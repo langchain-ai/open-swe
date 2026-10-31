@@ -380,6 +380,24 @@ class User(Base):
             return {external_id: user for user, external_id in rows.tuples()}
 
     @classmethod
+    async def for_github_logins(cls, logins: Collection[str]) -> dict[str, Self]:
+        """The people behind GitHub ``logins``, keyed by the lowercased login asked for."""
+        wanted = {login.lower() for login in logins}
+        if not wanted or not postgres.configured():
+            return {}
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(cls, func.lower(UserIdentity.login))
+                .join(cls.identities)
+                .where(
+                    UserIdentity.provider == "github",
+                    func.lower(UserIdentity.login).in_(wanted),
+                )
+                .order_by(UserIdentity.last_seen_at)
+            )
+            return {login: user for user, login in rows.tuples()}
+
+    @classmethod
     async def for_login(cls, provider: Provider, login: str) -> Self | None:
         """The person behind a mutable handle; the most recently seen one wins."""
         if not postgres.configured():

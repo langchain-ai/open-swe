@@ -239,6 +239,8 @@ export interface SessionUser {
   user_id?: string | null
   slack_user_id?: string | null
   is_admin: boolean
+  /** The organizations this Open SWE serves (`ALLOWED_GITHUB_ORGS`), lowercase. */
+  base_orgs?: Array<string>
   /** Mirrors the user's preference: what Enter does while a run is live. */
   follow_up_behavior?: FollowUpBehavior
   /** Whether the server records new threads into the transcript log. */

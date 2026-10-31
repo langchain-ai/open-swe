@@ -1,0 +1,65 @@
+{
+  "name": "@openswe/plugin-sdk",
+  "version": "0.1.0",
+  "description": "Build Open SWE web plugins: the frame protocol, a client, React bindings and a Yjs provider for live rooms",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./react": "./src/react.tsx",
+    "./yjs": "./src/yjs.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./react": {
+        "types": "./dist/react.d.ts",
+        "default": "./dist/react.js"
+      },
+      "./yjs": {
+        "types": "./dist/yjs.d.ts",
+        "default": "./dist/yjs.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": ">=19",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "y-protocols": {
+      "optional": true
+    },
+    "yjs": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "react": "^19.2.8",
+    "typescript": "^5.9.3",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.27"
+  },
+  "dependencies": {
+    "capnweb": "0.12.0"
+  }
+}

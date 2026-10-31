@@ -16,6 +16,7 @@ from langgraph.runtime import Runtime
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.openai_responses.client_tools import PENDING_ARTIFACT_KEY, ClientToolSpec
 from openswe.prompts import prompt
+from openswe.utils.json_types import JsonObject
 
 
 async def _runs_on_the_client(**_: object) -> str:
@@ -35,7 +36,9 @@ class ClientToolsMiddleware(OpenSWEMiddleware):
         ]
         self._names = frozenset(spec.name for spec in specs)
 
-    def pending_result(self, name: str, call_id: str) -> ToolMessage | None:
+    async def pending_result(
+        self, name: str, call_id: str, arguments: JsonObject
+    ) -> ToolMessage | None:
         """The placeholder a call of the client's tool ``name`` answers with, until the client does."""
         if name not in self._names:
             return None

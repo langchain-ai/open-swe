@@ -6,6 +6,7 @@ import {
 } from "@/features/reviews/components/ReviewChatActions"
 import { serializeExcerpts } from "@/features/agents/utils/codeExcerpt"
 import type { PassageReply } from "@/features/agents/utils/passageReply"
+import { EmbeddedThreadContext } from "@/features/agents/lib/embeddedThread"
 import {
   Profiler,
   useCallback,
@@ -138,6 +139,7 @@ export function AgentThreadView({
   composerDraft,
 }: AgentThreadViewProps) {
   const reviewChat = useContext(ReviewChatActionsContext)
+  const embedded = useContext(EmbeddedThreadContext)
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const source = useThreadSource()
@@ -243,7 +245,7 @@ export function AgentThreadView({
   // The review page shows its PR's status itself; don't poll it a second time here.
   const pullRequestStatus = useAgentThreadPullRequestStatus(
     thread.id,
-    !reviewChat && (thread.pullRequests?.length ?? 0) > 0
+    !embedded && (thread.pullRequests?.length ?? 0) > 0
   )
   const pullRequestHealth = pullRequestStatus.isError
     ? undefined
@@ -739,8 +741,8 @@ export function AgentThreadView({
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
-        {/* The review page's rail is the header for its chat. */}
-        {!reviewChat && (
+        {/* The page around an embedded thread is its header. */}
+        {!embedded && (
           <AgentThreadHeader
             key={thread.id}
             title={thread.title}
@@ -915,7 +917,7 @@ export function AgentThreadView({
                             Reload to try again.
                           </Banner>
                         ) : (
-                          (reviewChat?.emptyState ?? (
+                          (embedded?.emptyState ?? (
                             <p className="text-xs text-tertiary">
                               This thread has no messages yet.
                             </p>
@@ -947,7 +949,7 @@ export function AgentThreadView({
           {!isHydrating && (
             <AgentComposerDock>
               <CodeChannelLink url={thread.codeChannelUrl} />
-              {!reviewChat && (
+              {!embedded && (
                 <ThreadPullRequests
                   pullRequests={
                     // A local branch's PR may come from `gh`, which the thread
@@ -1037,8 +1039,7 @@ export function AgentThreadView({
           )}
         </div>
       </div>
-      {/* The review page is already the diff; a second panel only squeezes the chat. */}
-      {!reviewChat && (
+      {!embedded && (
         <AgentGitPanel
           thread={thread}
           onComment={canPost ? submitText : undefined}

@@ -59,6 +59,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.database.notifications import LISTENER
     from openswe.jobs.kinds import WORKER as JOB_WORKER
     from openswe.jobs.kinds import start_jobs
+    from openswe.plugins import rooms as plugin_rooms
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.slack.http import validate_slack_startup_config
@@ -101,6 +102,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # liveness ticks; what goes quiet is a bridge driven from another replica.
         logger.warning("Sandbox bridge listener startup failed", exc_info=True)
     try:
+        await plugin_rooms.start()
+    except Exception:  # noqa: BLE001
+        # Rooms stop being live: members see each other's edits when they reload.
+        logger.warning("Plugin room listener startup failed", exc_info=True)
+    try:
         await HUB.start()
     except Exception:  # noqa: BLE001
         # Dashboard pages still load and refetch on their own actions; what
@@ -125,6 +131,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await JOB_WORKER.stop()
         await HUB.stop()
         await bridge_listener.stop()
+        await plugin_rooms.stop()
         await transcript_listener.stop()
         await LISTENER.stop()
         await stop_worker()

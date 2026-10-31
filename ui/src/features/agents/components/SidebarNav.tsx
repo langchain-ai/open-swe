@@ -16,9 +16,14 @@ import { SirenIcon } from "@phosphor-icons/react/dist/ssr/Siren"
 import { SparkleIcon } from "@phosphor-icons/react/dist/ssr/Sparkle"
 import { Link, useRouterState } from "@tanstack/react-router"
 
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+
 import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
 import { MenuCheckItem } from "@/features/agents/components/MenuCheckItem"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
+import { pluginIcon, pluginRoot } from "@/features/plugins/lib/icons"
+import { usePlugins } from "@/features/plugins/lib/queries"
+import type { SectionRoot } from "@/lib/appLocation"
 import {
   getLastSectionLocation,
   sectionOf,
@@ -26,13 +31,19 @@ import {
 } from "@/lib/appLocation"
 import { cn } from "@/lib/utils"
 
-const NAV = [
+interface NavItem {
+  to: SectionRoot
+  label: string
+  icon: IconComponent
+}
+
+const NAV: ReadonlyArray<NavItem> = [
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/bots", label: "Bots", icon: RobotIcon },
   { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
   { to: "/incidents", label: "Incidents", icon: SirenIcon },
-] as const
+]
 
 const ROW =
   "flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-1 text-sm text-primary transition-colors hover:bg-surface-level-2-hover"
@@ -46,27 +57,38 @@ export function SidebarNav({
   onNavigate: () => void
 }) {
   const { prefs, toggleNavItemHidden } = useSidebarPrefs()
+  const plugins = usePlugins()
   const activeSection = useRouterState({
     select: (state) => sectionOf(state.location.pathname),
   })
   const linkTarget = useHrefLinkOptions()
-  const hidden = NAV.filter((item) => prefs.hiddenNavItems.includes(item.to))
-  const target = (to: (typeof NAV)[number]["to"]) =>
+  const items: ReadonlyArray<NavItem> = [
+    ...NAV,
+    ...(plugins.data ?? []).map((plugin) => ({
+      to: pluginRoot(plugin.name),
+      label: plugin.manifest.sidebar.label,
+      icon: pluginIcon(plugin.manifest.sidebar.icon),
+    })),
+  ]
+  const hidden = items.filter((item) => prefs.hiddenNavItems.includes(item.to))
+  const target = (to: SectionRoot) =>
     linkTarget(activeSection === to ? to : getLastSectionLocation(to))
 
   return (
     <nav className={cn("flex flex-col gap-0.5", className)}>
-      {NAV.filter((item) => !hidden.includes(item)).map((item) => (
-        <Link
-          key={item.to}
-          {...target(item.to)}
-          onClick={onNavigate}
-          className={cn(ROW, activeSection === item.to && SELECTED_ROW)}
-        >
-          <item.icon size={16} weight="regular" className="shrink-0" />
-          {item.label}
-        </Link>
-      ))}
+      {items
+        .filter((item) => !hidden.includes(item))
+        .map((item) => (
+          <Link
+            key={item.to}
+            {...target(item.to)}
+            onClick={onNavigate}
+            className={cn(ROW, activeSection === item.to && SELECTED_ROW)}
+          >
+            <item.icon size={16} weight="regular" className="shrink-0" />
+            {item.label}
+          </Link>
+        ))}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -108,7 +130,7 @@ export function SidebarNav({
               />
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-48">
-              {NAV.map((item) => (
+              {items.map((item) => (
                 <MenuCheckItem
                   key={item.to}
                   checked={!hidden.includes(item)}

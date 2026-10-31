@@ -989,6 +989,9 @@ function imageChunks(
   return chunks
 }
 
+/** The attachment marking the plugin context sent with a message (`openswe/threads/runs.py`). */
+const PLUGIN_CONTEXT_MIME = "application/vnd.open-swe.plugin-context"
+
 interface HumanCacheEntry {
   entities: ReadonlyMap<string, StructuredEntity>
   /** `null` when the message is one the transcript deliberately hides. */
@@ -1030,9 +1033,13 @@ function buildHumanMessage(
   const chunks: Array<Chunk> = imageChunks(threadId, row.attachments)
   if (text.trim()) chunks.push({ kind: "text", text })
   if (!chunks.length && !taskEvent && !replies) return null
+  const contextLabel = row.attachments.find(
+    (attachment) => attachment.mime_type === PLUGIN_CONTEXT_MIME
+  )?.file_name
   return {
     id: row.messageId,
     ...(taskEvent ? { taskEvent } : {}),
+    ...(contextLabel ? { contextLabel } : {}),
     author:
       parsed.type === "message" && parsed.senderKind === "system"
         ? "system"

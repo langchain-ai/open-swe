@@ -1,0 +1,8 @@
+{
+  "name": "starter",
+  "displayName": "Starter",
+  "version": "0.1.0",
+  "description": "An Open SWE app built from the starter",
+  "sidebar": { "label": "Starter", "icon": "puzzle-piece" },
+  "permissions": []
+}

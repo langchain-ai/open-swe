@@ -30,6 +30,7 @@
     "ui/dev-dist/**",
     "ui/dist/**",
     "desktop/build/**",
-    "ui/src/routeTree.gen.ts"
+    "ui/src/routeTree.gen.ts",
+    "plugins/docs/src/routeTree.gen.ts"
   ]
 }

@@ -708,6 +708,36 @@ describe("message images", () => {
   })
 })
 
+describe("plugin context", () => {
+  it("names the context a message was sent with, and never shows it as an image", () => {
+    const messages = toMessages(
+      fromSnapshot(
+        snapshot({
+          turns: [turn("turn-1", "2026-01-01T00:00:00Z")],
+          messages: [
+            messageRow({
+              message_id: "human-1",
+              turn_id: "turn-1",
+              role: "human",
+              text: "shorten this",
+              created_at: "2026-01-01T00:00:00Z",
+              attachments: [
+                attachment({
+                  mime_type: "application/vnd.open-swe.plugin-context",
+                  file_name: "AGENTS.md · 4 words selected",
+                }),
+              ],
+            }),
+          ],
+        })
+      )
+    )
+
+    expect(messages[0]?.contextLabel).toBe("AGENTS.md · 4 words selected")
+    expect(imagesOf(messages[0])).toEqual([])
+  })
+})
+
 describe("windowed reads", () => {
   function olderPage(
     overrides: Partial<TranscriptTurnPage> = {}

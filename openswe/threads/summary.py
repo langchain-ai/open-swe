@@ -118,9 +118,25 @@ def thread_is_private(metadata: Mapping[str, Any]) -> bool:
     return metadata.get("visibility", "public") != "public"
 
 
+PLUGIN_CHAT_KEY = "plugin_chat"
+"""Thread metadata naming the plugin install whose dock a thread chats in."""
+
+APP_PREVIEW_KEY = "app_preview"
+"""Thread metadata set once its agent previews an app it builds beside the thread."""
+
+
+def chats_beside_plugin(metadata: Mapping[str, Any]) -> bool:
+    """Whether a plugin may be open beside the thread to answer its tools."""
+    return bool(metadata.get(PLUGIN_CHAT_KEY) or metadata.get(APP_PREVIEW_KEY))
+
+
 def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
     """Threads that remain accessible directly but stay out of thread lists."""
-    return metadata.get("unlisted") is True or metadata.get("review_chat") is True
+    return (
+        metadata.get("unlisted") is True
+        or metadata.get("review_chat") is True
+        or bool(metadata.get(PLUGIN_CHAT_KEY))
+    )
 
 
 def thread_is_readable(

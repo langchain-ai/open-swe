@@ -73,6 +73,7 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
   Reference other rows by foreign key whenever a table holds them (our own `id`, or the key of an existing table such as `slack_channel`), creating the referenced row first if it is filled lazily; store a bare id only for things kept outside our database, like Agent Server threads or Slack teams.
 - Structured logging: static message, values in `extra`.
   Avoid standard `LogRecord` field names in `extra`.
+- Web plugins (`plugins/`, served by `openswe/plugins/`) run in a sandboxed frame whose policy blocks their requests and reach the backend only through the generic `/plugins/{id}/...` API. Never add backend code for one plugin; grow that API (storage, GitHub, rooms, people, threads), checking both the installation's grant and the person's own access.
 - Prefer exposing UI write operations as authorized agent tools.
   Whenever adding or changing a setting, add or update its authorized agent tool alongside the UI, reusing the same validation and permission checks.
   Keep the tool guidance and `openswe/resources/default_prompt.md` dashboard settings map current with those changes.

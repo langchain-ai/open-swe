@@ -235,6 +235,11 @@ export interface Message {
   /** Passages the sender selected and replied to, carried in the message's envelope. */
   replies?: Array<PassageReply>
   taskEvent?: TaskEventMetadata
+  /**
+   * What the context a plugin sent with this message is called, such as the
+   * open page; the agent read the context itself, which the thread never shows.
+   */
+  contextLabel?: string
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
   /** Invocations an agent turn's model calls ran under; key their costs in `AgentThread.runCosts`. */

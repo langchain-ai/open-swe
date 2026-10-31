@@ -72,12 +72,7 @@ class InputItem(_Lenient):
             text = self.output
         else:
             text = "\n".join(part.text for part in self.output or () if part.text)
-        return {
-            "type": "tool",
-            "id": ClientToolSpec.result_message_id(self.call_id),
-            "tool_call_id": self.call_id,
-            "content": text,
-        }
+        return ClientToolSpec.result_message(self.call_id, text)
 
     @classmethod
     def render(cls, items: list[InputItem]) -> str:

@@ -20,6 +20,8 @@
 /desktop/build
 /dist
 **/dist
+# Plugin builds are published by .github/workflows/openswe-plugin.yml, never committed.
+plugins/*/bundle/
 .turbo/
 
 # misc

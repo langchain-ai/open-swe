@@ -86,6 +86,7 @@ Local execution does not provide cloud sandbox isolation.
 ## Documentation
 
 - [Customization guide](docs/CUSTOMIZATION.md) — Models, sandboxes, tools, skills, prompts, triggers, and middleware
+- [Plugin guide](docs/PLUGINS.md) — Build web plugins: sandboxed web apps installed from GitHub
 - [Workspaces reference](docs/reference/workspaces.md) — Routing, settings, images, and access
 - [Human review in Slack](docs/reference/human-review.md) — Review requests in a repository's Slack channel, merged once reviewers approve
 - [Expedited Slack review](docs/reference/expedited-slack-review.md) — Human approval for small pull requests

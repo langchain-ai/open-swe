@@ -46,6 +46,13 @@ def review_chat_thread_id(owner: str, repo: str, pr_number: int, login: str) -> 
     return _url_uuid(f"{owner}/{repo}/pr/{pr_number}/chat/{login.lower()}")
 
 
+def plugin_chat_thread_id(
+    installation: str, user_id: str, name: str, repository: str | None
+) -> str:
+    """One person's chat under ``name`` beside a plugin install, optionally about a repository."""
+    return _url_uuid(f"plugin/{installation}/chat/{user_id}/{repository or ''}/{name}")
+
+
 def slack_thread_id(channel: str, timestamp: str, nonce: str | None = None) -> str:
     return _url_uuid(f"slack:{channel}:{timestamp}:{nonce or ''}")
 

@@ -84,6 +84,18 @@ class GitHubPROrIssueRef(BaseModel):
     repo: Repo | None = None
 
 
+class PluginChatConfig(BaseModel):
+    """The plugin a thread chats beside: the tools its frame runs, and what it says about them."""
+
+    chat_id: str
+    plugin: str
+    """The plugin's display name."""
+    prefix: str
+    """What every one of its tool names starts with, so none can stand in for another tool."""
+    tools: list[ClientToolSpec] = Field(default_factory=list)
+    instructions: str = ""
+
+
 class RunConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -95,6 +107,7 @@ class RunConfig(BaseModel):
     invocation_started_at: str | None = None
     offload_conversation: bool = False
     client_tools: list[ClientToolSpec] = Field(default_factory=list)
+    plugin_chat: PluginChatConfig | None = None
     source: str | None = None
     task: str | None = None
     environment: str | None = None

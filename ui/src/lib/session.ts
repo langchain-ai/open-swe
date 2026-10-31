@@ -1,4 +1,5 @@
 import { queryOptions, useQuery } from "@tanstack/react-query"
+import { useCallback } from "react"
 import { ApiError, api } from "./api"
 import type { SessionUser } from "./api"
 
@@ -18,4 +19,17 @@ export const sessionQueryOptions = queryOptions<SessionUser | null>({
 
 export function useSession() {
   return useQuery(sessionQueryOptions)
+}
+
+/**
+ * Whether `owner/repo` belongs to one of the organizations this Open SWE
+ * serves, where its name alone is clear enough to show.
+ */
+export function useIsInBaseOrg(): (repository: string) => boolean {
+  const orgs = useSession().data?.base_orgs
+  return useCallback(
+    (repository: string) =>
+      orgs?.includes(repository.split("/")[0]?.toLowerCase() ?? "") ?? false,
+    [orgs]
+  )
 }
