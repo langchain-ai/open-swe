@@ -16,8 +16,8 @@ For CI, `event_types=["check_suite.completed"]` gives one event per finished sui
 
 Args:
 - action: `subscribe` creates a subscription and returns its `subscription_id`; `list` shows this thread's outstanding subscriptions, each with `trigger_count` (events matched) and `last_triggered_at`; `cancel` removes the one named by `subscription_id`.
-- sources: `github` and/or `slack`.
-  Empty matches every source.
+- sources: `github` and/or `slack`; admin threads may also name `workspace` for workspace snapshot refreshes (`refresh.success`, `refresh.failed`).
+  Empty matches every source except `workspace`, which must be named.
 - repo: A GitHub repository (`owner/name`) of this workspace; only its events match.
 - pr_url: A GitHub pull request URL; only that pull request's events match (reviews, comments, pushes, CI).
 - event_types: Event types to match, as `list_event_types` names them.

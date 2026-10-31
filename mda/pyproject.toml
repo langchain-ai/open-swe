@@ -6,6 +6,8 @@ requires-python = ">=3.14"
 dependencies = [
     "managed-deepagents>=0.10.0",
     "deepagents==0.7.32",
+    # Remove this explicit dependency after upgrading to deepagents 0.7.33 once released.
+    "langchain-core>=1.7.3,<2",
     "langchain[mcp]>=1.4.7",
     "langchain-anthropic>=1.7.7",
     # Fireworks models the dashboard offers, such as Kimi.
@@ -44,6 +46,8 @@ open-swe-runtime-api = { path = "../packages/runtime-api", editable = true }
 # import of the backend (`openswe`) or a database driver fails to resolve.
 [tool.ty.src]
 include = ["agent.py", "identity.py", "channels", "rt", "tests"]
+# Run in the sandbox on its own python3; `make typecheck` checks them at 3.8.
+exclude = ["rt/sandbox_scripts"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

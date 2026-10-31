@@ -108,7 +108,7 @@ def github(
         ),
     )
     monkeypatch.setattr(lifecycle, "maybe_start_update", AsyncMock())
-    # The thread is bound to the box MDA opened for its run.
+    # The thread is bound to the sandbox MDA opened for its run.
     monkeypatch.setattr(
         lifecycle,
         "get_sandbox_metadata",
@@ -128,10 +128,10 @@ async def _connect(
     thread_id: str | None = None,
     github_proxy_repositories: list[str] | None = None,
 ) -> MagicMock:
-    """Configure the proxy of the box MDA opened, as every connection to it does.
+    """Configure the proxy of the sandbox MDA opened, as every connection to it does.
 
     The base proxy config is the workspace's, which the backend records when it binds
-    the thread to MDA's box.
+    the thread to MDA's sandbox.
     """
     backend = MagicMock(
         id="sandbox", aexecute=AsyncMock(return_value=ExecuteResponse(output="", exit_code=0))
@@ -216,7 +216,7 @@ async def test_a_reviewers_sandbox_can_read_but_never_write_github(
     github: list[dict[str, object]],
     kind: str,
 ) -> None:
-    """A reviewer box stays read-only across refresh and a reconnect that passes no scope."""
+    """A reviewer sandbox stays read-only across refresh and a reconnect that passes no scope."""
     read_only = (
         "actions=read,checks=read,contents=read,issues=read,"
         "metadata=read,pull_requests=read,statuses=read"
@@ -311,7 +311,7 @@ async def test_legacy_review_replacement_uses_authenticated_run_scope(
 
 
 @pytest.mark.parametrize("kind", ["reviewer", "review-scout", "agent"])
-async def test_mda_alone_writes_the_proxy_of_its_box_where_the_token_reaches_everything(
+async def test_mda_alone_writes_the_proxy_of_its_sandbox_where_the_token_reaches_everything(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
     kind: str,
@@ -338,13 +338,13 @@ async def test_mda_alone_writes_the_proxy_of_its_box_where_the_token_reaches_eve
         configurable={"repo": {"owner": "acme", "name": "api"}},
     )
 
-    box = await managed_sandbox(graph.config_for(run, None), kind)
+    managed = await managed_sandbox(graph.config_for(run, None), kind)
     await graph.api(run, "sandbox_replaced", {})
     refreshed = await graph.api(run, "refresh_github_proxy", {})
 
-    assert box is not None
+    assert managed is not None
     if kind == "agent":
-        assert box.github_proxy == ConnectionRef(slug="mda/github-token", owner="agent")
+        assert managed.github_proxy == ConnectionRef(slug="mda/github-token", owner="agent")
         assert github == []
         assert refreshed == {"expires_at": None}
     else:
@@ -352,9 +352,9 @@ async def test_mda_alone_writes_the_proxy_of_its_box_where_the_token_reaches_eve
             "x-access-token:repos:11;actions=read,checks=read,contents=read,issues=read,"
             "metadata=read,pull_requests=read,statuses=read"
         )
-        assert box.github_proxy is None
+        assert managed.github_proxy is None
         assert injected_auth(github) == [read_only, read_only]
-        # The box's capability goes only to a run that writes its proxy config.
+        # The sandbox's capability goes only to a run that writes its proxy config.
         with pytest.raises(RefusedCallError):
             await graph.api(run, "sandbox_proxy", {"run_id": "run", "sandbox_id": "sandbox"})
 
@@ -366,7 +366,7 @@ async def test_without_mda_github_proxy_a_review_refreshes_on_its_threads_scope(
     kind: str,
 ) -> None:
     """Unset, the setting changes nothing: a review whose run names no repository still
-    refreshes its box's token to the pull request its thread records."""
+    refreshes its sandbox's token to the pull request its thread records."""
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     async def build(config: object, surface: ToolSurface) -> None:

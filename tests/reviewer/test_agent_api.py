@@ -172,6 +172,198 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     )
 
 
+async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_off_its_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preparing a turn plans nothing, reaches no sandbox MDA keeps and records nothing:
+    what the turn's start records waits for its ``run_started`` report."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from langchain_core.messages import HumanMessage, messages_to_dict
+    from runtime_api.catalog import RoutingRules
+
+    from openswe import server
+    from openswe.agent_api import agent
+    from openswe.agent_api import graph as graph_module
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.agent_api.tokens import AgentTurnSettings, RunSettings
+    from openswe.prompt import SystemPrompt
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("Preparing a turn never plans the run")
+
+    def never_reached(thread_id: str) -> object:
+        raise AssertionError("Preparing a turn never reaches the sandbox MDA keeps")
+
+    bound = AsyncMock()
+    updated = AsyncMock()
+    usage = AsyncMock()
+    prompts: list[dict[str, object]] = []
+    monkeypatch.setattr(graph_module, "bind_mda_sandbox", bound)
+    # Binding the sandbox found its workspace image stale.
+    monkeypatch.setattr(graph_module, "take_stale_boot", lambda thread_id: object())
+    monkeypatch.setattr(
+        graph_module, "stale_workspace_notice", lambda thread_id, stale: {"workspace": "w"}
+    )
+    monkeypatch.setattr(agent, "load_thread_settings", AsyncMock(return_value={}))
+    monkeypatch.setattr(server, "get_or_create_sandbox_backend_proxy", never_reached)
+    monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value={}))
+    monkeypatch.setattr(server, "client", MagicMock(threads=MagicMock(update=updated)))
+    monkeypatch.setattr(server, "record_agent_invocation_usage", usage)
+    monkeypatch.setattr(server, "resolve_github_token", AsyncMock(return_value=("token", None)))
+    monkeypatch.setattr(server, "schedule_thread_title_generation", lambda **kwargs: None)
+
+    def render(**kwargs: object) -> SystemPrompt:
+        prompts.append(kwargs)
+        return SystemPrompt(shared="You code.", thread="")
+
+    monkeypatch.setattr(server, "construct_system_prompt", render)
+    for name in (
+        "resolve_triggering_user_identity",
+        "load_workspace",
+        "_resolve_prompt_default_repo",
+    ):
+        monkeypatch.setattr(server, name, AsyncMock(return_value=None))
+    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
+    turn = AgentTurnSettings(
+        title_model_id="openai:gpt-6-luna",
+        routing=RoutingRules(route_model_ids={"default": "openai:gpt-6.1-sol"}),
+    )
+    run = RUN.model_copy(
+        update={
+            "assistant_id": "agent",
+            "configurable": {"source": "dashboard", "invocation_id": "invocation-1"},
+            "settings": RunSettings(model_id="openai:gpt-6.1-sol", effort="high", agent=turn),
+            "grant_id": "grant-1",
+        }
+    )
+    asked = messages_to_dict([HumanMessage(content="Fix the login", id="human-1")])
+
+    prepared = await graph.api(
+        run,
+        "prepare",
+        {"run_id": "run-1", "messages": asked, "in_sandbox": True, "sandbox_id": "sandbox-1"},
+    )
+
+    assert isinstance(prepared, dict) and isinstance(update := prepared["update"], dict)
+    assert update["work_dir"] == "/workspace"
+    assert update["selected_model_id"] == "openai:gpt-6.1-sol"
+    assert len(prompts) == 1
+    bound.assert_awaited_once_with("thread-1", "sandbox-1", open_error=None, workspace_slug=None)
+    updated.assert_not_awaited()
+    usage.assert_not_awaited()
+    # The transcript turn may open on another replica, so its notices go with the run.
+    assert prepared["notices"] == [{"kind": "workspace_stale", "data": {"workspace": "w"}}]
+    queued = MagicMock()
+    monkeypatch.setattr(graph_module, "queue_run_notice", queued)
+
+    await graph.api(
+        run,
+        "run_started",
+        {
+            "run_id": "run-1",
+            "humans": asked,
+            "model_id": "openai:gpt-6.1-sol",
+            "effort": "high",
+            "model_route": "default",
+            "notices": prepared["notices"],
+            "sender": prepared["sender"],
+        },
+    )
+
+    queued.assert_called_once_with("thread-1", "workspace_stale", {"workspace": "w"})
+    [metadata] = [call.kwargs["metadata"] for call in updated.await_args_list]
+    assert metadata["model"] == "openai:gpt-6.1-sol"
+    assert metadata["model_route"] == "default"
+    assert usage.await_args.kwargs["model_id"] == "openai:gpt-6.1-sol"
+    assert usage.await_args.kwargs["invocation_id"] == "invocation-1"
+
+    # An earlier run's start, sent by this one from the thread's checkpoint, is recorded
+    # as its own sender's, and leaves this run's model on the thread.
+    await graph.api(
+        run,
+        "run_started",
+        {
+            "run_id": "run-0",
+            "humans": asked,
+            "invocation_id": "invocation-0",
+            "model_id": "openai:gpt-6-luna",
+            "sender": {"github_login": "earlier-sender", "source": "slack"},
+        },
+    )
+
+    assert usage.await_args.kwargs["invocation_id"] == "invocation-0"
+    assert usage.await_args.kwargs["github_login"] == "earlier-sender"
+    assert usage.await_args.kwargs["source"] == "slack"
+    assert updated.await_count == 1
+
+
+async def test_a_run_its_plan_still_answers_prepares_from_its_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An incident run's loop is its plan's, so its preparation runs the plan's hooks,
+    such as the one that says which surface owes the reply."""
+    from unittest.mock import AsyncMock
+
+    from langchain.agents.middleware import AgentMiddleware
+    from langchain_core.messages import HumanMessage, messages_to_dict
+
+    from openswe.agent_api import agent
+    from openswe.agent_api import graph as graph_module
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.agent_api.tokens import AgentTurnSettings, RunSettings
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    monkeypatch.setattr(graph_module.ManagedSandbox, "for_thread", AsyncMock(return_value=None))
+
+    class ReplyOnSlack(AgentMiddleware):
+        async def abefore_agent(self, state: object, runtime: object) -> dict[str, object]:
+            return {"reply_surface": "slack"}
+
+    async def plan(config: object, surface: ToolSurface) -> None:
+        surface.middleware = [ReplyOnSlack()]
+
+    graph = RemoteGraph("agent", plan, agent.AgentParts())
+    run = RUN.model_copy(
+        update={
+            "assistant_id": "agent",
+            "configurable": {"source": "incidents_agent", "invocation_id": "invocation-1"},
+            "settings": RunSettings(agent=AgentTurnSettings(title_model_id="openai:gpt-6-luna")),
+            "grant_id": "grant-1",
+        }
+    )
+    asked = messages_to_dict([HumanMessage(content="Page fired", id="human-1")])
+
+    prepared = await graph.api(run, "prepare", {"run_id": "run-1", "messages": asked})
+
+    assert isinstance(prepared, dict) and isinstance(update := prepared["update"], dict)
+    assert update["reply_surface"] == "slack"
+
+
+async def test_a_closed_walkthroughs_next_turn_still_retires_its_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The guide stays after a walkthrough closes, to tell the model its rules ended;
+    only an open one pins the checkout in the sandbox."""
+    from unittest.mock import AsyncMock
+
+    from openswe.agent_api import agent
+    from openswe.agent_api.tokens import AgentTurnSettings, RunSettings
+    from openswe.review_guide.middleware import ReviewGuideMiddleware
+
+    monkeypatch.setattr(agent, "load_thread_settings", AsyncMock(return_value={}))
+    turn = AgentTurnSettings(title_model_id="openai:gpt-6-luna", review_guide_closed=True)
+
+    prepared = await agent.AgentParts().preparation(
+        {"configurable": {"thread_id": "thread-1"}}, RunSettings(agent=turn), sandbox_id="sandbox-1"
+    )
+
+    assert prepared is not None
+    assert any(isinstance(middleware, ReviewGuideMiddleware) for middleware in prepared)
+    assert not turn.reaches_sandbox
+
+
 async def test_task_context_rechecks_membership_and_cancellation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -562,8 +754,10 @@ async def test_reviewer_runs_record_transcript_model_and_usage(
     await REVIEWER.api(
         run, "model_result", {"run_id": run_id, "response": messages_to_dict([reply])}
     )
+    await REVIEWER.api(run, "thread_edited", {"run_id": run_id})
     await REVIEWER.api(run, "run_ended", {"run_id": run_id})
 
+    assert metadata["has_edits"] is True
     assert metadata["agent_kind"] == "reviewer" and metadata["model"]
     snapshot = await load_snapshot(thread_id)
     assert snapshot is not None and snapshot.turns[0].state == "completed"
@@ -761,7 +955,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
 
     from openswe.sandboxes.managed import ManagedSandbox
 
-    # A thread with no box of MDA's, so the catalog reads no thread metadata.
+    # A thread with no sandbox of MDA's, so the catalog reads no thread metadata.
     monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
     monkeypatch.setenv("LANGCHAIN_REVISION_ID", "current-backend-sha")
     from langchain.agents.middleware import ModelCallLimitMiddleware

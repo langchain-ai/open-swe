@@ -13,7 +13,8 @@ from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
 from openswe.run_config import RunConfig
 from openswe.slack.client import parse_github_pr_url
-from openswe.webhooks.event_log import RETAINED_DAYS, EventLog, WebhookSource
+from openswe.tools.access import resolve_access
+from openswe.webhooks.event_log import ADMIN_ONLY_SOURCES, RETAINED_DAYS, EventLog, WebhookSource
 from openswe.webhooks.event_matches import MultitaskStrategy
 from openswe.webhooks.event_subscriptions import EventSubscription
 from openswe.workspaces.routing import workspace_for_repo
@@ -110,6 +111,9 @@ async def listen_events(
             "cancelled": await EventSubscription.cancel(thread_id, cancelled_id),
         }
 
+    admin_only = sorted(ADMIN_ONLY_SOURCES.intersection(sources or ()))
+    if admin_only and not (await resolve_access(cfg)).admin_thread:
+        return _error(f"Only admin threads can listen to {', '.join(admin_only)} events")
     types = _filters(event_types)
     if not (types or repo or pr_url):
         return _error("Narrow the subscription with event_types, repo, or pr_url")
@@ -181,7 +185,12 @@ async def list_event_types(
 ) -> dict[str, object]:
     """Implement the `list_event_types` tool."""
     since = datetime.now(UTC) - timedelta(days=RETAINED_DAYS)
-    kinds = await EventLog.kinds(since, source=source, event_type=event_type.strip())
+    kinds = await EventLog.kinds(
+        since,
+        source=source,
+        event_type=event_type.strip(),
+        admin=(await resolve_access()).admin_thread,
+    )
     return {
         "since": since.isoformat(),
         "event_types": [kind.model_dump(mode="json") for kind in kinds],

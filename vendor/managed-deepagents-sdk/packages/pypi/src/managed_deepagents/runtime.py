@@ -337,6 +337,14 @@ _ADOPTABLE_SANDBOX_STATUS = frozenset({"ready", "running"})
 #: Sandbox status for one that is stopped but restartable.
 _STOPPED_SANDBOX_STATUS = "stopped"
 
+#: Sandbox status for one still booting: adopted, then awaited on first use.
+_PROVISIONING_SANDBOX_STATUS = "provisioning"
+
+#: How long the first use of a box claimed without waiting waits for it to boot,
+#: as long as ``create_sandbox`` waits by default.
+_SANDBOX_READY_TIMEOUT_SECONDS = 30
+_SANDBOX_READY_POLL_SECONDS = 0.5
+
 #: Create failures that mean the sandbox name is already taken.
 _SANDBOX_NAME_CONFLICT_RE = re.compile(
     r"409|conflict|already exists|already in use|duplicate", re.IGNORECASE
@@ -364,11 +372,33 @@ class _ManagedSandboxEntry:
         self.selection_fingerprint = selection_fingerprint
 
 
+class _SandboxClaim:
+    """A box asked for but not yet used: adopted, or created without waiting for it to boot."""
+
+    __slots__ = ("adopted", "client", "host_name", "sandbox")
+
+    def __init__(
+        self,
+        client: LangSmithSandboxClient,
+        sandbox: Sandbox,
+        *,
+        adopted: bool,
+        host_name: str | None,
+    ) -> None:
+        self.client = client
+        self.sandbox = sandbox
+        self.adopted = adopted
+        self.host_name = host_name
+
+
 #: Created sandboxes, keyed by thread and any dynamic selection's mounts,
 #: reused for the lifetime of this runtime process. Storing the entry dedupes
 #: concurrent runs. Provisioning (``setup.sh``) happens at deploy bake, not on
 #: thread create.
 _managed_sandboxes: dict[str, _ManagedSandboxEntry] = {}
+#: Boxes ``open_sandbox(wait=False)`` claimed, by the same key, until their first use
+#: waits for them to boot and moves them to ``_managed_sandboxes``.
+_claimed_sandboxes: dict[str, _SandboxClaim] = {}
 #: Host box names that must not be re-adopted after invalidate until a fresh
 #: create claims them (or a unique suffix replaces them). Covers delete lag.
 _invalidated_sandbox_names: set[str] = set()
@@ -2052,13 +2082,13 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             raise RuntimeError("This run has no sandbox")
         return selected
 
-    def _without_box(self) -> SandboxBackendProtocol | None:
-        """Where this run acts instead (``_openswe_without_box``) when it has no box."""
-        from managed_deepagents.sandbox import without_box  # noqa: PLC0415
+    def _without_sandbox(self) -> SandboxBackendProtocol | None:
+        """Where this run acts instead (``_openswe_without_sandbox``) when it has no box."""
+        from managed_deepagents.sandbox import without_sandbox  # noqa: PLC0415
 
         if self._resolved_backend is not None:
             return None
-        instead = without_box(self._source.sandbox)
+        instead = without_sandbox(self._source.sandbox)
         return instead if instead is not None and self._selection() is None else None
 
     def _keep(self, backend: SandboxBackendProtocol) -> None:
@@ -2217,9 +2247,22 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         except TypeError:
             return await self._acall(lambda backend: backend.aexecute(command), execute=True)
 
-    async def aopen(self) -> str:
-        """Adopt or create this run's box now, as its first use would, and return its name."""
-        return (await self._abackend()).id
+    async def aopen(self, *, wait: bool = True) -> str:
+        """Adopt or create this run's box now, as its first use would, and return its name.
+
+        Without ``wait`` it returns once the box is asked for, before it boots; its
+        first use waits for it.
+        """
+        if wait or self._resolved_backend is not None:
+            return (await self._abackend()).id
+        source = self._source
+        name = await asyncio.to_thread(
+            _claim_managed_sandbox, self._sandbox(), self._config(), source.selection
+        )
+        if name is None:
+            # Local dev names no box, so only creating it tells its name.
+            return (await self._abackend()).id
+        return name
 
     async def areplace(
         self, sandbox: SandboxDefinition | None = None, *, missing_only: bool = False
@@ -2329,7 +2372,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
     ) -> _ResultT:
         from managed_deepagents._sandbox_proxy import run_sync  # noqa: PLC0415
 
-        instead = self._without_box()
+        instead = self._without_sandbox()
         if instead is not None:
             return operation(instead)
         backend = self._backend()
@@ -2347,7 +2390,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         *,
         execute: bool = False,
     ) -> _ResultT:
-        instead = self._without_box()
+        instead = self._without_sandbox()
         if instead is not None:
             return await _settled(operation(instead))
         backend = await self._abackend()
@@ -2462,8 +2505,7 @@ def _resolve_managed_sandbox(
             entry = _managed_sandboxes.get(key)
 
         bound_name = _string_option(sandbox.options.get("_openswe_sandbox_id"))
-        if entry is not None and bound_name is not None and entry.host_name != bound_name:
-            entry = None
+        entry = _bound(entry, bound_name)
 
         if entry is not None:
             _warn_selection_changed(entry, selection, config)
@@ -2496,6 +2538,9 @@ def _resolve_managed_sandbox(
         # lead's sandbox only refreshes credentials; one whose lead hasn't
         # created it yet creates it under the lead's scope for the lead to adopt.
         helper = _parent_sandbox_scope(config, selection) is not None
+        with _managed_sandbox_lock:
+            # A box that fails to boot is claimed afresh by the next use.
+            claim = _bound(_claimed_sandboxes.pop(key, None), bound_name)
         backend, host_name, sandbox_id = _create_langsmith_sandbox(
             sandbox,
             config=config,
@@ -2505,6 +2550,7 @@ def _resolve_managed_sandbox(
             adopted_mode="credentials" if helper else "reuse",
             scope_key=key,
             selection=selection,
+            claim=claim,
         )
         entry = _ManagedSandboxEntry(
             backend,
@@ -2516,6 +2562,54 @@ def _resolve_managed_sandbox(
         with _managed_sandbox_lock:
             _managed_sandboxes[key] = entry
         return entry.backend
+
+
+_Found = TypeVar("_Found", _ManagedSandboxEntry, _SandboxClaim)
+
+
+def _bound(found: _Found | None, bound_name: str | None) -> _Found | None:
+    """``found``, unless the thread is bound to another box than the one it names."""
+    if found is None or bound_name is None or found.host_name == bound_name:
+        return found
+    return None
+
+
+def _claim_managed_sandbox(
+    sandbox: SandboxDefinition,
+    config: ManagedRunConfig | None,
+    selection: _SandboxSelection | None = None,
+) -> str | None:
+    """Adopt the per-thread box, or ask for it without waiting for it to boot; its name.
+
+    The box boots while the run does other work; ``_resolve_managed_sandbox`` waits for
+    it, and runs the connectors' hooks, on its first use.
+    """
+    key = _sandbox_scope_key(sandbox, config, selection)
+    bound_name = _string_option(sandbox.options.get("_openswe_sandbox_id"))
+    with _managed_sandbox_lock:
+        entry = _bound(_managed_sandboxes.get(key), bound_name)
+        claim = _bound(_claimed_sandboxes.get(key), bound_name)
+    if entry is not None:
+        return entry.host_name
+    if claim is not None:
+        return claim.host_name
+    with _sandbox_key_lock(key):
+        with _managed_sandbox_lock:
+            entry = _bound(_managed_sandboxes.get(key), bound_name)
+            claim = _bound(_claimed_sandboxes.get(key), bound_name)
+        if entry is not None:
+            return entry.host_name
+        if claim is None:
+            claim = _claim_langsmith_sandbox(
+                sandbox,
+                config=config,
+                scope_key=key,
+                selection=selection,
+                wait=False,
+            )
+            with _managed_sandbox_lock:
+                _claimed_sandboxes[key] = claim
+        return claim.host_name
 
 
 def _is_sandbox_not_found_error(error: Exception) -> bool:
@@ -3129,8 +3223,13 @@ def _adopt_sandbox(
 
     status = _string_option(getattr(existing, "status", None))
     normalized = status.lower() if status else None
-    # No status reported: assume the SDK handed back a usable sandbox.
-    if normalized is None or normalized in _ADOPTABLE_SANDBOX_STATUS:
+    # No status reported: assume the SDK handed back a usable sandbox. One still booting
+    # is this scope's too: creating another would strand it.
+    if (
+        normalized is None
+        or normalized in _ADOPTABLE_SANDBOX_STATUS
+        or normalized == _PROVISIONING_SANDBOX_STATUS
+    ):
         return existing
     if normalized == _STOPPED_SANDBOX_STATUS:
         return _restart_sandbox(client, name, existing, preserve_existing=preserve_existing)
@@ -3218,6 +3317,21 @@ def _create_replacement_sandbox(
         return _await_if_needed(client.get_sandbox(name)), True
 
 
+def _ready_sandbox(client: LangSmithSandboxClient, sandbox: Sandbox) -> Sandbox:
+    """``sandbox`` once it has booted, which one claimed without waiting may not have."""
+    status = _string_option(getattr(sandbox, "status", None))
+    name = _sandbox_handle_name(sandbox)
+    if status is None or status.lower() != _PROVISIONING_SANDBOX_STATUS or name is None:
+        return sandbox
+    return _await_if_needed(
+        client.wait_for_sandbox(
+            name,
+            timeout=_SANDBOX_READY_TIMEOUT_SECONDS,
+            poll_interval=_SANDBOX_READY_POLL_SECONDS,
+        )
+    )
+
+
 def _create_langsmith_sandbox(
     sandbox: SandboxDefinition,
     *,
@@ -3230,8 +3344,62 @@ def _create_langsmith_sandbox(
     selection: _SandboxSelection | None = None,
     recovery_name: str | None = None,
     existing_sandbox: Sandbox | None = None,
+    claim: _SandboxClaim | None = None,
 ) -> tuple[SandboxBackendProtocol, str | None, str | None]:
-    """Build a LangSmith sandbox, optionally from the baked recipe, and wrap it."""
+    """Build a LangSmith sandbox, optionally from the baked recipe, and wrap it.
+
+    A ``claim`` already asked for the box; it is waited for here, as it boots.
+    """
+    if claim is None:
+        claim = _claim_langsmith_sandbox(
+            sandbox,
+            config=config,
+            scope_key=scope_key,
+            selection=selection,
+            recovery_name=recovery_name,
+            existing_sandbox=existing_sandbox,
+        )
+    langsmith_sandbox = _ready_sandbox(claim.client, claim.sandbox)
+    host_name = _sandbox_handle_name(langsmith_sandbox) or claim.host_name
+    logger.info(
+        "sandbox resolve: %s name=%r id=%r scope=%r",
+        "adopted" if claim.adopted else "created",
+        host_name,
+        _sandbox_handle_id(langsmith_sandbox),
+        scope_key,
+    )
+    # The optional SDK client returns its provider handle across a dynamic boundary.
+    backend = LangSmithSandbox(sandbox=langsmith_sandbox)
+
+    configured_timeout = cast("int | None", sandbox.options.get("default_timeout"))
+    resolved = backend
+    if configured_timeout is not None and hasattr(resolved, "_default_timeout"):
+        resolved._default_timeout = configured_timeout  # noqa: SLF001
+
+    run_connector_sandbox_hooks(
+        connectors,
+        backend=resolved,
+        # An adopted sandbox already ran create-time connector hooks in an
+        # earlier process, so treat it as a reuse for connector purposes.
+        mode=adopted_mode if claim.adopted else sandbox_mode,
+        config=config,
+        identity=identity,
+    )
+
+    return resolved, host_name, _sandbox_handle_id(langsmith_sandbox)
+
+
+def _claim_langsmith_sandbox(
+    sandbox: SandboxDefinition,
+    *,
+    config: ManagedRunConfig | None,
+    scope_key: str,
+    selection: _SandboxSelection | None,
+    recovery_name: str | None = None,
+    existing_sandbox: Sandbox | None = None,
+    wait: bool = True,
+) -> _SandboxClaim:
+    """Adopt this scope's LangSmith sandbox or create it; without ``wait``, before it boots."""
     from managed_deepagents.sandbox import (  # noqa: PLC0415
         BoundSandboxMissingError,
         declared_create_fields,
@@ -3240,6 +3408,8 @@ def _create_langsmith_sandbox(
     )
 
     create_kwargs = _sandbox_create_kwargs(sandbox, selection)
+    if not wait:
+        create_kwargs["wait_for_ready"] = False
     client = _sandbox_client_for(sandbox)
     _send_create_fields(client, declared_create_fields(sandbox.options))
     deployment = _managed_deployment_name()
@@ -3280,33 +3450,12 @@ def _create_langsmith_sandbox(
             lookup_names[1:],
             preserve_existing=is_per_thread(sandbox.options),
         )
-    host_name = _sandbox_handle_name(langsmith_sandbox) or sandbox_name
-    logger.info(
-        "sandbox resolve: %s name=%r id=%r scope=%r",
-        "adopted" if adopted else "created",
-        host_name,
-        _sandbox_handle_id(langsmith_sandbox),
-        scope_key,
+    return _SandboxClaim(
+        client,
+        langsmith_sandbox,
+        adopted=adopted,
+        host_name=_sandbox_handle_name(langsmith_sandbox) or sandbox_name,
     )
-    # The optional SDK client returns its provider handle across a dynamic boundary.
-    backend = LangSmithSandbox(sandbox=langsmith_sandbox)
-
-    configured_timeout = cast("int | None", sandbox.options.get("default_timeout"))
-    resolved = backend
-    if configured_timeout is not None and hasattr(resolved, "_default_timeout"):
-        resolved._default_timeout = configured_timeout  # noqa: SLF001
-
-    run_connector_sandbox_hooks(
-        connectors,
-        backend=resolved,
-        # An adopted sandbox already ran create-time connector hooks in an
-        # earlier process, so treat it as a reuse for connector purposes.
-        mode=adopted_mode if adopted else sandbox_mode,
-        config=config,
-        identity=identity,
-    )
-
-    return resolved, host_name, _sandbox_handle_id(langsmith_sandbox)
 
 
 def _string_option(value: object) -> str | None:

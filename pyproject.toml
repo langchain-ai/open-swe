@@ -7,6 +7,8 @@ requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
     "deepagents==0.7.32",
+    # Remove this explicit dependency after upgrading to deepagents 0.7.33 once released.
+    "langchain-core>=1.7.3,<2",
     # The types of the event endpoint requests the MDA deployment's channels send (mda/),
     # from the vendored SDK the deployment runs (vendor/README.md).
     "managed-deepagents>=0.10.0",
@@ -17,9 +19,9 @@ dependencies = [
     "httpx2>=2.12.0",
     "PyJWT>=2.13.0",
     "cryptography>=50.0.0",
-    "langgraph-sdk>=0.4.10",
+    "langgraph-sdk>=0.4.11",
     "langchain[mcp]>=1.4.7",
-    "langgraph>=1.2.18",
+    "langgraph>=1.2.19",
     "markdownify>=1.2.3",
     "markdown-it-py==4.2.0",
     "langchain-anthropic>=1.7.7",
@@ -65,8 +67,8 @@ managed-deepagents = { path = "vendor/managed-deepagents-sdk/packages/pypi", edi
 
 [tool.uv]
 constraint-dependencies = [
-    "langgraph-api==0.18.0rc1",
-    "langgraph-runtime-inmem==0.38.0rc1",
+    "langgraph-api==0.19.0.dev2",
+    "langgraph-runtime-inmem==0.39.0.dev2",
 ]
 
 [build-system]
@@ -82,7 +84,7 @@ packages = ["openswe"]
 [tool.ruff]
 line-length = 100
 # Scripts copied into sandboxes run on whatever python3 the image ships.
-per-file-target-version = { "openswe/sandbox_scripts/*.py" = "py38" }
+per-file-target-version = { "openswe/sandbox_scripts/*.py" = "py38", "mda/rt/sandbox_scripts/*.py" = "py38" }
 # Vendored upstream code keeps its own style.
 extend-exclude = ["vendor"]
 

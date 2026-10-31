@@ -466,6 +466,7 @@ async def start_dashboard_thread(
     prompt: str,
     repos: Sequence[str],
     visibility: Literal["public", "private"],
+    unlisted: bool = False,
 ) -> str:
     """Start a person's dashboard thread; the first repo is the one its sandbox opens in."""
     repo_configs: list[dict[str, str]] = []
@@ -486,6 +487,7 @@ async def start_dashboard_thread(
         title=title,
         visibility=visibility,
         workspace=await _resolve_requested_workspace(None, primary, login=login),
+        extra_metadata={"unlisted": True} if unlisted else None,
     )
     thread_id = str(thread["thread_id"])
     client = langgraph_client()

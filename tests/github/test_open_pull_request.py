@@ -7,16 +7,12 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx2
 import langgraph_sdk
 import pytest
+from runtime_api.operations import PullRequestHead
 
 import openswe.tools.open_pull_request  # noqa: F401
-from openswe.agent_api.git_metadata import GitTarget, collect_pr_targets
+from openswe.agent_api.git_metadata import collect_pr_targets
 
 opr = sys.modules["openswe.tools.open_pull_request"]
-
-
-@pytest.fixture(autouse=True)
-def _consent_not_needed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(opr, "require_consent", AsyncMock(return_value=None))
 
 
 class _FakeRequest:
@@ -613,7 +609,7 @@ async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
             # The model the run's preparation routed it to, not the one it started with.
             run_state={"selected_model_id": "anthropic:claude-opus-5-5"},
         )
-    assert targets == [GitTarget(repo="langchain-ai/open-swe", branch="Actual/PR-head")]
+    assert targets == [PullRequestHead(repo="langchain-ai/open-swe", branch="Actual/PR-head")]
     assert record_usage.await_args is not None
     assert record_usage.await_args.kwargs["model_id"] == "anthropic:claude-opus-5-5"
 
