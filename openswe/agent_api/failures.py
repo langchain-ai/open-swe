@@ -35,7 +35,12 @@ class OperationFailure:
 
     @classmethod
     async def of(
-        cls, exc: Exception, *, operation: str, config: Mapping[str, object]
+        cls,
+        exc: Exception,
+        *,
+        operation: str,
+        config: Mapping[str, object],
+        notify: bool = True,
     ) -> OperationFailure:
         if is_transient_sandbox_error(exc):
             # The command never started, so nothing is known to be wrong with the
@@ -65,6 +70,8 @@ class OperationFailure:
             logger.warning("Operation failed", extra={"operation": operation}, exc_info=True)
             return cls(json.dumps(payload))
         logger.error("The sandbox did not answer", extra={"operation": operation}, exc_info=True)
+        if not notify:
+            return cls(json.dumps(payload), sandbox_unreachable=True)
         try:
             await post_sandbox_unreachable_notification(
                 config, sandbox_id=extract_sandbox_id(str(exc))

@@ -975,6 +975,12 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
         patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
         patch.object(standard, "_permalink", AsyncMock(return_value="")),
         patch.object(ReviewCard, "post_standard", AsyncMock(return_value="1.0")),
+        patch.object(ReviewCard, "link_on_github", AsyncMock()),
+        patch.object(
+            standard.SupplementaryReviews,
+            "policies",
+            AsyncMock(side_effect=RuntimeError("repository settings unavailable")),
+        ),
     ):
         result = await standard._request_review(
             ref, MagicMock(), Origin(), channel="", inline_summary="Fix", auto_merge=override
@@ -1002,19 +1008,21 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
 
 @pytest.mark.parametrize("trigger", ["event", "deadline"])
 @pytest.mark.parametrize(
-    ("auto_merge", "pending", "activity"),
+    ("auto_merge", "pending", "activity", "design_only"),
     [
-        (False, False, "idle"),
-        (False, True, "idle"),
-        (True, True, "idle"),
+        (False, False, "idle", False),
+        (False, True, "idle", False),
+        (True, True, "idle", False),
+        (True, False, "idle", True),
         *[
-            (True, False, status)
+            (True, False, status, False)
             for status in ("idle", "busy", "pending", "running", "unknown", "unavailable")
         ],
     ],
 )
 @pytest.mark.parametrize("author", ["ada", "open-swe[bot]", "langsmith-engine[bot]"])
 async def test_only_auto_merge_requests_merge_when_approved(
+    design_only: bool,
     author: str,
     trigger: str,
     auto_merge: bool,
@@ -1054,6 +1062,8 @@ async def test_only_auto_merge_requests_merge_when_approved(
     request.pull_request = pr
     request.thread_id = "review-request"
     request.created_at = datetime.now(UTC) - timedelta(hours=3)
+    if design_only:
+        request.run_config = {"supplementary_reviews": {"design": {"github_login": "grace"}}}
     if pending:
         user = User(
             identities=[UserIdentity(provider="github", external_id="linus", login="linus")]
@@ -1105,7 +1115,7 @@ async def test_only_auto_merge_requests_merge_when_approved(
         else:
             await standard.settle_pull_request("lc", "repo", 7)
         held = auto_merge and activity != "idle"
-        assert merge.await_count == int(auto_merge and not held)
+        assert merge.await_count == int(auto_merge and not held and not design_only)
         if held:
             assert request.state == "open"
             assert request.detail.startswith("auto-merge paused")
@@ -1113,7 +1123,10 @@ async def test_only_auto_merge_requests_merge_when_approved(
             activity = "idle"
             await standard.run_deadline(str(request.id), "auto_merge")
             assert merge.await_count == 1
-    if not auto_merge:
+    if design_only:
+        assert request.state == "open"
+        assert request.detail == "an approval on GitHub"
+    elif not auto_merge:
         assert request.state == "open"
         assert request.detail == (
             "approval from @linus" if pending else "approved — awaiting manual merge"

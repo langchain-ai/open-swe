@@ -16,7 +16,7 @@ from openswe.sandboxes.state import (
 @pytest.mark.asyncio
 @pytest.mark.parametrize("owner", [None, "mda"])
 async def test_ensure_sandbox_never_creates_one_for_a_thread_without(owner: str | None) -> None:
-    """MDA creates every thread's box: a thread without one waits for its run to open it."""
+    """MDA creates every thread's sandbox: a thread without one waits for its run to open it."""
     thread_id = "thread-new"
     SANDBOX_BACKENDS.clear()
     metadata = {} if owner is None else {"sandbox_owner": owner}
@@ -143,7 +143,7 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
 
 @pytest.mark.asyncio
 async def test_ensure_sandbox_never_reuses_connection_to_another_sandbox() -> None:
-    """A reset on another worker rebinds the thread; this worker still holds the old box."""
+    """A reset on another worker rebinds the thread; this worker still holds the old sandbox."""
     thread_id = "thread-stale-cache"
     SANDBOX_BACKENDS.clear()
     stale_backend = MagicMock()

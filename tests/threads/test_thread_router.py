@@ -472,6 +472,30 @@ async def test_a_channel_thread_is_indexed_for_mda_without_creating_it_there(
     assert THREAD not in harness.runtimes.mda.threads
 
 
+async def test_a_channel_conversations_worker_is_indexed_without_creating_it_on_mda(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MDA's async subagent created the worker as the conversation's own thread, which
+    the backend's own create can't reach: MDA answers it with 404."""
+    harness = _Harness(monkeypatch)
+
+    status, _ = await harness.request(
+        "POST",
+        "/threads",
+        {
+            "thread_id": THREAD,
+            "metadata": {"channel": "slack", "owner_login": "ada"},
+            "if_exists": "do_nothing",
+        },
+    )
+
+    assert status == 200
+    indexed = await index.get(THREAD)
+    assert indexed is not None and indexed.metadata["channel"] == "slack"
+    assert THREAD in harness.runtimes.local.threads
+    assert THREAD not in harness.runtimes.mda.threads
+
+
 async def _channel_thread(harness: _Harness) -> None:
     await router.adopt_channel_run(THREAD, "linear")
     await harness.request(

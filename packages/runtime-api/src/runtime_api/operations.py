@@ -36,6 +36,13 @@ class RunOperation(RunRequest):
     credentials: dict[str, str] = Field(default={}, repr=False)
 
 
+class PullRequestHead(BaseModel):
+    """A pull request by its repository and head branch."""
+
+    repo: str
+    branch: str
+
+
 class OperationResult(BaseModel):
     # What the model reads, as a tool result's content.
     content: str | list[JsonValue]
@@ -46,11 +53,11 @@ class OperationResult(BaseModel):
     message_id: str | None = None
     # Run state the operation changed.
     state: dict[str, JsonValue] = {}
-    # What the operation changed in the thread's checkouts, for the turn's git metadata.
-    evidence: dict[str, JsonValue] = {}
+    # The pull requests the operation opened or found, for the turn's git metadata.
+    pull_requests: list[PullRequestHead] = []
     # Custom stream events the operation emitted, for the run to emit.
     events: list[JsonValue] = []
-    # The thread's box did not answer; the backend has told the person, and the run ends.
+    # The thread's sandbox did not answer; the backend has told the person, and the run ends.
     sandbox_unreachable: bool = False
 
 
@@ -58,7 +65,7 @@ OPERATION = Endpoint("operation", RunOperation, OperationResult)
 
 
 class ShellCheck(RunRequest):
-    """A shell command a tool is about to run in the thread's box."""
+    """A shell command a tool is about to run in the thread's sandbox."""
 
     tool: str
     command: str

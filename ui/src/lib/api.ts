@@ -325,11 +325,9 @@ export interface Profile {
   auto_human_review_enabled?: boolean
   review_assignment_instructions?: string
   concierge_mode?: boolean
-  pr_review_links?: boolean
   pr_failure_reactions?: boolean
   experimental_fleet?: boolean
-  experimental_act_as_approval?: boolean
-  act_as_always_allowed?: boolean
+  experimental_memory?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -346,10 +344,9 @@ export interface ProfileUpdate {
   auto_human_review_enabled?: boolean
   review_assignment_instructions?: string
   concierge_mode?: boolean
-  pr_review_links?: boolean
   pr_failure_reactions?: boolean
   experimental_fleet?: boolean
-  experimental_act_as_approval?: boolean
+  experimental_memory?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean

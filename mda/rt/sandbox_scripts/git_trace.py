@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Tuple
 
 # The scan is about 120 git calls waiting on the disk; 8, 16 and 128 workers measured the same.
 WORKERS = 16
-# A cold box's first scan has taken 25s, and the caller gives the script 30.
+# A cold sandbox's first scan has taken 25s, and the caller gives the script 30.
 DEADLINE_SECONDS = 20
 
 

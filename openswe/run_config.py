@@ -281,6 +281,32 @@ class RunConfig(BaseModel):
         return self.eval is True or self.reviewer_eval is True
 
     @property
+    def slack_ask_mode(self) -> bool:
+        """A one-off `/oswe` question (ephemeral answer, no Slack thread), until it continues on the web."""
+        return (
+            self.source == "slack"
+            and self.slack_ask is True
+            and self.slack_thread is not None
+            and bool(self.slack_thread.triggering_user_id.strip())
+        )
+
+    @property
+    def slack_context(self) -> bool:
+        """Whether the run has trusted Slack source context.
+
+        A web follow-up counts: its `slack_thread` is copied from the thread's own
+        metadata, never from the client, and keeping the tools registered across a
+        surface switch is what keeps the prompt prefix cacheable.
+        """
+        if self.source not in {"slack", "schedule", "incidents_agent", "github", "dashboard"}:
+            return False
+        if self.slack_thread is None:
+            return False
+        if self.slack_ask_mode:
+            return bool(self.slack_thread.channel_id.strip())
+        return bool(self.slack_thread.channel_id.strip() and self.slack_thread.thread_ts.strip())
+
+    @property
     def workspace_slug(self) -> str | None:
         for value in (self.workspace, self.environment):
             if isinstance(value, str) and value.strip():

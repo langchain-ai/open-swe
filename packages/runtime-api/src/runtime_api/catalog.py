@@ -3,7 +3,7 @@ models, sandbox and the rules of its middleware.
 
 The run's context always carries it, and the MDA run builds its agent from it: a tool
 for each operation and for each tool of the MCP servers it connects to itself, the
-subagents it may delegate to, the models it calls, the box its file and shell tools
+subagents it may delegate to, the models it calls, the sandbox its file and shell tools
 run in, and what its middleware does around each model call.
 """
 
@@ -104,23 +104,23 @@ class SandboxCreate(BaseModel):
 
 
 class SandboxSpec(BaseModel):
-    """The thread's box, which MDA creates, owns and runs the file and shell tools in."""
+    """The thread's sandbox, which MDA creates, owns and runs the file and shell tools in."""
 
     create: SandboxCreate
     sandbox_id: str | None = None
-    # The thread whose box this one works in, a task worker's coordinator; None for its own.
+    # The thread whose sandbox this one works in, a task worker's coordinator; None for its own.
     thread_id: str | None = None
-    # The connection the box's GitHub rules carry, where MDA writes its proxy config
+    # The connection the sandbox's GitHub rules carry, where MDA writes its proxy config
     # (``runtime_api.sandbox_proxy``); None leaves the proxy config to the backend.
     github_proxy: ConnectionRef | None = None
 
     @field_validator("github_proxy")
     @classmethod
     def _deployments_own(cls, github: ConnectionRef | None) -> ConnectionRef | None:
-        # Everyone who runs on the thread, and its task workers, works in the box, and
+        # Everyone who runs on the thread, and its task workers, works in the sandbox, and
         # its proxy config outlives the run: one person's token there reaches them all.
         if github is not None and github.owner != "agent":
-            raise ValueError("A box's GitHub proxy reads the deployment's own connection")
+            raise ValueError("A sandbox's GitHub proxy reads the deployment's own connection")
         return github
 
 
@@ -132,7 +132,7 @@ class FilesSpec(BaseModel):
     """Where the run's file and shell tools act, and what is checked around them."""
 
     # Paths under these prefixes are the backend's (skills, offloaded images): the
-    # runtime's file tools reach them through the files API rather than the box.
+    # runtime's file tools reach them through the files API rather than the sandbox.
     backend_paths: list[str] = []
     # Where large results and binary reads are offloaded; the backend serves blobs under it.
     artifacts_root: str = "/"
@@ -163,6 +163,8 @@ class ReplyRules(BaseModel):
 
     tool: str
     no_reply_tool: str
+    # Where each turn starts answering: Slack for a run asked from there, else the web.
+    surface: Literal["slack", "web"] = "web"
     # Other tools whose successful call answers the person.
     replies: list[str] = []
     # The messages that ask again, in the run's input envelope, sent as ``nudge_sender``.
@@ -208,7 +210,7 @@ class LoopRules(BaseModel):
     task_coordination: bool = False
     # Whether the run may wait on a call its client runs itself.
     client_tools: bool = False
-    # Whether the backend gives the box's GitHub proxy a fresh token before each model call.
+    # Whether the backend gives the sandbox's GitHub proxy a fresh token before each model call.
     refresh_github_proxy: bool = False
     # What the run's end does besides recording it.
     at_end: list[Literal["settle_review_check", "finish_scout_plan"]] = []
@@ -237,7 +239,7 @@ class Catalog(BaseModel):
     also_from_code: list[str] = []
     # Tools the model labels each call of, with what the label argument tells it.
     described: dict[str, str] = {}
-    # The thread's box; None runs the file and shell tools through the files API alone.
+    # The thread's sandbox; None runs the file and shell tools through the files API alone.
     sandbox: SandboxSpec | None = None
     files: FilesSpec = FilesSpec()
     # Whether each tool result is recorded as incident evidence, which the result then cites.

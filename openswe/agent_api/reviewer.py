@@ -17,7 +17,7 @@ from openswe.review.diff import compute_diff_line_set
 from openswe.reviewer import (
     ensure_reviewer_github_token,
     plan_reviewer,
-    reviewer_box,
+    reviewer_sandbox,
     reviewer_tools,
 )
 from openswe.run_config import RunConfig
@@ -55,7 +55,7 @@ class ReviewerParts(RunParts):
 
     async def files(self, config: RunnableConfig) -> BackendProtocol | None:
         cfg = RunConfig.from_config(config)
-        return None if cfg.thread_id is None else reviewer_box(cfg.thread_id, cfg)
+        return None if cfg.thread_id is None else reviewer_sandbox(cfg.thread_id, cfg)
 
     async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:  # noqa: ARG002
         return _tools_by_name().get(name)

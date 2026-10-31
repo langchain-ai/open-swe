@@ -44,6 +44,29 @@ def _slack_metadata() -> dict[str, Any]:
     }
 
 
+async def test_failed_run_offers_a_requester_scoped_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    from openswe.slack.retry import SlackRetry
+
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", "retry-test-secret-at-least-32-bytes")
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(completion, "get_langsmith_error_url", AsyncMock(return_value=None))
+    metadata = _slack_metadata()
+    metadata["source_context"]["slack_thread"]["triggering_user_id"] = "U1"
+    await completion._post_failure_reply("t1", metadata, "error", invocation_id="run-1")
+    assert reply.await_args is not None
+    blocks = reply.await_args.kwargs["blocks"]
+    notice = reply.await_args.kwargs["notice"]
+    assert blocks[0]["block_id"] == notice.block_id
+    assert notice.repeats({"blocks": blocks})
+    token = json.loads(blocks[1]["elements"][0]["value"])["response"]
+    assert SlackRetry.parse(token) == SlackRetry(
+        channel_id="C1", thread_ts="123.45", user_id="U1", nonce="run-1"
+    )
+
+
 @pytest.mark.asyncio
 async def test_reviewer_error_preserves_pending_check_result(
     monkeypatch: pytest.MonkeyPatch,

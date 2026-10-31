@@ -154,6 +154,8 @@ class EventMatch(Base):
     def sender(self) -> tuple[SystemIdentity, Surface]:
         if self.source == "sandbox":
             return _MONITOR_SYSTEM, "automation"
+        if self.source == "workspace":
+            return _SYSTEM, "automation"
         return _SYSTEM, self.source
 
     @classmethod
