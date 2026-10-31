@@ -43,6 +43,8 @@ The reviewers are already in the Slack thread.
   The card lists exclusions by guideline with line counts, and a PR whose drawn, excluded and test lines do not add up to its total is refused, so no change is ever neither drawn nor listed.
   Each exclusion hides exactly one hunk, so identical hunk bodies elsewhere in the file stay drawn.
   Exclusions stay in the fingerprint: a commit that changes an excluded hunk is a diff change, and the changed hunk no longer matches its exclusion, so the card draws it.
+- Conditional auto-approval is off by default and requires the PR author to opt in under Settings → Experiments → Conditional approval.
+  The requester’s or reviewer’s preference cannot opt another author in. Publishing downgrades conditional assessments for authors who have not opted in, and nomination rechecks the author’s current preference.
 - Conditional auto-approval: when Open SWE's review of the current head decides `would_approve_conditionally`, it would approve the pull request once a person approves one succinct condition it names, such as "Remove the legacy `foo` exporter" or "Rename `Workspace` to `Project`".
   The reviewer uses it only when that condition entirely, completely and unambiguously captures every part of the change the approval criteria do not already cover.
   Alongside the decision it records `auto_approved`: the rest of the change it believes those criteria already cover, naming each criterion and what it covers.

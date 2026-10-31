@@ -13,7 +13,7 @@ from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.github.checks import review_check_conclusion
 from openswe.github.http import GitHubClient
-from openswe.github.pull_requests import PullRequest
+from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.thread_token import (
     GitHubAuthError,
     invalidate_cached_github_token,
@@ -69,6 +69,7 @@ from openswe.review.publish import (
 from openswe.review.reconcile import reconcile_findings_with_review_threads
 from openswe.run_config import RunConfig
 from openswe.slack.client import post_slack_thread_reply
+from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_review_url
 from openswe.utils.langsmith import get_langsmith_trace_url
 
@@ -310,6 +311,21 @@ async def _publish_review_async(
         if not policy or mode == "off":
             assessment = None
         dry_run = mode != "approve"
+    if assessment is not None and assessment.decision == "would_approve_conditionally":
+        async with GitHubClient.connect(token=token) as github:
+            payload = PullRequestPayload.model_validate(
+                await github.repo(owner, repo).pull_request(pr_number).pull()
+            )
+        preferences = await User.preferences_for_login(payload.author)
+        if not preferences.experimental_conditional_approval:
+            assessment = assessment.model_copy(
+                update={
+                    "decision": "needs_human_review",
+                    "approval_condition": None,
+                    "auto_approved": None,
+                    "explanation": "Conditional approval is not enabled for this PR's author.",
+                }
+            )
     # The run config's head_sha is frozen at run creation; a push that arrived
     # mid-run updated the live head in thread metadata. Prefer that so the
     # review anchors to (and last_reviewed_sha advances to) the commit actually

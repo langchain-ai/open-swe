@@ -4985,6 +4985,17 @@
             ],
             "title": "Experimental Background Callbacks"
           },
+          "experimental_conditional_approval": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Conditional Approval"
+          },
           "experimental_fleet": {
             "anyOf": [
               {

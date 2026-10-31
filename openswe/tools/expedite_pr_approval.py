@@ -249,7 +249,12 @@ async def expedite_pr_approval(
             exclusions = await _resolve_exclusions(excluded, files, pr_ref, payload, token)
         except ValueError as exc:
             return _failure(str(exc))
-    assessment = await PublishedAssessment.latest(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    author_preferences = await User.preferences_for_login(payload.author)
+    assessment = (
+        await PublishedAssessment.latest(pr_ref.owner, pr_ref.repo, pr_ref.number)
+        if author_preferences.experimental_conditional_approval
+        else None
+    )
     approval_condition = (
         ApprovalCondition(
             assessment.approval_condition or "", assessment.auto_approved or "", head_sha

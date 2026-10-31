@@ -70,6 +70,11 @@ async def test_nomination_requires_outstanding_review(
         CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse(owners) if owners else None)
     )
 
+    from openswe.users import UserPreferences
+
+    monkeypatch.setattr(
+        expedite.User, "preferences_for_login", AsyncMock(return_value=UserPreferences())
+    )
     monkeypatch.setattr(expedite.PublishedAssessment, "latest", AsyncMock(return_value=None))
     monkeypatch.setattr(
         expedite, "assess_eligibility", lambda *_: Ineligible("diff exceeds the limit")
