@@ -60,7 +60,8 @@ The reviewers are already in the Slack thread.
 ### Slack card
 
 PR link, author, the diff as the card draws it, and its status.
-A draft's kitchen-thread card has **Mark ready for review** and **Dismiss**, with readiness restricted to the author; elsewhere readiness stays in the author DM. A ready card has **Approve** and **Dismiss**.
+A draft's kitchen-thread card has **Mark ready for review** and **Dismiss**, with readiness restricted to the author; elsewhere readiness stays in the author DM.
+A ready card has **Approve** and **Dismiss**.
 Once approved, the diff and buttons go and the card says who approved.
 Once merged or cancelled, the whole card becomes one line, such as *Expedited review: merged* or *Expedited review: dismissed by @someone*, and the PR link.
 Reactions are never votes.
