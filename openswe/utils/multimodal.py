@@ -15,6 +15,7 @@ from langchain_core.messages.content import (
 )
 
 from openswe.config import ENV
+from openswe.slack.http import required_slack_value
 from openswe.utils.url_safety import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
@@ -66,13 +67,7 @@ def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str
     if provider is None or _image_provider(current_url) != provider:
         return None
     if provider == "slack":
-        slack_bot_token = ENV.SLACK_BOT_TOKEN.get()
-        if slack_bot_token:
-            return {"Authorization": f"Bearer {slack_bot_token}"}
-        logger.warning(
-            "SLACK_BOT_TOKEN not set; cannot authenticate image fetch for %s",
-            current_url,
-        )
+        return {"Authorization": f"Bearer {required_slack_value(ENV.SLACK_BOT_TOKEN)}"}
     return None
 
 

@@ -20,6 +20,9 @@ __all__ = ["BrowserDefinition", "define_browser"]
 _MIN_IDLE_TTL_S = 60
 _MAX_IDLE_TTL_S = 86_400
 
+#: What every managed browser tool's name starts with.
+BROWSER_TOOL_PREFIX = "browser_"
+
 
 @dataclass(frozen=True)
 class BrowserDefinition:

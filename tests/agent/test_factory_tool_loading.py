@@ -11,6 +11,7 @@ from langchain_core.tools import StructuredTool
 from langgraph.graph.state import RunnableConfig
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.mcp.runtime import MCPTools
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_runtime import ToolSurface
@@ -93,7 +94,11 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
         patch("openswe.server.make_model", return_value=MagicMock()),
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
         patch("openswe.users.User.email_for_login", new_callable=AsyncMock, return_value=None),
-        patch("openswe.server._mcp_tools_for", new_callable=AsyncMock, return_value=[mcp_tool]),
+        patch(
+            "openswe.server._mcp_tools_for",
+            new_callable=AsyncMock,
+            return_value=MCPTools([mcp_tool]),
+        ),
     ):
         config = _config()
         config["configurable"]["github_login"] = github_login

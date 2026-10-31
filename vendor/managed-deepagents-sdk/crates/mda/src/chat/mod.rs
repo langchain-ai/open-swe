@@ -68,6 +68,10 @@ pub struct ChatOptions {
     pub assistant: Option<String>,
     /// Existing thread to continue.
     pub thread: Option<String>,
+    /// Env file a dev server started for this session stages instead of the
+    /// project `.env` / `.env.local` (`--env-file`), already resolved to an
+    /// existing absolute path.
+    pub env_file: Option<PathBuf>,
 }
 
 /// How the session reached its Agent Server, which decides both what the
@@ -123,11 +127,13 @@ pub fn run(opts: ChatOptions) -> Result<CommandCompletion> {
     let server = AgentServer::new(target.api_url().to_string(), assistant_id)?;
     let pickup = env_pickup(&target);
     let model_key = project.as_ref().and_then(model_api_key);
-    let env_path = opts
-        .path
-        .canonicalize()
-        .unwrap_or_else(|_| opts.path.clone())
-        .join(".env");
+    let env_path = env_file::project_env_path(
+        &opts
+            .path
+            .canonicalize()
+            .unwrap_or_else(|_| opts.path.clone()),
+        opts.env_file.as_deref(),
+    );
 
     let mut connection = vec![
         format!("Agent Server: {}", server.api_url),
@@ -195,24 +201,43 @@ fn resolve_target(
             .unwrap_or(DEFAULT_LOCAL_API_URL),
     )?;
     if dev::dev_server_is_up(&api_url) {
-        warn_missing_model_api_key(project, &staged, "attached", ATTACHED_PICKUP)?;
+        if let Some(env_file) = &opts.env_file {
+            // The running server staged its own env; say so rather than
+            // letting the author believe this file is in effect.
+            log::warning(format!(
+                "A dev server is already running at {api_url}, so --env-file {} is not applied. \
+                 Restart `mda dev --env-file …` to switch env files.",
+                env_file.display()
+            ))?;
+        }
+        warn_missing_model_api_key(
+            project,
+            &staged,
+            opts.env_file.as_deref(),
+            "attached",
+            ATTACHED_PICKUP,
+        )?;
         return Ok(Some(Target::Attached { api_url }));
     }
     if let Some(project) = project {
         // The file the server about to start stages, as `mda dev` picks it.
-        let env = [".env", ".env.local"]
-            .into_iter()
-            .map(|name| project.root.join(name))
-            .find(|path| path.is_file())
-            .map(|path| env_file::parse_env_file(&path))
-            .unwrap_or_default();
-        warn_missing_model_api_key(Some(project), &env, "started", STARTED_PICKUP)?;
+        let env = env_file::parse_env_file(&env_file::project_env_persist_path(
+            &project.root,
+            opts.env_file.as_deref(),
+        ));
+        warn_missing_model_api_key(
+            Some(project),
+            &env,
+            opts.env_file.as_deref(),
+            "started",
+            STARTED_PICKUP,
+        )?;
     }
 
     // Preparing compiles the project and can stop to ask for a login, so it
     // gets the terminal to itself; the spinner covers only the wait after.
     log::info("No local dev server is running — starting one for this session")?;
-    let pending = dev::prepare_background(&opts.path)?;
+    let pending = dev::prepare_background(&opts.path, opts.env_file.as_deref())?;
 
     telemetry::stage::enter(Stage::ServerStart);
     let starting = spinner();
@@ -344,6 +369,7 @@ fn env_pickup(target: &Target) -> &'static str {
 fn warn_missing_model_api_key(
     project: Option<&Project>,
     env: &BTreeMap<String, String>,
+    env_file: Option<&Path>,
     server: &str,
     pickup: &str,
 ) -> Result<()> {
@@ -351,7 +377,8 @@ fn warn_missing_model_api_key(
         return Ok(());
     };
     let pickup = format!("{pickup} Messages fail until then.");
-    if let Some(warning) = dev::missing_model_api_key_warning(project, env, &pickup) {
+    let env_path = env_file::project_env_path(&project.root, env_file);
+    if let Some(warning) = dev::missing_model_api_key_warning(project, env, &env_path, &pickup) {
         otel_logger::warn(
             &format!("model API key missing ({server} dev server)"),
             &anyhow!(warning.clone()),
@@ -403,8 +430,14 @@ fn resume_command(
         Some(url) => format!(" --url {}", shell_quote(url)),
         None => String::new(),
     };
+    // A resumed session may start its own server, which must stage the same
+    // env file. Clap rejects it alongside `--url`.
+    let env_file = match &opts.env_file {
+        Some(path) => format!(" --env-file {}", shell_quote(&path.to_string_lossy())),
+        None => String::new(),
+    };
     format!(
-        "mda chat{pinned} --assistant {} --thread {} -- {}",
+        "mda chat{pinned}{env_file} --assistant {} --thread {} -- {}",
         shell_quote(&server.assistant_id),
         shell_quote(thread_id),
         shell_quote(&opts.path.to_string_lossy()),

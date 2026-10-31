@@ -24,6 +24,7 @@ from managed_deepagents._channels.types import ChannelError
 from managed_deepagents._telemetry.otel import (
     TRACE_ID_METADATA_KEY,
     current_log_context,
+    record_log,
     set_log_attributes,
 )
 from managed_deepagents._thread_record import (
@@ -64,26 +65,59 @@ class _RunOptions(TypedDict, total=False):
     context: Context
     config: Config
     metadata: dict[str, Any]
+    webhook: str
+
+
+_PROVIDER_EVENT_TYPE_METADATA_KEY = "mda_provider_event_type"
+_USER_RESOLUTION_METADATA_KEY = "mda_user_resolution"
+
+
+class IngressRunOrigin(TypedDict):
+    provider_event_type: str | None
+    user_resolution: str | None
+
+
+def ingress_run_origin(metadata: object) -> IngressRunOrigin:
+    """What ingress recorded in a run's metadata about the delivery that started it."""
+    record = metadata if isinstance(metadata, Mapping) else {}
+    provider_event_type = record.get(_PROVIDER_EVENT_TYPE_METADATA_KEY)
+    user_resolution = record.get(_USER_RESOLUTION_METADATA_KEY)
+    return IngressRunOrigin(
+        provider_event_type=provider_event_type if isinstance(provider_event_type, str) else None,
+        user_resolution=user_resolution if isinstance(user_resolution, str) else None,
+    )
 
 
 def _run_options(
     context: Context | None,
     config: Config | None,
     metadata: Mapping[str, Any] | None = None,
+    *,
+    webhook: str | None = None,
 ) -> _RunOptions:
     options: _RunOptions = {}
+    if webhook is not None:
+        options["webhook"] = webhook
     if context is not None:
         options["context"] = context
     if config is not None:
         options["config"] = config
-    if metadata is not None:
-        options["metadata"] = dict(metadata)
+    run_metadata: dict[str, Any] = dict(metadata or {})
+    # Hand the current log context's trace id, provider event type and user
+    # resolution to the run, beside the run's own metadata, so the run's
+    # telemetry can report them. The Agent Server merges run metadata into the
+    # run's ``config["metadata"]``.
     log_context = current_log_context()
     if log_context is not None:
-        options["metadata"] = {
-            **options.get("metadata", {}),
-            TRACE_ID_METADATA_KEY: log_context.trace_id,
-        }
+        run_metadata[TRACE_ID_METADATA_KEY] = log_context.trace_id
+        provider_event_type = log_context.attributes.get("provider_event_type")
+        if isinstance(provider_event_type, str):
+            run_metadata[_PROVIDER_EVENT_TYPE_METADATA_KEY] = provider_event_type
+        user_resolution = log_context.attributes.get("user_resolution")
+        if isinstance(user_resolution, str):
+            run_metadata[_USER_RESOLUTION_METADATA_KEY] = user_resolution
+    if run_metadata:
+        options["metadata"] = run_metadata
     return options
 
 
@@ -226,7 +260,9 @@ async def cancel_ingress_runs(*, client: LangGraphClient, thread_id: str) -> lis
     cancelled = await asyncio.gather(
         *(_cancel_run(client, thread_id, run_id) for run_id in run_ids)
     )
-    return [run_id for run_id, done in zip(run_ids, cancelled, strict=True) if done]
+    cancelled_ids = [run_id for run_id, done in zip(run_ids, cancelled, strict=True) if done]
+    record_log("INFO", "channel runs cancelled", attributes={"runs_cancelled": len(cancelled_ids)})
+    return cancelled_ids
 
 
 async def _cancel_run(client: LangGraphClient, thread_id: str, run_id: str) -> bool:
@@ -287,14 +323,11 @@ async def start_ingress_run(
     POSTs the finished run to ``webhook``. ``thread_origin`` updates the thread
     record before the run starts, so the run's metadata holds it.
     """
+    thread_options: dict[str, Any] = {}
+    if thread_origin is not None:
+        thread_options["metadata"] = thread_record_metadata(_next_record(None, thread_origin))
     created = await client.threads.create(
-        thread_id=thread_id,
-        if_exists="do_nothing",
-        **(
-            {"metadata": thread_record_metadata(_next_record(None, thread_origin))}
-            if thread_origin is not None
-            else {}
-        ),
+        thread_id=thread_id, if_exists="do_nothing", **thread_options
     )
     # An existing thread keeps its metadata: compare what came back.
     await _write_thread_record(client, thread_id, created, thread_origin)
@@ -305,8 +338,7 @@ async def start_ingress_run(
         assistant_id,
         input=run_input,
         multitask_strategy=multitask_strategy,
-        **_run_options(context, config, metadata),
-        **({"webhook": webhook} if webhook is not None else {}),
+        **_run_options(context, config, metadata, webhook=webhook),
     )
     return _started_run(thread_id, run)
 

@@ -29,7 +29,6 @@ from runtime_api.catalog import (
 from runtime_api.endpoint import Delivery
 from runtime_api.loop import (
     Done,
-    GitBaseline,
     GitHubProxyRefreshed,
     PhaseResult,
     Prepared,
@@ -185,7 +184,11 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     loop = RunLoop(backend)
     state = _state(
         HumanMessage(content="Fix the login", id="human-1"),
-        rendered_system_prompt="You are Open SWE.",
+        rendered_system_prompt=(
+            "You are Open SWE.\n\nWe deploy on Fridays.\n\nThis thread's artifacts are here."
+        ),
+        rendered_workspace_prompt="We deploy on Fridays.",
+        rendered_thread_prompt="This thread's artifacts are here.",
     )
 
     barrier = asyncio.Barrier(2)
@@ -208,7 +211,11 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     await backend.outbox.drain()
 
     assert planned.call is not None
+    # What the workspace's threads and this thread alone say go apart, after what every
+    # thread shares.
     assert planned.call.system_prompt == "This is a preview deployment.\n\nYou are Open SWE."
+    assert planned.call.workspace_prompt == "We deploy on Fridays."
+    assert planned.call.thread_prompt == "This thread's artifacts are here."
     assert planned.call.hidden_tools == ["grep", "record_human_input"]
     assert planned.update == {
         "github_proxy_refresh_at": "2999-01-01T11:50:00+00:00",
@@ -470,7 +477,7 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
                 update={"rendered_system_prompt": "You review."},
                 github_proxy=GitHubProxyRefreshed(expires_at=_TOKEN_EXPIRES),
             ),
-            "git_baseline": GitBaseline(),
+            "run_started": Done(),
             # Neither a report nor a notice that fails takes the review check's settling with it.
             "run_ended": BackendCallError("run_ended failed: timed out"),
             "step_limit_reached": BackendCallError("step_limit_reached failed: Slack is down"),
@@ -490,20 +497,23 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
     )
 
     await graph.ainvoke({"messages": [("user", "Review it")]})
-    await backend.outbox.drain()
 
     # Only preparation is a phase call: the loop and the end of the run are named calls.
     # The graph's own work goes out before the run's end, in the order asked for, and
-    # work the backend keeps failing is tried again, then let go of for the rest.
+    # what the backend keeps failing is tried again, then let go of for the rest. The
+    # run is done only once the backend took its reports, the last as the invocation it is.
     assert [name for name, _ in calls] == [
         "prepare",
-        "git_baseline",
+        "run_started",
         "step_limit_reached",
         "step_limit_reached",
         "step_limit_reached",
         "settle_review_check",
         "run_ended",
+        "run_ended",
+        "run_ended",
     ]
+    assert calls[-1][1]["invocation_id"] == "turn"
 
 
 async def test_reports_carry_what_they_report_never_the_conversation(
@@ -513,14 +523,14 @@ async def test_reports_carry_what_they_report_never_the_conversation(
     from langchain_core.messages import ToolCall
     from langchain_core.tools import tool
     from rt.middleware import ReportRepliesMiddleware, RuntimeToolsMiddleware
-    from runtime_api.loop import ModelResult, ToolResultReply
+    from runtime_api.loop import ModelResult
 
     backend, calls = _backend(
         monkeypatch,
         {
             "model_result": Done(),
             "tool_started": Done(),
-            "tool_result": ToolResultReply(),
+            "tool_result": Done(),
         },
     )
     monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)

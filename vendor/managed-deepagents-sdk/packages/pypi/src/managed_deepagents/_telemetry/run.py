@@ -11,7 +11,7 @@ from typing import Literal, TypedDict
 
 from managed_deepagents._telemetry.event import TelemetryEvent
 
-SCHEMA_VERSION = "2026-09-15"
+SCHEMA_VERSION = "2026-10-29"
 EVENT_TYPE = "run_completed"
 
 #: ``mda dev`` has no LangSmith tenant, so those runs share one id rather than
@@ -20,9 +20,10 @@ LOCAL_DISTINCT_ID = "local"
 
 RunEnvironment = Literal["local", "deployed"]
 
-RunOutcome = Literal["success", "failure", "interrupted"]
+RunOutcome = Literal["success", "failure", "interrupted", "cancelled"]
 
-RunChannel = Literal["slack", "http", "schedule", "unknown"]
+#: Whether the run is an agent's own or one of its async subagents'.
+SubagentRole = Literal["lead", "async_subagent"]
 
 MemoryLayerType = Literal["agent", "user"]
 
@@ -78,13 +79,21 @@ class RunCompletedEvent(TelemetryEvent, RunIdentity):
     run_id: str
     run_id_source: RunIdSource
     thread_id: str | None
-    channel: RunChannel
+    channel: str
     sandbox_declared: bool
     identity_declared: bool
     skills_declared: bool
     backend_kind: BackendKind
     context_source: ContextSource
     memory: MemoryObservations
+    #: The provider's event type, such as ``issues.opened``; ``None`` when none.
+    provider_event_type: str | None
+    #: How ingress chose the run's user; ``None`` when no channel started it.
+    user_resolution: str | None
+    subagent_role: SubagentRole
+    browser_declared: bool
+    #: Whether the agent called a browser tool during the run.
+    browser_used: bool
     outcome: RunOutcome
     duration_ms: int
 
@@ -93,13 +102,17 @@ class RunCompletedEvent(TelemetryEvent, RunIdentity):
 class RunConfiguration:
     """How a run was configured, all of it known before the first model call."""
 
-    channel: RunChannel
+    channel: str
     sandbox_declared: bool
     identity_declared: bool
     skills_declared: bool
     backend_kind: BackendKind
     context_source: ContextSource
     memory: MemoryObservations
+    provider_event_type: str | None
+    user_resolution: str | None
+    subagent_role: SubagentRole
+    browser_declared: bool
 
 
 @dataclass
@@ -115,6 +128,8 @@ class PendingRun:
     started_monotonic_ms: float
     #: The caller's emitted-once guard; finalization does not change it.
     emitted: bool = False
+    #: Set by the caller when the agent calls a browser tool.
+    browser_used: bool = False
 
 
 def start_run(
@@ -191,6 +206,11 @@ def finish_run(
         backend_kind=configuration.backend_kind,
         context_source=configuration.context_source,
         memory=configuration.memory,
+        provider_event_type=configuration.provider_event_type,
+        user_resolution=configuration.user_resolution,
+        subagent_role=configuration.subagent_role,
+        browser_declared=configuration.browser_declared,
+        browser_used=pending.browser_used,
         outcome=outcome,
         duration_ms=max(0, math.floor(resolved_end - pending.started_monotonic_ms)),
     )

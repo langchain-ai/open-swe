@@ -7,7 +7,7 @@ import logging
 import re
 import weakref
 from collections import Counter
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
@@ -19,11 +19,12 @@ from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from langchain.mcp import as_langchain_tool
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
+from runtime_api.catalog import McpServerSpec
 
 from mcp.shared.exceptions import MCPError
 from mcp.types import Tool
 from openswe.analytics.posthog import record_mcp_tool
-from openswe.mcp.models import MCPConnection, MCPScope, MCPToolProvenance
+from openswe.mcp.models import CONNECTION_OWNERS, MCPConnection, MCPScope, MCPToolProvenance
 from openswe.mcp.oauth import MCPOAuthError, connection_auth
 from openswe.mcp.transport import MCPDiscoveryError, mcp_http_client
 from openswe.prompts import prompt
@@ -47,17 +48,28 @@ _MANAGED_FAILURE_BACKOFF = timedelta(minutes=1)
 
 
 class MCPTools(list[BaseTool]):
-    def __init__(self) -> None:
-        super().__init__()
+    """The tools of the MCP servers the backend serves, and the servers only an MDA run reaches."""
+
+    def __init__(
+        self, tools: Iterable[BaseTool] = (), runtime_servers: Iterable[McpServerSpec] = ()
+    ) -> None:
+        super().__init__(tools)
         self.failures: list[str] = []
+        # Servers whose credential is an MDA connection, which the run reads and connects with.
+        self.runtime_servers = list(runtime_servers)
 
     @property
     def catalog_note(self) -> str:
-        return (
-            "\n\n" + prompt("tools/mcp-catalog-note", failures=list(dict.fromkeys(self.failures)))
-            if self.failures
-            else ""
-        )
+        return catalog_note(self.failures)
+
+
+def catalog_note(failures: Sequence[str]) -> str:
+    """What the system prompt says of managed tool discovery that ``failures`` broke."""
+    return (
+        "\n\n" + prompt("tools/mcp-catalog-note", failures=list(dict.fromkeys(failures)))
+        if failures
+        else ""
+    )
 
 
 def _backoff_failure(error: BaseException) -> bool:
@@ -179,6 +191,12 @@ def _discovery_slots() -> asyncio.Semaphore:
 
 
 async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
+    if record.connection is not None:
+        raise MCPDiscoveryError(
+            "Only an MDA run reads this server's connection, so Open SWE cannot list its "
+            "tools; enter the names of the tools to allow"
+        )
+
     from langgraph_api.cache import cache_get, cache_set
 
     key: str | None = None
@@ -252,7 +270,7 @@ def _wrap_tool(
                 raise ToolException("MCP connection scope changed; start a new run")
             if not record.enabled:
                 raise ToolException("MCP is disabled or disconnected")
-            if record.url != url or record.transport != transport:
+            if record.url != url or record.transport != transport or record.connection is not None:
                 raise ToolException("MCP connection changed; start a new run")
             if not record.allows_tool(definition.name):
                 raise ToolException("This tool is no longer allowed by the MCP connection settings")
@@ -358,6 +376,34 @@ async def _load_tools(
         return [], "failed"
 
 
+def _runtime_server(
+    source: MCPSource, record: MCPConnection, overridden_scopes: list[MCPScope]
+) -> McpServerSpec | None:
+    """``record`` as the MDA run connects to it, if its tier may read its connection."""
+    connection = record.connection
+    if (
+        connection is None
+        or not connection.for_mcp_server
+        or connection.owner != CONNECTION_OWNERS.get(source.scope)
+    ):
+        logger.warning(
+            "Skipping an MCP server whose connection its tier may not read",
+            extra={"mcp_name": record.name, "mcp_scope": source.scope},
+        )
+        return None
+    return McpServerSpec(
+        name=record.name,
+        url=record.url,
+        transport=record.transport,
+        tools={tool: _tool_name(record.name, tool) for tool in record.allowed_tools},
+        connection=connection,
+        header=record.connection_header,
+        provenance=MCPToolProvenance(
+            connection_name=record.name, scope=source.scope, overridden_scopes=overridden_scopes
+        ).note(),
+    )
+
+
 async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None) -> MCPTools:
     """Combine sources in precedence order; later connections replace earlier names entirely."""
     result = MCPTools()
@@ -390,6 +436,7 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
                 result.failures,
             )
             for source, record in connections
+            if record.connection is None
         )
     )
     outcomes = Counter(outcome for _, outcome in groups)
@@ -401,4 +448,10 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
         },
     )
     result.extend(tool for tools, _ in groups for tool in tools)
+    runtime_servers = [
+        _runtime_server(source, record, scopes[record.name][:-1])
+        for source, record in connections
+        if record.connection is not None
+    ]
+    result.runtime_servers = [server for server in runtime_servers if server is not None]
     return result

@@ -209,6 +209,39 @@ ENV.var(
     secret=True,
 )
 ENV.var(
+    "MDA_WORKSPACE_ID",
+    "LangSmith workspace of the deployment at MDA_RUNTIME_URL (its LANGSMITH_WORKSPACE_ID, or "
+    "else its LANGSMITH_TENANT_ID), which its channels resolve people's Agent Auth principals "
+    "in; defaults to this backend's own workspace.",
+)
+ENV.var(
+    "MDA_SERVICE_SECRET",
+    "Secret shared with the MDA deployment at MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): MDA "
+    "signs each call its channels make to /linear/channel/* and /github/channel/* with it "
+    "(Standard Webhooks), and the backend verifies the signature; required for the Linear "
+    "and GitHub channels.",
+    secret=True,
+)
+ENV.var(
+    "MDA_GITHUB_PROXY_CONNECTION",
+    "MDA connection (mda/github-token, the GitHub channel's App token) whose token MDA puts "
+    "in the GitHub proxy of the sandboxes it owns whose thread reaches the whole App "
+    "installation; MDA then writes those sandboxes' proxy config, not the backend. Set it only "
+    "once the MDA deployment runs a build that writes it: an older one leaves those sandboxes "
+    "without one. Unset: the backend writes every sandbox's proxy config with a token it mints.",
+)
+ENV.var(
+    "MDA_EXA_CONNECTION",
+    "Slug of the MDA deployment's agent connection holding the Exa API key, e.g. "
+    "open-swe-exa: runs' web_search reads its key there. Unset: EXA_API_KEY.",
+)
+ENV.var(
+    "MDA_GITHUB_USER_CONNECTION",
+    "Slug of the MDA deployment's user GitHub OAuth connection, e.g. open-swe-github-prod: "
+    "open_pull_request opens the requester's own PR with their grant there, which MDA asks "
+    "them for when they have none. Unset: their dashboard GitHub sign-in.",
+)
+ENV.var(
     "REMOTE_RUNTIME_TOKEN_SECRET",
     "HMAC key(s) signing the run tokens MDA runs present to the agent API (/agent-api); "
     "comma-separated, the first signs and every one verifies. Required.",
@@ -294,7 +327,6 @@ ENV.var(
     "DASHBOARD_API_BASE_URL. Use the ngrok URL when the dashboard runs on localhost.",
 )
 ENV.var("SLACK_APP_ID", "Slack app id (A...) whose event deliveries Incidents accepts.")
-ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
 
 # --- Dashboard ------------------------------------------------------------------------------
 ENV.var(

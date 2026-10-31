@@ -99,6 +99,11 @@ def get_recorded_proxy_base_config(thread_id: str | None) -> dict[str, Any] | No
     return dict(config) if config is not None else None
 
 
+def proxy_token_recorded(thread_id: str | None) -> bool:
+    """Whether a proxy token was configured and recorded for ``thread_id`` in this process."""
+    return bool(thread_id) and thread_id in _PROXY_TOKEN_EXPIRY
+
+
 def clear_proxy_token_expiry(thread_id: str | None) -> None:
     if thread_id:
         _PROXY_TOKEN_EXPIRY.pop(thread_id, None)
@@ -114,7 +119,7 @@ def _unpack_proxy_token_record(record: tuple[Any, ...]) -> ProxyTokenRecord:
 
 
 def proxy_token_set_since(thread_id: str | None, since: datetime) -> datetime | None:
-    """When the token this process put on ``thread_id``'s box at or after ``since`` expires.
+    """When the token this process put on ``thread_id``'s sandbox at or after ``since`` expires.
 
     None when it put none there since, or does not know when that one expires.
     """

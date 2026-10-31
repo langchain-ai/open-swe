@@ -4,9 +4,9 @@ The runtime's middleware runs the loop: it nudges, routes, assembles each call
 and ends the run as the catalog's ``LoopRules`` say. It asks the backend only for
 what needs the backend's data or credentials, one named call each: the route a
 task takes, a model's settings, the task a thread belongs to, a fresh GitHub proxy
-token, the turn's git baseline, a reply posted on the model's behalf, and what the
-end of the run records.
-The transcript and usage hear of each reply and tool call.
+token, a reply posted on the model's behalf, and what the end of the run records.
+The transcript and usage hear of the run's start, each reply and tool call, and the
+run's end.
 
 Preparation, and every phase of a run still answered from its plan, are phase
 calls: the backend runs the graph's own middleware for the phase, and graph state
@@ -19,10 +19,10 @@ until a run receives it.
 """
 
 from datetime import datetime
-from typing import Final
+from typing import Final, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, JsonValue
+from pydantic import AliasChoices, BaseModel, Field, JsonValue
 
 from runtime_api.catalog import InboxSpec, ModelSpec
 from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
@@ -43,7 +43,9 @@ class RunCall(RunRequest):
 
 
 class Prepare(RunCall):
-    # The thread's box, which the runtime opened before preparing; None when it could not.
+    # Whether the runtime keeps the thread's sandbox, and the sandbox it opened before preparing;
+    # None when it could not. An MDA deployed before the field was renamed sends ``in_box``.
+    in_sandbox: bool = Field(False, validation_alias=AliasChoices("in_sandbox", "in_box"))
     sandbox_id: str | None = None
     # Why the runtime could not open it, secrets removed.
     sandbox_error: str | None = None
@@ -60,22 +62,51 @@ class PhaseResult(BaseModel):
 
 
 class GitHubProxyRefreshed(BaseModel):
-    """The box's GitHub proxy was given a fresh token."""
+    """The sandbox's GitHub proxy was given a fresh token."""
 
-    # When that token expires; None when the thread's box has no GitHub proxy to refresh.
+    # When that token expires; None when the thread's sandbox has no GitHub proxy to refresh.
     expires_at: datetime | None = None
 
 
+class RunNotice(BaseModel):
+    """A notice the transcript shows on the run's turn."""
+
+    kind: Literal["workspace_stale"]
+    data: dict[str, JsonValue] = {}
+
+
+class RunSender(BaseModel):
+    """Who the invocation a run plays is attributed to, as preparing it found."""
+
+    github_login: str | None = None
+    github_user_id: str | None = None
+    user_email: str | None = None
+    source: str | None = None
+    repository: str | None = None
+
+
 class Prepared(PhaseResult):
-    # The token preparation put on the box, which the first model call then keeps; None
+    # The token preparation put on the sandbox, which the first model call then keeps; None
     # when it put none there.
     github_proxy: GitHubProxyRefreshed | None = None
+    # What the turn's transcript shows, which the run hands back with ``run_started``: the
+    # replica that opens the turn need not be the one that prepared it.
+    notices: list[RunNotice] = []
+    # Who the turn is attributed to, which the run hands back with ``run_started``: a later
+    # run, with a token of its own, may send that report for it.
+    sender: RunSender | None = None
 
 
 class ModelCall(BaseModel):
     """What the graph's own middleware says the next model call sends."""
 
     system_prompt: str
+    # What every thread of the workspace says, sent after ``system_prompt`` and ahead of
+    # the run's skills so the workspace's threads share it from the cache.
+    workspace_prompt: str = ""
+    # What only this thread's prompt says, sent after ``system_prompt`` and the run's
+    # skills so that every thread shares the cached prefix before it.
+    thread_prompt: str = ""
     # Tools the graph's own middleware takes off this call's list.
     hidden_tools: list[str] = []
     model: ModelSpec | None = None
@@ -92,19 +123,12 @@ class BeforeModel(PhaseResult):
     call: ModelCall | None = None
 
 
-class AfterAgent(PhaseResult):
-    # What the turn's trace records about the run's git work.
-    trace_metadata: dict[str, JsonValue] = {}
-
-
 class Report(RunRequest):
     """What the runtime tells the backend happened: only what the report is about, never
     the conversation or the run's state."""
 
     # The ``task`` calls the reporting subagent is nested in; empty for the agent itself.
     namespace: list[str] = []
-    # The turn's git trace (``git_trace_*``): its baseline and what each call changed.
-    git: dict[str, JsonValue] = {}
 
 
 class ModelResult(Report):
@@ -132,18 +156,26 @@ class ToolResultReport(ToolCallReport):
     result: dict[str, JsonValue]
 
 
-class ToolResultReply(BaseModel):
-    # What the call changed in the thread's checkouts, for the turn's git metadata.
-    update: dict[str, JsonValue] = {}
+class RunStarted(Report):
+    """The run's turn began: what asked for it, and what preparation chose for it."""
 
+    # The invocation the run is: a later run on the thread may send this report for it.
+    invocation_id: str | None = None
 
-class GitBaseline(BaseModel):
-    # The thread's checkouts as the turn starts, as run state: the turn's git trace
-    # measures what its tools change against it.
-    update: dict[str, JsonValue] = {}
+    # The human messages since the conversation's last reply; the latest asked for the turn.
+    humans: list[dict[str, JsonValue]] = []
+    # The model, effort and route preparation chose.
+    model_id: str | None = None
+    effort: str | None = None
+    model_route: str | None = None
+    # What preparing the turn found for its transcript, and whom it is attributed to.
+    notices: list[RunNotice] = []
+    sender: RunSender | None = None
 
 
 class RunEnded(Report):
+    # The invocation the run is: a later run on the thread may send this report for it.
+    invocation_id: str | None = None
     # The run's replies without their content: their ids, usage and model, for usage.
     replies: list[dict[str, JsonValue]] = []
 
@@ -159,8 +191,10 @@ class ScoutPlanEnd(RunRequest):
 
 
 class SandboxGone(RunRequest):
-    # The box a tool found gone, when its error named it.
+    # The sandbox a tool found gone, when its error named it.
     sandbox_id: str | None = None
+    # Why, when the sandbox never booted, secrets removed.
+    reason: str | None = None
 
 
 class BrowserReport(RunRequest):
@@ -252,17 +286,12 @@ MODEL_RESULT = Endpoint("model_result", ModelResult, Done, seconds=LOOP_CALL_SEC
 AFTER_MODEL = Endpoint(
     "after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
 )
-AFTER_AGENT = Endpoint("after_agent", RunCall, AfterAgent, seconds=LOOP_CALL_SECONDS)
+AFTER_AGENT = Endpoint("after_agent", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS)
 TOOL_STARTED = Endpoint("tool_started", ToolCallReport, Done, seconds=LOOP_CALL_SECONDS)
-TOOL_RESULT = Endpoint("tool_result", ToolResultReport, ToolResultReply, seconds=LOOP_CALL_SECONDS)
-# Taken while the run's first model call runs, and waited for before any tool runs.
-# Only reads the box, so it is safe to send again.
-GIT_BASELINE = Endpoint(
-    "git_baseline", RunRequest, GitBaseline, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
-)
-# The runtime replaced the thread's box: the backend connects to the fresh one.
+TOOL_RESULT = Endpoint("tool_result", ToolResultReport, Done, seconds=LOOP_CALL_SECONDS)
+# The runtime replaced the thread's sandbox: the backend connects to the fresh one.
 SANDBOX_REPLACED = Endpoint("sandbox_replaced", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
-# A tool the runtime ran found the box gone: the backend tells the person.
+# A tool the runtime ran found the sandbox gone: the backend tells the person.
 SANDBOX_UNREACHABLE = Endpoint("sandbox_unreachable", SandboxGone, Done, seconds=LOOP_CALL_SECONDS)
 # For the dashboard to show the thread's browser.
 BROWSER = Endpoint("browser", BrowserReport, Done, seconds=LOOP_CALL_SECONDS)
@@ -276,7 +305,7 @@ MODEL_CHOICE = Endpoint(
 TASK_CONTEXT = Endpoint(
     "task_context", RunRequest, TaskContext, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
-# Mints a token and sets it on the box, so sending it again only mints another.
+# Mints a token and sets it on the sandbox, so sending it again only mints another.
 REFRESH_GITHUB_PROXY = Endpoint(
     "refresh_github_proxy",
     RunRequest,
@@ -285,9 +314,11 @@ REFRESH_GITHUB_PROXY = Endpoint(
     delivery="idempotent",
 )
 REPLY_ON_BEHALF = Endpoint("reply_on_behalf", ReplyOnBehalf, Done, seconds=LOOP_CALL_SECONDS)
-# The run ended: the transcript closes its turn, usage is finalized and the turn's git
-# work reconciled.
-RUN_ENDED = Endpoint("run_ended", RunEnded, AfterAgent, seconds=LOOP_CALL_SECONDS)
+# The run's turn began: the transcript opens it, and the thread and usage record what
+# it runs as.
+RUN_STARTED = Endpoint("run_started", RunStarted, Done, seconds=LOOP_CALL_SECONDS)
+# The run ended: the transcript closes its turn and usage is finalized.
+RUN_ENDED = Endpoint("run_ended", RunEnded, Done, seconds=LOOP_CALL_SECONDS)
 # The run ended at its model-call limit: the person is told.
 STEP_LIMIT_REACHED = Endpoint("step_limit_reached", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
 # A review run ended: its check run on the pull request is settled if it was not.

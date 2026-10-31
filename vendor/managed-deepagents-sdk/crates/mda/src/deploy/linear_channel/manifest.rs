@@ -81,12 +81,8 @@ struct LinearAppOptions {
 }
 
 /// Find the Linear channel, if the project declares one.
-///
-/// `wait` is false for `mda deploy --no-wait`: app setup needs the live Agent
-/// Server URL, so that combination is rejected before anything is uploaded.
 pub(crate) fn prepare(
     requirements: &ChannelRequirements,
-    wait: bool,
     assistant_id: &str,
     project_root: &Path,
     project_files: &[PathBuf],
@@ -106,9 +102,6 @@ pub(crate) fn prepare(
         .as_deref()
         .map(|icon| validate_icon_file(project_root, project_files, icon))
         .transpose()?;
-    if !wait {
-        bail!("An agent with a Linear channel cannot be deployed with --no-wait.");
-    }
 
     Ok(Some(LinearChannel {
         name,
@@ -238,7 +231,6 @@ mod tests {
     fn uses_the_app_setup_the_runtime_emits() {
         let channel = prepare(
             &requirements(manifest(true)),
-            true,
             "triage-agent",
             Path::new("."),
             &[],
@@ -274,7 +266,7 @@ mod tests {
             "name": "Triage Bot",
             "description": "Triages new issues.",
         });
-        let branded = prepare(&requirements(branded), true, "a", Path::new("."), &[])
+        let branded = prepare(&requirements(branded), "a", Path::new("."), &[])
             .unwrap()
             .unwrap();
         assert!(!branded.sessions);
@@ -282,16 +274,10 @@ mod tests {
         assert_eq!(branded.app_description, "Triages new issues.");
         // Linear refuses app names that are too short or mention Linear.
         assert_eq!(
-            prepare(
-                &requirements(manifest(false)),
-                true,
-                "a",
-                Path::new("."),
-                &[]
-            )
-            .unwrap()
-            .unwrap()
-            .app_name,
+            prepare(&requirements(manifest(false)), "a", Path::new("."), &[])
+                .unwrap()
+                .unwrap()
+                .app_name,
             "Deep Agent"
         );
     }
@@ -327,7 +313,7 @@ mod tests {
         let with_icon = |app: Value| {
             let mut iconed = manifest(false);
             iconed["providerConfig"]["app"] = app;
-            prepare(&requirements(iconed), true, "a", project.path(), &built)
+            prepare(&requirements(iconed), "a", project.path(), &built)
         };
 
         let channel = with_icon(json!({ "icon": " assets/icon.png " }))
@@ -382,29 +368,21 @@ mod tests {
 
     #[test]
     fn rejects_what_setup_cannot_honor() {
-        assert!(prepare(
-            &requirements(manifest(true)),
-            false,
-            "a",
-            Path::new("."),
-            &[]
-        )
-        .is_err());
         let mut unknown = manifest(true);
         // Like Slack's and GitHub's, the app takes no icon URL.
         unknown["providerConfig"]["app"] = json!({ "iconUrl": "https://acme.dev/icon.png" });
-        assert!(prepare(&requirements(unknown), true, "a", Path::new("."), &[]).is_err());
+        assert!(prepare(&requirements(unknown), "a", Path::new("."), &[]).is_err());
         let mut transport = manifest(true);
         transport["transport"] = json!("trigger_server");
-        assert!(prepare(&requirements(transport), true, "a", Path::new("."), &[]).is_err());
+        assert!(prepare(&requirements(transport), "a", Path::new("."), &[]).is_err());
 
         let two = ChannelRequirements::from([
             ("a".to_string(), manifest(true)),
             ("b".to_string(), manifest(true)),
         ]);
-        assert!(prepare(&two, true, "a", Path::new("."), &[]).is_err());
+        assert!(prepare(&two, "a", Path::new("."), &[]).is_err());
         assert!(
-            prepare(&ChannelRequirements::new(), true, "a", Path::new("."), &[])
+            prepare(&ChannelRequirements::new(), "a", Path::new("."), &[])
                 .unwrap()
                 .is_none()
         );

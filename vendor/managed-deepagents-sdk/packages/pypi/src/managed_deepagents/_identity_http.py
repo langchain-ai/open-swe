@@ -54,6 +54,9 @@ SecuredRouteHandler = Callable[[HttpRequestLike, RuntimeIdentity], RouteResult]
 if TYPE_CHECKING:
     from starlette.routing import BaseRoute as StarletteRoute
 
+    from managed_deepagents._channel import Channel, ChannelEventsContext
+    from managed_deepagents._channels.resolve_user import ChannelResolveUser
+
 else:
     #: Starlette ``Route`` / ``Mount`` instances — ``object`` at runtime so
     #: Starlette stays a lazy import for authoring-only installs.
@@ -126,6 +129,7 @@ def build_managed_http_app(
     applications = import_module("starlette.applications")
 
     cfg = _identity_config(identity)
+    default_resolve_user = getattr(identity, "resolve_user", None)
     channel_list = list(channels or [])
     connector_list = list(connectors or [])
     register_declared_source_providers(channel_list)
@@ -139,7 +143,8 @@ def build_managed_http_app(
     for channel in channel_list:
         name = _channel_mount_name(channel)
         if callable(getattr(channel, "events", None)):
-            routes.append(_channel_events_route(channel, name, mounted))
+            resolve_user = getattr(channel, "resolve_user", None) or default_resolve_user
+            routes.append(_channel_events_route(channel, name, mounted, resolve_user))
         icon = getattr(channel, "icon", None)
         if isinstance(icon, str) and icon:
             route = _channel_icon_route(icon, root, name, mounted)
@@ -191,7 +196,10 @@ def _channel_mount_name(channel: object) -> str:
 
 
 def _channel_events_route(
-    channel: object, name: str, mounted: list[MountedRoute]
+    channel: object,
+    name: str,
+    mounted: list[MountedRoute],
+    resolve_user: ChannelResolveUser | None,
 ) -> StarletteRoute:
     """Public Events route for a direct or Trigger-backed channel."""
     routing = import_module("starlette.routing")
@@ -229,14 +237,15 @@ def _channel_events_route(
             raw_body = await _read_limited_events_body(request)
             if raw_body is None:
                 return responses.JSONResponse({"error": "payload too large"}, status_code=413)
-            result = events(
-                {
-                    "name": name,
-                    "request": request,
-                    "raw_body": raw_body,
-                    "channel": channel,
-                }
-            )
+            context: ChannelEventsContext = {
+                "name": name,
+                "request": request,
+                "raw_body": raw_body,
+                "channel": cast("Channel", channel),
+            }
+            if resolve_user is not None:
+                context["resolve_user"] = resolve_user
+            result = events(context)
             if inspect.isawaitable(result):
                 result = await result
             return result

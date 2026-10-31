@@ -1,9 +1,9 @@
 """The thread's files on the Open SWE backend, as a deepagents sandbox backend.
 
 The backend serves the paths it holds (skills, offloaded images) and the files of
-a thread whose box is not MDA's, such as one bridged to a person's machine. This
+a thread whose sandbox is not MDA's, such as one bridged to a person's machine. This
 backend reaches them through the typed files API (``runtime_api.files``), so the
-file and shell tools run here, as they do in the box MDA owns.
+file and shell tools run here, as they do in the sandbox MDA owns.
 """
 
 import base64
@@ -245,7 +245,7 @@ class RemoteFiles(SandboxBackendProtocol):
 class RunArtifacts(RemoteFiles):
     """The backend's files under the run's artifacts root, for what the graph itself keeps.
 
-    A run whose box is not MDA's keeps its large tool results here, where its file
+    A run whose sandbox is not MDA's keeps its large tool results here, where its file
     tools read them, rather than at the root of a person's machine.
     """
 
