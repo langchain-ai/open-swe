@@ -11,7 +11,12 @@ Supported profile fields:
   Omit a workspace from the map to restore its global fallback; an empty map clears all workspace overrides.
 - `auto_fix_ci`: boolean preference.
 - `auto_human_review_enabled`: allow automatic review picks (default true); false opts out, but people can still explicitly name the user as a reviewer.
-- `review_assignment_instructions`: dedicated personal preferences for receiving automatic human-review assignments (up to 4,000 characters; empty string clears). Use this, not `save_user_instructions`, when asked to route reviews by repository, changed paths, topic or expertise, e.g. backend reviews but not frontend in a monorepo. The picker and fallback agent assignment check these against PR context. They are advisory, not guaranteed hard exclusions, and cannot override global opt-out, availability, access, author exclusion or other eligibility safeguards. To guarantee no automatic assignments, use `auto_human_review_enabled=false`. Explicit named requests and volunteering are unaffected.
+- `review_assignment_instructions`: dedicated personal preferences for receiving automatic human-review assignments (up to 4,000 characters; empty string clears).
+  Use this, not `save_user_instructions`, when asked to route reviews by repository, changed paths, topic or expertise, e.g. backend reviews but not frontend in a monorepo.
+  The picker and fallback agent assignment check these against PR context.
+  They are advisory, not guaranteed hard exclusions, and cannot override global opt-out, availability, access, author exclusion or other eligibility safeguards.
+  To guarantee no automatic assignments, use `auto_human_review_enabled=false`.
+  Explicit named requests and volunteering are unaffected.
 - Server-backed personal flags exposed by `read_user_settings` may also be toggled by name; flags on the user account require an existing Open SWE user record.
   Browser-local Feature Flags tab visibility cannot be changed here.
 - `review_draft_prs`: boolean overrides; null inherits the shared default.
