@@ -22,7 +22,18 @@ from typing import Literal, Self, TypedDict
 from uuid import UUID, uuid7
 
 from pydantic import JsonValue
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Text, cast, desc, func, or_, select
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Text,
+    cast,
+    desc,
+    func,
+    inspect,
+    or_,
+    select,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
@@ -578,8 +589,12 @@ class HumanReviewRequest(Base):
             )
             before = row.event_state() if row is not None else None
             yield session, row
+            deleted = row is not None and (row in session.deleted or inspect(row).deleted)
         if row is not None and before is not None:
-            await row.log_changes(before)
+            if deleted:
+                await row.log_event("request.discarded", snapshot=before)
+            else:
+                await row.log_changes(before)
 
     @classmethod
     @asynccontextmanager

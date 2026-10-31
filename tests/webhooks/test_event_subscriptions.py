@@ -310,8 +310,10 @@ async def test_slack_matches_joined_channels_but_not_dms(
         assert list(deliveries) == ["s-private", "s-public", "s-own"]
 
 
+@pytest.mark.parametrize("flush_delete", [False, True])
 async def test_review_log_tracks_committed_changes_without_run_secrets(
     workspace: dict[str, UUID],
+    flush_delete: bool,
 ) -> None:
     request = HumanReviewRequest(
         pull_request_id=workspace["pull_request"],
@@ -331,6 +333,19 @@ async def test_review_log_tracks_committed_changes_without_run_secrets(
             assert row is not None
             row.state = "open"
             raise RuntimeError("rollback")
+    with pytest.raises(RuntimeError, match="rollback deletion"):
+        async with HumanReviewRequest.locked(stored.id) as (session, row):
+            assert row is not None
+            await session.delete(row)
+            await session.flush()
+            raise RuntimeError("rollback deletion")
+    assert await HumanReviewRequest.get(stored.id) is not None
+    async with HumanReviewRequest.locked(stored.id) as (session, row):
+        assert row is not None
+        await session.delete(row)
+        if flush_delete:
+            await session.flush()
+    assert await HumanReviewRequest.get(stored.id) is None
     async with transaction() as conn:
         rows = (
             (
@@ -344,7 +359,13 @@ async def test_review_log_tracks_committed_changes_without_run_secrets(
             .mappings()
             .all()
         )
-    assert [row["event_type"] for row in rows] == ["request.created", "request.updated"]
+    assert [row["event_type"] for row in rows] == [
+        "request.created",
+        "request.updated",
+        "request.discarded",
+    ]
+    assert rows[2]["payload"]["request_id"] == str(stored.id)
+    assert rows[2]["payload"]["snapshot"]["state"] == "cancelled"
     assert rows[1]["payload"]["changes"]["state"] == {"before": "open", "after": "cancelled"}
     assert all(row["workspace_id"] == workspace["workspace"] for row in rows)
     assert all(row["pull_request_id"] == workspace["pull_request"] for row in rows)
