@@ -2059,6 +2059,9 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
     monkeypatch.setattr("rt.middleware.run_id", lambda: "worker-run")
     request = httpx2.Request("POST", "https://backend.invalid")
     seen: list[tuple[str, str]] = []
+    worker_sandbox = _IN_SANDBOX.model_copy(
+        update={"thread_id": "coordinator", "sandbox_id": "shared-sandbox"}
+    )
 
     async def post(
         url: str, *, headers: dict[str, str], json: dict[str, object], **kwargs: object
@@ -2073,7 +2076,10 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
             }
             adopted = {
                 "run_token": "worker-token",
-                "catalog": {"excluded": ["slack_reply"]},
+                "catalog": {
+                    "excluded": ["slack_reply"],
+                    "sandbox": worker_sandbox.model_dump(mode="json"),
+                },
                 "invocation_id": "worker-invocation",
             }
             return httpx2.Response(200, request=request, json=adopted)
@@ -2085,7 +2091,12 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
     client = MagicMock(is_closed=False)
     client.post = AsyncMock(side_effect=post)
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
-    backend = _run_backend(None, worker_grant="worker-grant")
+    inherited = Catalog(
+        sandbox=_IN_SANDBOX.model_copy(
+            update={"github_proxy": ConnectionRef(slug="mda/github-token", owner="agent")}
+        )
+    )
+    backend = _run_backend(None, worker_grant="worker-grant", catalog=inherited)
     graph = create_agent(
         model=FakeListChatModel(responses=["done"]),
         middleware=[BackendRunMiddleware(backend)],
@@ -2103,6 +2114,16 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
     assert all(bearer == "Bearer worker-token" for _, bearer in seen[1:])
     # Its replies are stamped with its own invocation, which its usage counts them by.
     assert backend.invocation_id == "worker-invocation"
+
+    from rt.managed_sandbox import _selected, _written_proxy
+
+    runtime = MagicMock(context=RunContext())
+    runtime.context._run = backend.run
+    selected = _selected(runtime)
+    assert selected is not None
+    assert selected.options["_openswe_thread_id"] == "coordinator"
+    assert selected.options["_openswe_sandbox_id"] == "shared-sandbox"
+    assert _written_proxy(runtime) is None
 
 
 @pytest.mark.parametrize(

@@ -6,7 +6,7 @@ import pytest
 from deepagents.backends.protocol import ExecuteResponse
 
 from openswe import background_tasks
-from openswe.sandboxes import lifecycle
+from openswe.sandboxes import lifecycle, managed, state
 from openswe.sandboxes.providers.registry import SandboxGoneError
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS, SandboxUnreachableError
 from openswe.tasks import service as task_service
@@ -63,6 +63,8 @@ def shared_sandbox(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, objec
     shared_metadata = metadata
     monkeypatch.setattr(TaskMembership, "context_for_thread", context)
     monkeypatch.setattr(lifecycle, "get_sandbox_metadata", read_metadata)
+    monkeypatch.setattr(managed, "get_sandbox_metadata", read_metadata)
+    monkeypatch.setattr(state, "get_sandbox_metadata", read_metadata)
     monkeypatch.setattr(lifecycle.client.threads, "update", update)
     monkeypatch.setattr(lifecycle, "configure_git_identity", AsyncMock())
     monkeypatch.setattr(
@@ -232,3 +234,77 @@ async def test_worker_cannot_attach_to_a_host_outside_its_permissions(
 
     connect.assert_not_awaited()
     assert "worker" not in SANDBOX_BACKENDS
+
+
+async def test_worker_catalog_attaches_to_the_coordinators_mda_sandbox(
+    shared_sandbox: dict[str, dict[str, object]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shared_sandbox["coordinator"]["sandbox_owner"] = "mda"
+    shared_sandbox["worker"].pop("sandbox_id")
+    monkeypatch.setattr(
+        lifecycle, "connect_existing_sandbox", AsyncMock(return_value=MagicMock(id="sb-old"))
+    )
+    monkeypatch.setattr(lifecycle, "_refresh_github_proxy", AsyncMock())
+    monkeypatch.setattr(managed, "mda_github_proxy", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        managed.SandboxCreateConfig,
+        "for_thread",
+        AsyncMock(return_value=lifecycle.SandboxCreateConfig(snapshot_id=None)),
+    )
+
+    sandbox = await managed.ManagedSandbox.for_thread("worker", "default")
+
+    assert sandbox is not None
+    assert sandbox.thread_id == "coordinator"
+    assert sandbox.sandbox_id == "sb-old"
+
+
+async def test_worker_catalog_fails_when_the_coordinator_is_unattached(
+    shared_sandbox: dict[str, dict[str, object]],
+) -> None:
+    shared_sandbox["coordinator"].pop("sandbox_id")
+    shared_sandbox["coordinator"]["sandbox_owner"] = "mda"
+    with pytest.raises(SandboxUnreachableError, match="coordinator must attach"):
+        await managed.ManagedSandbox.for_thread("worker", "default")
+
+
+@pytest.mark.parametrize("cached", [False, True])
+async def test_worker_download_and_push_use_the_coordinator_on_a_new_replica(
+    shared_sandbox: dict[str, dict[str, object]], monkeypatch: pytest.MonkeyPatch, cached: bool
+) -> None:
+    from importlib import import_module
+
+    from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
+    from tests.agent.test_workflow_push_guard import _Backend, _Request
+
+    download = import_module("openswe.tools.create_sandbox_file_download_url")
+    backend = _Backend(workflow_files="")
+    backend.id = "sb-old"
+    monkeypatch.setattr(lifecycle, "connect_existing_sandbox", AsyncMock(return_value=backend))
+    monkeypatch.setattr(lifecycle, "_refresh_github_proxy", AsyncMock())
+    monkeypatch.setattr(
+        "openswe.run_config.get_config", lambda: {"configurable": {"thread_id": "worker"}}
+    )
+    monkeypatch.setattr(download, "resolve_sandbox_work_dir", AsyncMock(return_value="/repo"))
+    original_execute = backend.aexecute
+    monkeypatch.setattr(
+        backend,
+        "aexecute",
+        AsyncMock(return_value=ExecuteResponse(output="/repo/changes.patch", exit_code=0)),
+    )
+    resolved, path, _ = await download.resolve_sandbox_file("changes.patch")
+    assert resolved.id == "sb-old"
+    assert path == "/repo/changes.patch"
+
+    SANDBOX_BACKENDS.clear()
+    shared_sandbox["worker"]["sandbox_id"] = "stale-worker-sandbox"
+    if cached:
+        state.set_sandbox_backend("worker", MagicMock(id="stale-worker-sandbox"))
+    monkeypatch.setattr(backend, "aexecute", original_execute)
+    request = _Request("git -C /repo push origin feature")
+    monkeypatch.setattr("openswe.middleware.workflow_push_guard._thread_id", lambda _: "worker")
+    handler = AsyncMock(return_value="pushed")
+    result = await WorkflowPushGuardMiddleware().awrap_tool_call(request, handler)
+    assert result == "pushed"
+    assert backend.commands
+    assert SANDBOX_BACKENDS["worker"].id == SANDBOX_BACKENDS["coordinator"].id == "sb-old"

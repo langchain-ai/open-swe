@@ -73,13 +73,11 @@ _WORKER = {"task_id": "00000000-0000-0000-0000-000000000001", "sandbox_host_thre
         # The sandbox the backend made is gone: this run starts in MDA's instead of failing.
         ({"sandbox_id": "gone-sandbox"}, {}, "own"),
         ({"sandbox_id": "bridge:abc"}, {}, None),
-        ({**_WORKER}, {"sandbox_id": "sandbox", "sandbox_owner": "mda"}, None),
         (
             {**_WORKER, "sandbox_id": "sandbox"},
             {"sandbox_id": "sandbox", "sandbox_owner": "mda"},
             _HOST,
         ),
-        ({**_WORKER, "sandbox_id": "sandbox"}, {"sandbox_id": "sandbox"}, None),
     ],
 )
 async def test_mda_owns_new_threads_and_its_own_sandboxes(
@@ -129,6 +127,10 @@ async def test_mda_owns_new_threads_and_its_own_sandboxes(
     monkeypatch.setattr("openswe.sandboxes.providers.langsmith.sandbox_exists", exists)
     monkeypatch.setattr("openswe.sandboxes.lifecycle.client.threads.update", write_metadata)
 
+    if metadata.get("task_id"):
+        from unittest.mock import AsyncMock
+
+        monkeypatch.setattr("openswe.sandboxes.managed.ensure_sandbox_for_thread", AsyncMock())
     sandbox = await ManagedSandbox.for_thread("thread-1", None)
 
     handed_over = metadata.get("sandbox_id") == "gone-sandbox"

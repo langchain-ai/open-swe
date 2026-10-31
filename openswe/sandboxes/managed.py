@@ -17,11 +17,12 @@ from openswe.bridge.store import Bridge
 from openswe.github.app import PermissionMap
 from openswe.sandboxes.lifecycle import (
     SandboxCreateConfig,
+    ensure_sandbox_for_thread,
     hand_gone_sandbox_to_mda,
     mda_github_proxy,
 )
 from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
-from openswe.sandboxes.state import get_sandbox_metadata
+from openswe.sandboxes.state import SandboxUnreachableError, get_sandbox_metadata
 from openswe.tasks.schemas import ThreadMetadata
 
 
@@ -46,31 +47,38 @@ class ManagedSandbox(BaseModel):
         github_repositories: Sequence[str] | None = None,
         github_permissions: PermissionMap | None = None,
     ) -> ManagedSandbox | None:
-        """The sandbox the thread's MDA run declares, or ``None`` when the backend keeps its own.
-
-        New threads and MDA's own get MDA's sandbox, created from the replacement
-        ``recreate_sandbox`` asked for if any. A thread the backend gave a sandbox before
-        MDA owned them keeps it until it is gone, when this run starts in MDA's
-        instead; bridged threads run on the user's machine. A task worker shares its
-        coordinator's MDA sandbox once the backend has attached it there, which checks that
-        it may. ``github_repositories`` and ``github_permissions`` narrow the run's
-        GitHub token beyond its thread's own scope, as a review's do.
-        """
+        """Resolve the thread's sandbox through its validated coordinator binding for workers."""
         raw = await get_sandbox_metadata(thread_id)
         metadata = ThreadMetadata.model_validate(raw)
-        if metadata.sandbox_id is not None and Bridge.bridge_id_of(metadata.sandbox_id):
-            return None
-        # The metadata of the thread whose sandbox this is: a worker's coordinator's.
         sandbox_metadata = raw
         owner: str | None = None
         if metadata.task_id is not None:
+            await ensure_sandbox_for_thread(
+                thread_id,
+                workspace_slug=workspace_slug,
+                github_proxy_repositories=github_repositories,
+            )
+            raw = await get_sandbox_metadata(thread_id)
+            metadata = ThreadMetadata.model_validate(raw)
             owner = metadata.sandbox_host_thread_id
             if owner is None or metadata.sandbox_id is None:
-                return None
+                raise SandboxUnreachableError(
+                    thread_id, metadata.sandbox_id, "Worker is unattached"
+                )
             sandbox_metadata = await get_sandbox_metadata(owner)
             host = ThreadMetadata.model_validate(sandbox_metadata)
-            if host.sandbox_owner != "mda" or host.sandbox_id != metadata.sandbox_id:
+            if host.sandbox_id != metadata.sandbox_id:
+                raise SandboxUnreachableError(
+                    thread_id, metadata.sandbox_id, "Worker's coordinator sandbox binding changed"
+                )
+            if Bridge.bridge_id_of(metadata.sandbox_id):
                 return None
+            if host.sandbox_owner != "mda":
+                raise SandboxUnreachableError(
+                    thread_id, metadata.sandbox_id, "Worker's coordinator sandbox is not MDA-owned"
+                )
+        elif metadata.sandbox_id is not None and Bridge.bridge_id_of(metadata.sandbox_id):
+            return None
         elif (
             metadata.sandbox_id is not None
             and metadata.sandbox_owner != "mda"
