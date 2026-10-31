@@ -37,6 +37,7 @@ import {
 } from "@/features/agents/lib/provider/useModelOptions"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import { localThreadKeys } from "@/features/agents/lib/desktopLocal"
+import { newThreadPreferences } from "@/features/agents/lib/newThreadPreferences"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { agentsApi } from "@/features/agents/lib/api"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
@@ -149,7 +150,7 @@ export function AgentsHome({
     Array<DesktopProjectRef>
   >([])
   const [localWorkspaceMode, setLocalWorkspaceMode] =
-    useState<DesktopWorkspaceMode>("local")
+    useState<DesktopWorkspaceMode>(() => newThreadPreferences.workspaceMode())
   const localWorkspaceModeRef = useRef(localWorkspaceMode)
   useEffect(() => {
     localWorkspaceModeRef.current = localWorkspaceMode
@@ -167,9 +168,21 @@ export function AgentsHome({
   const profileQuery = useProfile()
   const skills = useAgentSkills({ enabled: cloudEnabled })
   // undefined = untouched (the workspace decides); null = explicitly "no repo".
-  const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
+  const [repoSelection, setRepoOverride] = useState<string | null | undefined>(
     initialNoRepo ? null : initialRepo
   )
+  const storedRepo = session.data
+    ? newThreadPreferences.repo(session.data.login)
+    : undefined
+  const repoOverride =
+    repoSelection !== undefined
+      ? repoSelection
+      : storedRepo === null ||
+          reposQuery.data?.repositories.some(
+            (candidate) => candidate.full_name === storedRepo
+          )
+        ? storedRepo
+        : undefined
   const userDefaultRepo = profileQuery.data?.default_repo ?? null
 
   // Workspace first: an explicit pick, else the workspace preferring a
@@ -226,6 +239,7 @@ export function AgentsHome({
   }
   const selectRepo = (value: string | null) => {
     setRepoOverride(value)
+    if (session.data) newThreadPreferences.selectRepo(session.data.login, value)
     // Picking from the list pins the workspace it was offered under, so the
     // pick cannot drag the composer into whichever workspace owns it.
     if (!workspaceOverride) setWorkspaceOverride(selectedWorkspace)
@@ -265,9 +279,9 @@ export function AgentsHome({
     const stored =
       window.localStorage.getItem(LAST_LOCAL_REPO_KEY) ??
       window.localStorage.getItem(LEGACY_LAST_LOCAL_REPO_KEY)
-    const selected = localRepos.find(
-      (checkout) => checkout.cwd === localRepoPath || checkout.cwd === stored
-    )
+    const selected =
+      localRepos.find((checkout) => checkout.cwd === localRepoPath) ??
+      localRepos.find((checkout) => checkout.cwd === stored)
     // oxlint-disable-next-line react/set-state-in-effect
     setLocalRepoPath(selected?.cwd ?? localRepos[0]?.cwd ?? null)
   }, [
@@ -290,11 +304,12 @@ export function AgentsHome({
       branchRefreshId.current === refreshId
     ) {
       const branches = result?.branches ?? []
-      setLocalRepoBranch((selected) =>
+      const stored = cwd ? newThreadPreferences.branch(cwd) : null
+      setLocalRepoBranch(
         localWorkspaceModeRef.current === "worktree" &&
-        selected &&
-        branches.some((ref) => ref.name === selected)
-          ? selected
+          stored &&
+          branches.some((ref) => ref.name === stored)
+          ? stored
           : (result?.current ?? null)
       )
       setLocalRepoBranches(branches)
@@ -314,24 +329,29 @@ export function AgentsHome({
   const selectLocalRepoBranch = useCallback(
     async (branch: string) => {
       setLocalError(null)
+      const cwd = localRepoPathRef.current
       const ref = localRepoBranches.find(
         (candidate) => candidate.name === branch
       )
       if (ref?.worktreePath) {
         localWorkspaceModeRef.current = "worktree"
         setLocalWorkspaceMode("worktree")
+        newThreadPreferences.selectWorkspaceMode("worktree")
+        if (cwd) newThreadPreferences.selectBranch(cwd, branch)
         setLocalRepoBranch(branch)
         return
       }
-      if (localWorkspaceMode === "worktree" || !localRepoPathRef.current) {
+      if (localWorkspaceMode === "worktree" || !cwd) {
+        if (cwd) newThreadPreferences.selectBranch(cwd, branch)
         setLocalRepoBranch(branch)
         return
       }
       try {
         await window.openSweDesktop?.checkoutProjectBranch({
-          cwd: localRepoPathRef.current,
+          cwd,
           branch,
         })
+        newThreadPreferences.selectBranch(cwd, branch)
         setLocalRepoBranch(branch)
       } catch (error) {
         setLocalError(
@@ -348,6 +368,7 @@ export function AgentsHome({
     (next: DesktopWorkspaceMode) => {
       localWorkspaceModeRef.current = next
       setLocalWorkspaceMode(next)
+      newThreadPreferences.selectWorkspaceMode(next)
       setLocalError(null)
       if (next === "local") setLocalRepoBranch(null)
       void refreshLocalRepoBranch()
