@@ -142,8 +142,9 @@ function isTrustedProxyRequest(pageUrl) {
 
 /**
  * The response headers of a page the app frames, with its CSP letting the app
- * frame it. LangSmith's browser window names the origins that may frame it, and
- * only https ones, so it can never name the app's own `open-swe://app`.
+ * frame it as well as whoever it already allowed. LangSmith's browser window
+ * names the origins that may frame it, and only https ones, so it can never
+ * name the app's own `open-swe://app`.
  */
 function headersFramedByApp(headers: Record<string, string[]>) {
   return Object.fromEntries(
@@ -152,8 +153,9 @@ function headersFramedByApp(headers: Record<string, string[]>) {
       name.toLowerCase() === "content-security-policy"
         ? values.map((value) =>
             value.replace(
-              /(^|;)(\s*)frame-ancestors[^;]*/i,
-              `$1$2frame-ancestors ${APP_ORIGIN}`,
+              /(^|;)(\s*)frame-ancestors([^;]*)/i,
+              (_match, start, space, sources) =>
+                `${start}${space}frame-ancestors${sources.replace(/\s*'none'/i, "")} ${APP_ORIGIN}`,
             ),
           )
         : values,

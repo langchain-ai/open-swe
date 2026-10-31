@@ -276,7 +276,7 @@ test("keeps only well-formed alternate environments", () => {
   assert.deepEqual(parseDesktopEnvironments(null), []);
 });
 
-test("lets the app frame a page whose CSP names other frame ancestors", () => {
+test("adds the app to the frame ancestors a page already allows", () => {
   assert.deepEqual(
     headersFramedByApp({
       "Content-Type": ["text/html"],
@@ -289,10 +289,14 @@ test("lets the app frame a page whose CSP names other frame ancestors", () => {
     {
       "Content-Type": ["text/html"],
       "content-security-policy": [
-        "default-src 'none'; frame-ancestors open-swe://app; img-src data:",
-        "frame-ancestors open-swe://app; object-src 'none'",
+        "default-src 'none'; frame-ancestors https://dash.example.com open-swe://app; img-src data:",
+        "frame-ancestors 'self' https://dev.smith.langchain.com open-swe://app; object-src 'none'",
         "default-src 'none'",
       ],
     },
+  );
+  assert.deepEqual(
+    headersFramedByApp({ "Content-Security-Policy": ["frame-ancestors 'none'"] }),
+    { "Content-Security-Policy": ["frame-ancestors open-swe://app"] },
   );
 });
