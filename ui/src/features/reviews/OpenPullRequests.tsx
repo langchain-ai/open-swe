@@ -11,6 +11,7 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Typeahead } from "@langchain/macaw-components/Typeahead"
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowsDownUp"
 import { useQueries, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 
 import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
@@ -36,7 +37,12 @@ import { pullRequestKey, statusLabels } from "./lib/status"
 import { useOpenPullRequests } from "./lib/useOpenPullRequests"
 import { usePullRequestDetails } from "./lib/usePullRequestDetails"
 import { usePullRequestSearch } from "./lib/usePullRequestSearch"
-import { reviewStatuses, type ReviewsSearch, type ReviewSort } from "./search"
+import {
+  parsePullRequestSelection,
+  reviewStatuses,
+  type ReviewsSearch,
+  type ReviewSort,
+} from "./search"
 
 const chunkSize = 10
 
@@ -92,6 +98,7 @@ export function OpenPullRequests({
       direction: sort === next && direction === "asc" ? "desc" : "asc",
     })
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const query = useOpenPullRequests(login, repo, sort, direction, scope)
   const knownRepos = useRepos()
   const descriptionSearch = usePullRequestSearch(search)
@@ -215,6 +222,21 @@ export function OpenPullRequests({
       void queryClient.prefetchQuery(pullRequestPreviewQuery(nextRow))
   }, [queryClient, nextRow])
 
+  // Everything the filters leave, in list order, not just the rows scrolled into view.
+  const queue = (filter?.length ? filtered : matchingRows).map(pullRequestKey)
+  const firstInQueue = parsePullRequestSelection(queue[0])
+  const reviewOneByOne = () =>
+    firstInQueue &&
+    void navigate({
+      to: "/agents/reviews/$owner/$repo/$number",
+      params: {
+        owner: firstInQueue.owner,
+        repo: firstInQueue.repo,
+        number: String(firstInQueue.number),
+      },
+      search: { queue },
+    })
+
   const githubLink =
     scope === "review-assigned" &&
     latest &&
@@ -294,6 +316,11 @@ export function OpenPullRequests({
                   }
                 >
                   Back to Open SWE assignments
+                </Button>
+              )}
+              {firstInQueue && (
+                <Button size="xs" className="ml-auto" onClick={reviewOneByOne}>
+                  Review one by one ({queue.length})
                 </Button>
               )}
             </div>

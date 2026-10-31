@@ -31,6 +31,25 @@ export interface ReviewsSearch {
 
 const prSelectionPattern = /^[\w.-]+\/[\w.-]+#\d+$/
 
+export interface ReviewQueueSearch {
+  /** The pull requests being worked through one by one, as `pullRequestKey`s, in order. */
+  queue?: string[]
+}
+
+export function validateReviewQueueSearch(
+  search: Record<string, unknown>
+): ReviewQueueSearch {
+  const queue = [
+    ...new Set(
+      (Array.isArray(search.queue) ? search.queue : []).filter(
+        (value): value is string =>
+          typeof value === "string" && prSelectionPattern.test(value)
+      )
+    ),
+  ].slice(0, 100)
+  return { queue: queue.length ? queue : undefined }
+}
+
 export function parsePullRequestSelection(
   value: string | undefined
 ): { owner: string; repo: string; number: number } | null {
