@@ -98,7 +98,9 @@ function AssessmentCard({
               ? "Approved"
               : assessment.decision === "would_approve"
                 ? "Would approve"
-                : "Needs human review"}
+                : assessment.decision === "would_approve_if_idea_ok"
+                  ? "Would approve once the idea is okayed"
+                  : "Needs human review"}
           </span>
           <span
             className="text-xs text-secondary"
@@ -142,6 +144,11 @@ function AssessmentCard({
           </div>
         )}
       </div>
+      {assessment.idea && (
+        <p className="mt-space-2">
+          <span className="font-medium">Idea to okay:</span> {assessment.idea}
+        </p>
+      )}
       <details className="mt-space-2 text-xs text-secondary">
         <summary className="cursor-pointer">Why this assessment?</summary>
         <p className="mt-space-2 text-sm whitespace-pre-wrap text-primary">

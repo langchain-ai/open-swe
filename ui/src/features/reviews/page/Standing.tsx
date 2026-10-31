@@ -746,7 +746,9 @@ function OpenSweRow({
                 ? "approved"
                 : verdict.decision === "would_approve"
                   ? "would approve"
-                  : "needs human review"
+                  : verdict.decision === "would_approve_if_idea_ok"
+                    ? "would approve once the idea is okayed"
+                    : "needs human review"
               : null,
             bugs || flags
               ? [bugs && plural(bugs, "bug"), flags && plural(flags, "flag")]

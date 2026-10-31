@@ -141,7 +141,7 @@ class ReviewCard:
                 standard = self.request.kind == "standard"
                 files = await ChangedFile.of_pull(
                     pull,
-                    max_pages=30 if standard else 1,
+                    max_pages=30,
                     count=pr.changed_files if standard else None,
                 )
                 if standard and files is not None and pr.changed_files != len(files):

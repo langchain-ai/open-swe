@@ -14,11 +14,13 @@ from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard import repo_access
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.expedited_review.eligibility import (
+    FILE_PAGES,
     MAX_CHANGED_LINES,
     MAX_FILES,
     ChangedFile,
     ExcludedHunk,
     Exclusion,
+    Idea,
     Ineligible,
     assess_eligibility,
     fingerprint_matches,
@@ -34,6 +36,7 @@ from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import summary_line
 from openswe.review.approvals import APPROVALS_PATH, fetch_approvals_md
+from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.run_config import RunConfig
 from openswe.slack.cards import run_slack_location
 from openswe.slack.channels import SlackChannel
@@ -207,7 +210,7 @@ async def expedite_pr_approval(
     async with GitHubClient.connect(token=token) as github:
         pull = github.repo(pr_ref.owner, pr_ref.repo).pull_request(pr_ref.number)
         pr = await or_none(pull.pull())
-        files = await ChangedFile.of_pull(pull) if pr else None
+        files = await ChangedFile.of_pull(pull, max_pages=FILE_PAGES) if pr else None
         if pr and pr.get("state") == "open" and files is not None and len(files) < MAX_FILES:
             payload = PullRequestPayload.model_validate(pr)
             states = await latest_review_states(pull, payload.author)
@@ -246,6 +249,14 @@ async def expedite_pr_approval(
             exclusions = await _resolve_exclusions(excluded, files, pr_ref, payload, token)
         except ValueError as exc:
             return _failure(str(exc))
+    assessment = await PublishedAssessment.latest(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    idea = (
+        assessment.conditional_idea
+        if assessment is not None and assessment.head_sha == head_sha
+        else None
+    )
+    if idea:
+        exclusions = [*exclusions, *Idea(idea, head_sha).cover(files, exclusions)]
     verdict = assess_eligibility(files, exclusions)
     if isinstance(verdict, Ineligible):
         return _failure(
@@ -253,7 +264,9 @@ async def expedite_pr_approval(
             f"Eligible changes touch at most {MAX_CHANGED_LINES} lines outside tests and "
             "exclusions, and every one of those files has to have a readable text diff. Test "
             f"files are not counted, and `excluded` leaves out hunks that qualify under the "
-            f"target repository's `{APPROVALS_PATH}`. Otherwise ask for a normal review."
+            f"target repository's `{APPROVALS_PATH}`. When Open SWE's review of the current "
+            "head would approve once a person okays the PR's idea, the card shows that idea "
+            "instead of the diff. Otherwise ask for a normal review."
         )
 
     if await User.for_login("github", payload.author) is None:
@@ -282,6 +295,7 @@ async def expedite_pr_approval(
         and fingerprint_matches(files, active.diff_fingerprint)
         and {(e["path"], e["digest"]) for e in active.excluded_hunks}
         == {(e["path"], e["digest"]) for e in exclusions}
+        and active.idea == (idea or "")
     ):
         _audit_pull_request(active.pull_request_id)
         if active.awaiting_ready and not payload.draft:

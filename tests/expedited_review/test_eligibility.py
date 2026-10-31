@@ -7,6 +7,7 @@ from openswe.expedited_review.eligibility import (
     EligibleDiff,
     Exclusion,
     ExpeditedDiff,
+    Idea,
     Ineligible,
     assess_eligibility,
     fingerprint_matches,
@@ -129,3 +130,23 @@ def test_generated_files_never_count_and_regenerating_them_keeps_the_votes() -> 
     assert fingerprint_matches([source, regenerated], card.fingerprint)
     assert not ChangedFile(filename=".github/openapi.yaml").is_generated
     assert not ChangedFile(filename="dist/app.min.js").is_generated
+
+
+def test_an_idea_hides_everything_but_paths_that_must_be_read() -> None:
+    app = ChangedFile(
+        filename="src/app.py",
+        additions=40,
+        deletions=40,
+        patch="@@ -1,40 +1,40 @@\n" + "\n".join(f"-a{i}\n+b{i}" for i in range(40)),
+    )
+    gone = ChangedFile(filename="src/legacy.py", status="removed", deletions=900, patch=None)
+    lock = ChangedFile(filename="uv.lock", deletions=1, patch="@@ -1,1 +0,0 @@\n-x")
+    files = [app, gone, lock]
+    covered = Idea("Rename a to b and remove legacy", "f" * 40).cover(files)
+
+    assert isinstance(assess_eligibility(files), Ineligible)
+    assert [file.filename for file in ExpeditedDiff(files, covered).shown] == ["uv.lock"]
+    verdict = assess_eligibility(files, covered)
+    assert isinstance(verdict, EligibleDiff) and verdict.changed_lines == 1
+    edited = gone.model_copy(update={"deletions": 901})
+    assert isinstance(assess_eligibility([app, edited, lock], covered), Ineligible)

@@ -1248,8 +1248,9 @@ export interface PublishedReviewAssessment {
   review_id: number
   head_sha: string
   risk_score: number
-  decision: "would_approve" | "needs_human_review"
+  decision: "would_approve" | "would_approve_if_idea_ok" | "needs_human_review"
   explanation: string
+  idea?: string | null
 }
 
 export interface ReviewAssessmentFeedbackInput {

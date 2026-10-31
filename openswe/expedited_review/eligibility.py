@@ -5,7 +5,9 @@ to arrive as a readable text diff, and those files together have to fit in
 ``MAX_CHANGED_LINES``, so all of it is on the card. Test files are outside both
 gates — CI judges them — which is what lets a two-line fix arrive with the
 tests that prove it. So are hunks the agent excludes as qualifying under the
-target repository's ``.open-swe/APPROVALS.md``; the card summarizes them.
+target repository's ``.open-swe/APPROVALS.md``; the card summarizes them. When
+Open SWE's review would approve the PR once a person okays its high-level idea,
+the card shows that idea instead of the diff, so a PR of any size qualifies.
 """
 
 import hashlib
@@ -13,7 +15,7 @@ import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 import httpx2
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
@@ -27,7 +29,9 @@ MAX_CHANGED_LINES = 20
 # read than one that lands under, and bouncing it costs the asker more than the
 # slack costs the voters; the agent is told 20 so it aims there.
 ACCEPTED_CHANGED_LINES = 25
-MAX_FILES = 100
+# GitHub lists at most 3000 changed files, so a list that long may be cut short.
+MAX_FILES = 3000
+FILE_PAGES = MAX_FILES // 100
 
 # Kinds of change that must be read, so no APPROVALS.md guideline can hide them.
 _UNEXCLUDABLE_PATH = re.compile(
@@ -144,6 +148,21 @@ class ChangedFile(BaseModel):
     def changed_lines(self) -> int:
         return self.additions + self.deletions
 
+    @property
+    def digest(self) -> str:
+        """Stands in for a hunk digest when a whole file without a text diff is hidden."""
+        return hashlib.sha256(
+            "\0".join(
+                (
+                    self.status,
+                    self.previous_filename or "",
+                    self.filename,
+                    str(self.additions),
+                    str(self.deletions),
+                )
+            ).encode()
+        ).hexdigest()
+
     @classmethod
     def split(
         cls, files: list[ChangedFile]
@@ -181,7 +200,7 @@ _CHANGED_FILES = TypeAdapter(list[ChangedFile])
 
 
 class ExcludedHunk(TypedDict):
-    """A hunk left off the card."""
+    """A hunk left off the card; an empty ``header`` stands for a whole file without a text diff."""
 
     path: str
     digest: str
@@ -190,6 +209,7 @@ class ExcludedHunk(TypedDict):
     deletions: int
     guideline: str
     reason: str
+    idea: NotRequired[bool]
 
 
 class Exclusion(BaseModel):
@@ -240,6 +260,45 @@ class Exclusion(BaseModel):
         ]
 
 
+@dataclass(frozen=True, slots=True)
+class Idea:
+    """The one statement a person okays when Open SWE's review would approve everything else.
+
+    It comes from the reviewer's conditional assessment of ``head_sha``, never from the
+    agent asking for the card, so the agent cannot widen what the card hides.
+    """
+
+    text: str
+    head_sha: str
+
+    def _entry(self, file: ChangedFile, hunk: Hunk | None) -> ExcludedHunk:
+        return ExcludedHunk(
+            path=file.filename,
+            digest=file.digest if hunk is None else hunk.digest,
+            header="" if hunk is None else hunk.header,
+            additions=file.additions if hunk is None else hunk.additions,
+            deletions=file.deletions if hunk is None else hunk.deletions,
+            guideline=self.text,
+            reason=f"Open SWE review of {self.head_sha}",
+            idea=True,
+        )
+
+    def cover(
+        self, files: list[ChangedFile], exclusions: Sequence[ExcludedHunk] = ()
+    ) -> list[ExcludedHunk]:
+        """Everything still drawn after ``exclusions`` except what must always be read."""
+        return [
+            entry
+            for file in ExpeditedDiff(files, exclusions).shown
+            if not file.must_be_read
+            for entry in (
+                [self._entry(file, None)]
+                if file.patch is None
+                else [self._entry(file, hunk) for hunk in file.hunks]
+            )
+        ]
+
+
 class ExpeditedDiff:
     """The diff as the card splits it: drawn, tests, generated, and still-present exclusions.
 
@@ -259,7 +318,16 @@ class ExpeditedDiff:
         partial: set[str] = set()
         for file in reviewed:
             wanted = list(by_path.get(file.filename, ()))
-            if not wanted or file.patch is None:
+            if file.patch is None:
+                whole = next(
+                    (e for e in wanted if not e["header"] and e["digest"] == file.digest), None
+                )
+                if whole is None:
+                    self.shown.append(file)
+                else:
+                    self.excluded.append(whole)
+                continue
+            if not wanted:
                 self.shown.append(file)
                 continue
             hunks = file.hunks
@@ -288,6 +356,14 @@ class ExpeditedDiff:
                         hits[index] = wanted.pop(position)
                         break
         return hits
+
+    @property
+    def by_idea(self) -> list[ExcludedHunk]:
+        return [entry for entry in self.excluded if entry.get("idea")]
+
+    @property
+    def by_guideline(self) -> list[ExcludedHunk]:
+        return [entry for entry in self.excluded if not entry.get("idea")]
 
     @property
     def excluded_lines(self) -> int:
@@ -326,7 +402,7 @@ def diff_fingerprint(files: list[ChangedFile]) -> str:
     for file in sorted(ChangedFile.split(files)[0], key=lambda f: f.filename):
         digest.update(file.filename.encode())
         digest.update(b"\0")
-        digest.update((file.patch or "").encode())
+        digest.update((file.patch if file.patch is not None else file.digest).encode())
         digest.update(b"\0")
     return digest.hexdigest()
 

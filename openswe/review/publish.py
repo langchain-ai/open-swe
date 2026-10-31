@@ -24,7 +24,7 @@ from html import escape
 from typing import Any, Literal, TypedDict
 
 import httpx2
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from openswe.github.checks import CheckConclusion, complete_review_check_run
 from openswe.github.http import (
@@ -273,13 +273,31 @@ def render_out_of_diff_section(findings: list[Finding]) -> str:
     )
 
 
+IDEA_MAX_CHARS = 200
+
+
 class ReviewAssessment(BaseModel):
     """Advisory judgment for the exact commit the reviewer inspected."""
 
     head_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
     risk_score: int = Field(ge=1, le=5, strict=True)
-    decision: Literal["would_approve", "needs_human_review"]
+    decision: Literal["would_approve", "would_approve_if_idea_ok", "needs_human_review"]
     explanation: str = Field(min_length=1, max_length=1500)
+    idea: str | None = Field(default=None, min_length=1, max_length=IDEA_MAX_CHARS)
+
+    @model_validator(mode="after")
+    def _idea_only_when_conditional(self) -> ReviewAssessment:
+        if (self.decision == "would_approve_if_idea_ok") != bool(self.idea):
+            raise ValueError("Give an `idea` exactly when the decision is would_approve_if_idea_ok")
+        return self
+
+    @property
+    def verdict(self) -> str:
+        if self.decision == "would_approve":
+            return "Would approve"
+        if self.decision == "would_approve_if_idea_ok":
+            return "Would approve once a person okays the idea"
+        return "Needs human review"
 
 
 def render_review_body(
@@ -320,13 +338,13 @@ def render_review_body(
     if out_of_diff_findings:
         parts.append(render_out_of_diff_section(out_of_diff_findings))
     if assessment is not None:
-        decision = (
-            "Would approve" if assessment.decision == "would_approve" else "Needs human review"
-        )
+        decision = assessment.verdict
         if approved:
             decision = "Approved"
         suffix = "automatic approval" if approved else "dry run" if dry_run else "advisory"
         parts.append(f"**Risk: {assessment.risk_score}/5 · {decision}** ({suffix})")
+        if assessment.idea:
+            parts.append(f"**Idea to okay:** {escape(assessment.idea)}")
         parts.append(
             "<details>\n<summary>Why?</summary>\n\n"
             f"{escape(assessment.explanation)}\n\n"

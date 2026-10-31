@@ -331,12 +331,13 @@ async def _publish_review_async(
     )
     if (
         assessment is not None
-        and assessment.decision == "would_approve"
+        and assessment.decision != "needs_human_review"
         and any(f.get("status", "open") == "open" for f in findings)
     ):
         assessment = assessment.model_copy(
             update={
                 "decision": "needs_human_review",
+                "idea": None,
                 "explanation": f"Unresolved findings remain. {assessment.explanation}",
             }
         )
