@@ -285,3 +285,95 @@ async def test_updating_the_branch_pins_the_head_the_viewer_saw(github, status):
         "json": {"expected_head_sha": "b" * 40},
         "max_retries": 0,
     }
+
+
+async def test_description_correction_dismisses_only_own_marked_change_requests() -> None:
+    from openswe.review.publish import DESCRIPTION_REVIEW_MARKER
+
+    reviews = [
+        {
+            "id": 1,
+            "user": {"login": "open-swe[bot]"},
+            "state": "CHANGES_REQUESTED",
+            "body": DESCRIPTION_REVIEW_MARKER,
+        },
+        {
+            "id": 2,
+            "user": {"login": "alice"},
+            "state": "CHANGES_REQUESTED",
+            "body": DESCRIPTION_REVIEW_MARKER,
+        },
+        {
+            "id": 3,
+            "user": {"login": "open-swe[bot]"},
+            "state": "CHANGES_REQUESTED",
+            "body": "Unrelated",
+        },
+        {
+            "id": 4,
+            "user": {"login": "openswe-dev[bot]"},
+            "state": "CHANGES_REQUESTED",
+            "body": DESCRIPTION_REVIEW_MARKER,
+        },
+        {"id": 5, "user": {"login": "open-swe[bot]"}, "state": "COMMENTED", "body": "Clean"},
+    ]
+    dismissed: list[int] = []
+
+    def respond(request: httpx2.Request) -> httpx2.Response:
+        if request.method == "GET":
+            return httpx2.Response(200, json=reviews)
+        dismissed.append(int(request.url.path.split("/")[-2]))
+        return httpx2.Response(200, json={})
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as http:
+        await (
+            GitHubClient(http)
+            .repo("acme", "app")
+            .pull_request(9)
+            .dismiss_description_reviews(scope_to_review_id=5)
+        )
+    assert dismissed == [1]
+
+
+@pytest.mark.parametrize("already_blocked", [False, True])
+async def test_description_review_starts_blocked_and_reuses_a_standing_block(
+    already_blocked: bool,
+) -> None:
+    from openswe.review.publish import DESCRIPTION_REVIEW_MARKER
+
+    posted: list[dict[str, object]] = []
+    reviews = (
+        [
+            {
+                "id": 1,
+                "user": {"login": "open-swe[bot]"},
+                "state": "CHANGES_REQUESTED",
+                "commit_id": "a" * 40,
+                "body": DESCRIPTION_REVIEW_MARKER,
+            }
+        ]
+        if already_blocked
+        else []
+    )
+
+    def respond(request: httpx2.Request) -> httpx2.Response:
+        import json
+
+        if request.method == "GET":
+            return httpx2.Response(200, json=reviews)
+        posted.append(json.loads(request.content))
+        return httpx2.Response(200, json={"id": 99})
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as http:
+        await (
+            GitHubClient(http)
+            .repo("acme", "app")
+            .pull_request(9)
+            .start_description_review("a" * 40)
+        )
+    assert len(posted) == (0 if already_blocked else 1)
+    if posted:
+        assert posted[0]["event"] == "REQUEST_CHANGES"
+        body = posted[0]["body"]
+        assert isinstance(body, str)
+        assert DESCRIPTION_REVIEW_MARKER in body

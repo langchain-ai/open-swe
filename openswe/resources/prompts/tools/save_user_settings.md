@@ -13,6 +13,7 @@ Supported profile fields:
 - `auto_human_review_enabled`: allow automatic review picks (default true); false opts out, but people can still explicitly name the user as a reviewer.
 - Server-backed personal flags exposed by `read_user_settings` may also be toggled by name; flags on the user account require an existing Open SWE user record.
   Browser-local Feature Flags tab visibility cannot be changed here.
+- `experimental_description_review`: boolean, off by default; request changes at review startup for PRs you author until their descriptions are verified, then dismiss only the bot’s description block without approving.
 - `review_draft_prs`: boolean overrides; null inherits the shared default.
 - `draft_prs`: whether newly opened PRs are drafts; use true or false (null keeps the existing preference).
 

@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,6 +10,18 @@ from langgraph.runtime import Runtime
 from openswe import reviewer
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.sandboxes.tool_runtime import ToolSurface
+
+
+@pytest.fixture(autouse=True)
+def github_pr_author() -> Iterator[None]:
+    with (
+        patch(
+            "openswe.github.pull_request_status.PullRequestClient.pull",
+            AsyncMock(return_value={"user": {"login": "bob"}}),
+        ),
+        patch("openswe.reviewer.get_profile", AsyncMock(return_value=None)),
+    ):
+        yield
 
 
 def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:

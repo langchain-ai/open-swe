@@ -704,6 +704,27 @@ async def process_github_pr_synchronize(payload: dict[str, object]) -> None:
     )
 
 
+async def process_github_pr_description_edit(payload: dict[str, object]) -> None:
+    """Recheck a watched PR when its title or description changes, without a new commit."""
+    changes = payload.get("changes")
+    if not isinstance(changes, dict) or not ({"body", "title"} & changes.keys()):
+        return
+    try:
+        update = _ForkReviewUpdate.model_validate(payload)
+    except ValidationError:
+        common.logger.warning("PR edit lacks head context", exc_info=True)
+        return
+    if await common.enforce_public_repo_org_gate(payload, "pull_request") is not None:
+        return
+    await _process_github_head_update(
+        payload,
+        head_ref=update.head_ref,
+        head_sha=update.head_sha,
+        pr=update.pull_request,
+        description_changed=True,
+    )
+
+
 async def process_github_push_event(payload: dict[str, Any]) -> None:
     """Re-trigger the reviewer for a watched PR when its head branch is pushed to."""
     ref = payload.get("ref", "")
@@ -725,6 +746,7 @@ async def _process_github_head_update(
     head_ref: str,
     head_sha: str,
     pr: dict[str, object] | None = None,
+    description_changed: bool = False,
 ) -> None:
     """Dispatch a watched PR head through the normal assessment and publication path."""
     event_type = "pull_request" if pr is not None else "push"
@@ -830,13 +852,18 @@ async def _process_github_head_update(
         return
 
     last_reviewed_sha = metadata.get("last_reviewed_sha")
-    if isinstance(last_reviewed_sha, str) and last_reviewed_sha == head_sha:
+    if (
+        not description_changed
+        and isinstance(last_reviewed_sha, str)
+        and last_reviewed_sha == head_sha
+    ):
         common.logger.info(
             "Push to %s ignored: head_sha unchanged from last_reviewed_sha", head_ref
         )
         return
     if (
-        isinstance(last_reviewed_sha, str)
+        not description_changed
+        and isinstance(last_reviewed_sha, str)
         and last_reviewed_sha
         and await common.is_pr_diff_unchanged_since_last_review(
             repo_config,
@@ -955,7 +982,11 @@ async def _process_github_head_update(
         )
 
     re_review_prompt = (
-        f"A new commit has been pushed to PR #{pr_number}. The new HEAD is "
+        "The PR title or description changed without necessarily changing the commit. "
+        "Recheck the description yourself against the full base-to-head diff and current PR text; "
+        "call publish_review to set or clear its description change request."
+        if description_changed
+        else f"A new commit has been pushed to PR #{pr_number}. The new HEAD is "
         f"{head_sha}. Reconcile existing findings against the new diff, add any "
         f"net-new findings, and call `publish_review` once you're done."
     )

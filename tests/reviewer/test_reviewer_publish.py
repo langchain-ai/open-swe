@@ -10,6 +10,7 @@ from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.findings import Finding, new_finding
 from openswe.review.publish import (
+    DescriptionReview,
     ReviewAssessment,
     post_pull_request_review,
     render_inline_comment_body,
@@ -1051,7 +1052,10 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
         patch("openswe.tools.publish_review._publish_review_async", publish_async),
         patch("openswe.tools.publish_review._record_ranking", AsyncMock(return_value=None)),
     ):
-        result = await publish_review(ranking=[])
+        result = await publish_review(
+            ranking=[],
+            description_review=DescriptionReview(head_sha="a" * 40, title="T", body="B", issues=[]),
+        )
 
     assert result["success"] is False
     assert result["error"] == "thread_not_found"
@@ -1336,3 +1340,98 @@ async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> No
     assert {c["path"] for c in retry_inline} == {"in_diff.py"}
     assert result["success"] is True
     assert result["unresolvable_findings"] == ["f_bad"]
+
+
+@pytest.mark.parametrize("dismissal_denied", [False, True])
+@pytest.mark.parametrize("issues", [["Omits a breaking API change: src/api.py:10 removes v1."], []])
+async def test_description_verdict_posts_real_change_request_or_clears_its_block(
+    issues: list[str],
+    dismissal_denied: bool,
+) -> None:
+    from openswe.tools.publish_review import _publish_review_async
+
+    suggestion = "Combine the repeated implementation summaries into one sentence."
+    verdict = DescriptionReview(
+        head_sha="a" * 40,
+        title="T",
+        body="B",
+        issues=issues,
+        verbosity_suggestions=[suggestion],
+    )
+    github = MagicMock()
+    pull = github.repo.return_value.pull_request.return_value
+    pull.pull = AsyncMock(return_value={"head": {"sha": "a" * 40}, "title": "T", "body": "B"})
+    pull.dismiss_description_reviews = AsyncMock(
+        side_effect=ValueError("Dismissal denied") if dismissal_denied else None
+    )
+    connection = MagicMock()
+    connection.__aenter__ = AsyncMock(return_value=github)
+    connection.__aexit__ = AsyncMock(return_value=False)
+    with (
+        patch("openswe.tools.publish_review.GitHubClient.connect", return_value=connection),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch(
+            "openswe.tools.publish_review.post_pull_request_review",
+            AsyncMock(return_value={"id": 99}),
+        ) as post,
+        patch(
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
+            AsyncMock(return_value=0),
+        ),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
+        patch("openswe.tools.publish_review._record_reviewer_usage", AsyncMock()),
+        patch("openswe.tools.publish_review.settle_review_check_run", AsyncMock()),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="a" * 40,
+            token="t",
+            severity_threshold="medium",
+            is_re_review=True,
+            description_review=verdict,
+        )
+    assert result["success"] is True
+    assert result["description_blocked"] is bool(issues)
+    assert post.await_args is not None
+    assert post.await_args.kwargs["event"] == ("REQUEST_CHANGES" if issues else "COMMENT")
+    assert "Description brevity suggestions (advisory only)" in post.await_args.kwargs["body"]
+    assert suggestion in post.await_args.kwargs["body"]
+    if issues:
+        assert "No issues found" not in post.await_args.kwargs["body"]
+        assert issues[0] in post.await_args.kwargs["body"]
+        pull.dismiss_description_reviews.assert_not_awaited()
+    else:
+        pull.dismiss_description_reviews.assert_awaited_once_with(scope_to_review_id=99)
+        assert ("warning" in result) is dismissal_denied
+
+
+async def test_description_verdict_rejects_changed_pr_text_before_posting() -> None:
+    from openswe.tools.publish_review import _publish_review_async
+
+    github = MagicMock()
+    github.repo.return_value.pull_request.return_value.pull = AsyncMock(
+        return_value={"head": {"sha": "a" * 40}, "title": "T", "body": "Edited"}
+    )
+    connection = MagicMock()
+    connection.__aenter__ = AsyncMock(return_value=github)
+    connection.__aexit__ = AsyncMock(return_value=False)
+    with (
+        patch("openswe.tools.publish_review.GitHubClient.connect", return_value=connection),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.post_pull_request_review", AsyncMock()) as post,
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="a" * 40,
+            token="t",
+            severity_threshold="medium",
+            is_re_review=True,
+            description_review=DescriptionReview(head_sha="a" * 40, title="T", body="B", issues=[]),
+        )
+    assert result["success"] is False
+    post.assert_not_awaited()

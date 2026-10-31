@@ -1762,6 +1762,72 @@ def build_script() -> list[StepSpec]:
     return list(SCRIPT_LIBRARY["implement"])
 
 
+def _description_review_message(messages: list[BaseMessage]) -> AIMessage | None:
+    systems = "\n".join(_text(m.content) for m in messages if isinstance(m, SystemMessage))
+    match = re.search(r"Review GitHub pull request `fakeorg/demo#(\d+)`", systems)
+    if match is None:
+        return None
+    turn_start = max(
+        (index for index, message in enumerate(messages) if isinstance(message, HumanMessage)),
+        default=-1,
+    )
+    results = [m for m in messages[turn_start + 1 :] if isinstance(m, ToolMessage)]
+    published = next((m for m in reversed(results) if m.name == "publish_review"), None)
+    if published is not None and '"success": true' in _text(published.content).lower():
+        return AIMessage(content="Description review published.")
+    if "# Description review" not in systems:
+        return AIMessage(
+            content="Publishing the ordinary review.",
+            tool_calls=[
+                {
+                    "name": "publish_review",
+                    "args": {"ranking": []},
+                    "id": f"publish-ordinary-{len(messages)}",
+                }
+            ],
+        )
+    inspected = next((m for m in reversed(results) if m.name == "execute"), None)
+    if inspected is None:
+        return AIMessage(
+            content="Inspecting the full change directly.",
+            tool_calls=[
+                {
+                    "name": "execute",
+                    "args": {
+                        "command": f"git -C {os.environ['E2E_SANDBOX_ROOT']}/demo fetch origin main && git -C {os.environ['E2E_SANDBOX_ROOT']}/demo diff origin/main...HEAD"
+                    },
+                    "id": f"description-full-diff-{len(messages)}",
+                }
+            ],
+        )
+    if "TIMEOUT_SECONDS = 60" not in _text(inspected.content):
+        raise RuntimeError(f"Reviewer did not read the full change: {_text(inspected.content)}")
+    response = httpx.get(f"{FAKE_GITHUB_API}/repos/fakeorg/demo/pulls/{match[1]}")
+    response.raise_for_status()
+    pull = response.json()
+    verdict = {
+        "head_sha": pull["head"]["sha"],
+        "title": pull["title"],
+        "body": pull["body"],
+        "issues": []
+        if "60 seconds" in pull["body"]
+        else [
+            "The description omits the behavior change: settings.py:1 adds "
+            "TIMEOUT_SECONDS = 60. Describe the new 60-second timeout."
+        ],
+    }
+    return AIMessage(
+        content="Publishing the directly verified description check.",
+        tool_calls=[
+            {
+                "name": "publish_review",
+                "args": {"ranking": [], "description_review": verdict},
+                "id": f"publish-description-{len(messages)}",
+            }
+        ],
+    )
+
+
 class FakeScriptedChatModel(BaseChatModel):
     """Returns the next scripted AIMessage based on how far the loop has run."""
 
@@ -1799,6 +1865,9 @@ class FakeScriptedChatModel(BaseChatModel):
                     return ChatResult(generations=[ChatGeneration(message=AIMessage(content=""))])
                 LAST_SYSTEM_PROMPT.record(_text(message.content))
                 break
+        description = _description_review_message(messages)
+        if description is not None:
+            return ChatResult(generations=[ChatGeneration(message=description)])
         humans = _script_humans(messages)
         context = ScriptContext(
             first_text=_text(humans[0].content) if humans else "",

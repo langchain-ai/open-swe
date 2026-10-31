@@ -96,6 +96,9 @@ class ProfileUpdate(BaseModel):
     experimental_background_callbacks: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    experimental_description_review: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     slack_onboarding_dismissed: bool = False
 
     @field_validator("workspace_default_repos")
@@ -161,6 +164,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),
         "review_draft_prs": update.review_draft_prs,
+        "experimental_description_review": (
+            update.experimental_description_review
+            if update.experimental_description_review is not None
+            else existing.get("experimental_description_review", False)
+        ),
         "experimental_background_callbacks": (
             update.experimental_background_callbacks
             if update.experimental_background_callbacks is not None

@@ -116,6 +116,21 @@ def apply() -> None:
             if hasattr(module, name):
                 module.__dict__[name] = stub
 
+    import httpx2
+
+    original_request = httpx2.AsyncClient.request
+
+    async def request_fake_github(self, method, url, **kwargs):
+        target = str(url)
+        if target.startswith("https://api.github.com/"):
+            target = FAKE_GITHUB_API + target.removeprefix("https://api.github.com")
+        return await original_request(self, method, target, **kwargs)
+
+    httpx2.AsyncClient.request = request_fake_github
+    from openswe import reviewer
+
+    reviewer.get_github_app_installation_token_with_expiry = _dummy_install_token_with_expiry
+
     # Point the real PR/Slack code at the in-process fakes.
     opr.__dict__["GITHUB_API"] = FAKE_GITHUB_API
     slack_http.SLACK_API_BASE_URL = FAKE_SLACK_API
@@ -259,6 +274,9 @@ def apply() -> None:
     from openswe.review import routes as review_routes
     from openswe.schedules import store as schedules_store
     from openswe.webhooks import common as webhook_common
+
+    webhook_common.get_github_app_installation_token_with_expiry = _dummy_install_token_with_expiry
+    webhook_common.get_github_app_installation_token = _dummy_install_token
 
     for module in (
         profiles,

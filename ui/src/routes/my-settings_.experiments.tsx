@@ -36,6 +36,13 @@ function ExperimentsPage() {
           description="Add ⚠️ to watched pull request posts when checks fail on a pull request you own."
         />
       </SettingsSection>
+      <SettingsSection title="Code review">
+        <ProfileSwitchRow
+          field="experimental_description_review"
+          label="Block until PR descriptions are verified"
+          description="For PRs you author, Open SWE requests changes when review starts and clears its description block only after verifying accuracy and important details. Code findings do not control this block."
+        />
+      </SettingsSection>
       <SettingsSection title="Agent">
         <ProfileSwitchRow
           field="experimental_memory"

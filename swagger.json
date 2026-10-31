@@ -4981,6 +4981,18 @@
             ],
             "title": "Experimental Background Callbacks"
           },
+          "experimental_description_review": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Description Review"
+          },
           "experimental_fleet": {
             "anyOf": [
               {

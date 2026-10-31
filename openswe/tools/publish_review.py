@@ -50,6 +50,7 @@ from openswe.review.findings import (
     list_findings as list_findings_async,
 )
 from openswe.review.publish import (
+    DescriptionReview,
     ReviewAssessment,
     approval_allowed_for_head,
     clear_review_started_comment,
@@ -88,6 +89,7 @@ async def publish_review(
     severity_threshold: Severity = "medium",
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
     assessment: ReviewAssessment | None = None,
+    description_review: DescriptionReview | None = None,
 ) -> dict[str, Any]:
     """Implement the `publish_review` tool."""
     if _has_sibling_tool_calls(state):
@@ -131,6 +133,13 @@ async def publish_review(
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
 
+    description_enabled = bool(state and state.get("description_review_enabled"))
+    if description_enabled and description_review is None:
+        return {"success": False, "error": "Complete the description check before publishing."}
+
+    if not description_enabled:
+        description_review = None
+
     token = await resolve_thread_github_token()
     if not token:
         return {"success": False, "error": "No GitHub token available"}
@@ -148,6 +157,7 @@ async def publish_review(
             trace_link_config_override=cfg.review_trace_link_enabled,
             state=state,
             assessment=assessment,
+            description_review=description_review,
         )
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
@@ -299,6 +309,7 @@ async def _publish_review_async(
     trace_link_config_override: bool | None = None,
     state: dict[str, Any] | None = None,
     assessment: ReviewAssessment | None = None,
+    description_review: DescriptionReview | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
     dry_run = True
@@ -320,6 +331,19 @@ async def _publish_review_async(
             "success": False,
             "error": "Assessment commit differs from the current review head. Review it again.",
         }
+    if description_review is not None:
+        async with GitHubClient.connect(token=token) as github:
+            pull = await github.repo(owner, repo).pull_request(pr_number).pull()
+        live_head = pull.get("head")
+        if (
+            description_review.head_sha != head_sha
+            or not isinstance(live_head, dict)
+            or live_head.get("sha") != head_sha
+            or description_review.title != (pull.get("title") or "")
+            or description_review.body != (pull.get("body") or "")
+        ):
+            return {"success": False, "error": "PR text or head changed. Recheck its description."}
+    description_blocked = bool(description_review and description_review.issues)
     review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
     review_ui_url = dashboard_review_url(owner, repo, pr_number)
     findings = await _backfill_findings_from_pr_threads(
@@ -332,7 +356,7 @@ async def _publish_review_async(
     if (
         assessment is not None
         and assessment.decision == "would_approve"
-        and any(f.get("status", "open") == "open" for f in findings)
+        and (description_blocked or any(f.get("status", "open") == "open" for f in findings))
     ):
         assessment = assessment.model_copy(
             update={
@@ -390,6 +414,7 @@ async def _publish_review_async(
     # don't redo the same diff.
     if (
         assessment is None
+        and description_review is None
         and not inline_comments
         and await _open_swe_already_reviewed(
             thread_id=thread_id,
@@ -443,7 +468,8 @@ async def _publish_review_async(
         }
 
     approved = (
-        not dry_run
+        not description_blocked
+        and not dry_run
         and assessment is not None
         and assessment.decision == "would_approve"
         and await approval_allowed_for_head(
@@ -461,6 +487,7 @@ async def _publish_review_async(
             assessment=assessment,
             approved=approved,
             dry_run=dry_run,
+            description_review=description_review,
         )
 
         review_response = await post_pull_request_review(
@@ -471,7 +498,11 @@ async def _publish_review_async(
             body=review_body,
             inline_comments=inline_comments,
             token=token,
-            event="APPROVE" if approved else "COMMENT",
+            event="REQUEST_CHANGES"
+            if description_blocked
+            else "APPROVE"
+            if approved
+            else "COMMENT",
         )
         if (
             approved
@@ -506,6 +537,7 @@ async def _publish_review_async(
                 trace_url=review_trace_url,
                 ui_url=review_ui_url,
                 additional_findings_count=additional_findings_count,
+                description_review=description_review,
             )
             retry_response = await post_pull_request_review(
                 owner=owner,
@@ -515,6 +547,7 @@ async def _publish_review_async(
                 body=retry_body,
                 inline_comments=retry_inline,
                 token=token,
+                event="REQUEST_CHANGES" if description_blocked else "COMMENT",
             )
             if isinstance(retry_response, dict) and "_error" not in retry_response:
                 review_response = retry_response
@@ -563,6 +596,23 @@ async def _publish_review_async(
             "error": "Failed to POST PR review: no response from GitHub",
         }
     review_id = review_response.get("id") if isinstance(review_response, dict) else None
+    description_warning: str | None = None
+    if description_review is not None and not description_blocked and isinstance(review_id, int):
+        try:
+            async with GitHubClient.connect(token=token) as github:
+                await (
+                    github.repo(owner, repo)
+                    .pull_request(pr_number)
+                    .dismiss_description_reviews(scope_to_review_id=review_id)
+                )
+        except httpx2.HTTPError, ValueError:
+            logger.exception(
+                "Could not clear description change requests", extra={"review_id": review_id}
+            )
+            description_warning = (
+                "Review published, but description change requests could not be cleared; "
+                "the previous block may remain. Do not republish this review."
+            )
     # The anchor retry above posts a plain comment, so only the first post can be an approval.
     approval_id = (
         review_id if approved and not unresolvable_findings and isinstance(review_id, int) else None
@@ -683,7 +733,7 @@ async def _publish_review_async(
             repo=repo,
             pr_number=pr_number,
             review_id=review_id,
-            surfaced_count=len(inline_comments),
+            surfaced_count=len(inline_comments) + int(description_blocked),
         )
 
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
@@ -696,7 +746,9 @@ async def _publish_review_async(
         findings=await list_findings_async(thread_id),
     )
     await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
-    conclusion, check_title, check_summary = review_check_conclusion(len(inline_comments))
+    conclusion, check_title, check_summary = review_check_conclusion(
+        len(inline_comments) + int(description_blocked)
+    )
     await settle_review_check_run(
         thread_id=thread_id,
         owner=owner,
@@ -710,10 +762,13 @@ async def _publish_review_async(
     result: dict[str, Any] = {
         "success": True,
         "review_id": review_id,
+        "description_blocked": description_blocked,
         "surfaced_count": len(inline_comments),
         "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
         "resolved_thread_count": resolved_thread_count,
     }
+    if description_warning is not None:
+        result["warning"] = description_warning
     if unresolvable_findings:
         result["unresolvable_findings"] = unresolvable_findings
         result["hint"] = (

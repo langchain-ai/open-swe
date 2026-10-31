@@ -357,6 +357,54 @@ def _seeded_pull(body: dict[str, Any]) -> dict[str, Any]:
     return pull
 
 
+@app.post("/control/description-review")
+async def control_description_review(request: Request) -> JSONResponse:
+    from openswe.review.enabled_repos import set_review_repo_enabled
+
+    body = await request.json()
+    pull = _seeded_pull(body)
+    pull["head_sha"] = pull["branch_tip"]
+    checkout = Path(os.environ["E2E_SANDBOX_ROOT"]) / pull["repo"]
+    if not checkout.exists():
+        fakes._git("clone", os.environ["E2E_REMOTE"], str(checkout))
+    await set_review_repo_enabled(f"{pull['owner']}/{pull['repo']}", True)
+    if isinstance(body.get("body"), str):
+        previous = pull["body"]
+        pull["body"] = body["body"]
+        action = "edited"
+        changes = {"body": {"from": previous}}
+    else:
+        from openswe.github.webhook import reviewer_thread_id
+
+        thread_id = reviewer_thread_id(pull["owner"], pull["repo"], pull["number"])
+        try:
+            await get_client(url=BASE_URL).threads.delete(thread_id)
+        except NotFoundError:
+            import logging
+
+            logging.getLogger(__name__).debug("No prior reviewer thread to clear")
+        action, changes = "opened", {}
+    payload = {
+        "action": action,
+        "changes": changes,
+        "number": pull["number"],
+        "repository": {
+            "id": 123,
+            "name": pull["repo"],
+            "full_name": f"{pull['owner']}/{pull['repo']}",
+            "private": True,
+            "owner": {"login": pull["owner"]},
+        },
+        "sender": {"login": "alice", "id": 1001},
+        "pull_request": _gh_pr_json(pull),
+    }
+    payload["pull_request"]["head"]["repo"]["id"] = 123
+    payload["pull_request"]["base"]["repo"]["id"] = 123
+    payload["pull_request"]["base"]["repo"]["private"] = True
+    response = await _deliver_github_event("pull_request", payload, str(uuid.uuid4()))
+    return JSONResponse(response.json(), status_code=response.status_code)
+
+
 @app.post("/control/walkthrough")
 async def control_seed_walkthrough(request: Request) -> JSONResponse:
     """Store a one-chunk plan for a fake pull request's current head, as a scout would."""
@@ -1086,6 +1134,7 @@ async def mock_github_data() -> JSONResponse:
                 "body": p["body"],
                 "files": p["files"],
                 "reviews": p["reviews"],
+                "review_decision": p["review_decision"],
                 "requested_reviewers": p["requested_reviewers"],
                 "review_comments": p["review_comments"],
                 "standalone_comment_posts": p["standalone_comment_posts"],
@@ -1229,6 +1278,8 @@ def _token_login(request: Request) -> str:
     authorization = request.headers.get("Authorization", "")
     token = authorization.removeprefix("Bearer ").strip()
     prefix = "dummy-user-oauth-token:"
+    if token == "dummy-installation-token":
+        return "open-swe[bot]"
     return token.removeprefix(prefix) if token.startswith(prefix) else ""
 
 
@@ -1580,6 +1631,17 @@ def gh_merge_pull(owner: str, repo: str, number: int, body: _JsonBody) -> JSONRe
 
 # Seeded reviews carry only ``{author, state}``, so the list has to be
 # normalised: the dashboard's review-decision read needs a login and an id.
+@app.put("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}/dismissals")
+def gh_dismiss_review(owner: str, repo: str, number: int, review_id: int) -> JSONResponse:
+    pull = fakes.find_pull(number, owner, repo)
+    review = next((r for r in pull["reviews"] if r.get("id") == review_id), None) if pull else None
+    if review is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    review["state"] = "DISMISSED"
+    fakes.refresh_review_decision(pull)
+    return JSONResponse(review)
+
+
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews")
 def gh_list_pull_reviews(
     owner: str, repo: str, number: int, request: Request, page: int = 1
@@ -1655,7 +1717,7 @@ def gh_graphql(request: Request, body: _JsonBody) -> JSONResponse:
         return JSONResponse({"data": {"updatePullRequestReviewComment": payload}})
     owner = variables.get("owner")
     repo = variables.get("repo")
-    number = variables.get("number")
+    number = variables.get("number", variables.get("pr"))
     if not isinstance(owner, str) or not isinstance(repo, str) or not isinstance(number, int):
         return JSONResponse({"errors": [{"message": "Invalid variables"}]}, status_code=400)
     pr = fakes.find_pull(number, owner, repo)

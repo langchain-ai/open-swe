@@ -583,6 +583,62 @@ class PullRequestClient:
             json={"message": message, "event": "DISMISS"},
         )
 
+    async def start_description_review(self, head_sha: str) -> None:
+        """Keep a change request standing until this head's description is verified."""
+        from openswe.review.publish import DESCRIPTION_REVIEW_MARKER
+
+        reviews = await self.reviews()
+        if any(
+            review.get("state") == "CHANGES_REQUESTED"
+            and review.get("commit_id") == head_sha
+            and isinstance(user := review.get("user"), dict)
+            and user.get("login", "").lower() in OPEN_SWE_GITHUB_LOGINS
+            and DESCRIPTION_REVIEW_MARKER in (review.get("body") or "")
+            for review in reviews
+        ):
+            return
+        posted = await self.create_review(
+            {
+                "commit_id": head_sha,
+                "event": "REQUEST_CHANGES",
+                "body": (
+                    "**Open SWE: PR description verification pending**\n\n"
+                    "The author enabled description verification. This change request remains "
+                    "until Open SWE verifies that the description is accurate and includes important "
+                    "details. A failed or incomplete review leaves it in place. Code findings do not "
+                    "control this block. Clearing it does not approve the PR.\n\n"
+                    + DESCRIPTION_REVIEW_MARKER
+                ),
+            }
+        )
+        if not isinstance(posted, dict) or not isinstance(posted.get("id"), int):
+            raise ValueError("GitHub did not confirm the description change request")
+
+    async def dismiss_description_reviews(self, *, scope_to_review_id: int) -> None:
+        """Clear only this reviewer's description blocks after a verified correction."""
+        from openswe.review.publish import DESCRIPTION_REVIEW_MARKER
+
+        reviews = await self.reviews()
+        current = next((review for review in reviews if review.get("id") == scope_to_review_id), {})
+        user = current.get("user")
+        if (
+            not isinstance(user, dict)
+            or user.get("login", "").lower() not in OPEN_SWE_GITHUB_LOGINS
+        ):
+            raise ValueError("Cannot identify the description review author")
+        for review in reviews:
+            author = review.get("user")
+            if (
+                review.get("state") == "CHANGES_REQUESTED"
+                and isinstance(author, dict)
+                and author.get("login") == user.get("login")
+                and DESCRIPTION_REVIEW_MARKER in (review.get("body") or "")
+                and isinstance(review.get("id"), int)
+            ):
+                await self.dismiss_review(
+                    review["id"], "The PR description now accurately covers the reviewed changes."
+                )
+
     async def withdraw_open_swe_approvals(
         self,
         *,
