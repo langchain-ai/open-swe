@@ -288,7 +288,7 @@ export function buildCommandItems(
       type: "slack-user",
       userId: user.id,
       label: `@${user.display_name || user.name}`,
-      description: `@${user.name} · notify by Slack DM`,
+      description: `@${user.name} · notify in app · Slack DM fallback`,
     }))
   return [
     ...people,

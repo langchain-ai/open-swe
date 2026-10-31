@@ -15,6 +15,13 @@ import {
   newRequestId,
 } from "./dashboard-fetch"
 
+export interface AppNotification {
+  id: string
+  title: string
+  body: string
+  url: string
+}
+
 export interface AuditLogFilters {
   start_time: string
   end_time: string
@@ -1678,6 +1685,12 @@ export const api = {
     request<WorkspaceSettingsView>(
       `/workspaces/${encodeURIComponent(slug)}/settings`,
       { method: "PUT", body: JSON.stringify(overrides) }
+    ),
+  pendingNotifications: () => request<AppNotification[]>("/notifications"),
+  acknowledgeNotification: (id: string) =>
+    request<{ ok: boolean }>(
+      `/notifications/${encodeURIComponent(id)}/delivered`,
+      { method: "POST" }
     ),
   listSlackUsers: () => request<SlackUserOption[]>("/slack/users"),
   slackUserName: (userId: string) =>

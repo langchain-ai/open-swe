@@ -19,6 +19,7 @@ import { resolveSessionOnServer } from "@/lib/session-ssr"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { Text } from "@langchain/macaw-components/Text"
 import { Toaster } from "@/components/Toaster"
+import { AppNotifications } from "@/components/AppNotifications"
 import { VersionMismatchBanner } from "@/components/VersionMismatchBanner"
 import { ThemeSync } from "@/lib/ThemeSync"
 import { Favicon } from "@/components/Branding"
@@ -111,6 +112,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           <TooltipProvider>
             <PageTracking />
             <InvalidationStream />
+            <AppNotifications />
             <VersionMismatchBanner />
             <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
             <PerfHudMount />

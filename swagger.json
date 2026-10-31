@@ -464,6 +464,35 @@
         "title": "ApiKeyView",
         "type": "object"
       },
+      "AppNotification": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "body",
+          "url"
+        ],
+        "title": "AppNotification",
+        "type": "object"
+      },
       "AppUser": {
         "description": "MDA's ``ResolvedAppUser``: run as this Open SWE user. The only answer besides ``None``.",
         "properties": {
@@ -13733,6 +13762,90 @@
         "summary": "Api Reveal My Mcp Headers",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/notifications": {
+      "get": {
+        "operationId": "api_notifications_dashboard_api_notifications_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AppNotification"
+                  },
+                  "title": "Response Api Notifications Dashboard Api Notifications Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Notifications",
+        "tags": [
+          "dashboard",
+          "notifications"
+        ]
+      }
+    },
+    "/dashboard/api/notifications/{notification_id}/delivered": {
+      "post": {
+        "operationId": "api_notification_delivered_dashboard_api_notifications__notification_id__delivered_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Notification Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Api Notification Delivered Dashboard Api Notifications  Notification Id  Delivered Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Notification Delivered",
+        "tags": [
+          "dashboard",
+          "notifications"
         ]
       }
     },

@@ -2,12 +2,11 @@
 
 import logging
 from dataclasses import dataclass
-from datetime import timedelta
 
-from openswe import event_claims
+from openswe.notifications.service import AppNotification
 from openswe.review.session import ReviewSessionMetadata
 from openswe.slack.client import slack_mentioned_user_ids
-from openswe.slack.dm import DmOrigin, send_dm
+from openswe.slack.dm import DmOrigin
 from openswe.source_context import SourceContext
 from openswe.threads.store import THREADS
 from openswe.users import User
@@ -49,17 +48,20 @@ class ThreadMentions:
                 else None
             )
             for recipient in recipients:
-                key = f"{self.thread_id}:{self.message_id}:{recipient}"
-                if not await event_claims.claim("thread-mention", key, ttl=timedelta(days=7)):
+                person = await User.for_identity("slack", recipient)
+                if sender is not None and person is not None and person.id == sender.id:
                     continue
-                sent = await send_dm(
+                await AppNotification.send_to_slack(
                     recipient,
-                    f"{self.login} mentioned you in Open SWE. <{url}|Open conversation> "
+                    key=f"mention:{self.thread_id}:{self.message_id}",
+                    title=f"{self.login} mentioned you in Open SWE",
+                    body="Open the conversation with an account that has access.",
+                    url=url,
+                    fallback_text=f"{self.login} mentioned you in Open SWE. <{url}|Open conversation> "
                     "(sign in with an account that has access).",
                     origin=origin,
+                    by=sender.id if sender is not None else None,
                 )
-                if not sent:
-                    await event_claims.release("thread-mention", key)
         except Exception:
             logger.exception(
                 "Could not notify mentioned users", extra={"thread_id": self.thread_id}
