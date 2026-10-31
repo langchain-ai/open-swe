@@ -1,11 +1,9 @@
 """Native Slack ratings on individual agent replies."""
 
-import json
 import logging
 from typing import Literal
 
 from openswe.analytics.feedback import record_feedback_submission
-from openswe.slack.blocks import ContextActionsBlock, plain_text
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import slack_thread_mutation_lock
 from openswe.slack.payloads import (
@@ -26,28 +24,6 @@ FEEDBACK_ACTION = "open_swe_run_feedback"
 class RunFeedbackValue(SlackPayload):
     run_id: str
     rating: Literal["up", "down"]
-
-
-def feedback_block(run_id: str) -> ContextActionsBlock:
-    return {
-        "type": "context_actions",
-        "elements": [
-            {
-                "type": "feedback_buttons",
-                "action_id": FEEDBACK_ACTION,
-                "positive_button": {
-                    "text": plain_text("Helpful"),
-                    "value": json.dumps({"run_id": run_id, "rating": "up"}),
-                    "accessibility_label": "Rate this reply helpful",
-                },
-                "negative_button": {
-                    "text": plain_text("Not helpful"),
-                    "value": json.dumps({"run_id": run_id, "rating": "down"}),
-                    "accessibility_label": "Rate this reply not helpful",
-                },
-            }
-        ],
-    }
 
 
 async def process_feedback(interaction: SlackInteraction, action: SlackBlockAction) -> None:
