@@ -1,0 +1,298 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:51b330b02528755b9f05cf98de0175e83956b3d3485cb6bbff8042bbf5aa824f",
+  "claims": [
+    {
+      "id": "claim_7d534ba43dc1404f8f9e50d3301b4426",
+      "statement": "MDA owns the run loop, checkpoints, tool calls, and MDA-managed per-thread sandbox lifecycle, while the backend serves typed API calls and does not create or replace an MDA-owned sandbox.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L14-L24",
+          "version": "repo-lines-v1:sha256:b784a6c19f45d5b428def6cc738d441ceaf892600d216bc7df263c63ceb6240a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY1MzU1YTc2NjEyZTQ0MzBlMmNlNWZlY2QwYmIwMTc1ODM1OGQ5MzdkNmRkMTFlOThjOTBkZGYxNThkOGY2YzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVjYWVjMTQwM2MwMDQ0YzE4NjRlMWMwZWIyMDg4MjlmYmM2OTVjNzQyOTgzYzU4ZTEwMWRiZTFhNmM0ZWMwNWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAxNmI3YmU2ODQwMGU1YWQyZTNjNTQ1MzVjYmQ0OWFmOWE2ZTNmZGU3MWMxMmMyNGU4NDQ0MTRhNjUwNzNmYjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJiMzUzNGY5ZWQyMjQ2NTJhMzQ3ZjEzMWIzNWI0OTQ4NGQzMzBlZGE3N2VkNTFmZGE0NDk3YWI5NGU1ZTFlNmUifQ"
+        },
+        {
+          "resource": "repo://openswe/sandboxes/managed.py#L2-L8",
+          "version": "repo-lines-v1:sha256:83301650fc1d9faa4dd74718daa910f292caca63b810fd7e4a656ebf0f849ad3:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYmFkZmVlZWU3OGExODY3ZDUwODVkNTY5MzYzNTM4ODkwYjUxMWQ5ZDM3NDE5NzllMGI2ZGJmZGMwNTExY2RiYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjEsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGU2YmY1ODMxNWMxMWM3NWNhMjFiOGEyZDcyNDNkMGIwZjg4YmViODM3NDRiODE5NWMxZDZjOTc5OTQxYjU3ZiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiY2MxYTcyZjY4YmFlZTE2NjI0MWRmOTM2OWFiY2I4YjNhMzdkMjc0ODRiZGY1NzRmMmQ2MmY4OTc5NDQxNjYwYiJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_69685c59e42a4c3692235878a9f8c83d",
+      "statement": "The backend selects MDA sandbox participation through per-run catalog data; MDA retains one sandbox per thread and applies changed create options only when it creates a sandbox, while bridged threads and eligible legacy backend-held sandboxes follow distinct paths.",
+      "evidence": [
+        {
+          "resource": "repo://mda/rt/managed_sandbox.py#L1-L14",
+          "version": "repo-lines-v1:sha256:ec9f26d43cff15cacb78a137824f3542bfebecb452c699d4c81c0c892e72fd5d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwZDRiNzRkZjc4NjM5NGJlNjQ4M2I4YTAxMzFjYmNmOTQ0MGJkNmI3YmIyYWZjZTFhMGNhNmJiYzk3MjE4YjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU3YWVkYTgyYzFhYWY0MTIyOTI2NzIzOWM1ODcwYjM2YzRkNDY4NWRjYTMzZjA3ZDk3YzJlMjQ4NTg0Mjc5M2EiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU3ZTMzM2IxYmE0NWIyN2NiNzI5YjI5MzBiMmUwZjQyYmFkZGM2Yzg4YjY0MjI0NzEzM2U5MGRkNzlhNWMxMWQifQ"
+        },
+        {
+          "resource": "repo://openswe/sandboxes/managed.py#L40-L88",
+          "version": "repo-lines-v1:sha256:3507d4fce307718d5f4e5046212e3795b0b6a18a0cc5ed5c752cf97b5fbc673e:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyMGI0NTNmNWUwYzkyZDVmNmMyNTFhNWVhMTk2MGQ3MmYzYmQwNzk1NmFlODU3ZGEyMGUzMWE4OGM1NTk2OWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRkMzRhOWRmNzc5Yjk1NjZiMDRhZDJiOWU2Y2RkZTNiMWQ1ZTZjMWE4YzhiOTdhYjdjMjhhN2IxM2EzM2JkNmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAxYTcyOTgzMDAxYmU4NTM4M2JjZmQzMWI3ZjkyMWE1MjNkYWMwYjBmNzE0NzFhZmZiZmZlMWViYWE1OGJmYjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_59d8037e6ad843f5add1ebf32dcca1cb",
+      "statement": "MDA opens the selected sandbox before preparation without waiting for boot, retries transient opening failures, replaces a confirmed missing binding while reporting workspace loss, and otherwise reports a redacted failure cause.",
+      "evidence": [
+        {
+          "resource": "repo://mda/rt/managed_sandbox.py#L314-L345",
+          "version": "repo-lines-v1:sha256:edf1ec47389be19b261cf763a1357a7c1f46b2617a1e1e33add8d2d224b28e30:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgwMTE5YzhhM2Y5MDMzN2JkYjU0OGIxYmJhZjhjZjNlYTljOGQxNjE0MGNmMzBlMWI0NzE1YjdiY2RhMTc1YjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQzMzQ2MzJjODQ5NDExYTA5M2Y4OTEwZjdlOWY0NWE5Y2RmNzZjZTNmZjlmMDUxNjk2NTllZjYzOTYxOTg5NDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg0NDlkZjUzZmE3NzM1MmU4NDMzNTg2ZGU1ZWY3ZWM4Y2Y1ZTAwYzc2YmE3NTgzMGVjZDI4N2VlMTQ4MmEwNTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQxZGZhMWRmNmM5MDVlYWMyYzJiZGQ1ZjI5ZWQ5ZDU5NmFmNDdkN2M5ZDBiMzE1YjFjODQwMDUzNDliMmVjZDQifQ"
+        },
+        {
+          "resource": "repo://mda/rt/managed_sandbox.py#L348-L363",
+          "version": "repo-lines-v1:sha256:d02fc99d72dd91fa479562e007192d33c2dc8bb5f18c642215e62718851f8a8f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc4ZDM0NDA5YjVhNDVhMDcwZGU3YTY5YzUzYmIwZDgwNDUyODIxNmQ5N2M2YTA1MWE4ZGU0YmM4MzEyNGJhNjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFlZjhlYTI4OTExYzUzMDk3ZWY1Y2ZjMmU2NDIzYWQ3M2Q2ODgwYTkwM2FhM2VmZWRmNWYwZDFiOTVkYzNjYTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImVmMjI0NDMwOWUxYWM2NmY1OTA2OWNiYTkxMmNkMTk5ZDg4NTg4NWY5OWUwODExODk1NTRkZTk3ODNkZGZhODgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJkNjljOWI4N2ZiNjYwOTQyN2FjMDRhYzI2M2M1ODg5MzQ1MzYyNTg1NzY0NzM4OGQxNWQ1MWY2YzFhNGI4ZWEifQ"
+        },
+        {
+          "resource": "repo://mda/rt/managed_sandbox.py#L401-L431",
+          "version": "repo-lines-v1:sha256:ee0abe35cbacaf3122d9767112cc4f8f803e61caa24272a73dad3de985909be5:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImViNWExZThkMWQ3OTMyMzlkOGQwMjRhOTIzNmViYzllYzQxODAyMDNkZGY4NDBiMmUyNzU4YmRjODU2MjRjMTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjViZWI1YTIzMzVhNGE2NDc4ZjBiYjEwYWUwYTJhYzZkODllMmMxM2EzZGRhZWJiYTk4MTRiMjc4MTI3ODMyN2IiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYzNzMyYWExOGE2OGViODBiZWQzODU1MzA0NmJiMzgxZTg1MTQzMWUzZmEwODdmNDMzYjNiMjYxNmRjM2RjOGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZjNTNlMmRhMmUzZWNjNjllNTIxYzgxZDIzMjY2ZDQyMmE5ZDllOTllNzdkYWVkMWI1MDk2OGJkYjcyODQwYTYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_2361c9de3dc144d8a60791a65ed020fb",
+      "statement": "An unreachable sandbox is not replaced merely to recover connectivity because it may contain the only uncommitted working tree.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/sandboxes/state.py#L34-L59",
+          "version": "repo-lines-v1:sha256:f91bc83e6f3db1d67ab1898ad5d6392858a1dbc371305ca45b516ebb2e02cc9f:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjljNzg3OGViYjQyMWQyOTFlYmQ1ZmNmMjM0ZjBkMGFkODJkZGJlNzU1NDMxOGViMTNhNDA5NjI5ZjZlNDk4N2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyMDA5N2U0YWE1MDA2OGJhMTU3ZjlhMjczOWZhZDg2OTk1ZTFlMGNkY2NkYWRjNTg5N2MyMDM0Yzc0ZDNlZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFiOTM0NzUxZmIyYzFlZGJmNDcwNzQ0MTE1ZjA4YThlYjEyNGMyYTg5Y2VhOWIxNzVkNjg0OWZmMjc0NzU3NjIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a54c75f8b8d34d02916e396d431102d2",
+      "statement": "For a valid `recreate_sandbox` result, MDA replaces the managed sandbox, informs the backend through `SANDBOX_REPLACED`, resets and rewrites its MDA-owned proxy configuration, restarts setup, and returns replacement status.",
+      "evidence": [
+        {
+          "resource": "repo://mda/rt/managed_sandbox.py#L434-L505",
+          "version": "repo-lines-v1:sha256:12a5feb13220871167fe9d3fa0fd58ffb2076d0e3ebc2146e186f5d51c5b8781:eyJzZWxlY3RlZExpbmVDb3VudCI6NzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVhMDcwNjRkMjM5YzZkYWY4NDU1YmEyYzQxNTgzMGI2MzljNDE3NjJiNDUwNmIyZGJmOTgwZmE1YjFiZWZmNDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxMDlhNTJlY2Y5OWNjZjRiZjM2ZTg3Y2RkMmRjYzI5MjcwNTQ5NzhlZjA4NzhkZjNjMDUzMjJjZTMwMDE5M2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU3YTQ4MmYxNTcyNjYwZDgyMzE2M2I5Y2Y0NTA0ZWFmZjMyNzdkNGIxYjU5YjIzNjg2NzBjZjU0ZDA1MDdlNDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/graph.py#L1211-L1213",
+          "version": "repo-lines-v1:sha256:52326c2d72ddd9cb901f3fa15e415d34c8746019cdd1a2e399c9e4db6e8a7280:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYWFiYjEzY2QyZWQzOGMxNmU2YzdiZTZiMWFmMmI3ODBiYmNjZjFhOTY5ZmIwZGMwMzYzMjllNDQxMDFlMWFkYyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiM2ExMTc4NWE1NjhjNTE2MmU1Y2EyNjdlZTIzMmQ5NWY4NGI3NDk1ZTc0ODU2ZWI2ZjYzNWZkYzVmMTFkNjQzZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOTA5N2U5OTM3ZDI1NzI5MThjYjIxZDQyYzUzM2I3MmYyYzgyZTg4ZWRiOWJhOGU2NTMzNTdkYWNjZjE4ZDRjMyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYjE2MGJkZmU1NTczNDU5NzViYmNlYzljYjQ1MWI3OWQxOTNjNDhkZmIzYjY0NjEyNTY5MWM1NzQxZTQzYWFiMiJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_29f96bffce92443ab5b3647c00553dba",
+      "statement": "The backend may hand over only an eligible older cloud sandbox by clearing its binding and recording the requested next-create configuration; it refuses MDA-owned, bridged, missing, and shared task-worker sandboxes.",
+      "evidence": [
+        {
+          "resource": "repo://tests/sandbox/test_sandbox_recreation.py#L20-L46",
+          "version": "repo-lines-v1:sha256:82682a058b281707f9f7f29a7696bab229bca040fbe99db8ff3574b77ed4147f:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQzZWIwYmQwMTBiOWRhOWM4MjUwNTRhZWEwYzg3NzY4NjUzODAxN2JlNjRhMWJlNjE4ZTRhY2YyNTNmZjFhZGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI5YjhmM2VhNzU4NWE3MWZhODYzNTdjNTVjZWRiMjdkYWZiMjM4MWQxMTY4NjA1NzRkZThlNWZkNTcwMzVkMzciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIzNWZkOTUzYzNjMzQ3M2FhMjkwYTZkYWEyYmU3ODk1ZGY1Mjg4NjgyYjE2NDhmOGUxZDU2NmFhZjQ2MmMzMGYifQ"
+        },
+        {
+          "resource": "repo://tests/sandbox/test_sandbox_recreation.py#L52-L123",
+          "version": "repo-lines-v1:sha256:3442eb6faa67dee92143e6547c742affbe3f371576498299d931d5a34f7c3a12:eyJzZWxlY3RlZExpbmVDb3VudCI6NzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgzZWEwZDg2NWM1MDc0ZTRlYzAxNzc4MTU2MDNjZGQ5Y2E4NzJhMDhjOGRhOTY2MWQ2ZTg4NmVkMzliNDY5NjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZhY2Q3Y2ZkY2E4NmM2MTQ5ZDIxYWU0MGQ3YTNmNDYyYjA4MDEzOTI4MDM0MjcwYmJkZmUwNmRiMjhiMzlhNDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQxNWM1YmQ4OWE2ODQ1ZDhmMTRkYTdkN2E2OTJkZWFiOTBmOWE4MTdiYTA0ODE3ZjY4ODUxNmQwOWRkM2QyNWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM0YTk1NmUzYzEyMjcwNmM5YmIzZTg4NWMzYjYwYTcyMGRiY2Y3ZmFmYWJiZThmYjFlMTJkMGI2OGUwM2FmOWQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_034c7f82ff7f43e595f8be1d1ac7cbc0",
+      "statement": "Proxy configuration is owned either by the backend or, when `github_proxy` names an MDA connection, by MDA; MDA combines freshly read GitHub credential rules with backend rules, refreshes them around model and tool calls, and re-fetches backend rules after replacement.",
+      "evidence": [
+        {
+          "resource": "repo://mda/rt/managed_sandbox.py#L178-L244",
+          "version": "repo-lines-v1:sha256:319d52624611e285666e03913db2b55f78ebabc29a74f708b5560d193bbecf41:eyJzZWxlY3RlZExpbmVDb3VudCI6NjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5MWY4Nzg2NzNiNjVjNjliNzY0OGU1YTQ1YmUxYjdjNTZjNzQ2NzY5YTA0NzUzZGI0NWRhNmQ2MTAxOTUyNGUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIxZWVjNWM4MjY4MzU1M2U5YjZhN2U3ZjRiM2JjN2M4NzcxY2UzYWE5ODdjZTU1Y2ViZWNjNzIxNjdlM2E0ZTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0NjcyMDZkMWIzZDkyZDNhMGVmOGQ5OGEyY2I3OTFkMzY4YWIzMTM1MjU1NjAxYTEzYTU5ZGQxYzU5ODQ2ODgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdhNjJmZDM2NGZjZWFlMzEzNzUxZGYxNjJkZGYzNTRlMGNmYzAyZDVlNDdjN2ZhMDIxZmMyMTg1MTkyMzQyZmIifQ"
+        },
+        {
+          "resource": "repo://mda/rt/managed_sandbox.py#L247-L302",
+          "version": "repo-lines-v1:sha256:b10de69852fe01bc5df7104e9f891c0b3e97a38ee010bedd15bfb995c84e3b00:eyJzZWxlY3RlZExpbmVDb3VudCI6NTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUwNGRkZWE5YmQxNzc2NGZlMTM3YjIyYjJlN2Q4ZDRkYWZjMzBjMmYxY2Y0ZTdlYmFhYTljNzhjMzg5NTYyMGUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc0Y2NmMTZmNDVjY2I5Yjg4YTZlYmEwZGMxNTllY2FhODQyMGZhODI0ZjcxM2E0NDFlOTMyMzAzYzUyNTUyMTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcwY2UzZjI0YWI0N2MyZjVhOWQzMzdmMzc3ZWQ4NTczZmE1NjU4NDA3NjQwMmYxYWYwNTRhM2RlZDYxOTQ2MmYifQ"
+        },
+        {
+          "resource": "repo://mda/rt/managed_sandbox.py#L443-L462",
+          "version": "repo-lines-v1:sha256:d550f2bf2b0d40c130c99d4e9aea0aee16bb5e951dffec7c0c62ff6d2e5f1967:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJmMGU3NjliN2Q5ODVjMTZkZjcyN2U3OWFlY2Y0ODY1NTBhMWQxMzMxNTE0MTRjNzE3NTg5ZGVjZmUxMGE1MzciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEyMjBkZTg0MWEzZDljMmJhZTJiMmY1ZDhiMGVmMDE5NWZhMTA0NmVlNzhjOTI1ZjUxZjcyMWI2NWM4MTlkZWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg2ZGI2NjcxMGQyMDNmMWVjYjNkN2I2NDFlZWQ5ZWJhNzVjNWM5N2NmNGQ5MWIxNjZiZDM3YzdjNzZmOTkzNzAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRhMWVmZDYzZTg3YmQ3ZmJlYjQ5ZThmNWVjM2JkNGM2ZmM1YTBiYjZjMzFmOTE4YTQ3OWI4OGRjZDJkZWI0NTgifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/graph.py#L1266-L1278",
+          "version": "repo-lines-v1:sha256:0000c5c48acacbd17fe470b4e6deb1a605af0dae4f9334db26555488f25615ec:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFiZTg3MmUyMTY4ZTY3ZGExZmU2OWRmMzRiNDRkOTYzYzA5NWJlNDFjNTljNWQ4ZWViZjBlNzM2ZTJiNTIzNzIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkNjZlZTJhNmE4OGEwNzRiZDZjOTM5ZTQ5OTAwMWY5MzI2ZGE2NmVmZjRjZmFiMjUxODVkMDcwODAxNTkyN2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdlODlmOTRlMTE4MWNhZTY5MjI2YjViNjFlZWRkYjJiYTI3NjE3OWVmYjQzODBmMGI3MTVkMmEwZjMwNTY4N2UiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI0ODQwNTFiMzE2OTZhNDczMzdlYjI1NzQ0MjY5MDEyNGRkN2FmMjlkMzg2MWNkOTA4NzlhYjk1ODJjZDM5ZWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_75ba47ff9c424f1091bce6ac2d0996dc",
+      "statement": "Backend-written GitHub proxy refresh preserves recorded repository and permission scope rather than broadening access, refreshes near known expiry or after a fallback age, and treats proxy refresh failure as sandbox unreachability.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/github/proxy.py#L133-L206",
+          "version": "repo-lines-v1:sha256:81839ffc1121154e0c1a627d6f1c3c262760f7db4e6f63a498477501b76ce68b:eyJzZWxlY3RlZExpbmVDb3VudCI6NzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ2ODZjOTVjODJkZTU3ODdhNTg5NTgyMDM1N2JhOTc3ZGU2NmJmMGYwZjk4YThiM2YwYTVmYjZjYmExZGM2MjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwZTJhNDY1MDA5NWZhOTVkMGUyYmI0MWIyZGIyOTA5NGQzNDA0ZDI4Y2UxMjMzOWVjODhiYjRiNWM1YmU4ZjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY2MGY3ZGY4MTYwNDA4Y2RmOGZkYjcyYmE0ZWM2Y2Q0ZTBjNDdlNGE3MDRiMWExZDcxYTFkY2E2MDAzN2VkZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNiOTQ5ZWZmN2Y1NjE4NmQ5Yjg1MzA1ZjRlNTA2NzVlNjAxMWI3MTYwNzFiMzRlYzkxOGFiOWYwZDUzZmEzNzcifQ"
+        },
+        {
+          "resource": "repo://openswe/github/proxy.py#L65-L92",
+          "version": "repo-lines-v1:sha256:6edfc75cc32f799ad267a7b27bfc09939ad1297d5d0a22e0fc945fc1efbfc92a:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZmMjNkNzhjYjViOGIyMTY2ZjlhMTBmMjEwMmI0N2JlNjFlMTIzYjI4NDI1MTE0YWE2MGQ2ZjAwNzI0YzQxNzMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRjYjhkZjgxMmJmMWJiZDI0MDFiOTM5NjEyZmM5YzcyMTAwNDAxNWE2ZThiOWFiM2FmOTdhZDlhZDJlMTFmY2EiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUwNzBjYWJmZWYxMGU0MWJjNzBjMzUyNDUzMDczY2QxZjYyZDQ1NDdmOGM3NmI4Mjc4OWZjMmJjOWIyMzY5Y2UifQ"
+        },
+        {
+          "resource": "repo://openswe/sandboxes/lifecycle.py#L219-L246",
+          "version": "repo-lines-v1:sha256:ee909d9651e3722f61c4fe73ef932c8b12c3aabd664e9a7cfdf36b2b300a4b2c:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE0OTI0NzhkMDI4NmQ0YWQ0YmRmMjFlNWQ2ZWI5OGYxYTUyNTNiZjM2MDgzYjNlMzVkOThiNTkxMmVkMTEwOTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhiYmU3MjhkZDEzM2M5MDdiMDk0YjMxMjJmYTRhNDllZjc1NjUzOTFiMTE1YTE3YzRjNzM3MjNmNmFhMmFlMjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFhY2ZmMDEwN2NkMTk5OTFjOWFiYzY0NmEzNTQzNTU3MTUxOTkxYWMzY2QwZjgyYzI2MzZmZWY5ZmRmM2U1MjEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_bb80d208369a470b9bb1153875938438",
+      "statement": "File tools route skill paths to read-only runtime skills, explicitly backend-served paths to `RemoteFiles`, sandboxless runs to remote files, and other calls to the MDA sandbox; guards and middleware apply around the call regardless of route.",
+      "evidence": [
+        {
+          "resource": "repo://mda/rt/file_tools.py#L197-L220",
+          "version": "repo-lines-v1:sha256:dfd84f0998a8fbd56ee5e325057ea9a027cbbb42e2669f79ef32a87066955ba9:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkzMmNhYzcxY2Y0MWQ0MjIzYzBkZmYxMDU1YjNiYTUyZGFlNTdjOWIwNDJiNDkwMmU2NTAyMTMwMjVmNDVjYjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBlZGNlNDcxMTIwMjk0NjY4MmI4MWZkMmMyZjdmZmE2OGFhOWZkZmM2YjQzOGQzMzZlZDVmMGNjN2IwNGMzMzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhiOTc1NDdhMmI5ZDQ1Nzg2MGUzODAyNjQ1ZTQwN2VlOTNmNTllZmZiYTI2Y2U4YTE5MTZmNjhlZTNlMDljNjMifQ"
+        },
+        {
+          "resource": "repo://mda/rt/file_tools.py#L230-L304",
+          "version": "repo-lines-v1:sha256:800578ed70e7482018149afdcd8d2315d6c0fa0e4c2cca2632c2f6d2608fc192:eyJzZWxlY3RlZExpbmVDb3VudCI6NzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJkZDg0YTAzNTA5OGFhOGY0OTU3OGZkZTk4OGViMTNhZDBiZGE3NmQ2N2VkYzA0MjIwMDY2MDUwZjAwMWM3OTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQwOTViNWVjOWYxOTQzMGNiODFkMzcxNzJjYjRhZGQ1ZDQ2Yzk4MGQ2OTE3NzkzZjM5M2E1MjY0MmVjNWZiYzMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjEwYmVmNDlhZjcyZTk4MGY5ZWY1ZDQ2MjkyNzlmNDdmZjIzMTZlZjFhNTIwOWVjNWY3Yjk3MWFlZmM5OTNjZGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcxODYyMDE5NGNiNzBkYjRkMmI3OWFjNzI2NzcwZjE4OWVkZGUzYTVmOGM0MDRmM2FhMGJlMDhmZjdjY2E2MGUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ec4b0b30f4a74a5681d0daa0398eca16",
+      "statement": "`RemoteFiles` adapts typed backend file APIs to the deepagents sandbox protocol and run artifacts are rooted in the backend artifact directory so large results do not occupy a bridged machine root.",
+      "evidence": [
+        {
+          "resource": "repo://mda/rt/remote_files.py#L201-L269",
+          "version": "repo-lines-v1:sha256:1426326e4c3c9d5dca01fdc47b579767be5bf91d787d480c125338f54f005b38:eyJzZWxlY3RlZExpbmVDb3VudCI6NjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ3NDkxMzkzZmMwNDkyMWY2ODNhNmIzOGU0YWJlMTJlNjQ0MjRhODEzNDczNDU4M2RjZGE3NTQwZTk4YTgwNTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcwOTk2ZmFlMjJjZGU3MmUxZTNkN2NkZGU5NjhhY2JjMDBjYWUwMWM1YjQ5MGQxY2JlZmQ1MWRkYjM1NDhkMWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3NGI0NzMxZjEzNTRkMGQ3MTE2YWNlOGYxZDdiZGQwZjE4ZmNiODAzNWNiZTA2N2RjOWI2ZjM1MzFmMGUzZmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://mda/rt/remote_files.py#L81-L100",
+          "version": "repo-lines-v1:sha256:05af1e17e82bc6234cf81a16eb39e00a130eb05265e8b36f8dc1d0a10c5f36db:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU4ZDI4ZmQ2YWY1ZjQzMGQzZjg3Njc2ZDU3YjQ2MTAyMzc0NWU2Y2JhMjc2YjUxOTRjMDcwYzRkZTBkNjY4OGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjUyZDY4ZDMwM2FlOGYwNWVhZTczYTA3YWExODg4ZmE1MTY3ZDY2YjJhNGQwOTRkMTlmYmIzNWM1MTE5ZmQ1OTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFhYWVlMjQ1MWM1YWI2NTAxMzgwNDgxNzg2N2RkOWZiMjEyMGY0M2FiYWNlZDk2NzA3MWM2NDllZGRjOTgwYWQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_3759a863b5ea45398d2248013c8247ee",
+      "statement": "A bridged sandbox authorizes each request for the machine owner, queues execute and file-transfer work through the bridge, watches liveness while waiting, and reports a disconnected bridge as unreachable rather than replacing it.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/bridge/backend.py#L105-L123",
+          "version": "repo-lines-v1:sha256:05a1e4d5036fb9f87d1a7733217dc3994bd7509a7d79877122dcd0937c047472:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU2YjM0YzRjOGMwZjc3ZWZlMmEzZTZiNThjOTNjYzRiMmJlMzU5YjY2NTc2NDE0NTlmMmUyYWYxNjQxNjBkMTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE4YmZlNjc0NjEzMWZkOGJjMWYyMjFjNjU0YjU0MGEzZDVhODJiNWMzMGQxOWRlMmIzMzA5ZWFlMWNmZTljZTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI1YzFkOTg3OTkwYzUzZWE2Y2RkOWQ5YWQwMTQ3NzE2YTI3YjExZTcyN2U5ZDllOGY2Zjk2OTAwYzdmMDIyNzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgzOTdmOWQwZTliYzc4YTMzOTQ5MTZhZjk4NTczZGEzZjhjZWU4MzJjNjdiMWMxYTZlNzAwOTM0N2E2NzI5YTEifQ"
+        },
+        {
+          "resource": "repo://openswe/bridge/backend.py#L173-L205",
+          "version": "repo-lines-v1:sha256:b0eba3cee345f2360dce93e476658e9f937b56d81957076cd02965f199f4a586:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2ZTEwN2IyOTM1YTgzYzIyNzk1NTZmYjdkNzM5NDM0OTIzYzU0ZGNjNjViMjVjODFmZjZlNmVkYTY4M2E4MzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI1NmFmMWQyMWRkZTllODgwZTQyZmExMjRmM2MyNGU4NDZlOTA1M2IxZWUwYjQ4YTJmYjczNWU5MDIyY2UzNDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImVmZTUzNmY3YWNjMTg5OTFjOWZkYmVhNjA3ZTk4YzkzMjQ5N2I1ZmU5NDg2NDNmMTcwZGJiNWM0MDVmNzM1YzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgxZTExNTUwNzM1NjBhYjk4MGRhZjRjNmY3MDlkZDdiN2JjMzA5ODEzYTk2ZTg2MzVkMGJlNGY3MWQ1NjNiZWIifQ"
+        },
+        {
+          "resource": "repo://openswe/bridge/backend.py#L207-L251",
+          "version": "repo-lines-v1:sha256:d17c4211b6aa693bfc629b492a05d01d1872d7062a5c0b3e65a727c6400c84c0:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE2MThkMmZlODM2ODllZjVhNTdlNWM1ZTI3ODdjOGUwMDJhNGFlMTM5NDBlMjI5YTkwNjg5NTlhNTUyYThlZDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1ODk4OTNiNmE4NDhkZTI0MjU3ZjQxMjcwODQ2YTUzZWRlZGE5YjZhODlmYzIyMTZmNDAxYTNhMzMzZWU4NGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY3ZDg4MDZjMzM4N2FkNTlmMDNlM2IxNzNlNDQzZWFmNzg0MTFjYTJhOGQ4MThjYWM2NmZlMTA1NDhlMzU3OGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNkYTU5ZGFkOTA2ODJiOTU0YTI1ODM3NDI4MDFmNjE5NTNlNzI5MTc3ZDQ5ZjAwMTlmMDE2ZDIwYzczNWFlZGMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_89898345bae04c0891566f88fae2c3bd",
+      "statement": "The former general sandbox tool endpoints are removed with HTTP 410; remaining sandbox callbacks use capability authentication, no-store/no-referrer responses, and dedicated background-task and monitor routes.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/sandboxes/tool_routes.py#L18-L40",
+          "version": "repo-lines-v1:sha256:db8c9bc01968e138da19aa6e0bd991b62e316e88c4c438f12bd4e2fce36f9209:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJjMDMyZjM1YWU5NWRmN2YwODVhMGIwNjMxNmY5ZTMwNzU4YzY4Mjg0Zjc5NDRhZTc4N2Y3YzVmNzdjMzk2ZmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjllYzg2MGFmOTRhMTBkYmRjZTk4MDUyNjUwMTBiYjA3YmI3M2UwMzkzM2ZjODg4Y2Y5MTBjMzNlMTA1YTlhNTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyMDA5N2U0YWE1MDA2OGJhMTU3ZjlhMjczOWZhZDg2OTk1ZTFlMGNkY2NkYWRjNTg5N2MyMDM0Yzc0ZDNlZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2MmQyYmE1NzgwNjcwNWFlOTM2MTc4YjRlMDY2NTllNTBiYzk2YjkyZjc1MGEyYTNmYzk0MjMyYmNlZTlkMTEifQ"
+        },
+        {
+          "resource": "repo://openswe/sandboxes/tool_routes.py#L46-L117",
+          "version": "repo-lines-v1:sha256:4aa1dee000d445068da8f86d33b0538940d4d88aaed438784e28d9cfcebb9a22:eyJzZWxlY3RlZExpbmVDb3VudCI6NzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ5NzMyZTQ2MzdjNjAyZTU5NmIyYmZiYmI1YTc3NGM0MWQ4MTJiYjBlYzMxNDllOGM1N2FhZDI5NGU5YmY4OTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhjMjM2Yjk1YjllYTUyNGI1MjA5OTU0YmFmOTM1Y2I5OTVjZTNmMzhkNWU2MTMwNGExZWVhY2FlZjJjNzRhNTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU2NmUyYjFlNGViODhkYjRiM2EyNDMzZjQyMjM2NmJhNWE5YjJlOTE4ODVjYzg0ZTk0ODczM2E1ZDg2YmE2MzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_bb6267f0b6be4d25abb6483d216ad002",
+      "statement": "Backend MCP loading combines authorized sources in precedence order, discovers and wraps backend-held connections, but converts MDA-connection-backed records into runtime server specifications because only MDA may read their connection credentials.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/mcp/runtime.py#L379-L456",
+          "version": "repo-lines-v1:sha256:d8051fe051a7f5d93f8a3845ffd5fd672e06439602685cb9f3056a20f8987a4a:eyJzZWxlY3RlZExpbmVDb3VudCI6NzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFmMWFmMzRkM2ZjM2E0OWUwNjNkMDQwNjQzNWI4NjBjOThmYmI1YzQ5ZmIyZDU5MmRkMzU5OTY2MTNmYmNiM2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJhOGExZWQ0YWViYWRiYTY5ZTUzMGM1NzcwMjliODY2ODVlMWVmMjU4NDE4MDc0NzU0ZWJiOTllY2QxYTcyNDAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA1ZDJmYTRhYzNmOGJiZGFhNjM1Yzc2OTYzNmU2OGExMDkyZDUxMTU1MTg2NzY5ZTJlMDg0NGQzODQyMzkxZWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZhMTFjMDU2N2QwYTVmOWU5YjEzNWY2NWNkMjUzNzJkZmQ2Mjg3NzVmN2MxZWQyNTNmOGJhZDQyZGQyZDY2NjkifQ"
+        },
+        {
+          "resource": "repo://openswe/mcp/runtime.py#L50-L60",
+          "version": "repo-lines-v1:sha256:4c9c94af5337e5e41abb4534adac4480e83872d4b433d079dcef0e1a474c91a4:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJkNWQyYmViMjg1NDlmOWJjZDA2ZmRlMTZkZmUzZmNjNDAxODNlM2QyZDFjY2Q5MDRkNjA3NDU4YjdmN2JhYjAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhkMWNkMmFjODJjNzkwNjIxODMzMzUyMDZiY2NlNTFiZDNlOWRjMjVjOTUxN2UwZDFjMDA4YzRhZWJkMzU2OTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI2Mjk0NTE3MTM5MjAyMDVkYmI5ODBiNGViNTExMTVlYjQ5M2U3MzFlZmU0MDk1YzJiMjA4ODdiNzM3NTAxYTIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f8c47f0b28a3476f998f5f731bdfb49b",
+      "statement": "MDA loads connection-backed MCP tools once per run, lists only catalog-allowed remote tools, omits reserved `runtime` schemas and output-name collisions, and offers these tools alongside operations rather than through backend tool search.",
+      "evidence": [
+        {
+          "resource": "repo://mda/rt/mcp.py#L197-L221",
+          "version": "repo-lines-v1:sha256:e0001061cb3a97e44bb541da0627efed97820a11d807179e1e1d3506c5fb7c68:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyOWQwOGRmMzZkYzY5NGUxOGZjMzcyZjEzMDY4OWRmYWY0ZWRlNzViNGEzMTZlOTI2ZjAzOWNjYmU5YzI0MjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxNDczNWEzMzM2N2MxYTNmMWNkZTU1ZDdkZWI3MWQ2YWExNTIyYTdiNGZjOWFhOGE3Yzg1ZjJlYzMxODgxNDIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQyZmQ3MWI3MDgyNDhmNTRkOTkwOThhN2UyNjBiOGNjOTlkYTI0NjNhODk0ZDNhNjRiMmE4YWI3MmI1ZGJlMDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjllMGNlZDczMzQxNzUxMTZjMWQ0Y2I3Nzc0ZmY1ZjhjYTgyMjFjN2IwMDA3NGEyMmQ5NWNlNWRhYzkxNGJjODkifQ"
+        },
+        {
+          "resource": "repo://mda/rt/mcp.py#L298-L347",
+          "version": "repo-lines-v1:sha256:b1a534cc2383c14dfa26a6b886e4d62e8076e0d8f9f62fd1688fb15f2d493907:eyJzZWxlY3RlZExpbmVDb3VudCI6NTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhkYWZhYTQ0OTI1MWZlYjZmOTBlNDhlODhkMWRhMzc1ZTc5NjJiZDJkMzJlNjg4ZWJlMjFiZmE4NjQ5OGQwMWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImViNjRkNGQzYjM5MWIxY2I5NTYyYjAwZWUxNmRiNWZmODJhZDk4NWNjOTAyN2VkMDY0NDBmNDQ1MDBiYmNkNzYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://mda/rt/run_tools.py#L87-L131",
+          "version": "repo-lines-v1:sha256:e8caf836a3819d200aea7c3189356d5e9a79926a7a4fb85461a713bcc020211d:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNmNjJlMmY1YzYwYmMyOWFlZjc5MThlNTU0ZmU2YzNmZjZhMTZhNzFhZWQ0Y2UxOTAyYWYyZmMyMjM3YjQwMzYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiYTAwNzZlMDRiYzc3MTIxZDM0ZTQ4ZjdlNzA4NzViZjcwZTgyYThkODAwOWE1YTY4NGYxZDExYTkxOTA5NTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEyZmNjNzRhMjUyNGRmYmE2OWNiZTE2NGE3MmUwMGUxNjdjYWQ0OGRkNzYyMDdlMWIxMDg2ZGEyNTlkZjIwMmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRhZDZiOGY2NmEyZGVkY2EwNjI3ZGNmYmI2MWQ4MjFmOWIwMzY2MWIyMjM2Zjc4Mjg4MTYxZWY2ZTcyODgxYTIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a36ee67fe5af49eb86fcdf4ec0a970a0",
+      "statement": "Connection-backed MCP calls re-read the MDA credential at invocation and send it only to the configured HTTPS origin at checked public addresses; failures avoid logging request material and return generic tool errors.",
+      "evidence": [
+        {
+          "resource": "repo://mda/rt/mcp.py#L167-L195",
+          "version": "repo-lines-v1:sha256:a17bfaacfe7fa0b3446081b58d2bee350bb638ca181733802516d91efdd8b2ef:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVhNTUwNzUxZDc0NDIxYWY0NDI0OTFhNTg1NWY4ZmFiNmU3NGMzYTUzMTNlNTNmODdiYzU4NDg1YjYwY2I3MmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY2YTMxZDU3NDAxMDk3Y2Y3ZTUyOTAzNzdhNGQ0ZDZjN2YxOGQ5ZDNiZGMzOGZlMGEyNWYxY2M5MTg0ZjU2MjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRhYzdhNjc0MjE3MWJhODNmNmNlNDg4ZjlhNjU5NjI4N2M2MTMzNWM2YjkzZDk0NmZlNzMwNTQwM2IxNjgyNjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI2YTAxNDljNzczMWFmNjhmNmM3ODI1NGU1NjVlYzkyNjEyYTk2MDg4NmY2YjVmZWVlYzI0MzQ3MDNmZTIyMGIifQ"
+        },
+        {
+          "resource": "repo://mda/rt/mcp.py#L238-L295",
+          "version": "repo-lines-v1:sha256:f36c62c887549447c57f1a673c79e5efdf2332aad569b7f77eb91e8881890901:eyJzZWxlY3RlZExpbmVDb3VudCI6NTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRlN2QyODFjNGZjMzc5ZWEzNDg2MWFjOTBiZDdlZTQyNTk4N2Y4YTIwOTBjODBkZWE3M2E1MTU5ZDJiZTM3NzQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmNWI0OTQ3NmQ5ZDMyNGE5MTJmMWFiZmM5ZGMzZTQ4MzY2NDEyM2EzMDYxYTQwNDU1ODVmMzMzZmE5ZWM1M2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdhYTFmM2U4MWFhMzg4ZGE3Y2JiZTU1MDM5ZjljODVhY2FkNmRmYzM2Mjc5YWU3ZjYyYTMzMGU4Yjc4YWExODMifQ"
+        },
+        {
+          "resource": "repo://mda/rt/mcp.py#L75-L134",
+          "version": "repo-lines-v1:sha256:c6a0d9fa816e6bc8a26aa22abe330824b8d90b5c897c96c5fd457c37a4fd7596:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZmMDQ0NTlmNmI5NzcwODY2OThkZWY1MjliNmRjYTA1MjY5YjdjNGU0NWI0MzhlN2E3ZmQwNDc2OGQxMTY0YjAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRiOWZkNzczN2QxNjFhZjNjZGYxNmQwYTc3MTE1NmJkZTQyMDUzNjU1NWJhNGEzZjkwNDc0ODI2NjEzNjczYTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg0ODI2NzlhNDMyNzExMWVlNjJmMjA2Zjc3NGZhYjYzOWI1MTlkNzU5ZDcyYjFkN2EyYmJjZWZmNjFkNWNhNjYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_718c6186a3764604ba064b1451c36ee5",
+      "statement": "MCP configuration validates HTTPS endpoints and prevents backend-held credentials from coexisting with an MDA connection; runtime-server emission enforces source-tier credential ownership, and personal servers are excluded unless the run acts for their owner.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/mcp/models.py#L100-L157",
+          "version": "repo-lines-v1:sha256:bdd93c938fad80c0977e29b581aa127cca94ab5f38e5561d07a3e4b126be63bb:eyJzZWxlY3RlZExpbmVDb3VudCI6NTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhNzRjMjZlMzYyYjJlYTU4YzhhM2RjOTcyYmM4N2RkNWMxYzc4ODE0ZGMwMGRjYzRiMDFjODVhYmIzMzFmYTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFlM2NmY2ViMzNlMDExZjliNjk1MDg4ZTBiM2FhODNiMTYwM2Q2OWRiNGRjNjU4MDNhYTgzNjM1M2U4MWIwZDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MGIzMWE3MTNmMDg1NGE1MzY3N2IwYmY4MTdjMWU3MTZmNmRkMGFjYmQzMjE2YjZmZGM0ZDM4N2Q2MzJhNjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFhZDY2MzY5ZDIxN2FkNmEyMWJmZTkyZTYxZGRjZjRmNDQ0OTE1ODc1MmZlMDcxYmE4NjNlZDE1ZjhkNzA1NzIifQ"
+        },
+        {
+          "resource": "repo://openswe/mcp/models.py#L197-L213",
+          "version": "repo-lines-v1:sha256:c45aa6d1a5498e55638054b51e39f3f9fdd7839b6e2239bd5fbf95f24b64ba20:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc3ZjhhODg3OTJkNzQ1NjFkMDFlMDNmZWI1OGRiMGM5OGY5ZDA3MDBlOGUyYTFjY2UwYjNhMjU5ZTViYTIyZWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEyYWIwOTBiY2QxNjIwZmE2MmVhZWUxNTdhNzRmY2E2MzVhYTI5ZTEyY2JmZmQ2MThiNTc5MmQ4N2JjMDNhM2YiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdkZjNlZTg2NzgzM2NlOTg2ZGI4NzU0NGFmNTYxNTBiZmM2ZjAzOGI3ZmI5ZGIyODQ5MDQxMTBkNjE1ZjIyN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVjY2YxZmEzNjkxZjRiNmYxODMyZjNmN2UzNWE0YWI1MWMyZjczNzRhMWRlMzk2YWY0Y2FkYTc1NDljNmUwZjcifQ"
+        },
+        {
+          "resource": "repo://openswe/mcp/models.py#L58-L72",
+          "version": "repo-lines-v1:sha256:6015ad2c18068af7af31f9f3cd0e7d5d16b84ef0ed3297e704417a66883be0f0:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM3Mzg1ZmRiNTY3ZDFlOTY1OTZlYzdiYjdlNWMyNDFkMjI2Yjg2ZTE3MmMwNzBkODZmOWEyNDI2YzgyM2YzNTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk5M2ExMzA2MmYxMGVlNGYxMjE4ZDkzZTM3YTZmODFkMzQ2ZmYxMWVjN2U1NWRkNTQyZTJkMmQyZWYwNzExZjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDU4YjEyYWRiMjg1OTc4OGNiMDhkYjA0MzgyNmE1ZWQyZWViZTlmM2JkMGY4MmM1M2RjOTExYTQ5MTg0ZWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjczYzc3ZmMyYjgxYTQ0MmRmMGEzZDZjYWQxMGY5YzBmZTQyZTUyYTFmNzk3ZjM0MDIzMThjZDgwYWY5ZTQyNmIifQ"
+        },
+        {
+          "resource": "repo://openswe/server.py#L942-L972",
+          "version": "repo-lines-v1:sha256:176f424d1f744960f7538b86fa658dc345203aecfb48262c943ade8c9a847781:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNmNTA0ZTg0YzNhZmNmY2Q0ZTkzNmFjNWUyMTJhODdkOTRkMTRlMTJkNGMyNWE0ZmQ2Y2QzNTgxY2MzYTFlOWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZiZmJmMGUxNTE1MjMyZjA2NGY2YjE2NWE0ZWU0MzQ1NGMyNmRmOTBmYzZiM2I5ZjQ2YmFiYTY5ODFmMDM1NWQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdiMDUzYzQyZDkwNmNhMWNhODBjNTRmMDAyN2E1YTdiOTIzZTk0Yzc5Y2M4ZjAwNmNhZmZiODhkMDMzZDJlMWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM2OGYyN2E4Y2VmMzhlY2Y4ZWRlOTUxMGQ1ZTBjMzlkMmZiYWZiNzdjMjg5MmRhOTdmMWM1YzY1MzgxZDg1NDIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_84ab86d71a594e2493a51c803c82867d",
+      "statement": "Both backend and MDA MCP transports disable redirects and environment trust, constrain requests to the configured HTTPS origin, resolve only public addresses, and pin a checked address to prevent credential-bearing SSRF or DNS rebinding.",
+      "evidence": [
+        {
+          "resource": "repo://mda/rt/mcp.py#L53-L134",
+          "version": "repo-lines-v1:sha256:507196b36740b3d428261b31540584402472cb53252a7b36fbe1bca3880102d6:eyJzZWxlY3RlZExpbmVDb3VudCI6ODIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFlN2I2MzNhZDVkYTJiMzcyZjMxNjE3YWI4YzdkNzgyYmE4YTRiZWVhZDdiZDdmMjcyMDk3NzZkMjAwMDE2OTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM0MzNjZGU1ZTQzNjJlOTAzZDU5YzFiNTkxZWU2OGJiMTFjY2ExNTQxYjJhYjZlODYyYTY2YmU2YzJhNmFhMDQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg0ODI2NzlhNDMyNzExMWVlNjJmMjA2Zjc3NGZhYjYzOWI1MTlkNzU5ZDcyYjFkN2EyYmJjZWZmNjFkNWNhNjYifQ"
+        },
+        {
+          "resource": "repo://openswe/mcp/transport.py#L15-L74",
+          "version": "repo-lines-v1:sha256:4a9564958133645dda8141f707400e4d57820019134051b0ab103c57424f5a53:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVhMjliOWE1YmNlNzZlODIxMjg4MDNjN2ZjZWEwM2UwMjlmNjQ3ZmMxZDk0MGZiM2Y0MDBkMDk4NDFlYWQwOGMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdhZjNmMmFmMTViMjZiZTI5MDcxMjc1NWM2MGVhMGI3NjdhODUyYmJkNTNiMDg4MDM1ZTQ4ZDg5Mzg0MGFkMzIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_1725b7fee4104031a73358d673fa3f52",
+      "statement": "Focused tests cover MCP public-origin and principal/credential boundaries and sandbox recreation handover restrictions, while sandbox proxy tests verify credential removal, custom-rule preservation, and transient retry behavior.",
+      "evidence": [
+        {
+          "resource": "repo://mda/tests/test_mcp.py#L35-L94",
+          "version": "repo-lines-v1:sha256:1f01c7f29bf4a750dfa1e0222d286bf946631f6ff97a2973ddd6ee3fa83b2bc1:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFmMzQ1ODNhNTk4NzY3YmY1NmFlZmViNjVlMjAzM2ExNjUxY2M0YzhkN2U2ZjBhZjNlNWNmZDMyOTNmOTMzYjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRkMDU3OWRlY2U5YWUzMzY1ZGRhZmFjNmZmN2Y0MzljNTMyMTdhNjQyNmM2MDBmOTdiZWJjYWQzZDVkYzBkMTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI5YzA0NTE1ZWM1MTg0NjY3YzVmNjc3MzI0Yzg5NDZmNjE0ZjQ1NWYwNWRmYmNlYzdjYWZkMWZhMThiYzhjMWEifQ"
+        },
+        {
+          "resource": "repo://tests/sandbox/test_proxy_auth.py#L30-L160",
+          "version": "repo-lines-v1:sha256:4839d41954afdae0386ab54dcd0b31f5220fff9245e910e415267e3c406485e7:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMxLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIxYmI3OWI1YWVjZTkzNmFhZTJhZDFkYjJiMDZhNzE1MTE1OTBmNGVhNDZiNmM1YjcwMjZlMGMyNzhlNzFlYzg5IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJkY2U1NmM2Mjc0ZDkxOWU5MDdkODI5MWE3NWQwYTkyYzE0Y2E5YThjNzhkYTM2NGQwYWE0NDQ5YWYxMTBkYTkwIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJhYmNlMWZjMWU3NWU1MGI3NGNkYjc2ODFiMGNjN2IxYjBiMTA5NDEyNGMxYmVlMzdmNDljZjMwNjFhYWVhMTQ0IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI0YjZhNGZjOWRiYmZjZjI0MTNlYzdmZWVmMzFjYjYwOTI0ZjFiZjAxZGYwYTRlNTJlYjgwZDNkYWI4NThiYTRiIn0"
+        },
+        {
+          "resource": "repo://tests/sandbox/test_sandbox_recreation.py#L20-L123",
+          "version": "repo-lines-v1:sha256:8ac01cefecc668e67373140cd1d08ba9faabad39322348c1c55a21c40c6bc371:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI0M2ViMGJkMDEwYjlkYTljODI1MDU0YWVhMGM4Nzc2ODY1MzgwMTdiZTY0YTFiZTYxOGU0YWNmMjUzZmYxYWRiIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI2YWNkN2NmZGNhODZjNjE0OWQyMWFlNDBkN2EzZjQ2MmIwODAxMzkyODAzNDI3MGJiZGZlMDZkYjI4YjM5YTQ4IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI1YWI3YjI3MmFiNGUyNTE3NWI1ZmQyNGMxM2NmZTU2MzQyNTE0YzAyNzk0NmYwM2I1MzA1ZGYyMDMzNzg3OWY5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MSwiZm9sbG93aW5nQ29udGV4dEhhc2giOiIzNGE5NTZlM2MxMjI3MDZjOWJiM2U4ODVjM2I2MGE3MjBkYmNmN2ZhZmFiYmU4ZmIxZTEyZDBiNjhlMDNhZjlkIn0"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-10-31T08:08:21.705Z"
+  }
+}

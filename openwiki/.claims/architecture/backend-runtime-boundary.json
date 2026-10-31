@@ -1,0 +1,242 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:442bf4c56bfb56a38168f57b8412a0a90d476a0aeb8a539c068ebd69b0c1ee06",
+  "claims": [
+    {
+      "id": "claim_75b4adf57022436996715f7cc62ac017",
+      "statement": "Open SWE runs agent, reviewer, and review-scout work in the single `open-swe` Managed Deep Agents graph, while MDA owns the model loop, checkpoints, sandbox, tool calls, and middleware and the backend supplies planned policy, credentials, and typed callbacks.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L14-L24",
+          "version": "repo-lines-v1:sha256:b784a6c19f45d5b428def6cc738d441ceaf892600d216bc7df263c63ceb6240a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY1MzU1YTc2NjEyZTQ0MzBlMmNlNWZlY2QwYmIwMTc1ODM1OGQ5MzdkNmRkMTFlOThjOTBkZGYxNThkOGY2YzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVjYWVjMTQwM2MwMDQ0YzE4NjRlMWMwZWIyMDg4MjlmYmM2OTVjNzQyOTgzYzU4ZTEwMWRiZTFhNmM0ZWMwNWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAxNmI3YmU2ODQwMGU1YWQyZTNjNTQ1MzVjYmQ0OWFmOWE2ZTNmZGU3MWMxMmMyNGU4NDQ0MTRhNjUwNzNmYjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJiMzUzNGY5ZWQyMjQ2NTJhMzQ3ZjEzMWIzNWI0OTQ4NGQzMzBlZGE3N2VkNTFmZGE0NDk3YWI5NGU1ZTFlNmUifQ"
+        },
+        {
+          "resource": "repo://mda/agent.py#L1-L20",
+          "version": "repo-lines-v1:sha256:84d3e94feeb4f3fcb30bd2a914319a2c73678c5e93cf55a0b5d0f583195dccd4:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU4ZDEwZTNmMTc0ZWNhMWI3ODQzMGJlNGMxZmNlZjBjMThjNzhhN2I1NzJiMTRjOWQ4Mjg2NWU5NjYyY2M4Y2UiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFjYjgwNDQ5M2ZjYzMyYTZhMGE1ZTRhNTU3MDEzYWM0NWVjNmI0ZDlkM2Y0MTY4ZDVjNDVjNDFjYzI5OWRlYmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI5MDA0YTJjMjYzN2E4Y2U3NTMzZjRjMzI4NWU1NDBlYzkzZDhiNjVmNGUxMDUzNWM4NjM5NzM1MzJhMTg3ZDEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_0f8e4bb2081445609b72f428a0a97e80",
+      "statement": "Before MDA starts a hosted run, the backend validates the hosted graph, plans its catalog and settings, retains its tool set, signs a `RemoteRun` token, and sends a context containing graph, token, invocation ID, and a names-only catalog.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/agent_api/client.py#L97-L153",
+          "version": "repo-lines-v1:sha256:8b284c1206946570f64443f26981b6b55758274d016199829888a78828426f0d:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY2OWExMzk3NWMyNTZlYzgzMjBlMjAxNjA4M2M5NmRmNjM3Y2EzZDM1YmViZGUyMzE0YmVlM2E0NzExYjU2Y2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA1M2RiNjhmYzM1ZDExNDMxOTk1MDMyNTBjYWU4NjE1MGI4OTVjNWJhMmM2NzhlM2VkNjlmY2E5NWE4ZDk3NTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE3NmEyZmI5MjMyZDY0ZjE1NTI2Njc1MTI1ZTc2MTAwNGI2MGY2YWNmZjNhYTM1MjQ5NDdkZTdmY2YxZDIxYzEifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/graph.py#L1416-L1421",
+          "version": "repo-lines-v1:sha256:5d36451631edfe094707a6cc2205861f091772a729ac08f109951d8bee5e7bf4:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMWMxNWI0MDZkYWFhYmQyYWNmZjJmYzRhOTdlYmNjMDEwODg3NTdiMDI0YjA4NjI5NWY5MDNiMjcxNWEwODg1OSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYzUzZDkzMzUyYTFkNWNmZDkyMTNkMzQ0ODkxMmY4NWU4NDE3MjViOTU4NjQ0MTZlYzI1MDFhNjRkYzYzYTljNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMzMzNDdhNGMyODZmMDJhZWNiZTEyMDYwOTVlMTY5ZDVlYjZlNjJhNzY0OGQ5OWM1YTBhYThkMGY3NjI0ZjcxMSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMjY0ZWYyMWExZjAzMzBjZDNmZmUwOWIzZDQ1NTczYjE3ZGJjZmFkMmJiMDNkYTM2NmI4MmNlYThmMjViYjA3NiJ9"
+        },
+        {
+          "resource": "repo://packages/runtime-api/src/runtime_api/catalog.py#L219-L277",
+          "version": "repo-lines-v1:sha256:2d6fadd62484af2ab2ccf1ab927df3367f32c4c6697de78d2bca1fc0222b89f8:eyJzZWxlY3RlZExpbmVDb3VudCI6NTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMzMmZlYmVlNzVmMTUzZjU4M2E0ZTdhZTAyYmJlMzJmNWUyM2Y3YzYzODMxMWM2MzkwOWZmM2E1M2MyNzkwYWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlZTFmMmEwZmU3YTU5NmM0Yzk3Y2QxYTE3MmViZjBhNWVjMTViYTkxMmMyYjczODhkMjUwYjIxNjkyNGEyODkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBlOTQ2YjU2NmJlNGQ4YWM5NGQwNTkzZjlhNmMyNWQ3NTEzM2Q1MjliNDc5ZDNmODc5ZDFlY2QxMjRhNjEwNTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_eda79a626f33415da7cb61e532e3e4ea",
+      "statement": "The signed run token is the authority for thread identity, assistant, configuration, metadata, settings, operation grant identity, and expiry; backend handlers reconstruct these values from verified claims rather than model-controlled request bodies.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/agent_api/server.py#L1-L12",
+          "version": "repo-lines-v1:sha256:e07f8f0ce36313e0a54f6bb67b852669635d8b32b365b3599e5d399d8aa878dd:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI1ZjJiOWZiN2ExNWE3OTYwNTVlMDRiMmRjZjVjNGNiNmE2MmExMTE0MDJmZDliZmM2MzQxOTk3NTQ1ZmQwZDQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgxYzdlOWFhOTc4ZWUyMGMzOWZlYTBjNjQwYWRmZTc1MzY1ZDU5ZmRhOGIyZTVjMTA3YzljODIwMWFjMTFhYzEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhNjdmYjkyZjdmZjVhYzc5ZmU1MTc5YTYwMzk1ZDk4YjhkNjI4OGVkOGZiNmJlMGU3MzA4ZmIzNTk3YjYzYTAifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/tokens.py#L119-L153",
+          "version": "repo-lines-v1:sha256:3c5703e13a88bcd37856b29b6b47f3298c9537027b878500e8742f750e9a4807:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxNWEyNGM0ZWYwZmE0NDU4MGJjYzkzNmNhZDk4NTIxNTIzYTEyYmViZTk2ODU0ZWRmZDBmOTRlMzQ5ODNkOTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMxOTZiOWZlMTBiM2IzODY4Y2E3NDIwYmMxZGJlZjJlNjc0MmM3ZmE4YjM2M2RhODg4Y2I4MmE1Zjk0NGY0NzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk5NWJiNGMzNTU3MWE1NGJhNjEzOWE5YzgyNGRkNDY1Y2U0NTJhYjdmM2Q3MDBhMDFjYjZkNWNjMjk0OTZjMzgifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/tokens.py#L170-L236",
+          "version": "repo-lines-v1:sha256:57012302c1b579b6224eb78ec12fad72c773ba75fcce3069ea308c376459e9b0:eyJzZWxlY3RlZExpbmVDb3VudCI6NjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUyMWFhNDlmN2ViNmI1ZTI1YmQ5OTdkNmZkNTdjNWEzNGYwODJhYTc1YmQ3MzQwMzk2MzI5M2IxN2RmYmQ1OWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI2ZDU4Mzc4OThkNThiYTdmMTI1YWQxOGU3MDI5ZjJkZjE0NjA5Mzg3MDUxYjlmODZjNDBjMWJkYzA5ODFmNmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQwMWE3ZGIwOTcyMTgzMzQ5YWNkMGI4ZmQ4ZTM1MTBlNjBmOWJjOWFmNTQwMDlhZmViODU4YjJjOWUzODcyNjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNjNGE5YWE4OTBhOWQ5MGYxNGMxZTVjZmVjNjFjM2U0N2MxMzM4NzhjYjk2MGJlOGEyNzZmM2E5OGZhMWI0MzkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_85bfb79dcd8640b98b20da88a78a77cd",
+      "statement": "The callback API consists of shared typed `Endpoint` definitions under `/agent-api/{endpoint}`; request and response validation is shared by runtime and backend, while endpoint timeout and delivery semantics control client retry behavior.",
+      "evidence": [
+        {
+          "resource": "repo://mda/rt/backend.py#L403-L487",
+          "version": "repo-lines-v1:sha256:b13dc3e9715453e60d0346d0b89d7c6c9fc7185c4fb6757a039bd48797e49ea4:eyJzZWxlY3RlZExpbmVDb3VudCI6ODUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU0NmQwNDMxYzEyMDYzZjg4ODBlNDI4NTdiOWRlMjJkMTgwZDRlODg1Zjg4NDAzMTI2MTg0MjIzNmRhMTcxYWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgxODliMTkyNjVkMTZhMDYwOWJiM2NjNWU3YmM2ZTNlYmEwZWUwNjcyYTVmYmYzNWU1NzU5NDE4YjAyYjQyYTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg0YjY4YzJhMDcwZTVmZTY4Y2MxZDIwOGRkYWI3NTViMjdhZTY1NDAyYzhlNWUwOGE1NTVjZmJjZTcwYjVjMjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYwZGQ2OGNjMDhhZjBlYWM3ZTdlMDY5NWIzOTkxNmYxZTExNmU4MDczZTNkYmE2MGYzNzY0OGQ4OWM4Y2E3YzEifQ"
+        },
+        {
+          "resource": "repo://packages/runtime-api/src/runtime_api/endpoint.py#L1-L80",
+          "version": "repo-lines-v1:sha256:1e8c1598082812b1d9d88f3a363c5fe21084d5e41a9ddd3f45451f1098ad5dae:eyJzZWxlY3RlZExpbmVDb3VudCI6ODAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRhNzA1NzAyNzhiNWMyY2I1ZTM1Mjk5MjFjOTRhN2M4MGIxM2NiYmQwYjA3MGJmYWI0MThhMTQyYTBjNTY4YWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM1MTI0YjJmYjFiZmZkNTJiMWRmNjg5MmY4YTU1ZjJlZGQ0ZGFmMzk4YjQ0MGE4ZjMwZGVlMWI5NjQ5MTg3ZmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE1ZDg1ODFmZjI4ZDJmY2MyYTM0YWMyMjIwZjczMzdmOTRhNDkxM2FlYjVhNjNjMWIwODM2ZWRkYjQ5NjBmNjkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d2cc64962ad64d699a7e01daf814cffa",
+      "statement": "The Agent API verifies a bearer token on every HTTP request before dispatch, restricts worker grants to grant endpoints, selects the hosted graph from the verified run's assistant ID, and maps refusal, unknown endpoint, invalid body, and handler failure to HTTP responses.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/agent_api/server.py#L121-L167",
+          "version": "repo-lines-v1:sha256:13d80dd04796d1861a0ee6967bfcedde016e8632df9bbfa0da8be12b8bbb1b9b:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdkMzYyYmM0M2IzMzE0NjBmNTRkZTY1YWI0YTljNDE0OGQwZTg1OTMwNDVmYmZhYTE0ZWViNjcwY2E2M2UwODkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJiNjJlMTgyMmM1Mzg4MGIwMWM2ZDUyYzVlZjUwZjczOTA2ZmU0OGM1OWM0OTI4YTg0Y2JkNzU1ZjRlNmU3NTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFmOWIzM2NmYTUxMmE0NDJjNGViNWZiM2UzNzA0NDMyMjQzMmJiMjMzY2M5MWYzY2I4MTAzYWU2ZjNjOGQ4ZDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFhZTgxNGM2MGYwYzg5NDIyNzg1MzE2MjBlMjg2NDFmMjE1MGFkNmRjM2E4ZTgyZWM3NGY2NjNmMDcwNzIwZTcifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/server.py#L177-L216",
+          "version": "repo-lines-v1:sha256:cff6d9c386695b2aad0520345ffc595ec33af1ef26f31259938780f601a404c6:eyJzZWxlY3RlZExpbmVDb3VudCI6NDAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE5YzU5Yzc2ZDUzYTYyY2IwNmQxMTY5Mzk4MDkyY2E1MzJjMTY0NjU3MzQ3ODExZGM2ZGFmMjA0NTJlMDQ2NWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE0NTQ2YWExYWM0NzUzMmJhZDA2MjU1M2U5ZmFhYjk1ZDI0ZWFjYzQ2ZTQ5NjEwNzkwOTE1ZWRkZDAzMjNiMzIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM3OWMwZjJlYTVlNDBmYjExOGNkOTM5NTFmOGE5ZWVjYTNmY2MxZjNkMTVkOWYyMWQ3ZWNhMzliODJjZmM1NmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/server.py#L61-L85",
+          "version": "repo-lines-v1:sha256:2a7c02ae209012693d985bbe98dc6f5cd12f85f5b5a1282ace86e3da78dc3ae4:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYyMTVjOWJmNTJkMTFhYTkyYjBjMzIzZDQ4MWE0YmI0MzRjNWM4YzY2NmY1MjQ2YjdlY2ZmYmUzNDc1NjVhZDEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM1N2MzOTMyNmViNTE0ZDQzNjJjZGVhYWRjZTE0YzQ5ZmYwYjMwYWFmZWFkMWFmN2JiNTQ1ZmNhM2FlZmI0YTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZiMzI4OTM0NTk0YmRlMzMxNzUzMWNjNGVlYzcwYjczNzY5YzRkOTRlYzVhZGFjYmFlMjE4OGEwNjdmOWFlMDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJlN2NhYmYwZjU2MzhkNjliODhjYTNjODg5NWNmMjJlMGRiYTQxNGU1ZWQ3MjYxYjk2NzU4ZGY5NGIxYjI5MzQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f7ccfd3b59794fcaabd9c2f3b6ab3921",
+      "statement": "MDA graphs are shared by graph inputs rather than by run; run-specific bearer state, carried and adopted catalogs, resolved tools, outbox, and local caches live in the active `Run` obtained from `RunContext`, and named tool specifications are loaded once from the backend when the catalog initially contains names only.",
+      "evidence": [
+        {
+          "resource": "repo://mda/agent.py#L120-L170",
+          "version": "repo-lines-v1:sha256:1e0e2311b4d3678388e3dcc0d7b97f9c673bd7efa98bc4e6b64ab6af79ad599f:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc4ZDE1YTUxNTc3MDBkMTNhNmFmYTM2NDA5Yzk1ZWY4NDc0YTIwY2MzMDUyNWUwMzhkM2FkOTIwMmFlODAzNzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA2Mzc3MGRmOTI3YTFkMzEzODcxZjI0ZTcyZWJiNDZjNzFjZmE3MWUzNzRjYzk4NTc4ZDc0ZWJjMDkyNmFhNGIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE5OGIwNjNkOWI0N2U2NTM3OTYyNTU3MmNjZTE5NzY2OWQ1NzY3ZTEyYzE4YmUwNzU2NTJiOGNkOTgxY2U4ZDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcwY2UzZjI0YWI0N2MyZjVhOWQzMzdmMzc3ZWQ4NTczZmE1NjU4NDA3NjQwMmYxYWYwNTRhM2RlZDYxOTQ2MmYifQ"
+        },
+        {
+          "resource": "repo://mda/rt/backend.py#L222-L310",
+          "version": "repo-lines-v1:sha256:f1f3209e05a9bed99ade2ee8876ab8222d2d41b5d4a9cc45508c4c2a5669b35e:eyJzZWxlY3RlZExpbmVDb3VudCI6ODksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjNTFlYTBhOGIxMjAwM2U2NTE5MmZiNzFjZTA5NDk0NTMyNDA1NWZjYzA0MWZlOGNlYWRjNDJiMzdkZTQ5MDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3MjU5M2M1MjZlZjQwZjg0NjhiNzhhMjY1M2FiMjYzM2U4ZWJjNjdlMTBlM2NiNGYxOGI1YTU1MTk0MDBlODIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEyY2RjYTUzMDk2ODM1YTA0ODBlZWFkMzFmYmUwYmJkOTExYTJjMzYyZTcwNTAzOTVkMGFkNTllMzczYmM0MmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU2MWJlMTk5NTdmNWUyNzFjZjlkNGFmNWY5ZTRhMWIxMzU3ZWUxYTQwZjg0ZTg0YWQ1M2VkMjg2M2I1MjUyMDUifQ"
+        },
+        {
+          "resource": "repo://mda/rt/backend.py#L321-L367",
+          "version": "repo-lines-v1:sha256:2a32cad84896b7872139c94df968d4a02e90615e7fe79a79e75a9537c582ff78:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxMDY0NWNlMjMyYzRkMjA3ZTgwY2UwYjNiNjE5NmRjZmZlNTNkODdmNWFhOWY4NmJkY2RmNDZkYjI4MjgyOTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY1N2M5NDhhNTA3YWZjZGNhZGE1ODUwMmYyN2Y0YmEyN2E0ZDJmZjRlM2ZlM2JkMWI0YzA0MmFhMjY3MDlhMDkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQwYTQ1MGJhZTBkNmZkMWNhMjFlYjIwNzU4MDg1NWJmYTg2NTcxODM4MTY0YWIwYzQxYzU0NDljNTk5NDBiY2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgxYzM3NThhYmQ0NGJhZDQ1NWE2ZTQ0YmM5OGIzMmRhMmVlMTI4YWNiN2M4MzhlYzRhNGE3MWJkOWM5NzM3YTkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e13e1625e1124b348b379b817a62ae5e",
+      "statement": "`BackendRunMiddleware` adopts workers before they act, prepares a run after sandbox opening and tool-spec loading, reads the configured inbox before model calls, and uses catalog loop rules locally; backend phase endpoints are retained only as a legacy fallback.",
+      "evidence": [
+        {
+          "resource": "repo://mda/rt/middleware.py#L312-L472",
+          "version": "repo-lines-v1:sha256:4360eb480a57c7a347954cac73a03e6c7fab5043ff1485d691d5cdee7e53aedc:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYxLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJlZTc5M2Q2YTJjYWYxNWZhNDljZTRhYjY3YzlkMmQzNjIwZTVkMzBlYmJiNmE3ODVkMGI5NmZlNjgyZWY1ZDdhIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIyOTNlMzkxMjBkNDJjNDljMGRiYzdkNGM2OGVlZGJmNDRiNmYxMWIzZGIwYWUwMjA1ZmI4OGNiODY1MTFmOGZhIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlOGIzOTAyMTM2ZDU5ZGRmOTcxYjhiNGU3YzA1NTI2NzI5MWJlYTAxZTE1MmVhZjQ2MTdjMzQ4MDc0ZDZhODkyIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlNjA3YTI5NDEyZTc2ZGVkOWYzNzcwZGU2NDllNTgzZDAxMzBjMWZjYTFhY2FkNzZlY2VmNzAwNjYwYjJkZTE2In0"
+        },
+        {
+          "resource": "repo://mda/rt/middleware.py#L499-L555",
+          "version": "repo-lines-v1:sha256:b79a30c0be1166834820d50202d2ba749a3867b998205c59ab5f846565ec44b1:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRjMGQ4ZDhhZTRlOGZhZThkYTk3OGQzZTQ5Y2ViNTg3ZjAyMjA2N2UxNWU0Nzc0MzkxMjEwNjFiNjg4ZGFkMTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNkNThhOWM2MjZiMTAzYzk0MTVmNTczMDgwMThiY2NhNDE5MzYyMjBlNGZlZWNhNzZlZDI2ZjNhZjEyYzlmYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNmMTQ1YzE2ODBhZDhmOWQwNjBkN2M5ZTBlY2NhNmViMDM0ZjI4M2UxOWMwZjA4Y2NiMTczMTk3NzdhNTkxYjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMyMzc1NjhmMzcxYzY2NGZhNzM5ZmU2ZGYzNzAyZTc2MjUzZTA3NDMyOGQwMjU2YTRhYWQzZGVkOTlkN2Y4YTQifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/graph.py#L1440-L1473",
+          "version": "repo-lines-v1:sha256:fcfc8b711c09643a96376032e8c91de87cbab04c32a46a80931eb8b721a7489c:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg1ZDc0YzMxOTQ0NDJjNDcxZjdhNjdiOTg5MTg4Zjc3YzYyNTEyYzM3ODFkZmE4ZTg1OGEwNTIxNjlkNWMyZjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU1ZGRiYWIwOWQwZjMyMjBkMWI2MjAxYzg4NDhkZDk5Y2RkNzVhMWRiYTc2YmY0MDlmOWU5MTEwNzYwZWI0NjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY2NDU2ZmE1ODkzYTE4MGZjM2M5MThiMmIwMjczMWM2MDM0Mjk0MWQ2NzMxM2JjMWI1MGE4OWNiZjhhYzczYmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRhMWY0ZjliN2UzNGYyMzFjMDZmOGYwZTA5N2YxZDJkMzk4MTY0ODUyMzk5ZWUzY2ZmZThhOTY2ODYyMzcwYWQifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/graph.py#L919-L938",
+          "version": "repo-lines-v1:sha256:5c8ae3d4ba77d46f6b5d460c67df0d464d9d6d0a42c15f5a2c5752f51bce49c3:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4ODlkMjBmNTY4ZDUxYjlmNWQyMDQ3M2MwMDBiZGQwMjE3YmI3ZjM0NzAxYzM3NWM3YTQyNzE2OWI3MmVkYmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI3OTY4MjIxZjVjNmY4ODI0OGVhMDg3MzdhN2NmMmY3NDJhMmIwNDFmYzQ5OTI5MDFjNzA3NThiNjBhNGVkOGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJjMTQ1ZGQ1N2Q1ZDEwODFiMWNmMDcxMmE1ZjcxOTgzNzZjYTBhMzMzNDFhYWRkNmNmYmIzY2IxN2EzNGU3MTAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_79e55338e22a4a3fb9662dd199684593",
+      "statement": "Backend operations are independently authorized by a per-operation grant derived from the token-bound run, and `TokenRun.operation` rejects a request whose operation name and grant do not match before resolving and invoking the backend tool.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/agent_api/graph.py#L1150-L1170",
+          "version": "repo-lines-v1:sha256:bfa039eb198827bb75638c7fad402785246c72ce81a35b2f8c8521e02322281a:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5YjMzNTJkNmYzODllOTA0NTdkMWI3ZDAxYjc2MzE5ZGZhY2U0NmE5NDJhODhmY2UzM2VjZjk4NDJjNjEwNTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBjMjJiOGM5NDUzMjgzZjExMzY2MjE3YWE4N2U0MzkzMDA4NDI4ODVlZTQ1YmJmNDA5MWYyYWM0MzdmZDcxNDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNkNjNmYzY2ZmU0NGY3YmQxYzk5M2VhNzUxZTZhN2Y4Y2I0MzZiYWQwYzhmYjVhMDVlYmY2ZWFkOTI5MmNjZjUifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/tokens.py#L136-L163",
+          "version": "repo-lines-v1:sha256:4ac0c448f879a546f6a27f9731cfae414f4eb6bf702e01496e106f568df6da4c:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQwYzE0ODY0YmFhZjA4OTM4MjBhMmVmZWU1OWQ1ZmU3MzFiYmExMmNiNmQyOWIwOTlhY2FjYzIwNTEzMzM2NjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYyMWNlNzk3MjRkNDY5M2EwMDRlNDE1ZDJhYWU1MjUwZjMyZmU3MTA2OTIyMmM3ZDcwMTc1ZTRjMzgwNmU1NTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFjZDdjYmZkNjVlMDZiZWE1MDYzNWE4ZjcyNThkNzk1Nzc2NDM0NmEyZjU0Y2NlMTI2MmQ0MDM1NzJlNjdhMmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA5NDMyNWI3MDRmN2FjYTBmMzdmZjg3MTFjMDM3NDI2YWUyYmYyNDVhMGNjYzlhZGE1YTI2ZGRmMDNiNmJiYTAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_dfeeff7d3dfb4535ad54c9e1baed3d1b",
+      "statement": "The runtime persists unacknowledged ordered reports in checkpoint state, retries them until acknowledged, and the backend records report keys once and processes each batch in order, providing ordered effectively-once transcript and event delivery across restart or retry.",
+      "evidence": [
+        {
+          "resource": "repo://mda/rt/outbox.py#L1-L18",
+          "version": "repo-lines-v1:sha256:7cea23bcf64cafb92085b81f1c9aae23d75da1415de9a36d418bc9e9eff40b73:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU0NTU0NDQwZTdkZDIwYmQ2YmFmZTM5MzFiY2RiZDc3ZDk2YWNiZTJmMjZlZDc3ZTdlM2I4NzViZTM5NDY0NzEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE5MWQ1OTc4OGIzNDUxYzA5MWUzOThiNzgzZGU2YWFmOTUyMjA2MzEyMzlhODkzNGFhOGRmZGU3MzQxNGJiOWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhNjdmYjkyZjdmZjVhYzc5ZmU1MTc5YTYwMzk1ZDk4YjhkNjI4OGVkOGZiNmJlMGU3MzA4ZmIzNTk3YjYzYTAifQ"
+        },
+        {
+          "resource": "repo://mda/rt/outbox.py#L204-L266",
+          "version": "repo-lines-v1:sha256:0b9afc749b21dc708dbd2f12bc26223602946aea5df180a2faf88e39c6dce47d:eyJzZWxlY3RlZExpbmVDb3VudCI6NjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIzYWZmMTU4YTdkMTQ5MDZkMzA0M2FjMThkOGNlOTc5MTkxZWM2NjY1YWE1ZmMzYWQ1M2Y0MTYyNTI1NmIwZGUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjliZmEzMzM0MGU5NDk2N2IzZDMwY2RjOTVlMzZkNzI3NDgyZGNiM2ZhYjlkMzA0N2M4MTNjNGMzNjAxODlmMDQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY0Y2ZhNTljZjA3MzFlMjBhMTE2ZWM2MDJiZDcxM2ZmYTA2Njg3NzE5YTExNWJiZWU2NzUyNGM3NWI0YWEzZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNhNmNiOTEzZWE1NmY3YjhlNTMwMTNlYzkzM2RlNmRlYzkwNzdlMTAzMzY5MzJkNzc4ZTU1YTIwMDg4MTI4ZjkifQ"
+        },
+        {
+          "resource": "repo://mda/rt/outbox.py#L322-L383",
+          "version": "repo-lines-v1:sha256:f7fd03431fe2679d173e52c4237d4457104bbcbf18b1ba72c332c183ad6817a1:eyJzZWxlY3RlZExpbmVDb3VudCI6NjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFjNDBmZTE4MzBiY2E0MjE3NGU4ZmNkOWQyYjBjMTlkNTExMzRhOGFmN2RhYTNmZTM2NTgxNzM5NmEyNGEwMzQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3YzY2MWFiOGExOTVmYzE0OTI2Njk3ZmU2ZDExNmU2YWE1ZWUzNjRkNzk0Nzc1NDAyNmI2NmQ3ZWEyNTg0NGUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjEzMTdiOThmYzRhN2UxNjJiYmJlNzJhNzhmMzBlMmRmZjkwZDhkMTZkYTBiMmZkNmY0YzlmYTA2MzkyMWEwZDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/graph.py#L1331-L1367",
+          "version": "repo-lines-v1:sha256:03a1e12dde024b3d42b5dcfa9bd7aac7480fdd21f4e7bb58d0e1e3c5a5c2cc22:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJjMTY0ODQxYmZiN2RlZjNmNWEyNzRlY2UwMDc3OThiMGMyOTFjZWUyMGUzMWUxZjYxOTE5NTYwZGRmZjMwYmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA4NzE0Y2Q2ZDg4ZmQxM2Y5Yzc2NmVjMTc2YmE2NWM0MTViODJlNzNmYzBmOWI5NGJiYzU3MGUzN2E3MWFiYTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRjY2ZiMmQxZTUyZjAxMjk3YzMzZmM4YzAyNDNmZmQ2NDhjODI3ZDFkYWQ3NDI1YTE3YzMxYWFlZWRhZjFkOTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJmZDlmZTgyYjVhODczNmUxOGIzNTc3NjhhNjg0YjFjMjhmNDk5YWI1ODE5MGQxMDI4NjRhODVmZTE1MGU5NTUifQ"
+        },
+        {
+          "resource": "repo://packages/runtime-api/src/runtime_api/reports.py#L1-L13",
+          "version": "repo-lines-v1:sha256:8bfffba96c80a327d766423f0032cd322b33f6465a31be4343818f5d9a9998d6:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFjYjZlNjkzMmUwMmFjZmY4YzFkNWVhOWYyNDlkNWRmMzM1ZjMyYmU2ZTZiODAzNzE2Y2QzMDYxMjhjMTI0MDIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRhYTc2ZDAzYThiOTE4M2NiY2ZkNTIzZDI2NTkxNWMzMjA3OTNlY2UxMDQzZjE3MzE0ZjcwNDMzODJmNDQzZWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRkNDI4NTVhZjU1NDRhNDg4NTI2MzE2YzZiMmU0ZWIzNjgzNGZmZmRmMzIyM2ExZGIyY2EwZDg0NDVjNjBhNWIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_53d5728656dc4a27a1573682f38bb06b",
+      "statement": "An async task worker launches with a limited worker-grant token rather than its coordinator's token, may only adopt a run token of its own, and adopts before normal work; registration and completion handling make retries and a run ending before registration safe.",
+      "evidence": [
+        {
+          "resource": "repo://mda/rt/middleware.py#L874-L987",
+          "version": "repo-lines-v1:sha256:1203ce5dfa5397f31af03c17ac8a34f71ec1751adec75da08b8f7f9966c81401:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI5NmFhYjYxNjgyNTgwMWY1MjIxMTg2MWYyY2E0YzJhY2Y5OGI3ODQzNDk1Nzg3NjA1ZWY4OTI0NmQ4NTdkZDg2IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI5ODkxNWExZDZiYzA3NzE5MjVkYjQ1YmViNTg1M2Q2Y2ZlNmE5NjQwODM3ZWQ4ZjBjZGRkMWQ2ODM2NGUzZTQ1IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI4Y2M0YTdkMWNjNzk2YWJhM2U0NjcyMzMyN2Y1MTdlOWY4MTE5ODJkMjUwZjA3MDI5ODZlNGI1NzY0YWQ5NTg5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI0ZWY3OTQzNDY3NDNlMmJiNmVlNDFjZTU3NGQxYTJiYWEyMGUzM2MyY2E0ZWRlNDdlZDk2ZWRlYzk0Mjk2OTA1In0"
+        },
+        {
+          "resource": "repo://openswe/agent_api/async_workers.py#L177-L199",
+          "version": "repo-lines-v1:sha256:2240d1f034b69832f0fc63b19a5509d2bb3760838d1f4acc5c24901f3efe6405:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjNjc2ZjcwMzNkZWZhNzMyNWRmYWE2NDcxMzYzNzdjNWEyY2E3ZTc4NTU2OGMwNzAxYmExZDk2NTczNmYzNDQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MDMyZTk2NGQwOTMyMzUxZTVkMTg1MjY5MjgxYjE3MWEzYTA5YjA4YjI4NmU2NjFlYTQ3MDMyM2M4MmViNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI1YWQ1MGU4YzEzZTA0OThlN2Y2NmRhMDViNGE3YWU5YWNkMzc2Nzg5ZDg2OTg5NGJjOGRkMjhjZDA1MTdlOGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjY2MzRhZmIyYmIwNTc3ZmIwODRiZjliY2M3MzI5MjJjNTlkOGFhNTkwOTliYTllMjMyZDY4ODc1OTQyNDY4YWQifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/async_workers.py#L98-L151",
+          "version": "repo-lines-v1:sha256:a29d5c6f8f74d4b53ef60ed788ed2935e7ea7e9cd04b5729cfb7a9756e5f4244:eyJzZWxlY3RlZExpbmVDb3VudCI6NTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU0MDlmNTE1NTE2Mzc4MGFlOTg2ZGVlNjIyMzRiMzJiNjQ3NzQ1M2U5MmU1Y2FiYzIwYjAyZGE2NGE4YjA5YmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI5NjRiMWU5MDZiODkxNWU0MDI0NzRmYWE2YzEzZjU0ZTNlMzAyN2M0NGI3YmE1MmQ5Y2I2ZmY0OTk4NzFhNDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcwY2UzZjI0YWI0N2MyZjVhOWQzMzdmMzc3ZWQ4NTczZmE1NjU4NDA3NjQwMmYxYWYwNTRhM2RlZDYxOTQ2MmYifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/server.py#L68-L78",
+          "version": "repo-lines-v1:sha256:de591ccdcb95852ae8292d014709adeda820b015743047910c393b4ae5b2f940:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA5ZWRiM2ViMTAyYWZjOWQ2ODIyMDZlNWNiOWVmOGJiNWJkMzI2NjBlZTY1MmVjZDVlMzRjN2RjZGYxNGUwOWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiNGM4ZjZiYjk5YTk1ODUwZmU4N2Y2MjFhOWI3MWRhYjVhMDdlZjkxZTY2OWY0MmZkZmI1N2Y0NGI3ZTk2Y2MiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM5NzE5YmYzNzQ4NDYzMWJjNTc1Mjg1NzdmOWE0YjRjOTNiMDA0NGNkNTU4ZmU3Yjc2OTc3YjhkZGI0NmMyZWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZkZDUzZTAyNmYzYjM1OWZhYjE4ZGZkMzQ0YmNjMTg5NWEzMDQxOWFkYzY2ZWVmM2QyOWI0MTk4NWYxNzFmYWEifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/tokens.py#L239-L265",
+          "version": "repo-lines-v1:sha256:5de4ede563ec2afbc6ad9086806351d3c0f0d186d4fabae26c9c7ae47405baa5:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhmMzM1M2U2NzliMzM1N2I4MjY5YWIzMTY2NWViMzcyNTJkMzc5YzAxNTViMzY1ZjZmMjc3NjkyMjNjOWM2MzUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI2ZDU4Mzc4OThkNThiYTdmMTI1YWQxOGU3MDI5ZjJkZjE0NjA5Mzg3MDUxYjlmODZjNDBjMWJkYzA5ODFmNmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUxM2VkMzU2NTQ2Mzc5MmQ4NjZmMzU2NjRkYWE0ZDA2NmRlNzQxNjM4OGNlZTI0NWEzY2E0NjFiNzdjZGRhYTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ad105364d1a54a6f8644621db79da761",
+      "statement": "The backend refuses MDA runtime startup without a configured token secret and a valid absolute runtime URL, rejecting non-local HTTP; token signing uses the first configured secret while verification accepts any configured comma-separated key.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/agent_api/client.py#L54-L78",
+          "version": "repo-lines-v1:sha256:a7630b661c4519929c662747dd36705efd977a27e7460ea4886081dc7f491f1f:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMzNmJlYTViZTc3ZmYxYTk5NmZlOGI1MzRiZDNjMGFmZTM3MmUyNGVkMTllMjVkMDcwZGFlMDhlODIzYzhhN2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdlOWM3MWI2ZGIxYmZlOTU1OWU1NGU2Nzc5Y2JkN2Q0ZmJjYzBkZTI5MjA5YTUyY2E2MmY1NWRhNDMzNDM3MzMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE5OGIwNjNkOWI0N2U2NTM3OTYyNTU3MmNjZTE5NzY2OWQ1NzY3ZTEyYzE4YmUwNzU2NTJiOGNkOTgxY2U4ZDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMxM2ZhNDYzYmZiMTQ4OGNiNWYxYjAzYmIzYzE1YjBhMjAxNmZiNWQ4OTg3NjU5MDYyOTM0MzRkMmFlNWFlZGQifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/tokens.py#L156-L167",
+          "version": "repo-lines-v1:sha256:2496b5343ee9d9b8e48b8f141ba2e273b5c328e17a6b4f4fda2cbf3fe6dcedf5:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFkZGVhZTg5ZGQxNGNmMDFiODIzYTMzNTNjNTNhMTEyMmE0M2QwYzMzZmI5MTRlMjEyNjlmMGIzZGIwODdjZDQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM3OTIyZjZjNWY2Yzk0MWQ1OTAwMmZkOGI5M2FiNTFiOTAxNmUxYmVlZDYwMzkzZTI5YTAzMTEyZmNlMTU3OWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhMWM5NWY0ODc2YzRiYWJkNTE1NWZiMDkyYWQyZmFjMjQxYjIwMjY3YjU1YjE5NzUwNDVjNzVjMTVkYTY1NzAifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/tokens.py#L170-L210",
+          "version": "repo-lines-v1:sha256:e87f21f5e724468a3f1678f25312afa8ef3d669fc7e73d2226c40753396174eb:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUyMWFhNDlmN2ViNmI1ZTI1YmQ5OTdkNmZkNTdjNWEzNGYwODJhYTc1YmQ3MzQwMzk2MzI5M2IxN2RmYmQ1OWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAwZWM1MjA3MzBhNDg4MjNlNmVkMmU5NzhmNjc0MzI5MDk1ODJjMmRmYzU5NzI2YWRlY2VhM2NmZGM4YjBiOTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQwMWE3ZGIwOTcyMTgzMzQ5YWNkMGI4ZmQ4ZTM1MTBlNjBmOWJjOWFmNTQwMDlhZmViODU4YjJjOWUzODcyNjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIzZTgxMjZiYzNmYTUwODY5ZGYyYTlmMjVjNTRiYTQ4MzA3Zjg0NGRhNjI5YjgwOTlmMzNjYzI0NTc2NDRiNTYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_07f4772498cc4aed98e947df5e700c37",
+      "statement": "Focused MDA boundary tests cover shared-graph per-run catalog isolation, callback and worker-token behavior, checkpointed report recovery, and loop report ordering.",
+      "evidence": [
+        {
+          "resource": "repo://mda/tests/test_backend_calls.py#L1951-L2103",
+          "version": "repo-lines-v1:sha256:da4d0ccdab336ca2a3f3e9d0baf9fb91773484d799f39ebc2007fa96bd1052c7:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUzLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIzZGI5N2UxMWIzZGZjNjJiNmVmYzA2MWMzZDA2N2VmZjZkOTg2OTYwYzFhYjE4ZjM3N2Y0ZDNlNjM1ZjczZTBkIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIzNzg0ZTk3YzkyMTM2MjhmODNlOTcwNzBmNGU2NGMyYTUyMjcyNzUzMDg3ZmZiZjI2ZWU1NTZhNmU2NzllNTg1IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiIzMTYzNGUzMGEyYTY1Yzk1ZTQ2ZmQxNjE3MDM5NjRlMjQzYTE0MzA5Zjg4MmRjYzY2NjAxODRhYzAwNDU5Mjk1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIyZjhlZDI3NjkyMTIzNGYzNzQ1N2M1NjY1OTljMDVhOTA3ZTQ5MGQ5OGQ2ZjExZGM5ZTFiN2E5MzRlZTcyNGEzIn0"
+        },
+        {
+          "resource": "repo://mda/tests/test_backend_calls.py#L800-L877",
+          "version": "repo-lines-v1:sha256:f8096ebe2f4227d17cdea32122255ac0ef01f720e9d1438ab3f844f3d95af503:eyJzZWxlY3RlZExpbmVDb3VudCI6NzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRhNjg5ZDZkMzIyZDA0Y2E4ZjdkMGFmYTg0MjYzMWEyYjJiNDhhMGUxMTYzZDNkMGIwNDg5MjViZjA2YzcyNGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAzNTE3NjJiYTJiY2FkMjViOTUxNjJlNTNiNGUzMmNlYTgzZDBlODgwYzFkMmU3OWJjNGVhMzBjMmQ2MTNkYTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwZDQ4ZjM4NjQ2M2I0YWZlMWU3MjczM2RiYjI5NDllODZmNjY2ZTgyNjhjYzE5NDcyZmUwMWE2ZjVjYjlhZjciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE1OGM0MjM1OWFiZTg5OTY1NDVhZjFkZWZlMGVhZDA1ZTdkOTY2NDJkNDQzYjhhODAyZDExYjk2NmVhOTcyNmUifQ"
+        },
+        {
+          "resource": "repo://mda/tests/test_loop.py#L504-L519",
+          "version": "repo-lines-v1:sha256:25a44012032e85921b27ab075d74dc762ac56dcc39838b19dbd112335f0e0292:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY1YmM2Yjc3NTBkMTY0NDAwNmM1MDI4MzEzNjY1ZDk5NWI1MWM2ZjBlZDg4NTRiZjIyZjNiOTA4OGFmMGM3MWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUxZjZjY2RmZTUyZTYxYzhjNzJhZGQ3MGZkOTJiNzRlMWRhYzA4ZTMxMmJmZjZlN2Q4YTFjNDc4ZDE4OWYwZWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY3ZjFjOWJlYTczYzA1NDdjMjBmMDgxYzQ2ZjYxNTkwMTg1NmQzNzEyNGQ5ZjY1NTcwNTQxZDE5YzMyOGY4MmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAyMTlmN2Q2YmE4NDZjN2Y1MmU4MzMzZjE1NDM4ZjU3MWM4YWE3MTQ4NzY5ZTkxMjc2YWYxZjdiMzAzNDA3OGYifQ"
+        },
+        {
+          "resource": "repo://mda/tests/test_shared_graph.py#L259-L284",
+          "version": "repo-lines-v1:sha256:3251c1d19da4dbbc3f293c2278adb5e120c15de2fca3cfa2bd018d44d3c3bb3d:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiZDQ4MjBmODEwZDIzN2MwNTNjOTFmNzQ2Mjk4ZWQxYmFmYjkwOTc3ZWI0YTIzZmNlNjRhODNhYTA1MjllZjAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiMTYwMTU3ZTA0NjA4YTcyODBhMjE2ZmUwODcwZDAxNDVkMDM0OTI5ODM1NTNlYmZjMjZkYWY4MjZjNWFmNmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE5MGFiOTc4M2ViYmUwMDg1ZmFlNzFlZjlmOGY4ODYwODI5NDU2MjM1NjhiNTc1NmU4Zjk2YjAwODUwYzllYjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAxNDMzYTRjMmI4MTRhNzM5Njk2ZmNkODc5NTZkNzhjNjMzOGQwYjY0MWU1N2E4YjQxMjcyMzIxMzM2ZjViOGMifQ"
+        },
+        {
+          "resource": "repo://mda/tests/test_shared_graph.py#L95-L108",
+          "version": "repo-lines-v1:sha256:fbe14a900bd12f793f1d7652790a84d6b157cf6291cd985a7aaedb8cd4fd43e6:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVjMzFlMzMwOWQyMDdlZGI0MzZhYzNiMWFmOTkxMTQwYjU0OTVhMWU1YmJkNWU1ZTRjMTA2MTkxYjc2MmM5NzMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM0Y2MzYTIxOTQ2NzUxMjMxZjNhYWM4NzYwYjY1OTgwODBmZGI4NTE1NjZiZWQxZjFkZDllMzAxNTlkMjg1YmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjIwMjQ4MTg4MjJkZTY0M2FiMmQ2MjQxMjc0NzE0OTE4NzZjZGIzNGMxYTFlNDg4MjlmZWM3NzJhNzUxZWMyODYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-10-31T08:08:21.705Z"
+  }
+}

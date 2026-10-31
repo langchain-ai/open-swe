@@ -1,0 +1,220 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:a5de562c0bb4d8e23556ff1434dabd0cab83c3d54aadeb6abcaec17414e0317b",
+  "claims": [
+    {
+      "id": "claim_ff9c06e73e1745c8ba3ce52e661ea722",
+      "statement": "Open SWE uses PostgreSQL-backed durable state to coordinate thread-facing mechanisms; `POSTGRES_URI` configures the async PostgreSQL engine.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/database/postgres.py",
+          "version": "repo-file-v1:sha256:9126eb3494fb1bd9ca327ef0d35be06200e6020fccf18c7c69437d54a3e0cee2"
+        }
+      ]
+    },
+    {
+      "id": "claim_1396da6da4c54f81a4c38a1c81d30d01",
+      "statement": "The PostgreSQL thread index stores a thread's metadata, selected runtime, and status while checkpoints and streams remain with the runtime; per-thread advisory locking prevents a stale sync from overwriting a newer read.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/threads/index.py",
+          "version": "repo-file-v1:sha256:3ab82ead76fcfbebaa0c57f8007dbb431a17adf8b8f0501227b169f7a0233d63"
+        }
+      ]
+    },
+    {
+      "id": "claim_55422ade35be43958328d00cf18001d4",
+      "statement": "Queued thread follow-ups are individual, ordered durable rows: writers insert rows, a run deletes only accepted sequence numbers, dashboard queue IDs deduplicate retries per thread, and the queue is capped at 100 newest messages with UI invalidation on mutation.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/message_queue.py",
+          "version": "repo-file-v1:sha256:d5e92ed70e71d17eb219cf9bc6debc3a52e33bdb907538cf203f870f70a7484a"
+        }
+      ]
+    },
+    {
+      "id": "claim_1fe39a18b87e4b58b42965ff98d6205a",
+      "statement": "The thread inbox reads queued follow-ups, task messages, and event matches without consuming them, returns receipt identifiers, and removes or marks those items delivered only through `receive`; inbox receipts are accepted both during a later read and through the report endpoint.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/agent_api/graph.py",
+          "version": "repo-file-v1:sha256:a9fcd92a52a990a67ad31afbf19d89c6405a9e31a347f937d1310e43f97449e2"
+        },
+        {
+          "resource": "repo://openswe/threads/inbox.py",
+          "version": "repo-file-v1:sha256:6e94b296d5c895c0a1b7f275492983b522d8d86006d7d53f3b683c30ed9e0259"
+        }
+      ]
+    },
+    {
+      "id": "claim_76d53a620cab44bd9e58a5f85e18892b",
+      "statement": "Run input is a structured `RunMessage`/`RunInput` contract: builders serialize sender, surface, kind, channel, and structured data into input-message envelopes; system inputs retain notification metadata.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/input_messages.py",
+          "version": "repo-file-v1:sha256:5412d25d23247b500ebfd9a0973ac3f8d48412588fa6c88fced239f738067172"
+        }
+      ]
+    },
+    {
+      "id": "claim_60d46568d438492da722f3d5d15df082",
+      "statement": "The inbox preserves already-structured queued RunMessages and requires one structured envelope per message because transcript parsing expects one envelope per message.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/threads/inbox.py",
+          "version": "repo-file-v1:sha256:6e94b296d5c895c0a1b7f275492983b522d8d86006d7d53f3b683c30ed9e0259"
+        }
+      ]
+    },
+    {
+      "id": "claim_42163001a1414f84bc9f5b376a0dd1f0",
+      "statement": "An event subscription persists an `event_match` before starting a run; nonempty delivery IDs are deduplicated per thread and source, owed matches are read oldest-first until received, and delivery is retried at most three automatic starts rather than relying on a cancellable runtime queue.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/webhooks/event_matches.py",
+          "version": "repo-file-v1:sha256:c7c0a517ed2d6ed9ff8824e4323a14c7175a6c88f8755ddc2e5f33417fd3209c"
+        }
+      ]
+    },
+    {
+      "id": "claim_bfb2d676d589485ea8d64ba0f258f373",
+      "statement": "Delivered event matches are represented as system RunMessage envelopes with the event-match receipt in envelope data and a stable `event-match:<UUID>` message ID.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/input_messages.py",
+          "version": "repo-file-v1:sha256:5412d25d23247b500ebfd9a0973ac3f8d48412588fa6c88fced239f738067172"
+        },
+        {
+          "resource": "repo://openswe/webhooks/event_matches.py",
+          "version": "repo-file-v1:sha256:c7c0a517ed2d6ed9ff8824e4323a14c7175a6c88f8755ddc2e5f33417fd3209c"
+        }
+      ]
+    },
+    {
+      "id": "claim_b8a4d7d36ba845b49acbfe8f5f4645fe",
+      "statement": "The MDA outbox keeps reports in checkpointed graph state, batches them in order, retries until acknowledged, can be adopted by a restarted or later run, and eventually leaves unsent work checkpointed; permanently refused items are dropped after three refusals so they cannot block later reports.",
+      "evidence": [
+        {
+          "resource": "repo://mda/rt/outbox.py",
+          "version": "repo-file-v1:sha256:38885417ef991d793f9e6ecafa9c7c6c7c28d7f360d7a6dba664653958a82b9b"
+        }
+      ]
+    },
+    {
+      "id": "claim_e85c8865d3af481598c69e57da39a2f0",
+      "statement": "For non-idempotent remote-run reports, backend report receipts are keyed by thread and idempotency key: a claimant records the response, duplicates return that stored response, abandoned claims can be taken over after ten minutes, and retained receipts are purged after seven days.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/agent_api/graph.py",
+          "version": "repo-file-v1:sha256:a9fcd92a52a990a67ad31afbf19d89c6405a9e31a347f937d1310e43f97449e2"
+        },
+        {
+          "resource": "repo://openswe/agent_api/report_receipts.py",
+          "version": "repo-file-v1:sha256:bb9e4dabe2c72c0d8330d623b985d2b3abca4e828e9d557d3c66d7655802dea8"
+        }
+      ]
+    },
+    {
+      "id": "claim_e1e36b64080b4f289949c6b58546ae3f",
+      "statement": "Transcript `append` is the sole writer and atomically locks a thread, assigns gapless versions, writes events, projections, auxiliary content, command receipts, head update, and notification; a repeated command ID returns its prior version instead of appending again.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/transcript/engine.py",
+          "version": "repo-file-v1:sha256:55cbb1b650f301c93a9c94c2f0fb91503acaeef6c8c88072121f18f9de24d22d"
+        }
+      ]
+    },
+    {
+      "id": "claim_10ab339cc39040c38156692dfc8c123e",
+      "statement": "Transcript event payloads are typed and schema-versioned, serve as the UI wire format, and keep attachments and full tool output out of the event payload in transactionally associated storage.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/transcript/events.py",
+          "version": "repo-file-v1:sha256:ab61380b207c252254e5cc1b5c7ba150e478bdb113ae2f37e1ba8533acc3c1d2"
+        }
+      ]
+    },
+    {
+      "id": "claim_d16940c1ee2b42239cae66901c3289bb",
+      "statement": "Transcript snapshots read projections in a repeatable-read transaction; live subscribers receive only version notifications and reconnect resynchronizes to current heads or deletion, so lost notifications cost latency rather than history.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/transcript/listener.py",
+          "version": "repo-file-v1:sha256:29b0e891fe99a067a1b2b04eee06c9487a94aecd839b052a2150216695b80fad"
+        },
+        {
+          "resource": "repo://openswe/transcript/snapshot.py",
+          "version": "repo-file-v1:sha256:6243e056b9c17c270655b10e089bfd91ce9fbaaac22ffc3355339cb2e3a62fa8"
+        }
+      ]
+    },
+    {
+      "id": "claim_26319693b9974ef096ec24db9e65e814",
+      "statement": "Webhook `record_once` claims a source-scoped delivery ID before recording, suppresses duplicate logging and subscriber wakeups, releases a successful claim if storage fails, and uses expiring claims that sweep stale entries.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/event_claims.py",
+          "version": "repo-file-v1:sha256:d1b44072886c47d417aacb0b117fa3877dd098e10e797c9b3dd7be52891be295"
+        },
+        {
+          "resource": "repo://openswe/webhooks/event_log.py",
+          "version": "repo-file-v1:sha256:75a4e395fa14949fac6fa192fe02093fe808fc9a3cba359faf5dcee62d3281b8"
+        }
+      ]
+    },
+    {
+      "id": "claim_c9072c9bbd5c44bf9627b93526d2874c",
+      "statement": "The event log is a daily-partitioned append-only record retained for 14 days, and logging a committed event then invokes subscription delivery.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/webhooks/event_log.py",
+          "version": "repo-file-v1:sha256:75a4e395fa14949fac6fa192fe02093fe808fc9a3cba359faf5dcee62d3281b8"
+        }
+      ]
+    },
+    {
+      "id": "claim_9a05cdd16e4644d080ef38186b62aece",
+      "statement": "UI invalidations persist topic rows and publish PostgreSQL notifications in the same transaction; reconnecting readers replay rows within a one-day retention window, conservatively refetch beyond retention or on replay failure, and authorization controls which keyed topics a session can hear.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/ui_invalidations/outbox.py",
+          "version": "repo-file-v1:sha256:04aea9837125c636de3f4f21c9d8fbb5af9f2ab8492a96bc877a65bf16d78225"
+        },
+        {
+          "resource": "repo://openswe/ui_invalidations/routes.py",
+          "version": "repo-file-v1:sha256:7a1f0dfb4ffde97c4b70fdf78a57a65d44a1f8e7c8371eb2320c2182b0dfb7b0"
+        },
+        {
+          "resource": "repo://openswe/ui_invalidations/topics.py",
+          "version": "repo-file-v1:sha256:aac0fa37196eed23172c9b207fb1eb7c32071531eda91e8e7482b1d4564e5baa"
+        }
+      ]
+    },
+    {
+      "id": "claim_cfdb826f3b334ddb99149a54d0c8b69d",
+      "statement": "Focused tests validate transcript receipt/version semantics and keyset paging, UI invalidation commit/replay/access behavior, and webhook retry deduplication rather than only payload serialization.",
+      "evidence": [
+        {
+          "resource": "repo://tests/transcript/test_engine.py",
+          "version": "repo-file-v1:sha256:f8d967afb87a80fd1b246ed11a1c559d57396d9928f542d933e07b3200deec95"
+        },
+        {
+          "resource": "repo://tests/transcript/test_windowing.py",
+          "version": "repo-file-v1:sha256:b57d5da454a9fbef2f33c80e69418d84bece7f74db6f0a562f0e0bfcf2b9a29d"
+        },
+        {
+          "resource": "repo://tests/ui_invalidations/test_ui_invalidations.py",
+          "version": "repo-file-v1:sha256:e4a95e2e0e0470c99db7a02a7eedba84f1044f4a8fbff4e34dc560ac210b7ac5"
+        },
+        {
+          "resource": "repo://tests/webhooks/test_event_log.py",
+          "version": "repo-file-v1:sha256:6db6d764c571ffc95358b7d6f2ad47c44eba7efcd6228682178d7149d064dd0f"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-10-31T08:08:21.705Z"
+  }
+}

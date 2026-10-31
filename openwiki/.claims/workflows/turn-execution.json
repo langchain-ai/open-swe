@@ -1,0 +1,266 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:c26e88fe4d7e9f38458c520d8fbf5df4ce5524b10f7508af8466fa3ca5612ce4",
+  "claims": [
+    {
+      "id": "claim_f109bd9aa21a405c82fb53180321475c",
+      "statement": "Open SWE divides a turn between a backend that owns planning, identities, inboxes, transcripts, and completion handling, and MDA that owns the remote model loop, checkpoints, tools, and middleware; MDA calls the backend through the typed runtime API.",
+      "evidence": [
+        {
+          "resource": "repo://mda/agent.py#L2-L25",
+          "version": "repo-lines-v1:sha256:eda89209a2aa4a59a2916db60beeae235abb7ce48d7443263a70cd0fe0d0751c:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAwNjNhYzY3NzkxOWJhYzY4MzcxNjE3ZTdmZjM2MjNlMzFkMTVhZDIzYWNhNTU3ZWY4YzViNDVmMWQ5NWJiYjUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoxLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU4ZDEwZTNmMTc0ZWNhMWI3ODQzMGJlNGMxZmNlZjBjMThjNzhhN2I1NzJiMTRjOWQ4Mjg2NWU5NjYyY2M4Y2UiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU4M2RmYWUzN2YzODFmODBmNzhiMzVmMWE0MzUwMGE0OTUwYTE3ZjEwNjk4MjcyMDRiZTZhOTA3NjcwZmIwMTMifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/graph.py#L2-L35",
+          "version": "repo-lines-v1:sha256:9a9ac361402d2f2356ea89e7868a5967552829bfe499cc7759bb0b58a58e9bd8:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRjYjY5ZWE4OWNkZjJlOWM2MDRlM2YzOTgzZmM1Nzc0MGI1MGViMjA5ZDA4YzczMmY0YWI5OWMyNDUwMDgzYmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoxLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc0OGU1ZDhmZDExNjM1OTIyZjliYWU4NzMzMDc2ZGY0MWY3YWU1YTUxODc2ODY4NzQ0MGM5MWM1NjJmOTVmOTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhNjdmYjkyZjdmZjVhYzc5ZmU1MTc5YTYwMzk1ZDk4YjhkNjI4OGVkOGZiNmJlMGU3MzA4ZmIzNTk3YjYzYTAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_1fa256cae5c54c64bbb81f85ddca2489",
+      "statement": "Dashboard thread creation validates repository access and model/image choices, records thread ownership and visibility metadata, and appends a ThreadCreated transcript event when PostgreSQL-backed transcripts are enabled.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/threads/runs.py#L253-L371",
+          "version": "repo-lines-v1:sha256:5a8944d4e2ff543e94167d91bdb2db26b84a366cc7994b3718faf204a5b8eb1b:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE5LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI2ZWE4NjM5YmRhNDk4NmJiZWVhZTdkOTdkYzRmODkwZTQ5M2ZjMTNlZGMyMjQ3OWQzYmFjZWNmYjEyZmE2ODU5IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI2ODZjZTExNDIwNjlhZWViZDg0ZjE5Y2NiZTQzZWRiMWFlODNlMGRjNjljMDExNjVkM2NkNDNlZTJhMDRmNTVlIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiIwMDRiNGU1MDk2YzExZDExYjZhODUyMzBiNmEyMjk2MmViY2U5NGJlNTI4MTE4ZDcxZTM1YmU0MWZmMmI0YzFkIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJjMzIyMmE3ZTA5YjBmZWQzMDYyMTkzNjI1ZjUwMDI3ZDAxZjI1MDcwNDc4MzAzNmUyYzA2Y2VkZmVhYmU2ZDJmIn0"
+        },
+        {
+          "resource": "repo://openswe/threads/runs.py#L431-L502",
+          "version": "repo-lines-v1:sha256:05957092436c0c4f8ca88bccb07ea6c79b9b6ac89f859645cf190fd853cfeb1a:eyJzZWxlY3RlZExpbmVDb3VudCI6NzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRhODhhN2NhYWY4NGZmNjNmZTQxZGU3YjQ3YTVmNzI3MDZlYjRhZGYxNmQwZTE0MjI3YjYwNTU5ZjQ2NDg5YzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZiZjRkN2FkMDAyOWM5OTMxMTE3OWE1MTZmZjM2Yzc1ZTkwMmYyNzY3NzcwZDRjOTgxODhhNWRmYjU2ZmFhNWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI2NjMyMDNmMTZkMmE1NmQ4MjI4OGQ3MDVhYmIxNmI5YTczNGVjMWIwMDBmOWVmZjMyODc2YjFlZGMzY2NmOWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJjNTk0OGVlMTRlNzg0YzE2YWZhZGU2YWNiODMzYzAwOWQwOGQ0NWYyMTE0MTNiZGVhZmUyZjk3MmY0OWQxNTAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e8729ca145ca4f05a7309b157d73a6e9",
+      "statement": "Dispatch constructs structured, provenance-bearing RunInput envelopes and resolves canonical senders; run attribution is backend-controlled, while acting-user authority is granted only for a sender-initiated run or a verified channel conversation.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/dispatch.py#L124-L197",
+          "version": "repo-lines-v1:sha256:144fa3f349968cc2d10ae241b406e1290ffd250655f976cf9afb89fd933c7431:eyJzZWxlY3RlZExpbmVDb3VudCI6NzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBhMDE0YzJjM2MyMGQ1ZmFlOWE0ZGRkMDBkZmMyYWJlZTU1MDNmMzZhMzBmMjVlMDNhN2Q0MmQ4ZDg1YzNkZjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE5OGIwNjNkOWI0N2U2NTM3OTYyNTU3MmNjZTE5NzY2OWQ1NzY3ZTEyYzE4YmUwNzU2NTJiOGNkOTgxY2U4ZDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjczY2JjNjc0M2Q3OTk3ODJiOGEzYmRjZWRhNjlmMDQ1M2MwOGY0YjYyYzE0MjA2NDRkYThjMDhjNDEzNTA2YmMifQ"
+        },
+        {
+          "resource": "repo://openswe/dispatch.py#L370-L402",
+          "version": "repo-lines-v1:sha256:e7c7732063bb41d7f218841772929cb29b1f1588aae96c24d93f3208aeb2da50:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxMGJiOTllMTFkNDY4N2U4MjNmN2I5NjY1MjhhZjYxMmQ5N2VmZTY4YjYzNmRhYzgyNDUxNTQyNjQ5ZTBlMzUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjYWIxN2JkODQ4NjM0YzRiOTllZWYwZDk4MWExMzIxODFhNjNhYjRmMjY1OTZiZjA2ZTgwMGU3YzUzZjIwMjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkxZmJhYjUxYzczN2ZmYTIwNzdjZmMzYmFjYjM2ZGFmODg5MmRjYzU5MWNhMWZmZGUxMWRlMTVmMDMyNDM0Y2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJjMzkxMDIwZmM3ZWZhMDdkMDY5ODVjMmNiODNmNWIyY2JjNWVmZDg0YjBhZWQzZTM3YWQ0YmFjMTA2YmExNmQifQ"
+        },
+        {
+          "resource": "repo://openswe/input_messages.py#L377-L396",
+          "version": "repo-lines-v1:sha256:20487a6e5587928a70ab2d1ab2073179124327c7aa3e6b908d2d6005beb3eb73:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3ZDQ2NjIxNjkyNjJjZGFmMzAxNDhiOTFjZTNmOTViMDgwMzY5NmEzOTNjMGI2NzdiOTYwMzM3NTY1YjdkODEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxMWYwZTYyMjdjMGY2M2UyYjljNmI1ZGIyZTkyNDY3ZTdjZjUyZGFmYjg1ZGJjOTk1YzgxNWVkMDg1MWUwYjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY5NWRlODNlYmM5YjYzNzgzZGE4YWVmYTNhMzdhM2ZhODJiMGNiMWYzNmQ2NmExNTdhZmIxMWU1MWIxNDFhZjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhODFlOTViNzIxODI4YTY4ZGUzMDUzMjJmMDI5NmMwYTQzZjQ0NDgzMWM4NTE2ZGYwNWY2MGNmNDJkYzMxNTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_365edcfc1e19499d89ad6cf991a3c023",
+      "statement": "ThreadRouter uses the PostgreSQL thread index as the routing directory, creates ordinary new threads on MDA, routes MDA thread operations to the remote runtime, and marks a thread busy only after remote run acceptance; completion and reconciliation settle its status.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/threads/router.py#L1-L24",
+          "version": "repo-lines-v1:sha256:0495c5b850d2e0c382a733dd90f1a895cc12d05fe63f5298abe9c03a850db1b7:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRjMGJjZjdjNWRiYTc5YzViN2NlNmY1NjhmODVjMGNjOTJjZDU3Y2M2MmQzNzJjYTdkN2ZkZjE2NDA4MWQ0MzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJiNjIxMTk3NzFkOGI4YTIxZTVjZTA4M2I2MTY3MzQ3MmI2MzYzM2VjZmMxYWJmNTBkMjM4ZTNjZGE4NzE1ZmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhNjdmYjkyZjdmZjVhYzc5ZmU1MTc5YTYwMzk1ZDk4YjhkNjI4OGVkOGZiNmJlMGU3MzA4ZmIzNTk3YjYzYTAifQ"
+        },
+        {
+          "resource": "repo://openswe/threads/router.py#L329-L351",
+          "version": "repo-lines-v1:sha256:30e78db0b0f152fc75ca3a2f5e2adcd06f5d2b5029a9a68f0fa47f528b146387:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhiNDQzMGQ3Y2MzMzM4MjZhZTYwOTVkMTYyZTgwODBjMjkxODI0MTM0ZWNlOTQ4N2NhNGM1ZWU1NjEyNDIwZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEyMDg5MjY1MDZmNTRjNDE0ODFkNmQ2MWM5OTMzZTc0OWU3OWE2Nzg0N2EyZmI1ZDFhYzkzNmRmNGJjZTI2OWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ2Mzg0ODBjMDM0ZWI2M2FmYzQyNjk3ZDhmMTJmZGFjZWYzMjJhNzY2MWQ0NzM4MTY5OWI5MDMwOWU4MjVmNjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNiM2UyYjI5MjViNDg0MzcwMTU5MTA2ZjgyYTU1YzBiM2RlNjhlODEyNzBiNDgyOGI2NTk4ZDc3N2M5YTY4NzIifQ"
+        },
+        {
+          "resource": "repo://openswe/threads/router.py#L396-L452",
+          "version": "repo-lines-v1:sha256:6f924092ccd14d79b89e6d8d5cfdf25a4f481464bd2965521f0c6c579aa1cd3d:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQwNjY3ZjIwZWIzYTJkZWVhMDgyZDM5ZGE0NjhjZjlmYWUzNTNmYTQ5MjA2NjRjMTQyZWVjMGI2OTc5MWQ5ZjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQwYWUwODM2NWQ5MmY3ZDBjZGUwMGIxMWU1OTRiMTY2MDg5NDRjNWU4ZTAwNGI0MWM2YzcyY2NhNTU2ZjIwYjUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc0YjcwMmI2NjU3ODAwZWRjMThhNGU0ZjgwY2ZjYjQyMWQ4MjMxMGUwZDFjNzM2NWYwMjYyMzU0OTlkYWQzYjUifQ"
+        },
+        {
+          "resource": "repo://openswe/threads/router.py#L96-L107",
+          "version": "repo-lines-v1:sha256:be2bc8485471bb528b5bd14b690439ddb099dfc74a37d0f2dd521335935bd20f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdmMzU0YzU5NDU0OTI3NWU5ZjUyMTE2NTFlMGRiZTAyZTJlOTQ1MzNiNDk5MjE1NmQxM2U5MGM5MmZkYTBkNDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFiMmYwNzMyOTg1NTEzZjhjZTJkMDA5ZDBjMWI1YTM3MWQ3NDQ1MzkxMzU0MWUzODAzZGUyMzZjNzIyM2FjNjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQzMmE1OGM5ZGY1YzI1ZGQwYjQ5ZWFhMTdjNjQyNTdlM2RmZjNkNWVjMzg0NDM3YmY2MTkxY2YxMzIwMzAwN2QifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4f8e6ec75be14b22b325133823a42cb8",
+      "statement": "Channel-owned MDA threads remain their channel conversation: ordinary backend writes are refused, while runs and stop actions use trusted channel ingress; copying and crons are not allowed for those threads.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/threads/router.py#L114-L150",
+          "version": "repo-lines-v1:sha256:c23af8422659873d02ecdb60ca3541a75311379681f841d26fbf9718d65aba2f:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdiY2Q0ZDA3YjFmZTQwOWFiNDg2ZWVhYzg2MzNlMjYwMjAyZTVhMzdjNmMxODRkOGFjM2ZjNzczY2VmM2E4MjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5MzdlNmJiMmE5N2VkOGRhMjFmMzYzYjg2NzgwMTg0YTFmMGVlNzUzZWFjOTRjMDU3ZjM1NWE5ZTkzODI1Y2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImExZjE1MjhmNTA4MTkwYmMwOTMxYTNhMzQ1ZWVlYmM4MDczZjdjMDk4Y2QwZWEzNjhhNDlhMzViZGYyMThhNTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ1MGFkMDYxMGRhNTJiODFlM2E3ZWI1NTE4MGU5ZWJlZTY1NGJiNjllMzk5YTc5ZTM3MDJkNjJkZGEyZDAyODMifQ"
+        },
+        {
+          "resource": "repo://openswe/threads/router.py#L195-L225",
+          "version": "repo-lines-v1:sha256:996c1e0e789ce9a538d173aefcf5529e6570192deb09d5a740ec583d0c9179fb:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBkMzJhM2I3OWQxNGJjM2ZmMTBkNGM4MmE1OWNjZWRkYjEzMGIwNDgzMGJmNmY1M2ViYzYxMWIyYzgwNDA5NWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY0MzQzODI5MDE1NTUxM2M1NmViMzU5YzJiMzllZWI1NDc4NThjMGQyOTYwMTU4Y2RmN2NlODcxOWI4ZmNiYWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUwYjIxYmY4OTVmYWUyZDczOTIwZDkzMTc4Y2ZkNTg0MWNkZjhmOTUyNDUxNmM4YTU2NTg0MzZhNGFjNDhmM2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjczM2U4NDg3Yzg1ZGZkY2Y5ZmE3YjkzYzc0NmM5NDYyNWFlNDdlMTIwYzc5N2U3OTFlNzM3ZjllZDdmZmM3M2QifQ"
+        },
+        {
+          "resource": "repo://openswe/threads/router.py#L417-L431",
+          "version": "repo-lines-v1:sha256:39e8af14810f432aa8ec1e0aa088a52e13aad57daf340172bf3dc12a009b8da9:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwODU3YmUxNmViODkzZTk1MDU5YjA4MDRmMmViODQ2MjdlNmQyM2RhYTkzOGUxYWIzNzJlNjQzNmM4NDg4ZWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI4ZjliMmEwOTYwMDkzMDhkNzNhOTExYTIzNThhMjFjMDgzNDRmY2I4YzE3ZDM4ZDA4NjI3OTZiNjM4NTBmZmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM3YzFjYjAzMzM3NzcxYzkzYTdlN2M5OTlmNjAxNjYxZjNhNDNiMDdjNzlkOGQzNGEwZDdjZjNhMmM0MzdmY2YiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAzZTJjMTZkNWIyNWRmNmNhNGQxYmIwMTM4OTlmMWZjMzE3MzM2YjI4YzBkNTliODI1NTg1MDNiMmFhMjg3ZjgifQ"
+        },
+        {
+          "resource": "repo://openswe/threads/router.py#L487-L510",
+          "version": "repo-lines-v1:sha256:7e7c1b6139b2c9a299d16e6972049cb5f9198e5ba014846a2032b2279a876a97:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYxMTA5YWY1M2M4MGM5MDdhNzljNjA0NTJiM2FjYzEzMWFiYzVkMDdjMDlhODNjMWZlMjQ3ZjczNmJhODcxYjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNkMjU1ZTA1MWNiOGU3NWM1ZjBiYzY4MjQ4ODhiYTkwYTcxZjU2NzE3MjcyNjVlMzVhMDJjZGRjZTFhMWEzOGYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU0MDlmMmU0M2IzMjNmNDdiNGRkMDQ3NDIwNTM1YzM5YTQyMDU0NzlkOTY3YmM3NjU4YzIxZmJhMGZhMjhmMDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNkZTUwYzY4MWI4YTQyZmI4M2UyNmI4MmY4ZWU5ODFhOWYyZTk0NjIxMmJiOGZmN2JhZDViOGQzZmY4ODhjOTYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f33ca111a4a74b99941a5a449f3ff348",
+      "statement": "The shared durable dispatch contract defaults to interrupt and asynchronous durability, creates v3/subgraph streams, and conditionally attaches a secured completion webhook; interrupt preserves checkpoint-based continuation, whereas enqueue is an explicit background-work choice.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/dispatch.py#L1-L24",
+          "version": "repo-lines-v1:sha256:f01dcf9997d043b21206e634652e557e5a8257cce2130c3557ddbeb49d832f72:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlMzgxZGU4NjA0OWNiMjBhYmU5NmI2YWQyODlhMDI4OWJhZThmOTVhZWFlY2ZjNzUxNTI2ZDIwYTNiMmRkZDEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ3OTI0ZjA1YWI5OWE0ODUxMTM3ZjA1ZmZiZjgyNDhiZGVhZjNiNzc5MmJlM2FlZDFjZTBlNDhjMzdmMzJkOWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImIyZWQ3MTZhZmY0NmJiNmRlMjY5ZGIxMDJiZGI0NDJkY2RjOTc2ZmE4MWYwODg4YTA1ZmExYzQ3NGQ4ZjA1NGMifQ"
+        },
+        {
+          "resource": "repo://openswe/dispatch.py#L200-L246",
+          "version": "repo-lines-v1:sha256:d53908f8d0826d7ec2fa383aa07c6fbadf36e7a7efb8c2a9436ce7e14aa8d0f2:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRiZmFhNGI1OGZhYjdlZDE5ZDNjNDllMGYxZTVkNWZmZWU1YmYyZDBjNDJhYWZmM2FiYzk0YzI3ZjQyNDA2NjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhZmJhMDUyN2MzOTUzYzRiNmUwZTViNTczOWJhODM2MTJmODA1M2JjZGM5NDY2NzMwMTkzY2QxZDU5MGI0MDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ0ZmFkMDk4NTI0ZTNlOWE2MjNlMzE3ZjA1ZWE2OWE1NDc4MWZhODAzNTU3MjAyMTkyZjQ0OTYzYzYxNGJjNjkifQ"
+        },
+        {
+          "resource": "repo://openswe/dispatch.py#L405-L470",
+          "version": "repo-lines-v1:sha256:4ee2b2a24bf0bb52c9b2bfdac69544979836f4243173d790bc587848b6f36f82:eyJzZWxlY3RlZExpbmVDb3VudCI6NjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1Y2FiY2JkOGFkOTJhYTM0MGYyNjcyM2I2Yjk2YjlhNzEzOWIzYTMzNWU3MDM4ZTdhMDAwYTE0OTJkMmRjNDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNhOTc0YWU0ZjQyYzhkYzRmYzhjOGQyNWMxOTYwZDM1YmJiMzQ3MGRiZmVkZmVkMzE5ZWY4NGRjYTcxYzAzMGMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0Y2Q4ZjY1MWJkZGMyNDJkMzhjYWQyZjc2YjJjZTlmNmI2OWQ1ZTU0NWMyNzEyZWIwOWNkNWFiMWNlYTY5M2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMwNWUzMmI3YTA2Mzg3OWMyMmM5YTJiYzMyZjdhMWY4MDUwOTkwOTNlMjJlZWU0ZGVkYmE5M2M5NTM3MmRhNDQifQ"
+        },
+        {
+          "resource": "repo://openswe/threads/runs.py#L505-L542",
+          "version": "repo-lines-v1:sha256:1eb3ea66d0dc9ab76db83d1263b17b8ff50c983c6c06b9d28bbb99a3a3066fe2:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZiZDUzYWJjMWNlYzU3Yjg5ZTY3OGMzZDA1M2YyN2Y0NTU2Y2UyODFiYWNjYmVjM2Y3YWZlZWU3YjFiNjhlYmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzODkwNjE2ODVlMzQ2MzNlMjVjYzExNDhjYmYwYzMzNWQ0MDFhZTIyNzgzN2MxZjJlMGE5N2FkYzUxN2FkY2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI0NmVkMjBmMmZmOWU3MTE2ODgwNTJiMzEzZGVmZmM5YjRkYmE0MjA0ZGIxZDJkZDU3NTczYmQ4YTM5M2M5ZGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjljODc0MDk1NTEyYjQxMTBlNjE1YzU2M2M4ZTc3YWRhZmJiMjk2ZGZlNzFiNWQ4OWI0MTExNDU1OWRkYjRhOWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7e3a1db6a15c4e87af0175087e452b35",
+      "statement": "Before remote execution, the backend plans a catalog and signed token from immutable run configuration and metadata; MDA receives the hosted graph, token, and names-only catalog, and later uses the token to authenticate callback work.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/agent_api/client.py#L120-L153",
+          "version": "repo-lines-v1:sha256:3114fca5b7f388027437ff4de0414e6e2d5db060012e6a5fddebd7a315c54d7e:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI4NjIzMTU1MmQ1YTYyMjU5YzZkNGIwYzgyNmMxNWI0NmFjNWQ3NzYyN2E0ZGQ4ODc2Mzc4OWE4MzY4OTExNTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE0NzBlZTM0ZmU0ZGIxOGQ4MGM2M2RiOGQwN2ZlNGEwY2VkMzZlNWRlNDQ4YmQwNWMyMjczMmE0MjcyNGRhMTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE3NmEyZmI5MjMyZDY0ZjE1NTI2Njc1MTI1ZTc2MTAwNGI2MGY2YWNmZjNhYTM1MjQ5NDdkZTdmY2YxZDIxYzEifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/client.py#L39-L50",
+          "version": "repo-lines-v1:sha256:236c6b72fdb894cac5790b2e56a8f7eec66313425e9aeb9e07addc05fe9972c5:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlNDhkMWIwODVmMmEzMmVjZTNlMzgyOTY4N2E2NzI5YWM2YTg2NGJmYmQ4NjY4YzM3YmI4OTExOTZkMTc5ZDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFmMGNkYjk3MmE3YmZiN2VkMjQ2ZjlmZjY3MjM4NWU1NWY0OTY4ZmMxMTA0M2RjNWI2ODRkNTFkZmEzMWRiY2IiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwZmI3NTQ4NDZjMmI3NTJhOTk4NjliODczZTZkOTljOWNlNDRjOWEyZmEwNGRkYTM3MTM2MjMwNTdjZDZlNGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE5OGIwNjNkOWI0N2U2NTM3OTYyNTU3MmNjZTE5NzY2OWQ1NzY3ZTEyYzE4YmUwNzU2NTJiOGNkOTgxY2U4ZDUifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/graph.py#L449-L545",
+          "version": "repo-lines-v1:sha256:d281b8e8fec6355f51a03eacbcfde58078ff5625e189904fc85c9e840b3850d6:eyJzZWxlY3RlZExpbmVDb3VudCI6OTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAzZjJlMTY2N2NjY2E5ZjNmY2E1OWI1MDhhN2ExOGQ3OTQzNjIxOTIzMDExMDU0Mzk0OWE0NTQwYjZhNzNlYTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM3YWVhNzVhOTYzNGFmMmMyNTRmM2FjYTU2YjQ2ZGUwZWY4NWM4Nzg3MDAyYjE4ZDY2YzJhYzAxMzI5MzZlZjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYxMjU1NzcyNmQ2ZTMyMjk4YTc4YWZhMmZiYWMyNDJjNTJlMjA3NmUxNTE4OTY2NjgzOThlNmE1MGU4NzJkZDUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8fe3c49e2486415ab1b484ae316128b6",
+      "statement": "MDA's shared graph factory supplies per-run middleware for backend preparation, sandbox/files, reporting, skills, run tools, prompts, model limits, and subagents; the active run catalog determines the run-specific behavior despite graph sharing.",
+      "evidence": [
+        {
+          "resource": "repo://mda/agent.py#L120-L170",
+          "version": "repo-lines-v1:sha256:1e0e2311b4d3678388e3dcc0d7b97f9c673bd7efa98bc4e6b64ab6af79ad599f:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc4ZDE1YTUxNTc3MDBkMTNhNmFmYTM2NDA5Yzk1ZWY4NDc0YTIwY2MzMDUyNWUwMzhkM2FkOTIwMmFlODAzNzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA2Mzc3MGRmOTI3YTFkMzEzODcxZjI0ZTcyZWJiNDZjNzFjZmE3MWUzNzRjYzk4NTc4ZDc0ZWJjMDkyNmFhNGIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE5OGIwNjNkOWI0N2U2NTM3OTYyNTU3MmNjZTE5NzY2OWQ1NzY3ZTEyYzE4YmUwNzU2NTJiOGNkOTgxY2U4ZDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcwY2UzZjI0YWI0N2MyZjVhOWQzMzdmMzc3ZWQ4NTczZmE1NjU4NDA3NjQwMmYxYWYwNTRhM2RlZDYxOTQ2MmYifQ"
+        },
+        {
+          "resource": "repo://mda/agent.py#L212-L333",
+          "version": "repo-lines-v1:sha256:0362e6049623e7029d4ebbf477547bdbc048d60c29166bcf3f72ebeadf858182:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIyLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIyM2VkZmEyN2UwMTRhNjNlMDU5NjgxYTlmNDFiYzE4NTEwYTEyM2RjNDFhNWU0OGFkMGUyZTZkMTdhYmIzZWIxIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIzMGMxZjE4OGYxNDJlZDdhODI0NjgwYjIwNzE3MmM1NTE5YmM2MTRhNDhmZGE3Y2YxNjdlZGI4ZGRmNzk5NTZjIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI4Y2M0YTdkMWNjNzk2YWJhM2U0NjcyMzMyN2Y1MTdlOWY4MTE5ODJkMjUwZjA3MDI5ODZlNGI1NzY0YWQ5NTg5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_afe4bd8032de4a39924496158d8f74b8",
+      "statement": "Before each model call, the MDA loop can stop on held state or a pending client tool, obtain task context and GitHub proxy refresh, restore visible guidance after summarization, choose a route/model, and build the prompt and hidden-tool set; after a tool-free answer it nudges for required results or replies.",
+      "evidence": [
+        {
+          "resource": "repo://mda/rt/loop.py#L300-L423",
+          "version": "repo-lines-v1:sha256:c2837e629e9b186664a4c05ec008fabe23d15c086ed5a0b59c86f33d479def5c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTI0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJjNTU3MDgzYjJiZTYzYjk3ZWZkMjEzNmQ3OTVmNmFlZGE5ZjY4YWVkODY2YzU3OGI0MDExOWI4ZTJiZGIwMTU2IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI1OTA5YTUzYTYxOGQwMjhlMWQzMDAwYzBhN2FiY2VlY2JlNWZiMzdmNGU1MTFlZmU0NjY0M2ZhZDZlNjY4NzJmIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJjMzMwMDUzMDBlNWE5YWEzYzQ2NmQ3ZTc4MzcyOTJlMzAzODE5MGVkYmQ0YTY4ZTk3NjA3ODI5YmZjYzgwODk2IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJhMzcyOWUyOTc2M2Y5MzEwNmJmMzE3ZDZmZGRlOTFkMTIxMzQyYTg2OGZiZTdmNDNiN2UxMGM1ZTkxYTJkNzYxIn0"
+        },
+        {
+          "resource": "repo://mda/rt/loop.py#L425-L544",
+          "version": "repo-lines-v1:sha256:a9c11a1ce328cf100445325dc037f71ac1efbae989ae36210feef32ea3beca7e:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJkZTMyZmMxM2QyZjg5N2IzNGNjMGQ0MWQyYzg0NTgwNWE2MGQ5ZGIwNWJhNjc5YzVjZGU4ZDExNGVlZWUyMzQ5IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJhN2I4ZjI1ZDhjM2E2YjU1NzBlZjdiMDRkNzA4OGJjNGQ4YjU0NjMzMWI1YWNhZDFiN2QzNWVkNTI1ZDM0Y2U5IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJkZWFiNmM0OWYzMDUwZWVjZjMwZjg0ZTU0M2ExMGZmNjc4YjNiNmEzYzJiNWMwYzRiNzI1MGQwZTA1YWU1NjU4IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlODQzOTc3M2E0NWY4MjhmZGQ0ZDk4ZDc2MmQ2YzhjZmVjMTlmYmU2MTg0MWMxMzMyZGJlMTdlM2Q3NzU1OWY4In0"
+        },
+        {
+          "resource": "repo://mda/rt/loop.py#L546-L659",
+          "version": "repo-lines-v1:sha256:4cc476a787c14a09190654073abe224c41713dc1f3c0469a7c55e3f789f1a83f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI2NzlhMmZlNTZkNzQ3M2NiYjY2ZTkwYTM3YjBjZjIwY2U5YWExOGFhNGRkYTM4NDEyYzhmYzQzMzdlZjEzNTQyIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJiY2U4MDVmMTczZjhkMGQ2ZGMwMTBlNDcxZjUwMTE1NTc4MDU5YWE3NTFkM2NkMGY1NDcxNTYzYWJjY2JhYTFhIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJhZDg3YmU5MmNhZTBlYzljNWZkYzQ5NDBmYmJhOWEwYTMyNjRkN2YzOTc5NmU5NzNiMGIzYmExZjEyZWU5ZmI2IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIwMGI0ZDFkNGNhZDUxZTg4NzdhNjVjNGU3N2MwN2I1MDkwOWVmNDliZmJlZjc2NGUyZDYyOGVhNzRhZmJjY2M2In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_a1d4ee5ccc7a421cb22d814d402eb937",
+      "statement": "ThreadInbox reads queued follow-ups, task messages, and event matches before model calls without consuming them; items are removed or marked received only when MDA acknowledges receipt, so an ended run leaves unacknowledged work for a later run.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/threads/inbox.py#L1-L13",
+          "version": "repo-lines-v1:sha256:0ce746bf2448d4bfbd9490a70c31cec3a55c1ca3a8bde8a785d61bc6763dc4a6:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFjOTE4NmU5OTRkYTg3NzEwMTEyNWJkOWNlZDUyMzgxNjViN2UzZmEzMjE2ZDRlYzA1Y2JhODFlMGEzNDNlY2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlmMDkwNjBlYTcxMWYwYjdkYjYxMjAzOWJkODRjMTk5YzlkYzEzMDk2NWRhNzk4YTNmYTYwZTViYmVmMmQ5YzgifQ"
+        },
+        {
+          "resource": "repo://openswe/threads/inbox.py#L186-L251",
+          "version": "repo-lines-v1:sha256:44fee6c913708e1a7626dd7b195f8736ab8df82a4ccfe855986fcf8d8d87f2a2:eyJzZWxlY3RlZExpbmVDb3VudCI6NjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ0MGNhZDNjMTRkZjY0YWY0MDdlNzFjMjc5ZjJhNTc2YmYyNGVkNDg5ZmQ3MjJmMTZmNWQzZGViYjAyZTYxMWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE0ZTdjNmVkMWUxMTJjYTlmZWE5NmZkMTYwYTdhZjNiYTgyNGVkZmVlOTUyNDE5OTMxN2RkZGUxZmFmMzE4NzAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImVhYjZlMGFjNThjMzAzN2ExOTJkMWViYjZjMGM5OTI5MmIzODMxNzFkYWU0Yjk4MjIyMDJiM2Q4YmVmMmFjNDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE5YTE2NWIwMWIxYjEzZTRmMzNmNGRlYTdkYjQ4YTY0MDI2YWFkNDllODVhMjQ1NGNhYjJmMTFlMzhkN2NjZjYifQ"
+        },
+        {
+          "resource": "repo://openswe/threads/inbox.py#L253-L360",
+          "version": "repo-lines-v1:sha256:dc5332d9d5e54fbedfd3d71b7989ebadfc2c8d0e394a9c4becd405a9fd929214:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA4LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI4YTRiOTViYjBkMzA4ZDNkNThjN2YzZjZhYzMxOGY3NzdkZWE1MmY2ODNiNzdhNWI5MWU4NjQwYmJjYjk0ODNjIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI5MWVjYzhiMjljNzNmMDM4MzVlNTQyMWJmOGQzMmVhNDRkZWQ4NWJkMTFhMjkyYjlhNGNiNWRmMTMxZTY5M2Q4IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiIwMzYwN2QwNGE3ZDQ2N2U0OTE4YTcyMTIzODZhNDgwZDJmMDA0NWM5OTQyZGYxMGMwYWI0OGJmODI3ZTEzMjc4IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_da80362be881492ea9a27d961b931541",
+      "statement": "Completion starts an empty-input follow-up pickup only after successful non-pickup work and uses reject so it cannot disrupt a concurrently started run; failed and pickup runs do not recursively retry identical leftovers.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/completion.py#L465-L491",
+          "version": "repo-lines-v1:sha256:964b333dfd9941de6c8a967a9f3ef20684d6cc38461dfacc888917e846ec4af7:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ5MDY2ZDNiOWU5YzkwNWRjNWRiNmY0ZThjZGQ3Y2NiZGExODEwZmI5NWNkYjcxODE5YmVhNGU0MzFkYmVmMmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImYxZjc1YzQxMjUyYjgyMjkzY2Y0YjRiYTdiZGUzMGE4MzhiNzFiNzMzZGYzNTUzOWFkNWExZjUyZTU1YTJlNjEifQ"
+        },
+        {
+          "resource": "repo://openswe/completion.py#L521-L576",
+          "version": "repo-lines-v1:sha256:2c809912dc3495e60437d179e525ad3efcfe80dc2b547d4fbe722a86ff86c026:eyJzZWxlY3RlZExpbmVDb3VudCI6NTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRiNzYyMzBhYjI4NjRkNTU0NjljZDNiMjc1OGNlOWRmZWJiZjYxZThiYWI0YzgxNWVmZGQzOThhNTI0NWI3NWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJhMDI5Zjc5MmM5ZDlhZjc2ZGQ0YzIxMTgxOTVlODM0ZTNlYzc3ODIzODgxMmRjNjhhMGQzNzcyMjVlZmIzNDUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJhZjA3MDY4YzU1NzNiYWE2NTFmMWFhMWQ0MzU2NmI0Yzg4OTI4ODQzOTg2MmFhOTZiNGNkNjkzOGQ4ZmQ4MDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjUyNWZhMzljNDBiMDJlYzcyMzA1NmE2YzlkNThhZWI5YjYzZDMwOWNjYmY3NDUwYTA0MGU2ZmU3MDVlMjVjNGEifQ"
+        },
+        {
+          "resource": "repo://openswe/threads/runs.py#L1483-L1512",
+          "version": "repo-lines-v1:sha256:4bbe44c6f998f13b7dfee9a345147bad0219814c9fc67d504a1c97b4c8b72ea8:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImExNTUwNWZiMDY5M2QxYmE5NDQ5ZGJiN2M2NDVkNmY2MTk1ZWM5ZGNhYjFkYWIwNWRkZTVjNWVmNjgzZGI3NTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEwMDYxZjYwOTFjZTAwMzYwYzViNWYzNzBhYmM1MGU4NjhiODg2YThmODY3MTA3NmIzNjhiY2FjMGQzYjcxNGUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk5OTAxOWZlMDg1ZGU0NjQyZmM4YWQ5MzQ3YWQ3NmZjMjA4M2NmY2VhY2U4OTRhMGUwMzU4YTQ0NzQ0MWUwNWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_174f6a53ce7249b4b22468f97a036cb7",
+      "statement": "MDA's outbox batches ordered reply, tool, inbox, and notice reports; it retries until acknowledged, persists unacknowledged entries in checkpoint state under stable keys, and lets a restarted process or later run resend checkpointed reports idempotently.",
+      "evidence": [
+        {
+          "resource": "repo://mda/rt/outbox.py#L165-L266",
+          "version": "repo-lines-v1:sha256:b4a8b821f7a2d1391e8cb42509a624284bea560e031f4c2276454c0b38ba784a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAyLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJkNjgxZjBjNzY2YzQ0ZWM4ODczYjNmN2M0MDU4YWMwM2I0NzY4OTkyYjFiZjU4MmM1MTA1YjliN2Y4N2E1YWRjIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI5YmZhMzMzNDBlOTQ5NjdiM2QzMGNkYzk1ZTM2ZDcyNzQ4MmRjYjNmYWI5ZDMwNDdjODEzYzRjMzYwMTg5ZjA0IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiIzZGE0M2YzZTY1NzI2MDI3ZjgwYmVkZTZhODk5ZDNlMjIwOGY4NTc1ZDFiODYyNDVmYTMzMGZiNjI3MGZlM2M2IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIzYTZjYjkxM2VhNTZmN2I4ZTUzMDEzZWM5MzNkZTZkZWM5MDc3ZTEwMzM2OTMyZDc3OGU1NWEyMDA4ODEyOGY5In0"
+        },
+        {
+          "resource": "repo://mda/rt/outbox.py#L2-L18",
+          "version": "repo-lines-v1:sha256:9ff89e8bd55c187dd1fecc78fec16a8263871927324f8a91439457214604d1d2:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE5MWQ1OTc4OGIzNDUxYzA5MWUzOThiNzgzZGU2YWFmOTUyMjA2MzEyMzlhODkzNGFhOGRmZGU3MzQxNGJiOWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjoxLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU0NTU0NDQwZTdkZDIwYmQ2YmFmZTM5MzFiY2RiZDc3ZDk2YWNiZTJmMjZlZDc3ZTdlM2I4NzViZTM5NDY0NzEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhNjdmYjkyZjdmZjVhYzc5ZmU1MTc5YTYwMzk1ZDk4YjhkNjI4OGVkOGZiNmJlMGU3MzA4ZmIzNTk3YjYzYTAifQ"
+        },
+        {
+          "resource": "repo://mda/rt/outbox.py#L322-L383",
+          "version": "repo-lines-v1:sha256:f7fd03431fe2679d173e52c4237d4457104bbcbf18b1ba72c332c183ad6817a1:eyJzZWxlY3RlZExpbmVDb3VudCI6NjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFjNDBmZTE4MzBiY2E0MjE3NGU4ZmNkOWQyYjBjMTlkNTExMzRhOGFmN2RhYTNmZTM2NTgxNzM5NmEyNGEwMzQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3YzY2MWFiOGExOTVmYzE0OTI2Njk3ZmU2ZDExNmU2YWE1ZWUzNjRkNzk0Nzc1NDAyNmI2NmQ3ZWEyNTg0NGUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjEzMTdiOThmYzRhN2UxNjJiYmJlNzJhNzhmMzBlMmRmZjkwZDhkMTZkYTBiMmZkNmY0YzlmYTA2MzkyMWEwZDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://mda/tests/test_backend_calls.py#L800-L890",
+          "version": "repo-lines-v1:sha256:5387e07a4d6ae73660ca206ab6edfffd8d8a72265d6d7fe7092f3a4a6657aeec:eyJzZWxlY3RlZExpbmVDb3VudCI6OTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRhNjg5ZDZkMzIyZDA0Y2E4ZjdkMGFmYTg0MjYzMWEyYjJiNDhhMGUxMTYzZDNkMGIwNDg5MjViZjA2YzcyNGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY5NDUzMjg2NjYzMmQ1YjUwNGU3YjFiNjRkZTVhZTY3MGU1YTY5MWU4NDFmNzkxZDkwM2JlM2ZmYzExMTk5MWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwZDQ4ZjM4NjQ2M2I0YWZlMWU3MjczM2RiYjI5NDllODZmNjY2ZTgyNjhjYzE5NDcyZmUwMWE2ZjVjYjlhZjciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdkY2FiM2Y5MWZhYmVhNDc4MjYxODIwNTI1MjBjYjNjZmYzZmRhNzE4ZTc0NjliZWQ4MTU4ZjA4NDMwOGI2ZmMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_0f1fbf2b33b84ad9ba3f09aeded29d83",
+      "statement": "The completion handler refreshes status, settles transcript turns for success, interruption, and terminal failure, finalizes telemetry, and posts deduplicated source-specific failure replies only for error or timeout; interruption is intentionally not a failure notification.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/completion.py#L434-L462",
+          "version": "repo-lines-v1:sha256:cbcb7c2fd013a720083075a9e033f20ee7215ca577d0182f1beae031920390b2:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJiMWVhYjI1YzE2MDQ1NWM1ZTNjZGVmODgxNDc4NDkzMDY5MGEzZDU5ODMxOTA0NmFhOTk2ZjVkN2Q4YjY4ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNmNWVjYjc3ZDBmOGJmM2Q1MWY4NDliNWNiMWIwZGVkNmZiNWJjMmU0M2I2NzRmMjU0MWQ0ZWRhOTFhMmMwMDQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjczZTdhYWRiNDExNTg5NTEzMjBlOTJlZWQwNTEzZjhiZTQxNmIyODU3ZGFmY2JiZTUzOTRiNmI5MmJiZDBlZDAifQ"
+        },
+        {
+          "resource": "repo://openswe/completion.py#L521-L585",
+          "version": "repo-lines-v1:sha256:4a8f2e3a95e20a7033d7d91414dfdc4fa177144aba2499587b8a046f016e6f64:eyJzZWxlY3RlZExpbmVDb3VudCI6NjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRiNzYyMzBhYjI4NjRkNTU0NjljZDNiMjc1OGNlOWRmZWJiZjYxZThiYWI0YzgxNWVmZGQzOThhNTI0NWI3NWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIxNTQwZDNhNDIxMTRlOTBkMWY4YzBiODdiNjM2ODQzZGVjMDE2NmJiOTIxNGFlMmQxMDhlOGRkZDJmZTQyNWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJhZjA3MDY4YzU1NzNiYWE2NTFmMWFhMWQ0MzU2NmI0Yzg4OTI4ODQzOTg2MmFhOTZiNGNkNjkzOGQ4ZmQ4MDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAzZjBhZWJlZmJmMzFlNjMyNmY3NmMzYmZlZDVmYzUxYWVlNDI0NDhmNWI0MWNkOWI2MThkZGJiMDE4MWRlODAifQ"
+        },
+        {
+          "resource": "repo://openswe/completion.py#L605-L694",
+          "version": "repo-lines-v1:sha256:32251e3b715aa0a951c1e786cc9887ea6c3334189e9436991576157e77c48721:eyJzZWxlY3RlZExpbmVDb3VudCI6OTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA5NGQ5MGU0ZjBkZTYxMjljODJkN2FmMDU0NGQ3ZTE2OGNkNTU0ZDg4ZmI5NDYwZTMwY2M1MGUxYTFkZWQyMTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRjNzFlMTkxOTA0MzA0MGIzNGNmNDk1NTVlYmY5ODAzYzA4OTVkN2M3MGFjYWYwODM5Y2M1ODYxM2VmMWYwNmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg5NzFhMjBkNmQyZTQ3YzcxMDFhYWRkMGI0OTNhZmIzMmE1ZjA5YmE3NTA4Y2MzYjEyMzY2OWJkY2YxOTA3NzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://openswe/completion.py#L63-L106",
+          "version": "repo-lines-v1:sha256:193f5441ee52a0293129903ee274e351126a0be1434b0caabc24785d3bee3037:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc0YzlmNmMyNDA4ODUwYWI0ODZiNmUwMDA1ZmZjNTI5NzEyMGRmMjg2NTlmNjI2ZDRhNTU0NThmOWM2NTBmYzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjViNzQxZjFkNDliZGVkOWQyZGU3ZjY2ZDU5Nzg0OTYyZWMyOTZiOGQ2ZDBkYTI3YTFmYjE2NWM3ZTZhYzk3N2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImExMDkwYjEwYjY3YjJjMGJkYTgxYTNlNjRjZjBmNjE0ZTZiNzJmNWViZjMxMjE1YWMzODg5NmJkZWE3MjQwYWYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ae786ddac4b8492e95f8c3eb2b55b94a",
+      "statement": "Durable-dispatch tests verify async durability, interrupt strategy, webhook attachment, v3 streaming/subgraphs, invocation metadata, and the distinction between attribution and acting-user authority.",
+      "evidence": [
+        {
+          "resource": "repo://tests/agent/test_dispatch.py#L110-L166",
+          "version": "repo-lines-v1:sha256:2eca0cd766849a41f04203be39102d354d9e8868ddcfab89b1488546b4e6a43b:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBkNDdjMjBlY2RlNTkzYzY0NjY4MmU3MWJmZjk4NmRlZWUwNDliN2VjZmExODE1YmU5ZDhlZWVjMzRjMjM3YWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcwYWZkODU5MGNiMmY2MmZkYjM0OWQyZTY3NzhjNzIzOTRmNGQ0YzczZDc3ZmRkYTg2ZmVmNzdkYzEzNGUzODYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlkNDQ5YjFhZjQzNDQyOWNjMjkyZDFlMmI5MWE4YmJmYWMwMWQwOTE4ZjQwOWVkN2NjYzg4ZGUyZDkxZTI1NTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNjNmJkYjk5OTk2OTcxMzgxMjI3MjBiOWI3NDAyMjBlODZmMTRlMjg1NzhiNTI2N2U2YmIyZjIyYjJiOGY1OGMifQ"
+        },
+        {
+          "resource": "repo://tests/agent/test_dispatch.py#L49-L107",
+          "version": "repo-lines-v1:sha256:f02065337e150240c3043d67ee69e29b874f8367e11f2bff57f119d2c7f2a81d:eyJzZWxlY3RlZExpbmVDb3VudCI6NTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJlNjYzOTYzNDhhNjM2ZjJjMDZiNjFjMTE0YWI1NDA3NjVlYTU5NTAzOWIzZDgxMTFlMjNmNTNlMTYwZDU0YjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMyNWFmMTRmNjc3MmUxNThiNDVhZGNlYTRmZTY3YTM0YWU5NmVhNDQ2MzBmZGExYjhhN2UyMDJiODBkMmZkMTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAwNDBlODI2ZDRiMjFmNWFhN2M2ZjRlNDAwY2YxNTRlMjA0YTViMjc2NGI0NDk1YTQ2MjhhMGY1OTZmYzM4ODMifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-10-31T08:08:21.705Z"
+  }
+}
