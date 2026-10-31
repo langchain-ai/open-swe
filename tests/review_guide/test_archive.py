@@ -11,6 +11,8 @@ from openswe.review_guide import sessions
 from openswe.review_guide.github import PullRequestHead
 from openswe.review_guide.sessions import ARCHIVE_JOB, ReviewGuideSession
 from openswe.review_guide.walk import Walk
+from openswe.slack import code_channels
+from openswe.slack.http import SlackRequestError
 from openswe.users.models import User
 from openswe.walkthrough.plan import Plan
 from openswe.walkthrough.record import Walkthrough
@@ -18,7 +20,7 @@ from openswe.walkthrough.record import Walkthrough
 pytestmark = pytest.mark.usefixtures("registry_db")
 
 
-@pytest.mark.parametrize("changed", ["none", "resumed", "head", "unfinished"])
+@pytest.mark.parametrize("changed", ["none", "resumed", "head", "unfinished", "status_failed"])
 async def test_completed_review_archives_after_a_day_unless_review_resumes(
     monkeypatch: pytest.MonkeyPatch, changed: str
 ) -> None:
@@ -56,7 +58,13 @@ async def test_completed_review_archives_after_a_day_unless_review_resumes(
     monkeypatch.setattr(sessions, "fetch_head", AsyncMock(return_value=head))
     archive = AsyncMock()
     monkeypatch.setattr(sessions, "archive_code_channel", archive)
-    monkeypatch.setattr(sessions, "set_session_status_result", AsyncMock())
+    monkeypatch.setattr(
+        code_channels,
+        "set_session_status_result",
+        AsyncMock(
+            side_effect=SlackRequestError("is_archived") if changed == "status_failed" else None
+        ),
+    )
 
     before = datetime.now(UTC)
     await session.save_walk(walk, finished=True)
@@ -74,8 +82,9 @@ async def test_completed_review_archives_after_a_day_unless_review_resumes(
         assert await WORKER.run_due() == 1
         session = await ReviewGuideSession.get("thread-1")
         assert session is not None
-        assert session.closed == (changed == "none")
-    if changed == "none":
+        assert session.closed == (changed in {"none", "status_failed"})
+        assert await queue.get(f"{ARCHIVE_JOB}:thread-1") is None
+    if changed in {"none", "status_failed"}:
         archive.assert_awaited_once_with("C1", summary_message_ts="")
     else:
         archive.assert_not_awaited()

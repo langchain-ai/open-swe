@@ -22,7 +22,7 @@ from openswe.github.repositories import Repository
 from openswe.jobs import queue
 from openswe.review_guide.github import fetch_head
 from openswe.review_guide.walk import Reader, Walk
-from openswe.slack.code_channels import archive_code_channel, set_session_status_result
+from openswe.slack.code_channels import archive_code_channel, set_session_status
 from openswe.slack.http import SlackRequestError
 from openswe.users.models import User
 from openswe.utils.json_types import JsonObject
@@ -193,8 +193,8 @@ class ReviewGuideSession(Base):
         except SlackRequestError as exc:
             if exc.code != "already_archived":
                 raise
-        await set_session_status_result(self.slack_channel_id, "closed")
         await self.set_closed(True)
+        await set_session_status(self.slack_channel_id, "closed")
 
     @classmethod
     async def get(cls, thread_id: str) -> Self | None:
