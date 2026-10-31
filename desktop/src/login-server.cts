@@ -8,7 +8,7 @@ function page(heading, detail) {
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>${heading} - Open SWE</title>
+<title>${heading} - Agent Workspace</title>
 <style>
   :root { color-scheme: light dark }
   body {
@@ -32,21 +32,21 @@ function page(heading, detail) {
 
 const SIGNED_IN_PAGE = page(
   "You're signed in",
-  "You can close this tab and return to Open SWE.",
+  "You can close this tab and return to Agent Workspace.",
 );
 const FAILED_PAGE = page(
   "Sign-in failed",
-  "Open SWE did not receive a sign-in code. Try again from the app.",
+  "Agent Workspace did not receive a sign-in code. Try again from the app.",
 );
 // The app still has to redeem this code, and that can fail — so this says
 // what actually happened here rather than claiming the account is connected.
 const CONNECTED_PAGE = page(
   "Approval received",
-  "You can close this tab. Open SWE is finishing the connection.",
+  "You can close this tab. Agent Workspace is finishing the connection.",
 );
 const CONNECT_FAILED_PAGE = page(
   "Connection failed",
-  "Open SWE did not receive a code. Try again from the app.",
+  "Agent Workspace did not receive a code. Try again from the app.",
 );
 
 /**

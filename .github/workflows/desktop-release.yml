@@ -43,12 +43,12 @@ jobs:
             version="${stable_version}-nightly.${timestamp}"
             tag="desktop-v${version}"
             prerelease=true
-            label="Open SWE Desktop Nightly ${timestamp}"
+            label="Agent Workspace Nightly ${timestamp}"
           else
             tag="desktop-v${stable_version}"
             version="$stable_version"
             prerelease=false
-            label="Open SWE Desktop v${version}"
+            label="Agent Workspace v${version}"
             if git rev-parse "refs/tags/${tag}" >/dev/null 2>&1; then
               cli_assets='[]'
               if git cat-file -e "${tag}:cli/package.json" 2>/dev/null; then
@@ -279,7 +279,7 @@ jobs:
           sha="$(git rev-parse HEAD)"
           {
             printf '## Desktop and CLI release\n\n'
-            printf -- '- [Open SWE %s (%s)](%s)\n' "$VERSION" "$channel" "$RELEASE_URL"
+            printf -- '- [Agent Workspace %s (%s)](%s)\n' "$VERSION" "$channel" "$RELEASE_URL"
             printf -- '- Downloads: signed macOS app and DMG; CLI archives for macOS and Linux (arm64/x64), with checksums\n'
             printf -- '- Release commit: [%s](%s/%s/commit/%s)\n' "${sha:0:12}" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$sha"
             if [[ "$PRERELEASE" == "true" ]]; then

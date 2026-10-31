@@ -89,8 +89,10 @@ class ProfileUpdate(BaseModel):
     auto_human_review_enabled: bool = True
     concierge_mode: bool | None = None
     pr_failure_reactions: bool | None = None
-    experimental_fleet: bool | None = None
     experimental_memory: bool | None = None
+    experimental_agent_workspace: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_background_callbacks: bool | None = Field(
@@ -119,6 +121,8 @@ def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     value = dict(profile)
     value.setdefault("auto_human_review_enabled", True)
     value.setdefault("workspace_default_repos", {})
+    if value.get("experimental_agent_workspace") is None:
+        value["experimental_agent_workspace"] = True
     for field in RETIRED_PROFILE_KEYS:
         value.pop(field, None)
     return value
@@ -162,6 +166,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),
         "review_draft_prs": update.review_draft_prs,
+        "experimental_agent_workspace": (
+            update.experimental_agent_workspace
+            if "experimental_agent_workspace" in update.model_fields_set
+            else existing.get("experimental_agent_workspace", True)
+        ),
         "experimental_background_callbacks": (
             update.experimental_background_callbacks
             if update.experimental_background_callbacks is not None
@@ -408,7 +417,6 @@ async def put_my_profile(
         UserPreferencesPatch(
             concierge_mode=update.concierge_mode,
             pr_failure_reactions=update.pr_failure_reactions,
-            experimental_fleet=update.experimental_fleet,
             experimental_memory=update.experimental_memory,
             experimental_act_as_approval=update.experimental_act_as_approval,
             # Switching approval either way starts over from asking every time.
@@ -420,7 +428,6 @@ async def put_my_profile(
     if preferences is None and (
         update.concierge_mode
         or update.pr_failure_reactions
-        or update.experimental_fleet
         or update.experimental_memory
         or update.experimental_act_as_approval
     ):

@@ -33,7 +33,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
 import type { DesktopUpdateState } from "@/desktop"
 import { api, type SessionUser } from "@/lib/api"
-import { useProfile } from "@/lib/profile"
+import { useProfile, useAgentWorkspacePreference } from "@/lib/profile"
 import { AgentWorkspaceProvider } from "@/features/agents/lib/agentWorkspace"
 import type {
   PullRequestSnapshot,
@@ -190,7 +190,7 @@ export function AgentsSidebar({
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
   const profile = useProfile()
-  const agentWorkspaceEnabled = profile.data?.experimental_fleet === true
+  const agentWorkspaceEnabled = useAgentWorkspacePreference()
   const newThreadShortcut = useShortcutLabel("mod+n")
   const concierge = useQuery({
     queryKey: ["concierge", user?.login],
@@ -690,7 +690,10 @@ export function AgentsSidebar({
 
       {agentWorkspaceEnabled && (
         <AgentWorkspaceThreadList
-          items={allItems}
+          items={[
+            ...pinnedItems,
+            ...sortSidebarThreads(threadItems, "updated"),
+          ]}
           activeThreadId={activeThreadId}
           compact={prefs.compact}
           onNavigate={layout.closeOnMobile}
@@ -1359,7 +1362,7 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
-  const agentWorkspaceEnabled = useProfile().data?.experimental_fleet === true
+  const agentWorkspaceEnabled = useAgentWorkspacePreference()
   // `useMutation` returns a fresh object every render; only `mutate` is stable,
   // and an unstable command array re-registers on every commit.
   const pinThread = usePinAgentThread().mutate

@@ -5,7 +5,11 @@ import type { ReactNode } from "react"
 import { afterEach, expect, it, vi } from "vitest"
 
 import { api, type Profile, type ProfileUpdate } from "./api"
-import { usePatchProfile, useProfile } from "./profile"
+import {
+  usePatchProfile,
+  useProfile,
+  useAgentWorkspacePreference,
+} from "./profile"
 
 vi.mock("./session", () => ({
   useSession: () => ({ data: { login: "alice" } }),
@@ -14,6 +18,7 @@ vi.mock("./session", () => ({
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  Reflect.deleteProperty(window, "openSweDesktop")
 })
 
 interface Pending {
@@ -59,6 +64,7 @@ function renderTwoPages() {
   return renderHook(
     () => ({
       profile: useProfile(),
+      workspace: useAgentWorkspacePreference(),
       a: usePatchProfile(),
       b: usePatchProfile(),
     }),
@@ -124,4 +130,32 @@ it("does not resend a failed save's field with the next one", async () => {
       review_draft_prs: true,
     })
   )
+})
+
+it("defaults the desktop interface on and applies a persisted opt-out", async () => {
+  const requests = mockServer()
+  Object.defineProperty(window, "openSweDesktop", {
+    configurable: true,
+    value: { isDesktop: true },
+  })
+  const { result } = renderTwoPages()
+  await waitFor(() => expect(result.current.profile.data).toBeDefined())
+  expect(result.current.workspace).toBe(true)
+  act(() => result.current.a.patch({ experimental_agent_workspace: false }))
+  await waitFor(() => expect(result.current.workspace).toBe(false))
+  await waitFor(() => expect(requests).toHaveLength(1))
+  act(() => requests[0]!.resolve())
+  await waitFor(() =>
+    expect(result.current.profile.data?.experimental_agent_workspace).toBe(
+      false
+    )
+  )
+  expect(result.current.workspace).toBe(false)
+})
+
+it("keeps the browser coding interface regardless of the desktop default", async () => {
+  mockServer()
+  const { result } = renderTwoPages()
+  await waitFor(() => expect(result.current.profile.data).toBeDefined())
+  expect(result.current.workspace).toBe(false)
 })

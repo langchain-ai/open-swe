@@ -122,7 +122,7 @@ async def slack_callback(
         _clear_slack_state_cookie(response)
         return response
 
-    session = require_session(request)
+    session = await require_session(request)
     nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(SLACK_STATE_COOKIE_NAME)
     if (
@@ -160,6 +160,8 @@ async def _link_slack_identity(
     session: dict[str, Any], *, slack_user_id: str, email: str, team_id: str
 ) -> None:
     """Attach the Slack account to the person the session belongs to."""
+    if session.get("provider", "github") != "github":
+        raise HTTPException(403, "LangSmith accounts cannot link Slack identities")
     github_login = session["sub"]
     user = await User.for_session(session_user_id(session), github_login)
     if user is None:

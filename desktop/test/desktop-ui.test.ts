@@ -170,7 +170,10 @@ test("rejects untrusted archive URLs", async (t) => {
       root,
       serveFile,
     );
-    await assert.rejects(ui.serve(page()), /Could not load the Open SWE UI/);
+    await assert.rejects(
+      ui.serve(page()),
+      /Could not load the Agent Workspace UI/,
+    );
   }
 });
 
@@ -185,7 +188,7 @@ test("reports a bridge mismatch as a desktop update, on first install and over a
       root,
       serveFile,
     ).serve(page()),
-    /Update the Open SWE desktop app/,
+    /Update the Agent Workspace desktop app/,
   );
   await new DesktopUi(
     "https://backend.example",
@@ -221,7 +224,10 @@ test("rejects archive traversal before extracting a checksum-valid download", as
     root,
     serveFile,
   );
-  await assert.rejects(ui.serve(page()), /Could not load the Open SWE UI/);
+  await assert.rejects(
+    ui.serve(page()),
+    /Could not load the Agent Workspace UI/,
+  );
   assert.deepEqual(await readdir(root), []);
 });
 

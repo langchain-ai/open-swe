@@ -71,7 +71,11 @@ def participant_logins(stored: Any) -> list[str]:
 
 def _legacy_people(metadata: Mapping[str, object]) -> list[PersonIdentity]:
     return [
-        {"id": f"github:{login}", "github_login": login}
+        (
+            {"id": login}
+            if login.startswith("user:")
+            else {"id": f"github:{login}", "github_login": login}
+        )
         for login in participant_logins(metadata.get(PARTICIPANT_LOGINS_KEY))
     ] + [
         {"id": f"email:{email}", "email": email}

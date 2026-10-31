@@ -24,6 +24,7 @@ from openswe.slack.client import parse_github_pr_url
 from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.blobs import copy_thread_blobs, referenced_blob_digests
 from openswe.threads.creation import TITLE_LOCKED_KEY, create_thread
+from openswe.threads.identity import ThreadIdentity
 from openswe.threads.index import STOPPED_AT_KEY
 from openswe.threads.listing import (
     attach_task_workers,
@@ -697,6 +698,8 @@ async def get_dashboard_thread_pull_request_status(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
     """Return live GitHub health for every pull request tracked by the thread."""
+    if ThreadIdentity(login).user_id is not None:
+        raise HTTPException(403, "Agent Workspace has no GitHub repository access")
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     tracked = _tracked_pull_requests(metadata)
     if not tracked:
@@ -709,6 +712,8 @@ async def get_dashboard_pull_request_checks(
     records: Sequence[object], login: str
 ) -> dict[str, PullRequestState]:
     """Return batched live state for the pull requests the sidebar is showing."""
+    if ThreadIdentity(login).user_id is not None:
+        raise HTTPException(403, "Agent Workspace has no GitHub repository access")
     if not records:
         return {}
     async with GitHubClient.as_user(login) as github:
@@ -725,6 +730,8 @@ async def get_dashboard_thread_pull_request_context(
     email: str | None = None,
 ) -> dict[str, Any]:
     """Return fresh model context for one PR already tracked by the thread."""
+    if ThreadIdentity(login).user_id is not None:
+        raise HTTPException(403, "Agent Workspace has no GitHub repository access")
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     record = next(
         (

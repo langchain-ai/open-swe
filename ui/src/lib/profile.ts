@@ -12,6 +12,7 @@ import {
   writeCachedRepos,
 } from "./repoCache"
 import { useSession } from "./session"
+import { appDistribution } from "./pageTitle"
 import type { Profile, ProfileUpdate, ReposPayload } from "./api"
 
 const profileQueryKey = (login: string | undefined) => [
@@ -23,6 +24,14 @@ const saveProfileMutationKey = (login: string | undefined) => [
   "saveProfile",
   login ?? null,
 ]
+
+export function useAgentWorkspacePreference(): boolean {
+  const profile = useProfile()
+  return (
+    appDistribution.isDesktop &&
+    (profile.data?.experimental_agent_workspace ?? true)
+  )
+}
 
 interface ProfilePatch {
   login: string | undefined
@@ -93,7 +102,7 @@ export function useRepos() {
         throw e
       }
     },
-    enabled: !!session.data,
+    enabled: !!session.data && session.data.auth_provider !== "langsmith",
     initialData: cached?.payload,
     initialDataUpdatedAt: cached?.updatedAt,
     staleTime: REPOS_STALE_TIME_MS,

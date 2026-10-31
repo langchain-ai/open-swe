@@ -902,6 +902,34 @@ async def test_tool_server_hands_the_verified_run_to_its_handlers() -> None:
     assert await _status(f"Bearer {sign_runtime_token(RUN)}") == (200, RUN)
 
 
+@pytest.mark.parametrize("worker", [False, True])
+async def test_langsmith_runtime_tokens_and_worker_grants_recheck_live_access(
+    monkeypatch: pytest.MonkeyPatch, worker: bool
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from openswe.dashboard.langsmith_login import LangSmithLogin
+
+    grant = AsyncMock(return_value="langsmith-token")
+    monkeypatch.setattr(LangSmithLogin, "access_token", grant)
+    run = RUN.model_copy(
+        update={
+            "configurable": {
+                "auth_provider": "langsmith",
+                "user_id": "019abcde-0000-7000-8000-000000000001",
+            }
+        }
+    )
+    token = (
+        sign_worker_grant(WorkerGrant(coordinator=run, request_id="worker"))
+        if worker
+        else sign_runtime_token(run)
+    )
+    assert (await _status(f"Bearer {token}"))[0] == 200
+    grant.return_value = None
+    assert await _status(f"Bearer {token}") == (401, None)
+
+
 async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatch) -> None:
     from langgraph_api.logging import Formatter
 

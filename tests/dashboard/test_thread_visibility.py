@@ -56,6 +56,40 @@ def private_thread(monkeypatch, request):
     return thread, client
 
 
+async def test_langsmith_identity_is_private_owner_only_and_cannot_inherit_admin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from uuid import uuid7
+
+    from openswe.run_config import RunConfig
+    from openswe.threads.principals import Principal
+    from openswe.tools.admin_gate import actor_is_admin
+
+    subject = f"user:{uuid7()}"
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
+    metadata = {
+        "source": "dashboard",
+        "visibility": "private",
+        "experience": "agent_workspace",
+        "owner_login": subject,
+    }
+    assert summary.thread_is_readable(metadata, subject)
+    assert summary.thread_is_promptable(metadata, subject)
+    assert not summary.thread_is_readable(metadata, f"user:{uuid7()}", "admin@example.com")
+    assert not summary.thread_is_readable({**metadata, "visibility": "public"}, subject)
+    assert summary.thread_is_readable({**metadata, "experience": "coding"}, subject)
+    assert not summary.thread_is_readable({**metadata, "experience": "unknown"}, subject)
+    assert not Principal.of_login(subject, "admin@example.com").admin
+    assert not await actor_is_admin(
+        RunConfig(auth_provider="langsmith", user_email="admin@example.com")
+    )
+    with pytest.raises(HTTPException) as rejected:
+        await handlers.get_dashboard_pull_request_checks(
+            [{"repo_full_name": "private/repo", "number": 1}], subject
+        )
+    assert rejected.value.status_code == 403
+
+
 def test_private_readable_by_owner_and_admin_but_promptable_by_owner_only(private_thread):
     thread, _ = private_thread
     metadata = thread["metadata"]

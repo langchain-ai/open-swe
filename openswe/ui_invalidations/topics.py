@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
-from openswe.dashboard.admin import is_admin
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.ui_invalidations import outbox
 
@@ -131,7 +130,9 @@ class AdminTopic(Topic):
     """Data only admins may read, invalidated as a whole."""
 
     async def authorize(self, session: Session, keys: set[str]) -> set[str]:
-        admin = is_admin(session.get("email"), login=session.get("sub"))
+        from openswe.dashboard.deps import session_is_admin
+
+        admin = session_is_admin(session)
         return keys & {""} if admin else set()
 
 
@@ -164,10 +165,13 @@ class KeyedTopic[K: str](BaseTopic):
 
 async def _readable_incidents(session: Session, incident_ids: set[str]) -> set[str]:
     # The incident service invalidates through this module.
+    from openswe.dashboard.deps import session_is_admin
     from openswe.incidents import service
     from openswe.incidents.models import IncidentId
 
-    admin = is_admin(session.get("email"), login=session.get("sub"))
+    if session.get("provider", "github") != "github":
+        return set()
+    admin = session_is_admin(session)
     ordered = sorted(incident_ids)
     visible = await asyncio.gather(
         *(service.visible(IncidentId(key), include_setup=admin) for key in ordered)

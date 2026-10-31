@@ -2,7 +2,7 @@
   "name": "open-swe-desktop",
   "version": "0.3.10",
   "private": true,
-  "description": "Experimental Open SWE desktop client",
+  "description": "Experimental Agent Workspace desktop client",
   "main": "build/main.cjs",
   "scripts": {
     "build": "node scripts/build-main.cjs",
@@ -19,7 +19,7 @@
   },
   "build": {
     "appId": "com.langchain.openswe",
-    "productName": "Open SWE",
+    "productName": "Agent Workspace",
     "publish": {
       "provider": "github",
       "owner": "langchain-ai",
