@@ -97,13 +97,13 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
             "slack_channel_id": "C123",
             "slack_channel_name": "team-openswe",
             "invocation_id": invocation_id,
-            "prepare_run_id": invocation_id,
             "invocation_started_at": created["config"]["configurable"]["invocation_started_at"],
         }.items()
     )
     assert created["metadata"] == created["config"]["metadata"]
     assert created["config"]["configurable"]["thread_id"] == "thread-1"
-    assert created["config"]["configurable"]["prepare_run_id"] == invocation_id
+    assert "prepare_run_id" not in created["config"]["configurable"]
+    assert "prepare_run_id" not in created["metadata"]
     assert isinstance(invocation_id, str)
 
 
@@ -230,7 +230,8 @@ async def test_create_durable_run_preserves_existing_prepare_id(
     created = client.runs.created[0]
     assert "webhook" not in created
     assert created["config"]["configurable"]["invocation_id"] == "existing"
-    assert created["config"]["configurable"]["prepare_run_id"] == "existing"
+    assert "prepare_run_id" not in created["config"]["configurable"]
+    assert "prepare_run_id" not in created["metadata"]
     assert created["config"]["configurable"]["__event_streaming_v2"] is True
 
 
