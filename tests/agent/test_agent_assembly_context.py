@@ -46,7 +46,7 @@ def saved_thread_scope(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scope):
+async def test_public_agent_excludes_personal_skills(saved_thread_scope):
     saved_thread_scope["visibility"] = "public"
     config = _base_config()
     config["configurable"]["source"] = "dashboard"
@@ -58,17 +58,6 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
         captured = await _plan_agent(config)
     assert captured["skills"] == ["/organization-skills/", "/bundled-skills/"]
     assert "/skills/" not in captured["backend"].routes
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    tool_names = {_registered_tool_name(tool) for tool in tools}
-    assert not tool_names.intersection(
-        {
-            "save_user_settings",
-            "save_user_skill",
-            "delete_user_skill",
-            "read_user_settings",
-        }
-    )
     mcps.assert_awaited_once_with(None, ANY, None)
 
 
@@ -415,18 +404,22 @@ async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) 
         {"github_login": "someone-else"},
         {"github_login": None},
         {"background_task_completion": True},
-        {"source": "schedule"},
+        {"admin_thread": True},
     ],
 )
-async def test_personal_settings_tool_not_exposed_to_unauthorized_runs(
-    config_patch: dict[str, object],
+async def test_access_changes_preserve_the_tool_catalog(
+    config_patch: dict[str, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config = _base_config()
-    config["configurable"].update({"source": "dashboard", **config_patch})
-    captured = await _plan_agent(config)
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    assert "save_user_settings" not in {_registered_tool_name(tool) for tool in tools}
+    monkeypatch.setenv("CONFIGURED_ADMINS", "octocat")
+    catalogs = []
+    for change in ({}, config_patch):
+        config = _base_config()
+        config["configurable"].update(source="dashboard", **change)
+        captured = await _plan_agent(config)
+        surface = cast(ToolSurface, captured["surface"])
+        await surface.prepare()
+        catalogs.append(surface.catalog())
+    assert catalogs[0] == catalogs[1]
 
 
 def _tool_names(tools: object) -> set[str]:
@@ -435,7 +428,7 @@ def _tool_names(tools: object) -> set[str]:
 
 
 @pytest.mark.asyncio
-async def test_agent_includes_sql_only_on_private_admin_surfaces(
+async def test_sql_stays_on_the_parent_tool_surface(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from openswe.server import ADMIN_TOOLS
@@ -443,12 +436,6 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
 
     monkeypatch.setenv("OPENSWE_ENV", "preview")
     from openswe.tools.manage_feature_flags import manage_feature_flags
-
-    captured = await _plan_agent()
-    tools = _tool_names(captured["tools"])
-    assert read_only_sql.__name__ not in tools
-    assert execute_database_sql.__name__ not in tools
-    assert manage_feature_flags.__name__ not in tools
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "octocat")
     config = _base_config()
@@ -483,22 +470,6 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     assert manage_feature_flags.__name__ in tools
 
     assert all(tool.__name__ in tools for tool in ADMIN_TOOLS)
-
-    configurable["github_login"] = "not-an-admin"
-    captured = await _plan_agent(config)
-    tools = _tool_names(captured["tools"])
-    assert read_only_sql.__name__ not in tools
-    assert execute_database_sql.__name__ not in tools
-    assert manage_feature_flags.__name__ not in tools
-    assert all(tool.__name__ not in tools for tool in ADMIN_TOOLS)
-
-    configurable["github_login"] = "octocat"
-    configurable["source"] = "schedule"
-    captured = await _plan_agent(config)
-    tools = _tool_names(captured["tools"])
-    assert read_only_sql.__name__ not in tools
-    assert execute_database_sql.__name__ not in tools
-    assert manage_feature_flags.__name__ not in tools
 
 
 SLACK_TOOL_NAMES = {
@@ -621,58 +592,6 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     }
     assert parent_only_names <= parent_names
     assert not subagent_names & parent_only_names
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("thread_scope", "source", "channel_reads", "thread_reads"),
-    [
-        ("private", "slack", True, True),
-        ("public", "slack", False, True),
-        ("bot", "slack", True, True),
-        ("private", "dashboard", True, True),
-        ("public", "dashboard", False, False),
-    ],
-)
-async def test_channel_reads_need_a_private_thread_or_its_triggering_bot(
-    thread_scope: str,
-    source: str,
-    channel_reads: bool,
-    thread_reads: bool,
-    saved_thread_scope: dict[str, object],
-) -> None:
-    saved_thread_scope["visibility"] = "private" if thread_scope == "private" else "public"
-    config = _base_config()
-    configurable = config.get("configurable")
-    assert isinstance(configurable, dict)
-    configurable["source"] = source
-    if source == "slack":
-        configurable["slack_thread"] = {"channel_id": "C123", "thread_ts": "1700000000.000100"}
-    if thread_scope == "bot":
-        slack_thread = {
-            "channel_id": "C123",
-            "thread_ts": "1700000000.000100",
-            "triggering_bot_id": "B1",
-        }
-        configurable.update(slack_thread=slack_thread, github_login=None)
-        saved_thread_scope.update(
-            owner_type="system", source_context={"slack_thread": slack_thread}
-        )
-
-    captured = await _plan_agent(config)
-    tools = captured["tools"]
-    subagents = captured["subagents"]
-    assert isinstance(tools, list)
-    assert isinstance(subagents, list)
-
-    tool_names = {_registered_tool_name(tool) for tool in tools}
-    assert ("slack_read_channel_messages" in tool_names) is channel_reads
-    # A run started from Slack reads threads with the bot's own reach; a web one as channel history.
-    assert ("slack_read_thread_messages" in tool_names) is thread_reads
-
-    gp = next(item for item in subagents if item.name == "general-purpose")
-    assert ("slack_read_channel_messages" in (gp.tools or ())) is channel_reads
-    assert ("slack_read_thread_messages" in (gp.tools or ())) is thread_reads
 
 
 @pytest.fixture

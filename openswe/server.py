@@ -263,7 +263,7 @@ from openswe.tools import (
     web_search,
     write_database_rows,
 )
-from openswe.tools.access import permitted, resolve_access
+from openswe.tools.access import resolve_access
 from openswe.tools.add_review_comment import add_review_comment
 from openswe.tools.admin_gate import (
     actor_has_admin_context,
@@ -1986,7 +1986,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         *(() if _writes_database_rows() else (execute_database_sql, write_database_rows)),
     ]
     static_tools = [tool for tool in AGENT_TOOLS if not any(tool is w for w in withheld)]
-    static_tools = permitted(static_tools, tool_access)
     if not cfg.slack_context:
         # An automation run has no Slack thread, but its prompt may ask it to
         # report to a channel.

@@ -25,6 +25,7 @@ from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolC
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import BaseTool, tool
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_quickjs._repl import EvalOutcome, _Registry, _ThreadREPL
 from langgraph.config import get_config
 from langgraph.errors import NodeCancelledError
@@ -1151,6 +1152,70 @@ async def test_code_prompt_uses_each_runs_schema_even_when_names_match(
 
     assert "first_parameter" in prompts[0] and "second_parameter" not in prompts[0]
     assert "second_parameter" in prompts[1] and "first_parameter" not in prompts[1]
+
+
+async def test_consecutive_access_contexts_keep_the_model_prefix(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    prompts: list[list[BaseMessage]] = []
+    schemas: list[object] = []
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        prompts.append(messages)
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(
+        GenericFakeChatModel,
+        "bind_tools",
+        lambda model, tools, **kwargs: (
+            schemas.append([convert_to_openai_tool(tool) for tool in tools]) or model
+        ),
+    )
+    model = _calling()
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", model)
+    monkeypatch.setattr(agent, "build_model", lambda *args, **kwargs: model)
+    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
+    monkeypatch.setattr("rt.run_tools.build_model", lambda *args, **kwargs: model)
+    monkeypatch.setitem(_PREPARE_UPDATE, "rendered_workspace_prompt", "Workspace instructions")
+    monkeypatch.setitem(_PREPARE_UPDATE, "rendered_thread_prompt", "Private thread instructions")
+    monkeypatch.setitem(
+        _PREPARE_UPDATE,
+        "rendered_system_prompt",
+        "Workspace instructions\n\nPrivate thread instructions",
+    )
+    store = InMemoryStore()
+    for token in ("direct-dashboard", "background-completion"):
+        catalog = _catalog("save_user_settings", token).model_copy(
+            update={
+                "operations": [
+                    ToolSpec(name=name, description=name, parameters={}, grant=token)
+                    for name in ("save_user_settings", "remember")
+                ],
+                "code_only": ["save_user_settings"],
+                "loop": LoopRules(deployment_prompt="Deployment instructions"),
+                "models": RunModels(
+                    model=ModelSpec(model_id="test", kwargs={}),
+                    subagent_model=ModelSpec(model_id="test", kwargs={}),
+                    use_gateway=False,
+                ),
+            }
+        )
+        await _run(store, "same-private-thread", _context("agent", token, catalog))
+
+    first, second = [
+        [message.text for message in messages if isinstance(message, SystemMessage)]
+        for messages in prompts
+    ]
+    assert first == second
+    text = str(first)
+    assert text.index("saveUserSettings") < text.index("Deployment instructions")
+    assert text.index("Deployment instructions") < text.index("Workspace instructions")
+    assert text.index("Workspace instructions") < text.index("Skills System")
+    assert text.index("Skills System") < text.index("Private thread instructions")
+    assert schemas[0] == schemas[1]
 
 
 async def test_sync_subagent_uses_its_runs_prompt_model_and_tools(
