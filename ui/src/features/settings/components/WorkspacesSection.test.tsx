@@ -315,6 +315,7 @@ describe("WorkspacesSection", () => {
 
     await waitFor(() => expect(createSpy).toHaveBeenCalled())
     expect(createSpy).toHaveBeenCalledWith({
+      allow_workflow_edits: false,
       name: "Preview",
       repos: ["acme/web"],
       slack_channel_ids: ["C0000000002"],

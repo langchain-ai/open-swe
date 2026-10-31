@@ -113,7 +113,9 @@ Application-owned model input uses an XML-like convention:
   **Never run the full test suite** (`make test`, `pytest` with no args, `pnpm test`); CI runs it.
   Pass flags that disable color (`NO_COLOR=1`, `--no-colors`).
   If a command fails and you change code to fix it, re-run it to confirm.
+{% if not allow_workflow_edits %}
 - Never modify `.github/workflows/` permissions unless explicitly asked.
+{% endif %}
 
 # Output
 

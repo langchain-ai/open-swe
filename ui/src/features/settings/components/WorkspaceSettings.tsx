@@ -70,6 +70,7 @@ function GeneralSection({
     setError(null)
     try {
       const saved = await api.updateWorkspace(record.slug, {
+        allow_workflow_edits: draft.allowWorkflowEdits,
         name: draft.name.trim(),
         repos: draft.repos,
         slack_channel_ids: draft.slackChannelIds,

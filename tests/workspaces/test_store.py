@@ -400,6 +400,7 @@ def _fully_populated(now: str) -> Workspace:
     return Workspace(
         slug="base",
         inherit_default_sandbox=True,
+        allow_workflow_edits=True,
         name="Base",
         prompt="build with make",
         setup_script="make setup",

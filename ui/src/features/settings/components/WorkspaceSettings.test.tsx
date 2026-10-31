@@ -370,12 +370,19 @@ describe("WorkspaceSettingsPanel", () => {
     expect((name as HTMLInputElement).value).toBe("OSS")
     expect(within(general).queryByRole("button", { name: "Cancel" })).toBeNull()
 
+    const workflowToggle = screen.getByRole("switch", {
+      name: "Allow GitHub workflow edits",
+    })
+    expect(workflowToggle.getAttribute("aria-checked")).toBe("false")
+    fireEvent.click(workflowToggle)
+    expect(workflowToggle.getAttribute("aria-checked")).toBe("true")
     fireEvent.change(name, { target: { value: " OSS support " } })
     expect(within(general).getByRole("button", { name: "Cancel" })).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
     await waitFor(() =>
       expect(update).toHaveBeenCalledWith("oss", {
+        allow_workflow_edits: true,
         name: "OSS support",
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],

@@ -8589,6 +8589,11 @@
       },
       "Workspace": {
         "properties": {
+          "allow_workflow_edits": {
+            "default": false,
+            "title": "Allow Workflow Edits",
+            "type": "boolean"
+          },
           "base_snapshot_id": {
             "anyOf": [
               {
@@ -8901,6 +8906,11 @@
       },
       "WorkspaceCreate": {
         "properties": {
+          "allow_workflow_edits": {
+            "default": false,
+            "title": "Allow Workflow Edits",
+            "type": "boolean"
+          },
           "base_snapshot_id": {
             "anyOf": [
               {
@@ -9490,6 +9500,17 @@
       "WorkspaceUpdate": {
         "description": "Partial update: only the fields present are written.",
         "properties": {
+          "allow_workflow_edits": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Workflow Edits"
+          },
           "base_snapshot_id": {
             "anyOf": [
               {

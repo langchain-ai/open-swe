@@ -860,6 +860,7 @@ export interface WorkspaceOptionList {
 
 /** Body for `POST /workspaces`; `name` is the only required field. */
 export interface WorkspaceCreate {
+  allow_workflow_edits?: boolean
   inherit_default_sandbox?: boolean
   name: string
   prompt?: string
@@ -880,6 +881,7 @@ export type JsonValue =
 
 /** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
 export interface WorkspaceUpdate {
+  allow_workflow_edits?: boolean
   inherit_default_sandbox?: boolean
   create_params?: Record<string, JsonValue>
   name?: string
@@ -902,6 +904,7 @@ export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
  * the sandbox image and its last rebuild.
  */
 export interface WorkspaceRecord {
+  allow_workflow_edits?: boolean
   inherit_default_sandbox?: boolean
   create_params?: Record<string, JsonValue>
   slug: string

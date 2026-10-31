@@ -196,3 +196,34 @@ async def test_deleting_the_default_workspace_is_a_409(admin_client: httpx.Async
 
     assert response.status_code == 409
     assert (await admin_client.get("/dashboard/api/workspaces/default")).status_code == 200
+
+
+async def test_workflow_edits_default_off_and_can_be_revoked(
+    admin_client: httpx.AsyncClient,
+) -> None:
+    created = await admin_client.post("/dashboard/api/workspaces", json={"name": "Core"})
+    assert created.status_code == 200
+    assert created.json()["allow_workflow_edits"] is False
+    for enabled in (True, False):
+        saved = await admin_client.put(
+            "/dashboard/api/workspaces/core", json={"allow_workflow_edits": enabled}
+        )
+        assert saved.status_code == 200
+        stored = await admin_client.get("/dashboard/api/workspaces/core")
+        assert stored.json()["allow_workflow_edits"] is enabled
+
+
+async def test_workflow_policy_requires_admin(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.dependency_overrides[oauth.require_session] = lambda: {"sub": "member"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Origin": "http://test"},
+    ) as client:
+        response = await client.put(
+            "/dashboard/api/workspaces/default", json={"allow_workflow_edits": True}
+        )
+    assert response.status_code == 403

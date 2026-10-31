@@ -33,6 +33,7 @@ from openswe.threads.workflow_approval import (
     workflow_push_approved,
 )
 from openswe.utils.dashboard_links import dashboard_workflow_approval_url
+from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 logger = logging.getLogger(__name__)
 
@@ -809,6 +810,16 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
+        if any("push" in command for command in shell_commands(request)):
+            try:
+                workspace = await WORKSPACES.get(
+                    _configurable(request).workspace_slug or DEFAULT_WORKSPACE_SLUG
+                )
+            except Exception:
+                logger.exception("Failed to read workspace workflow edit policy")
+            else:
+                if workspace is not None and workspace.allow_workflow_edits:
+                    return await handler(request)
         try:
             change = await self._change_for_request(request)
         except WorkflowPushInspectionError as exc:

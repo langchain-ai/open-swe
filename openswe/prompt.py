@@ -120,6 +120,7 @@ def construct_system_prompt(
     artifact_url: str | None = None,
     default_repo: dict[str, str] | None = None,
     repo_custom_instructions: str | None = None,
+    allow_workflow_edits: bool = False,
     workspace_name: str | None = None,
     workspace_instructions: str | None = None,
     admin_workspaces: bool = False,
@@ -132,6 +133,7 @@ def construct_system_prompt(
     """Render the agent's system prompt, once for the thread's whole life."""
     shared = prompt(
         "system/main",
+        allow_workflow_edits=allow_workflow_edits,
         agent_workspace=agent_workspace,
         dashboard_context_section=prompt(
             "system/dashboard-context",

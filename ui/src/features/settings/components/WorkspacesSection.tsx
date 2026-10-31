@@ -221,6 +221,7 @@ export function WorkspacesSection({
     setCreateError(null)
     try {
       const body: WorkspaceCreate = {
+        allow_workflow_edits: createDraft.allowWorkflowEdits,
         name: createDraft.name.trim(),
         repos: createDraft.repos,
         slack_channel_ids: createDraft.slackChannelIds,
