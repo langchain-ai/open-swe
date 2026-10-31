@@ -592,6 +592,27 @@ class RepoClient:
                     found[path] = blob["text"]
         return found
 
+    async def read_dir(self, path: str, ref: str | None) -> dict[str, str]:
+        """Text of each file directly in ``path`` at ``ref`` (the default branch when ``None``)."""
+        data = await self.graphql(
+            "query($owner:String!,$repo:String!,$expression:String!)"
+            "{repository(owner:$owner,name:$repo){object(expression:$expression)"
+            "{...on Tree{entries{path type object{...on Blob{text}}}}}}}",
+            {"expression": f"{ref or 'HEAD'}:{path}"},
+        )
+        tree = (data.get("repository") or {}).get("object")
+        entries = tree.get("entries") if isinstance(tree, Mapping) else None
+        found: dict[str, str] = {}
+        for entry in entries if isinstance(entries, list) else []:
+            blob = entry.get("object") if isinstance(entry, Mapping) else None
+            if (
+                entry.get("type") == "blob"
+                and isinstance(blob, Mapping)
+                and isinstance(blob.get("text"), str)
+            ):
+                found[entry["path"]] = blob["text"]
+        return found
+
     async def can_write(self, login: str) -> bool:
         """Whether ``login`` has write, maintain or admin here; any failure denies."""
         if not login:

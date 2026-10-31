@@ -18,7 +18,7 @@ from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repos import accessible_repo_full_names
-from openswe.review.approvals import fetch_approvals_md
+from openswe.review.approvals import ApprovalPolicy
 from openswe.review.assessment_feedback import (
     AssessmentFeedback,
     FeedbackSubmission,
@@ -620,7 +620,7 @@ async def api_get_review_style_approvals_file(
     token = await require_repo_access_for_user(session["sub"], full_name)
     owner, _, name = full_name.partition("/")
     return ApprovalsFileStatus(
-        found=await fetch_approvals_md(owner, name, None, token=token) is not None
+        found=(await ApprovalPolicy.load(owner, name, token=token)).configured
     )
 
 

@@ -776,9 +776,11 @@ async def prepare_reviewer_run(
 
     async def _fetch_approval_policy() -> str | None:
         # Read from the default branch so a pull request cannot rewrite the policy it is judged by.
-        if reviewer_eval:
+        if reviewer_eval or not isinstance(pr_number, int):
             return None
-        return await approval_policy_for_review(repo_owner, repo_name, token=github_token)
+        return await approval_policy_for_review(
+            repo_owner, repo_name, pr_number, token=github_token
+        )
 
     # Only the diff waits on the checkout.
     checkout_task = asyncio.create_task(_check_out())

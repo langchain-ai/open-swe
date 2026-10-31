@@ -847,7 +847,9 @@ async def _process_github_head_update(
         )
         and not (
             await approval_mode_for(context.owner, context.name) == "approve"
-            and await approval_policy_for_review(context.owner, context.name, token=app_token)
+            and await approval_policy_for_review(
+                context.owner, context.name, pr_number, token=app_token
+            )
         )
     ):
         await PullRequest(

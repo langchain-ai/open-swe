@@ -95,6 +95,11 @@ class ChangedFile(BaseModel):
     previous_filename: str | None = None
 
     @property
+    def paths(self) -> list[str]:
+        """Every path this change touches: a rename's old path as well as its new one."""
+        return [self.filename, *([self.previous_filename] if self.previous_filename else [])]
+
+    @property
     def hunks(self) -> list[Hunk]:
         hunks: list[Hunk] = []
         header = ""
