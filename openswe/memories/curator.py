@@ -1,7 +1,7 @@
-"""Each workspace's curator: one long-lived system thread, woken daily while engrams wait.
+"""Each workspace's curator: one long-lived system thread, woken daily while memories wait.
 
-The thread is public so anyone can follow what it decides; it never sees what a
-private thread said unless that thread's person shared it (``ENGRAMS.for_curator``).
+The thread is public so anyone can follow what it decides; it never learns who saved
+a memory, nor reads the private thread one came from (``MEMORIES.for_curator``).
 """
 
 import logging
@@ -12,10 +12,10 @@ from typing import Final, Self
 
 from openswe import event_claims
 from openswe.dispatch import create_durable_run, dispatch_client
-from openswe.engrams.store import CURATOR_SOURCE, CURATOR_THREAD_KEY, ENGRAMS
 from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.jobs.queue import Job
+from openswe.memories.store import CURATOR_SOURCE, CURATOR_THREAD_KEY, MEMORIES
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.threads import succession
@@ -56,7 +56,7 @@ class WorkspaceCurator:
         await create_thread(
             client,
             thread_id,
-            title=f"Engram curator: {self.slug}",
+            title=f"Memory curator: {self.slug}",
             if_exists="do_nothing",
             metadata={
                 "owner_type": "system",
@@ -73,7 +73,7 @@ class WorkspaceCurator:
                 prompt("curator/wake", workspace=self.slug),
                 {"sender_id": _SENDER_ID, "surface": "automation", "kind": "system"},
                 systems=[
-                    {"id": _SENDER_ID, "display_name": "Engram curator", "platform": "open-swe"}
+                    {"id": _SENDER_ID, "display_name": "Memory curator", "platform": "open-swe"}
                 ],
             ),
             source=CURATOR_SOURCE,
@@ -86,11 +86,11 @@ class WorkspaceCurator:
 
     @classmethod
     async def wake_pending(cls, job: Job) -> None:
-        """Wake the curator of every workspace with an engram it has not decided."""
+        """Wake the curator of every workspace with a memory it has not decided."""
         # Once per fire: a job claimed again after a deploy or crash may have woken them.
         if not await event_claims.claim(WAKE_JOB, job.due_at.isoformat(), ttl=_FIRE_CLAIM_TTL):
             return
-        for slug in await ENGRAMS.pending_workspaces():
+        for slug in await MEMORIES.pending_workspaces():
             try:
                 run_id = await cls(slug).wake()
             except Exception:

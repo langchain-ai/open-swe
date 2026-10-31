@@ -60,9 +60,9 @@ _TOOL_MODULES = {
     "publish_artifact": ".publish_artifact",
     "remember": ".remember",
     "forget": ".remember",
-    "list_engrams": ".curator",
+    "list_memories": ".curator",
     "read_workspace_prompt": ".curator",
-    "decide_engram": ".curator",
+    "decide_memory": ".curator",
     "publish_workspace_prompt": ".curator",
     "save_user_settings": ".save_user_settings",
     "save_user_skill": ".user_skills",
@@ -150,9 +150,9 @@ __all__ = [
     "publish_artifact",
     "remember",
     "forget",
-    "list_engrams",
+    "list_memories",
     "read_workspace_prompt",
-    "decide_engram",
+    "decide_memory",
     "publish_workspace_prompt",
     "save_user_settings",
     "save_user_skill",
@@ -214,8 +214,8 @@ if TYPE_CHECKING:
     from openswe.tools.connect_managed_tools import connect_managed_tools
     from openswe.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
     from openswe.tools.curator import (
-        decide_engram,
-        list_engrams,
+        decide_memory,
+        list_memories,
         publish_workspace_prompt,
         read_workspace_prompt,
     )

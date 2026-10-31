@@ -126,7 +126,7 @@ def construct_system_prompt(
     sole_writer: bool = False,
     continued_from_collaborative: bool = False,
     workspace_repos: list[str] | None = None,
-    workspace_engrams: str = "",
+    workspace_memory: str = "",
     agent_workspace: bool = False,
 ) -> SystemPrompt:
     """Render the agent's system prompt, once for the thread's whole life."""
@@ -159,8 +159,8 @@ def construct_system_prompt(
         section
         for section in (
             _render_workspace_section(workspace_name, workspace_instructions, workspace_repos),
-            prompt("system/workspace-engrams", engrams=workspace_engrams.strip())
-            if workspace_engrams.strip()
+            prompt("system/workspace-memory", memory=workspace_memory.strip())
+            if workspace_memory.strip()
             else "",
         )
         if section

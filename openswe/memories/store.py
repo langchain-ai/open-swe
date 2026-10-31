@@ -1,9 +1,9 @@
-"""Engrams, what threads remember, and the prompt each workspace's curator distils from them.
+"""What threads remember, and the prompt each workspace's curator distils from it.
 
-Every engram waits for the curator of the workspace it was saved in, which may restate
-what many people's threads learned in the workspace's prompt. A personal engram also
-applies to its person's runs at once, until that prompt carries it instead. The curator
-never reads an engram saved in a private thread unless its person agreed to share it.
+Every memory waits for the curator of the workspace it was saved in, which may restate
+what many people's threads learned in the workspace's prompt. A personal memory also
+applies to its person's runs at once, until that prompt carries it instead. Memories
+saved in private threads before every memory reached the curator stay held from it.
 """
 
 import hashlib
@@ -23,7 +23,7 @@ from openswe.database.orm import NOW, Base
 from openswe.users.models import User
 from openswe.workspaces.rows import WorkspaceRow
 
-# A personal engram applies to its person; a workspace one only reaches the curator.
+# A personal memory applies to its person; a workspace one only reaches the curator.
 Scope = Literal["personal", "workspace"]
 Status = Literal["pending", "held", "adopted", "declined"]
 Decision = Literal["adopted", "declined"]
@@ -33,14 +33,14 @@ Withdrawal = Literal["deleted", "requested"]
 CURATOR_THREAD_KEY: Final = "curator"
 # The source of the runs the curator's wake starts, the only runs its tools serve.
 CURATOR_SOURCE: Final = "curator"
-MAX_ENGRAM_CHARS: Final = 2_000
+MAX_MEMORY_CHARS: Final = 2_000
 MAX_WORKSPACE_PROMPT_CHARS: Final = 40_000
-# The personal engrams a person's runs see, newest first.
+# The personal memories a person's runs see, newest first.
 _PERSONAL_LIMIT: Final = 50
 _CURATOR_PAGE: Final = 200
 
 
-class EngramRow(Base):
+class MemoryRow(Base):
     __tablename__ = "memory"
 
     scope: Mapped[str]
@@ -65,10 +65,10 @@ class EngramRow(Base):
 
     @property
     def person_key(self) -> str | None:
-        """The same for every engram one person saved in one workspace, and nothing else.
+        """The same for every memory one person saved in one workspace, and nothing else.
 
         Keyed by a server secret: the curator's thread is public, and a plain hash of ids
-        anyone can guess would name who saved each engram.
+        anyone can guess would name who saved each memory.
         """
         if self.created_by is None:
             return None
@@ -95,32 +95,31 @@ class WorkspacePromptVersion(Base):
     )
 
 
-class PersonalEngram(BaseModel):
-    """An engram that reaches its person's runs."""
+class PersonalMemory(BaseModel):
+    """A memory that reaches its person's runs."""
 
     id: UUID
     body: str
 
     @property
     def line(self) -> str:
-        """The engram as its person's block lists it, with the id that forgets it."""
-        return f"{self.body} (engram {self.id})"
+        """The memory as its person's block lists it, with the id that forgets it."""
+        return f"{self.body} (memory {self.id})"
 
 
-class CuratedEngram(BaseModel):
-    """An engram as the curator sees it: never who saved it, and never what a private
-    thread said unless its person agreed to share it."""
+class CuratedMemory(BaseModel):
+    """A memory as the curator sees it: never who saved it, nor what a held one says."""
 
     id: UUID
-    # Personal engrams already apply to their person; adopting one moves it to the prompt.
+    # Personal memories already apply to their person; adopting one moves it to the prompt.
     scope: Scope
     status: Status
     saved_at: datetime
-    # The same for every engram one person saved in this workspace, so the curator
+    # The same for every memory one person saved in this workspace, so the curator
     # can count how many people say a thing without learning who they are.
     person: str | None
     from_private_thread: bool
-    # None for an engram from a private thread whose person kept it to themselves.
+    # None for a held memory.
     body: str | None
     # Where the curator can look for evidence; None for a private thread.
     thread_id: str | None
@@ -128,7 +127,7 @@ class CuratedEngram(BaseModel):
     withdrawal_requested: bool
 
     @classmethod
-    def of(cls, row: EngramRow) -> Self:
+    def of(cls, row: MemoryRow) -> Self:
         return cls.model_validate(
             {
                 "id": row.id,
@@ -145,11 +144,11 @@ class CuratedEngram(BaseModel):
 
 
 class UnknownWorkspaceError(LookupError):
-    """No workspace is stored under the slug an engram names."""
+    """No workspace is stored under the slug a memory names."""
 
 
-class Engrams:
-    """Every engram (``memory`` row) and every ``workspace_prompt_version``, by workspace slug."""
+class Memories:
+    """Every ``memory`` row and every ``workspace_prompt_version``, by workspace slug."""
 
     @staticmethod
     async def _workspace_id(session: AsyncSession, slug: str) -> UUID:
@@ -169,15 +168,12 @@ class Engrams:
         workspace: str | None,
         thread_id: str | None,
         from_private_thread: bool,
-        shared: bool,
-    ) -> EngramRow:
-        """Keep an engram; one from a private thread its person did not share is held from
-        the curator, and a workspace one never takes effect without it.
+    ) -> MemoryRow:
+        """Keep a memory for the curator; a workspace one never takes effect without it.
 
-        A personal engram keeps the workspace it was saved in when there is one, for that
-        workspace's curator; a workspace engram needs it.
+        A personal memory keeps the workspace it was saved in when there is one, for that
+        workspace's curator; a workspace memory needs it.
         """
-        held = from_private_thread and not shared
         async with postgres.session() as session:
             workspace_id = (
                 await session.scalar(select(WorkspaceRow.id).where(WorkspaceRow.slug == workspace))
@@ -186,13 +182,12 @@ class Engrams:
             )
             if scope == "workspace" and workspace_id is None:
                 raise UnknownWorkspaceError(workspace or "")
-            row = EngramRow(
+            row = MemoryRow(
                 scope=scope,
                 body=body,
                 workspace_id=workspace_id,
                 thread_id=thread_id,
                 from_private_thread=from_private_thread,
-                status="held" if held else "pending",
                 created_by=person,
                 updated_by=person,
             )
@@ -201,24 +196,24 @@ class Engrams:
 
     async def personal(
         self, person: UUID | None, *, curated_in: str | None = None
-    ) -> list[PersonalEngram]:
-        """``person``'s personal engrams, newest first; none for no person.
+    ) -> list[PersonalMemory]:
+        """``person``'s personal memories, newest first; none for no person.
 
         With ``curated_in``, the workspace whose curated prompt the run reads, leaving out
-        the engrams its curator adopted: that prompt carries them now.
+        the memories its curator adopted: that prompt carries them now.
         """
         if person is None or not postgres.configured():
             return []
         conditions = [
-            EngramRow.scope == "personal",
-            EngramRow.created_by == person,
-            EngramRow.withdrawal_requested.is_(False),
+            MemoryRow.scope == "personal",
+            MemoryRow.created_by == person,
+            MemoryRow.withdrawal_requested.is_(False),
         ]
         if curated_in is not None:
             conditions.append(
                 or_(
-                    EngramRow.status != "adopted",
-                    EngramRow.workspace_id.is_distinct_from(
+                    MemoryRow.status != "adopted",
+                    MemoryRow.workspace_id.is_distinct_from(
                         select(WorkspaceRow.id)
                         .where(WorkspaceRow.slug == curated_in)
                         .scalar_subquery()
@@ -227,29 +222,29 @@ class Engrams:
             )
         async with postgres.session() as session:
             rows = await session.scalars(
-                select(EngramRow)
+                select(MemoryRow)
                 .where(*conditions)
-                .order_by(EngramRow.created_at.desc())
+                .order_by(MemoryRow.created_at.desc())
                 .limit(_PERSONAL_LIMIT)
             )
-            return [PersonalEngram.model_validate({"id": row.id, "body": row.body}) for row in rows]
+            return [PersonalMemory.model_validate({"id": row.id, "body": row.body}) for row in rows]
 
-    async def withdraw(self, engram_id: UUID, person: UUID) -> Withdrawal | None:
-        """Take back one of ``person``'s engrams; None when they saved no such one.
+    async def withdraw(self, memory_id: UUID, person: UUID) -> Withdrawal | None:
+        """Take back one of ``person``'s memories; None when they saved no such one.
 
-        One the curator never saw, held from a private thread, is simply deleted. Any other
+        One the curator never saw, held from it, is simply deleted. Any other
         goes back to the curator, adopted or not, since only it may change the workspace's
         prompt; a personal one stops applying to its person at once.
         """
-        mine = (EngramRow.id == engram_id, EngramRow.created_by == person)
+        mine = (MemoryRow.id == memory_id, MemoryRow.created_by == person)
         async with postgres.session() as session:
             if await session.scalar(
-                delete(EngramRow).where(*mine, EngramRow.status == "held").returning(EngramRow.id)
+                delete(MemoryRow).where(*mine, MemoryRow.status == "held").returning(MemoryRow.id)
             ):
                 return "deleted"
             await session.execute(
-                update(EngramRow)
-                .where(*mine, EngramRow.withdrawal_requested.is_(False))
+                update(MemoryRow)
+                .where(*mine, MemoryRow.withdrawal_requested.is_(False))
                 .values(
                     status="pending",
                     withdrawal_requested=True,
@@ -257,45 +252,45 @@ class Engrams:
                     updated_at=func.clock_timestamp(),
                 )
             )
-            withdrawn = await session.scalar(select(EngramRow.id).where(*mine))
+            withdrawn = await session.scalar(select(MemoryRow.id).where(*mine))
         return "requested" if withdrawn else None
 
-    async def for_curator(self, workspace: str, status: Status) -> list[CuratedEngram]:
+    async def for_curator(self, workspace: str, status: Status) -> list[CuratedMemory]:
         async with postgres.session() as session:
             rows = await session.scalars(
-                select(EngramRow)
+                select(MemoryRow)
                 .where(
-                    EngramRow.workspace_id == await self._workspace_id(session, workspace),
-                    EngramRow.status == status,
+                    MemoryRow.workspace_id == await self._workspace_id(session, workspace),
+                    MemoryRow.status == status,
                 )
-                .order_by(EngramRow.created_at)
+                .order_by(MemoryRow.created_at)
                 .limit(_CURATOR_PAGE)
             )
-            return [CuratedEngram.of(row) for row in rows]
+            return [CuratedMemory.of(row) for row in rows]
 
     async def pending_workspaces(self) -> list[str]:
-        """The slugs of the workspaces with an engram their curator has not decided."""
+        """The slugs of the workspaces with a memory their curator has not decided."""
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(WorkspaceRow.slug)
-                .join(EngramRow, EngramRow.workspace_id == WorkspaceRow.id)
-                .where(EngramRow.status == "pending")
+                .join(MemoryRow, MemoryRow.workspace_id == WorkspaceRow.id)
+                .where(MemoryRow.status == "pending")
                 .distinct()
             )
             return list(rows)
 
-    async def decide(self, workspace: str, engram_id: UUID, decision: Decision, note: str) -> bool:
-        """Record the curator's decision; False for an engram it may not decide."""
+    async def decide(self, workspace: str, memory_id: UUID, decision: Decision, note: str) -> bool:
+        """Record the curator's decision; False for a memory it may not decide."""
         async with postgres.session() as session:
             decided = await session.scalar(
-                update(EngramRow)
+                update(MemoryRow)
                 .where(
-                    EngramRow.id == engram_id,
-                    EngramRow.workspace_id == await self._workspace_id(session, workspace),
-                    EngramRow.status != "held",
+                    MemoryRow.id == memory_id,
+                    MemoryRow.workspace_id == await self._workspace_id(session, workspace),
+                    MemoryRow.status != "held",
                 )
                 .values(status=decision, decision_note=note, updated_at=func.clock_timestamp())
-                .returning(EngramRow.id)
+                .returning(MemoryRow.id)
             )
         return decided is not None
 
@@ -322,4 +317,4 @@ class Engrams:
         return version
 
 
-ENGRAMS = Engrams()
+MEMORIES = Memories()

@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from openswe.config import ENV
 from openswe.credential_scope import private_owner_login
-from openswe.engrams.store import CURATOR_SOURCE
+from openswe.memories.store import CURATOR_SOURCE
 from openswe.run_config import RunConfig
 from openswe.slack.client import SLACK_THREAD_MAX_MESSAGES, fetch_slack_thread_messages
 from openswe.source_context import SourceContext
@@ -127,7 +127,7 @@ class Access:
     slack_bot_channel: str | None = None
     # The run was started from a Slack thread; the bot's own reach applies there.
     slack_context: bool = False
-    # A workspace curator's own thread (``openswe.engrams.curator``).
+    # A workspace curator's own thread (``openswe.memories.curator``).
     curator: bool = False
 
     @property
