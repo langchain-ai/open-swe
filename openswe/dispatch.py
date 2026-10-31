@@ -299,7 +299,10 @@ def thread_workspace(metadata: Mapping[str, Any]) -> str | None:
 
 def follow_up_configurable(metadata: Mapping[str, Any], thread_id: str) -> dict[str, Any]:
     """Config for a system-started run that continues a thread where its last run left off."""
-    configurable: dict[str, Any] = {"thread_id": thread_id}
+    configurable: dict[str, Any] = {
+        "thread_id": thread_id,
+        "experience": metadata.get("experience", "coding"),
+    }
     for key in ("source", "repo", "github_login", "started_by_id", "triggering_user_email"):
         value = metadata.get(key)
         if value is not None:
@@ -309,7 +312,6 @@ def follow_up_configurable(metadata: Mapping[str, Any], thread_id: str) -> dict[
         configurable.update(
             user_id=owner.removeprefix("user:"),
             auth_provider="langsmith",
-            experience="agent_workspace",
             repo_explicitly_none=True,
         )
         configurable.pop("github_login", None)
