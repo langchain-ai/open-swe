@@ -107,7 +107,7 @@ class HumanReviewRequest(Base):
         ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
     diff_fingerprint: Mapped[str] = mapped_column(server_default="", default="")
-    # Hunks the agent left off an expedited card as qualifying under the target repo's APPROVALS.md.
+    # Hunks the agent left off an expedited card as qualifying under the target repo's auto-approve rules.
     excluded_hunks: Mapped[list[ExcludedHunk]] = mapped_column(JSONB, default_factory=list)
     tldr: Mapped[str] = mapped_column(server_default="", default="")
     state: Mapped[RequestState] = mapped_column(Text, default="open")

@@ -1,8 +1,9 @@
 """Approval criteria from a repository's ``.open-swe`` directory and its approval mode.
 
-Criteria come from ``.open-swe/APPROVALS.md`` and from one rule per Markdown file in
-``.open-swe/auto-approve-rules/``. A rule's frontmatter may list ``paths`` globs; the
-rule then applies only when every file the pull request changes matches one of them.
+Criteria come from one rule per Markdown file in ``.open-swe/auto-approve-rules/``.
+A rule's frontmatter may list ``paths`` globs; the rule then applies only when every
+file the pull request changes matches one of them. A legacy, undocumented
+``.open-swe/APPROVALS.md`` still applies to every pull request.
 The mode on the repository's review style record decides whether a positive
 assessment only comments (``dry_run``) or submits a GitHub approval (``approve``).
 Reviews read the criteria from the default branch, so one policy covers pull requests

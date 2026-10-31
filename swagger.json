@@ -2196,7 +2196,7 @@
         "type": "object"
       },
       "Exclusion": {
-        "description": "Changes the agent judged to qualify under the target repository's APPROVALS.md.",
+        "description": "Changes the agent judged to qualify under the target repository's auto-approve rules.",
         "properties": {
           "guideline": {
             "title": "Guideline",
@@ -2229,7 +2229,7 @@
       },
       "ExpeditedExclusions": {
         "additionalProperties": false,
-        "description": "What an expedited card left off as qualifying under the target repo's APPROVALS.md.",
+        "description": "What an expedited card left off as qualifying under the target repo's auto-approve rules.",
         "properties": {
           "approvals_md_sha256": {
             "title": "Approvals Md Sha256",

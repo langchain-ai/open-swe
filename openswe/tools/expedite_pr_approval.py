@@ -33,7 +33,7 @@ from openswe.github.token import resolve_github_token
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import summary_line
-from openswe.review.approvals import APPROVALS_PATH, AUTO_APPROVE_RULES_DIR, ApprovalPolicy
+from openswe.review.approvals import AUTO_APPROVE_RULES_DIR, ApprovalPolicy
 from openswe.run_config import RunConfig
 from openswe.slack.cards import run_slack_location
 from openswe.slack.channels import SlackChannel
@@ -101,8 +101,8 @@ async def _resolve_exclusions(
     approvals = policy.for_changes(changed).render()
     if approvals is None:
         raise ValueError(
-            f"Nothing can be excluded: `{pr_ref.owner}/{pr_ref.repo}` has no `{APPROVALS_PATH}` "
-            f"or applicable rule in `{AUTO_APPROVE_RULES_DIR}/` on its default branch."
+            f"Nothing can be excluded: `{pr_ref.owner}/{pr_ref.repo}` has no applicable rule in "
+            f"`{AUTO_APPROVE_RULES_DIR}/` on its default branch."
         )
     audited = ExpeditedExclusions(
         base_sha=payload.base_sha,
@@ -255,7 +255,7 @@ async def expedite_pr_approval(
             f"Eligible changes touch at most {MAX_CHANGED_LINES} lines outside tests and "
             "exclusions, and every one of those files has to have a readable text diff. Test "
             f"files are not counted, and `excluded` leaves out hunks that qualify under the "
-            f"target repository's `{APPROVALS_PATH}` or `{AUTO_APPROVE_RULES_DIR}/`. Otherwise ask for a normal review."
+            f"target repository's `{AUTO_APPROVE_RULES_DIR}/`. Otherwise ask for a normal review."
         )
 
     if await User.for_login("github", payload.author) is None:

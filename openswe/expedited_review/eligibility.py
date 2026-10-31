@@ -5,7 +5,7 @@ to arrive as a readable text diff, and those files together have to fit in
 ``MAX_CHANGED_LINES``, so all of it is on the card. Test files are outside both
 gates — CI judges them — which is what lets a two-line fix arrive with the
 tests that prove it. So are hunks the agent excludes as qualifying under the
-target repository's ``.open-swe/APPROVALS.md``; the card summarizes them.
+target repository's ``.open-swe/auto-approve-rules/``; the card summarizes them.
 """
 
 import hashlib
@@ -29,7 +29,7 @@ MAX_CHANGED_LINES = 20
 ACCEPTED_CHANGED_LINES = 25
 MAX_FILES = 100
 
-# Kinds of change that must be read, so no APPROVALS.md guideline can hide them.
+# Kinds of change that must be read, so no auto-approve rule can hide them.
 _UNEXCLUDABLE_PATH = re.compile(
     r"(?:^|/)\.github/"
     r"|(?:^|/)(?:migrations|alembic)/"
@@ -198,7 +198,7 @@ class ExcludedHunk(TypedDict):
 
 
 class Exclusion(BaseModel):
-    """Changes the agent judged to qualify under the target repository's APPROVALS.md."""
+    """Changes the agent judged to qualify under the target repository's auto-approve rules."""
 
     path: str
     hunks: list[int] = []
