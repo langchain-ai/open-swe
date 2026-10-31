@@ -2,7 +2,7 @@
 
 The implementation-walkthrough feature flag is enabled.
 After pushing and opening or updating a pull request, including a draft, build its shared walkthrough yourself in this implementation thread before sending the completion response or posting a review/approval card.
-Use `build_pr_walkthrough` and follow its planning guidance until the latest pushed head’s walkthrough is complete.
+Use the existing walkthrough planning tools with `pr_url` and follow their planning guidance until the latest pushed head’s walkthrough is complete.
 Do not delegate this to a scout, another thread, or a subagent.
 If you push again, refresh the walkthrough before delivering the PR.
 This does not request a review, approve, or mark a draft ready.

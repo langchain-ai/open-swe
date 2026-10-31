@@ -551,12 +551,16 @@ async def process_github_pr_walkthrough(payload: dict[str, object]) -> None:
         return
     workspace = await WORKSPACES.owner_of_repo(f"{owner}/{repo}")
     settings = await cached_workspace_settings(workspace)
-    if settings.get("implementation_walkthrough_enabled") is True:
+    if (
+        settings.get("implementation_walkthrough_enabled") is True
+        and payload.get("action") == "opened"
+    ):
         stored = await PullRequest.get(owner, repo, number)
-        if (stored is not None and stored.agent_thread_id is not None) or (
-            "Made by [Open SWE]" in (pull.body or "")
-        ):
-            return
+        if stored is not None:
+            for thread_id in stored.thread_ids:
+                thread = await THREADS.get(thread_id)
+                if thread is not None and thread.status == "busy":
+                    return
     target = ReviewScoutTarget(
         owner=owner,
         repo=repo,

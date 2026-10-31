@@ -555,12 +555,11 @@ async def test_a_head_change_during_planning_ends_the_scout(
 async def test_implementation_tool_completes_the_shared_plan_in_its_own_checkout(
     repo: Path, checkout: PinnedCheckout, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from openswe.tools.implementation_walkthrough import (
-        ImplementationWalkthrough,
-        build_pr_walkthrough,
-    )
+    from openswe.run_config import RunConfig
+    from openswe.tools.plan_walkthrough import walkthrough_plan_chunk
     from openswe.ui_invalidations import Topic
 
+    monkeypatch.setattr(RunConfig, "from_runtime", lambda: RunConfig(thread_id="implementation"))
     base = _git(repo, "rev-parse", "HEAD").strip()
     head = _commit(repo, {"core.py": BASE.replace("return 1", "return 2")}, "change behavior")
     index = await _pin(checkout, base, head)
@@ -570,17 +569,21 @@ async def test_implementation_tool_completes_the_shared_plan_in_its_own_checkout
         PullRequest(owner="lc", repo="repo", number=7), checkout, head, base, index, plan
     )
     monkeypatch.setattr(
-        ImplementationWalkthrough,
-        "open",
-        AsyncMock(return_value=ImplementationWalkthrough(workspace)),
+        PlanWorkspace,
+        "for_implementation",
+        AsyncMock(return_value=workspace),
     )
     monkeypatch.setattr(Topic, "invalidate", AsyncMock())
 
-    initial = await build_pr_walkthrough("https://github.com/lc/repo/pull/7")
+    initial = await walkthrough_plan_chunk(
+        scout=None, tool_call_id="first", pr_url="https://github.com/lc/repo/pull/7"
+    )
     assert initial["complete"] is False
     assert workspace.status().unplanned_hunks
-    result = await build_pr_walkthrough(
-        "https://github.com/lc/repo/pull/7",
+    result = await walkthrough_plan_chunk(
+        scout=None,
+        tool_call_id="second",
+        pr_url="https://github.com/lc/repo/pull/7",
         title="Change the return value",
         show=[FileHunks(path="core.py", hunks=["-4"])],
         explanation="Return two instead of one.",

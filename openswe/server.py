@@ -223,6 +223,7 @@ from openswe.tools import (
     monitor,
     open_pull_request,
     output_iframe,
+    plan_walkthrough,
     publish_artifact,
     publish_workspace,
     publish_workspace_prompt,
@@ -269,7 +270,6 @@ from openswe.tools.admin_gate import (
     actor_has_admin_context,
     participant_is_admin,
 )
-from openswe.tools.implementation_walkthrough import build_pr_walkthrough
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
 from openswe.tools.manage_review_repos import manage_review_repos
@@ -814,7 +814,6 @@ def agent_tools_by_name() -> Mapping[str, BaseTool]:
     every run stays out of reach here too.
     """
     tools = [
-        build_pr_walkthrough,
         *(
             tool
             for tool in AGENT_TOOLS
@@ -822,6 +821,14 @@ def agent_tools_by_name() -> Mapping[str, BaseTool]:
         ),
         *walkthrough_tools("reviewer"),
         *walkthrough_tools("author"),
+        *apply_tool_descriptions(
+            [
+                plan_walkthrough.walkthrough_plan_chunk,
+                plan_walkthrough.walkthrough_split_hunks,
+                plan_walkthrough.walkthrough_move_to_other,
+                plan_walkthrough.walkthrough_describe_other,
+            ]
+        ),
     ]
     built = (tool if isinstance(tool, BaseTool) else as_tool(tool) for tool in tools)
     return {tool.name: tool for tool in built}
@@ -2015,8 +2022,14 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             for tool in static_tools
             if _registered_tool_name(tool) not in INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
         ]
-    if settings.get("implementation_walkthrough_enabled") is True:
-        static_tools.append(build_pr_walkthrough)
+    if guide is None and settings.get("implementation_walkthrough_enabled") is True:
+        static_tools = [
+            *static_tools,
+            plan_walkthrough.walkthrough_plan_chunk,
+            plan_walkthrough.walkthrough_split_hunks,
+            plan_walkthrough.walkthrough_move_to_other,
+            plan_walkthrough.walkthrough_describe_other,
+        ]
     if guide is not None:
         static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
     static_tools = apply_tool_descriptions(static_tools, _tool_description_values())
