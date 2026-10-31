@@ -62,7 +62,9 @@ async def test_every_memory_reaches_the_curator_but_only_personal_ones_apply_at_
     }
 
 
-async def test_an_adopted_memory_moves_into_the_workspace_prompt(registry_db: None) -> None:
+async def test_a_superseded_memory_leaves_only_those_who_read_the_workspace_prompt(
+    registry_db: None,
+) -> None:
     workspace = WorkspaceRow(slug="platform", name="Platform")
     person = User(display_name="Ada")
     async with postgres.session() as session:
@@ -76,8 +78,10 @@ async def test_an_adopted_memory_moves_into_the_workspace_prompt(registry_db: No
         from_private_thread=False,
     )
     assert await MEMORIES.decide(workspace.slug, row.id, "adopted", "")
+    assert [m.id for m in await MEMORIES.personal(person.id, curated_in=workspace.slug)] == [row.id]
+    assert await MEMORIES.decide(workspace.slug, row.id, "superseded", "")
 
-    # Only runs that read that workspace's curated prompt drop it.
+    # Only runs that read that workspace's curated prompt drop it; elsewhere it stays.
     assert await MEMORIES.personal(person.id, curated_in=workspace.slug) == []
     for elsewhere in (None, "billing"):
         assert [m.id for m in await MEMORIES.personal(person.id, curated_in=elsewhere)] == [row.id]

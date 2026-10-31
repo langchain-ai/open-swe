@@ -6,7 +6,7 @@ To change one, forget it and `remember` the new wording.
 
 It stops reaching their runs at once.
 One the curator never saw, held from it, is deleted.
-Any other goes back to the workspace's curator as a withdrawal, even if it already adopted it: only the curator changes the workspace's prompt, and other people's memories may still keep what it said there.
+Any other goes back to the workspace's curator as a withdrawal, even if it already decided it: only the curator changes the workspace's prompt, and other people's memories may still keep what it said there.
 
 Args:
 - memory_id: The memory's id.

@@ -2,7 +2,7 @@
 
 Every memory waits for the curator of the workspace it was saved in, which may restate
 what many people's threads learned in the workspace's prompt. A personal memory also
-applies to its person's runs at once, until that prompt carries it instead. Memories
+applies to its person's runs at once, until a line there supersedes it. Memories
 saved in private threads before every memory reached the curator stay held from it.
 """
 
@@ -25,8 +25,8 @@ from openswe.workspaces.rows import WorkspaceRow
 
 # A personal memory applies to its person; a workspace one only reaches the curator.
 Scope = Literal["personal", "workspace"]
-Status = Literal["pending", "held", "adopted", "declined"]
-Decision = Literal["adopted", "declined"]
+Status = Literal["pending", "held", "adopted", "superseded", "declined"]
+Decision = Literal["adopted", "superseded", "declined"]
 Withdrawal = Literal["deleted", "requested"]
 
 # The thread metadata key naming the workspace a curator thread curates; nobody posts there.
@@ -111,7 +111,7 @@ class CuratedMemory(BaseModel):
     """A memory as the curator sees it: never who saved it, nor what a held one says."""
 
     id: UUID
-    # Personal memories already apply to their person; adopting one moves it to the prompt.
+    # Personal memories already apply to their person, until a line in the prompt supersedes one.
     scope: Scope
     status: Status
     saved_at: datetime
@@ -200,7 +200,8 @@ class Memories:
         """``person``'s personal memories, newest first; none for no person.
 
         With ``curated_in``, the workspace whose curated prompt the run reads, leaving out
-        the memories its curator adopted: that prompt carries them now.
+        the memories its curator superseded: that prompt carries them now. Without it, as for
+        a person who does not read that prompt, they keep applying rather than disappear.
         """
         if person is None or not postgres.configured():
             return []
@@ -212,7 +213,7 @@ class Memories:
         if curated_in is not None:
             conditions.append(
                 or_(
-                    MemoryRow.status != "adopted",
+                    MemoryRow.status != "superseded",
                     MemoryRow.workspace_id.is_distinct_from(
                         select(WorkspaceRow.id)
                         .where(WorkspaceRow.slug == curated_in)
@@ -233,7 +234,7 @@ class Memories:
         """Take back one of ``person``'s memories; None when they saved no such one.
 
         One the curator never saw, held from it, is simply deleted. Any other
-        goes back to the curator, adopted or not, since only it may change the workspace's
+        goes back to the curator, decided or not, since only it may change the workspace's
         prompt; a personal one stops applying to its person at once.
         """
         mine = (MemoryRow.id == memory_id, MemoryRow.created_by == person)

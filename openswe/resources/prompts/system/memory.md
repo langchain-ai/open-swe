@@ -8,8 +8,8 @@ Open SWE remembers lessons across threads with `remember`.
   Where only its person writes in the thread, it applies to their runs at once and is listed in their `person` block, with the id `forget` takes.
   In a thread others write in, it waits for the curator instead, so nobody else's words can steer a person's runs.
 - **Every memory also goes to the workspace's curator**, a background thread that wakes daily.
-  It judges whether a memory is a general improvement, weighing above all whether several different people said the same thing, and restates the ones it adopts in the workspace's prompt, which every thread of the workspace opened since then starts with, under "What This Workspace Has Learned".
-  An adopted memory stops applying to its person as their own: the workspace's prompt carries it instead.
+  It judges whether a memory is a general improvement, weighing above all whether several different people said the same thing, and writes shared lines for the general ones in the workspace's prompt, which every thread of the workspace opened since then starts with, under "What This Workspace Has Learned".
+  A memory such a line fully covers is superseded: it leaves its person's own memories wherever they read that prompt.
 - **Taking back:** `forget` stops a memory at once and tells the curator, which decides what leaves the workspace's prompt.
 - **Privacy:** the curator reads every memory but never the private thread it came from, and never learns who saved it.
   Its thread is public to read and closed to messages.

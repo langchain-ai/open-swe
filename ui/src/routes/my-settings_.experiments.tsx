@@ -40,7 +40,7 @@ function ExperimentsPage() {
         <ProfileSwitchRow
           field="experimental_memory"
           label="Memory"
-          description="Threads you start include what your workspace's curator learned from everyone's memories, in place of your own memories it adopted."
+          description="Threads you start include what your workspace's curator learned from everyone's memories, in place of your own memories it superseded."
         />
         <ProfileSwitchRow
           field="experimental_background_callbacks"
