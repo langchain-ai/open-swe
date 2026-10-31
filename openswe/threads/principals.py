@@ -27,6 +27,7 @@ from openswe.api_keys.models import ApiKey
 from openswe.audit_logs.middleware import bind_actor
 from openswe.audit_logs.models import AuditLogEnrichments
 from openswe.dashboard.oauth import bind_audit_session, optional_session
+from openswe.dashboard.principal import DashboardPrincipal
 from openswe.federation.github_oidc import (
     GitHubActionsClaims,
     InvalidFederatedToken,
@@ -105,11 +106,9 @@ class Principal:
 
     @classmethod
     def of_person(cls, session: dict[str, Any]) -> Principal:
-        login = session.get("sub")
-        if not isinstance(login, str) or not login.strip():
-            raise HTTPException(401, "session carries no user")
+        principal = DashboardPrincipal.from_session(session)
         email = session.get("email")
-        return cls.of_login(login.strip(), email if isinstance(email, str) else None)
+        return cls.of_login(principal.subject.strip(), email if isinstance(email, str) else None)
 
     @property
     def machine(self) -> bool:

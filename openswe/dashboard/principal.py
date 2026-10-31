@@ -21,7 +21,11 @@ class DashboardPrincipal:
     def from_session(cls, session: Mapping[str, object]) -> DashboardPrincipal:
         provider = session.get("provider", "github")
         subject = session.get("sub")
-        if provider not in {"github", "langsmith"} or not isinstance(subject, str) or not subject:
+        if (
+            provider not in {"github", "langsmith"}
+            or not isinstance(subject, str)
+            or not subject.strip()
+        ):
             raise HTTPException(401, "invalid session identity")
         raw_id = session.get("user_id")
         try:
