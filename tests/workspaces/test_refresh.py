@@ -1,5 +1,7 @@
 import asyncio
 import base64
+import logging
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -8,7 +10,7 @@ from sqlalchemy import text
 from openswe.database import transaction
 from openswe.webhooks import event_log
 from openswe.workspaces import refresh
-from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.workspaces.store import WORKSPACES, Workspace, WorkspaceCreate
 
 
 class _Result:
@@ -393,3 +395,125 @@ async def test_the_builder_is_published_while_it_lives_and_cleared_after() -> No
     assert record is not None
     # Released with the refresh, so it stops being offered as a readable source.
     assert record.refresh_sandbox_id is None
+
+
+class TestFailedUpdateRecovery:
+    @pytest.mark.usefixtures("registry_db")
+    @pytest.mark.parametrize("failure_at", ["script", "boot", "capture"])
+    async def test_failed_update_queues_one_full_rebuild(
+        self, failure_at: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        backend = _backend(_Result("update output", 1 if failure_at == "script" else 0))
+        create = AsyncMock(return_value=backend)
+        capture = AsyncMock()
+        if failure_at == "boot":
+            create.side_effect = RuntimeError("no capacity")
+        if failure_at == "capture":
+            capture.side_effect = TimeoutError("capture timed out")
+        with (
+            patch.object(refresh, "_create_builder_sandbox", create),
+            patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
+            patch.object(refresh, "capture_workspace_snapshot", capture),
+            patch.object(
+                refresh.queue, "schedule", AsyncMock(return_value=MagicMock(id="full-job"))
+            ) as schedule,
+        ):
+            await WORKSPACES.create(
+                WorkspaceCreate(
+                    inherit_default_sandbox=False,
+                    name="base",
+                    setup_script="make setup",
+                    update_script="git pull",
+                ),
+                "ramon",
+            )
+            await WORKSPACES.mark_captured(
+                "base", snapshot_id="snap-1", snapshot_name="base", source_sandbox_id="sb-prior"
+            )
+            result = await refresh.refresh_workspace("base", "update", run_id="update-job")
+            record = await WORKSPACES.get("base")
+            assert record is not None
+            assert record.refresh_status == "failed"
+            assert record.refresh_error == result["error"]
+            assert record.ready_snapshot_id == "snap-1"
+            assert record.refresh_run_id == "full-job"
+            assert not refresh.is_update_due(record)
+            assert schedule.await_count == 1
+            assert schedule.await_args is not None
+            assert schedule.await_args.args[1] == {"workspace_slug": "base", "refresh_kind": "full"}
+            backend.aexecute.side_effect = [_Result("full rebuild failed", 1)]
+            rebuilt = await refresh.refresh_workspace("base", "full", run_id="full-job")
+            assert rebuilt["status"] == "failed"
+            assert schedule.await_count == 1
+        assert result["status"] == "failed"
+        assert any(
+            entry.levelno == logging.ERROR
+            and entry.__dict__.get("workspace") == "base"
+            and entry.__dict__.get("refresh_run_id") == "update-job"
+            for entry in caplog.records
+        )
+
+    @pytest.mark.usefixtures("registry_db")
+    @pytest.mark.parametrize("fallback", ["unsupported", "missing_run", "queue_exception"])
+    async def test_unavailable_fallback_preserves_the_failed_update(
+        self, fallback: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with (
+            patch.object(
+                refresh,
+                "_create_builder_sandbox",
+                AsyncMock(return_value=_backend(_Result("failed", 1))),
+            ),
+            patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
+            patch.object(
+                refresh,
+                "start_refresh_run",
+                AsyncMock(
+                    return_value=None,
+                    side_effect=RuntimeError("queue unavailable")
+                    if fallback == "queue_exception"
+                    else None,
+                ),
+            ),
+        ):
+            await WORKSPACES.create(
+                WorkspaceCreate(
+                    inherit_default_sandbox=False,
+                    name="base",
+                    setup_script="" if fallback == "unsupported" else "make setup",
+                    update_script="git pull",
+                ),
+                "ramon",
+            )
+            await WORKSPACES.mark_captured(
+                "base", snapshot_id="snap-1", snapshot_name="base", source_sandbox_id="sb-prior"
+            )
+            result = await refresh.refresh_workspace("base", "update", run_id="update-job")
+            record = await WORKSPACES.get("base")
+        assert result["status"] == "failed"
+        assert record is not None
+        assert record.refresh_status == "failed"
+        assert record.refresh_error == "update script exited 1"
+        assert record.ready_snapshot_id == "snap-1"
+        assert not refresh.is_update_due(record)
+        assert "Could not queue full refresh after failed update" in caplog.text
+        assert "Queued full refresh after failed update" not in caplog.text
+
+    @pytest.mark.parametrize("queue_error", [None, RuntimeError("queue unavailable")])
+    async def test_missing_update_run_is_reported_as_a_queue_failure(
+        self, queue_error: Exception | None, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        record = Workspace(
+            slug="base",
+            name="base",
+            update_script="git pull",
+            snapshot_id="snap-1",
+            snapshot_status="ready",
+            last_captured_at=(datetime.now(UTC) - timedelta(hours=2)).isoformat(),
+        )
+        with patch.object(
+            refresh, "start_refresh_run", AsyncMock(return_value=None, side_effect=queue_error)
+        ):
+            assert await refresh.maybe_start_update(record) is None
+        assert any(entry.levelno == logging.ERROR for entry in caplog.records)
+        assert "Queued workspace update" not in caplog.text
