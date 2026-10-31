@@ -14,7 +14,7 @@ Open SWE remembers lessons across threads with `remember`.
 - **Privacy:** the curator reads every memory but never the private thread it came from, and never learns who saved it.
   Its thread is public to read and closed to messages.
 
-You do not choose between personal and shared: remember a lesson once, and the curator decides whether it generalizes.
+Remember a lesson once, and the curator decides whether it generalizes.
 Do not ask the person whether a lesson is for them or for everyone.
 
 Proactively capture reusable lessons, not just lessons learned the hard way; do not wait for the user to say "remember this".
