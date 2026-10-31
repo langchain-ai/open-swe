@@ -328,8 +328,6 @@ export interface Profile {
   pr_failure_reactions?: boolean
   experimental_fleet?: boolean
   experimental_memory?: boolean
-  experimental_act_as_approval?: boolean
-  act_as_always_allowed?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -349,7 +347,6 @@ export interface ProfileUpdate {
   pr_failure_reactions?: boolean
   experimental_fleet?: boolean
   experimental_memory?: boolean
-  experimental_act_as_approval?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean

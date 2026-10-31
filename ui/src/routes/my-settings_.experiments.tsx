@@ -3,7 +3,6 @@ import { createFileRoute } from "@tanstack/react-router"
 import { SettingsPage, SettingsSection } from "@/components/AppShell"
 import { StreamPreference } from "@/features/settings/components/StreamPreference"
 import { ProfileSwitchRow } from "@/features/settings/components/ProfileSwitchRow"
-import { useProfile } from "@/lib/profile"
 import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/my-settings_/experiments")({
@@ -12,7 +11,6 @@ export const Route = createFileRoute("/my-settings_/experiments")({
 })
 
 function ExperimentsPage() {
-  const profile = useProfile()
   return (
     <SettingsPage
       title="Experiments"
@@ -55,15 +53,6 @@ function ExperimentsPage() {
           field="experimental_background_callbacks"
           label="Background command callbacks"
           description="Background commands you start report completion from the sandbox instead of being polled every minute."
-        />
-        <ProfileSwitchRow
-          field="experimental_act_as_approval"
-          label="Approve PRs opened as you"
-          description={
-            profile.data?.act_as_always_allowed
-              ? "You chose Always allow, so Open SWE is not asking. Switch this off and on to be asked again."
-              : "In Slack threads with more than one person, Open SWE DMs you for approval before opening a PR under your name."
-          }
         />
       </SettingsSection>
     </SettingsPage>

@@ -14,10 +14,6 @@ class UserPreferences(BaseModel):
     # workspace memories they saved in their private threads reach their own runs there
     # until the curator processes them.
     experimental_memory: bool = False
-    # Ask this person before Open SWE opens a PR as them in a shared thread.
-    experimental_act_as_approval: bool = False
-    # Open SWE acts as this person in shared threads without asking first.
-    act_as_always_allowed: bool = False
 
 
 class UserPreferencesPatch(BaseModel):
@@ -31,6 +27,3 @@ class UserPreferencesPatch(BaseModel):
     experimental_memory: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
-    # A consent control, so never agent-manageable.
-    experimental_act_as_approval: bool | None = None
-    act_as_always_allowed: bool | None = None

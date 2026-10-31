@@ -4969,17 +4969,6 @@
             ],
             "title": "Draft Prs"
           },
-          "experimental_act_as_approval": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Act As Approval"
-          },
           "experimental_background_callbacks": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -12089,6 +12078,41 @@
         "tags": [
           "dashboard",
           "incidents"
+        ]
+      }
+    },
+    "/dashboard/api/l/{token}": {
+      "get": {
+        "operationId": "open_short_link_dashboard_api_l__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open Short Link",
+        "tags": [
+          "short-links"
         ]
       }
     },

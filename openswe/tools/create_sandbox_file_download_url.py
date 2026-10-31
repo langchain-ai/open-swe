@@ -1,12 +1,21 @@
 import logging
 import posixpath
 import shlex
+from datetime import datetime
 from typing import Any, Literal
 
+from langgraph.config import get_config
+
+from openswe.dashboard.agent_overrides import resolve_github_login
 from openswe.run_config import RunConfig
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
 from openswe.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
+from openswe.short_links.models import ShortLink
+from openswe.tools.access import direct_user_run
+from openswe.users import User
+from openswe.utils.dashboard_links import public_dashboard_api_base_url
+from openswe.utils.json_types import as_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +79,24 @@ async def create_sandbox_file_download_url(
 
     if not download.download_url:
         raise RuntimeError("LangSmith did not return a download URL")
-    return {
-        "url": download.download_url,
-        "file_path": path,
-        "expires_at": download.expires_at,
-    }
+    url = download.download_url
+    # Models copy a short link reliably, unlike hundreds of signed characters; only a public
+    # deployment can serve one to the people and image proxies that follow it.
+    if public_dashboard_api_base_url() is not None:
+        cfg = RunConfig.from_runtime()
+        # Only a person's own run is theirs; scheduled and other automatic runs write as the system.
+        login = (
+            await resolve_github_login(as_json_object(get_config()))
+            if direct_user_run(cfg)
+            else None
+        )
+        person = await User.for_login("github", login) if login else None
+        link = await ShortLink.create(
+            url,
+            expires_at=(
+                None if download.expires_at is None else datetime.fromisoformat(download.expires_at)
+            ),
+            created_by=person.id if person else None,
+        )
+        url = link.url
+    return {"url": url, "file_path": path, "expires_at": download.expires_at}
