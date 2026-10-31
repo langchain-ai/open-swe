@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react"
 import { CatchBoundary } from "@tanstack/react-router"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { ErrorState } from "@langchain/macaw-components/ErrorState"
+import { AgentsApiError } from "@/features/agents/lib/api"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 
 import { AgentThreadView } from "@/features/agents/components/AgentThreadView"
@@ -91,6 +93,23 @@ function AgentThreadContent({
   }
 
   if (!threadQuery.data) {
+    if (
+      threadQuery.error instanceof AgentsApiError &&
+      threadQuery.error.status === 403
+    ) {
+      return (
+        <main
+          role="alert"
+          className="flex min-w-0 flex-1 overflow-y-auto p-space-5"
+        >
+          <ErrorState
+            title="This thread is private"
+            message={threadQuery.error.message}
+            contentClassName="mx-auto max-w-lg pt-space-8"
+          />
+        </main>
+      )
+    }
     return (
       <LoadError
         title="Unable to load thread"

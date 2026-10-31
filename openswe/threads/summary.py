@@ -163,10 +163,28 @@ def thread_is_bot_triggered(metadata: Mapping[str, Any]) -> bool:
 
 
 def assert_thread_readable(
-    metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
+    metadata: Mapping[str, Any],
+    login: str | None = None,
+    email: str | None = None,
+    *,
+    explain_private: bool = False,
 ) -> None:
-    if not thread_is_readable(metadata, login, email):
-        raise HTTPException(404, "thread not found")
+    if thread_is_readable(metadata, login, email):
+        return
+    if (
+        explain_private
+        and login
+        and thread_source(metadata) in _SURFACED_SOURCES
+        and thread_is_private(metadata)
+    ):
+        owner = metadata.get("owner_login")
+        contact = f"@{owner.strip()}" if isinstance(owner, str) and owner.strip() else "the owner"
+        raise HTTPException(
+            403,
+            f"This thread is private. Ask {contact} to share it with the workspace "
+            "using the thread's visibility menu.",
+        )
+    raise HTTPException(404, "thread not found")
 
 
 def _assert_thread_promptable(metadata: Mapping[str, Any], login: str | None) -> None:
