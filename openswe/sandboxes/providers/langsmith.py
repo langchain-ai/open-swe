@@ -525,6 +525,10 @@ async def capture_snapshot_with_tag(
     the same way ``_install_create_extra_fields`` injects sandbox-create fields.
     Drop this for a plain ``capture_snapshot(..., tag=...)`` once
     langchain-ai/langsmith-sdk#3447 ships.
+
+    The server answers the capture POST only once the host has taken the
+    snapshot, which can run for minutes, so that request gets ``timeout`` too
+    instead of the client's 10-second default.
     """
     # Reaching into the SDK's transport is the whole mechanism: there is no public
     # seam for a field the client does not model.
@@ -534,6 +538,7 @@ async def capture_snapshot_with_tag(
         payload = kwargs.get("json")
         if str(url).endswith("/snapshot") and isinstance(payload, dict):
             kwargs["json"] = {**payload, "tag": tag}
+            kwargs["timeout"] = timeout
         return await original_post(url, *args, **kwargs)
 
     client._http.post = post_with_tag  # noqa: SLF001 # ty: ignore[invalid-assignment]
