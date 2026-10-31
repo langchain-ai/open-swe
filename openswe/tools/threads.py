@@ -46,6 +46,7 @@ from openswe.threads.workflow_approval import (
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
+from openswe.tools.access import resolve_access
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User
 from openswe.utils.dashboard_handoff import RELAY_RUN_ID_KEY, RELAYED_FROM_KEY
@@ -151,6 +152,13 @@ async def _reader(state: Mapping[str, Any] | None = None) -> _Actor | None:
     if actor := await _actor(state):
         return actor
     cfg = RunConfig.parse(_config().get("configurable"))
+    if cfg.source == "curator" and (await resolve_access(cfg)).curator:
+        return _Actor(
+            login=f"system:curator:{cfg.workspace_slug}",
+            email=None,
+            name="Memory curator",
+            automation=True,
+        )
     if record := await schedules.authorized_schedule_run(cfg):
         return _Actor(
             login=f"system:schedule:{record['id']}",

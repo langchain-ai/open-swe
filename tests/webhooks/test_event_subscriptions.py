@@ -14,7 +14,7 @@ from openswe.github.comments import (
 )
 from openswe.slack.channels import SlackChannel
 from openswe.webhooks import event_log
-from openswe.webhooks.event_log import EventLog, EventRefs
+from openswe.webhooks.event_log import EventLog, EventRefs, WebhookSource
 from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
 from openswe.webhooks.event_subscriptions import EventSubscription
 from tests.support.slack_api import SlackAPI
@@ -308,23 +308,26 @@ async def test_slack_matches_joined_channels_but_not_dms(
         assert list(deliveries) == ["s-private", "s-public", "s-own"]
 
 
+@pytest.mark.parametrize("source", ["workspace", "platform_issue"])
 async def test_workspace_events_reach_only_admin_threads_that_name_the_source(
-    workspace: dict[str, UUID], delivered: list[tuple[str, MultitaskStrategy]]
+    workspace: dict[str, UUID],
+    delivered: list[tuple[str, MultitaskStrategy]],
+    source: WebhookSource,
 ) -> None:
     await _subscribe(workspace, event_types=["refresh"])
-    await _subscribe(workspace, sources=["workspace"], event_types=["refresh"])
+    await _subscribe(workspace, sources=[source], event_types=["refresh"])
     await EventSubscription(
         thread_id="admin-thread",
         workspace_id=workspace["workspace"],
         multitask_strategy="enqueue",
         run_config={"thread_id": "admin-thread", "admin_thread": True},
         expires_at=datetime.now(UTC) + timedelta(hours=1),
-        sources=["workspace"],
+        sources=[source],
         event_types=["refresh"],
     ).create()
 
     await EventLog.append(
-        "workspace",
+        source,
         {
             "workspace_slug": "acme",
             "error": "TimeoutError with opaque-error-credential",
@@ -343,5 +346,5 @@ async def test_workspace_events_reach_only_admin_threads_that_name_the_source(
     since = datetime.now(UTC) - timedelta(hours=1)
     assert await EventLog.kinds(since) == []
     assert [(kind.source, kind.event_type) for kind in await EventLog.kinds(since, admin=True)] == [
-        ("workspace", "refresh.failed")
+        (source, "refresh.failed")
     ]

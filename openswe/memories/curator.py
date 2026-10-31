@@ -51,6 +51,28 @@ class WorkspaceCurator:
     async def wake(self) -> str:
         """Start a run on the curator's thread, creating the thread the first time; a run
         already going keeps going, and this one waits behind it."""
+        return await self._start(prompt("curator/wake", workspace=self.slug))
+
+    async def report_problem(
+        self, *, report_id: str, description: str, keywords: list[str], thread_id: str | None
+    ) -> str:
+        """Send a problem report without saving it as a memory."""
+        description = description.strip()
+        if not description:
+            raise ValueError("A problem report requires a description.")
+        return await self._start(
+            prompt("curator/wake", workspace=self.slug)
+            + "\n\n"
+            + prompt(
+                "curator/problem-report",
+                report_id=report_id,
+                description=description,
+                keywords=keywords,
+                thread_id=thread_id,
+            )
+        )
+
+    async def _start(self, message: str) -> str:
         client = dispatch_client()
         thread_id = await succession.succeed(self.thread_id)
         await create_thread(
@@ -70,7 +92,7 @@ class WorkspaceCurator:
             thread_id,
             _ASSISTANT_ID,
             input=build_run_input(
-                prompt("curator/wake", workspace=self.slug),
+                message,
                 {"sender_id": _SENDER_ID, "surface": "automation", "kind": "system"},
                 systems=[
                     {"id": _SENDER_ID, "display_name": "Memory curator", "platform": "open-swe"}
