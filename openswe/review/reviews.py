@@ -40,7 +40,7 @@ from openswe.review.findings import (
     is_thread_resolved,
 )
 from openswe.review.session import PullRequestState, ReviewSession, now_ms
-from openswe.review_scout.launch import ReviewScoutTarget, ScoutProgress
+from openswe.review_scout.launch import ReviewScoutTarget, ScoutProgress, ScoutStatus
 from openswe.thread_ids import reviewer_thread_id
 from openswe.threads import index
 from openswe.threads.status import thread_run_error
@@ -701,15 +701,13 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
 
     target = await _scout_target(owner, repo, pr_number, pr_payload)
     walkthrough = await target.walkthrough() if target else None
-    walkthrough_running = walkthrough is None and target is not None and await _scouting(target)
-    walkthrough_error = (
-        await _scout_failure(target)
-        if walkthrough is None and target is not None and not walkthrough_running
+    scout = await _scout_status(target) if walkthrough is None and target is not None else None
+    walkthrough_progress = (
+        await _scout_progress(target)
+        if scout is not None and scout.state == "running" and target is not None
         else None
     )
-    walkthrough_progress = (
-        await _scout_progress(target) if walkthrough_running and target is not None else None
-    )
+    scout_thread_id = await target.current_thread_id() if target else None
     thread_id = thread.get("thread_id") if thread else None
     review_error = (
         await _reviewer_failure(thread_id)
@@ -730,13 +728,15 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         "checks": checks,
         "findings": findings,
         "walkthrough": walkthrough.model_dump(mode="json") if walkthrough else None,
-        "walkthrough_running": walkthrough_running,
-        "walkthrough_error": walkthrough_error,
+        "walkthrough_scout": scout.model_dump() if scout else None,
         "walkthrough_progress": (
             walkthrough_progress.model_dump(mode="json") if walkthrough_progress else None
         ),
         "review_error": review_error,
-        "walkthrough_scout_thread_id": await target.current_thread_id() if target else None,
+        "walkthrough_scout_thread_id": scout_thread_id,
+        "walkthrough_trace_url": (
+            await get_langsmith_trace_url(scout_thread_id) if scout_thread_id else None
+        ),
         "assessment": assessment.model_dump() if assessment else None,
     }
 
@@ -1180,19 +1180,11 @@ async def _scout_target(
     )
 
 
-async def _scouting(target: ReviewScoutTarget) -> bool:
+async def _scout_status(target: ReviewScoutTarget) -> ScoutStatus | None:
     try:
-        return await target.active_run() is not None
+        return await target.status()
     except Exception:
         logger.warning("Could not read review scout runs", exc_info=True, extra=target.log_extra)
-        return False
-
-
-async def _scout_failure(target: ReviewScoutTarget) -> str | None:
-    try:
-        return await target.last_failure()
-    except Exception:
-        logger.warning("Could not read review scout failure", exc_info=True, extra=target.log_extra)
         return None
 
 
