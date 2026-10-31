@@ -42,7 +42,7 @@ export function AppShell({
   fill,
   children,
 }: AppShellProps) {
-  const agentWorkspace = useAgentWorkspacePreference()
+  const agentWorkspace = useAgentWorkspace()
   if (fill) {
     return (
       <div className="flex h-svh overflow-hidden bg-surface-level-1 text-primary">

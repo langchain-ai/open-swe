@@ -994,7 +994,8 @@ async def _enrich_run_start_command(
                 login=login,
                 email=email,
                 repo_config=repo_config,
-                repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True
+                repo_explicitly_none=identity.user_id is not None
+                or client_configurable.get("repo_explicitly_none") is True
                 or (experience == "agent_workspace" and not repo_config),
                 experience=experience,
                 visibility=visibility,

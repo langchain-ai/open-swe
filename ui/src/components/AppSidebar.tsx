@@ -28,7 +28,7 @@ import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import type { SessionUser } from "@/lib/api"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import { LogoMark } from "@/components/Branding"
-import { useAgentWorkspacePreference } from "@/lib/profile"
+import { useAgentWorkspace } from "@/features/agents/lib/agentWorkspace"
 import {
   SidebarCollapseButton,
   SidebarFrame,
@@ -167,7 +167,7 @@ function WorkspaceNavItems({ onNavigate }: { onNavigate: () => void }) {
 }
 
 export function AppSidebar({ user }: { user: SessionUser }) {
-  const agentWorkspace = useAgentWorkspacePreference()
+  const agentWorkspace = useAgentWorkspace()
   const layout = useSidebarLayout()
   const hrefLinkOptions = useHrefLinkOptions()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
