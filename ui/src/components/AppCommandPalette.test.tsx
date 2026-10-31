@@ -13,6 +13,10 @@ const mocks = vi.hoisted(() => ({
   cloudThread: { id: "cloud-1", title: "Cloud result" } as AgentThread,
 }))
 
+vi.mock("@/lib/session", () => ({
+  useSession: () => ({ data: { login: "alice" } }),
+}))
+
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => mocks.navigate,
   useRouterState: () => ({

@@ -394,7 +394,13 @@ test.describe("threads workspace", () => {
     page,
     request,
   }) => {
-    await seedThreads(request, workspaceThreads());
+    await seedThreads(
+      request,
+      workspaceThreads().map((thread) => ({
+        ...thread,
+        metadata: { ...thread.metadata, experience: "agent_workspace" },
+      })),
+    );
     await loginAs(page);
     await page.addInitScript(() => {
       Object.defineProperty(window, "openSweDesktop", {

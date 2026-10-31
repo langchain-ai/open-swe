@@ -416,8 +416,7 @@ async function diffThread(threadId) {
 
 /** Whether the backend has a run in flight on this thread. */
 async function threadRunning(threadId) {
-  if (!backendUrl)
-    throw new Error("Open SWE is not connected to a backend");
+  if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
   const response = await backendFetch(
     new URL(
       `/dashboard/api/threads/${encodeURIComponent(threadId)}?mark_viewed=false`,
@@ -437,8 +436,7 @@ async function threadRunning(threadId) {
  * brings its own abort signal; anything else gives up rather than hold a quit.
  */
 async function sendBridgeRequest(method, apiPath, { body, signal }) {
-  if (!backendUrl)
-    throw new Error("Open SWE is not connected to a backend");
+  if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
   const response = await backendFetch(
     new URL(`/dashboard/api${apiPath}`, backendUrl).toString(),
     {
@@ -621,8 +619,7 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:copy-page-link", (event) => {
     requireTrustedDesktopIpc(event);
-    if (!backendUrl)
-      throw new Error("Open SWE is not connected to a backend");
+    if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
     const source = new URL(event.sender.getURL());
     const target = new URL(backendUrl);
     target.pathname = source.pathname;
@@ -847,9 +844,7 @@ function configureDesktopIpc() {
     }
     const cwd = await projectForRepo(input?.repo);
     if (!cwd)
-      throw new Error(
-        `Add a checkout of ${input?.repo} to Open SWE first`,
-      );
+      throw new Error(`Add a checkout of ${input?.repo} to Open SWE first`);
     let thread = localThreadStore.create({ id: input?.threadId, cwd });
     try {
       thread = await createThreadWorktree(thread, null);

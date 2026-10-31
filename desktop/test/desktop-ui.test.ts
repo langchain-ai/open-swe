@@ -170,10 +170,7 @@ test("rejects untrusted archive URLs", async (t) => {
       root,
       serveFile,
     );
-    await assert.rejects(
-      ui.serve(page()),
-      /Could not load the Open SWE UI/,
-    );
+    await assert.rejects(ui.serve(page()), /Could not load the Open SWE UI/);
   }
 });
 
@@ -224,10 +221,7 @@ test("rejects archive traversal before extracting a checksum-valid download", as
     root,
     serveFile,
   );
-  await assert.rejects(
-    ui.serve(page()),
-    /Could not load the Open SWE UI/,
-  );
+  await assert.rejects(ui.serve(page()), /Could not load the Open SWE UI/);
   assert.deepEqual(await readdir(root), []);
 });
 

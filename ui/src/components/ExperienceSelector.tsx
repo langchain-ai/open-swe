@@ -18,7 +18,7 @@ export function ExperienceSelector({
         size="md"
         color="secondary"
         variant="outlined"
-        className="w-full"
+        className="w-full [&>*:not(:first-child)]:border-l [&>*:not(:first-child)]:border-l-transparent"
       >
         {(
           [
