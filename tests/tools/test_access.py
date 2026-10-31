@@ -220,3 +220,27 @@ async def test_bot_channel_history_is_scoped_and_revocable(
 
     metadata["source_context"] = {}
     assert (await slack_read_channel_messages("C1"))["ok"] is False
+
+
+@pytest.mark.parametrize(
+    ("owner_type", "curates", "run", "expected"),
+    [
+        ("system", "platform", {}, "full"),
+        ("system", "billing", {}, None),
+        ("user", "platform", {}, None),
+        # A person posting in the public curator thread starts a run of their own.
+        ("system", "platform", {"source": "dashboard", "github_login": "alice"}, None),
+        ("system", "platform", {"github_login": "alice"}, None),
+        ("system", "platform", {"started_by_id": "api_key:1"}, None),
+    ],
+)
+async def test_only_the_curators_own_wake_curates_its_workspace(
+    metadata: dict[str, object],
+    owner_type: str,
+    curates: str,
+    run: dict[str, object],
+    expected: tool_access.Mode | None,
+) -> None:
+    metadata.update(owner_type=owner_type, curator=curates)
+    cfg = _cfg(**{"workspace": "platform", "source": "curator", "github_login": None, **run})
+    assert (await resolve_access(cfg)).mode(Policy(trusted="curator")) == expected

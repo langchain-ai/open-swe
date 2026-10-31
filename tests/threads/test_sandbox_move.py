@@ -16,10 +16,10 @@ ON_THE_MAC = {
 }
 
 
-async def test_moving_to_the_cloud_leaves_the_box_and_the_carry_to_mda(
+async def test_moving_to_the_cloud_leaves_the_sandbox_and_the_carry_to_mda(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The cloud box is MDA's to create when the thread's next run starts; the checkout
+    """The cloud sandbox is MDA's to create when the thread's next run starts; the checkout
     comes over when that run connects to it."""
     stored: dict[str, object] = dict(ON_THE_MAC)
 

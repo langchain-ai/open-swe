@@ -10,6 +10,7 @@ result and its state updates. The file and shell tools are this runtime's own
 """
 
 import logging
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from functools import partial
 from typing import Final
@@ -45,13 +46,12 @@ from rt.backend import (
     BackendTimeoutError,
     BackendUnavailableError,
     OpenSweBackend,
-    git_trace,
     held_state,
     issuing_message_id,
     namespace,
     reported_call,
 )
-from rt.tracing import TurnTrace
+from rt.git_evidence import turn_git
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ _json_content = TypeAdapter(str | list[JsonValue])
 
 
 class SandboxGoneError(RuntimeError):
-    """The thread's box did not answer an operation; the person has been told, and the run ends."""
+    """The thread's sandbox did not answer an operation; the person has been told, and the run ends."""
 
 
 class UnreadConnectionError(RuntimeError):
@@ -105,11 +105,10 @@ def tool_report(
     arguments: Mapping[str, JsonValue],
     tool_call_id: str,
 ) -> ToolCallReport:
-    """A tool call as the backend's transcript takes it, with the turn's git evidence."""
+    """A tool call as the backend's transcript takes it."""
     return ToolCallReport(
         run_id=run_id(),
         namespace=namespace(),
-        git={**git_trace(state), **TurnTrace.current_evidence()},
         name=name,
         arguments=dict(arguments),
         tool_call_id=tool_call_id,
@@ -159,8 +158,6 @@ def _result(answer: OperationResult, tool_call_id: str, name: str) -> ToolMessag
         name=name,
         id=answer.message_id,
     )
-    if answer.evidence:
-        TurnTrace.record_evidence(answer.evidence)
     if not answer.state:
         return message
     return Command(update={"messages": [message], STATE_KEY: answer.state})
@@ -247,6 +244,7 @@ async def _operate(
             "credentials": credentials,
         }
     )
+    started = time.time_ns()
     try:
         answer = await call(backend, OPERATION, request, timeout=_seconds(spec, arguments))
     except BackendTimeoutError:
@@ -259,6 +257,7 @@ async def _operate(
         raise SandboxGoneError(f"The thread's sandbox did not answer {spec.name}")
     for event in answer.events:
         runtime.stream_writer(event)
+    turn_git(backend.run).found_pull_requests(answer.pull_requests, started)
     return _result(answer, tool_call_id, spec.name)
 
 

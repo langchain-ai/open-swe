@@ -79,7 +79,8 @@ beforeEach(() => {
   source.isRunning = false
   source.startRun.mockReset()
   source.startRun.mockResolvedValue(undefined)
-  vi.mocked(reportError).mockClear()
+  vi.mocked(reportError).mockReset()
+  vi.mocked(reportError).mockReturnValue("err_send-failed")
 })
 
 describe("useSubmitAgentMessage", () => {
@@ -163,7 +164,7 @@ describe("useSubmitAgentMessage", () => {
         expect.objectContaining({
           content: "try me",
           status: "failed",
-          error: "503 Service Unavailable",
+          error: "503 Service Unavailable · ID err_send-failed",
         }),
       ])
     )

@@ -121,3 +121,17 @@ async def test_bot_scope_lists_bot_threads_for_any_user(bot_thread, monkeypatch)
     page = await listing.list_dashboard_threads_page("bob", scope="bot", bot="T123:B123")
     assert searches == [{"trigger_kind": "slack_bot", "triggering_bot": "T123:B123"}]
     assert [item["id"] for item in page["items"]] == ["bot-thread"]
+
+
+@pytest.mark.parametrize("login", ["bob", "admin"])
+def test_nobody_posts_in_a_memory_curators_thread(monkeypatch, login):
+    monkeypatch.setattr(summary, "is_admin", lambda email, login=None: login in _ADMINS)
+    metadata = {
+        "source": "dashboard",
+        "visibility": "public",
+        "owner_type": "system",
+        "curator": "platform",
+    }
+    with pytest.raises(HTTPException) as exc:
+        summary.assert_thread_postable(metadata, login)
+    assert exc.value.status_code == 403

@@ -576,6 +576,40 @@ describe("Messages", () => {
     expect(screen.getByText("subagent")).toBeTruthy()
   })
 
+  it("shows a tool result's image on its card outside the folded work", () => {
+    const dataUrl = "data:image/png;base64,iVBORw0KGgo="
+    const messages = streamMessagesToUi([
+      new AIMessage({
+        id: "browse",
+        content: "",
+        tool_calls: [
+          { id: "ls", name: "execute", args: { command: "ls" } },
+          { id: "shot", name: "screenshot", args: {} },
+        ],
+      }),
+      new ToolMessage({ tool_call_id: "ls", content: "README.md" }),
+      new ToolMessage({
+        tool_call_id: "shot",
+        // The block MDA's browser `screenshot` tool returns.
+        content: [
+          { type: "text", text: "Captured the page" },
+          { type: "image", url: dataUrl },
+        ],
+      }),
+      new AIMessage({ id: "reply", content: "The page is shown above." }),
+    ])
+    render(<Messages messages={messages} isStreaming={false} />, { wrapper })
+
+    expect(
+      screen.getByRole("button", { name: "Worked · 1 action" })
+    ).toBeTruthy()
+    expect(screen.queryByText("README.md")).toBeNull()
+    expect(screen.getByRole("img", { name: "image" }).getAttribute("src")).toBe(
+      dataUrl
+    )
+    expect(screen.getByText("Captured the page")).toBeTruthy()
+  })
+
   it("keeps workflow approval available alongside an empty-state error", () => {
     render(
       <Messages
