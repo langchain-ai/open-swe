@@ -41,6 +41,7 @@ from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.run_usage import RunUsageSummary
 from openswe.utils.url_safety import UnsafeUrlError, request_with_safe_redirects
 from openswe.utils.user_messages import WARNING_ICON
+from openswe.workspaces.routing import is_kitchen_channel
 
 logger = logging.getLogger(__name__)
 
@@ -545,6 +546,27 @@ async def _slack_thread_exists(channel_id: str, thread_ts: str) -> bool:
     return True
 
 
+async def _broadcast_idle_kitchen_thread(channel_id: str, thread_ts: str) -> bool:
+    if not await is_kitchen_channel(channel_id):
+        return False
+    try:
+        async with SlackClient.bot() as client:
+            data = await client.conversations_replies(channel=channel_id, ts=thread_ts, limit=1)
+    except SLACK_REQUEST_ERRORS as exc:
+        logger.warning(
+            "Could not check kitchen thread activity for broadcast",
+            extra={"slack_channel": channel_id, "slack_error": slack_error(exc)},
+        )
+        return False
+    messages = data.get("messages")
+    if not isinstance(messages, list) or not messages or not isinstance(messages[0], Mapping):
+        return False
+    root = messages[0]
+    latest = root.get("latest_reply") if root.get("reply_count") else root.get("ts")
+    latest_ts = parse_slack_ts(latest if isinstance(latest, str) else None)
+    return 0 < latest_ts < time.time() - timedelta(hours=12).total_seconds()
+
+
 async def delete_slack_message(channel_id: str, message_ts: str) -> bool:
     """Delete one of the bot's own messages; whether Slack confirmed it."""
     try:
@@ -573,6 +595,8 @@ async def _post_slack_message_with_ts(
 
     # A code channel is one flowing session: replies belong in the channel.
     reply_ts = None if is_code_channel_session(thread_ts) else thread_ts
+    if reply_ts and not reply_broadcast:
+        reply_broadcast = await _broadcast_idle_kitchen_thread(channel_id, reply_ts)
     broadcast = {"reply_broadcast": True} if reply_broadcast and reply_ts else {}
     text, blocks = await pr_review_links(text, blocks)
 

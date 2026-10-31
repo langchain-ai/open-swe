@@ -184,6 +184,59 @@ async def test_upload_blocks_unsafe_urls_and_redirects(slack_api, redirect, monk
     assert len(uploads) == int(redirect)
 
 
+@pytest.mark.parametrize(
+    "root,broadcast",
+    [
+        ({"ts": "1.0"}, True),
+        ({"ts": "56800.0"}, False),
+        ({"ts": "56801.0"}, False),
+        ({"ts": "1.0", "reply_count": 5, "latest_reply": "56799.0"}, True),
+        ({"ts": "1.0", "reply_count": 5, "latest_reply": "99999.0"}, False),
+        ({"ts": "1.0", "reply_count": 5}, False),
+    ],
+)
+async def test_kitchen_reply_broadcast_uses_latest_activity(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, root: dict[str, object], broadcast: bool
+) -> None:
+    monkeypatch.setattr(slack_utils, "is_kitchen_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(slack_utils.time, "time", lambda: 100000)
+    slack_api.respond({"ok": True, "messages": [root], "has_more": True})
+    slack_api.respond({"ok": True, "ts": "100000.0", "message": {"thread_ts": "1.0"}})
+
+    await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "Update")
+
+    assert slack_api.calls[0] == (
+        "conversations.replies",
+        {"channel": "C1", "ts": "1.0", "limit": "1"},
+    )
+    payload = slack_api.calls[-1][1]
+    assert payload["thread_ts"] == "1.0"
+    assert payload.get("reply_broadcast", False) is broadcast
+
+
+@pytest.mark.parametrize("mode", ["ordinary", "top_level", "explicit", "lookup_failure"])
+async def test_automatic_broadcast_preserves_other_delivery_modes(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    monkeypatch.setattr(
+        slack_utils, "is_kitchen_channel", AsyncMock(return_value=mode != "ordinary")
+    )
+    if mode == "lookup_failure":
+        slack_api.respond({"ok": False, "error": "missing_scope"})
+    slack_api.respond({"ok": True, "ts": "2.0", "message": {"thread_ts": "1.0"}})
+
+    if mode == "top_level":
+        await slack_utils.post_slack_top_level_message_with_ts("C1", "Update")
+    else:
+        await slack_utils.post_slack_thread_reply_with_ts(
+            "C1", "1.0", "Update", reply_broadcast=mode == "explicit"
+        )
+
+    payload = slack_api.calls[-1][1]
+    assert payload.get("reply_broadcast", False) is (mode == "explicit")
+    assert len(slack_api.calls) == (2 if mode == "lookup_failure" else 1)
+
+
 async def test_reply_to_a_deleted_parent_is_removed_instead_of_left_at_the_channel_root(
     slack_api,
 ) -> None:
