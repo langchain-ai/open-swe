@@ -10,6 +10,7 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     ToolMessage,
+    add_notification_metadata,
     messages_from_dict,
 )
 from pydantic import BaseModel, JsonValue
@@ -575,3 +576,51 @@ async def test_reports_carry_what_they_report_never_the_conversation(
     ]
     [started] = [body for name, body in calls if name == "tool_started"]
     assert started["message_id"] == "ai-1"
+
+
+class TestWorkerCompletionReply:
+    @pytest.mark.parametrize("delivery", ["progress", "final", "rejected"])
+    async def test_worker_wake_preserves_delivery_obligations(
+        self, monkeypatch: pytest.MonkeyPatch, delivery: str
+    ) -> None:
+        backend, _calls = _backend(monkeypatch, {}, LoopRules(reply=_REPLY))
+        messages: list[BaseMessage] = [
+            HumanMessage(content="Fix it"),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "slack_reply",
+                        "args": {"response_type": "final" if delivery == "final" else "progress"},
+                        "id": "reply",
+                    }
+                ],
+            ),
+            ToolMessage(content='{"success": true}', tool_call_id="reply"),
+            AIMessage(
+                content="", tool_calls=[{"name": "slack_no_reply_needed", "args": {}, "id": "wait"}]
+            ),
+            ToolMessage(content='{"success": true}', tool_call_id="wait"),
+            HumanMessage(
+                content='<input-message sender="system:event-subscription" surface="automation" kind="system">Worker completed</input-message>'
+            ),
+        ]
+        if delivery == "rejected":
+            messages[-1] = add_notification_metadata(
+                HumanMessage(content="Worker completed"), source="async-task"
+            )
+            messages.extend(
+                [
+                    AIMessage(
+                        content="",
+                        tool_calls=[{"name": "slack_no_reply_needed", "args": {}, "id": "close"}],
+                    ),
+                    ToolMessage(
+                        content='{"success": false, "error": "requester_still_owed"}',
+                        tool_call_id="close",
+                    ),
+                ]
+            )
+        messages.append(AIMessage(content=""))
+        result = await RunLoop(backend).after_model(_state(*messages, reply_surface="slack"))
+        assert (result.jump_to == "model") is (delivery != "final")

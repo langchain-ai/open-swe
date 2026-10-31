@@ -302,7 +302,11 @@ async def expedite_pr_approval(
             "pr_url": pr_ref.url,
             "head_sha": head_sha,
             "approvers": active.approvers,
-            "completion_reply_required": active.awaiting_ready,
+            "completion_reply_required": active.awaiting_ready
+            or not (
+                bool(own_thread)
+                and (active.slack_channel_id, active.slack_thread_ts) == (own_channel, own_thread)
+            ),
             "slack_channel_id": active.slack_channel_id,
             "slack_channel_name": await SlackChannel.name_for(active.slack_channel_id),
             "next": readiness_warning
@@ -414,6 +418,9 @@ async def expedite_pr_approval(
         "approval_id": str(approval.id),
         "pr_url": pr_ref.url,
         "head_sha": head_sha,
+        "completion_reply_required": not (
+            bool(own_thread) and (channel_id, thread_ts) == (own_channel, own_thread)
+        ),
         "changed_lines": verdict.changed_lines,
         "test_lines": verdict.test_lines,
         "generated_lines": verdict.generated_lines,
