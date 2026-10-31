@@ -1,8 +1,8 @@
 """Declarative access policies for agent tools.
 
-A tool declares where it may run with ``@access(Policy(...))``. The factory binds
-only the tools the run's access permits, and every call is rechecked so a thread
-that gains a second writer mid-run loses the tools that relied on it having one.
+A tool declares where it may run with ``@access(Policy(...))``. The catalog stays
+stable across access changes; every call checks the current actor and thread scope,
+including whether a shared thread still has only one writer.
 """
 
 import functools
@@ -310,16 +310,6 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
             and not cfg.started_by_id
         ),
     )
-
-
-def policy_of(tool: object) -> Policy | None:
-    policy = getattr(tool, "__access__", None)
-    return policy if isinstance(policy, Policy) else None
-
-
-def permitted[T](tools: list[T], access: Access) -> list[T]:
-    """The tools this run may bind; tools without a policy are unrestricted."""
-    return [tool for tool in tools if (policy := policy_of(tool)) is None or access.mode(policy)]
 
 
 def access(

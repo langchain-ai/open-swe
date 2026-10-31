@@ -151,6 +151,18 @@ async def test_calls_are_rechecked_and_projected(monkeypatch: pytest.MonkeyPatch
     assert (await tool())["ok"] is False
 
 
+async def test_background_turn_cannot_save_personal_settings(
+    metadata: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.tools.save_user_settings import save_user_settings
+
+    metadata.update(visibility="private", owner_login="alice")
+    monkeypatch.setattr(tool_access, "configurable", lambda: _cfg(background_task_completion=True))
+    refused = await save_user_settings.__wrapped__(settings={"default_model": "openai:gpt-6.1-sol"})
+    assert refused["ok"] is False
+    assert "not available in this thread" in str(refused["error"])
+
+
 async def test_unreadable_slack_history_is_not_sole(
     metadata: dict, slack: list, monkeypatch: pytest.MonkeyPatch
 ) -> None:
