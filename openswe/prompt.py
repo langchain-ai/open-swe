@@ -8,6 +8,7 @@ from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
 from openswe.input_messages import RunMessage, dynamic_context_hash, run_context
 from openswe.prompts import prompt
+from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
 from openswe.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
@@ -83,6 +84,37 @@ def _render_collaboration_section() -> str:
     )
 
 
+@dataclass(frozen=True)
+class SystemPrompt:
+    """A thread's system prompt, rendered on its first run and kept for its whole life.
+
+    Any byte that differs between two runs makes the model provider's prompt cache
+    miss from there on, so every later turn would pay again for the whole
+    conversation. What can change from one turn to the next is a ``TurnContext``.
+
+    ``shared`` is the same for every thread of the deployment, ``workspace`` for every
+    thread of its workspace that opened since its curator last published, and
+    ``thread`` is what only this thread's says. Each part is shared by fewer threads
+    than the one before it, so a new thread's first model call reads the parts ahead
+    of its own from the cache earlier threads wrote.
+    """
+
+    shared: str
+    workspace: str = ""
+    thread: str = ""
+
+    def state(self) -> dict[str, str | bool]:
+        """What the thread's state keeps: the whole prompt, which ends in the workspace's
+        part and then the thread's, and those parts, which the runtime caches apart."""
+        parts = (self.shared, self.workspace, self.thread)
+        return {
+            "rendered_system_prompt": "\n\n".join(p for p in parts if p),
+            "rendered_workspace_prompt": self.workspace,
+            "rendered_thread_prompt": self.thread,
+            "system_prompt_fixed": True,
+        }
+
+
 def construct_system_prompt(
     dashboard_base_url: str = "",
     artifact_url: str | None = None,
@@ -94,37 +126,46 @@ def construct_system_prompt(
     sole_writer: bool = False,
     continued_from_collaborative: bool = False,
     workspace_repos: list[str] | None = None,
-) -> str:
-    """Render the agent's system prompt, once for the thread's whole life.
-
-    Any byte that differs between two runs makes the model provider's prompt cache
-    miss from there on, so every later turn would pay again for the whole
-    conversation. What can change from one turn to the next is a ``TurnContext``.
-    """
-    return prompt(
+    workspace_memory: str = "",
+    agent_workspace: bool = False,
+) -> SystemPrompt:
+    """Render the agent's system prompt, once for the thread's whole life."""
+    shared = prompt(
         "system/main",
-        admin_workspaces=admin_workspaces,
-        sole_writer=sole_writer,
-        continued_from_collaborative=continued_from_collaborative,
+        agent_workspace=agent_workspace,
+        dashboard_context_section=prompt(
+            "system/dashboard-context",
+            environment=ENV.OPENSWE_ENV.optional(),
+            dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
+        ),
+        default_prompt_section=_load_default_prompt(),
+        collaboration_section=_render_collaboration_section(),
+        external_untrusted_comments_section=EXTERNAL_UNTRUSTED_COMMENTS_SECTION,
+    )
+    thread = prompt(
+        "system/thread",
+        artifact_url=artifact_url or "(artifact link unavailable)",
         default_repo=(
             f"{default_repo['owner']}/{default_repo['name']}"
             if default_repo and default_repo.get("owner") and default_repo.get("name")
             else ""
         ),
-        dashboard_context_section=prompt(
-            "system/dashboard-context",
-            environment=ENV.OPENSWE_ENV.optional(),
-            dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
-            artifact_url=artifact_url or "(artifact link unavailable)",
-        ),
-        default_prompt_section=_load_default_prompt(),
-        collaboration_section=_render_collaboration_section(),
-        external_untrusted_comments_section=EXTERNAL_UNTRUSTED_COMMENTS_SECTION,
+        continued_from_collaborative=continued_from_collaborative,
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
-        workspace_section=_render_workspace_section(
-            workspace_name, workspace_instructions, workspace_repos
-        ),
+        admin_workspaces=admin_workspaces,
+        sole_writer=sole_writer,
     )
+    workspace = "\n\n".join(
+        section
+        for section in (
+            _render_workspace_section(workspace_name, workspace_instructions, workspace_repos),
+            prompt("system/workspace-memory", memory=workspace_memory.strip())
+            if workspace_memory.strip()
+            else "",
+        )
+        if section
+    )
+    return SystemPrompt(shared=shared, workspace=workspace, thread=thread)
 
 
 @dataclass(frozen=True)
@@ -142,6 +183,7 @@ class TurnContext:
     """
 
     working_dir: str
+    agent_workspace: bool = False
     source: str = "dashboard"
     slack_context: bool = False
     slack_ask: bool = False
@@ -163,6 +205,8 @@ class TurnContext:
             else "system/working-environment",
             working_dir=self.working_dir,
             desktop=self.local_checkout_client == "desktop",
+            agent_workspace=self.agent_workspace,
+            sandbox_defaults=None if self.local_checkout else LangSmithCreateOptions.resolve(),
         )
         if self.sandbox_file_downloads:
             environment += "\n\n" + prompt("system/sandbox-file-downloads")

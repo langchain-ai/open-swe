@@ -448,6 +448,7 @@ _CONTINUED_METADATA_KEYS = (
     "repo_owner",
     "repo_name",
     "repo_explicitly_none",
+    "experience",
     THREAD_SETTINGS_KEY,
 )
 

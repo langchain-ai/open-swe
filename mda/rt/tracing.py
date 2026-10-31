@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 
 from langchain.agents.middleware import TracePolicy, omit_payload
@@ -11,12 +11,20 @@ from langchain_core.callbacks import AsyncCallbackManager, CallbackManager
 from langchain_core.runnables.config import ensure_config
 from langchain_core.tracers.langchain import LangChainTracer
 from langsmith.run_trees import RunTree
-from pydantic import JsonValue, TypeAdapter
+from pydantic import JsonValue
 
 logger = logging.getLogger(__name__)
 
 # Baggage that describes the span itself rather than where its children belong.
 _SPAN_ONLY_BAGGAGE: Final = ("langsmith-metadata=", "langsmith-tags=")
+# Turns whose trace is still being reconciled after their run ended.
+_ENDING: Final[set[asyncio.Task[None]]] = set()
+
+
+def _ended(task: asyncio.Task[None]) -> None:
+    _ENDING.discard(task)
+    if task.cancelled():
+        logger.warning("A turn's trace was not reconciled before the runtime stopped")
 
 
 MIDDLEWARE_TRACE_POLICY = TracePolicy(process_inputs=omit_payload)
@@ -47,6 +55,7 @@ class TurnTrace:
 
     def __init__(self) -> None:
         self.root: RunTree | None = None
+        self._ending: asyncio.Task[None] | None = None
 
     @staticmethod
     def current_root() -> RunTree | None:
@@ -82,7 +91,6 @@ class TurnTrace:
             self.root = self.current_root()
             if self.root is not None:
                 self.root.metadata.update({**metadata, **_deployment_provenance()})
-                self.root.metadata["open_swe_git_evidence"] = {}
         except Exception:
             logger.warning("Could not tag the turn trace", exc_info=True)
 
@@ -125,69 +133,47 @@ class TurnTrace:
             logger.warning("Could not read the running span's trace headers", exc_info=True)
         return {}
 
-    @staticmethod
-    def live_root() -> RunTree | None:
-        """The turn's tree as seen from the running call, while that call's run is open."""
-        try:
-            return TurnTrace.current_root()
-        except Exception:
-            logger.warning("Could not find the turn trace", exc_info=True)
-            return None
-
-    @staticmethod
-    def record_evidence(update: Mapping[str, JsonValue], root: RunTree | None = None) -> None:
-        """Hold ``update``'s git evidence on ``root``, by default the running call's turn."""
-        evidence = {
-            key: value
-            for key, value in update.items()
-            if key == "git_trace_baseline" or key.startswith(("git_trace_pr:", "git_trace_work:"))
-        }
-        try:
-            if evidence and (root := root or TurnTrace.current_root()) is not None:
-                held = root.metadata.setdefault("open_swe_git_evidence", {})
-                if isinstance(held, dict):
-                    if "git_trace_baseline" in evidence:
-                        held.clear()
-                    held.update(evidence)
-        except Exception:
-            logger.warning("Could not record turn git evidence", exc_info=True)
-
-    @staticmethod
-    def _evidence(root: RunTree | None) -> dict[str, JsonValue]:
-        if root is None:
-            return {}
-        return TypeAdapter(dict[str, JsonValue]).validate_python(
-            root.metadata.get("open_swe_git_evidence", {})
-        )
-
-    @staticmethod
-    def current_evidence() -> dict[str, JsonValue]:
-        """Share the parent's observation budget with subagents that have their own state."""
-        try:
-            return TurnTrace._evidence(TurnTrace.current_root())
-        except Exception:
-            logger.warning("Could not read current turn git evidence", exc_info=True)
-            return {}
-
-    @property
-    def evidence(self) -> dict[str, JsonValue]:
-        try:
-            return self._evidence(self.root)
-        except Exception:
-            logger.warning("Ignoring invalid turn git evidence", exc_info=True)
-            return {}
-
-    async def reconcile(self, metadata: Mapping[str, JsonValue]) -> None:
+    def end(
+        self,
+        metadata: Mapping[str, JsonValue],
+        evidence: Callable[[], Awaitable[Mapping[str, JsonValue]]],
+    ) -> None:
+        """Reconcile the turn's trace with ``metadata`` and what ``evidence`` finds, in the
+        background: the run ends, and its thread takes the next message, without waiting."""
         if self.root is None:
             return
+        self._ending = asyncio.ensure_future(self._end(self.root, metadata, evidence))
+        _ENDING.add(self._ending)
+        self._ending.add_done_callback(_ended)
+
+    async def ended(self) -> None:
+        """Wait for the turn's trace to be reconciled."""
+        if self._ending is not None:
+            await asyncio.shield(self._ending)
+
+    @staticmethod
+    async def _end(
+        root: RunTree,
+        metadata: Mapping[str, JsonValue],
+        evidence: Callable[[], Awaitable[Mapping[str, JsonValue]]],
+    ) -> None:
         try:
-            pending = [self.root]
+            found = await evidence()
+        except Exception:
+            logger.warning("Could not gather the turn's trace metadata", exc_info=True)
+            found = {}
+        await TurnTrace._reconcile(root, {**metadata, **found})
+
+    @staticmethod
+    async def _reconcile(root: RunTree, metadata: Mapping[str, JsonValue]) -> None:
+        try:
+            pending = [root]
             runs: list[RunTree] = []
             while pending:
                 run = pending.pop()
-                if run.trace_id != self.root.trace_id or run.metadata.get(
+                if run.trace_id != root.trace_id or run.metadata.get(
                     "invocation_id"
-                ) != self.root.metadata.get("invocation_id"):
+                ) != root.metadata.get("invocation_id"):
                     continue
                 run.metadata.update(metadata)
                 runs.append(run)

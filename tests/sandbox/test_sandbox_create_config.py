@@ -68,20 +68,24 @@ _WORKER = {"task_id": "00000000-0000-0000-0000-000000000001", "sandbox_host_thre
     ("metadata", "host", "owner"),
     [
         ({}, {}, "own"),
-        ({"sandbox_id": "mda-box", "sandbox_owner": "mda"}, {}, "own"),
-        ({"sandbox_id": "backend-box"}, {}, None),
-        # The box the backend made is gone: this run starts in MDA's instead of failing.
-        ({"sandbox_id": "gone-box"}, {}, "own"),
+        ({"sandbox_id": "mda-sandbox", "sandbox_owner": "mda"}, {}, "own"),
+        ({"sandbox_id": "backend-sandbox"}, {}, None),
+        # The sandbox the backend made is gone: this run starts in MDA's instead of failing.
+        ({"sandbox_id": "gone-sandbox"}, {}, "own"),
         ({"sandbox_id": "bridge:abc"}, {}, None),
-        ({**_WORKER}, {"sandbox_id": "box", "sandbox_owner": "mda"}, None),
-        ({**_WORKER, "sandbox_id": "box"}, {"sandbox_id": "box", "sandbox_owner": "mda"}, _HOST),
-        ({**_WORKER, "sandbox_id": "box"}, {"sandbox_id": "box"}, None),
+        ({**_WORKER}, {"sandbox_id": "sandbox", "sandbox_owner": "mda"}, None),
+        (
+            {**_WORKER, "sandbox_id": "sandbox"},
+            {"sandbox_id": "sandbox", "sandbox_owner": "mda"},
+            _HOST,
+        ),
+        ({**_WORKER, "sandbox_id": "sandbox"}, {"sandbox_id": "sandbox"}, None),
     ],
 )
-async def test_mda_owns_new_threads_and_its_own_boxes(
+async def test_mda_owns_new_threads_and_its_own_sandboxes(
     monkeypatch, metadata: dict[str, str], host: dict[str, str], owner: str | None
 ) -> None:
-    """MDA creates new threads' boxes; a box the backend made before is kept; workers share MDA's."""
+    """MDA creates new threads' sandboxes; a sandbox the backend made before is kept; workers share MDA's."""
     from openswe.sandboxes.managed import ManagedSandbox
 
     workspace = Workspace(
@@ -113,7 +117,7 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
         return host if thread_id == _HOST else metadata
 
     async def exists(sandbox_id: str) -> bool:
-        return sandbox_id != "gone-box"
+        return sandbox_id != "gone-sandbox"
 
     unbound: list[dict[str, object]] = []
 
@@ -127,7 +131,7 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
 
     sandbox = await ManagedSandbox.for_thread("thread-1", None)
 
-    handed_over = metadata.get("sandbox_id") == "gone-box"
+    handed_over = metadata.get("sandbox_id") == "gone-sandbox"
     assert unbound == (
         [{"sandbox_id": None, "sandbox_base_proxy_config": None}] if handed_over else []
     )
@@ -137,6 +141,11 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
         return
     assert sandbox is not None
     assert sandbox.thread_id == (None if owner == "own" else owner)
+    assert sandbox.sandbox_id == (
+        metadata.get("sandbox_id")
+        if owner == _HOST or metadata.get("sandbox_owner") == "mda"
+        else None
+    )
     assert sandbox.create.snapshot_id == "snap-1"
     assert sandbox.create.extra_fields == {
         **workspace.create_params,
@@ -150,35 +159,35 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
     [
         (
             {},
-            "mda-box",
+            "mda-sandbox",
             {
                 "sandbox_owner": "mda",
-                "sandbox_id": "mda-box",
+                "sandbox_id": "mda-sandbox",
                 "sandbox_base_proxy_config": {"rules": []},
             },
         ),
-        # MDA could not open the box: the thread stays MDA's, and binding reports why.
+        # MDA could not open the sandbox: the thread stays MDA's, and binding reports why.
         ({}, None, {"sandbox_owner": "mda"}),
-        ({"sandbox_id": "mda-box", "sandbox_owner": "mda"}, "mda-box", None),
-        ({"sandbox_id": "mda-box", "sandbox_owner": "mda"}, None, None),
-        # A thread handed over by ``recreate_sandbox`` gets the box it asked for, once.
+        ({"sandbox_id": "mda-sandbox", "sandbox_owner": "mda"}, "mda-sandbox", None),
+        ({"sandbox_id": "mda-sandbox", "sandbox_owner": "mda"}, None, None),
+        # A thread handed over by ``recreate_sandbox`` gets the sandbox it asked for, once.
         (
             {"sandbox_replacement": {"workspace": "default", "source": "base"}},
-            "mda-box",
-            {"sandbox_owner": "mda", "sandbox_id": "mda-box", "sandbox_replacement": None},
+            "mda-sandbox",
+            {"sandbox_owner": "mda", "sandbox_id": "mda-sandbox", "sandbox_replacement": None},
         ),
         (
-            {"sandbox_id": "old-box", "sandbox_owner": "mda"},
-            "mda-box",
             {
+                "sandbox_id": "mda-sandbox",
                 "sandbox_owner": "mda",
-                "sandbox_id": "mda-box",
-                "sandbox_base_proxy_config": {"rules": []},
+                "sandbox_replacement": {"workspace": "default", "source": "base"},
             },
+            "mda-sandbox",
+            None,
         ),
     ],
 )
-async def test_the_backend_binds_the_box_mda_reports(
+async def test_the_backend_binds_the_sandbox_mda_reports(
     monkeypatch,
     metadata: dict[str, str],
     reported: str | None,
@@ -219,7 +228,46 @@ async def test_the_backend_binds_the_box_mda_reports(
 
 
 @pytest.mark.asyncio
-async def test_a_box_mda_replaced_from_another_workspace_gets_that_workspaces_proxy(
+@pytest.mark.parametrize("replacement_pending", [False, True])
+async def test_replicas_cannot_rebind_a_thread_to_a_different_sandbox(
+    monkeypatch, replacement_pending: bool
+) -> None:
+    from unittest.mock import MagicMock
+
+    from openswe.sandboxes.lifecycle import bind_mda_sandbox
+    from openswe.sandboxes.state import SANDBOX_CONNECTIONS, SandboxUnreachableError
+
+    metadata: dict[str, object] = {"sandbox_id": "original", "sandbox_owner": "mda"}
+    if replacement_pending:
+        metadata["sandbox_replacement"] = {"workspace": "default", "source": "base"}
+    updates: list[dict[str, object]] = []
+    connection = MagicMock()
+    monkeypatch.setitem(SANDBOX_CONNECTIONS, "original", connection)
+
+    async def read_metadata(thread_id: str) -> dict[str, object]:
+        return metadata
+
+    async def write_metadata(*, thread_id: str, metadata: dict[str, object]) -> None:
+        updates.append(metadata)
+
+    monkeypatch.setattr("openswe.sandboxes.lifecycle.get_sandbox_metadata", read_metadata)
+    monkeypatch.setattr("openswe.sandboxes.lifecycle.client.threads.update", write_metadata)
+
+    for reported in ("original", "original-c9eec961", "original", "original-c9eec961"):
+        if reported == "original":
+            await bind_mda_sandbox("thread-1", reported)
+        else:
+            with pytest.raises(
+                SandboxUnreachableError, match="Expected original; opened original-"
+            ):
+                await bind_mda_sandbox("thread-1", reported)
+        assert metadata["sandbox_id"] == "original"
+        assert SANDBOX_CONNECTIONS["original"] is connection
+    assert updates == []
+
+
+@pytest.mark.asyncio
+async def test_a_sandbox_mda_replaced_from_another_workspace_gets_that_workspaces_proxy(
     monkeypatch,
 ) -> None:
     from unittest.mock import AsyncMock
@@ -228,7 +276,7 @@ async def test_a_box_mda_replaced_from_another_workspace_gets_that_workspaces_pr
 
     other = Workspace(slug="other", create_params={"proxy_config": {"rules": ["other"]}})
     metadata = {
-        "sandbox_id": "mda-box",
+        "sandbox_id": "mda-sandbox",
         "sandbox_owner": "mda",
         "sandbox_base_proxy_config": {"rules": ["original"]},
         "sandbox_replacement": {"workspace": "other", "source": "workspace"},

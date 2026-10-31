@@ -22,14 +22,10 @@ type InstallTransport = Callable[[ResponseHandler], None]
 def transport(
     monkeypatch: pytest.MonkeyPatch,
 ) -> InstallTransport:
-    for name in (
-        "TYPESAFE_API_KEY",
-        "LANGSMITH_GATEWAY_API_KEY",
-        "LANGSMITH_API_KEY",
-        "LANGCHAIN_API_KEY",
-    ):
+    for name in ("LANGSMITH_GATEWAY_API_KEY", "LANGSMITH_API_KEY", "LANGCHAIN_API_KEY"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "test-key")
+    monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", "https://gateway.example.com/")
     client = httpx2.AsyncClient
 
     def install(handler: ResponseHandler) -> None:
@@ -68,7 +64,11 @@ async def test_classification_accepts_only_confident_valid_answers(
     transport: InstallTransport, choice: str, confidence: float, status: int, expected: str | None
 ) -> None:
     def handle(request: httpx2.Request) -> httpx2.Response:
-        assert json.loads(request.read())["state"] == "Fix the bug"
+        assert request.url == "https://gateway.example.com/v1/systemone"
+        assert request.headers["Authorization"] == "Bearer test-key"
+        payload = json.loads(request.read())
+        assert payload["state"] == "Fix the bug"
+        assert payload["model"] == "typesafe/jev-1.13.0"
         return httpx2.Response(
             status,
             json={
@@ -104,7 +104,7 @@ async def test_classification_accepts_only_confident_valid_answers(
 async def test_missing_credentials_skips_classification(
     monkeypatch: pytest.MonkeyPatch, transport: InstallTransport
 ) -> None:
-    monkeypatch.delenv("TYPESAFE_API_KEY")
+    monkeypatch.delenv("LANGSMITH_GATEWAY_API_KEY")
 
     def handle(request: httpx2.Request) -> httpx2.Response:
         pytest.fail("Classification must not send a request without credentials")
@@ -136,7 +136,7 @@ async def test_classifier_deadline_cancels_stalled_request(
 
 
 @pytest.mark.parametrize("status", [401, 403])
-async def test_rejected_credentials_report_all_decisions_without_gateway(
+async def test_rejected_credentials_report_all_decisions(
     transport: InstallTransport, caplog: pytest.LogCaptureFixture, status: int
 ) -> None:
     requests: list[httpx2.Request] = []
@@ -165,56 +165,8 @@ async def test_rejected_credentials_report_all_decisions_without_gateway(
     assert record.levelno == logging.ERROR
     assert record.message == "Jev classifier credential rejected"
     assert record.__dict__["status_code"] == status
-    assert record.__dict__["classifier_transport"] == "direct"
     assert record.__dict__["questions"] == ["runtime_model", "runtime_effort"]
     assert "test-key" not in caplog.text
-
-
-@pytest.mark.parametrize("status", [200, 403, 503])
-async def test_rejected_direct_credential_retries_gateway_exactly_once(
-    monkeypatch: pytest.MonkeyPatch,
-    transport: InstallTransport,
-    status: int,
-) -> None:
-    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "gateway-key")
-    monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", "https://gateway.example.com/")
-    requests: list[httpx2.Request] = []
-
-    def handle(request: httpx2.Request) -> httpx2.Response:
-        requests.append(request)
-        if len(requests) == 1:
-            return httpx2.Response(403)
-        return httpx2.Response(
-            status,
-            json={
-                "model": "typesafe/jev-1.13.0",
-                "answers": {
-                    "route": {
-                        "type": "choice",
-                        "choice": "fast",
-                        "confidence": 0.95,
-                        "probabilities": {"fast": 1.0},
-                    }
-                },
-            },
-        )
-
-    transport(handle)
-    decision = JevDecision()
-    assert await classify(decision) == ("fast" if status == 200 else None)
-    assert len(requests) == 2
-    assert requests[0].headers["Authorization"] == "Bearer test-key"
-    assert requests[1].url == "https://gateway.example.com/v1/systemone"
-    assert requests[1].headers["Authorization"] == "Bearer gateway-key"
-    assert json.loads(requests[1].read())["model"] == "typesafe/jev-1.13.0"
-    assert decision.outcome == ("accepted" if status == 200 else "classifier_failure")
-    assert decision.reason == (
-        "confident_choice"
-        if status == 200
-        else "classifier_auth_failure"
-        if status == 403
-        else "classifier_error"
-    )
 
 
 @pytest.mark.parametrize("failed_question", [None, "runtime_model", "runtime_effort"])

@@ -219,6 +219,7 @@ fn resume_command_preserves_project_and_resolved_connection() {
         url: None,
         assistant: None,
         thread: None,
+        env_file: None,
     };
     let target = Target::Pinned {
         api_url: "http://localhost:3030".into(),
@@ -245,6 +246,27 @@ fn resume_command_omits_a_connection_the_user_did_not_pin() {
     let command = resume_command(&opts(), &attached, &server, THREAD);
     assert!(command.starts_with("mda chat --assistant "), "{command}");
     assert!(!command.contains("--url"), "{command}");
+}
+
+/// A resumed session that starts its own server must stage the same env file.
+#[test]
+fn resume_command_repeats_the_env_file_for_a_local_server() {
+    let server = AgentServer::new("http://localhost:2024".into(), "agent".into()).unwrap();
+    let options = ChatOptions {
+        env_file: Some(PathBuf::from("/work/secrets/.env.staging")),
+        ..opts()
+    };
+    let attached = Target::Attached {
+        api_url: "http://localhost:2024".into(),
+    };
+    let command = resume_command(&options, &attached, &server, THREAD);
+    assert!(
+        command.starts_with("mda chat --env-file '/work/secrets/.env.staging' --assistant "),
+        "{command}"
+    );
+
+    let command = resume_command(&opts(), &attached, &server, THREAD);
+    assert!(!command.contains("--env-file"), "{command}");
 }
 
 #[test]
@@ -330,6 +352,7 @@ fn opts() -> ChatOptions {
         url: None,
         assistant: None,
         thread: None,
+        env_file: None,
     }
 }
 

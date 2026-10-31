@@ -37,7 +37,7 @@ DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="137438953472"          # Optional, d
 DEFAULT_SANDBOX_VCPUS="4"                                          # Optional, default 4
 DEFAULT_SANDBOX_MEM_BYTES="17179869184"                            # Optional, default 16 GiB
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"                            # Optional, default 7200 (2 h); 0 disables
-DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"                # Optional, default 2592000 (30 d); 0 disables
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="604800"                 # Optional, default 604800 (7 d); 0 disables
 ```
 
 This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run.
@@ -49,6 +49,7 @@ For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a s
 - `api.github.com` receives Bearer auth for `gh` and REST API operations.
 
 The proxy token is minted at runtime from the GitHub App installation credentials.
+With `MDA_GITHUB_PROXY_CONNECTION` set, the Managed Deep Agents deployment writes these rules instead on the sandboxes it owns whose thread reaches the whole installation, with the App token its GitHub channel keeps in Agent Auth (see [mda/README.md](../mda/README.md)).
 Do not store GitHub access tokens as deployment environment variables.
 
 ### Who creates sandboxes
@@ -126,8 +127,7 @@ surface.models = SurfaceModels(main=main, subagent=main, use_gateway=bool(use_ga
 ### Auto model routing with Jev
 
 Eligible Auto turns use Jev through `langchain-typesafe`'s `TypeSafeClassifier`.
-When `TYPESAFE_API_KEY` is available, routing calls `jev-1.13.0` directly through TypeSafe.
-Otherwise, a LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) calls `typesafe/jev-1.13.0` through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models); that path requires a TypeSafe workspace provider secret and respects `LANGSMITH_GATEWAY_BASE_URL`.
+A LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) calls `typesafe/jev-1.13.0` through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models); this requires a TypeSafe workspace provider secret and respects `LANGSMITH_GATEWAY_BASE_URL`.
 Routing is independent of the provider-proxy gateway toggle below.
 The classifier is tagged `nostream` to keep its run out of the user-facing transcript.
 
@@ -148,7 +148,7 @@ It remains selected on follow-ups; explicit UI/API model choices take precedence
 A clearly unavailable model or failure to persist the selection stops the run.
 No clear request, low confidence, or a classifier failure keeps the usual default/routing behavior.
 
-Run the live intent cases from the repository root with an activated Python environment and configured TypeSafe or gateway credentials:
+Run the live intent cases from the repository root with an activated Python environment and configured gateway credentials:
 
 ```bash
 LANGSMITH_TRACING=false python -m evals.model_request
@@ -251,8 +251,9 @@ The Currents REST API URL itself does not speak MCP, and the local `npx @current
 Optional reviewer trace resolution and personal LangSmith credential proxying have been removed.
 Configure agent access to LangSmith through Workspace MCPs.
 Sandbox provisioning uses the deployment's `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`.
-Linear webhook intake uses the signed webhook setup; configure Linear replies and other agent operations through Workspace MCPs.
-Automatic failure notices use the workspace connection named `linear` and its selected `save_comment` tool (`create_comment` is also supported).
+Linear sessions arrive through the MDA deployment's Linear channel, which posts the agent's answer in the session; configure other Linear operations through Workspace MCPs.
+The channel reports a session's failed run in the session.
+Notices a run posts on its issue itself, such as a failing sandbox, use the workspace connection named `linear` and its selected `save_comment` tool (`create_comment` is also supported).
 These notices run independently of the agent and honor the connection's enabled state and tool selection.
 Delivery failures are logged without marking the run as notified.
 
@@ -354,6 +355,30 @@ Both scopes share the **MCPs** tool group.
 A personal connection with the same name as a workspace connection replaces it entirely for that user's runs, and a disabled personal connection hides the workspace one rather than falling back to it.
 Desktop (local) runs do not load MCP connections yet.
 GitHub PR follow-ups targeting a private thread are rejected unless the commenter owns that thread, before credentials are read or a run is dispatched.
+
+### MCP servers on an MDA connection
+
+An instance, workspace or personal MCP server can keep its credential in an MDA connection (LangSmith Agent Auth) instead of Open SWE's database.
+The MDA run then connects to the server itself; the backend holds no credential for it and never calls it.
+Create the connection from `mda/` after the deployment's first `mda deploy`, for example `mda connections create open-swe-mcp-incident-io --secret-from-env INCIDENT_IO_API_KEY --deployment-id <id>`, then save the server through the dashboard API with `connection` and the tools to allow:
+
+```json
+{
+  "name": "incident",
+  "url": "https://mcp.incident.io/mcp",
+  "allowed_tools": ["incident_list"],
+  "connection": {"slug": "open-swe-mcp-incident-io", "owner": "agent"}
+}
+```
+
+The slug must be `open-swe-mcp-<server>`: a server never gets a credential Open SWE or a channel reads for itself, such as `mda/github-token` or `open-swe-exa`.
+Instance and workspace servers read the deployment's connection (`"owner": "agent"`); personal servers read their owner's own (`"owner": "user"`), and only in runs that act for their owner, so not in a background task's completion.
+The credential goes as `Authorization: Bearer <credential>`, or as it is in the header `connection_header` names, such as `DD_API_KEY`.
+A server with a connection takes no headers or OAuth, and saving it drops those the record had.
+An update that sends no `connection`, headers or OAuth, such as the dashboard's enable toggle, keeps the connection; changing the URL needs `connection` sent again.
+Open SWE cannot list its tools, so name them in `allowed_tools`; each run lists the server's tools once and offers those, under the same names and tier rules as other MCP tools.
+A person who has not granted a personal server's connection is asked to through MDA's credential interrupt; a run that acts for no person, or whose agent connection is missing, goes without the server.
+The dashboard's forms do not set `connection` yet, and the inbound MCP server and Linear notices leave these servers out.
 
 ### Adding a Python tool
 

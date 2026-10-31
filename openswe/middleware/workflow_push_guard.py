@@ -701,8 +701,7 @@ def _approval_slack_message(change: WorkflowPushChange, approval_url: str | None
         "repository secrets.\n\n"
         f"*Files:*\n{files}\n\n"
         f"*Diff stat:* {stats.get('files', len(change.files))} files, "
-        f"+{stats.get('additions', 0)} / -{stats.get('deletions', 0)}\n"
-        f"*Approval ID:* `{change.fingerprint}`{web_review}\n\n"
+        f"+{stats.get('additions', 0)} / -{stats.get('deletions', 0)}{web_review}\n\n"
         "Approval covers this workflow diff on branches in this thread and repository. "
         "Different workflow diffs and lease-protected pushes require separate approval."
     )

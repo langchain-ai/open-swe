@@ -8,6 +8,7 @@ person a previous run acted for.
 """
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from functools import cache
 from typing import Any, Final, cast
@@ -42,6 +43,8 @@ from runtime_api.skills import SKILLS
 from rt.backend import OpenSweBackend, RunLocal
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
+logger = logging.getLogger(__name__)
+
 _SYNC: Final = "The run's skills are read asynchronously"
 _READ_ONLY: Final = "Skills are read-only here"
 
@@ -63,6 +66,7 @@ class _Listing:
     def __init__(self) -> None:
         self.files: _Listed | None = None
         self.lock = asyncio.Lock()
+        self.ahead: asyncio.Task[_Listed] | None = None
 
 
 class SkillFiles(BackendProtocol):
@@ -86,6 +90,14 @@ class SkillFiles(BackendProtocol):
                     {skill.path: create_file_data(skill.content) for skill in listed.files}
                 )
         return listing.files
+
+    def list_ahead(self) -> None:
+        """Start listing the run's skills, so its first read finds them listed."""
+        listing = self._listings.get(self._backend.run)
+        if listing.ahead is not None or not self._backend.run.catalog.skill_sources:
+            return
+        listing.ahead = asyncio.create_task(self._listed())
+        listing.ahead.add_done_callback(_log_failure)
 
     async def als(self, path: str) -> LsResult:
         return (await self._listed()).ls(path)
@@ -132,6 +144,12 @@ class SkillFiles(BackendProtocol):
 
     def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
         raise NotImplementedError(_SYNC)
+
+
+def _log_failure(listed: asyncio.Task[_Listed]) -> None:
+    if not listed.cancelled() and (error := listed.exception()) is not None:
+        # The first read lists them again.
+        logger.warning("Could not list the run's skills ahead of its first read", exc_info=error)
 
 
 @cache

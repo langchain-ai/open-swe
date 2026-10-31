@@ -123,6 +123,10 @@ class BackendUnavailableError(BackendCallError):
     """A transport or gateway failure left the call without a usable response."""
 
 
+class BackendRefusedError(BackendCallError):
+    """The backend answered that the run may not make this call."""
+
+
 def held_state(state: Mapping[str, object]) -> dict[str, JsonValue]:
     """The graph state the backend's hooks keep, which goes back with every call."""
     held = state.get("open_swe_state")
@@ -132,16 +136,6 @@ def held_state(state: Mapping[str, object]) -> dict[str, JsonValue]:
     if isinstance(cutoff, int):
         forwarded[VISIBLE_FROM] = cutoff
     return _json_object.validate_python({**(held if isinstance(held, dict) else {}), **forwarded})
-
-
-_GIT_TRACE_PREFIX: Final = "git_trace_"
-
-
-def git_trace(state: Mapping[str, object]) -> dict[str, JsonValue]:
-    """The turn's git trace the backend keeps in the run's state: its baseline and evidence."""
-    return {
-        key: value for key, value in held_state(state).items() if key.startswith(_GIT_TRACE_PREFIX)
-    }
 
 
 def namespace() -> list[str]:
@@ -484,11 +478,11 @@ class OpenSweBackend:
                     )
                     await asyncio.sleep(wait)
                     continue
-                error = (
-                    BackendUnavailableError
-                    if isinstance(exc, httpx2.TransportError) or status in _GATEWAY_STATUSES
-                    else BackendCallError
-                )
+                error: type[BackendCallError] = BackendCallError
+                if isinstance(exc, httpx2.TransportError) or status in _GATEWAY_STATUSES:
+                    error = BackendUnavailableError
+                elif status == 403:
+                    error = BackendRefusedError
                 raise error(f"{label} failed ({type(exc).__name__})") from exc
         return _json.validate_python(response.json())
 

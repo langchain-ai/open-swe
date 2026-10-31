@@ -294,8 +294,8 @@ fn rewrite_py_runtime_dep(out_dir: &Path, mode: RuntimePathMode) -> Result<()> {
         .parse::<toml_edit::DocumentMut>()
         .with_context(|| format!("failed to parse {}", path.display()))?;
 
-    // A uv source for the runtime would win over the vendored copy, and its path
-    // is relative to the project, not the build.
+    // A runtime source would win over the vendored copy, and its path is
+    // relative to the project, not the build.
     if let Some(sources) = doc
         .get_mut("tool")
         .and_then(|tool| tool.get_mut("uv"))

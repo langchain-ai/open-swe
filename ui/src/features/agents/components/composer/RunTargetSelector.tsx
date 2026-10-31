@@ -118,9 +118,11 @@ export function LocalRepoSelector({
   placeholder = "Select repository",
   triggerClassName,
   side = "bottom",
+  onUseTaskFolder,
 }: {
   repos: Array<DesktopProject>
   selectedRepoPath: string | null
+  onUseTaskFolder?: () => void
   onSelectRepo: (cwd: string) => void
   onAddRepo: () => void
   onRemoveRepo: (cwd: string) => void
@@ -150,8 +152,19 @@ export function LocalRepoSelector({
         sideOffset={7}
       >
         <DropdownMenuGroup>
-          <ComposerMenuLabel>Repositories</ComposerMenuLabel>
-          {repos.length === 0 && (
+          <ComposerMenuLabel>
+            {onUseTaskFolder ? "Working folder" : "Repositories"}
+          </ComposerMenuLabel>
+          {onUseTaskFolder && (
+            <ComposerMenuOption
+              icon={FolderIcon}
+              onSelect={onUseTaskFolder}
+              selected={!selectedRepoPath}
+            >
+              Automatic task folder
+            </ComposerMenuOption>
+          )}
+          {repos.length === 0 && !onUseTaskFolder && (
             <ComposerMenuOption disabled>
               No repositories added
             </ComposerMenuOption>
@@ -171,7 +184,7 @@ export function LocalRepoSelector({
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <ComposerMenuOption icon={FolderPlusIcon} onSelect={onAddRepo}>
-            Add repository…
+            {onUseTaskFolder ? "Use another folder…" : "Add repository…"}
           </ComposerMenuOption>
           {repos.length > 0 && (
             <DropdownMenuSub>

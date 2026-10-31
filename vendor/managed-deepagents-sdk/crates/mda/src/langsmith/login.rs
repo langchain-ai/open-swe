@@ -182,6 +182,12 @@ impl Login {
             .and_then(|pat| pat.unexpired().map(str::to_string))
     }
 
+    /// Drop the cached PAT for this API URL once LangSmith has refused it, so
+    /// the next run signs in again instead of reusing a revoked key.
+    pub(crate) fn forget_cached_api_key(&self) {
+        self.pat_store.forget(&self.api_url);
+    }
+
     /// Whether `key` equals the CLI-minted PAT cached for this API URL.
     ///
     /// Ignores expiry so callers can detect a session PAT that leaked into a
@@ -734,6 +740,17 @@ impl PatStore {
         pats.insert(api_url.to_string(), pat.clone());
         let _ = write_json(path, &pats);
     }
+
+    /// Drop the PAT cached for `api_url`, ignoring any failure to persist.
+    fn forget(&self, api_url: &str) {
+        let Some(path) = self.path.as_ref() else {
+            return;
+        };
+        let mut pats: BTreeMap<String, CachedPat> = read_json(path);
+        if pats.remove(api_url).is_some() {
+            let _ = write_json(path, &pats);
+        }
+    }
 }
 
 fn read_json<T>(path: &Path) -> BTreeMap<String, T>
@@ -907,6 +924,34 @@ mod tests {
             },
         );
         assert_eq!(login.cached_api_key(), None);
+    }
+
+    #[test]
+    fn a_forgotten_pat_is_no_longer_cached_and_other_installs_keep_theirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let pats = PatStore::at(dir.path().join("cli-api-keys.json"));
+        let login = |api_url: &str| Login {
+            store: TokenStore { path: None },
+            pat_store: pats.clone(),
+            api_url: api_url.to_string(),
+        };
+        for (api_url, key) in [("https://saas", "lsv2_pt_us"), ("https://eu", "lsv2_pt_eu")] {
+            pats.put(
+                api_url,
+                &CachedPat {
+                    key: key.into(),
+                    expires_at: unix_now() + 600,
+                },
+            );
+        }
+
+        login("https://saas").forget_cached_api_key();
+
+        assert_eq!(login("https://saas").cached_api_key(), None);
+        assert_eq!(
+            login("https://eu").cached_api_key().as_deref(),
+            Some("lsv2_pt_eu")
+        );
     }
 
     #[test]

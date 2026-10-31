@@ -100,6 +100,8 @@ Reviewer and review-scout sandboxes explicitly scope their tokens to the reposit
 Coding threads that members start from Slack, the dashboard, or Linear normally get the installation-wide token, as do workspace image builds.
 
 A workspace's preferred repositories are what its image preloads: the setup and update scripts receive them in `OPENSWE_WORKSPACE_REPOS`, clone each to `/workspace/<repo>`, and changing them rebuilds the image.
+Before an update script runs, Open SWE clones any missing preferred repository into `/workspace/<repo>`, so an older image can catch up with the current repository list.
+Existing paths are left untouched for the script to validate; a clone failure fails the update and preserves the previous image.
 Any other repository is cloned on demand to the same place by the run that needs it.
 A refresh writes only snapshot and refresh state and an edit writes only the definition, so neither reverts the other.
 

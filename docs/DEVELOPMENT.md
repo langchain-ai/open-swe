@@ -165,9 +165,10 @@ The HMR WebSocket connects straight to Vite's port; the UI's Vite config points 
 |---|---|
 | `/` | Dashboard |
 | `POST /webhooks/github` | GitHub issue, PR, and comment webhooks |
+| `POST /github/channel/events` | The MDA deployment's GitHub channel asking what an issue mention starts |
 | `POST /webhooks/slack`, `POST /webhooks/slack/interactivity` | Slack events and Block Kit interactions |
 | `POST /webhooks/slack/commands` | The `/oswe` slash command |
-| `POST /webhooks/linear` | Linear comment webhooks |
+| `POST /linear/channel/events` | The MDA deployment's Linear channel asking what a Linear event starts |
 | `GET /dashboard/api/auth/login`, `GET /dashboard/api/auth/callback` | GitHub login |
 | `/dashboard/api/*` | Dashboard API |
 | `GET /ok`, `GET /health` | Health checks |
@@ -407,7 +408,7 @@ Ask users to attach that file to a report.
   With the webhooks-only policy, ngrok itself answers 404 for anything outside `/webhooks/*`, so test with `/webhooks/slack`, not `/ok`.
 - Restart the backend after changing `.env`: `langgraph dev` reloads on code changes only, so a new `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET` is not picked up until then, and every delivery is rejected as `Invalid signature` in the meantime.
   Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
-- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
+- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET`, every request to that endpoint is rejected with 401, and the Linear channel's routes verify the deployment's signature with `MDA_SERVICE_SECRET`, the same value as `mda/.env`'s.
 
 ### Dashboard login fails or won't stay logged in
 

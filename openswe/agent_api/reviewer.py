@@ -11,11 +11,13 @@ from langchain_core.tools import BaseTool
 from openswe.agent_api.graph import RemoteGraph
 from openswe.agent_api.run_parts import RunParts
 from openswe.github.thread_token import get_github_token
+from openswe.middleware.record_run_usage import record_run_usage
+from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.review.diff import compute_diff_line_set
 from openswe.reviewer import (
     ensure_reviewer_github_token,
     plan_reviewer,
-    reviewer_box,
+    reviewer_sandbox,
     reviewer_tools,
 )
 from openswe.run_config import RunConfig
@@ -32,6 +34,8 @@ def _tools_by_name() -> dict[str, BaseTool]:
 
 class ReviewerParts(RunParts):
     """The reviewer's pieces, as its plan builds them, for a call answered without it."""
+
+    reporters = (TranscriptMiddleware(), record_run_usage)
 
     def restore(self, state: dict[str, object]) -> None:
         # Sets do not cross to MDA and back; the diff they index does.
@@ -51,7 +55,7 @@ class ReviewerParts(RunParts):
 
     async def files(self, config: RunnableConfig) -> BackendProtocol | None:
         cfg = RunConfig.from_config(config)
-        return None if cfg.thread_id is None else reviewer_box(cfg.thread_id, cfg)
+        return None if cfg.thread_id is None else reviewer_sandbox(cfg.thread_id, cfg)
 
     async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:  # noqa: ARG002
         return _tools_by_name().get(name)

@@ -86,7 +86,8 @@ class ChannelPost(Protocol):
         which replies continue, also without a mention in Slack's thread mode.
         It returns the thread's ``thread_id``. ``run`` starts a run in it with a
         channel handler's run input. Only Trigger channels that name the new
-        thread support it.
+        thread support it. ``new_thread`` and ``run`` are experimental and may
+        change in a minor release.
         """
         ...
 

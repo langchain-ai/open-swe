@@ -1,11 +1,11 @@
 """The E2E's stand-in for LangSmith's sandbox service.
 
 In production LangSmith runs every sandbox: Managed Deep Agents creates each
-thread's box, and the backend reconnects to it by id. The E2E fakes that SaaS
-boundary as it does GitHub and Slack. A box is a shell on this machine, rooted in
+thread's sandbox, and the backend reconnects to it by id. The E2E fakes that SaaS
+boundary as it does GitHub and Slack. A sandbox is a shell on this machine, rooted in
 the E2E's work directory, under the id its creator gave it. MDA and the backend
 run as separate processes and share nothing but the id, so either side reaches
-the same box from it.
+the same sandbox from it.
 
 ``E2E_REAL_SANDBOX=1`` leaves the boundary real, for specs that need LangSmith.
 Imports only ``deepagents``, which both processes' environments have.
@@ -20,7 +20,7 @@ from deepagents.backends import LocalShellBackend
 
 REAL = os.environ.get("E2E_REAL_SANDBOX") == "1"
 
-# Model keys stay out of the box, as a LangSmith sandbox never sees them.
+# Model keys stay out of the sandbox, as a LangSmith sandbox never sees them.
 _EXCLUDED_ENV = {
     "ANTHROPIC_API_KEY",
     "BASETEN_API_KEY",
@@ -34,7 +34,7 @@ _EXCLUDED_ENV = {
 
 
 class StandInSandbox(LocalShellBackend):
-    """A box under ``sandbox_id``, which every process opening that id shares."""
+    """A sandbox under ``sandbox_id``, which every process opening that id shares."""
 
     def __init__(self, sandbox_id: str) -> None:
         root = Path(os.environ["E2E_SANDBOX_ROOT"])
@@ -43,20 +43,30 @@ class StandInSandbox(LocalShellBackend):
             root_dir=root,
             virtual_mode=True,
             inherit_env=False,
-            env={key: value for key, value in os.environ.items() if key not in _EXCLUDED_ENV},
+            env={
+                **{key: value for key, value in os.environ.items() if key not in _EXCLUDED_ENV},
+                "GIT_CONFIG_COUNT": "2",
+                "GIT_CONFIG_KEY_0": f"url.{os.environ['E2E_REMOTE']}.insteadOf",
+                "GIT_CONFIG_VALUE_0": "https://github.com/fakeorg/demo.git",
+                "GIT_CONFIG_KEY_1": f"url.{os.environ['E2E_REMOTE']}.insteadOf",
+                "GIT_CONFIG_VALUE_1": "https://github.com/e2e/initial-build.git",
+            },
         )
         self._stand_in_id = sandbox_id
+
+    def get_work_dir(self) -> str:
+        return str(self.cwd)
 
     @property
     def id(self) -> str:
         return self._stand_in_id
 
 
-def open_box(sandbox_id: str | None = None) -> StandInSandbox:
-    """The box ``sandbox_id`` names, or a new one."""
+def open_mda_sandbox(sandbox_id: str | None = None) -> StandInSandbox:
+    """The sandbox ``sandbox_id`` names, or a new one."""
     return StandInSandbox(sandbox_id or f"e2e-{uuid.uuid4().hex[:12]}")
 
 
-def mda_box_name(scope_key: str) -> str:
-    """The name MDA gives the box it keeps for ``scope_key``, the same on every call."""
+def mda_sandbox_name(scope_key: str) -> str:
+    """The name MDA gives the sandbox it keeps for ``scope_key``, the same on every call."""
     return f"e2e-{hashlib.sha256(scope_key.encode()).hexdigest()[:16]}"

@@ -23,8 +23,8 @@ import {
 //   that same review, and the card becomes "Expedited review: merged".
 
 const PEOPLE = [
-  { login: "alice", slack_id: "U_ALICE" },
-  { login: "bob", slack_id: "U_BOB" },
+  { login: "alice", slack_id: "U_ALICE", name: "Alice" },
+  { login: "bob", slack_id: "U_BOB", name: "Bob" },
 ];
 const PR_NUMBER = 1;
 const REPO = { owner: "fakeorg", repo: "demo" };
@@ -432,10 +432,8 @@ test.describe("Expedited Slack review", () => {
       .poll(async () => (await latest(request)).approvers, { timeout: 60_000 })
       .toEqual([reviewer.login]);
     await page.goto("/mock/slack");
-    // A voter who clicked from Slack is mentioned by their Slack identity.
-    await expect(card(page)).toContainText(
-      new RegExp(`Approved by (<@${reviewer.slack_id}>|@${reviewer.slack_id})`),
-    );
+    await expect(card(page)).toContainText(`Approved by ${reviewer.name}.`);
+    await expect(card(page)).not.toContainText(`<@${reviewer.slack_id}>`);
     await expect(card(page).getByRole("button")).toHaveCount(0);
     await expect(card(page).locator("img.block-image")).toHaveCount(0);
     await shootCard(page, "approved");

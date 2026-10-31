@@ -95,10 +95,11 @@ class SandboxDefinition:
     RESOLUTION_OPTION_KEYS: ClassVar[tuple[str, ...]] = (
         "_openswe_per_thread",
         "_openswe_thread_id",
+        "_openswe_sandbox_id",
         "_openswe_create_fields",
         "_openswe_no_manage_proxy",
         "_openswe_select",
-        "_openswe_without_box",
+        "_openswe_without_sandbox",
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
@@ -158,6 +159,10 @@ _RESERVED_CREATE_FIELDS = frozenset(
 )
 
 
+class BoundSandboxMissingError(RuntimeError):
+    """The provider confirmed that the thread's bound workspace no longer exists."""
+
+
 @dataclass(frozen=True)
 class SandboxReplacement:
     """A thread's box replaced by a fresh one under its name; the old box is kept, renamed."""
@@ -168,18 +173,20 @@ class SandboxReplacement:
     stop_error: str | None = None
 
 
-async def open_sandbox(backend: object) -> str:
+async def open_sandbox(backend: object, *, wait: bool = True) -> str:
     """Adopt or create the run's managed sandbox now and return its name.
 
     ``backend`` is ``runtime.backend``. The box is otherwise opened on first use.
+    Without ``wait`` this returns as soon as the box is asked for, while it boots;
+    its first use waits for it to be ready and runs the connectors' hooks.
     """
     from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
 
-    return await _managed_sandbox_of(backend).aopen()
+    return await _managed_sandbox_of(backend).aopen(wait=wait)
 
 
 async def replace_sandbox(
-    backend: object, sandbox: SandboxDefinition | None = None
+    backend: object, sandbox: SandboxDefinition | None = None, *, missing_only: bool = False
 ) -> SandboxReplacement:
     """Give the run's thread a fresh managed sandbox under the same name.
 
@@ -189,7 +196,12 @@ async def replace_sandbox(
     """
     from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
 
-    return await _managed_sandbox_of(backend).areplace(sandbox)
+    return await _managed_sandbox_of(backend).areplace(sandbox, missing_only=missing_only)
+
+
+def is_per_thread(options: Mapping[str, object]) -> bool:
+    """Whether the box is a thread's own, whose work a failure must never abandon."""
+    return options.get("_openswe_per_thread") is True
 
 
 def owning_thread(options: Mapping[str, object]) -> str | None:
@@ -212,15 +224,10 @@ def selected_for(sandbox: SandboxDefinition, runtime: object) -> SandboxDefiniti
     return selected
 
 
-def without_box(sandbox: SandboxDefinition) -> SandboxBackendProtocol | None:
+def without_sandbox(sandbox: SandboxDefinition) -> SandboxBackendProtocol | None:
     """Where a run ``_openswe_select`` picks no box for acts instead, if anywhere."""
-    backend = sandbox.options.get("_openswe_without_box")
+    backend = sandbox.options.get("_openswe_without_sandbox")
     return backend if isinstance(backend, SandboxBackendProtocol) else None
-
-
-def is_per_thread(options: Mapping[str, object]) -> bool:
-    """Whether the thread keeps one box whatever a dynamic selection's options."""
-    return options.get("_openswe_per_thread") is True
 
 
 def declared_create_fields(options: Mapping[str, object]) -> dict[str, object]:

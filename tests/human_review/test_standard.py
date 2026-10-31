@@ -12,7 +12,7 @@ import pytest
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.expedited_review.readiness import PullRequestSnapshot
 from openswe.github.http import GitHubClient, GitHubError, RepoClient
-from openswe.github.pull_requests import PullRequest
+from openswe.github.pull_requests import PullRequest, ThreadLink
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
@@ -29,6 +29,39 @@ from openswe.users import User, UserIdentity
 from tests.conftest import FakeUserRecords
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
+
+
+async def test_review_backlink_survives_card_reposts_without_duplicate_comments() -> None:
+    pr = PullRequest(owner="lc", repo="repo", number=7)
+    request = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="standard",
+        slack_channel_id="C1",
+        slack_thread_ts="1.0",
+        slack_message_ts="2.0",
+    )
+    request.pull_request = pr
+    pull = AsyncMock()
+    pull.issue_comments.side_effect = [
+        [],
+        [{"body": f"<!-- open-swe-review-request:{request.id} -->"}],
+    ]
+    with (
+        patch("openswe.human_review.lifecycle.PullRequestClient.as_app") as app,
+        patch(
+            "openswe.human_review.lifecycle.get_slack_permalink",
+            AsyncMock(return_value="https://slack.example.com/review"),
+        ),
+    ):
+        app.return_value.__aenter__.return_value = pull
+        await ReviewCard(request).link_on_github()
+        request.slack_message_ts = "3.0"
+        await ReviewCard(request).link_on_github()
+    pull.comment.assert_awaited_once_with(
+        f"Review requested in [Slack](https://slack.example.com/review).\n\n"
+        f"<!-- open-swe-review-request:{request.id} -->"
+    )
 
 
 @pytest.mark.parametrize("decision", [None, "picked", "review"])
@@ -170,7 +203,7 @@ async def test_snoozed_pick_does_not_expire_before_its_new_deadline() -> None:
         assert pick.decision == "picked"
 
 
-@pytest.mark.parametrize("author", ["ada", "open-swe[bot]"])
+@pytest.mark.parametrize("author", ["ada", "open-swe[bot]", "langsmith-engine[bot]"])
 async def test_losing_auto_assignment_does_not_wake_another_picker(author: str) -> None:
     from openswe.human_review.picking import Pick
     from openswe.human_review.standard import RequestResult, _auto_assign
@@ -182,6 +215,12 @@ async def test_losing_auto_assignment_does_not_wake_another_picker(author: str) 
         patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
         patch.object(
             User, "for_login", AsyncMock(return_value=User() if author == "ada" else None)
+        ),
+        patch.object(GitHubClient, "as_app", _review_github_app),
+        patch.object(
+            RepoClient,
+            "read_file",
+            AsyncMock(return_value='{"reviewAllowedAuthors": ["langsmith-engine[bot]"]}'),
         ),
         patch(
             "openswe.human_review.standard.choose_reviewer",
@@ -814,31 +853,84 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
     assert [row.number for row in result.pull_requests] == [1]
 
 
+@asynccontextmanager
+async def _review_github_app(owner: str, repo: str) -> AsyncIterator[GitHubClient]:
+    yield GitHubClient(MagicMock())
+
+
 @pytest.mark.parametrize(
-    ("author", "user", "draft", "expected"),
+    ("author", "user", "draft", "allowed", "expected"),
     [
-        ("ada", User(), False, []),
-        ("ada", None, False, ["its author is not an Open SWE user"]),
-        ("open-swe[bot]", None, False, []),
-        ("open-swe-preview[bot]", None, False, []),
-        ("openswe-dev[bot]", None, False, []),
-        ("another[bot]", None, False, ["its author is not an Open SWE user"]),
-        ("open-swe[bot]", None, True, ["it is a draft"]),
+        ("ada", User(), False, [], []),
+        ("ada", None, False, [], ["its author is not an Open SWE user or in reviewAllowedAuthors"]),
+        ("open-swe[bot]", None, False, [], []),
+        ("open-swe-preview[bot]", None, False, [], []),
+        ("openswe-dev[bot]", None, False, [], []),
+        (
+            "another[bot]",
+            None,
+            False,
+            ["langsmith-engine[bot]"],
+            ["its author is not an Open SWE user or in reviewAllowedAuthors"],
+        ),
+        ("open-swe[bot]", None, True, [], ["it is a draft"]),
+        ("LangSmith-Engine[bot]", None, False, [" langsmith-engine[bot] "], []),
+        ("ada", None, False, ["ADA"], []),
+        ("ada", None, True, ["ada"], ["it is a draft"]),
     ],
 )
-async def test_review_blockers_require_an_account_or_an_open_swe_bot(
-    author: str, user: User | None, draft: bool, expected: list[str]
+async def test_review_blockers_require_an_account_or_an_allowed_author(
+    author: str, user: User | None, draft: bool, allowed: list[str], expected: list[str]
 ) -> None:
     from openswe.expedited_review.readiness import Readiness
     from openswe.human_review.standard import review_blockers
 
     readiness = Readiness(snapshot=_snapshot(author=author, draft=draft), blockers=[])
+    settings = RepoSettings(review_allowed_authors=allowed).model_dump_json(by_alias=True)
     with (
         patch.object(Readiness, "assess", AsyncMock(return_value=readiness)),
         patch.object(User, "for_login", AsyncMock(return_value=user)),
+        patch.object(GitHubClient, "as_app", _review_github_app),
+        patch.object(RepoClient, "read_file", AsyncMock(return_value=settings)),
     ):
-        blockers = await review_blockers(MagicMock())
+        blockers = await review_blockers(_repo().pull_request(7))
     assert blockers == expected
+
+
+@pytest.mark.parametrize(
+    "settings", [None, "unreadable", "not json", '{"reviewAllowedAuthors": "ada"}']
+)
+async def test_review_author_allowlist_requires_valid_default_branch_settings(
+    settings: str | None,
+) -> None:
+    from openswe.expedited_review.readiness import Readiness
+    from openswe.human_review.standard import review_blockers
+
+    readiness = Readiness(snapshot=_snapshot(author="ada"), blockers=[])
+
+    async def read_file(
+        repo: RepoClient, path: str, ref: str | None, *, max_chars: int, strict: bool = False
+    ) -> str | None:
+        if ref is not None:
+            return '{"reviewAllowedAuthors": ["ada"]}'
+        if settings == "unreadable":
+            from openswe.github.repo_files import RepoFileUnreadableError
+
+            raise RepoFileUnreadableError("Could not read settings")
+        return settings
+
+    with (
+        patch.object(Readiness, "assess", AsyncMock(return_value=readiness)),
+        patch.object(User, "for_login", AsyncMock(return_value=None)),
+        patch.object(GitHubClient, "as_app", _review_github_app),
+        patch.object(RepoClient, "read_file", read_file),
+    ):
+        blockers = await review_blockers(_repo().pull_request(7))
+    assert blockers == (
+        ["its author is not an Open SWE user or in reviewAllowedAuthors"]
+        if settings is None
+        else None
+    )
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -858,6 +950,7 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
     from openswe.slack.client import GitHubPrRef
 
     pr = await PullRequest(owner="lc", repo="repo", number=7, author="ada").save()
+    pr = await pr.link_thread("implementation")
     details = MagicMock(head_sha="abc", body="Fix")
     ref = GitHubPrRef(owner="lc", repo="repo", number=7, url=pr.url)
     with (
@@ -873,6 +966,12 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
         patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
         patch.object(standard, "_permalink", AsyncMock(return_value="")),
         patch.object(ReviewCard, "post_standard", AsyncMock(return_value="1.0")),
+        patch.object(ReviewCard, "link_on_github", AsyncMock()),
+        patch.object(
+            standard.SupplementaryReviews,
+            "policies",
+            AsyncMock(side_effect=RuntimeError("repository settings unavailable")),
+        ),
     ):
         result = await standard._request_review(
             ref, MagicMock(), Origin(), channel="", inline_summary="Fix", auto_merge=override
@@ -880,6 +979,10 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
         assert result.success and result.auto_merge is expected
         request = await HumanReviewRequest.active_for("lc", "repo", 7)
         assert request is not None and request.auto_merge is expected
+        assert request.pull_request.thread_ids == ["implementation"]
+        async with HumanReviewRequest.locked(request.id) as (_, locked):
+            assert locked is not None
+            assert locked.pull_request.thread_ids == ["implementation"]
         assert [call.args[1] for call in schedule.await_args_list] == (
             ["unclaimed", "auto_merge"] if expected else ["unclaimed"]
         )
@@ -895,14 +998,27 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
 
 
 @pytest.mark.parametrize("trigger", ["event", "deadline"])
-@pytest.mark.parametrize("pending", [False, True])
-@pytest.mark.parametrize("auto_merge", [False, True])
-@pytest.mark.parametrize("author", ["ada", "open-swe[bot]"])
+@pytest.mark.parametrize(
+    ("auto_merge", "pending", "activity", "design_only"),
+    [
+        (False, False, "idle", False),
+        (False, True, "idle", False),
+        (True, True, "idle", False),
+        (True, False, "idle", True),
+        *[
+            (True, False, status, False)
+            for status in ("idle", "busy", "pending", "running", "unknown", "unavailable")
+        ],
+    ],
+)
+@pytest.mark.parametrize("author", ["ada", "open-swe[bot]", "langsmith-engine[bot]"])
 async def test_only_auto_merge_requests_merge_when_approved(
+    design_only: bool,
     author: str,
     trigger: str,
     auto_merge: bool,
     pending: bool,
+    activity: str,
     github_app: AsyncMock,
 ) -> None:
     from openswe.expedited_review.readiness import Readiness
@@ -910,12 +1026,35 @@ async def test_only_auto_merge_requests_merge_when_approved(
     from openswe.human_review.merging import MergeResult
     from openswe.human_review.picking import Coverage
 
+    client = MagicMock()
+
+    async def thread(thread_id: str) -> MagicMock | None:
+        if thread_id == "deleted":
+            return None
+        if thread_id == "review-request":
+            if activity == "unavailable":
+                raise httpx2.ConnectError("Runtime unavailable")
+            if activity in {"busy", "unknown"}:
+                return MagicMock(status=activity, runtime="mda")
+        return MagicMock(status="idle", runtime="mda")
+
+    async def runs(thread_id: str, *, status: str, limit: int) -> list[dict[str, str]]:
+        return [{"status": status}] if activity == status else []
+
+    client.runs.list = AsyncMock(side_effect=runs)
     pr = PullRequest(owner="lc", repo="repo", number=7, author=author)
+    pr.threads = [
+        ThreadLink(thread_id="implementation", role="primary"),
+        ThreadLink(thread_id="deleted"),
+    ]
     request = HumanReviewRequest(
         pull_request_id=pr.id, head_sha="abc", kind="standard", auto_merge=auto_merge
     )
     request.pull_request = pr
+    request.thread_id = "review-request"
     request.created_at = datetime.now(UTC) - timedelta(hours=3)
+    if design_only:
+        request.run_config = {"supplementary_reviews": {"design": {"github_login": "grace"}}}
     if pending:
         user = User(
             identities=[UserIdentity(provider="github", external_id="linus", login="linus")]
@@ -940,6 +1079,12 @@ async def test_only_auto_merge_requests_merge_when_approved(
         patch.object(
             User, "for_login", AsyncMock(return_value=User() if author == "ada" else None)
         ),
+        patch.object(GitHubClient, "as_app", _review_github_app),
+        patch.object(
+            RepoClient,
+            "read_file",
+            AsyncMock(return_value='{"reviewAllowedAuthors": ["langsmith-engine[bot]"]}'),
+        ),
         patch.object(
             standard, "latest_review_states", AsyncMock(return_value={"grace": "APPROVED"})
         ),
@@ -949,6 +1094,9 @@ async def test_only_auto_merge_requests_merge_when_approved(
         patch.object(ReviewCard, "update_blocked_reactions", AsyncMock()),
         patch.object(ReviewCard, "mark_merged", AsyncMock()),
         patch.object(ReviewCard, "refresh", AsyncMock()),
+        patch.object(standard.index, "get", AsyncMock(side_effect=thread)),
+        patch.object(standard.RUNTIMES, "runs_on", return_value=MagicMock(client=client)),
+        patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
         patch.object(
             standard, "merge_pull_request", AsyncMock(return_value=MergeResult("merged", "Merged"))
         ) as merge,
@@ -957,8 +1105,19 @@ async def test_only_auto_merge_requests_merge_when_approved(
             await standard.run_deadline(str(request.id), "auto_merge")
         else:
             await standard.settle_pull_request("lc", "repo", 7)
-    assert merge.await_count == int(auto_merge)
-    if not auto_merge:
+        held = auto_merge and activity != "idle"
+        assert merge.await_count == int(auto_merge and not held and not design_only)
+        if held:
+            assert request.state == "open"
+            assert request.detail.startswith("auto-merge paused")
+            schedule.assert_awaited_once_with(request, "auto_merge", timedelta(minutes=5))
+            activity = "idle"
+            await standard.run_deadline(str(request.id), "auto_merge")
+            assert merge.await_count == 1
+    if design_only:
+        assert request.state == "open"
+        assert request.detail == "an approval on GitHub"
+    elif not auto_merge:
         assert request.state == "open"
         assert request.detail == (
             "approval from @linus" if pending else "approved — awaiting manual merge"

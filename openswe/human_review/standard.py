@@ -46,6 +46,7 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
 from openswe.human_review.card import accept_button, decline_button, mention, snooze_button
+from openswe.human_review.deadlines import schedule as _schedule
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.people import Outcome, Participant, resolve_writer
@@ -59,7 +60,13 @@ from openswe.human_review.picking import (
     choose_reviewer,
 )
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
-from openswe.jobs import queue
+from openswe.human_review.supplementary import (
+    STEP_PREFIX as SUPPLEMENTARY_STEP,
+)
+from openswe.human_review.supplementary import (
+    SupplementaryReviewRefused,
+    SupplementaryReviews,
+)
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import actions, block_payload, escape, section
@@ -74,6 +81,8 @@ from openswe.slack.client import (
 from openswe.slack.dm import send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thread_owner import wake_thread_owner
+from openswe.threads import index
+from openswe.threads.runtimes import RUNTIMES
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_base_url
 from openswe.utils.json_types import JsonObject
@@ -82,7 +91,6 @@ from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
-SCHEDULER_TASK = "human_review"
 AUTO_MERGE_AFTER_HOURS = 2
 SUMMARY_MAX_CHARS = 280
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
@@ -153,6 +161,7 @@ class RequestResult(BaseModel):
     summary_updated: bool = False
     claimed: bool = False
     auto_merge: bool = True
+    supplementary_refusal: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,11 +210,18 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
     return blockers
 
 
-async def _review_author_allowed(author: str) -> bool:
-    return (
-        author.lower() in OPEN_SWE_GITHUB_LOGINS
-        or await User.for_login("github", author) is not None
-    )
+async def _review_author_allowed(author: str, owner: str, repo: str) -> bool | None:
+    if author.lower() in OPEN_SWE_GITHUB_LOGINS or await User.for_login("github", author):
+        return True
+    try:
+        async with GitHubClient.as_app(owner, repo) as github:
+            settings = await RepoSettings.fetch(github.repo(owner, repo), strict=True)
+    except GitHubAppUnavailable, RepoFileUnreadableError:
+        logger.exception("Could not read review author allow-list")
+        return None
+    return bool(author) and author.lower() in {
+        login.strip().lower() for login in settings.review_allowed_authors
+    }
 
 
 async def review_blockers(pull: PullRequestClient) -> list[str] | None:
@@ -214,8 +230,13 @@ async def review_blockers(pull: PullRequestClient) -> list[str] | None:
     if readiness is None:
         return None
     blockers = request_blockers(readiness.snapshot)
-    if not await _review_author_allowed(readiness.snapshot.author):
-        blockers.append("its author is not an Open SWE user")
+    author_allowed = await _review_author_allowed(
+        readiness.snapshot.author, pull.repo.owner, pull.repo.name
+    )
+    if author_allowed is None:
+        return None
+    if not author_allowed:
+        blockers.append("its author is not an Open SWE user or in reviewAllowedAuthors")
     return blockers
 
 
@@ -283,24 +304,6 @@ def review_reminder_at(start: datetime, timezone: ZoneInfo) -> datetime:
         cursor = datetime.combine(cursor.date() + timedelta(days=1), time(9), timezone)
 
 
-async def _schedule(request: HumanReviewRequest, step: str, after: timedelta) -> bool:
-    try:
-        await queue.schedule(
-            SCHEDULER_TASK,
-            {"request_id": str(request.id), "step": step},
-            due_at=datetime.now(UTC) + after,
-            metadata={"kind": SCHEDULER_TASK, "request_id": str(request.id), "step": step},
-        )
-    except Exception:
-        logger.warning(
-            "Could not schedule a human review deadline",
-            extra={"request_id": str(request.id), "step": step},
-            exc_info=True,
-        )
-        return False
-    return True
-
-
 async def _existing(
     active: HumanReviewRequest, auto_merge: bool | None = None, requested_channel: str = ""
 ) -> RequestResult:
@@ -349,6 +352,24 @@ async def _resummarize(active: HumanReviewRequest, tldr: str) -> RequestResult:
     return result
 
 
+async def _request_supplementary(
+    active: HumanReviewRequest,
+    pull: PullRequestClient,
+    result: RequestResult,
+    policy_id: str,
+    reason: str,
+) -> RequestResult:
+    """Add a supplementary review to an open request without touching its engineering card."""
+    blockers = await review_blockers(pull)
+    if blockers is None or blockers:
+        return _failure("The pull request must be open and not a draft for a supplementary review.")
+    try:
+        await SupplementaryReviews(active).ask(pull, policy_id.strip(), reason)
+    except SupplementaryReviewRefused as refused:
+        return _failure(str(refused))
+    return result
+
+
 async def record_pull_request(
     pull: PullRequestClient,
 ) -> tuple[PullRequest, PullRequestPayload] | None:
@@ -377,6 +398,8 @@ async def request_review(
     channel: str = "",
     inline_summary: str | None = None,
     auto_merge: bool | None = None,
+    supplementary_review: str = "",
+    supplementary_review_reason: str = "",
 ) -> RequestResult:
     """Post a standard review card for ``pr_ref``, or return the one already open.
 
@@ -391,6 +414,8 @@ async def request_review(
                 channel=channel,
                 inline_summary=inline_summary,
                 auto_merge=auto_merge,
+                supplementary_review=supplementary_review,
+                supplementary_review_reason=supplementary_review_reason,
             )
     except GitHubAppUnavailable:
         return _failure("Open SWE cannot reach this repository's GitHub App installation.")
@@ -404,13 +429,21 @@ async def _request_review(
     channel: str,
     inline_summary: str | None,
     auto_merge: bool | None = None,
+    supplementary_review: str = "",
+    supplementary_review_reason: str = "",
 ) -> RequestResult:
+    if bool(supplementary_review.strip()) != bool(supplementary_review_reason.strip()):
+        return _failure("Pass supplementary_review and supplementary_review_reason together.")
     # An open card stays correctable whatever has happened to the pull request since.
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if active is not None:
         result = await _existing(active, auto_merge)
         if not result.success:
             return result
+        if supplementary_review:
+            return await _request_supplementary(
+                active, pull, result, supplementary_review, supplementary_review_reason
+            )
         if active.kind == "standard" and channel.strip():
             target = await _target_channel(pr_ref, pull, channel)
             if isinstance(target, RequestResult):
@@ -421,6 +454,8 @@ async def _request_review(
             return await _resummarize(active, summary_line(inline_summary))
         return result
 
+    if supplementary_review and not inline_summary:
+        return _failure("A supplementary review needs an open review request or an inline_summary.")
     blockers = await review_blockers(pull)
     if blockers is None:
         return _failure("GitHub was unavailable while checking the pull request.")
@@ -491,10 +526,21 @@ async def _request_review(
         raise
     request.slack_message_ts = message_ts
     request = await request.save()
+    await ReviewCard(request).link_on_github()
     if not in_thread and origin.slack_channel_id and origin.slack_thread_ts:
         await _point_to_card(request, origin, target)
+    refusal = ""
+    if supplementary_review:
+        try:
+            await SupplementaryReviews(request).ask(
+                pull, supplementary_review.strip(), supplementary_review_reason
+            )
+        except SupplementaryReviewRefused as refused:
+            refusal = str(refused)
+    await SupplementaryReviews(request).start(pull)
     return RequestResult(
         success=True,
+        supplementary_refusal=refusal,
         auto_merge=request.auto_merge,
         request_id=str(request.id),
         channel=target.id,
@@ -671,6 +717,7 @@ async def _github_approvers(request: HumanReviewRequest) -> list[str]:
             extra={"request_id": str(request.id)},
         )
         return []
+    states = await SupplementaryReviews(request).engineering_states(states)
     return [login for login, state in states.items() if state == "APPROVED"]
 
 
@@ -1006,13 +1053,43 @@ async def settle(request: HumanReviewRequest) -> bool:
         return False
 
 
+async def _auto_merge_hold(request: HumanReviewRequest) -> str | None:
+    thread_ids = set(request.pull_request.thread_ids)
+    if request.thread_id:
+        thread_ids.add(request.thread_id)
+    try:
+        for thread_id in sorted(thread_ids):
+            thread = await index.get(thread_id)
+            if thread is None:
+                continue
+            if thread.status not in {"idle", "interrupted", "error", "busy"}:
+                return "auto-merge paused — could not verify PR thread activity"
+            if thread.status == "busy":
+                return "auto-merge paused — a PR thread has an active run"
+            client = RUNTIMES.runs_on(thread.runtime).client
+            for run_status in ("pending", "running"):
+                if await client.runs.list(thread_id, status=run_status, limit=1):
+                    return "auto-merge paused — a PR thread has an active run"
+    except Exception:
+        logger.warning(
+            "Could not check PR thread activity before auto-merge",
+            extra={"request_id": str(request.id)},
+            exc_info=True,
+        )
+        return "auto-merge paused — could not verify PR thread activity"
+    return None
+
+
 async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     readiness = await Readiness.assess(pull)
     if readiness is None:
         return False
     snapshot = readiness.snapshot
-    if not await _review_author_allowed(snapshot.author):
-        await ReviewCard(request).retire("cancelled", "PR author has no Open SWE account")
+    author_allowed = await _review_author_allowed(snapshot.author, pull.repo.owner, pull.repo.name)
+    if author_allowed is None:
+        return False
+    if not author_allowed:
+        await ReviewCard(request).retire("cancelled", "PR author is not allowed for review")
         return True
     if snapshot.merged:
         await ReviewCard(request).mark_merged()
@@ -1024,6 +1101,7 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     states = await latest_review_states(pull, snapshot.author)
     if states is None:
         return False
+    states = await SupplementaryReviews(request).engineering_states(states)
     await ReviewPicks(request).complete(
         {
             login.lower()
@@ -1065,6 +1143,11 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
             return True
         if not row.auto_merge:
             row.detail = "approved — awaiting manual merge"
+            await ReviewCard(row).refresh()
+            return True
+        if hold := await _auto_merge_hold(row):
+            row.detail = hold
+            await _schedule(row, "auto_merge", _DEADLINE_RETRY)
             await ReviewCard(row).refresh()
             return True
         result = await merge_pull_request(
@@ -1160,8 +1243,12 @@ async def _auto_assign(
     replacing = trigger is not None and trigger.kind in ("declined", "expired")
     if not replacing and (request.reviewers or request.picks):
         return AutoAssignResult("claimed")
-    if not await _review_author_allowed(request.pull_request.author):
-        await ReviewCard(request).retire("cancelled", "PR author has no Open SWE account")
+    pr = request.pull_request
+    author_allowed = await _review_author_allowed(pr.author, pr.owner, pr.repo)
+    if author_allowed is None:
+        return AutoAssignResult("failed")
+    if not author_allowed:
+        await ReviewCard(request).retire("cancelled", "PR author is not allowed for review")
         return AutoAssignResult("disabled")
     choice = await choose_reviewer(request)
     if isinstance(choice, Wait):
@@ -1514,6 +1601,8 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         request = None
     if request is None or request.state != "open":
         return {"status": "closed"}
+    if step.startswith(SUPPLEMENTARY_STEP):
+        return {"status": await SupplementaryReviews(request).run(step)}
     if step.startswith("snooze:"):
         user_id = UUID(step.removeprefix("snooze:"))
         participant = request.participant(user_id)

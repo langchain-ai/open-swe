@@ -78,16 +78,26 @@ def remote_path(scope: Scope) -> str:
 
 
 async def forward(
-    http: httpx.AsyncClient, scope: Scope, send: Send, body: bytes, *, path: str | None = None
+    http: httpx.AsyncClient,
+    scope: Scope,
+    send: Send,
+    body: bytes,
+    *,
+    path: str | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> None:
-    """Send the request to another deployment, and stream its answer back unchanged."""
-    headers = Headers(scope=scope)
+    """Send the request to another deployment, and stream its answer back unchanged.
+
+    ``headers`` join the caller's forwarded ones, such as a credential for this call.
+    """
+    received = Headers(scope=scope)
     request = http.build_request(
         scope["method"],
         path or remote_path(scope),
         params=scope.get("query_string", b"").decode(),
         headers={
-            name: value for name in _FORWARDED_REQUEST_HEADERS if (value := headers.get(name))
+            **{name: value for name in _FORWARDED_REQUEST_HEADERS if (value := received.get(name))},
+            **(headers or {}),
         },
         content=body or None,
     )

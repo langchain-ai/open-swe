@@ -34,12 +34,14 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
   Add a sync method only when an interface requires it, and make it raise `NotImplementedError`.
 - Strong types in Python and TypeScript.
   Never use `Any`/`any`, including to silence a type error; use a union, generic, protocol, or `object`/`unknown` with narrowing.
-- Put behavior on the object it acts on.
-  If functions keep passing the same value around (a request, a client, a `(backend, repo_dir)` pair), that value is a missing class.
-  Free functions are for framework entrypoints (routes, graph nodes, tools) and helpers spanning unrelated types.
+- **Every new function is a method.**
+  Put behavior on the object it acts on: a store, a model, a client, or a class that owns the state.
+  The only new module-level functions are framework entrypoints: routes, graph nodes, tools and job handlers.
+  A private helper (`_person()`, `_workspace_id(cfg)`) is a missing method on the class whose data it reads, and a value functions keep passing around (a request, a client, a `(backend, repo_dir)` pair) is a missing class.
   A new class must own real state, never be a bag of arguments.
 - Call GitHub through named `RepoClient`/`PullRequestClient` methods (e.g. `pull.comment(body)`); outside `openswe/github/http.py` and `openswe/github/pull_request_status.py`, never pass a REST path or GraphQL query to the transport (`get`, `post`, `patch`, `delete`, `pages`, `graphql`, `request`).
   Open the client as who it acts for, `GitHubClient.as_user(login)` or `GitHubClient.as_app(owner, repo)`; `GitHubClient.connect(token=...)` is only for a token a run was handed.
+- Build a per-call `httpx2.AsyncClient` with `transport=pooled_transport()` (an `aiohttp` session with `connector=pooled_connector(), connector_owner=False`) from `openswe/utils/http_pool.py`, so it reuses the event loop's warm connections instead of opening new ones.
 - Absolute imports across packages; same-package imports may start with one dot.
   Never use parent-relative imports.
 - New dashboard endpoints go in the `router` of the package that owns the feature, never in `openswe/dashboard/routes.py`.
@@ -60,8 +62,9 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
 - The dashboard (`ui/`) builds with the React Compiler, which memoizes components, values and callbacks itself.
   Write derived values and handlers as plain expressions; keep `useMemo`/`useCallback` only where a hook's dependency list needs a stable identity.
 - Create database migrations with `make migration m="Short description"`.
-- Don't add new uses of `langgraph_client` in the backend.
+- Don't add new uses of the LangGraph SDK client (`langgraph_client`, `get_client`, `LangGraphClient`) in the backend.
   Everything must be on MDA now; use MDA for runs and PostgreSQL for thread state.
+  Read and change threads, their metadata included, through `THREADS` (`openswe/threads/store.py`).
   Existing uses are legacy, not a pattern to copy.
 - Don't use the LangGraph Store (`client.store`) for state; keep it in PostgreSQL tables.
 - New tables share one shape: an `id uuid` primary key (`uuid7()`, set in Python); `created_at` and `updated_at` (`timestamptz NOT NULL DEFAULT clock_timestamp()`, `updated_at` set again on every write); and `created_by` and `updated_by` (`uuid REFERENCES users (id) ON DELETE SET NULL`: the person whose action caused the write, NULL for system, API-key and workflow writes).
@@ -75,6 +78,8 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
   Keep the tool guidance and `openswe/resources/default_prompt.md` dashboard settings map current with those changes.
   Destructive or sensitive actions may stay human-only.
   Prefer existing sandbox CLIs, such as the authenticated `gh`, over new tools.
+- Design new agent tools as fine-grained, Unix-style primitives: each does one thing and returns structured data that code mode can compose.
+  Don't add batch tools or combined orchestration tools; use code mode to loop, branch, and run independent calls in parallel instead.
 - A person's concierge DM thread must see everything in their DM with the bot: every post from outside its own run and every button click there must reach its context.
 - Only the agent that owns a Slack channel thread posts in it.
   Background work hands it events instead: `wake_thread_owner` when it must act or report, `note_for_thread_owner` to queue informational ones for its next run.

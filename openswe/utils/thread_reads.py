@@ -1,8 +1,9 @@
 """One read of a thread, shared by the lookups a run makes while it starts up.
 
 A run's factory and its prepare step each consult the same thread several times
-(credential scope, task coordination, tool access, participants, ...), and every
-read is a round trip through the LangGraph API.
+(credential scope, task coordination, tool access, participants, token scope,
+the sandbox's tool proxy, ...), and every read is a round trip through the
+thread API. The share lasts one request, never longer.
 """
 
 import asyncio
@@ -25,8 +26,11 @@ async def shared_thread_reads() -> AsyncIterator[None]:
 
     Only lookups of fields the block does not itself write (ownership,
     visibility, participants) use it; anything that needs the live record keeps
-    reading through the client.
+    reading through the client. A block inside another shares the outer one's reads.
     """
+    if _SHARED.get() is not None:
+        yield
+        return
     token = _SHARED.set({})
     try:
         yield

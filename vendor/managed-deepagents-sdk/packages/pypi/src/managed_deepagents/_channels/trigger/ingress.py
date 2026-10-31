@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import uuid
 from collections.abc import Mapping
 from http import HTTPStatus
@@ -15,7 +14,6 @@ from langgraph_sdk.schema import Interrupt
 from managed_deepagents._channels.types import ChannelError
 from managed_deepagents._identity_auth import (
     AGENT_AUTH_PRINCIPAL_HEADER,
-    LANGCHAIN_API_KEY_ENV,
     SOURCE_PROVIDER_HEADER,
     SOURCE_THREAD_HEADER,
     USER_HEADER,
@@ -28,6 +26,7 @@ from managed_deepagents._ingress_runs import (
     resume_ingress_run,
     start_ingress_run,
 )
+from managed_deepagents._langsmith_env import resolve_platform_injected_api_key
 from managed_deepagents._loopback import resolve_loopback_api_url
 from managed_deepagents._thread_record import THREAD_CONVERSATION_METADATA
 
@@ -351,7 +350,9 @@ async def cancel_ingress_thread_runs(
 def _create_trigger_ingress_loopback_client(
     source: _IngressSource,
 ) -> LangGraphClient:
-    api_key = os.environ.get(LANGCHAIN_API_KEY_ENV, "").strip()
+    # Hosted injects the deployment key as LANGCHAIN_API_KEY; some BYOC and
+    # self-hosted Hosts inject it only as LANGSMITH_API_KEY.
+    api_key = resolve_platform_injected_api_key()
     if not api_key:
         raise ChannelError(
             "channel_run_failed",

@@ -28,6 +28,8 @@ _ERROR_TYPE_CODES = {
     "SandboxUnreachableError": "sandbox_unreachable",
     "BackendUnavailableError": "backend_interrupted",
     "BackendTimeoutError": "backend_interrupted",
+    # Not raised: the stalled-run sweep names it when it fails a run that went silent.
+    "RunStalledError": "run_stalled",
 }
 
 

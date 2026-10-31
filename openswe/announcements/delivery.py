@@ -28,9 +28,7 @@ def announcement_blocks(text: str) -> list[dict[str, Any]]:
         {"type": "section", "text": {"type": "mrkdwn", "text": text}},
         {
             "type": "context",
-            "elements": [
-                {"type": "mrkdwn", "text": "Announcement from the Open SWE admins to every user"}
-            ],
+            "elements": [{"type": "mrkdwn", "text": "An update from the Open SWE team"}],
         },
     ]
 

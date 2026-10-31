@@ -1,14 +1,17 @@
 """What the backend works out for a run as it starts it: its operations, subagents,
 models, sandbox and the rules of its middleware.
 
-The run's context always carries it, and the MDA run builds its agent from it: a tool for each operation, the subagents it
-may delegate to, the models it calls, the box its file and shell tools run in, and
-what its middleware does around each model call.
+The run's context always carries it, and the MDA run builds its agent from it: a tool
+for each operation and for each tool of the MCP servers it connects to itself, the
+subagents it may delegate to, the models it calls, the sandbox its file and shell tools
+run in, and what its middleware does around each model call.
 """
 
 from typing import Literal
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, JsonValue, field_validator
+
+from runtime_api.connections import ConnectionRef
 
 # The runtime's own tool that finds the run's operations by what they do.
 SEARCH_TOOLS = "search_tools"
@@ -55,6 +58,30 @@ class ToolSpec(BaseModel):
     grant: str | None = None
     # How long a call of it may take, when shorter than a tool call's allowance.
     seconds: float | None = None
+    # The connections its tool reads its credentials from, which the runtime reads as
+    # the run and sends with each call of it (``RunOperation.credentials``).
+    connections: list[ConnectionRef] = []
+
+
+class McpServerSpec(BaseModel):
+    """An MCP server whose credential is an MDA connection, which the run connects to itself.
+
+    The backend serves every other MCP server's tools as operations; it holds no
+    credential for this one.
+    """
+
+    # The Open SWE connection's name.
+    name: str
+    url: str
+    transport: Literal["streamable_http", "sse"]
+    # The tools the run may call, by their name on the server, each with the name the
+    # model calls it by.
+    tools: dict[str, str]
+    connection: ConnectionRef
+    # The header the credential goes in as it is; None sends ``Authorization: Bearer``.
+    header: str | None = None
+    # What each of its tools' descriptions ends with: where the model's tool comes from.
+    provenance: str = ""
 
 
 class SubagentSpec(BaseModel):
@@ -77,11 +104,24 @@ class SandboxCreate(BaseModel):
 
 
 class SandboxSpec(BaseModel):
-    """The thread's box, which MDA creates, owns and runs the file and shell tools in."""
+    """The thread's sandbox, which MDA creates, owns and runs the file and shell tools in."""
 
     create: SandboxCreate
-    # The thread whose box this one works in, a task worker's coordinator; None for its own.
+    sandbox_id: str | None = None
+    # The thread whose sandbox this one works in, a task worker's coordinator; None for its own.
     thread_id: str | None = None
+    # The connection the sandbox's GitHub rules carry, where MDA writes its proxy config
+    # (``runtime_api.sandbox_proxy``); None leaves the proxy config to the backend.
+    github_proxy: ConnectionRef | None = None
+
+    @field_validator("github_proxy")
+    @classmethod
+    def _deployments_own(cls, github: ConnectionRef | None) -> ConnectionRef | None:
+        # Everyone who runs on the thread, and its task workers, works in the sandbox, and
+        # its proxy config outlives the run: one person's token there reaches them all.
+        if github is not None and github.owner != "agent":
+            raise ValueError("A sandbox's GitHub proxy reads the deployment's own connection")
+        return github
 
 
 ShellGuard = Literal["shell_commands"]
@@ -92,7 +132,7 @@ class FilesSpec(BaseModel):
     """Where the run's file and shell tools act, and what is checked around them."""
 
     # Paths under these prefixes are the backend's (skills, offloaded images): the
-    # runtime's file tools reach them through the files API rather than the box.
+    # runtime's file tools reach them through the files API rather than the sandbox.
     backend_paths: list[str] = []
     # Where large results and binary reads are offloaded; the backend serves blobs under it.
     artifacts_root: str = "/"
@@ -123,6 +163,8 @@ class ReplyRules(BaseModel):
 
     tool: str
     no_reply_tool: str
+    # Where each turn starts answering: Slack for a run asked from there, else the web.
+    surface: Literal["slack", "web"] = "web"
     # Other tools whose successful call answers the person.
     replies: list[str] = []
     # The messages that ask again, in the run's input envelope, sent as ``nudge_sender``.
@@ -168,7 +210,7 @@ class LoopRules(BaseModel):
     task_coordination: bool = False
     # Whether the run may wait on a call its client runs itself.
     client_tools: bool = False
-    # Whether the box's GitHub proxy token is kept fresh before each model call.
+    # Whether the backend gives the sandbox's GitHub proxy a fresh token before each model call.
     refresh_github_proxy: bool = False
     # What the run's end does besides recording it.
     at_end: list[Literal["settle_review_check", "finish_scout_plan"]] = []
@@ -183,6 +225,9 @@ class Catalog(BaseModel):
     # The same tools by name alone, as the run's context carries them (``names_only``):
     # the run reads their specs as it starts (``runtime_api.tool_search.TOOL_SPECS``).
     tool_names: list[str] = []
+    # MCP servers the run connects to itself; ``search_tools`` finds only the backend's
+    # tools, so theirs are offered to each model call.
+    mcp_servers: list[McpServerSpec] = []
     subagents: list[SubagentSpec] = []
     models: RunModels | None = None
     trace_metadata: dict[str, JsonValue] = {}
@@ -194,7 +239,7 @@ class Catalog(BaseModel):
     also_from_code: list[str] = []
     # Tools the model labels each call of, with what the label argument tells it.
     described: dict[str, str] = {}
-    # The thread's box; None runs the file and shell tools through the files API alone.
+    # The thread's sandbox; None runs the file and shell tools through the files API alone.
     sandbox: SandboxSpec | None = None
     files: FilesSpec = FilesSpec()
     # Whether each tool result is recorded as incident evidence, which the result then cites.

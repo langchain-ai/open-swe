@@ -483,7 +483,7 @@ fn object_memory_layers(options: &ObjectExpression<'_>) -> MemoryLayersValue {
         .map(|element| match element {
             ArrayExpressionElement::ObjectExpression(object) => layer_entry_value(object),
             ArrayExpressionElement::StringLiteral(literal) => {
-                MemoryLayersValue::Shorthand(format!("{:?}", literal.value.as_str()))
+                MemoryLayersValue::Shorthand(format!("{:?}", literal.value))
             }
             other => match other.as_expression().and_then(static_string_expression) {
                 Some(text) => MemoryLayersValue::Shorthand(format!("{text:?}")),
@@ -521,7 +521,7 @@ fn layer_entry_value(object: &ObjectExpression<'_>) -> MemoryLayersValue {
             let name = property
                 .key
                 .static_name()
-                .map(|name| format!("the key `{name}`"))
+                .map(|name| format!("the key `{}`", name.display()))
                 .unwrap_or_else(|| "a computed key".to_string());
             return MemoryLayersValue::Reserved(name);
         }

@@ -253,6 +253,83 @@ function sidebarRowClassName({
   )
 }
 
+export function SidebarConversationRow({
+  title,
+  threadId,
+  active,
+  compact,
+  onNavigate,
+  pinned,
+  archived,
+  pending,
+  onPin,
+  onArchive,
+}: {
+  title: string
+  threadId: string
+  active: boolean
+  compact: boolean
+  onNavigate: () => void
+  pinned: boolean
+  archived: boolean
+  pending: boolean
+  onPin: () => void
+  onArchive: () => void
+}) {
+  const marquee = useTitleMarquee()
+  return (
+    <div
+      className="group/row relative mb-0.5"
+      onMouseEnter={marquee.measure}
+      onMouseLeave={marquee.reset}
+    >
+      <Link
+        to="/agents/$threadId"
+        params={{ threadId }}
+        aria-current={active ? "page" : undefined}
+        onClick={onNavigate}
+        className={cn(
+          "flex items-center rounded-xl px-space-2 text-secondary transition-colors group-focus-within/row:bg-surface-level-3 group-focus-within/row:pr-14 group-hover/row:bg-surface-level-3 group-hover/row:pr-14 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+          compact ? "h-7" : "h-8",
+          active && "bg-surface-level-3"
+        )}
+      >
+        <SidebarRowTitle title={title} marquee={marquee} />
+      </Link>
+      <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 rounded-xl bg-surface-level-3 opacity-0 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100">
+        <IconButton
+          icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
+          label={pinned ? "Unpin chat" : "Pin chat"}
+          className="text-tertiary hover:text-secondary"
+          size="xs"
+          color="secondary"
+          variant="plain"
+          disabled={pending}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            onPin()
+          }}
+        />
+        <IconButton
+          icon={archived ? ArrowCounterClockwiseIcon : ArchiveIcon}
+          label={archived ? "Unarchive chat" : "Archive chat"}
+          className="text-tertiary hover:text-secondary"
+          size="xs"
+          color="secondary"
+          variant="plain"
+          disabled={pending}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            onArchive()
+          }}
+        />
+      </span>
+    </div>
+  )
+}
+
 function RunningIndicator({ label }: { label: string }) {
   return (
     <span role="img" aria-label={label} className="flex shrink-0">
@@ -646,9 +723,11 @@ export function SidebarThreadRow({
         detail={
           !worktreeThread
             ? undefined
-            : worktreeThread.ownedWorktrees.length
-              ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
-              : "This removes its history but does not revert changes made to your repository."
+            : worktreeThread.managedTaskFolder
+              ? `This deletes the conversation. Its task files are kept at ${worktreeThread.cwd}.`
+              : worktreeThread.ownedWorktrees.length
+                ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
+                : "This removes its history but does not revert changes made to your repository."
         }
       />
     </>

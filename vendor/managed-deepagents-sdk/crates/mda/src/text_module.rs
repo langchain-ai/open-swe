@@ -63,17 +63,21 @@ pub fn inline_text_modules(source: &str, file_name: &str, resolve_dir: &Path) ->
             continue;
         };
 
-        let type_value = with_clause.with_entries.iter().find_map(|entry| {
-            (entry.key.as_arena_str().as_str() == "type").then(|| entry.value.value.as_str())
-        });
+        let type_value = with_clause
+            .with_entries
+            .iter()
+            .find_map(|entry| (entry.key.as_js_str() == "type").then_some(entry.value.value));
         let Some(type_value) = type_value else {
             continue;
         };
         if type_value != TEXT_MODULE_TYPE {
             continue;
         }
+        let type_value = TEXT_MODULE_TYPE;
 
-        let specifier = import.source.value.as_str();
+        let specifier = import.source.value.as_str().ok_or_else(|| {
+            anyhow!("text-module import path in {file_name} contains a lone surrogate")
+        })?;
         let local = default_import_binding(import.specifiers.as_ref().map(|v| &v[..])).ok_or_else(
             || {
                 anyhow!(
@@ -275,6 +279,14 @@ mod tests {
             "import { systemPrompt } from \"./instructions.md\" with { type: \"text\" };\n";
         let err = inline_text_modules(source, "agent.ts", dir.path()).unwrap_err();
         assert!(err.to_string().contains("single default import"));
+    }
+
+    #[test]
+    fn rejects_text_import_paths_with_lone_surrogates() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = r#"import sp from "./\uD800.md" with { "type": "text" };"#;
+        let error = inline_text_modules(source, "agent.ts", dir.path()).unwrap_err();
+        assert!(error.to_string().contains("contains a lone surrogate"));
     }
 
     #[test]

@@ -31,6 +31,10 @@ class _FakeClaims:
             self.held.add((scope, key))
             return True
 
+    async def release(self, scope: str, key: str) -> None:
+        async with self.lock:
+            self.held.discard((scope, key))
+
 
 class _FakeBackgroundTasks:
     def __init__(self) -> None:
@@ -103,6 +107,7 @@ def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClaims:
         return {"owner": "langchain-ai", "name": "open-swe"}
 
     monkeypatch.setattr(slack_events.event_claims, "claim", claims.claim)
+    monkeypatch.setattr(slack_events.event_claims, "release", claims.release)
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
@@ -442,7 +447,7 @@ async def test_command_intent_http_to_dispatch(
     monkeypatch: pytest.MonkeyPatch, command: str, outcome: str
 ) -> None:
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
-    monkeypatch.setenv("TYPESAFE_API_KEY", "fake-key")
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "fake-key")
     client_type = httpx2.AsyncClient
     classifier_requests: list[dict[str, object]] = []
 

@@ -1,9 +1,9 @@
 """A thread whose old sandbox is gone or abandoned is handed to MDA; nothing replaces it here.
 
-A box the backend made before MDA owned them that is deleted holds nothing, and a
+A sandbox the backend made before MDA owned them that is deleted holds nothing, and a
 reviewer's holds only a checkout `prepare_review_repo` re-derives every run, so the
-thread is unbound and its next run starts in the box MDA creates. Any other
-unreachable box fails loudly, because a fresh one would lose the thread's work.
+thread is unbound and its next run starts in the sandbox MDA creates. Any other
+unreachable sandbox fails loudly, because a fresh one would lose the thread's work.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -12,7 +12,11 @@ import pytest
 from langchain_core.runnables import RunnableConfig
 from langsmith.sandbox import SandboxClientError
 
-from openswe.reviewer import PrepareReviewerRunMiddleware, ensure_reviewer_sandbox_for_thread
+from openswe.reviewer import (
+    PrepareReviewerRunMiddleware,
+    ReviewerModelChoice,
+    ensure_reviewer_sandbox_for_thread,
+)
 from openswe.run_config import RunConfig
 from openswe.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
 from openswe.sandboxes.providers.registry import SandboxGoneError
@@ -60,7 +64,7 @@ async def test_an_old_sandbox_that_cannot_be_reached_is_handed_to_mda_or_fails(
     ):
         await ensure_sandbox_for_thread(thread_id, abandon_unreachable=abandon)
 
-    # Typed, so callers still recognize it and tell the person whether a fresh box follows.
+    # Typed, so callers still recognize it and tell the person whether a fresh sandbox follows.
     assert excinfo.value.sandbox_id == "sandbox-old"
     assert isinstance(excinfo.value, SandboxHandedOverError) is handed_over
     writes = [call.kwargs["metadata"] for call in update_thread.await_args_list]
@@ -91,7 +95,7 @@ async def test_an_abandoned_cached_sandbox_is_forgotten() -> None:
     ):
         await ensure_sandbox_for_thread(thread_id, abandon_unreachable=True)
 
-    # Handles already built around the proxy reach no box until the thread has one again.
+    # Handles already built around the proxy reach no sandbox until the thread has one again.
     assert not proxy.has_backend
     SANDBOX_BACKENDS.clear()
 
@@ -122,7 +126,10 @@ async def test_reviewer_says_whether_its_next_run_gets_a_fresh_sandbox(handed_ov
         "configurable": {"repo": {"owner": "langchain-ai", "name": "open-swe"}}
     }
     middleware = PrepareReviewerRunMiddleware(
-        thread_id="thread-reviewer", config=config, use_gateway=False
+        thread_id="thread-reviewer",
+        config=config,
+        use_gateway=False,
+        model=ReviewerModelChoice("openai:gpt-6.1-sol", {}, None),
     )
 
     with (

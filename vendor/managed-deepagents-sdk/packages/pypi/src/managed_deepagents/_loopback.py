@@ -6,6 +6,8 @@ import ipaddress
 import os
 import urllib.parse
 
+from managed_deepagents._langsmith_env import resolve_server_api_key
+
 
 def resolve_loopback_api_url(*, explicit: str | None = None) -> str:
     """Return the Agent Server base URL for in-process/loopback SDK clients.
@@ -28,10 +30,10 @@ def resolve_loopback_api_url(*, explicit: str | None = None) -> str:
 def resolve_loopback_api_key(*, explicit: str | None = None) -> str:
     """API key for trusted loopback LangGraph SDK clients.
 
-    Prefers ``explicit``, then ``LANGSMITH_API_KEY``, else ``"local"``
+    Prefers ``explicit``, then the deployment key, else ``"local"``
     (in-process / unit-test clients that do not authenticate against Host).
     """
-    key = (explicit if explicit is not None else os.environ.get("LANGSMITH_API_KEY") or "").strip()
+    key = (explicit if explicit is not None else resolve_server_api_key()).strip()
     return key or "local"
 
 

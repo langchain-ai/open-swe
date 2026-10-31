@@ -28,7 +28,8 @@ pub const WATCH_DEBOUNCE: Duration = Duration::from_millis(200);
 pub enum WatchAction {
     /// Nothing relevant changed.
     Ignore,
-    /// Restage `.env` / `.env.local` into `.mda/dev`.
+    /// Restage the project env file (`.env` / `.env.local`, or `--env-file`)
+    /// into `.mda/dev`.
     EnvRestage,
     /// Sync `skills/**` into the local Context Hub mock (no worker reload).
     HubSync,
@@ -53,6 +54,10 @@ pub struct WatchClassifyContext {
     pub instructions_rel: PathBuf,
     /// Deploy-owned skills directory relative to the project root.
     pub skills_rel: PathBuf,
+    /// Batch paths that restage env: `.env` / `.env.local`, or the
+    /// `--env-file` — relative when it lives under the project root, else
+    /// absolute (as [`ProjectWatcher`] reports it).
+    pub env_paths: Vec<PathBuf>,
 }
 
 impl WatchClassifyContext {
@@ -72,12 +77,31 @@ impl WatchClassifyContext {
         Self {
             instructions_rel,
             skills_rel,
+            env_paths: DEFAULT_ENV_FILES.iter().map(PathBuf::from).collect(),
         }
+    }
+
+    /// Restage on `--env-file` changes instead of `.env` / `.env.local`.
+    pub fn with_env_file(mut self, project_root: &Path, env_file: Option<&Path>) -> Self {
+        if let Some(env_file) = env_file {
+            let path = relativize_watch_path(project_root, env_file)
+                .unwrap_or_else(|| env_file.to_path_buf());
+            self.env_paths = vec![path];
+        }
+        self
     }
 }
 
+/// Env files `mda dev` stages when no `--env-file` is given.
+const DEFAULT_ENV_FILES: [&str; 2] = [".env", ".env.local"];
+
 /// Classify a path relative to the project root.
 pub fn classify_watch_path(rel: &Path, ctx: &WatchClassifyContext) -> WatchAction {
+    // First: an `--env-file` may sit outside the root, under `skills/`, or
+    // in a directory the project denylist skips.
+    if is_env_watch_path(rel, ctx) {
+        return WatchAction::EnvRestage;
+    }
     if rel.is_absolute() {
         return WatchAction::Recompile;
     }
@@ -92,9 +116,6 @@ pub fn classify_watch_path(rel: &Path, ctx: &WatchClassifyContext) -> WatchActio
     }
     if should_ignore_watch_path(rel) {
         return WatchAction::Ignore;
-    }
-    if is_env_watch_path(rel) {
-        return WatchAction::EnvRestage;
     }
     if rel == ctx.instructions_rel {
         return WatchAction::HubSyncReload;
@@ -130,10 +151,6 @@ fn should_ignore_watch_path(rel: &Path) -> bool {
             return true;
         }
     }
-    // `.env` / `.env.local` are ignored by project discovery but watched here.
-    if is_env_watch_path(rel) {
-        return false;
-    }
     if project::is_ignored_file(rel) || project::is_junk_file(rel) {
         return true;
     }
@@ -156,19 +173,59 @@ fn should_ignore_skill_watch_path(rel: &Path) -> bool {
     project::is_junk_file(rel)
 }
 
-/// Whether any path in the batch is a staged env file.
-pub fn batch_includes_env_path<I, P>(paths: I) -> bool
+/// Whether any path in the batch is the staged env file.
+pub fn batch_includes_env_path<I, P>(paths: I, ctx: &WatchClassifyContext) -> bool
 where
     I: IntoIterator<Item = P>,
     P: AsRef<Path>,
 {
     paths
         .into_iter()
-        .any(|path| is_env_watch_path(path.as_ref()))
+        .any(|path| is_env_watch_path(path.as_ref(), ctx))
 }
 
-fn is_env_watch_path(rel: &Path) -> bool {
-    matches!(rel.to_str(), Some(".env") | Some(".env.local"))
+fn is_env_watch_path(path: &Path, ctx: &WatchClassifyContext) -> bool {
+    ctx.env_paths.iter().any(|env| env == path)
+}
+
+/// An `--env-file` outside the project root. Its changes are kept as the
+/// absolute path [`WatchClassifyContext::with_env_file`] stores, so
+/// [`classify_watch_path`] can match them.
+#[derive(Debug, Clone)]
+struct ExternalEnvFile {
+    path: PathBuf,
+    /// Its directory, canonicalized like the project root so notify's
+    /// reported paths strip against it directly.
+    dir: PathBuf,
+}
+
+impl ExternalEnvFile {
+    /// `None` when the file lives under the project root, whose changes
+    /// already relativize.
+    fn new(project_root: &Path, env_file: &Path) -> Option<Self> {
+        if relativize_watch_path(project_root, env_file).is_some() {
+            return None;
+        }
+        let dir = env_file.parent()?;
+        Some(Self {
+            path: env_file.to_path_buf(),
+            dir: fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf()),
+        })
+    }
+
+    fn matches(&self, path: &Path) -> bool {
+        path.file_name() == self.path.file_name()
+            && relativize_watch_path(&self.dir, path).as_deref()
+                == self.path.file_name().map(Path::new)
+    }
+
+    /// Whether a recursive local-package watch already covers its directory.
+    /// Re-watching it non-recursively would narrow that watch on some backends.
+    fn is_watched_by(&self, local_package_roots: &[PathBuf]) -> bool {
+        local_package_roots
+            .iter()
+            .any(|root| self.dir.starts_with(root))
+    }
 }
 
 /// Fingerprint of deploy-owned hub inputs (instructions + skills tree).
@@ -281,8 +338,13 @@ pub struct ProjectWatcher {
 }
 
 impl ProjectWatcher {
-    /// Start watching `project_root` and each local package root recursively.
-    pub fn start(project_root: &Path, local_package_roots: &[PathBuf]) -> Result<Self> {
+    /// Start watching `project_root` and each local package root recursively,
+    /// plus the directory of an `--env-file` that lives outside them.
+    pub fn start(
+        project_root: &Path,
+        local_package_roots: &[PathBuf],
+        env_file: Option<&Path>,
+    ) -> Result<Self> {
         let (raw_tx, raw_rx) = mpsc::channel::<Event>();
         let mut watcher = notify::recommended_watcher(move |result| {
             if let Ok(event) = result {
@@ -297,6 +359,18 @@ impl ProjectWatcher {
             watcher
                 .watch(root, RecursiveMode::Recursive)
                 .with_context(|| format!("failed to watch {}", root.display()))?;
+        }
+        // The directory, not the file: an editor's atomic save replaces the
+        // file, and a watch on the old inode would go quiet after one save.
+        let external_env =
+            env_file.and_then(|env_file| ExternalEnvFile::new(project_root, env_file));
+        if let Some(env) = external_env
+            .as_ref()
+            .filter(|env| !env.is_watched_by(local_package_roots))
+        {
+            watcher
+                .watch(&env.dir, RecursiveMode::NonRecursive)
+                .with_context(|| format!("failed to watch {}", env.dir.display()))?;
         }
         let local_package_roots = local_package_roots.to_vec();
 
@@ -327,7 +401,11 @@ impl ProjectWatcher {
                             }
                             let mut guard = pending_flush.lock().unwrap_or_else(|e| e.into_inner());
                             for path in event.paths {
-                                if let Some(rel) = relativize_watch_path(&root, &path) {
+                                if let Some(env) =
+                                    external_env.as_ref().filter(|env| env.matches(&path))
+                                {
+                                    guard.insert(env.path.clone());
+                                } else if let Some(rel) = relativize_watch_path(&root, &path) {
                                     guard.insert(rel);
                                 } else if let Some(path) =
                                     local_package_watch_path(&local_package_roots, &path)
@@ -601,8 +679,115 @@ mod tests {
 
     #[test]
     fn batch_includes_env_path_detects_dotenv() {
-        assert!(batch_includes_env_path(["agent.ts", ".env"]));
-        assert!(batch_includes_env_path([".env.local"]));
-        assert!(!batch_includes_env_path(["agent.ts", "instructions.md"]));
+        let ctx = root_ctx();
+        assert!(batch_includes_env_path(["agent.ts", ".env"], &ctx));
+        assert!(batch_includes_env_path([".env.local"], &ctx));
+        assert!(!batch_includes_env_path(
+            ["agent.ts", "instructions.md"],
+            &ctx
+        ));
+    }
+
+    #[test]
+    fn env_file_inside_root_replaces_default_env_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(root.path()).unwrap();
+        let ctx = root_ctx().with_env_file(&root, Some(&root.join("config/.env.staging")));
+
+        assert_eq!(ctx.env_paths, [PathBuf::from("config/.env.staging")]);
+        assert_eq!(
+            classify_watch_path(Path::new("config/.env.staging"), &ctx),
+            WatchAction::EnvRestage
+        );
+        // The default files are not staged with `--env-file`, so their edits
+        // fall back to the project denylist.
+        for path in [".env", ".env.local"] {
+            assert_eq!(
+                classify_watch_path(Path::new(path), &ctx),
+                WatchAction::Ignore,
+                "{path}"
+            );
+            assert!(!batch_includes_env_path([path], &ctx), "{path}");
+        }
+        assert!(batch_includes_env_path(
+            ["agent.ts", "config/.env.staging"],
+            &ctx
+        ));
+    }
+
+    #[test]
+    fn env_file_in_an_ignored_dir_still_restages() {
+        let root = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(root.path()).unwrap();
+        let ctx = root_ctx().with_env_file(&root, Some(&root.join("build/staging.env")));
+
+        assert_eq!(
+            classify_watch_path(Path::new("build/staging.env"), &ctx),
+            WatchAction::EnvRestage
+        );
+    }
+
+    #[test]
+    fn env_file_outside_root_is_matched_by_absolute_path() {
+        let root = tempfile::tempdir().unwrap();
+        let secrets = tempfile::tempdir().unwrap();
+        let env_file = secrets.path().join(".env.staging");
+        let ctx = root_ctx().with_env_file(root.path(), Some(&env_file));
+
+        assert_eq!(ctx.env_paths, std::slice::from_ref(&env_file));
+        assert_eq!(
+            classify_watch_path(&env_file, &ctx),
+            WatchAction::EnvRestage
+        );
+        assert!(batch_includes_env_path([env_file.as_path()], &ctx));
+        // Other absolute paths are still local package edits.
+        assert_eq!(
+            classify_watch_path(&secrets.path().join("index.ts"), &ctx),
+            WatchAction::Recompile
+        );
+        assert_eq!(
+            classify_watch_path(Path::new(".env"), &ctx),
+            WatchAction::Ignore
+        );
+    }
+
+    #[test]
+    fn external_env_file_matches_only_its_own_file() {
+        let root = tempfile::tempdir().unwrap();
+        let secrets = tempfile::tempdir().unwrap();
+        let env_file = secrets.path().join(".env.staging");
+        fs::write(&env_file, "OPENAI_API_KEY=test\n").unwrap();
+        let external = ExternalEnvFile::new(root.path(), &env_file).unwrap();
+
+        assert!(external.matches(&env_file));
+        // notify can report the canonical directory (`/private/var` on macOS).
+        let canonical = fs::canonicalize(secrets.path()).unwrap();
+        assert!(external.matches(&canonical.join(".env.staging")));
+        assert!(!external.matches(&secrets.path().join(".env")));
+        assert!(!external.matches(&root.path().join(".env.staging")));
+        assert!(!external.is_watched_by(&[]));
+    }
+
+    #[test]
+    fn env_file_under_the_project_root_needs_no_extra_watch() {
+        let root = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(root.path()).unwrap();
+        assert!(ExternalEnvFile::new(&root, &root.join(".env.staging")).is_none());
+    }
+
+    /// `.env*` files are never vendored, so a local package watch alone would
+    /// drop the change; the env file is still matched, just not re-watched.
+    #[test]
+    fn env_file_in_a_local_package_is_matched_without_a_second_watch() {
+        let root = tempfile::tempdir().unwrap();
+        let package = tempfile::tempdir().unwrap();
+        let package = fs::canonicalize(package.path()).unwrap();
+        let env_file = package.join(".env.staging");
+        let roots = std::slice::from_ref(&package);
+
+        assert_eq!(local_package_watch_path(roots, &env_file), None);
+        let external = ExternalEnvFile::new(root.path(), &env_file).unwrap();
+        assert!(external.is_watched_by(roots));
+        assert!(external.matches(&env_file));
     }
 }
