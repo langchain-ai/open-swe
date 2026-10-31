@@ -8,7 +8,6 @@ from typing import Literal, TypedDict, cast
 
 from fastapi import APIRouter, HTTPException, Response
 
-from openswe.act_as import slack as act_as
 from openswe.expedited_review import slack as expedited_review
 from openswe.human_review import offer as review_offer
 from openswe.human_review import slack as human_review
@@ -1271,9 +1270,6 @@ async def slack_interactivity(
             return await human_review.handle_button(interaction, button, background_tasks)
         if button.type == suggested_actions.BUTTON_TYPE:
             return await suggested_actions.handle_button(interaction, button, background_tasks)
-
-        if button.type == act_as.BUTTON_TYPE:
-            return await act_as.handle_button(interaction, button, background_tasks)
 
         if button.type == "workflow_push_approval":
             if not channel_id or not thread_ts or not button.fingerprint:
