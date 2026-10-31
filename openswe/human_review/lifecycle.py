@@ -811,13 +811,7 @@ class ReviewCard:
             if row is None:
                 return
             if snapshot is not None:
-                preferences = await User.preferences_for_login(
-                    snapshot.author or row.pull_request.author
-                )
-                failing = preferences.pr_failure_reactions and snapshot.check_state in {
-                    "failure",
-                    "blocked",
-                }
+                failing = snapshot.check_state in {"failure", "blocked"}
                 reason = ", ".join(snapshot.failing_checks) or "a check finished without success"
                 row.run_config = {
                     **row.run_config,

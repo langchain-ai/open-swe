@@ -13,7 +13,7 @@ from openswe.human_review import lifecycle, posted, standard, supplementary
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.posted import linked_pull_requests
 from openswe.human_review.requests import HumanReviewRequest
-from openswe.users import User, UserIdentity, UserPreferences
+from openswe.users import User, UserIdentity
 from tests.support.slack_api import SlackAPI
 
 
@@ -132,24 +132,13 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse("* @ada")))
     await settle_with_reactions(set())
 
-    preferences = UserPreferences()
-
-    async def owner_preferences(login: str) -> UserPreferences:
-        assert login == "ada"
-        return preferences
-
-    monkeypatch.setattr(User, "preferences_for_login", owner_preferences)
-    await settle_with_reactions(set())
     snapshot.check_state = "failure"
-    await settle_with_reactions(set())
-    snapshot.mergeable = False
-    await settle_with_reactions({"construction"})
-    snapshot.mergeable = None
-    preferences.pr_failure_reactions = True
     await settle_with_reactions({"warning"})
-    preferences.pr_failure_reactions = False
-    await settle_with_reactions(set())
-    preferences.pr_failure_reactions = True
+    snapshot.mergeable = False
+    await settle_with_reactions({"warning", "construction"})
+    snapshot.mergeable = None
+    snapshot.check_state = "blocked"
+    await settle_with_reactions({"warning"})
     snapshot.mergeable = False
     snapshot.mergeable_state = "dirty"
     await settle_with_reactions({"warning", "construction"})
@@ -201,11 +190,6 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
     monkeypatch.setattr(lifecycle, "add_slack_reaction", add)
     monkeypatch.setattr(lifecycle, "remove_slack_reaction", remove)
     monkeypatch.setattr(lifecycle, "wake_thread_owner", wake)
-    monkeypatch.setattr(
-        User,
-        "preferences_for_login",
-        AsyncMock(return_value=UserPreferences(pr_failure_reactions=True)),
-    )
     first, second = map(ReviewCard, requests)
     reactions.add("x")
     await first.mark_approved()

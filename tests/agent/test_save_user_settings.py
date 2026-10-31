@@ -189,7 +189,7 @@ async def test_unavailable_thread_scope_fails_closed(
         {"default_model": "anthropic:claude-fable-5-1"},
         {"default_subagent_model": None, "subagent_reasoning_effort": "high"},
         {"branch_prefix": "new/", "default_visibility": "invalid"},
-        {"pr_failure_reactions": None, "auto_fix_ci": False},
+        {"pr_failure_reactions": True, "auto_fix_ci": False},
     ],
 )
 async def test_invalid_patch_rejects_all_changes(
@@ -235,7 +235,7 @@ async def test_feature_flag_requires_user_and_validates_before_writing(
     with patch.object(
         User, "update_preferences", new_callable=AsyncMock, return_value=None
     ) as save:
-        assert (await save_user_settings({"pr_failure_reactions": True, "auto_fix_ci": False}))[
+        assert (await save_user_settings({"experimental_fleet": True, "auto_fix_ci": False}))[
             "ok"
         ] is False
         save.assert_awaited_once()
@@ -244,13 +244,13 @@ async def test_feature_flag_requires_user_and_validates_before_writing(
         User,
         "update_preferences",
         new_callable=AsyncMock,
-        return_value=UserPreferences(pr_failure_reactions=True),
+        return_value=UserPreferences(experimental_fleet=True),
     ) as save:
-        assert (await save_user_settings({"pr_failure_reactions": True, "auto_fix_ci": False}))[
+        assert (await save_user_settings({"experimental_fleet": True, "auto_fix_ci": False}))[
             "updated"
-        ] == {"pr_failure_reactions": True, "auto_fix_ci": False}
+        ] == {"experimental_fleet": True, "auto_fix_ci": False}
         assert save.await_args.args[0] == "Alice"
-        assert save.await_args.args[1].pr_failure_reactions is True
+        assert save.await_args.args[1].experimental_fleet is True
     assert user_records.get("profile", "Alice")["auto_fix_ci"] is False
 
 
@@ -308,7 +308,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 **ordinary,
                 "auto_human_review_enabled": True,
                 "concierge_mode": False,
-                "pr_failure_reactions": False,
                 "experimental_fleet": False,
                 "experimental_memory": False,
             },
