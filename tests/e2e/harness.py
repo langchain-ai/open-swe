@@ -620,7 +620,16 @@ async def control_repo_file(request: Request) -> JSONResponse:
     files = body.get("files")
     if not isinstance(files, dict) or not files:
         raise HTTPException(400, "files must map paths to contents")
-    fakes.commit_to_base(owner, name, {str(path): str(text) for path, text in files.items()})
+    login = body.get("author")
+    author = next((user for user in TEST_USERS if user["login"] == login), None)
+    if login is not None and author is None:
+        raise HTTPException(400, "author must name a test user")
+    fakes.commit_to_base(
+        owner,
+        name,
+        {str(path): str(text) for path, text in files.items()},
+        email=author["email"] if author else "seed@example.com",
+    )
     from langgraph_api.cache import cache_set
 
     await cache_set(f"__lg_swr__:repo-settings:{owner}/{name}".lower(), None)
@@ -1449,15 +1458,26 @@ def gh_compare(owner: str, repo: str, basehead: str) -> JSONResponse:
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/commits")
-def gh_list_commits(owner: str, repo: str, path: str = "", sha: str = BASE_BRANCH) -> JSONResponse:
+def gh_list_commits(
+    owner: str, repo: str, path: str = "", sha: str = BASE_BRANCH, since: str = ""
+) -> JSONResponse:
     """Commits touching ``path``; an author is a GitHub user only when a test user owns the email."""
     logins = {user["email"]: user["login"] for user in TEST_USERS}
     return JSONResponse(
         [
-            {"author": {"login": logins[email], "type": "User"} if email in logins else None}
-            for email in fakes.commit_author_emails(owner, repo, path, sha)
+            {
+                "sha": commit_sha,
+                "author": {"login": logins[email], "type": "User"} if email in logins else None,
+            }
+            for commit_sha, email in fakes.commit_history(owner, repo, path, sha, since)
         ]
     )
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/commits/{sha}")
+def gh_get_commit(owner: str, repo: str, sha: str) -> JSONResponse:
+    """Read a commit's actual file statistics from the seeded repository."""
+    return JSONResponse({"sha": sha, "files": fakes.compare_files(owner, repo, f"{sha}^", sha)})
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/contents/{path:path}")

@@ -660,6 +660,12 @@ test.describe("Human review in Slack", () => {
     test.setTimeout(240_000);
     await setReviewChannel(request);
 
+    await control(request, "/control/repo-file", {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      author: BOB.login,
+      files: { "greet.py": 'print("Hello from Bob")\n' },
+    });
+
     // Bob keeps his bot DM as one concierge conversation, which already exists.
     await control(request, "/control/user-preferences", {
       login: BOB.login,
@@ -694,6 +700,7 @@ test.describe("Human review in Slack", () => {
       repo: `${REPO.owner}/${REPO.repo}`,
       title: "Greet by name",
       author: ALICE.login,
+      files: { "greet.py": 'print("Hello, Alice")\n' },
       body: `<!-- template -->\nUses the name in the greeting. ${"It also trims the whitespace around it. ".repeat(10)}`,
       check_runs: GREEN,
     });
@@ -845,6 +852,12 @@ test.describe("Human review in Slack", () => {
       files: { ".github/CODEOWNERS": "* @alice\n/greeting/ @bob\n" },
     });
 
+    await control(request, "/control/repo-file", {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      author: BOB.login,
+      files: { "greeting/hello.py": 'print("Hello from Bob")\n' },
+    });
+
     // 1. Alice asks from the dashboard.
     await loginAs(page, ALICE);
     const seeded = await seedOpenPullRequest(page, {
@@ -941,6 +954,14 @@ test.describe("Human review in Slack", () => {
       repo: `${REPO.owner}/${REPO.repo}`,
       files: { ".github/CODEOWNERS": "* @alice\n/greeting/ @bob @dana\n" },
     });
+
+    for (const person of [BOB, DANA]) {
+      await control(request, "/control/repo-file", {
+        repo: `${REPO.owner}/${REPO.repo}`,
+        author: person.login,
+        files: { "greeting/hello.py": `print("Hello from ${person.login}")\n` },
+      });
+    }
 
     // 1. Alice asks from the dashboard; nobody signs up, so the card thread's agent
     //    picks one of the two code owners.
