@@ -13,6 +13,7 @@ from openswe.config import ENV
 from openswe.dashboard.admin import configured_admins, is_admin
 from openswe.dashboard.deps import SESSION_DEP, session_is_admin
 from openswe.dashboard.dev_login import GhUnavailable, dev_login_enabled, gh_credentials
+from openswe.dashboard.langsmith_login import LANGSMITH_LOGIN_CALLBACK_PATH, LangSmithLogin
 from openswe.dashboard.oauth import (
     COOKIE_NAME,
     GITHUB_CALLBACK_PATH,
@@ -22,6 +23,7 @@ from openswe.dashboard.oauth import (
     GithubUser,
     clear_state_cookie,
     cookie_security,
+    decode_session,
     decode_state,
     desktop_callback_url,
     desktop_handoff_from_state,
@@ -35,13 +37,16 @@ from openswe.dashboard.oauth import (
     issue_session,
     issue_state,
     new_state_nonce,
+    optional_session,
     rebind_session,
     redeem_desktop_handoff,
     sanitize_redirect_to,
+    session_user_id,
     set_session_cookie,
     set_state_cookie,
     valid_handoff_challenge,
 )
+from openswe.dashboard.oauth_refresh import refresh_guard
 from openswe.dashboard.principal import DashboardPrincipal
 from openswe.dashboard.profiles import (
     upsert_access_token,
@@ -155,6 +160,8 @@ async def auth_callback(request: Request, state: str, code: str | None = None) -
     if code is None:
         raise HTTPException(400, "GitHub sign-in was cancelled — please retry login")
     state_payload = decode_state(state)
+    if state_payload.get("provider", "github") != "github":
+        raise HTTPException(400, "oauth provider mismatch")
     state_nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(STATE_COOKIE_NAME)
     handoff = desktop_handoff_from_state(state_payload)
@@ -227,15 +234,22 @@ class DesktopHandoffExchange(BaseModel):
 
 
 @router.post("/auth/desktop/exchange")
-async def auth_desktop_exchange(body: DesktopHandoffExchange) -> dict[str, Any]:
+async def auth_desktop_exchange(body: DesktopHandoffExchange) -> dict[str, object]:
+    token = redeem_desktop_handoff(code=body.code, verifier=body.verifier)
+    await DashboardPrincipal.from_session(decode_session(token)).authorize()
     return {
-        "session": redeem_desktop_handoff(code=body.code, verifier=body.verifier),
+        "session": token,
         "expires_in": SESSION_TTL_SECONDS,
     }
 
 
 @router.post("/auth/logout")
-async def auth_logout() -> Response:
+async def auth_logout(request: Request) -> Response:
+    session = optional_session(request)
+    if session is not None:
+        principal = DashboardPrincipal.from_session(session)
+        if principal.provider == "langsmith":
+            await LangSmithLogin().logout(principal.subject)
     response = Response(status_code=204)
     secure, samesite = cookie_security()
     response.delete_cookie(COOKIE_NAME, path="/", samesite=samesite, secure=secure)
@@ -250,7 +264,11 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
     user = None
     try:
         user = await principal.user()
+    except HTTPException:
+        raise
     except Exception:
+        if principal.provider == "langsmith":
+            raise
         logger.warning(
             "Could not read the signed-in user's row",
             extra={"github_login": session["sub"]},
@@ -259,16 +277,30 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
     else:
         if user is None and postgres.configured():
             raise HTTPException(401, "Open SWE account not found — sign in with GitHub again")
-    if user is not None and principal.user_id != user.id:
+    if user is not None and session_user_id(session) != user.id:
         # The dashboard boots here, so every stale cookie is repaired on its next load.
         set_session_cookie(response, rebind_session(session, str(user.id)))
         logger.info(
             "Rebound a stale session to its user",
             extra={"github_login": session["sub"], "user_id": str(user.id)},
         )
+    if principal.provider == "langsmith" and user is not None:
+        set_session_cookie(
+            response,
+            issue_session(
+                login=principal.subject,
+                email=session.get("email"),
+                avatar_url=session.get("avatar_url"),
+                user_id=str(user.id),
+                provider="langsmith",
+                langsmith_subject=principal.langsmith_subject,
+            ),
+        )
     preferences = await get_user_preferences(session["sub"])
     return {
         "login": session["sub"],
+        "auth_provider": principal.provider,
+        "github_login": principal.github_login,
         "display_name": user.display_name if user else "",
         "email": session.get("email") or (user.email or None if user else None),
         "avatar_url": session.get("avatar_url"),
@@ -279,8 +311,73 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
         # Whether new threads are stamped `transcript: v2` (`openswe/threads/runs.py`),
         # so the thread the UI seeds after `run.start` can carry the same stamp.
         "transcript_recording": postgres.configured(),
-        "slack_oauth_enabled": slack_oauth_configured(),
+        "slack_oauth_enabled": principal.provider == "github" and slack_oauth_configured(),
         "api_base_url": dashboard_api_base_url(),
         "slack_base_url": slack_base_url(),
         "build_info": build_info(),
     }
+
+
+@router.get("/auth/langsmith/login")
+async def auth_langsmith_login(
+    redirect_to: str | None = None,
+    desktop: bool = False,
+    desktop_handoff: str | None = None,
+    desktop_port: int | None = Query(default=None, ge=1024, le=65535),
+) -> RedirectResponse:
+    challenge = valid_handoff_challenge(desktop_handoff)
+    if challenge is None or desktop_port is None:
+        raise HTTPException(
+            400, "Desktop LangSmith login requires a PKCE challenge and loopback port"
+        )
+    nonce = new_state_nonce()
+    url = await LangSmithLogin().start(
+        redirect_uri=dashboard_api_base_url() + LANGSMITH_LOGIN_CALLBACK_PATH,
+        redirect_to=sanitize_redirect_to(redirect_to) or frontend_base_url(),
+        nonce=nonce,
+        handoff_challenge=challenge,
+        handoff_port=desktop_port,
+    )
+    response = RedirectResponse(url, status_code=302)
+    set_state_cookie(response, nonce)
+    return response
+
+
+@router.get("/auth/langsmith/callback")
+async def auth_langsmith_callback(
+    request: Request, state: str, code: str | None = None
+) -> Response:
+    if not code:
+        raise HTTPException(400, "LangSmith sign-in was cancelled — please retry")
+    payload = decode_state(state)
+    if payload.get("provider") != "langsmith":
+        raise HTTPException(400, "oauth provider mismatch")
+    handoff = desktop_handoff_from_state(payload)
+    if handoff is None:
+        raise HTTPException(400, "LangSmith login requires a desktop handoff")
+    login = LangSmithLogin()
+    account, tokens, token_endpoint = await login.complete(payload, code)
+    user = await User.sign_in(
+        "langsmith",
+        account.sub,
+        email=account.email,
+        display_name=account.name,
+        avatar_url=account.picture,
+        authorization=account,
+    )
+    key = f"user:{user.id}"
+    async with refresh_guard("langsmith_login", key):
+        await login.save(key, tokens, token_endpoint, email=account.email or None)
+    challenge, port = handoff
+    handoff_code = issue_desktop_handoff(
+        login=key,
+        email=account.email or None,
+        avatar_url=account.picture or None,
+        user_id=str(user.id),
+        provider="langsmith",
+        langsmith_subject=account.sub,
+        challenge=challenge,
+    )
+    response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
+    clear_state_cookie(response)
+    return response

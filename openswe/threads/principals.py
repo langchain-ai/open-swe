@@ -107,6 +107,8 @@ class Principal:
     @classmethod
     def of_person(cls, session: dict[str, Any]) -> Principal:
         principal = DashboardPrincipal.from_session(session)
+        if principal.provider != "github":
+            raise HTTPException(403, "Agent execution is not enabled for this account")
         email = session.get("email")
         return cls.of_login(
             principal.github_login.strip(), email if isinstance(email, str) else None
