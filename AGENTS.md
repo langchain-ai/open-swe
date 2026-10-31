@@ -95,6 +95,8 @@ Never run the full test suite locally; run only tests related to the change.
 `mda/` is its own project: its tests live in `mda/tests/` and run in its own environment (`make mda-test`, `make mda-typecheck`).
 Never import `openswe` there; test each side of an endpoint against the models it exchanges.
 
+`vendor/` is checked as its upstream checks it: `make vendor-check` (`vendor/README.md`).
+
 Tests are maintenance cost.
 Add one only when you can name a concrete regression existing coverage would miss.
 

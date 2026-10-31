@@ -31,6 +31,10 @@ dependencies = [
 test = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    # The vendored langchain-quickjs's tests run here too (`make vendor-check`):
+    # its pytest config names pytest-benchmark, and it runs them without network.
+    "pytest-benchmark>=5.1.0",
+    "pytest-socket>=0.7.0",
 ]
 
 # Vendored, with the `mda` CLI `make mda-cli` builds into it (vendor/README.md).

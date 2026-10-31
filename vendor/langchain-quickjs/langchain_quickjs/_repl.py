@@ -462,8 +462,11 @@ class _ThreadREPL:
     @property
     def is_closed(self) -> bool:
         """Whether the REPL's context or its engine has been closed."""
+        # quickjs_rs exposes neither state publicly.
         return (
-            self._ctx is None or self._ctx._closed or self._ctx._engine_ctx.is_closed()
+            self._ctx is None
+            or self._ctx._closed  # noqa: SLF001
+            or self._ctx._engine_ctx.is_closed()  # noqa: SLF001
         )
 
     def _require_ctx(self) -> Context:
@@ -775,7 +778,7 @@ class _ThreadREPL:
         ctx.register(_RESOLVED_TOOL_SYMBOL, _resolved, is_async=True)
 
     async def _acall_tool(self, camel: str, tool: BaseTool, raw_input: Any) -> Any:
-        """Call `tool` as `tools.<camel>`, within the eval's budget and outer runtime."""
+        """Call `tool` as `tools.<camel>`, in the eval's budget and outer runtime."""
         if self._ptc_state is None:
             msg = "PTC bridge called outside active eval"
             raise ConcurrentEvalError(msg)

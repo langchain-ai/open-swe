@@ -2750,7 +2750,7 @@ def _replace_managed_sandbox(
     )
 
 
-def _managed_sandbox_of(backend: object) -> _LazyManagedSandboxBackend:
+def managed_sandbox_of(backend: object) -> _LazyManagedSandboxBackend:
     """The run's managed sandbox behind ``runtime.backend``."""
     if isinstance(backend, CompositeBackend):
         backend = backend.default

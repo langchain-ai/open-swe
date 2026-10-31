@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck mda-typecheck mda-test test tests integration_tests help run dev dev-mda mda-cli dev-ui postgres migration tunnel web build-dashboard desktop install-desktop install-checkout swagger cli hooks
+.PHONY: all format format-check lint typecheck mda-typecheck mda-test vendor-check vendor-sdk-rust-check vendor-sdk-python-check vendor-quickjs-check test tests integration_tests help run dev dev-mda mda-cli dev-ui postgres migration tunnel web build-dashboard desktop install-desktop install-checkout swagger cli hooks
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -149,6 +149,40 @@ mda-typecheck:
 mda-test:
 	cd mda && uv run --locked --group test pytest $(PYTEST_ARGS)
 
+# The vendored code (vendor/README.md), checked the way its upstream checks it.
+# Ambient LangSmith settings, a developer's real API key included, would leak into
+# tests of how the SDK resolves them, and the tests would call LangSmith with it.
+VENDOR_TEST_ENV := env $(foreach v,$(filter LANGSMITH_% LANGCHAIN_%,$(.VARIABLES)),-u $(v))
+MDA_SDK_PYPI := $(MDA_SDK)/packages/pypi
+QUICKJS := vendor/langchain-quickjs
+vendor-check: vendor-sdk-rust-check vendor-sdk-python-check vendor-quickjs-check
+
+vendor-sdk-rust-check:
+	cd $(MDA_SDK) && cargo fmt --check
+	cd $(MDA_SDK) && cargo clippy --locked --all-targets -- -D warnings
+	# `mda connection create` reads a secret from a piped stdin, which an open pipe never ends.
+	cd $(MDA_SDK) && $(VENDOR_TEST_ENV) cargo test --locked </dev/null
+
+# Against the runtime's own lock. Our pyproject.toml's [tool.ty] would claim the
+# package; upstream type-checks it with no ty configuration.
+vendor-sdk-python-check:
+	cd $(MDA_SDK_PYPI) && uv sync --frozen --extra test --group lint --group typing
+	cd $(MDA_SDK_PYPI) && uv run --frozen ruff format --check src tests
+	cd $(MDA_SDK_PYPI) && uv run --frozen ruff check src tests
+	cd $(MDA_SDK_PYPI) && uv run --frozen ty check --config-file /dev/null src
+	cd $(MDA_SDK_PYPI) && uv run --frozen basedpyright src
+	cd $(MDA_SDK_PYPI) && $(VENDOR_TEST_ENV) uv run --frozen python -m pytest $(PYTEST_ARGS)
+
+# Against mda/'s environment, which deploys it; ruff at upstream's lock, which
+# vendor/ leaves out.
+vendor-quickjs-check:
+	cd $(QUICKJS) && uvx ruff@0.15.20 format --check .
+	cd $(QUICKJS) && uvx ruff@0.15.20 check .
+	cd mda && uv sync --locked --group test
+	cd $(QUICKJS) && uvx ty@0.0.84 check --python ../../mda/.venv langchain_quickjs
+	cd $(QUICKJS) && $(VENDOR_TEST_ENV) uv run --project ../../mda --locked --group test \
+		pytest --disable-socket --allow-unix-socket $(PYTEST_ARGS) tests/unit_tests
+
 ######################
 # HELP
 ######################
@@ -176,6 +210,7 @@ help:
 	@echo 'typecheck                    - run ty on openswe/ and tests/'
 	@echo 'mda-typecheck                - type-check mda/ against its own environment'
 	@echo 'mda-test                     - run mda/ tests in its own environment'
+	@echo 'vendor-check                 - lint, type-check and test the vendored code as its upstream does'
 	@echo 'test                         - run unit tests'
 	@echo 'integration_tests            - run integration tests'
 	@echo '----'

@@ -702,17 +702,7 @@ mod tests {
     }
 
     #[test]
-    fn typescript_browser_dependency_matches_the_npm_packages_pin() {
-        let package: serde_json::Value =
-            serde_json::from_str(include_str!("../../../packages/npm/package.json")).unwrap();
-        for dep in [TYPESCRIPT_BROWSER, TYPESCRIPT_BROWSER_TOOLS] {
-            assert_eq!(package["peerDependencies"][dep.name], dep.version);
-        }
-        // The browser loads its extension from the same Stagehand release.
-        let runtime = include_str!("../../../packages/npm/src/runtime/browser-langsmith.ts");
-        let pin = format!("STAGEHAND_VERSION = \"{}\"", TYPESCRIPT_BROWSER.version);
-        assert!(runtime.contains(&pin), "browser-langsmith.ts lacks {pin}");
-        // Python deployments run the same Stagehand.
+    fn python_deployments_run_the_typescript_browsers_stagehand() {
         assert_eq!(
             PYTHON_BROWSER.version,
             format!("=={}", TYPESCRIPT_BROWSER.version)

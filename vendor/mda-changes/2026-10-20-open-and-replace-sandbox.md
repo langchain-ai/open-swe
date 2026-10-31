@@ -2,7 +2,7 @@
 
 **Verdict: upstream as-is.** Generic operations on the run's managed sandbox.
 
-**Changed:** `managed_deepagents/sandbox.py` (`open_sandbox`, `replace_sandbox`, `SandboxReplacement`), `runtime.py` (`_LazyManagedSandboxBackend.aopen` / `areplace`, `_replace_managed_sandbox`, `_managed_sandbox_of`), `__init__.py` (exports).
+**Changed:** `managed_deepagents/sandbox.py` (`open_sandbox`, `replace_sandbox`, `SandboxReplacement`), `runtime.py` (`_LazyManagedSandboxBackend.aopen` / `areplace`, `_replace_managed_sandbox`, `managed_sandbox_of`, public so `sandbox.py` can import it), `__init__.py` (exports), `tests/test_authoring.py` (the exports).
 
 ## What
 

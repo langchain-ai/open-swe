@@ -1,0 +1,382 @@
+{
+  "comment": "GitHub mention cases both runtimes' tests run. `texts` are comment bodies of issue_comment.created; `events` patch the test payload of `key`, one level deep, and set `changes`.",
+  "texts": [
+    {
+      "text": "@openswe fix this",
+      "mentions": [
+        "@openswe"
+      ]
+    },
+    {
+      "text": "Could @OpenSWE and @octo-org/reviewers look? cc @openswe",
+      "mentions": [
+        "@openswe",
+        "@octo-org/reviewers"
+      ]
+    },
+    {
+      "text": "Ping @openswe-preview instead",
+      "mentions": [
+        "@openswe-preview"
+      ]
+    },
+    {
+      "text": "Mail team@openswe.dev",
+      "mentions": []
+    },
+    {
+      "text": "See https://github.com/@openswe",
+      "mentions": []
+    },
+    {
+      "text": "@openswe, please. (@octocat)",
+      "mentions": [
+        "@openswe",
+        "@octocat"
+      ]
+    },
+    {
+      "text": "cc @octo-org/reviewers.",
+      "mentions": [
+        "@octo-org/reviewers"
+      ]
+    },
+    {
+      "text": "@@openswe and @_x and @-y",
+      "mentions": []
+    },
+    {
+      "text": "Run `@openswe fix` like this",
+      "mentions": []
+    },
+    {
+      "text": "It's a ` char, @openswe please",
+      "mentions": [
+        "@openswe"
+      ]
+    },
+    {
+      "text": "``a ` b`` @openswe",
+      "mentions": [
+        "@openswe"
+      ]
+    },
+    {
+      "text": "`a\n\n@openswe`",
+      "mentions": [
+        "@openswe"
+      ]
+    },
+    {
+      "text": "```\n@openswe in a block\n```\nthen @octocat",
+      "mentions": [
+        "@octocat"
+      ]
+    },
+    {
+      "text": "~~~\n@openswe\n~~~",
+      "mentions": []
+    },
+    {
+      "text": "````\n```\n@openswe\n````\nthen @octocat",
+      "mentions": [
+        "@octocat"
+      ]
+    },
+    {
+      "text": "```\n@openswe never closed",
+      "mentions": []
+    },
+    {
+      "text": "``` `x` @openswe",
+      "mentions": [
+        "@openswe"
+      ]
+    },
+    {
+      "text": "> @openswe do this\nas they asked\n\n@octocat agreed",
+      "mentions": [
+        "@octocat"
+      ]
+    },
+    {
+      "text": "  > @openswe quoted",
+      "mentions": []
+    },
+    {
+      "text": "<!-- ping @openswe -->\n## Summary\n@octocat",
+      "mentions": [
+        "@octocat"
+      ]
+    },
+    {
+      "text": "Before <!-- @openswe\nspans lines --> after @octocat",
+      "mentions": [
+        "@octocat"
+      ]
+    },
+    {
+      "text": "<!-- never closed @openswe",
+      "mentions": []
+    },
+    {
+      "text": "Use <!-- in HTML, @openswe",
+      "mentions": [
+        "@openswe"
+      ]
+    },
+    {
+      "text": "Hi\n  <!-- never closed\n@openswe",
+      "mentions": []
+    },
+    {
+      "text": "@user0 @user1 @user2 @user3 @user4 @user5 @user6 @user7 @user8 @user9 @user10 @user11 @user12 @user13 @user14 @user15 @user16 @user17 @user18 @user19 @user20 @user21 @user22 @user23 @user24 @user25 @user26 @user27 @user28 @user29 @user30 @user31 @user32 @user33 @user34 @user35 @user36 @user37 @user38 @user39 @user40 @user41 @user42 @user43 @user44 @user45 @user46 @user47 @user48 @user49 @user50 @user51 @user52 @user53 @user54 @user55 @user56 @user57 @user58 @user59",
+      "mentions": [
+        "@user0",
+        "@user1",
+        "@user2",
+        "@user3",
+        "@user4",
+        "@user5",
+        "@user6",
+        "@user7",
+        "@user8",
+        "@user9",
+        "@user10",
+        "@user11",
+        "@user12",
+        "@user13",
+        "@user14",
+        "@user15",
+        "@user16",
+        "@user17",
+        "@user18",
+        "@user19",
+        "@user20",
+        "@user21",
+        "@user22",
+        "@user23",
+        "@user24",
+        "@user25",
+        "@user26",
+        "@user27",
+        "@user28",
+        "@user29",
+        "@user30",
+        "@user31",
+        "@user32",
+        "@user33",
+        "@user34",
+        "@user35",
+        "@user36",
+        "@user37",
+        "@user38",
+        "@user39",
+        "@user40",
+        "@user41",
+        "@user42",
+        "@user43",
+        "@user44",
+        "@user45",
+        "@user46",
+        "@user47",
+        "@user48",
+        "@user49"
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "an opened issue's title",
+      "key": "issues.opened",
+      "patch": {
+        "issue": {
+          "title": "@openswe fix the build",
+          "body": null
+        }
+      },
+      "mentions": [
+        "@openswe"
+      ]
+    },
+    {
+      "name": "an opened pull request's body",
+      "key": "pull_request.opened",
+      "patch": {
+        "pull_request": {
+          "body": "@openswe implement this"
+        }
+      },
+      "mentions": [
+        "@openswe"
+      ]
+    },
+    {
+      "name": "a review's body",
+      "key": "pull_request_review.submitted",
+      "patch": {
+        "review": {
+          "body": "@openswe implement this"
+        }
+      },
+      "mentions": [
+        "@openswe"
+      ]
+    },
+    {
+      "name": "a review comment",
+      "key": "pull_request_review_comment.created",
+      "patch": {
+        "comment": {
+          "body": "@openswe implement this"
+        }
+      },
+      "mentions": [
+        "@openswe"
+      ]
+    },
+    {
+      "name": "a push to a pull request whose body mentions",
+      "key": "pull_request.synchronize",
+      "patch": {
+        "pull_request": {
+          "body": "@openswe implement this"
+        }
+      },
+      "mentions": []
+    },
+    {
+      "name": "a label on a pull request whose body mentions",
+      "key": "pull_request.labeled",
+      "patch": {
+        "pull_request": {
+          "body": "@openswe implement this"
+        }
+      },
+      "mentions": []
+    },
+    {
+      "name": "a closed pull request whose body mentions",
+      "key": "pull_request.closed",
+      "patch": {
+        "pull_request": {
+          "body": "@openswe implement this"
+        }
+      },
+      "mentions": []
+    },
+    {
+      "name": "a reopened issue whose body mentions",
+      "key": "issues.reopened",
+      "patch": {
+        "issue": {
+          "body": "@openswe implement this"
+        }
+      },
+      "mentions": []
+    },
+    {
+      "name": "a label on an issue whose body mentions",
+      "key": "issues.labeled",
+      "patch": {
+        "issue": {
+          "body": "@openswe implement this"
+        }
+      },
+      "mentions": []
+    },
+    {
+      "name": "an edit that adds a mention",
+      "key": "issue_comment.edited",
+      "patch": {
+        "comment": {
+          "body": "@octocat and @openswe"
+        }
+      },
+      "mentions": [
+        "@openswe"
+      ],
+      "changes": {
+        "body": {
+          "from": "@octocat"
+        }
+      }
+    },
+    {
+      "name": "an edit that keeps a mention",
+      "key": "issue_comment.edited",
+      "patch": {
+        "comment": {
+          "body": "@openswe fix the tests"
+        }
+      },
+      "mentions": [],
+      "changes": {
+        "body": {
+          "from": "@openswe fix teh tests"
+        }
+      }
+    },
+    {
+      "name": "a retitled issue whose body mentions",
+      "key": "issues.edited",
+      "patch": {
+        "issue": {
+          "title": "New title",
+          "body": "@openswe implement this"
+        }
+      },
+      "mentions": [],
+      "changes": {
+        "title": {
+          "from": "Old title"
+        }
+      }
+    },
+    {
+      "name": "an issue title edit that adds a mention",
+      "key": "issues.edited",
+      "patch": {
+        "issue": {
+          "title": "@openswe New title",
+          "body": "Please fix the build"
+        }
+      },
+      "mentions": [
+        "@openswe"
+      ],
+      "changes": {
+        "title": {
+          "from": "New title"
+        }
+      }
+    },
+    {
+      "name": "a pull request edit that changes only its base",
+      "key": "pull_request.edited",
+      "patch": {
+        "pull_request": {
+          "body": "@openswe implement this"
+        }
+      },
+      "mentions": [],
+      "changes": {
+        "base": {
+          "ref": {
+            "from": "main"
+          }
+        }
+      }
+    },
+    {
+      "name": "an edit without changes",
+      "key": "pull_request_review.edited",
+      "patch": {
+        "review": {
+          "body": "@openswe implement this"
+        }
+      },
+      "mentions": []
+    }
+  ]
+}

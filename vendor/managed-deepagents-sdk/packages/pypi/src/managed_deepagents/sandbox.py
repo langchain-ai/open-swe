@@ -180,9 +180,9 @@ async def open_sandbox(backend: object, *, wait: bool = True) -> str:
     Without ``wait`` this returns as soon as the box is asked for, while it boots;
     its first use waits for it to be ready and runs the connectors' hooks.
     """
-    from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
+    from managed_deepagents.runtime import managed_sandbox_of  # noqa: PLC0415
 
-    return await _managed_sandbox_of(backend).aopen(wait=wait)
+    return await managed_sandbox_of(backend).aopen(wait=wait)
 
 
 async def replace_sandbox(
@@ -194,9 +194,9 @@ async def replace_sandbox(
     The old box is stopped and kept, renamed, until its lifecycle deletes it.
     ``backend`` is ``runtime.backend``.
     """
-    from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
+    from managed_deepagents.runtime import managed_sandbox_of  # noqa: PLC0415
 
-    return await _managed_sandbox_of(backend).areplace(sandbox, missing_only=missing_only)
+    return await managed_sandbox_of(backend).areplace(sandbox, missing_only=missing_only)
 
 
 def is_per_thread(options: Mapping[str, object]) -> bool:

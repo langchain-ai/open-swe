@@ -52,7 +52,10 @@ from typing import Final
 ROOT: Final = Path(__file__).resolve().parent.parent
 VENDOR: Final = ROOT / "vendor"
 RECORD: Final = "UPSTREAM"
-IGNORED_NAMES: Final = frozenset({"target", "_binaries", "__pycache__"})
+# Build outputs, and what checking the tree in place (`make vendor-check`) writes.
+IGNORED_NAMES: Final = frozenset(
+    {"target", "_binaries", "__pycache__", ".venv", ".pytest_cache", ".ruff_cache"}
+)
 
 
 class VendorError(Exception):
@@ -93,7 +96,7 @@ class Project:
     # Where in the upstream repository the project lives; its paths are relative to it.
     subdirectory: str
     paths: tuple[str, ...]
-    # Upstream paths never vendored, such as the project's own tests.
+    # Upstream paths never vendored, such as tests that need services CI lacks.
     skipped: tuple[str, ...] = ()
     # What `make mda-cli` and local tooling write into the tree: kept across updates, never compared.
     build_outputs: tuple[str, ...] = ()
@@ -146,9 +149,9 @@ PROJECTS: Final = {
                 "README.md",
                 "crates",
                 "packages/pypi",
+                # The runtime's tests' fixtures.
+                "packages/testdata",
             ),
-            # The Python runtime's own tests never run here.
-            skipped=("packages/pypi/tests",),
             build_outputs=("target", "packages/pypi/src/managed_deepagents/_binaries"),
             prs_record_name="mda-upstream-prs",
             changes_name="mda-changes",
@@ -159,7 +162,9 @@ PROJECTS: Final = {
             repo="git@github.com:langchain-ai/deepagents.git",
             github_repo="langchain-ai/deepagents",
             subdirectory="libs/partners/quickjs",
-            paths=("LICENSE", "README.md", "pyproject.toml", "langchain_quickjs"),
+            paths=("LICENSE", "README.md", "pyproject.toml", "langchain_quickjs", "tests"),
+            # They need PostgreSQL, model credentials or CodSpeed.
+            skipped=("tests/benchmarks", "tests/integration_tests"),
         ),
     )
 }

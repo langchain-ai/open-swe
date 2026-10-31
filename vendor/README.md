@@ -5,7 +5,7 @@
 
 ## `managed-deepagents-sdk/`
 
-The [Managed Deep Agents SDK](https://github.com/langchain-ai/managed-deepagents-sdk) at the commit in `UPSTREAM`: the `mda` CLI's Rust source (`crates/`) and the `managed-deepagents` Python runtime (`packages/pypi/`). `mda/` installs the runtime from here (an editable uv path source), and so does the backend, for the types of the requests the deployment's channels send it, and `make mda-cli` builds the CLI with `cargo` into that runtime's `_binaries/`, where its `mda` command runs it from. `mda build` and `mda deploy` bundle this runtime into the deployment, so what runs is exactly this tree.
+The [Managed Deep Agents SDK](https://github.com/langchain-ai/managed-deepagents-sdk) at the commit in `UPSTREAM`: the `mda` CLI's Rust source (`crates/`) and the `managed-deepagents` Python runtime (`packages/pypi/`), with their tests and the fixtures those read (`packages/testdata/`). `mda/` installs the runtime from here (an editable uv path source), and so does the backend, for the types of the requests the deployment's channels send it, and `make mda-cli` builds the CLI with `cargo` into that runtime's `_binaries/`, where its `mda` command runs it from. `mda build` and `mda deploy` bundle this runtime into the deployment, so what runs is exactly this tree.
 
 The SDK's `main` is vendored, and `UPSTREAM` records the exact commit the tree comes from (full SHA, then its date, then its branch when that is not `main`). While Open SWE needs SDK work that hasn't reached `main`, such as a release branch's, it vendors that branch with `--branch`; once the branch lands, a plain update moves it back to `main`. Our changes are edits in the tree itself, as on a vendor branch: change the SDK by editing its files here, and review the change as an ordinary diff. `scripts/vendor.py` manages the rest:
 
@@ -17,8 +17,13 @@ Every change we make there ourselves has a dated note in [`mda-changes/`](mda-ch
 
 ## `langchain-quickjs/`
 
-[langchain-quickjs](https://github.com/langchain-ai/deepagents/tree/main/libs/partners/quickjs), the code mode `mda/` runs (`CodeInterpreterMiddleware`), from `libs/partners/quickjs` of the deepagents repository at the commit in `UPSTREAM`. `mda/` installs it from here as an editable uv path source, and `mda build` bundles it as a local package. It is vendored so Open SWE can change it before upstream does.
+[langchain-quickjs](https://github.com/langchain-ai/deepagents/tree/main/libs/partners/quickjs), the code mode `mda/` runs (`CodeInterpreterMiddleware`), from `libs/partners/quickjs` of the deepagents repository at the commit in `UPSTREAM`, with its unit tests. `mda/` installs it from here as an editable uv path source, and `mda build` bundles it as a local package. It is vendored so Open SWE can change it before upstream does.
 
 `scripts/vendor.py --project langchain-quickjs` manages it exactly as it manages the SDK above: `[sha]`, `--branch`, `--pr <n>` (recorded in `langchain-quickjs-upstream-prs`) and `--diff` all work the same, against upstream's `main`. `DEEPAGENTS_REPO` overrides the upstream, as `MDA_SDK_REPO` does the SDK's.
 
 Every change we make there ourselves has a dated note in [`langchain-quickjs-changes/`](langchain-quickjs-changes/README.md), in the shape `mda-changes/` describes.
+
+## Checks
+
+`make vendor-check`, which CI runs whenever `vendor/` changes, checks each tree the way its upstream's CI does: `cargo fmt`, `clippy` and `cargo test` for the CLI; `ruff`, `ty`, `basedpyright` and `pytest` for the runtime, against its own `uv.lock`; `ruff`, `ty` and its unit tests for langchain-quickjs, against `mda/`'s environment, which is what deploys it.
+A change of ours that breaks one of upstream's tests updates that test in the tree, and its note says so.
