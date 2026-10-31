@@ -14,21 +14,33 @@ _NOT_PUBLIC = (
 )
 
 
+class ChannelNotReadable(Exception):
+    """The run may not read this channel with the bot's access on the asker's behalf."""
+
+
+async def readable_public_channel(
+    channel_id: str, current_access: tool_access.Access
+) -> SlackChannel:
+    """The public channel this run may read with the bot's own access, else ``ChannelNotReadable``."""
+    if not current_access.private and current_access.slack_bot_channel != channel_id:
+        raise ChannelNotReadable("Bot-triggered runs can read only their current channel.")
+    channel = await SlackChannel.load(channel_id)
+    if channel is None or not channel.public:
+        raise ChannelNotReadable(_NOT_PUBLIC)
+    return channel
+
+
 @tool_access.access(tool_access.Policy(trusted="channel_history"))
 async def slack_read_channel_messages(channel_id: str, limit: int = 30) -> dict[str, object]:
     """Implement the `slack_read_channel_messages` tool."""
     if not channel_id or not channel_id.strip():
         return {"success": False, "error": "channel_id is required"}
-    channel_id = channel_id.strip()
-    current_access = await tool_access.resolve_access()
-    if not current_access.private and current_access.slack_bot_channel != channel_id:
-        return {
-            "success": False,
-            "error": "Bot-triggered runs can read only their current channel.",
-        }
-    channel = await SlackChannel.load(channel_id)
-    if channel is None or not channel.public:
-        return {"success": False, "error": _NOT_PUBLIC}
+    try:
+        channel = await readable_public_channel(
+            channel_id.strip(), await tool_access.resolve_access()
+        )
+    except ChannelNotReadable as exc:
+        return {"success": False, "error": str(exc)}
 
     requested = limit if isinstance(limit, int) and limit > 0 else DEFAULT_CHANNEL_MESSAGE_LIMIT
     messages = await channel.messages(requested)

@@ -15,7 +15,7 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from collections.abc import Set as AbstractSet
 from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Generic, Literal, TypeVar, cast
 
 from managed_deepagents._log import logger
 
@@ -151,7 +151,11 @@ def resolve_endpoints(
     for key, value in handlers.items():
         label = f'{provider} on_event["{key}"]'
         if is_event_endpoint(value):
-            resolved[key] = endpoint_handler(value, label, fields)
+            # It may also return an ``EndpointDeclined``, which only
+            # ``run_event_handler`` reads; handlers never see that type.
+            resolved[key] = cast(
+                "EventCallback[_Event, _Thread]", endpoint_handler(value, label, fields)
+            )
         elif value is None or callable(value):
             # A ``None`` handler handles nothing, as an absent one.
             resolved[key] = value
@@ -163,7 +167,10 @@ def resolve_endpoints(
 EventFinished = Callable[[_E, _T, "HttpFinish"], "Awaitable[None] | None"]
 """A provider channel's ``on_finish``: a delivery of one of its events is done,
 with the event, its thread, and how it finished, to switch on by ``type``: the
-run it started, why it started none, or that MDA lost it; see ``HttpFinish``."""
+run it started, why it started none, or that MDA lost it; see ``HttpFinish``.
+
+Experimental: this may change in a minor release.
+"""
 
 
 def finish_events(
@@ -209,7 +216,10 @@ def _finish_of(delivery: HttpFinishedDelivery) -> HttpFinish:
 
 EventReceived = Callable[[_E, _T], "Awaitable[None] | None"]
 """A provider channel's ``on_received``: a delivery of one of its events reached
-its thread, before MDA reads the thread; see ``http_channel``'s ``on_received``."""
+its thread, before MDA reads the thread; see ``http_channel``'s ``on_received``.
+
+Experimental: this may change in a minor release.
+"""
 
 
 def receive_events(
@@ -321,6 +331,8 @@ class EventHandlerOutcome:
 
     type: Literal["input", "skipped", "failed"]
     input: ChannelRunResult | None = None
+    decline: str | None = None
+    """Set when an endpoint skipped with ``{"decline"}``: what to tell the person."""
 
 
 async def run_event_handler(
@@ -329,7 +341,9 @@ async def run_event_handler(
     delivery_id: str,
     call: Callable[[], ChannelRunResult | Awaitable[ChannelRunResult | None] | None],
 ) -> EventHandlerOutcome:
-    """Run an event's handler. A throw is logged, not raised."""
+    """Run an event's handler. A throw is logged, not raised; a decline's text never is."""
+    from managed_deepagents._channels.http.endpoint import EndpointDeclined  # noqa: PLC0415
+
     receipt = json.dumps(
         {"event": logger.log_identifier(key), "deliveryId": logger.log_identifier(delivery_id)}
     )
@@ -346,5 +360,8 @@ async def run_event_handler(
         return EventHandlerOutcome("failed")
     if content is None:
         return EventHandlerOutcome("skipped")
+    if isinstance(content, EndpointDeclined):
+        logger.info("%s endpoint declined %s", provider, receipt)
+        return EventHandlerOutcome("skipped", decline=content.message)
     logger.info("%s handler returned run input %s", provider, receipt)
     return EventHandlerOutcome("input", content)

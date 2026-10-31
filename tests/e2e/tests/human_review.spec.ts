@@ -361,6 +361,7 @@ test.describe("Human review in Slack", () => {
   test("the agent posts a card in the review channel; two sign up; it merges two hours after one approval", async ({
     page,
     request,
+    baseURL,
   }) => {
     test.setTimeout(240_000);
     await setReviewChannel(request);
@@ -411,7 +412,7 @@ test.describe("Human review in Slack", () => {
       .flatMap((block) => block.elements ?? [])
       .find((element) => element.action_id === "open_swe_option_select_review");
     expect(review?.url).toBe(
-      `https://github.com/${REPO.owner}/${REPO.repo}/pull/${seeded.number}`,
+      `${baseURL}/agents/reviews/${REPO.owner}/${REPO.repo}/${seeded.number}`,
     );
     await shootCard(page, "open");
     await loginAs(page, ALICE);

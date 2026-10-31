@@ -38,7 +38,3 @@ Args:
 Returns: On success: {"success": True, "created": bool, "url": str, "number": int, "author": str}.
 ``created`` is False when an open PR already existed.
 On failure: {"success": False, "error": str}, where ``error`` states what failed and quotes the request, status, headers, and body GitHub actually returned — read it and decide what to do next.
-
-Shared threads and acting as someone: In a thread with more than one participant, a PR first needs the approval of the person it opens as, unless they chose "Always allow".
-The tool DMs them an approval card in Slack and waits up to 30 seconds: on approval it proceeds, otherwise it returns ``act_as: pending|denied|unreachable`` — PR created: no. On ``pending``, tell the thread the PR is waiting on that person; their answer arrives later as a new message in this thread, so do not poll or call the tool again until then.
-After a denial you may re-attribute to another participant, but only through this same approval flow with their own sign-off, and the commits must be rewritten so the author (and any Co-authored-by trailers) name that person; never swap attribution silently.

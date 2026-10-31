@@ -18,13 +18,17 @@ from openswe.api.tracing import add_trace_resource_names, configure_datadog_envi
 from openswe.audit_logs.middleware import AuditLogMiddleware
 from openswe.config import ENV
 from openswe.dashboard import router as dashboard_router
+from openswe.github.channel import router as github_channel_router
 from openswe.github.routes import router as github_webhook_router
-from openswe.linear.routes import router as linear_webhook_router
+from openswe.linear.channel import router as linear_channel_router
 from openswe.mcp import server as agent_mcp_server
+from openswe.mda_channels.resolve_user import router as mda_resolve_user_router
 from openswe.openai_responses.routes import router as sandbox_openai_router
 from openswe.review.eval_report_routes import router as reviewer_eval_report_router
 from openswe.rollout_events import router as rollout_webhook_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
+from openswe.short_links.routes import router as short_link_router
+from openswe.slack.channel import router as slack_channel_router
 from openswe.slack.routes import router as slack_webhook_router
 from openswe.threads.plan_api import plan_router
 from openswe.threads.router import ThreadRouter
@@ -57,6 +61,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.jobs.kinds import start_jobs
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
+    from openswe.slack.http import validate_slack_startup_config
     from openswe.transcript import listener as transcript_listener
     from openswe.ui_invalidations.hub import HUB
     from openswe.users import User
@@ -67,6 +72,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
     validate_mda_startup_config()
+    validate_slack_startup_config()
     database.require_configured()
     await database.migrate()
     try:
@@ -162,12 +168,16 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(plan_router)
     app.include_router(workflow_approval_router)
-    app.include_router(linear_webhook_router)
+    app.include_router(linear_channel_router)
+    app.include_router(mda_resolve_user_router)
     app.include_router(slack_webhook_router)
     app.include_router(health_router)
     app.include_router(github_webhook_router)
+    app.include_router(github_channel_router)
+    app.include_router(slack_channel_router)
     app.include_router(rollout_webhook_router)
     app.include_router(sandbox_tool_router)
+    app.include_router(short_link_router)
     app.include_router(sandbox_openai_router)
     app.include_router(reviewer_eval_report_router)
     # Routed at the exact path so no redirect sits between MDA and the agent API.

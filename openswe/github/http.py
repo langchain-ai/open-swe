@@ -349,6 +349,14 @@ class GitHubClient:
     def repo(self, owner: str, name: str) -> RepoClient:
         return RepoClient(self, owner, name)
 
+    async def viewer_login(self) -> str:
+        """The login of the account this client's token acts as."""
+        payload = await self.get("user")
+        login = payload.get("login") if isinstance(payload, dict) else None
+        if not isinstance(login, str) or not login:
+            raise ValueError("GitHub answered the authenticated user without a login")
+        return login
+
     async def request(self, method: str, path: str, **kwargs: Any) -> httpx2.Response:
         """``path`` is relative to the REST API root, or an absolute URL."""
         url = path if "://" in path else f"{GITHUB_API_BASE}/{path}"

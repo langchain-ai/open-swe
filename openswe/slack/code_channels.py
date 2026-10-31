@@ -7,7 +7,6 @@ from typing import Any, Literal
 from urllib.parse import quote
 
 from openswe.slack.channels import SlackChannel
-from openswe.slack.client import SLACK_BOT_TOKEN
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
 from openswe.slack.records import SlackViewSuggestion
 
@@ -67,8 +66,6 @@ async def is_code_channel(channel_id: str) -> bool:
 
 
 async def _call(method: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if not SLACK_BOT_TOKEN:
-        raise SlackRequestError("missing_slack_bot_token")
     try:
         async with SlackClient.bot() as client:
             response = await client.api_call(method, json=payload)

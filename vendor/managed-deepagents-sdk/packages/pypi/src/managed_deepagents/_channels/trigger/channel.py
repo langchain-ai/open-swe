@@ -15,7 +15,9 @@ from managed_deepagents._channels.reactions import (
     ReactionChoice,
     is_emoji_name,
 )
+from managed_deepagents._channels.resolve_user import checked_resolve_user
 from managed_deepagents._channels.slack_connections import SLACK_BOT_TOKEN_SLUG
+from managed_deepagents._telemetry.otel import set_log_attributes
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.actor import ChannelActor
@@ -23,6 +25,7 @@ if TYPE_CHECKING:
     from managed_deepagents._channels.http.provider import EventFinished
     from managed_deepagents._channels.http.types import HttpFinishedDelivery
     from managed_deepagents._channels.manifest import ChannelManifest, JsonObject
+    from managed_deepagents._channels.resolve_user import ChannelResolveUser, ResolveUser
     from managed_deepagents._channels.run_input import ChannelRunResult
     from managed_deepagents._channels.slack.events import (
         DecidedSlackEvents,
@@ -97,8 +100,10 @@ class TriggerSlackChannel(Channel):
         multitask_strategy: MultitaskStrategy = "enqueue",
         reply: ChannelReply = "auto",
         on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
+        resolve_user: ChannelResolveUser | None = None,
     ) -> None:
         self.app = app
+        self.resolve_user = resolve_user
         self.trigger_mode = trigger_mode
         self.allow_bot_triggers = allow_bot_triggers
         self.reactions = reactions
@@ -134,16 +139,18 @@ class TriggerSlackChannel(Channel):
             thread: TriggerChannelThread,
             actor: ChannelActor | None,
         ) -> TriggerMessageRoute | None:
-            assert on_event is not None  # noqa: S101 - only passed with handlers
-            return await _decide_event(on_event, event, thread, name, actor, remember=remember)
+            return await _decide_event(
+                on_event or {}, event, thread, name, actor, remember=remember
+            )
 
         async def decide_interaction(
             event: TriggerChannelUserPromptResponseEvent,
             thread: TriggerChannelThread,
             actor: ChannelActor | None,
         ) -> TriggerMessageRoute | None:
-            assert on_event is not None  # noqa: S101 - only passed with handlers
-            return await _decide_event(on_event, event, thread, name, actor, remember=remember)
+            return await _decide_event(
+                on_event or {}, event, thread, name, actor, remember=remember
+            )
 
         on_finish = None
         if self.on_finish is not None:
@@ -183,12 +190,13 @@ class TriggerSlackChannel(Channel):
                 if on_event and "mention" in on_event and self.trigger_mode == "thread"
                 else None
             ),
-            decide_message=decide_message if on_event else None,
-            decide_interaction=(
-                decide_interaction if on_event and "interaction" in on_event else None
-            ),
+            # Asked even without handlers, so every run reports its event
+            # type; with no handler for the event, it starts the default run.
+            decide_message=decide_message,
+            decide_interaction=decide_interaction,
             multitask_strategy=self.multitask_strategy,
             on_finish=on_finish,
+            resolve_user=context.get("resolve_user"),
         )
 
     def _decided_events(self) -> DecidedSlackEvents | None:
@@ -273,6 +281,7 @@ async def _decide_event(
     )
 
     event = await read_slack_event(delivery, actor)
+    set_log_attributes({"provider_event_type": event.key if event is not None else None})
     handler = handlers.get(event.key) if event is not None else None
     if event is None or handler is None:
         return None
@@ -425,6 +434,7 @@ def slack_channel(
     multitask_strategy: MultitaskStrategy = "enqueue",
     reply: ChannelReply = "auto",
     on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
+    resolve_user: ResolveUser | EventEndpoint | None = None,
 ) -> TriggerSlackChannel:
     """Declare a Trigger Server-backed Slack channel.
 
@@ -462,6 +472,7 @@ def slack_channel(
             not yet done, as the thread's status. A callable that raises, takes
             longer than 1 s, or returns something else leaves the status as it
             is.
+            Experimental: this may change in a minor release.
         on_event: Handlers that decide what each kind of message starts, by
             key: ``"mention"`` (a channel message that @-mentions your agent),
             ``"directMessage"``, and ``"message"`` (any other channel message,
@@ -479,16 +490,22 @@ def slack_channel(
             message, which reads the click from ``runtime.channel.event``. A
             click that answers a decision the thread waits on resumes the run,
             and never reaches it.
+            Experimental: this may change in a minor release.
         multitask_strategy: What a message that starts a run does while its
             thread already runs: ``enqueue`` (the default) waits for the run
             and starts after it, ``interrupt`` cancels the run, keeping its
             progress, and starts at once, ``rollback`` cancels it and discards
             its progress, and ``reject`` starts nothing.
+            Experimental: this may change in a minor release.
         reply: Whether the channel posts the run's final answer in the thread:
             ``"auto"`` (the default) or ``"none"``, to leave replying to the
             agent, through ``runtime.channel.post`` or its own tools. The
             status, reactions and ``on_finish`` stay as they are. ``"none"``
             needs an ``mda`` CLI that deploys it.
+            Experimental: this may change in a minor release.
+        resolve_user: Map the Slack user to one of your users, with a function
+            or an endpoint MDA asks; overrides the identity's ``resolve_user``.
+            Experimental: this may change in a minor release.
         on_finish: Called once when a message or interaction is done, with the
             ``SlackEvent`` (a ``SlackMessageEvent`` or ``SlackInteractionEvent``), its
             ``SlackChannelThread``, and how it finished: ``run`` (its run
@@ -502,6 +519,7 @@ def slack_channel(
             Trigger Server will send again because its run couldn't start.
             It runs in the deployment's process, so a restart loses it: use
             the run's ``webhook`` for anything you can't miss.
+            Experimental: this may change in a minor release.
 
     Example::
 
@@ -562,6 +580,7 @@ def slack_channel(
         multitask_strategy=multitask_strategy,
         reply=reply,
         on_finish=on_finish,
+        resolve_user=checked_resolve_user("channels.slack", resolve_user),
     )
 
 

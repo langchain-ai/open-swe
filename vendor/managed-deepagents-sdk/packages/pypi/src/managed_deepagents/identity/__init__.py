@@ -13,11 +13,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal, Protocol, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, Protocol, TypedDict, cast
 
 from langgraph.runtime import ServerInfo
 
 from managed_deepagents.identity.claims import user_claim_name
+
+if TYPE_CHECKING:
+    from managed_deepagents._channels.http.endpoint import EventEndpoint
+    from managed_deepagents._channels.resolve_user import ChannelResolveUser, ResolveUser
 from managed_deepagents.identity.options import (
     IdentityAuth,
     normalize_identity,
@@ -344,8 +348,12 @@ class IdentityDefinition:
 
     kind = "identity"
 
-    def __init__(self, config: IdentityConfig) -> None:
+    def __init__(
+        self, config: IdentityConfig, resolve_user: ChannelResolveUser | None = None
+    ) -> None:
         self.config = config
+        #: The channels' default from ``define_identity(resolve_user=...)``.
+        self.resolve_user = resolve_user
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         scope = self.config.get("scope", {})
@@ -355,6 +363,7 @@ class IdentityDefinition:
 def define_identity(
     *,
     auth: IdentityAuth,
+    resolve_user: ResolveUser | EventEndpoint | None = None,
 ) -> IdentityDefinition:
     """Declare the identity contract for the deployment.
 
@@ -371,10 +380,16 @@ def define_identity(
 
     Args:
         auth: ``"backend"`` or one or more ``auth.*`` entries.
+        resolve_user: Map a channel's verified sender to one of your users, for
+            every channel that does not set its own: a function, or an endpoint
+            MDA asks (a URL, or an ``httpx.Request`` that carries headers).
+            Experimental: this may change in a minor release.
     """
+    from managed_deepagents._channels.resolve_user import checked_resolve_user  # noqa: PLC0415
+
     config = normalize_identity(auth=auth)
     validate_identity(config)
-    return IdentityDefinition(config)
+    return IdentityDefinition(config, checked_resolve_user("define_identity", resolve_user))
 
 
 class _Auth:

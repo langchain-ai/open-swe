@@ -177,25 +177,16 @@ async def _refuse(request: SlackAskRequest, text: str) -> None:
 
 async def _runnable_login(request: SlackAskRequest, login: str | None, email: str) -> str | None:
     """The GitHub login to run as, or None once the asker has been asked to link one."""
-    if login:
-        try:
-            if await common.get_valid_access_token(login):
-                return login
-        except Exception:  # noqa: BLE001
-            logger.debug("Could not resolve a GitHub token for %s", login, exc_info=True)
-    has_record = False
-    if login:
-        try:
-            has_record = await common.has_access_token_record(login)
-        except Exception:  # noqa: BLE001
-            logger.debug("Could not check the GitHub token record for %s", login, exc_info=True)
+    reason = await common.account_link_reason(login)
+    if reason is None:
+        return login
     await _settle_thinking_status(request)
     await common.post_account_link_prompt(
         request.channel_id,
         request.reply_thread_ts,
         request.user_id,
         email or None,
-        reason="revoked" if has_record else "unlinked",
+        reason=reason,
         ephemeral=True,
     )
     if request.response_url:

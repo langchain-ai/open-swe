@@ -58,7 +58,12 @@ _TOOL_MODULES = {
     "publish_workspace": ".workspaces",
     "save_organization_skill": ".organization_skills",
     "publish_artifact": ".publish_artifact",
-    "save_user_instructions": ".save_user_instructions",
+    "remember": ".remember",
+    "forget": ".remember",
+    "list_memories": ".curator",
+    "read_workspace_prompt": ".curator",
+    "decide_memory": ".curator",
+    "publish_workspace_prompt": ".curator",
     "save_user_settings": ".save_user_settings",
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
@@ -144,7 +149,12 @@ __all__ = [
     "save_organization_skill",
     "delete_organization_skill",
     "publish_artifact",
-    "save_user_instructions",
+    "remember",
+    "forget",
+    "list_memories",
+    "read_workspace_prompt",
+    "decide_memory",
+    "publish_workspace_prompt",
     "save_user_settings",
     "save_user_skill",
     "delete_user_skill",
@@ -205,6 +215,12 @@ if TYPE_CHECKING:
     from openswe.tools.code_channel_set_view import code_channel_set_view
     from openswe.tools.connect_managed_tools import connect_managed_tools
     from openswe.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
+    from openswe.tools.curator import (
+        decide_memory,
+        list_memories,
+        publish_workspace_prompt,
+        read_workspace_prompt,
+    )
     from openswe.tools.expedite_pr_approval import expedite_pr_approval
     from openswe.tools.expose_port import expose_port
     from openswe.tools.fetch_review_diff import fetch_review_diff
@@ -225,6 +241,7 @@ if TYPE_CHECKING:
     from openswe.tools.read_user_settings import read_user_settings
     from openswe.tools.record_human_input import record_human_input
     from openswe.tools.recreate_sandbox import recreate_sandbox
+    from openswe.tools.remember import forget, remember
     from openswe.tools.repair_data import execute_database_sql, write_database_rows
     from openswe.tools.reply_to_finding_thread import reply_to_finding_thread
     from openswe.tools.report_platform_issue import report_platform_issue
@@ -238,7 +255,6 @@ if TYPE_CHECKING:
     )
     from openswe.tools.request_rollout_check import request_rollout_check
     from openswe.tools.resolve_finding_thread import resolve_finding_thread
-    from openswe.tools.save_user_instructions import save_user_instructions
     from openswe.tools.save_user_settings import save_user_settings
     from openswe.tools.schedule_thread_wakeup import schedule_thread_wakeup
     from openswe.tools.search_pull_requests import search_pull_requests

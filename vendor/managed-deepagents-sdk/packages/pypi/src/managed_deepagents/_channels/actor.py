@@ -1,25 +1,29 @@
 """Who caused a channel event.
 
 The signed sender of a GitHub or Linear webhook, or the Slack user Trigger
-Server names on a delivery, which MDA can't verify yet. It is personal data:
-MDA neither logs it nor adds it to a run's metadata. Kept free of the agent
-stack and PyJWT, so the package can name these types without loading either.
+Server names on a delivery, which MDA checks against the delivery's signed
+principal. It is personal data: MDA neither logs it nor adds it to a run's
+metadata. Kept free of the agent stack and PyJWT, so the package can name these
+types without loading either.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, NotRequired, TypeAlias, overload
+from typing import TYPE_CHECKING, Literal, NotRequired, TypeAlias, overload
 
 from typing_extensions import TypedDict
+
+if TYPE_CHECKING:
+    from managed_deepagents._agent_auth import ResolvePrincipalIdentity
 
 
 @dataclass(frozen=True, kw_only=True)
 class SlackActor:
     """A Slack user, as Trigger Server read them from Slack's signed request.
 
-    MDA doesn't yet verify the delivery's service key, so this is no identity
-    check."""
+    MDA checks ``id`` against the delivery's signed principal, but not a Slack
+    Connect guest's ``team_id``."""
 
     provider: Literal["slack"] = "slack"
     id: str
@@ -53,7 +57,10 @@ class LinearActor:
 
 
 ChannelActor = SlackActor | GitHubActor | LinearActor
-"""Who caused an event, on any channel; switch on ``provider``."""
+"""Who caused an event, on any channel; switch on ``provider``.
+
+Experimental: this may change in a minor release.
+"""
 
 
 class SlackEndpointActor(TypedDict):
@@ -88,6 +95,28 @@ class LinearEndpointActor(TypedDict):
 
 EndpointActor: TypeAlias = SlackEndpointActor | GitHubEndpointActor | LinearEndpointActor
 """A ``ChannelActor`` as an endpoint is sent it; switch on ``provider``."""
+
+
+def actor_identity(actor: ChannelActor) -> ResolvePrincipalIdentity | None:
+    """The Agent Auth identity a webhook channel's sender runs as when no
+    ``resolve_user`` maps them.
+
+    A GitHub user by their numeric ID, a Linear user by theirs. Both IDs are
+    unique across their provider, so the provider's host is the issuer. Bots,
+    apps and organizations have none and run as the channel. A Slack sender has
+    none here: Trigger Server already resolved ``(slack, install team, user)``
+    for the delivery.
+    """
+    if isinstance(actor, GitHubActor):
+        if actor.type != "User":
+            return None
+        return {"provider": "github", "issuer": "github.com", "subject": actor.id}
+    if isinstance(actor, LinearActor):
+        # A session's creator or prompting user comes without a type.
+        if actor.type is not None and actor.type.lower() != "user":
+            return None
+        return {"provider": "linear", "issuer": "linear.app", "subject": actor.id}
+    return None
 
 
 @overload
@@ -129,5 +158,6 @@ __all__ = [
     "LinearEndpointActor",
     "SlackActor",
     "SlackEndpointActor",
+    "actor_identity",
     "endpoint_actor",
 ]

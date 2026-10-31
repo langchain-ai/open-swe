@@ -42,6 +42,7 @@ use crate::deploy::channel_app::{
     self, agent_auth, env_app_notice, find_connection, is_interactive, override_value, AppSlugs,
     SetupUi,
 };
+use crate::deploy::channel_setup::ChannelStatus;
 use crate::interrupt::Interrupt;
 use crate::langsmith::linear_app::ExistingLinearApp;
 use crate::langsmith::{
@@ -256,12 +257,14 @@ pub(crate) fn setup(
 
 /// Check, before anything is deployed, that setup will be able to finish.
 /// Malformed or incomplete CLI-only env vars always fail here. Without a
-/// terminal, a new app's credentials must come from the env.
+/// terminal, a new app's credentials must come from the env. `interactive`
+/// says whether setup can ask in a terminal.
 pub(crate) fn preflight(
     client: &langsmith::Client,
     channel: &LinearChannel,
     deployment_id: Option<&str>,
     env_vars: &BTreeMap<String, String>,
+    interactive: bool,
 ) -> Result<()> {
     if !channel_needs_app(channel) {
         return Ok(());
@@ -278,7 +281,7 @@ pub(crate) fn preflight(
     // A new app's credentials cover every case. Without a terminal, a
     // partial set fails below only once it is known that a new app is needed:
     // the signing secret alone repairs an installed app.
-    if is_interactive() {
+    if interactive {
         return interactive_credentials_env(env_vars);
     }
     let credentials = credentials_env(env_vars);
@@ -303,6 +306,39 @@ pub(crate) fn preflight(
     credentials?;
     let workspace_known = override_value(WORKSPACE_ENV, env_vars).is_some();
     bail!(unattended_setup_message(None, workspace_known))
+}
+
+/// Where the channel's setup stands for the deployment, read without
+/// changing anything.
+pub(crate) fn status(
+    client: &langsmith::Client,
+    channel: &LinearChannel,
+    deployment_id: &str,
+    env_vars: &BTreeMap<String, String>,
+) -> Result<ChannelStatus> {
+    if !channel_needs_app(channel) {
+        return Ok(ChannelStatus::NoApp);
+    }
+    let agent_auth = agent_auth(client, env_vars)?;
+    let connection = lookup_app_connection(&agent_auth, deployment_id)?;
+    Ok(app_status(connection.as_ref()))
+}
+
+fn app_status(connection: Option<&AppConnection>) -> ChannelStatus {
+    let needs = |message: &str| ChannelStatus::NeedsSetup(message.to_string());
+    let Some(connection) = connection else {
+        return needs("No Linear app is set up for this deployment yet.");
+    };
+    match &connection.grant {
+        AgentGrant::Missing => needs("The Linear app was not approved by a workspace admin yet."),
+        AgentGrant::AuthorizationRequired => needs(LAPSED_GRANT),
+        AgentGrant::Revoked => needs(REVOKED_GRANT),
+        _ if !connection.has_webhook_secret() => {
+            needs("The Linear app is installed, but its webhook signing secret is not stored.")
+        }
+        AgentGrant::Active => ChannelStatus::Ready,
+        AgentGrant::Unknown(status) => needs(&unknown_grant_warning(status)),
+    }
 }
 
 /// How long the credential check may take before deploy goes on without it.

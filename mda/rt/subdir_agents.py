@@ -1,4 +1,4 @@
-"""Auto-load applicable ``AGENTS.md`` files after file reads, from the box the read ran in."""
+"""Auto-load applicable ``AGENTS.md`` files after file reads, from the sandbox the read ran in."""
 
 import asyncio
 import logging
@@ -151,7 +151,7 @@ class SubdirAgentsReadMiddleware(AgentMiddleware):
     state_schema = AgentState
 
     def __init__(self, files: BackendProtocol | None = None) -> None:
-        # Where the thread's files are; None reads them from the run's own backend, its box.
+        # Where the thread's files are; None reads them from the run's own backend, its sandbox.
         self._files = files
         self._loaded: defaultdict[str, set[str]] = defaultdict(set)
 
@@ -159,7 +159,7 @@ class SubdirAgentsReadMiddleware(AgentMiddleware):
         return _thread_id(request) or "__unknown_thread__"
 
     def backend(self, request: ToolCallRequest) -> BackendProtocol | None:
-        """The thread's files: its box, behind the run's backend, unless they are elsewhere."""
+        """The thread's files: its sandbox, behind the run's backend, unless they are elsewhere."""
         if self._files is not None:
             return self._files
         backend = getattr(request.runtime, "backend", None)

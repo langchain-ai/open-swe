@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ChatComposer, buildCommandItems } from "./ChatComposer"
+import { AgentWorkspaceProvider } from "@/features/agents/lib/agentWorkspace"
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import { replaceTextRange } from "./composerTrigger"
 import type { ChatComposerProps } from "./ChatComposer"
@@ -70,7 +71,8 @@ beforeEach(() => {
 
 function renderComposer(
   running: boolean,
-  props: Partial<ChatComposerProps> = {}
+  props: Partial<ChatComposerProps> = {},
+  workspace = false
 ) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
@@ -79,10 +81,12 @@ function renderComposer(
     <QueryClientProvider client={client}>
       <AgentThreadStreamBoundary>
         <ThreadSourceProvider threadId="thread-1" transcript={false}>
-          <ChatComposer
-            activeRun={{ threadId: "thread-1", running }}
-            {...props}
-          />
+          <AgentWorkspaceProvider enabled={workspace}>
+            <ChatComposer
+              activeRun={{ threadId: "thread-1", running }}
+              {...props}
+            />
+          </AgentWorkspaceProvider>
         </ThreadSourceProvider>
       </AgentThreadStreamBoundary>
     </QueryClientProvider>,
@@ -199,6 +203,64 @@ describe("ChatComposer stop button", () => {
 })
 
 describe("ChatComposer options", () => {
+  it("keeps local setup reachable in workspace mode without taking Escape from the context popover", async () => {
+    const onTargetChange = vi.fn()
+    renderComposer(
+      true,
+      {
+        runTarget: "local",
+        onRunTargetChange: onTargetChange,
+        onSelectLocalRepo: vi.fn(),
+        onAddLocalRepo: vi.fn(),
+        onRemoveLocalRepo: vi.fn(),
+        onSelectLocalRepoBranch: vi.fn(),
+        onRefreshLocalRepoBranch: vi.fn(),
+        onLocalWorkspaceModeChange: vi.fn(),
+      },
+      true
+    )
+
+    expect(screen.getByRole("button", { name: "This Mac" })).toBeTruthy()
+    expect(
+      screen.queryByRole("button", { name: "Select repository" })
+    ).toBeNull()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Task context: Use a folder" })
+    )
+    const dialog = await screen.findByRole("dialog", { name: "Task context" })
+    expect(
+      screen.getByRole("button", { name: "Automatic task folder" })
+    ).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "No branch" })).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Current checkout" })
+    ).toBeNull()
+    fireEvent.keyDown(dialog, { key: "Escape" })
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Task context" })).toBeNull()
+    )
+    expect(cancelThread).not.toHaveBeenCalled()
+  })
+
+  it("keeps an existing local thread's branch controls in task context", async () => {
+    renderComposer(
+      false,
+      {
+        runTarget: "local",
+        selectedLocalRepoPath: "/projects/demo",
+        selectedLocalRepoBranch: "main",
+        localRepoBranches: [
+          { name: "main", current: true, isDefault: true, worktreePath: null },
+        ],
+        onSelectLocalRepoBranch: vi.fn(),
+        onRefreshLocalRepoBranch: vi.fn(),
+      },
+      true
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Task context: demo" }))
+    expect(await screen.findByRole("button", { name: "main" })).toBeTruthy()
+  })
+
   it("offers attachments without a plan-mode toggle", async () => {
     renderComposer(false)
 

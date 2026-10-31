@@ -1,10 +1,11 @@
 """The run's tools and models, from its catalog: offered to each model call, run by name.
 
 MDA builds the graph once and shares it between every run of every thread, so the
-graph registers none of the operations a run's catalog names. ``RunToolsMiddleware``
-offers each model call the run's own tools and hands LangGraph's tool node the tool a
-call names; code mode reaches the same tools (``RunCodeInterpreter``). A subagent's
-prompt and model, and the run's limit on model calls, are the run's too.
+graph registers none of the operations a run's catalog names, nor the tools of the
+MCP servers it connects to itself (``rt.mcp``). ``RunToolsMiddleware`` offers each
+model call the run's own tools and hands LangGraph's tool node the tool a call names;
+code mode reaches the same tools (``RunCodeInterpreter``). A subagent's prompt and
+model, and the run's limit on model calls, are the run's too.
 """
 
 import asyncio
@@ -14,7 +15,7 @@ from functools import partial
 from typing import Final
 
 from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
@@ -31,6 +32,7 @@ from runtime_api.tool_search import RESOLVE, ToolLookup
 
 from rt.backend import BackendCallError, OpenSweBackend, Run, RunLocal, current_run
 from rt.file_tools import FileToolsMiddleware
+from rt.mcp import McpTools
 from rt.models import build_model
 from rt.search_tools import search_tools_tool
 from rt.tools import backend_tool, operation_tool, run_id
@@ -56,35 +58,24 @@ def subagent_prompt(name: str) -> str:
 
 
 class RunTools:
-    """One run's tools and models, as its catalog names them."""
+    """One run's tools and models, as its catalog names them, and once the run connects to
+    its MCP servers (``connect``), their tools too."""
 
     def __init__(
         self, catalog: Catalog, backend: OpenSweBackend, files: FileToolsMiddleware
     ) -> None:
         self.catalog = catalog
-        operations = [
+        self._backend = backend
+        self._files = files
+        self._operations = [
             operation_tool(spec, backend, cites_evidence=catalog.incident_evidence)
             for spec in catalog.operations
         ]
-        searched = (
-            [search_tools_tool(backend, catalog.search_tools_description)]
-            if catalog.search_tools
-            else []
-        )
-        self.by_name = {tool.name: tool for tool in (*operations, *searched)}
+        # None until the run connects to the MCP servers its catalog names.
+        self._mcp: McpTools | None = None if catalog.mcp_servers else McpTools()
+        self._connecting = asyncio.Lock()
         self.excluded = frozenset(catalog.excluded)
-        # Every schema offered costs each call its context, and OpenAI answers some
-        # requests carrying hundreds with nothing; the tools the model seldom needs are
-        # called from code.
-        code_only = frozenset(catalog.code_only)
-        self.offered = [tool for tool in self.by_name.values() if tool.name not in code_only]
-        in_code = [tool for tool in operations if tool.name in code_only]
-        self.from_code = [
-            *in_code,
-            *(t for t in operations if t.name in catalog.also_from_code and t not in in_code),
-            *files.code_tools(catalog.also_from_code),
-        ]
-        self.hidden = self.excluded | code_only
+        self._offer(McpTools())
         self.subagents = {subagent.name: subagent for subagent in catalog.subagents}
         models = catalog.models
         self.subagent_model: BaseChatModel | None = (
@@ -92,6 +83,52 @@ class RunTools:
             if models is None
             else build_model(models.subagent_model, use_gateway=models.use_gateway)
         )
+
+    def _offer(self, mcp: McpTools) -> None:
+        """Offer the run's operations and ``mcp``'s tools: to each model call, or from code.
+
+        The backend's ``search_tools`` finds only the tools it serves, so the tools of the
+        MCP servers the run connects to itself are offered to each model call.
+        """
+        catalog = self.catalog
+        tools = [*self._operations, *mcp.tools]
+        searched = (
+            [search_tools_tool(self._backend, catalog.search_tools_description)]
+            if catalog.search_tools
+            else []
+        )
+        self.by_name = {tool.name: tool for tool in (*tools, *searched)}
+        # Every schema offered costs each call its context, and OpenAI answers some
+        # requests carrying hundreds with nothing; the tools the model seldom needs are
+        # called from code.
+        code_only = frozenset(catalog.code_only)
+        self.offered = [tool for tool in self.by_name.values() if tool.name not in code_only]
+        in_code = [tool for tool in tools if tool.name in code_only]
+        self.from_code = [
+            *in_code,
+            *(t for t in tools if t.name in catalog.also_from_code and t not in in_code),
+            *self._files.code_tools(catalog.also_from_code),
+        ]
+        self.hidden = self.excluded | code_only
+
+    async def connect(self) -> None:
+        """Load the tools of the MCP servers the run connects to itself, once for the run.
+
+        A person who has not granted a server's connection is asked to, and the call that
+        connects waits on them.
+        """
+        if self._mcp is not None:
+            return
+        async with self._connecting:
+            if self._mcp is not None:
+                return
+            self._mcp = await McpTools.load(
+                self.catalog.mcp_servers,
+                self._backend,
+                taken=self.by_name.keys(),
+                cites_evidence=self.catalog.incident_evidence,
+            )
+            self._offer(self._mcp)
 
     def subagent_tools(self, subagent: SubagentSpec) -> list[BaseTool]:
         """What ``subagent`` may call of the run's tools: all it is offered, or those it names."""
@@ -123,6 +160,13 @@ class RunToolsets:
         run = self._backend.run
         await run.load_tool_specs(run_id())
         return self.get(run)
+
+    async def load(self) -> RunTools:
+        """The run's tools once it has read their specs, with the tools of the MCP servers
+        it connects to itself."""
+        tools = await self.ready()
+        await tools.connect()
+        return tools
 
 
 class BackendTools:
@@ -160,9 +204,11 @@ class RunToolsMiddleware(AgentMiddleware):
     The backend's tools act on its sandbox, so they stay offered even where MDA's
     filesystem middleware drops one it cannot back itself, such as ``execute``. Hidden
     tools still run when called by name, as in-process; the backend names the ones its
-    middleware hides from each call. ``subagent`` names the subagent this middleware
-    serves; the agent itself otherwise. A call by a name the run's tools don't have
-    goes to ``backend_tools``, for a tool the catalog leaves out.
+    middleware hides from each call. The run connects to its MCP servers before its
+    first model call, or at a call of one of their tools that a resumed run makes first.
+    ``subagent`` names the subagent this middleware serves; the agent itself otherwise.
+    A call by a name the run's tools don't have goes to ``backend_tools``, for a tool
+    the catalog leaves out.
     """
 
     trace_policy = MIDDLEWARE_TRACE_POLICY
@@ -180,8 +226,14 @@ class RunToolsMiddleware(AgentMiddleware):
         # The ``task`` tool as each run describes its subagents, by the description.
         self._task_tools = RunLocal[dict[tuple[int, str], BaseTool]](dict)
 
+    async def abefore_model(self, state: AgentState, runtime: Runtime) -> None:  # noqa: ARG002
+        # In a node of its own: a person asked to grant a connection resumes this node
+        # alone, not the model call, whose outer wrappers, such as summarization, would
+        # do their work again.
+        await self._toolsets.load()
+
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
-        tools = await self._toolsets.ready()
+        tools = await self._toolsets.load()
         if self._subagent is None:
             hidden = tools.hidden
             own = tools.offered
@@ -223,6 +275,9 @@ class RunToolsMiddleware(AgentMiddleware):
             tools = await self._toolsets.ready()
             name = request.tool_call["name"]
             tool = tools.by_name.get(name)
+            if tool is None and tools.catalog.mcp_servers:
+                # A resumed run's call of an MCP server's tool, before any model call.
+                tool = (await self._toolsets.load()).by_name.get(name)
             # Only a name the backend knows: any other gets the tool node's own answer
             # for a tool that is not there, which the run recovers from.
             if (

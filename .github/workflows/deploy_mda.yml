@@ -124,6 +124,18 @@ jobs:
             || matrix.environment == 'staging' && secrets.MDA_LINEAR_WEBHOOK_SECRET_STAGING
             || matrix.environment == 'preview' && secrets.MDA_LINEAR_WEBHOOK_SECRET_PREVIEW
             || '' }}
+          # This environment's own Open SWE Slack app, which deploy registers with Trigger Server for
+          # the Slack channel; its URLs stay at the backend. Deploy never forwards these.
+          MDA_SLACK_BOT_TOKEN: >-
+            ${{ matrix.environment == 'prod' && secrets.MDA_SLACK_BOT_TOKEN_PROD
+            || matrix.environment == 'staging' && secrets.MDA_SLACK_BOT_TOKEN_STAGING
+            || matrix.environment == 'preview' && secrets.MDA_SLACK_BOT_TOKEN_PREVIEW
+            || '' }}
+          MDA_SLACK_SIGNING_SECRET: >-
+            ${{ matrix.environment == 'prod' && secrets.MDA_SLACK_SIGNING_SECRET_PROD
+            || matrix.environment == 'staging' && secrets.MDA_SLACK_SIGNING_SECRET_STAGING
+            || matrix.environment == 'preview' && secrets.MDA_SLACK_SIGNING_SECRET_PREVIEW
+            || '' }}
           # This environment's own Open SWE GitHub App, which deploy brings into Agent Auth when the
           # deployment has none yet; it cannot ask for it without a terminal. A deployment that
           # already has the App keeps it, and these never reach the deployment.
@@ -155,10 +167,15 @@ jobs:
             echo "::error::Set the LANGSMITH_GATEWAY_API_KEY_${ENVIRONMENT^^} secret to the backend's gateway key."
             exit 1
           fi
+          if [[ -z "$MDA_SERVICE_SECRET" ]]; then
+            echo "::error::Set the MDA_SERVICE_SECRET_${ENVIRONMENT^^} secret to the backend's MDA_SERVICE_SECRET: without it the backend refuses every channel call."
+            exit 1
+          fi
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
           # the gateway key it calls models with, the secret it signs its calls to the backend with,
           # and the commit its traces name as their revision.
-          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\nLANGSMITH_REVISION_ID=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" "$(git rev-parse HEAD)" >mda/.env
+          # The backend acts on the channels' threads with the same secret, as MDA's ingress secret.
+          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\nMDA_INGRESS_SECRET=%s\nLANGSMITH_REVISION_ID=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" "$MDA_SERVICE_SECRET" "$(git rev-parse HEAD)" >mda/.env
           # The GitHub channel's App is Open SWE's own, whose webhook stays at the backend,
           # which forwards issue mentions to the channel.
           export MDA_GITHUB_WEBHOOK_ELSEWHERE="$backend/webhooks/github"
