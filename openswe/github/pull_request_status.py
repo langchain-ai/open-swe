@@ -653,7 +653,9 @@ class PullRequestClient:
             "PUT", f"repos/{self.repo.full_name}/pulls/{self.number}/merge", json=payload
         )
 
-    async def enable_auto_merge(self, *, sha: str, method: str) -> None:
+    async def enable_auto_merge(
+        self, *, sha: str, method: str, commit_message: str | None = None
+    ) -> None:
         """Enable GitHub's auto-merge for the head the person inspected."""
         pull = await self.pull()
         head = pull.get("head")
@@ -662,6 +664,13 @@ class PullRequestClient:
         node_id = pull.get("node_id")
         if not isinstance(node_id, str) or not node_id:
             raise ValueError("GitHub did not return the pull request ID.")
+        mutation_input: dict[str, object] = {
+            "pullRequestId": node_id,
+            "mergeMethod": method.upper(),
+            "expectedHeadOid": sha,
+        }
+        if commit_message is not None:
+            mutation_input["commitBody"] = commit_message
         data = await self.repo.github.graphql(
             """
             mutation EnableAutoMerge($input: EnablePullRequestAutoMergeInput!) {
@@ -670,7 +679,7 @@ class PullRequestClient:
               }
             }
             """,
-            {"input": {"pullRequestId": node_id, "mergeMethod": method.upper()}},
+            {"input": mutation_input},
         )
         enabled = data.get("enablePullRequestAutoMerge")
         updated = enabled.get("pullRequest") if isinstance(enabled, Mapping) else None

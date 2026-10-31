@@ -5,6 +5,7 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
+from openswe.github import http as github_http
 from openswe.github import pull_request_actions as actions
 from openswe.github import squash_message
 from openswe.github.http import GitHubClient
@@ -145,7 +146,11 @@ async def test_pending_merge_enables_github_auto_merge(method: str) -> None:
         )
     assert result.done
     assert requests[0]["variables"] == {
-        "input": {"pullRequestId": "PR_1", "mergeMethod": method.upper()}
+        "input": {
+            "pullRequestId": "PR_1",
+            "mergeMethod": method.upper(),
+            "expectedHeadOid": "a" * 40,
+        }
     }
 
 
@@ -191,23 +196,47 @@ async def test_auto_merge_refuses_a_changed_head() -> None:
     assert error.value.status_code == 409
 
 
-async def test_squash_merge_sends_the_description_and_commits(github):
+@pytest.mark.parametrize("auto_merge", [False, True])
+async def test_squash_merge_sends_the_description_and_commits(github, monkeypatch, auto_merge):
     commit = {
         "commit": {"message": "fix: spelling", "author": {"name": "Ada", "email": "ada@x.com"}},
         "author": {"login": "ada"},
         "parents": [{"sha": "b" * 40}],
     }
     payloads = {
-        "https://api.github.com/repos/acme/app/pulls/1": {"title": "fix: typo", "body": "Fix."},
+        "https://api.github.com/repos/acme/app/pulls/1": {
+            "title": "fix: typo",
+            "body": "Fix.",
+            "node_id": "PR_1",
+            "head": {"sha": "a" * 40},
+        },
+        "https://api.github.com/graphql": {
+            "data": {
+                "enablePullRequestAutoMerge": {
+                    "pullRequest": {"autoMergeRequest": {"enabledAt": "2026-10-31T00:00:00Z"}}
+                }
+            }
+        },
         "https://api.github.com/repos/acme/app/pulls/1/commits": [commit],
         "https://api.github.com/user": {"login": "octocat"},
         "https://api.github.com/repos/acme/app/pulls/1/merge": {"merged": True},
     }
     request = github(AsyncMock(side_effect=lambda _, __, url, **___: response(payloads[url])))
-    action = actions.MergeAction(action="merge", sha="a" * 40, merge_method="squash")
+    monkeypatch.setattr(github_http, "github_request", request)
+    action = actions.MergeAction(
+        action="merge", sha="a" * 40, merge_method="squash", auto_merge=auto_merge
+    )
 
     await actions.act_on_pull_request(_pull(1), action)
 
+    if auto_merge:
+        assert request.await_args.kwargs["json"]["variables"]["input"] == {
+            "pullRequestId": "PR_1",
+            "mergeMethod": "SQUASH",
+            "expectedHeadOid": "a" * 40,
+            "commitBody": "Fix.\n\n* fix: spelling\n\nCo-authored-by: Ada <ada@x.com>",
+        }
+        return
     assert request.await_args.kwargs["json"] == {
         "sha": "a" * 40,
         "merge_method": "squash",

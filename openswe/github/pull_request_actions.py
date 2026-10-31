@@ -126,10 +126,17 @@ class MergeAction(_PullRequestActionBase):
     unconfirmed: ClassVar[str] = "GitHub did not confirm the merge."
 
     async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> None:
+        message = (
+            await self._squash_message(client, owner, repo, number)
+            if self.merge_method == "squash"
+            else None
+        )
         if self.auto_merge:
             pull = GitHubClient(client).repo(owner, repo).pull_request(number)
             try:
-                await pull.enable_auto_merge(sha=self.sha, method=self.merge_method)
+                await pull.enable_auto_merge(
+                    sha=self.sha, method=self.merge_method, commit_message=message
+                )
             except GitHubError as exc:
                 raise HTTPException(exc.response.status_code, exc.message) from exc
             except GraphQLError as exc:
@@ -140,10 +147,8 @@ class MergeAction(_PullRequestActionBase):
                 ) from exc
             return
         payload: dict[str, object] = {"sha": self.sha, "merge_method": self.merge_method}
-        if self.merge_method == "squash":
-            message = await self._squash_message(client, owner, repo, number)
-            if message is not None:
-                payload["commit_message"] = message
+        if message is not None:
+            payload["commit_message"] = message
         await self._confirm(
             client,
             "PUT",
