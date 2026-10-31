@@ -41,6 +41,8 @@ import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSourc
 import { agentsApi } from "@/features/agents/lib/api"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
 import { runStartCommand, startRun } from "@/features/agents/lib/transcript/api"
+import { prefetchThreadTranscript } from "@/features/agents/lib/transcript/useThreadTranscript"
+import { readPreference as prefersSdkStream } from "@/lib/streamPreference"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -604,6 +606,14 @@ export function AgentsHome({
       // The user moved on (another submission, or another thread opened) while
       // this was in flight: the thread is seeded either way, but only the
       // submission this page is still waiting for may navigate.
+      if (pendingRun.current !== pending) return
+      if (thread.transcript === "v2" && !prefersSdkStream()) {
+        try {
+          await prefetchThreadTranscript(threadId)
+        } catch (error) {
+          console.warn("Could not prefetch the new thread transcript", error)
+        }
+      }
       if (pendingRun.current !== pending) return
       await navigate({ to: "/agents/$threadId", params: { threadId } })
     })()
