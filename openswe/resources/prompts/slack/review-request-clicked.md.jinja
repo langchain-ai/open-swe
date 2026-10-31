@@ -1,2 +1,2 @@
-The person {% if action == "decline" %}declined{% elif action == "snooze" %}snoozed{% elif action == "dismiss" %}dismissed{% else %}accepted{% endif %} Open SWE's review request for {{ pr_url }}{% if action == "snooze" %} for {{ choice }}{% elif action == "decline" %} ({{ choice }}){% endif %}.
+The person {% if action == "decline" %}declined{% elif action == "snooze" %}snoozed{% elif action == "dismiss" %}dismissed{% elif action == "code_channel" %}asked to review in a code channel from{% else %}accepted{% endif %} Open SWE's review request for {{ pr_url }}{% if action == "snooze" %} for {{ choice }}{% elif action == "decline" %} ({{ choice }}){% endif %}.
 Open SWE told them: {{ outcome }}

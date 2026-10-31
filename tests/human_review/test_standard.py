@@ -592,6 +592,54 @@ async def test_merged_card_names_only_actual_approvers(
         assert "linus" not in message
 
 
+@pytest.mark.parametrize("public", [True, False, None])
+async def test_review_code_channel_uses_clickers_identity_and_source_privacy(
+    public: bool | None,
+) -> None:
+    from openswe.human_review import slack
+    from openswe.review_guide.launch import GuideOrigin, GuideStartError, StartedGuide
+
+    pr = PullRequest(owner="o", repo="r", number=1)
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    origin = GuideOrigin(requester_slack_id="U_reader", channel_id="C1", message_ts="1.2")
+    channel = (
+        {
+            "id": "C1",
+            "is_private": not public,
+            "is_channel": True,
+            "is_ext_shared": False,
+            "is_pending_ext_shared": False,
+        }
+        if public is not None
+        else None
+    )
+    with (
+        patch.object(slack.SlackChannel, "fetch", AsyncMock(return_value=channel)),
+        patch.object(slack, "workspace_for_slack_channel", AsyncMock(return_value="team")),
+        patch.object(
+            slack,
+            "start_review_guide",
+            AsyncMock(return_value=StartedGuide(thread_id="guide", channel_id="C_review")),
+        ) as start,
+    ):
+        result = await slack._open_code_channel(request, origin)
+        assert "<#C_review>" in result.message
+        launched = start.call_args.args[0]
+        assert launched.origin.requester_slack_id == "U_reader"
+        assert launched.origin.is_private is (public is not True)
+        assert launched.origin.source_thread_id is None
+        assert launched.origin.workspace_slug == "team"
+        start.side_effect = GuideStartError("cannot read that pull request")
+        result = await slack._open_code_channel(request, origin)
+        assert "cannot read that pull request" in result.message
+        start.reset_mock()
+        request.state = "dismissed"
+        result = await slack._open_code_channel(request, origin)
+        assert "no longer open" in result.message
+        start.assert_not_awaited()
+
+
 @pytest.mark.parametrize("available", [True, False])
 async def test_open_card_counts_only_non_test_files(available: bool) -> None:
     pr = PullRequest(
