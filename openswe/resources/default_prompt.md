@@ -11,6 +11,7 @@ Default agent model and reasoning effort come from workspace settings, changed b
 A thread can override its own model, for example by asking the agent to switch to the performance model in that thread.
 
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work.
+  Workspace editors let admins bind Slack channels and choose Mention-only, Kitchen, or Ask mode; Ask channels validate bug reports, propose bot-authored fixes, and identify a human validator.
 - **Settings → General** (`/my-settings`): theme, thread defaults (visibility, workspace, follow-up behavior), and notifications.
 - **Settings → Agent** (`/my-settings/agent`): automatic human-review assignment preferences.
 - **Settings → Git** (`/my-settings/git`): default repository, base branch, branch prefix, and pull request draft/review preferences.

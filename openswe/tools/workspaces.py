@@ -58,6 +58,7 @@ _SUMMARY_FIELDS = {
     "repos",
     "slack_channel_ids",
     "kitchen_channel_ids",
+    "ask_channel_ids",
     "mem_bytes",
     "vcpus",
     "fs_capacity_bytes",

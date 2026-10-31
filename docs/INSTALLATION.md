@@ -421,9 +421,14 @@ Without it, Slack senders stay unlinked until they connect from **Settings → C
 The manifest already registers the OIDC redirect; make sure the `openid`, `email`, and `profile` user scopes are available, then set `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` from **Basic Information → App Credentials**, and optionally `SLACK_TEAM_ID` (`T...`) to restrict linking to one workspace.
 When they are unset the link is simply hidden.
 
-**Kitchen channels.**
-Admins turn kitchen mode on per channel in the workspace editor (**Workspaces → edit workspace → Slack channels**); a channel must be bound to a workspace to be a kitchen channel, and Open SWE must have joined it.
-In a kitchen channel, a top-level human message starts a new agent thread and replies continue it without tagging Open SWE; ordinary untagged replies queue behind an active run.
+**Kitchen and Ask channels.**
+Admins choose Mention-only, Kitchen, or Ask per channel in the workspace editor (**Workspaces → edit workspace → Slack channels**); a channel must be bound to a workspace to use Kitchen or Ask, and Open SWE must have joined it.
+In a Kitchen or Ask channel, a top-level human message starts a new agent thread and replies continue it without tagging Open SWE; ordinary untagged replies queue behind an active run.
+Ask channels use a bug-triage workflow: attempt reproduction, distinguish confirmed bugs from expected behavior or unverified reports, assess whether to fix, and propose a draft PR when appropriate.
+Public Ask-channel PRs open as Open SWE rather than the reporter, and the agent explicitly identifies a human validator—preferably the current on-call—without assuming the reporter owns delivery.
+If no owner can be established, it asks the thread to identify one.
+Ordinary Kitchen channels retain their existing behavior.
+
 Other channels still require mentions.
 To enable private channels, update the Slack app with the current manifest and reinstall it so Slack sends the `message.groups` event (the base manifest already includes the `groups:history` scope).
 

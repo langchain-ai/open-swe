@@ -75,7 +75,7 @@ async def api_create_workspace(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
     try:
-        await require_kitchen_eligible(body.kitchen_channel_ids)
+        await require_kitchen_eligible(body.kitchen_channel_ids + body.ask_channel_ids)
         record = await WORKSPACES.create(body, _admin["sub"])
     except ValueError as e:
         raise _save_conflict(e) from e

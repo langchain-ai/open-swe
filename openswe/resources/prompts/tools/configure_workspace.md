@@ -9,7 +9,9 @@ In a verified sole-writer shared thread, only an acknowledgement is returned; re
   Lists replace the entire list: read the existing configuration first and preserve entries not being changed.
 - `slack_channel_ids` binds Slack channels to the workspace.
   `kitchen_channel_ids` is a subset of those bindings: every human top-level message in a Kitchen channel starts a thread, and replies continue it without a mention.
-  Newly enabled kitchens must be internal Slack channels Open SWE has joined.
+  `ask_channel_ids` enables the same delivery for bug-triage channels: reproduce reports, assess whether to fix, propose fixes as Open SWE, and identify a human validator (preferably the on-call).
+  Both lists must be subsets of the bound channels and cannot overlap.
+  Newly enabled Kitchen or Ask channels must be internal Slack channels Open SWE has joined.
 - Repository bindings are exclusive across workspaces.
   Changing repositories can trigger a snapshot rebuild; other definition edits do not capture a sandbox.
 - Prompt, scripts, sizing, snapshot settings and sandbox inheritance use the dashboard's existing rules.

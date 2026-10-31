@@ -76,7 +76,7 @@ async def _resolve_pr_author_token(author: str | None = None) -> tuple[str | Non
     The requester's own GitHub grant, which an MDA run reads from the deployment's
     connection, comes before their dashboard sign-in.
     """
-    login = await pr_author_login(author)
+    login = await pr_author_login(author, bot_in_ask_channel=True)
     if login is None:
         return await get_github_app_installation_token(), "bot"
     if granted := await _requester_grant(login):

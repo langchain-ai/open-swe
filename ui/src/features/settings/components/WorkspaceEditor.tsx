@@ -2,7 +2,7 @@ import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import type { ReactNode } from "react"
 import { Input } from "@langchain/macaw-components/Input"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { Switch } from "@langchain/macaw-components/Switch"
+import { Select } from "@langchain/macaw-components/Select"
 import { QuestionIcon } from "@phosphor-icons/react/dist/ssr/Question"
 
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
@@ -84,6 +84,7 @@ export interface WorkspaceDraft {
   repos: Array<string>
   slackChannelIds: Array<string>
   kitchenChannelIds: Array<string>
+  askChannelIds: Array<string>
   prompt: string
   setupScript: string
   updateScript: string
@@ -95,6 +96,7 @@ export function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
     repos: workspace.repos,
     slackChannelIds: workspace.slack_channel_ids,
     kitchenChannelIds: workspace.kitchen_channel_ids,
+    askChannelIds: workspace.ask_channel_ids ?? [],
     prompt: workspace.prompt,
     setupScript: "",
     updateScript: "",
@@ -106,6 +108,7 @@ export const EMPTY_DRAFT: WorkspaceDraft = {
   repos: [],
   slackChannelIds: [],
   kitchenChannelIds: [],
+  askChannelIds: [],
   prompt: "",
   setupScript: "",
   updateScript: "",
@@ -121,6 +124,7 @@ function SlackChannelRows({
   channelLabel: (id: string) => string
 }) {
   const kitchen = new Set(draft.kitchenChannelIds)
+  const ask = new Set(draft.askChannelIds)
   return (
     <ul className="w-full divide-y divide-default rounded-md border border-default">
       {draft.slackChannelIds.map((id) => (
@@ -140,18 +144,31 @@ function SlackChannelRows({
           >
             {channelLabel(id)}
           </MacawLink>
-          <label className="flex shrink-0 items-center gap-space-2 text-xs text-secondary">
-            Kitchen
-            <Switch
-              aria-label={`Kitchen mode for ${channelLabel(id)}`}
-              checked={kitchen.has(id)}
-              onChange={(on) => {
-                if (on) kitchen.add(id)
-                else kitchen.delete(id)
-                onChange({ ...draft, kitchenChannelIds: [...kitchen].sort() })
-              }}
-            />
-          </label>
+          <Select
+            aria-label={`Channel type for ${channelLabel(id)}`}
+            size="sm"
+            triggerClassName="w-32 shrink-0"
+            value={
+              ask.has(id) ? "ask" : kitchen.has(id) ? "kitchen" : "mentions"
+            }
+            options={[
+              { value: "mentions", label: "Mention-only" },
+              { value: "kitchen", label: "Kitchen" },
+              { value: "ask", label: "Ask" },
+            ]}
+            onChange={(mode) => {
+              if (!mode) return
+              kitchen.delete(id)
+              ask.delete(id)
+              if (mode === "kitchen") kitchen.add(id)
+              if (mode === "ask") ask.add(id)
+              onChange({
+                ...draft,
+                kitchenChannelIds: [...kitchen].sort(),
+                askChannelIds: [...ask].sort(),
+              })
+            }}
+          />
         </li>
       ))}
     </ul>
@@ -215,10 +232,11 @@ export function WorkspaceEditor({
       <div className="text-sm">
         <span className="inline-flex items-center gap-space-2">
           Slack channels
-          <HelpTooltip label="About kitchen channels">
-            Mentions in these channels start runs in this workspace. Turn on
-            Kitchen for a channel to let every top-level message start a thread
-            and replies continue it without mentioning Open SWE.
+          <HelpTooltip label="About channel types">
+            Mention-only channels require tagging Open SWE. Kitchen and Ask
+            channels receive every human message without a mention. Ask channels
+            validate bug reports, propose fixes as Open SWE, and identify a
+            human to validate the result—preferably the on-call.
           </HelpTooltip>
         </span>
         <div
@@ -234,7 +252,7 @@ export function WorkspaceEditor({
             />
           ) : (
             <span className="text-xs text-secondary">
-              None yet. Add a channel to turn on Kitchen mode for it.
+              None yet. Add a channel to choose Mention-only, Kitchen, or Ask.
             </span>
           )}
           <SlackChannelPicker
@@ -243,6 +261,9 @@ export function WorkspaceEditor({
               onChange({
                 ...draft,
                 slackChannelIds,
+                askChannelIds: draft.askChannelIds.filter((id) =>
+                  slackChannelIds.includes(id)
+                ),
                 kitchenChannelIds: draft.kitchenChannelIds.filter((id) =>
                   slackChannelIds.includes(id)
                 ),

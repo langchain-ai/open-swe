@@ -4,9 +4,11 @@ from collections.abc import Mapping
 from typing import Any
 
 from openswe.run_config import RunConfig
+from openswe.source_context import SourceContext
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
 from openswe.utils.thread_reads import read_thread
+from openswe.workspaces.store import WORKSPACES
 
 
 class PrAuthorNotAParticipant(RuntimeError):
@@ -82,7 +84,9 @@ async def private_credential_login(
     return _private_owner_login(cfg, metadata)
 
 
-async def pr_author_login(requested: str | None = None) -> str | None:
+async def pr_author_login(
+    requested: str | None = None, *, bot_in_ask_channel: bool = False
+) -> str | None:
     """The account a PR is opened as: a named participant, or the run requester.
 
     In a shared, user-owned thread any login that has posted in it is honored,
@@ -92,6 +96,14 @@ async def pr_author_login(requested: str | None = None) -> str | None:
     cfg, metadata = await _thread_scope()
     if metadata.get("visibility", "public") == "private":
         return _private_owner_login(cfg, metadata)
+    slack = SourceContext.from_metadata(metadata).slack_thread
+    if (
+        bot_in_ask_channel
+        and slack is not None
+        and slack.channel_id
+        and await WORKSPACES.is_ask_channel(slack.channel_id)
+    ):
+        return None
     owner = metadata.get("owner_login")
     has_owner = isinstance(owner, str) and bool(owner.strip())
     shared_user_thread = metadata.get("owner_type") != "system" and (

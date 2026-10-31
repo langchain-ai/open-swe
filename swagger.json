@@ -8589,6 +8589,13 @@
       },
       "Workspace": {
         "properties": {
+          "ask_channel_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ask Channel Ids",
+            "type": "array"
+          },
           "base_snapshot_id": {
             "anyOf": [
               {
@@ -8901,6 +8908,13 @@
       },
       "WorkspaceCreate": {
         "properties": {
+          "ask_channel_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ask Channel Ids",
+            "type": "array"
+          },
           "base_snapshot_id": {
             "anyOf": [
               {
@@ -9490,6 +9504,20 @@
       "WorkspaceUpdate": {
         "description": "Partial update: only the fields present are written.",
         "properties": {
+          "ask_channel_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ask Channel Ids"
+          },
           "base_snapshot_id": {
             "anyOf": [
               {

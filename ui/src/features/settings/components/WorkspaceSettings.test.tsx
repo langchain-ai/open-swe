@@ -380,6 +380,7 @@ describe("WorkspaceSettingsPanel", () => {
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
         kitchen_channel_ids: [],
+        ask_channel_ids: [],
         prompt: "Run make test.",
       })
     )
