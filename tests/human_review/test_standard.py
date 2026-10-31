@@ -12,6 +12,7 @@ import pytest
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.expedited_review.readiness import PullRequestSnapshot
 from openswe.github.http import GitHubClient, GitHubError, RepoClient
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, ThreadLink
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
@@ -882,13 +883,22 @@ async def _review_github_app(owner: str, repo: str) -> AsyncIterator[GitHubClien
 async def test_review_blockers_require_an_account_or_an_allowed_author(
     author: str, user: User | None, draft: bool, allowed: list[str], expected: list[str]
 ) -> None:
-    from openswe.expedited_review.readiness import Readiness
     from openswe.human_review.standard import review_blockers
 
-    readiness = Readiness(snapshot=_snapshot(author=author, draft=draft), blockers=[])
     settings = RepoSettings(review_allowed_authors=allowed).model_dump_json(by_alias=True)
     with (
-        patch.object(Readiness, "assess", AsyncMock(return_value=readiness)),
+        patch.object(
+            PullRequestClient,
+            "pull",
+            AsyncMock(
+                return_value={
+                    "state": "open",
+                    "head": {"sha": "abc"},
+                    "user": {"login": author},
+                    "draft": draft,
+                }
+            ),
+        ),
         patch.object(User, "for_login", AsyncMock(return_value=user)),
         patch.object(GitHubClient, "as_app", _review_github_app),
         patch.object(RepoClient, "read_file", AsyncMock(return_value=settings)),
@@ -903,10 +913,7 @@ async def test_review_blockers_require_an_account_or_an_allowed_author(
 async def test_review_author_allowlist_requires_valid_default_branch_settings(
     settings: str | None,
 ) -> None:
-    from openswe.expedited_review.readiness import Readiness
     from openswe.human_review.standard import review_blockers
-
-    readiness = Readiness(snapshot=_snapshot(author="ada"), blockers=[])
 
     async def read_file(
         repo: RepoClient, path: str, ref: str | None, *, max_chars: int, strict: bool = False
@@ -920,7 +927,17 @@ async def test_review_author_allowlist_requires_valid_default_branch_settings(
         return settings
 
     with (
-        patch.object(Readiness, "assess", AsyncMock(return_value=readiness)),
+        patch.object(
+            PullRequestClient,
+            "pull",
+            AsyncMock(
+                return_value={
+                    "state": "open",
+                    "head": {"sha": "abc"},
+                    "user": {"login": "ada"},
+                }
+            ),
+        ),
         patch.object(User, "for_login", AsyncMock(return_value=None)),
         patch.object(GitHubClient, "as_app", _review_github_app),
         patch.object(RepoClient, "read_file", read_file),
