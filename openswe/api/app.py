@@ -74,7 +74,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     validate_mda_startup_config()
     validate_slack_startup_config()
     database.require_configured()
-    await database.migrate()
+    try:
+        await database.migrate()
+    except Exception:
+        if ENV.OPENSWE_ENV.optional() != "preview":
+            raise
+        # Labeled PRs come and go from the preview's migrations, so its database can drift
+        # from them; stay up, on the schema it has, so an admin can repair it.
+        logger.exception("Preview database migration failed; starting without it")
     try:
         # The review-style analyzer is gone; its nightly crons would fail every run.
         await delete_analyzer_crons()
