@@ -29,6 +29,7 @@ from openswe.slack.ask import (
 )
 from openswe.slack.breakout import BreakoutCommand, process_slack_breakout, process_slack_web
 from openswe.slack.channels import DIRECTORY_EVENTS, SlackChannel
+from openswe.slack.command_intent import interpret_commands
 from openswe.slack.dm import CONCIERGE_TS, is_dm_channel
 from openswe.slack.failures import (
     SlackRequestError,
@@ -36,7 +37,7 @@ from openswe.slack.failures import (
     answer_slack_request,
     run_slack_task,
 )
-from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
+from openswe.slack.parsed_message import SlackAction
 from openswe.slack.payloads import (
     SlackBlockAction,
     SlackButtonValue,
@@ -725,18 +726,9 @@ async def slack_webhook(
         suggest_review()
         return ignored("Message addressed to another user")
 
-    message = ParsedSlackMessage.parse(text, bot_user_id, common.SLACK_BOT_USERNAME)
-    by_the_way = (
-        message.argument
-        if message.action is SlackAction.BY_THE_WAY
-        and explicit_mention
-        and not (in_code_channel or in_dm_channel or allowed_bot)
-        else None
-    )
     solo_followup = False
     if (
-        by_the_way is None
-        and not is_message_update
+        not is_message_update
         and not in_code_channel
         and not in_dm_channel
         and allowed_bot is None
@@ -778,6 +770,14 @@ async def slack_webhook(
     ):
         return ignored("Not an app mention or DM")
 
+    message = await interpret_commands(text, bot_user_id, common.SLACK_BOT_USERNAME)
+    by_the_way = (
+        message.argument
+        if message.action is SlackAction.BY_THE_WAY
+        and explicit_mention
+        and not (in_code_channel or in_dm_channel or allowed_bot)
+        else None
+    )
     if is_message_update and by_the_way is not None:
         return ignored("By-the-way questions are answered once")
 
@@ -817,6 +817,7 @@ async def slack_webhook(
                 event_id=event_id,
                 user_id=user_id,
                 text=text,
+                command_message=message,
                 attachments=attachments,
                 bot_user_id=bot_user_id,
                 message_update=True,
@@ -927,6 +928,7 @@ async def slack_webhook(
                 event_id=event_id,
                 user_id=user_id,
                 text=text,
+                command_message=message,
                 attachments=attachments,
                 bot_user_id=bot_user_id,
                 thread_id=thread_id,

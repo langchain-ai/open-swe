@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from openswe.input_messages import SystemIdentity
 from openswe.slack.failures import SlackRequestTarget
+from openswe.slack.parsed_message import ParsedSlackMessage
 from openswe.slack.payloads import SlackChannelContext
 from openswe.utils.json_types import JsonObject
 
@@ -18,6 +19,7 @@ class SlackRequest(BaseModel):
     user_id: str = ""
     user_name: str = ""
     text: str = ""
+    command_message: ParsedSlackMessage | None = None
     attachments: list[JsonObject] = Field(default_factory=list)
     bot_user_id: str = ""
     triggering_bot_id: str = ""

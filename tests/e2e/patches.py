@@ -69,6 +69,12 @@ def apply() -> None:
             return FakeScriptedChatModel(script=build_script())
 
         server.make_model = _fake_make_model
+        from langchain_typesafe import TypeSafeClassifier
+
+        from tests.support.jev import deterministic_command_classifier
+
+        os.environ["LANGSMITH_GATEWAY_API_KEY"] = "fake-jev-key"
+        TypeSafeClassifier.ainvoke = deterministic_command_classifier
         # The review scout graph binds its own factory by name.
         from openswe.review_scout import graph as review_scout_graph
 

@@ -3,14 +3,19 @@ import json
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
+import httpx
+import httpx2
 import pytest
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from starlette.requests import Request
 
 from openswe.slack import events as slack_events
 from openswe.slack import failures as slack_failures
 from openswe.slack import routes as slack_routes
+from openswe.slack.ask import SlackAskRequest
+from openswe.slack.parsed_message import BreakoutCommand
 from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.request import SlackRequest
 from openswe.webhooks import common as webhook_common
 
 
@@ -82,6 +87,13 @@ async def _post(
 
 @pytest.fixture(autouse=True)
 def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClaims:
+    for name in (
+        "TYPESAFE_API_KEY",
+        "LANGSMITH_GATEWAY_API_KEY",
+        "LANGSMITH_API_KEY",
+        "LANGCHAIN_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
     slack_events.reset_slack_event_claims()
     claims = _FakeClaims()
     monkeypatch.setattr(
@@ -109,6 +121,7 @@ async def test_mention_and_message_deliveries_start_one_run(
 ) -> None:
     background_tasks = _FakeBackgroundTasks()
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
+    monkeypatch.setattr(slack_routes, "allow_solo_thread_followup", AsyncMock(return_value=False))
 
     first = await _post(_mention_payload("Ev1"), background_tasks)
     slack_events.reset_slack_event_claims()
@@ -422,3 +435,116 @@ async def test_preprocessing_failure_replies_and_does_not_claim_event(
 
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", original_repo_config)
     assert (await _post(_mention_payload(), background_tasks))["status"] == "accepted"
+
+
+@pytest.mark.parametrize(
+    "command", ["/btw", "/breakout", "/breakout:web", "/model:perf", "/workspace"]
+)
+@pytest.mark.parametrize(
+    "outcome", ["deterministic", "agent", "no_command", "low_confidence", "failure"]
+)
+async def test_command_intent_http_to_dispatch(
+    monkeypatch: pytest.MonkeyPatch, command: str, outcome: str
+) -> None:
+    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "fake-key")
+    client_type = httpx2.AsyncClient
+    classifier_requests: list[dict[str, object]] = []
+
+    def fake_jev(request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.read())
+        classifier_requests.append(body)
+        if outcome == "failure":
+            return httpx2.Response(503, json={"error": "unavailable"})
+        answers = {}
+        for question in body["questions"]:
+            choice = "no_command"
+            if question == command:
+                choice = (
+                    f"{outcome}:{command}"
+                    if outcome in {"deterministic", "agent"}
+                    else "no_command"
+                )
+            elif (
+                outcome == "deterministic"
+                and command.startswith(("/btw", "/breakout"))
+                and question in {"/model:perf", "/workspace"}
+            ):
+                choice = f"deterministic:{question}"
+            answers[question] = {
+                "type": "choice",
+                "choice": choice,
+                "confidence": 0.1 if outcome == "low_confidence" else 0.99,
+                "probabilities": {choice: 1.0},
+            }
+        return httpx2.Response(200, json={"model": "jev-1.13.0", "answers": answers})
+
+    monkeypatch.setattr(
+        httpx2,
+        "AsyncClient",
+        lambda **kwargs: client_type(**{**kwargs, "transport": httpx2.MockTransport(fake_jev)}),
+    )
+    received: list[tuple[str, SlackRequest | SlackAskRequest, BreakoutCommand | None]] = []
+
+    async def mention(request: SlackRequest, repo: object) -> None:
+        received.append(("agent", request, None))
+
+    async def ask(request: SlackAskRequest) -> None:
+        received.append(("/btw", request, None))
+
+    async def breakout(request: SlackRequest, parsed: BreakoutCommand, repo: object) -> None:
+        received.append(("/breakout", request, parsed))
+
+    async def web(request: SlackRequest, parsed: BreakoutCommand, repo: object) -> None:
+        received.append(("/breakout:web", request, parsed))
+
+    monkeypatch.setattr(slack_routes.service, "process_slack_mention", mention)
+    monkeypatch.setattr(slack_routes, "process_slack_ask", ask)
+    monkeypatch.setattr(slack_routes, "process_slack_breakout", breakout)
+    monkeypatch.setattr(slack_routes, "process_slack_web", web)
+    payload = _mention_payload()
+    token = "/workspace:infra" if command == "/workspace" else command
+    options = "/model:perf /workspace:infra " if command.startswith(("/btw", "/breakout")) else ""
+    text = f"<@BOT> {options}{token} investigate this"
+    payload["event"]["text"] = text
+    app = FastAPI()
+    app.include_router(slack_routes.router)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post("/webhooks/slack", json=payload)
+        duplicate = await client.post("/webhooks/slack", json=payload)
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+    assert duplicate.json()["status"] == "ignored"
+    assert len(received) == 1
+    route, request, parsed = received[0]
+    action = command.startswith(("/btw", "/breakout"))
+    assert route == (command if outcome == "deterministic" and action else "agent")
+    if isinstance(request, SlackAskRequest):
+        assert request.question == "investigate this"
+    elif outcome == "deterministic" and action:
+        assert parsed is not None
+        assert parsed.instruction == "investigate this"
+        assert parsed.options == "/model:perf /workspace:infra"
+        assert parsed.workspace == "infra"
+    elif outcome == "deterministic":
+        decision = request.command_message
+        assert decision is not None
+        assert decision.action is None
+        assert decision.performance_model == (command == "/model:perf")
+        assert decision.workspace == ("infra" if command == "/workspace" else None)
+        assert decision.without(performance_model=True, workspace=True) == "<@BOT> investigate this"
+    else:
+        assert request.text == text
+        decision = request.command_message
+        assert decision is not None
+        assert decision.action is None
+        assert not decision.performance_model
+        assert decision.workspace is None
+        assert decision.without(performance_model=True, workspace=True) == text
+    assert classifier_requests
+    state = json.loads(classifier_requests[0]["state"])
+    assert state["message"] == text
+    assert "def _leading_commands(" in state["python_rules"]
+    assert "def from_message(" in state["python_rules"]

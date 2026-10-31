@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 from xml.etree import ElementTree
 
 import pytest
+from langchain_typesafe import TypeSafeClassifier
 
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.run_config import Repo
@@ -23,6 +24,7 @@ from openswe.utils.run_usage import RunUsageSummary
 from openswe.utils.thread_participants import participant_ids
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.support.jev import deterministic_command_classifier
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
@@ -363,6 +365,8 @@ def _setup_slack_mention_fakes(
         runs = _FakeRunsClient()
         threads = _FakeThreadsClientForProcess()
 
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "test-key")
+    monkeypatch.setattr(TypeSafeClassifier, "ainvoke", deterministic_command_classifier)
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
     monkeypatch.setattr(slack_webhooks, "get_langsmith_trace_url", _fake_trace_url)
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")

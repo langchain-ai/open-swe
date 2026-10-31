@@ -125,8 +125,12 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     mention = AsyncMock()
     monkeypatch.setattr(breakout.service, "process_slack_mention", mention)
 
-    request = _request()
-    command = Command("fix it", channel_id=explicit, options="/workspace:other", workspace="other")
+    text = "<@U0BOT> /model:perf /workspace:other /breakout fix it"
+    approved = ParsedSlackMessage.parse(text, "U0BOT")
+    request = _request().model_copy(update={"text": text, "command_message": approved})
+    command = Command(
+        "fix it", channel_id=explicit, options="/model:perf /workspace:other", workspace="other"
+    )
     if email_only:
         request = request.model_copy(update={"thread_id": None})
         command = Command("fix it", channel_id=explicit)
@@ -201,6 +205,13 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
         command.thread_text,
         "100.0",
     )
+    if not email_only:
+        assert sent.command_message is not None
+        assert sent.command_message.text == sent.text
+        assert sent.command_message.performance_model
+        assert sent.command_message.workspace == "other"
+        assert sent.command_message.action is None
+        assert sent.command_message.without(performance_model=True, workspace=True) == "fix it"
     assert sent.breakout_root_suffix == " · <https://slack/p105|(source)> · <@U_ALICE>"
     posted.ephemeral.assert_not_awaited()
 
@@ -243,7 +254,17 @@ async def test_web_breakout_notifies_source_thread_only_after_starting(monkeypat
     reply = AsyncMock()
     monkeypatch.setattr(breakout_links, "post_slack_thread_reply", reply)
 
-    await breakout.process_slack_web(_request(), Command("fix it"), None)
+    text = "<@U0BOT> /model:perf /workspace:other /breakout:web fix it"
+    approved = ParsedSlackMessage.parse(text, "U0BOT")
+    request = _request().model_copy(update={"text": text, "command_message": approved})
+    await breakout.process_slack_web(request, Command.from_message(approved), None)
+    sent = breakout.service.process_slack_web_mention.await_args.args[0]
+    assert sent.command_message is not None
+    assert sent.command_message.text == sent.text
+    assert sent.command_message.performance_model
+    assert sent.command_message.workspace == "other"
+    assert sent.command_message.action is None
+    assert sent.command_message.without(performance_model=True, workspace=True) == "fix it"
 
     if started:
         text = "<@U_ALICE> continued in a <https://dashboard/agents/new|private web breakout>."
