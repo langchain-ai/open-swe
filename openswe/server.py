@@ -176,9 +176,9 @@ from openswe.slack.client import get_slack_user_timezone, remember_slack_user_ti
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.slack.staged_files import deliver_slack_files, slack_files_pending
 from openswe.thread_title import (
-    ANTHROPIC_TITLE_GENERATION_MAX_TOKENS,
-    TITLE_GENERATION_MAX_TOKENS,
     schedule_thread_title_generation,
+    thread_title_kwargs,
+    thread_title_model_spec,
 )
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
@@ -1177,17 +1177,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     @cached_property
     def _title_model(self) -> BaseChatModel:
         turn = self._turn
-        anthropic = turn.title_model_id.startswith("anthropic:")
-        kwargs = provider_model_kwargs(
+        return _make_model_or_defer(
             turn.title_model_id,
-            turn.title_effort,
-            max_tokens=(
-                ANTHROPIC_TITLE_GENERATION_MAX_TOKENS if anthropic else TITLE_GENERATION_MAX_TOKENS
-            ),
+            use_gateway=turn.use_gateway,
+            **thread_title_kwargs(turn.title_model_id, turn.title_effort),
         )
-        if anthropic:
-            kwargs.pop("thinking", None)
-        return _make_model_or_defer(turn.title_model_id, use_gateway=turn.use_gateway, **kwargs)
 
     def _recent_context_audience(self, cfg: RunConfig) -> RecentContextAudience | None:
         if (
@@ -1781,7 +1775,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     model_defaults = settings.default_model_pair("agent")
     routing_defaults = dict(settings.agent_routing_models)
-    title_defaults = settings.default_thread_title_model
     use_gateway = settings.effective_gateway_enabled
     fable_enabled = settings.fable_enabled
 
@@ -1791,7 +1784,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     for route, stored_route in thread_settings.get("routing_models", {}).items():
         if route in routing_defaults:
             routing_defaults[route] = (stored_route["model_id"], stored_route["effort"])
-    title_model_id, title_effort = title_defaults
+    title_model_id, title_effort = thread_title_model_spec(settings)
     logger.info("Using workspace default agent model: model=%s effort=%s", model_id, profile_effort)
 
     adaptive_model_routing = settings.model_routing_enabled if settings else False
@@ -1913,9 +1906,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     subagent_model_id, subagent_effort = gate_fable_model(
         subagent_model_id, subagent_effort, fable_enabled=fable_enabled
-    )
-    title_model_id, title_effort = gate_fable_model(
-        title_model_id, title_effort, fable_enabled=fable_enabled
     )
 
     model_kwargs = provider_model_kwargs(

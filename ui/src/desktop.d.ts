@@ -160,6 +160,8 @@ declare global {
       taskWorkspaces?: boolean
       writeClipboard: (value: string) => Promise<void>
       copyPageLink: () => Promise<void>
+      /** Missing from desktop builds that predate it. */
+      appUrl?: (path: string) => Promise<string>
       onCommand: (callback: (commandId: DesktopCommandId) => void) => () => void
       listProjects: () => Promise<Array<DesktopProject>>
       getProjectBranches: (cwd: string) => Promise<{

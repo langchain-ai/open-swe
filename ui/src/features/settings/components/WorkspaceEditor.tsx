@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import type { ReactNode } from "react"
 import { Input } from "@langchain/macaw-components/Input"
@@ -128,18 +129,26 @@ function SlackChannelRows({
           key={id}
           className="flex items-center justify-between gap-space-3 px-space-2 py-space-1"
         >
-          <MacawLink
-            variant="xs"
-            href={slackChannelHref(id)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={cn(
-              INHERITED_LINK,
-              "min-w-0 truncate text-xs text-primary hover:underline [&>span]:truncate"
-            )}
-          >
-            {channelLabel(id)}
-          </MacawLink>
+          <span className="flex min-w-0 items-center gap-0.5">
+            <MacawLink
+              variant="xs"
+              href={slackChannelHref(id)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={cn(
+                INHERITED_LINK,
+                "min-w-0 truncate text-xs text-primary hover:underline [&>span]:truncate"
+              )}
+            >
+              {channelLabel(id)}
+            </MacawLink>
+            <CopyIconButton
+              copy={slackChannelHref(id)}
+              label="Copy Slack channel link"
+              size="xs"
+              className="shrink-0"
+            />
+          </span>
           <label className="flex shrink-0 items-center gap-space-2 text-xs text-secondary">
             Kitchen
             <Switch

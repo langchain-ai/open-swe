@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { XIcon } from "@langchain/macaw-components/icons"
 import { Text } from "@langchain/macaw-components/Text"
@@ -92,18 +93,26 @@ function CheckRow({ check }: { check: PreviewCheck }) {
       </span>
       <span className="min-w-0 flex-1 truncate text-primary">
         {check.url ? (
-          <MacawLink
-            variant="xs"
-            className={cn(
-              INHERITED_LINK,
-              "max-w-full hover:underline [&>span]:truncate"
-            )}
-            href={check.url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {check.name}
-          </MacawLink>
+          <span className="group/check-link inline-flex max-w-full items-center gap-0.5">
+            <MacawLink
+              variant="xs"
+              className={cn(
+                INHERITED_LINK,
+                "min-w-0 hover:underline [&>span]:truncate"
+              )}
+              href={check.url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {check.name}
+            </MacawLink>
+            <CopyIconButton
+              copy={check.url}
+              label="Copy check link"
+              size="xs"
+              className="shrink-0 opacity-0 group-focus-within/check-link:opacity-100 group-hover/check-link:opacity-100"
+            />
+          </span>
         ) : (
           check.name
         )}
@@ -348,15 +357,22 @@ function Conversation({
             </Button>
           )}
           {thread.url && (
-            <Button
-              size="xs"
-              color="secondary"
-              variant="plain"
-              leftDecorator={GithubLogoIcon}
-              as={<a href={thread.url} target="_blank" rel="noreferrer" />}
-            >
-              Reply
-            </Button>
+            <>
+              <Button
+                size="xs"
+                color="secondary"
+                variant="plain"
+                leftDecorator={GithubLogoIcon}
+                as={<a href={thread.url} target="_blank" rel="noreferrer" />}
+              >
+                Reply
+              </Button>
+              <CopyIconButton
+                copy={thread.url}
+                label="Copy GitHub link"
+                size="xs"
+              />
+            </>
           )}
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { parseGitHubPullRequestUrl } from "./PullRequestPreview"
+import { parseGitHubPullRequestUrl } from "./threadPullRequest"
 
 describe("parseGitHubPullRequestUrl", () => {
   it("parses GitHub pull request links anywhere in text renderers", () => {

@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Checkbox } from "@langchain/macaw-components/Checkbox"
 import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
@@ -7,7 +8,7 @@ import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 
 import { cn } from "@/lib/utils"
-import { copyText } from "@/features/reviews/lib/copyText"
+import { copyText } from "@/lib/clipboard"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
 import { AgentMark } from "./AgentMark"
@@ -198,6 +199,13 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
           rel="noreferrer"
         />
       </IconButton>
+      <CopyIconButton
+        copy={githubUrls.file(pr, file.headSha, path)}
+        label={`Copy GitHub link to ${path}`}
+        copyText="Copy GitHub link"
+        className={onHover}
+        {...quiet}
+      />
       <Checkbox
         checked={viewed}
         onCheckedChange={() => markViewed(id)}

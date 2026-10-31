@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import {
   ArrowDownIcon,
@@ -430,12 +431,15 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
       {open && (
         <ul className="mt-space-1 flex flex-col gap-0.5">
           {commits.map((commit) => (
-            <li key={commit.sha}>
+            <li
+              key={commit.sha}
+              className="group/commit-row flex items-center gap-space-1"
+            >
               <a
                 href={commit.html_url}
                 target="_blank"
                 rel="noreferrer"
-                className="group/commit flex items-center gap-space-2 text-secondary hover:text-primary"
+                className="group/commit flex min-w-0 flex-1 items-center gap-space-2 text-secondary hover:text-primary"
               >
                 <span className="min-w-0 flex-1 truncate font-mono text-xxs group-hover/commit:underline">
                   {commit.message.split("\n")[0]}
@@ -444,6 +448,12 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
                   {commit.sha.slice(0, 7)}
                 </span>
               </a>
+              <CopyIconButton
+                copy={commit.html_url}
+                label="Copy commit link"
+                size="xs"
+                className="shrink-0 opacity-0 group-focus-within/commit-row:opacity-100 group-hover/commit-row:opacity-100"
+              />
             </li>
           ))}
         </ul>
@@ -581,7 +591,10 @@ function ItemBlock({
       {showEarlier && (
         <ul className="mt-space-1 flex flex-col gap-0.5 text-xxs text-secondary">
           {earlier.map((said) => (
-            <li key={said.id}>
+            <li
+              key={said.id}
+              className="group/said flex items-center gap-space-1"
+            >
               <MacawLink
                 variant="xs"
                 href={said.html_url}
@@ -594,6 +607,12 @@ function ItemBlock({
               >
                 Said the same {formatWhen(said.created_at)}
               </MacawLink>
+              <CopyIconButton
+                copy={said.html_url}
+                label="Copy GitHub link"
+                size="xs"
+                className="opacity-0 group-focus-within/said:opacity-100 group-hover/said:opacity-100"
+              />
             </li>
           ))}
         </ul>

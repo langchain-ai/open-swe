@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import {
   ArrowLeftIcon,
   CaretRightIcon,
@@ -257,15 +258,18 @@ function BotThreadRow({
         </div>
       </Link>
       {slackUrl ? (
-        <Button
-          as={<a href={slackUrl} target="_blank" rel="noreferrer" />}
-          color="secondary"
-          variant="plain"
-          leftDecorator={SlackLogoIcon}
-          aria-label="Open the Slack thread"
-        >
-          Slack
-        </Button>
+        <>
+          <Button
+            as={<a href={slackUrl} target="_blank" rel="noreferrer" />}
+            color="secondary"
+            variant="plain"
+            leftDecorator={SlackLogoIcon}
+            aria-label="Open the Slack thread"
+          >
+            Slack
+          </Button>
+          <CopyIconButton copy={slackUrl} label="Copy Slack link" size="sm" />
+        </>
       ) : (
         <ArrowSquareOutIcon
           size={16}

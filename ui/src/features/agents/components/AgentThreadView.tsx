@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { LogoMark } from "@/components/Branding"
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import {
@@ -120,16 +121,18 @@ function editedPaths(messages: Array<Message>): Array<string> {
 function CodeChannelLink({ url }: { url?: string | null }) {
   if (!url) return null
   return (
-    <Button
-      as={<a href={url} target="_blank" rel="noreferrer" />}
-      color="secondary"
-      variant="plain"
-      leftDecorator={SlackLogoIcon}
-      rightDecorator={ArrowUpRightIcon}
-      className="mb-space-2 w-fit"
-    >
-      Open in Slack
-    </Button>
+    <div className="mb-space-2 flex w-fit items-center gap-space-1">
+      <Button
+        as={<a href={url} target="_blank" rel="noreferrer" />}
+        color="secondary"
+        variant="plain"
+        leftDecorator={SlackLogoIcon}
+        rightDecorator={ArrowUpRightIcon}
+      >
+        Open in Slack
+      </Button>
+      <CopyIconButton copy={url} label="Copy Slack link" size="sm" />
+    </div>
   )
 }
 
@@ -784,20 +787,27 @@ export function AgentThreadView({
               intent="error"
               action={
                 thread.traceUrl ? (
-                  <Button
-                    as={
-                      <a
-                        href={thread.traceUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      />
-                    }
-                    color="secondary"
-                    variant="underlined"
-                    size="md"
-                  >
-                    Open trace
-                  </Button>
+                  <span className="flex items-center gap-space-1">
+                    <Button
+                      as={
+                        <a
+                          href={thread.traceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        />
+                      }
+                      color="secondary"
+                      variant="underlined"
+                      size="md"
+                    >
+                      Open trace
+                    </Button>
+                    <CopyIconButton
+                      copy={thread.traceUrl}
+                      label="Copy trace link"
+                      size="sm"
+                    />
+                  </span>
                 ) : undefined
               }
             >

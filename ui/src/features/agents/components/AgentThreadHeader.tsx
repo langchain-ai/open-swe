@@ -39,6 +39,7 @@ import {
   useShareThreadWithWorkspace,
   useSidebarPinnedThreads,
   useSidebarRepos,
+  useThreadTitleRegeneration,
 } from "@/features/agents/lib/queries"
 import type { ThreadVisibility } from "@/lib/api"
 import { useSession } from "@/lib/session"
@@ -118,6 +119,8 @@ export function AgentThreadHeader({
   const pinThread = usePinAgentThread()
   const resolveThread = useResolveAgentThread()
   const deleteThread = useDeleteAgentThread()
+  const titleRegeneration = useThreadTitleRegeneration(thread?.id)
+  const regeneratingThisTitle = titleRegeneration.regenerating
   const continuePrivately = useContinueThreadPrivately()
   const shareWithWorkspace = useShareThreadWithWorkspace()
   const session = useSession()
@@ -209,6 +212,8 @@ export function AgentThreadHeader({
           resolveThread.mutate({ threadId: current.id, resolved: !archived })
         }
       }}
+      regeneratingTitle={regeneratingThisTitle}
+      onRegenerateTitle={onRename ? titleRegeneration.regenerate : undefined}
       onDelete={() => setDeleteOpen(true)}
     />
   )
@@ -266,14 +271,21 @@ export function AgentThreadHeader({
                 type="button"
                 aria-label="Rename thread"
                 ref={titleButtonRef}
-                aria-busy={savingTitle !== null}
+                aria-busy={savingTitle !== null || regeneratingThisTitle}
                 disabled={savingTitle !== null}
                 title={savingTitle ?? title}
                 data-no-drag=""
                 className="h-auto min-w-0 shrink justify-start truncate px-space-2 py-space-1 text-left text-inherit hover:bg-surface-level-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:bg-transparent"
                 onClick={startRename}
               >
-                <span className="truncate">{savingTitle ?? title}</span>
+                <span
+                  className={cn(
+                    "truncate",
+                    regeneratingThisTitle && "animate-pulse"
+                  )}
+                >
+                  {savingTitle ?? title}
+                </span>
               </Button>
             ) : (
               <span className="min-w-0 truncate" title={title}>

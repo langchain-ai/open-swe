@@ -21095,6 +21095,56 @@
         ]
       }
     },
+    "/dashboard/api/threads/{thread_id}/regenerate-title": {
+      "post": {
+        "operationId": "api_regenerate_thread_title_dashboard_api_threads__thread_id__regenerate_title_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Regenerate Thread Title Dashboard Api Threads  Thread Id  Regenerate Title Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Regenerate Thread Title",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
     "/dashboard/api/threads/{thread_id}/resolve": {
       "post": {
         "operationId": "api_resolve_thread_dashboard_api_threads__thread_id__resolve_post",

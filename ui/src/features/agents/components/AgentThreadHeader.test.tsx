@@ -26,6 +26,10 @@ vi.mock("@/features/agents/lib/queries", () => ({
   useDeleteAgentThread: () => ({ isPending: false, mutate: vi.fn() }),
   useContinueThreadPrivately: () => ({ isPending: false, mutate: vi.fn() }),
   useShareThreadWithWorkspace: () => ({ isPending: false, mutate: vi.fn() }),
+  useThreadTitleRegeneration: () => ({
+    regenerating: false,
+    regenerate: vi.fn(),
+  }),
 }))
 
 const title = "Show the thread title"

@@ -15,6 +15,7 @@ import {
   HoverCardTrigger,
 } from "@langchain/macaw-components/HoverCard"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 import { ArchiveIcon } from "@phosphor-icons/react/dist/ssr/Archive"
@@ -46,13 +47,21 @@ import type {
 } from "@/features/agents/lib/types"
 import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
+import { OpenPullRequestButton } from "@/features/agents/components/OpenPullRequestButton"
+import {
+  SELECTABLE_ROW_ATTRIBUTE,
+  SidebarBulkMenuItems,
+  useSidebarSelection,
+} from "@/features/agents/components/SidebarSelection"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
+import { threadPullRequest } from "@/features/agents/lib/threadPullRequest"
 import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
   markAgentThreadViewed,
   markReviewViewed,
   useDeleteAgentThread,
+  useThreadTitleRegeneration,
 } from "@/features/agents/lib/queries"
 import {
   noteReviewOpenedFromSidebar,
@@ -164,6 +173,11 @@ function openContextMenuFromKeyboard(
   )
 }
 
+/** Shift-click extends the selection; without this it also selects the titles' text. */
+function keepTextUnselectedOnShiftClick(event: React.MouseEvent) {
+  if (event.shiftKey) event.preventDefault()
+}
+
 /** Pixels per second every title travels at, whatever its length. */
 const MARQUEE_SPEED = 45
 /** Keeps a barely-overflowing title from flicking past in a few frames. */
@@ -231,11 +245,13 @@ function SidebarRowTitle({
 function sidebarRowClassName({
   compact,
   active,
+  selected = false,
   paddingLeft,
   archived,
 }: {
   compact: boolean
   active: boolean
+  selected?: boolean
   paddingLeft: string
   archived: boolean
 }): string {
@@ -247,9 +263,10 @@ function sidebarRowClassName({
     archived && "opacity-55",
     compact ? "h-7 gap-space-2" : "h-8",
     "text-primary",
-    active
+    active || selected
       ? "bg-selected group-hover/row:bg-selected-hover"
-      : "group-hover/row:bg-surface-level-2-hover"
+      : "group-hover/row:bg-surface-level-2-hover",
+    selected && "ring-brand ring-1 ring-inset"
   )
 }
 
@@ -411,6 +428,13 @@ export function SidebarThreadRow({
 }) {
   const queryClient = useQueryClient()
   const deleteThread = useDeleteAgentThread()
+  const { regenerating, regenerate: regenerateTitle } =
+    useThreadTitleRegeneration(item.id)
+  const selection = useSidebarSelection()
+  const selected = Boolean(selection?.selected.has(item.key))
+  const bulkMenu = selected && (selection?.selected.size ?? 0) > 1
+  useEffect(() => selection?.register(item), [selection, item])
+  const pullRequest = threadPullRequest(item.thread)
   const worktreeThread = useLocalThread(item.id)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
@@ -488,7 +512,7 @@ export function SidebarThreadRow({
   }
 
   const handleNavigate = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (contextMenuOpen) {
+    if (contextMenuOpen || selection?.handleClick(event, item)) {
       event.preventDefault()
       return
     }
@@ -552,8 +576,10 @@ export function SidebarThreadRow({
         </span>
       )}
       <SidebarRowTitle marquee={marquee} title={item.title} />
+      {selected && <span className="sr-only">Selected</span>}
 
       <span className="flex shrink-0 items-center gap-space-2 group-hover/row:hidden">
+        {regenerating && <RunningIndicator label="Regenerating title" />}
         {item.status === "error" && <ErrorIndicator label="Thread error" />}
         {thread.automationActionPosted && (
           <SlackLogoIcon
@@ -594,6 +620,12 @@ export function SidebarThreadRow({
       </span>
 
       <span className="-mr-[3px] hidden shrink-0 items-center gap-0.5 group-hover/row:flex">
+        {pullRequest && !item.reviewPage && (
+          <OpenPullRequestButton
+            pullRequest={pullRequest}
+            onNavigate={onNavigate}
+          />
+        )}
         <IconButton
           icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
           label={pinned ? "Unpin thread" : "Pin thread"}
@@ -617,6 +649,7 @@ export function SidebarThreadRow({
   const rowClassName = sidebarRowClassName({
     compact,
     active: rowIsActive,
+    selected,
     paddingLeft:
       hasSubagents || workers.length > 0
         ? indent
@@ -637,6 +670,7 @@ export function SidebarThreadRow({
         handleNavigate(event)
       }}
       onKeyDown={openContextMenuFromKeyboard}
+      onMouseDown={keepTextUnselectedOnShiftClick}
       className={rowClassName}
     >
       {rowContent}
@@ -647,6 +681,7 @@ export function SidebarThreadRow({
       params={{ threadId: item.id }}
       onClick={handleNavigate}
       onKeyDown={openContextMenuFromKeyboard}
+      onMouseDown={keepTextUnselectedOnShiftClick}
       className={rowClassName}
     >
       {rowContent}
@@ -658,6 +693,7 @@ export function SidebarThreadRow({
       <ContextMenu onOpenChange={setContextMenuOpen}>
         <ContextMenuTrigger asChild>
           <div
+            {...{ [SELECTABLE_ROW_ATTRIBUTE]: item.key }}
             className={cn(
               "group/row relative mb-0.5",
               isDeleting && "opacity-50"
@@ -668,20 +704,27 @@ export function SidebarThreadRow({
             <RowHoverCard
               trigger={link}
               card={<ThreadHoverCard item={item} live={live} />}
+              suppressed={contextMenuOpen}
             />
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="min-w-[10rem]">
-          <ThreadMenuItems
-            menu="context"
-            thread={thread}
-            pinned={pinned}
-            archived={archived}
-            isDeleting={isDeleting}
-            onTogglePin={onTogglePin}
-            onToggleArchived={onToggleArchived}
-            onDelete={() => setDeleteOpen(true)}
-          />
+          {bulkMenu ? (
+            <SidebarBulkMenuItems menu="context" />
+          ) : (
+            <ThreadMenuItems
+              menu="context"
+              thread={thread}
+              pinned={pinned}
+              archived={archived}
+              isDeleting={isDeleting}
+              regeneratingTitle={regenerating}
+              onTogglePin={onTogglePin}
+              onToggleArchived={onToggleArchived}
+              onRegenerateTitle={regenerateTitle}
+              onDelete={() => setDeleteOpen(true)}
+            />
+          )}
         </ContextMenuContent>
       </ContextMenu>
       {hasSubagents && !subagentsCollapsed && (
@@ -807,12 +850,19 @@ function SidebarSubagentRow({
 function RowHoverCard({
   trigger,
   card,
+  suppressed = false,
 }: {
   trigger: React.ReactElement
   card: React.ReactNode
+  /** Kept shut while the row's context menu is open, which it would cover. */
+  suppressed?: boolean
 }) {
   return (
-    <HoverCard openDelay={500} closeDelay={100}>
+    <HoverCard
+      openDelay={500}
+      closeDelay={100}
+      open={suppressed ? false : undefined}
+    >
       <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
       <HoverCardContent
         side="right"
@@ -868,16 +918,24 @@ function ThreadHoverCard({
         </div>
       )}
       {item.pr && (
-        <a
-          href={item.pr.url}
-          target="_blank"
-          rel="noreferrer"
-          onClick={(event) => event.stopPropagation()}
-          className="pointer-events-auto -mx-space-1 flex min-w-0 items-center gap-space-2 rounded-md px-space-1 py-0.5 text-secondary hover:bg-surface-level-1-hover hover:text-primary"
-        >
-          <PullRequestIcon state={item.pr.state} live={live} />
-          <span className="min-w-0 truncate text-xxs">{item.pr.title}</span>
-        </a>
+        <div className="-mx-space-1 flex min-w-0 items-center gap-0.5">
+          <a
+            href={item.pr.url}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(event) => event.stopPropagation()}
+            className="pointer-events-auto flex min-w-0 flex-1 items-center gap-space-2 rounded-md px-space-1 py-0.5 text-secondary hover:bg-surface-level-1-hover hover:text-primary"
+          >
+            <PullRequestIcon state={item.pr.state} live={live} />
+            <span className="min-w-0 truncate text-xxs">{item.pr.title}</span>
+          </a>
+          <CopyIconButton
+            copy={item.pr.url}
+            label="Copy PR link"
+            size="xs"
+            className="pointer-events-auto shrink-0"
+          />
+        </div>
       )}
     </div>
   )

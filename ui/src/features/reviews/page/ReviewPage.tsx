@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Button } from "@langchain/macaw-components/Button"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -193,6 +194,11 @@ function PullRequestUnavailable({
         >
           Try it on GitHub
         </Button>
+        <CopyIconButton
+          copy={githubUrls.pullRequest(pr)}
+          label="Copy GitHub link"
+          size="sm"
+        />
       </div>
     </div>
   )

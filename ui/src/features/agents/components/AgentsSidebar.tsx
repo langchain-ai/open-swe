@@ -49,6 +49,10 @@ import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import { SidebarNav } from "@/features/agents/components/SidebarNav"
 import {
+  SidebarSelectionBar,
+  SidebarSelectionProvider,
+} from "@/features/agents/components/SidebarSelection"
+import {
   SidebarThreadRow,
   SidebarConversationRow,
 } from "@/features/agents/components/SidebarThreadRow"
@@ -952,6 +956,7 @@ export function AgentsSidebar({
           )}
         </div>
       </div>
+      {!agentWorkspaceEnabled && <SidebarSelectionBar />}
       <div className="flex items-center gap-space-2 p-space-2">
         <div className="min-w-0 flex-1">
           {user ? (
@@ -1444,11 +1449,13 @@ export function AgentsShell({
       <SidebarLayoutProvider value={layout}>
         <TooltipProvider delayDuration={500} skipDelayDuration={100}>
           <div className="agents-ui flex h-svh overflow-hidden bg-surface-level-1">
-            <AgentsSidebar
-              user={user}
-              activeThreadId={activeThreadId}
-              layout={layout}
-            />
+            <SidebarSelectionProvider activeThreadId={activeThreadId}>
+              <AgentsSidebar
+                user={user}
+                activeThreadId={activeThreadId}
+                layout={layout}
+              />
+            </SidebarSelectionProvider>
             <main className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1">
               {children}
             </main>

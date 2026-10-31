@@ -16,6 +16,11 @@ export function reviewPageRoute(review: ReviewPageRef) {
   } as const
 }
 
+/** The review page's path, for links that leave the router (a copied URL). */
+export function reviewPagePath(review: ReviewPageRef): string {
+  return `/agents/reviews/${encodeURIComponent(review.owner)}/${encodeURIComponent(review.repo)}/${review.number}`
+}
+
 function reviewKey(review: ReviewPageRef): string {
   return `${review.owner}/${review.repo}#${review.number}`.toLowerCase()
 }

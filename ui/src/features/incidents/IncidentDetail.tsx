@@ -233,9 +233,11 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                 {label}
               </Button>
             ))}
+          <span aria-hidden className="ml-auto" />
           <ExternalLink
             href={incident.slack_url}
-            className="ml-auto text-xs font-medium text-secondary"
+            className="text-xs font-medium text-secondary"
+            copyLabel="Copy Slack link"
           >
             Open in Slack
           </ExternalLink>
@@ -243,6 +245,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
             <ExternalLink
               href={trace_url}
               className="text-xs font-medium text-secondary"
+              copyLabel="Copy trace link"
             >
               Open trace
             </ExternalLink>
@@ -397,6 +400,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                             <ExternalLink
                               href={evidence.url}
                               className="text-sm leading-relaxed"
+                              copyLabel="Copy evidence link"
                             >
                               {sourceLabel(
                                 evidence.summary,

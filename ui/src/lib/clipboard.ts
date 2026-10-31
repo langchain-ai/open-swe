@@ -13,6 +13,27 @@ export function copyPageLink(): void {
   )
 }
 
+/** A shareable URL for an in-app `path`; the desktop app maps it onto its backend's origin. */
+export function appUrl(path: string): Promise<string> {
+  const desktop = window.openSweDesktop
+  return desktop?.appUrl
+    ? desktop.appUrl(path)
+    : Promise.resolve(new URL(path, window.location.origin).href)
+}
+
+/** Copies shareable links to in-app `paths`, one per line. */
+export function copyAppLinks(
+  paths: ReadonlyArray<string>,
+  copied = "Copied the link"
+): void {
+  reportCopy(
+    Promise.all(paths.map(appUrl)).then((urls) =>
+      navigator.clipboard.writeText(urls.join("\n"))
+    ),
+    copied
+  )
+}
+
 function reportCopy(pending: Promise<void>, copied: string): void {
   pending.then(
     () => toast.success(copied),

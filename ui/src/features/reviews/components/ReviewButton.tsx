@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { CaretDownIcon, CheckIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { ButtonGroup } from "@langchain/macaw-components/ButtonGroup"
@@ -329,14 +330,21 @@ export function ReviewButton({
                   ? `Your draft is preserved.${submit.error.status === 404 ? " Check that you can access this pull request on GitHub." : " Address the error before submitting again."}`
                   : "Your draft is preserved. Check GitHub before submitting again; the review may already have been posted."}
               </Text>
-              <Link
-                variant="xs"
-                href={`https://github.com/${owner}/${repo}/pull/${number}#pullrequestreview`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Check review on GitHub
-              </Link>
+              <span className="flex items-center gap-0.5">
+                <Link
+                  variant="xs"
+                  href={`https://github.com/${owner}/${repo}/pull/${number}#pullrequestreview`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Check review on GitHub
+                </Link>
+                <CopyIconButton
+                  copy={`https://github.com/${owner}/${repo}/pull/${number}#pullrequestreview`}
+                  label="Copy GitHub link"
+                  size="xs"
+                />
+              </span>
             </div>
           )}
           <div className="mt-space-3 flex items-center justify-end gap-space-2">

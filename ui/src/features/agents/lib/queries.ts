@@ -41,7 +41,7 @@ import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { api } from "@/lib/api"
-import { optimisticUpdate } from "@/lib/optimistic"
+import { optimisticUpdate, usePendingVariables } from "@/lib/optimistic"
 import { reportError } from "@/lib/errorReporting"
 
 export const agentThreadKeys = {
@@ -447,6 +447,7 @@ export const agentScheduleKeys = {
 export const agentMutationKeys = {
   pin: ["agent-threads", "pin"] as const,
   resolve: ["agent-threads", "resolve"] as const,
+  regenerateTitle: ["agent-threads", "regenerate-title"] as const,
   updateSchedule: ["agent-schedules", "update"] as const,
   workflowDecision: (threadId: string) =>
     ["workflow-approvals", threadId, "decision"] as const,
@@ -1509,6 +1510,34 @@ export function useRenameAgentThread() {
     onSuccess: (thread) => storeAgentThread(queryClient, thread),
     onSettled: () => invalidateAgentThreadLists(queryClient),
   })
+}
+
+/** Titles a thread afresh from its messages; the new title is only known once it answers. */
+export function useRegenerateAgentThreadTitle() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationKey: agentMutationKeys.regenerateTitle,
+    mutationFn: (vars: { threadId: string }) =>
+      agentsApi.regenerateThreadTitle(vars.threadId),
+    meta: { errorTitle: "Couldn't regenerate the title" },
+    onSuccess: (thread) => storeAgentThread(queryClient, thread),
+    onSettled: () => invalidateAgentThreadLists(queryClient),
+  })
+}
+
+/** Regenerates one thread's title, and whether a regeneration of it is still running from anywhere. */
+export function useThreadTitleRegeneration(threadId: string | undefined) {
+  const mutation = useRegenerateAgentThreadTitle()
+  const regenerating = usePendingVariables<{ threadId: string }>(
+    agentMutationKeys.regenerateTitle
+  ).some((vars) => vars.threadId === threadId)
+  return {
+    regenerating,
+    regenerate: () => {
+      if (threadId && !regenerating) mutation.mutate({ threadId })
+    },
+  }
 }
 
 export function useResolveAgentThread() {

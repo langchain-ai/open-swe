@@ -8,10 +8,13 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal
 
 from fastapi import HTTPException
+from langchain_core.messages import convert_to_messages
 from langgraph.constants import END
 from langgraph_sdk.errors import NotFoundError
 
 from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
+from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.dispatch import thread_workspace
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from openswe.github.pull_request_context import PullRequestFixScope, get_pull_request_context
@@ -21,6 +24,7 @@ from openswe.message_queue import QueuedMessage, QueuedPreview
 from openswe.review.session import ReviewSession, ReviewSessionMetadata
 from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.slack.client import parse_github_pr_url
+from openswe.thread_title import generate_thread_title, thread_title_input, thread_title_model
 from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.blobs import copy_thread_blobs, referenced_blob_digests
 from openswe.threads.creation import TITLE_LOCKED_KEY, create_thread
@@ -38,6 +42,7 @@ from openswe.threads.runs import (
     QUEUED_BY_KEY,
     dispatch_pending_follow_ups,
 )
+from openswe.threads.store import THREADS
 from openswe.threads.summary import (
     _SANDBOX_CREATING_SENTINEL,
     DASHBOARD_SOURCE,
@@ -433,6 +438,35 @@ async def rename_dashboard_thread(
         "metadata": {**thread_metadata(thread), **metadata_update},
     }
     return await _thread_summary(thread)
+
+
+async def regenerate_dashboard_thread_title(
+    thread_id: str, login: str, *, email: str | None = None
+) -> dict[str, Any]:
+    """Title the thread afresh from everything people have asked in it so far."""
+    metadata = thread_metadata(await _authorized_thread(thread_id, login, email=email))
+    state = await THREADS.state(thread_id)
+    values = state.get("values") if state else None
+    raw = values.get("messages") if isinstance(values, Mapping) else None
+    asks = [
+        message
+        for message in (raw if isinstance(raw, list) else [])
+        if isinstance(message, dict) and message.get("type") == "human"
+    ]
+    conversation = thread_title_input(convert_to_messages(asks))
+    if conversation is None:
+        raise HTTPException(409, "this thread has no messages to title it from")
+    settings = await cached_workspace_settings(thread_workspace(metadata))
+    try:
+        title = await generate_thread_title(conversation, thread_title_model(settings))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Could not regenerate thread title", extra={"thread_id": thread_id}, exc_info=True
+        )
+        raise HTTPException(502, "failed to generate a title") from exc
+    if not title:
+        raise HTTPException(502, "the title model returned no title")
+    return await rename_dashboard_thread(thread_id, login, title=title, email=email)
 
 
 # Thread settings that carry over into a private continuation. Source linkage

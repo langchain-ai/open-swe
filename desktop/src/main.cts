@@ -274,6 +274,16 @@ function requireTrustedDesktopIpc(event) {
   if (!isAppUrl(senderUrl)) throw new Error("Forbidden");
 }
 
+/** The backend's own URL for a page of the app, which is what a person can share. */
+function backendLink(page: URL) {
+  if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
+  const target = new URL(backendUrl);
+  target.pathname = page.pathname;
+  target.search = page.search;
+  target.hash = page.hash;
+  return target.toString();
+}
+
 function projectsPath() {
   return path.join(app.getPath("userData"), "desktop-projects.json");
 }
@@ -619,13 +629,14 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:copy-page-link", (event) => {
     requireTrustedDesktopIpc(event);
-    if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
-    const source = new URL(event.sender.getURL());
-    const target = new URL(backendUrl);
-    target.pathname = source.pathname;
-    target.search = source.search;
-    target.hash = source.hash;
-    clipboard.writeText(target.toString());
+    clipboard.writeText(backendLink(new URL(event.sender.getURL())));
+  });
+  ipcMain.handle("desktop:app-url", (event, appPath: unknown) => {
+    requireTrustedDesktopIpc(event);
+    if (typeof appPath !== "string" || !appPath.startsWith("/")) {
+      throw new Error("Expected an app path");
+    }
+    return backendLink(new URL(appPath, "open-swe://app"));
   });
   ipcMain.handle("desktop:version", (event) => {
     requireTrustedDesktopIpc(event);

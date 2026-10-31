@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Button } from "@langchain/macaw-components/Button"
 import { CaretDownIcon } from "@langchain/macaw-components/icons"
@@ -158,6 +159,11 @@ function Description({
         >
           opened this {createdAt && <RelativeTimestamp value={createdAt} />}
         </MacawLink>
+        <CopyIconButton
+          copy={githubUrls.pullRequest(pr)}
+          label="Copy GitHub link"
+          size="xs"
+        />
         <span className="ml-auto">{labels}</span>
       </header>
       <div

@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { QueryClientProvider } from "@tanstack/react-query"
 import {
   cleanup,
@@ -104,7 +105,11 @@ function mount(component: React.ReactNode) {
     queries: { retry: false },
     mutations: { retry: false },
   })
-  render(<QueryClientProvider client={client}>{component}</QueryClientProvider>)
+  render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>{component}</TooltipProvider>
+    </QueryClientProvider>
+  )
   return client
 }
 

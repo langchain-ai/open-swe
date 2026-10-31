@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import { CircleIcon } from "@phosphor-icons/react/dist/ssr/Circle"
@@ -100,14 +101,17 @@ export function ExternalLink({
   href,
   children,
   className,
+  copyLabel,
 }: {
   href: string | null | undefined
   children: ReactNode
   className?: string
+  /** Offers a button beside the link that copies it, named this. */
+  copyLabel?: string
 }) {
   if (!href || !/^https?:\/\//i.test(href))
     return <span className={className}>{children}</span>
-  return (
+  const link = (
     <MacawLink
       variant="xs"
       href={href}
@@ -119,6 +123,13 @@ export function ExternalLink({
     >
       {children}
     </MacawLink>
+  )
+  if (!copyLabel) return link
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      {link}
+      <CopyIconButton copy={href} label={copyLabel} size="xs" />
+    </span>
   )
 }
 
