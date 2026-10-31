@@ -321,7 +321,7 @@ async def test_a_delivery_asked_about_again_is_logged_and_wakes_threads_once(
         {
             "type": "http",
             "method": "POST",
-            "path": "/linear/channel/events",
+            "path": "/mda/channel-api/record_linear_delivery",
             "query_string": b"",
             "headers": [(b"content-type", b"application/json")],
         }

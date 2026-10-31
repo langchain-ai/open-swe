@@ -34,7 +34,6 @@ from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata, channel_of
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
-from openswe.linear.notifications import post_linear_notification
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.review.run_failure import ReviewRunFailure
 from openswe.session_cost import schedule_session_cost_refresh
@@ -225,13 +224,6 @@ async def _post_failure_reply(
                 blocks=blocks,
                 agent_thread_id=thread_id,
                 notice=notice,
-            )
-        return False
-
-    if source == "linear":
-        if ctx.linear_issue and ctx.linear_issue.id:
-            return await post_linear_notification(
-                ctx.linear_issue.id, _failure_text(status, reason_code=reason_code)
             )
         return False
 
