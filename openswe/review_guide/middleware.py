@@ -107,6 +107,21 @@ class ReviewGuideMiddleware(OpenSWEMiddleware):
                 "Could not set a review walkthrough channel's context bar",
                 extra={"agent_thread_id": self._thread_id, "slack_error": str(exc)},
             )
+        async with ReviewGuideSession.locked(self._thread_id):
+            session = await ReviewGuideSession.get(self._thread_id)
+            if session is None or session.closed:
+                return None
+            return await self._prepare_walk(session, checkout, head, state, rules)
+
+    async def _prepare_walk(
+        self,
+        session: ReviewGuideSession,
+        checkout: PinnedCheckout,
+        head: PullRequestHead,
+        state: AgentState,
+        rules: str,
+    ) -> dict[str, object]:
+        pr = session.pull_request
         await resume(session)
         try:
             workspace = await PlanWorkspace.open(pr, checkout)

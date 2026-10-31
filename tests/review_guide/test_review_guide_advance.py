@@ -1,6 +1,7 @@
+import asyncio
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import uuid7
 
 import pytest
@@ -13,6 +14,8 @@ from openswe.walkthrough.diff import DiffIndex
 from openswe.walkthrough.lines import LineSet
 from openswe.walkthrough.plan import Plan, PlanChunk
 from openswe.walkthrough.record import Walkthrough
+
+pytestmark = pytest.mark.usefixtures("registry_db")
 
 DIFF = (
     "diff --git a/a.py b/a.py\nnew file mode 100644\n--- /dev/null\n+++ b/a.py\n"
@@ -32,7 +35,7 @@ def _plan(chunks: int) -> Plan:
 
 @dataclass
 class _Session:
-    walk: Walk
+    _walk: Walk
     thread_id: str = "thread-1"
     slack_channel_id: str = "C1"
     closed: bool = False
@@ -42,8 +45,12 @@ class _Session:
         default_factory=lambda: SimpleNamespace(id=uuid7(), owner="o", repo="r", number=1)
     )
 
+    @property
+    def walk(self) -> Walk:
+        return self._walk.model_copy(deep=True)
+
     async def save_walk(self, walk: Walk) -> None:
-        self.walk = walk
+        self._walk = walk.model_copy(deep=True)
 
     async def mark_seen(self, head_sha: str, merge_base_sha: str, lines: LineSet) -> None:  # noqa: ARG002
         self.seen = self.seen | lines
@@ -52,21 +59,11 @@ class _Session:
         return self.seen
 
 
-def _client(*active_runs: str) -> MagicMock:
-    client = MagicMock()
-    client.runs.list = AsyncMock(
-        side_effect=lambda _thread, status, limit: (  # noqa: ARG005
-            [{"run_id": run} for run in active_runs] if status == "running" else []
-        )
-    )
-    return client
-
-
 def _session(monkeypatch: pytest.MonkeyPatch, plan: Plan, *, complete: bool) -> _Session:
     walk = Walk(head_sha="head-1")
     walk.on_screen = Reader.of(walk, plan, LineSet()).show(plan.chunks[0])
     walk.on_screen.message_ts = "1.0"
-    session = _Session(walk=walk)
+    session = _Session(_walk=walk)
     stored = Walkthrough(
         pull_request_id=session.pull_request.id,
         head_sha="head-1",
@@ -84,7 +81,6 @@ def _session(monkeypatch: pytest.MonkeyPatch, plan: Plan, *, complete: bool) -> 
     monkeypatch.setattr(advance_module, "refresh_progress", AsyncMock())
     monkeypatch.setattr(advance_module, "post_with_buttons", AsyncMock(return_value="2.0"))
     monkeypatch.setattr(advance_module, "dispatch_guide_run", AsyncMock())
-    monkeypatch.setattr(advance_module, "langgraph_client", _client)
     return session
 
 
@@ -119,16 +115,58 @@ async def test_looks_good_ahead_of_the_planner_approves_then_hands_the_guide_a_t
     assert dispatch.await_args.kwargs["approve_ts"] == ""
 
 
-async def test_looks_good_during_a_turn_is_recorded_when_its_own_turn_starts(
+async def test_duplicate_and_stale_next_never_approve_the_following_chunk(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session = _session(monkeypatch, _plan(2), complete=False)
-    monkeypatch.setattr(advance_module, "langgraph_client", lambda: _client("r1"))
+    session = _session(monkeypatch, _plan(3), complete=True)
+    retiring = asyncio.Event()
+    proceed = asyncio.Event()
+    duplicate_started = asyncio.Event()
+    reads = 0
+
+    async def for_channel(channel_id: str) -> _Session:  # noqa: ARG001
+        nonlocal reads
+        reads += 1
+        if reads == 3:
+            duplicate_started.set()
+        return session
+
+    monkeypatch.setattr(advance_module.ReviewGuideSession, "for_channel", for_channel)
+
+    async def retire(*args: object) -> None:
+        retiring.set()
+        await proceed.wait()
+
+    monkeypatch.setattr(advance_module, "retire", retire)
+    first = asyncio.create_task(advance_module.advance("C1", "1.0"))
+    await asyncio.wait_for(retiring.wait(), 5)
+    duplicate = asyncio.create_task(advance_module.advance("C1", "1.0"))
+    await asyncio.wait_for(duplicate_started.wait(), 5)
+    proceed.set()
+    await asyncio.gather(first, duplicate)
+    await advance_module.advance("C1", "1.0")
+
+    assert [a.title for a in session.walk.approvals] == ["def one():"]
+    assert session.walk.on_screen is not None
+    assert session.walk.on_screen.title == "def two():"
+    assert len(session.seen) == 1
+    post = advance_module.post_with_buttons
+    assert isinstance(post, AsyncMock)
+    assert post.await_count == 1
+    dispatch = advance_module.dispatch_guide_run
+    assert isinstance(dispatch, AsyncMock)
+    dispatch.assert_not_awaited()
+
+
+async def test_paused_next_does_not_queue_a_stale_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _session(monkeypatch, _plan(2), complete=True)
+    session.paused_message_ts = "pause"
 
     await advance_module.advance("C1", "1.0")
 
-    assert session.walk.on_screen is not None and session.walk.on_screen.message_ts == "1.0"
-    assert len(session.seen) == 0
+    assert not session.walk.approvals
     dispatch = advance_module.dispatch_guide_run
-    assert isinstance(dispatch, AsyncMock) and dispatch.await_args is not None
-    assert dispatch.await_args.kwargs["approve_ts"] == "1.0"
+    assert isinstance(dispatch, AsyncMock)
+    dispatch.assert_not_awaited()
