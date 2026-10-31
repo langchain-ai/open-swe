@@ -6,7 +6,6 @@ that gets ahead of the review scout places the next chunk itself with the same
 planning tools the scout uses.
 """
 
-import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import wraps
@@ -16,7 +15,7 @@ from openswe.review_guide.buttons import APPROVE, MARK_READY, NEXT
 from openswe.review_guide.context import GuideContext, GuideUnavailableError
 from openswe.review_guide.github import fetch_head
 from openswe.review_guide.messages import Stage, refresh_progress, retire
-from openswe.review_guide.sessions import GuideMode
+from openswe.review_guide.sessions import GuideMode, ReviewGuideSession
 from openswe.review_guide.walk import OnScreen, Reader, Walk
 from openswe.run_config import RunConfig
 from openswe.slack.code_channels import archive_code_channel, set_session_status_result
@@ -40,9 +39,6 @@ from openswe.walkthrough.record import PlanMovedError
 _ONE_PER_TURN = (
     "you already put something on screen this turn; end your turn and wait for the reader"
 )
-# Each tool reads the whole walk and writes it back, and one model message's tool calls run
-# concurrently, so they take turns per thread or the last write drops the others.
-_WALK_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 def _one_at_a_time[**P](
@@ -51,7 +47,7 @@ def _one_at_a_time[**P](
     @wraps(tool)
     async def serialized(*args: P.args, **kwargs: P.kwargs) -> dict[str, Any]:
         thread_id = RunConfig.from_runtime().thread_id or ""
-        async with _WALK_LOCKS.setdefault(thread_id, asyncio.Lock()):
+        async with ReviewGuideSession.locked(thread_id):
             return await tool(*args, **kwargs)
 
     return serialized

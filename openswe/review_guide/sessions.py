@@ -6,12 +6,13 @@ person and pull request as line ranges at one head, carried to each new head
 with the plan, so a rebase or force-push never asks them to reread it.
 """
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Literal, Self
 from uuid import UUID, uuid7
 
-from sqlalchemy import ForeignKey, Text, func, select, update
+from sqlalchemy import ForeignKey, Text, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
@@ -106,6 +107,17 @@ class ReviewGuideSession(Base):
                 .options(selectinload(cls.pull_request))
                 .where(cls.slack_channel_id == channel_id)
             )
+
+    @classmethod
+    @asynccontextmanager
+    async def locked(cls, thread_id: str) -> AsyncIterator[None]:
+        """Serialize walkthrough transitions across API replicas and model tools."""
+        async with postgres.session() as session:
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                {"key": f"review-guide:{thread_id}"},
+            )
+            yield
 
     async def save_summary_message(self, message_ts: str) -> None:
         self.summary_message_ts = message_ts
