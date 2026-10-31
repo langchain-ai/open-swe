@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
@@ -116,6 +117,78 @@ async def test_merge_requires_github_confirmation(github, status, merged):
         "json": {"sha": "a" * 40, "merge_method": "squash"},
         "max_retries": 0,
     }
+
+
+@pytest.mark.parametrize("method", ["squash", "merge", "rebase"])
+async def test_pending_merge_enables_github_auto_merge(method: str) -> None:
+    requests: list[dict[str, object]] = []
+
+    def github(request: httpx2.Request) -> httpx2.Response:
+        if request.method == "GET":
+            return response({"node_id": "PR_1", "head": {"sha": "a" * 40}})
+        requests.append(json.loads(request.content))
+        return response(
+            {
+                "data": {
+                    "enablePullRequestAutoMerge": {
+                        "pullRequest": {"autoMergeRequest": {"enabledAt": "2026-10-31T00:00:00Z"}}
+                    }
+                }
+            }
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(1)
+        result = await actions.act_on_pull_request(
+            pull,
+            actions.MergeAction(action="merge", sha="a" * 40, merge_method=method, auto_merge=True),
+        )
+    assert result.done
+    assert requests[0]["variables"] == {
+        "input": {"pullRequestId": "PR_1", "mergeMethod": method.upper()}
+    }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"errors": [{"message": "Auto-merge is not allowed"}]},
+        {"data": {"enablePullRequestAutoMerge": {"pullRequest": {"autoMergeRequest": None}}}},
+    ],
+)
+async def test_auto_merge_requires_github_confirmation(payload: dict[str, object]) -> None:
+    def github(request: httpx2.Request) -> httpx2.Response:
+        if request.method == "GET":
+            return response({"node_id": "PR_1", "head": {"sha": "a" * 40}})
+        return response(payload)
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(1)
+        with pytest.raises(HTTPException) as error:
+            await actions.act_on_pull_request(
+                pull,
+                actions.MergeAction(
+                    action="merge", sha="a" * 40, merge_method="merge", auto_merge=True
+                ),
+            )
+    assert error.value.status_code == (422 if "errors" in payload else 502)
+
+
+async def test_auto_merge_refuses_a_changed_head() -> None:
+    def github(request: httpx2.Request) -> httpx2.Response:
+        assert request.method == "GET"
+        return response({"node_id": "PR_1", "head": {"sha": "b" * 40}})
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(1)
+        with pytest.raises(HTTPException, match="head changed") as error:
+            await actions.act_on_pull_request(
+                pull,
+                actions.MergeAction(
+                    action="merge", sha="a" * 40, merge_method="squash", auto_merge=True
+                ),
+            )
+    assert error.value.status_code == 409
 
 
 async def test_squash_merge_sends_the_description_and_commits(github):

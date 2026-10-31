@@ -199,6 +199,7 @@ class OpenPullRequest(BaseModel):
     deletions: int | None = None
     mergeable: bool | None = None
     merge_state: str = "unknown"
+    auto_merge: bool = False
     head_sha: str | None = None
     head_ref: str | None = None
     status_available: bool = False
@@ -652,6 +653,30 @@ class PullRequestClient:
             "PUT", f"repos/{self.repo.full_name}/pulls/{self.number}/merge", json=payload
         )
 
+    async def enable_auto_merge(self, *, sha: str, method: str) -> None:
+        """Enable GitHub's auto-merge for the head the person inspected."""
+        pull = await self.pull()
+        head = pull.get("head")
+        if not isinstance(head, Mapping) or head.get("sha") != sha:
+            raise HTTPException(409, "The PR head changed. Refresh before enabling auto-merge.")
+        node_id = pull.get("node_id")
+        if not isinstance(node_id, str) or not node_id:
+            raise ValueError("GitHub did not return the pull request ID.")
+        data = await self.repo.github.graphql(
+            """
+            mutation EnableAutoMerge($input: EnablePullRequestAutoMergeInput!) {
+              enablePullRequestAutoMerge(input: $input) {
+                pullRequest { autoMergeRequest { enabledAt } }
+              }
+            }
+            """,
+            {"input": {"pullRequestId": node_id, "mergeMethod": method.upper()}},
+        )
+        enabled = data.get("enablePullRequestAutoMerge")
+        updated = enabled.get("pullRequest") if isinstance(enabled, Mapping) else None
+        if not isinstance(updated, Mapping) or not updated.get("autoMergeRequest"):
+            raise ValueError("GitHub did not confirm auto-merge was enabled.")
+
     async def mergeable_pull(self) -> dict[str, Any] | None:
         """Read the pull request, waiting for GitHub to decide whether it merges.
 
@@ -921,6 +946,7 @@ class PullRequestClient:
             deletions=_as_optional_int(source.get("deletions")),
             mergeable=_as_optional_bool(source.get("mergeable")),
             merge_state=_as_str(source.get("mergeable_state"), "unknown"),
+            auto_merge=bool(source.get("auto_merge")),
             status_available=pull is not None,
         )
         if pull is None:

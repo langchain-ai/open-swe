@@ -7,7 +7,14 @@ import httpx2
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
-from openswe.github.http import GITHUB_API_BASE, GITHUB_GRAPHQL, github_request
+from openswe.github.http import (
+    GITHUB_API_BASE,
+    GITHUB_GRAPHQL,
+    GitHubClient,
+    GitHubError,
+    GraphQLError,
+    github_request,
+)
 from openswe.github.pull_request_status import PullRequestClient, pull_request_identity
 from openswe.github.repo_merge_methods import MergeMethod
 from openswe.github.squash_message import GitHubUser, SquashSource
@@ -108,6 +115,7 @@ class MergeAction(_PullRequestActionBase):
     action: Literal["merge"]
     sha: str = Field(pattern=r"^[0-9a-fA-F]{40,64}$")
     merge_method: MergeMethod
+    auto_merge: bool = False
 
     transport_failure: ClassVar[str] = (
         "Could not confirm merge. Refresh to check the PR before retrying."
@@ -118,6 +126,19 @@ class MergeAction(_PullRequestActionBase):
     unconfirmed: ClassVar[str] = "GitHub did not confirm the merge."
 
     async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> None:
+        if self.auto_merge:
+            pull = GitHubClient(client).repo(owner, repo).pull_request(number)
+            try:
+                await pull.enable_auto_merge(sha=self.sha, method=self.merge_method)
+            except GitHubError as exc:
+                raise HTTPException(exc.response.status_code, exc.message) from exc
+            except GraphQLError as exc:
+                raise HTTPException(422, exc.message) from exc
+            except (httpx2.HTTPError, ValueError) as exc:
+                raise HTTPException(
+                    502, "Could not confirm auto-merge. Refresh before retrying."
+                ) from exc
+            return
         payload: dict[str, object] = {"sha": self.sha, "merge_method": self.merge_method}
         if self.merge_method == "squash":
             message = await self._squash_message(client, owner, repo, number)
