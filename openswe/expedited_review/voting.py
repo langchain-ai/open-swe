@@ -167,7 +167,12 @@ async def _mark_ready(approval: HumanReviewRequest, *, voter: Participant) -> Ou
     current = await HumanReviewRequest.get(approval.id)
     if current is None:
         return Outcome(marked, dm_card_success=True)
-    await ReviewCard(current).refresh()
+    card = ReviewCard(current)
+    posted = bool(current.slack_message_ts)
+    await card.refresh()
+    if posted:
+        await card.link_on_github()
+        await card.broadcast_configured()
     return Outcome(marked, dm_card_success=True)
 
 

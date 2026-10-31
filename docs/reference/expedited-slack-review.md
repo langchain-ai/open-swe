@@ -6,7 +6,7 @@ The feature is experimental and off by default.
 ## Summary
 
 The agent posts a tiny PR's full diff in the Slack thread.
-For a draft, the PR's author first marks it ready from an author-only Slack DM.
+For a draft, the PR's author first marks it ready in the original kitchen thread, or from an author-only Slack DM elsewhere.
 Then one person other than the author approves, and the click submits that person's GitHub review at once.
 Once checks and reviews are clean, the agent calls a merge tool that merges.
 The approval survives a later commit only if it leaves the diff shown on the card unchanged.
@@ -46,9 +46,9 @@ The reviewers are already in the Slack thread.
 - The card draws the source diff.
   It draws the test diff too when the change is test-only or test lines are the majority, because otherwise there would be nothing to look at; when tests are the minority of a mostly-source change it names them instead, so the thing being voted on stays readable.
 - A draft stays a draft.
-  **Mark ready for review** is sent by DM to the PR's linked Slack author, rather than an ephemeral thread message.
-  It undrafts the PR with the author's own GitHub token and then opens the shared card for approval.
-  Calling the tool again retries this private prompt.
+  In kitchen-channel threads, **Mark ready for review** is posted in the original thread; elsewhere it is sent by DM to the PR's linked Slack author.
+  Only the author can use it: it undrafts the PR with the author's own GitHub token and then opens the shared card for approval.
+  Calling the tool again retries delivery without duplicating an existing prompt.
   If Slack delivery fails or the author is not linked, the tool reports that they must mark it ready on GitHub; calling the tool again after that opens the existing card for approval.
 - No path on the card is refused for being sensitive (exclusions are, above, because nobody reads them).
   A denylist is incomplete by construction, so it stops nobody deliberate, while matching path segments blocks unrelated files that merely contain a word like `token`.
@@ -60,7 +60,8 @@ The reviewers are already in the Slack thread.
 ### Slack card
 
 PR link, author, the diff as the card draws it, and its status.
-A draft's shared card shows a waiting status and **Dismiss**, never the author-only readiness button; otherwise it has **Approve** and **Dismiss**.
+A draft's kitchen-thread card has **Mark ready for review** and **Dismiss**, with readiness restricted to the author; elsewhere readiness stays in the author DM.
+A ready card has **Approve** and **Dismiss**.
 Once approved, the diff and buttons go and the card says who approved.
 Once merged or cancelled, the whole card becomes one line, such as *Expedited review: merged* or *Expedited review: dismissed by @someone*, and the PR link.
 Reactions are never votes.

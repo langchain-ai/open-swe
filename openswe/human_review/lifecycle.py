@@ -63,6 +63,7 @@ from openswe.slack.thread_owner import wake_thread_owner
 from openswe.threads.pr_fixes import dispatch_pull_request_prompt
 from openswe.users import User
 from openswe.utils.preview import skip_on_preview
+from openswe.workspaces.routing import is_kitchen_channel
 
 logger = logging.getLogger(__name__)
 
@@ -234,14 +235,25 @@ class ReviewCard:
             agent_thread_id=approval.thread_id or None,
         )
 
+    async def readiness_in_thread(self) -> bool:
+        """Whether the draft's author prompt belongs in its kitchen thread."""
+        return bool(self.request.slack_location) and await is_kitchen_channel(
+            self.request.slack_channel_id
+        )
+
     async def prompt_author_ready(self) -> str | None:
-        """Ask only the author to undraft; return a delivery problem, if any."""
+        """Ask the author to undraft; return a delivery problem, if any."""
         self.request = await HumanReviewRequest.get(self.request.id) or self.request
         approval = self.request
         if approval.state != "open" or not approval.awaiting_ready:
             await self.refresh_author_dm(None)
             return None
-        if approval.slack_dm_channel_id and approval.slack_dm_message_ts:
+        in_thread = await self.readiness_in_thread()
+        if (
+            approval.slack_message_ts
+            if in_thread
+            else approval.slack_dm_channel_id and approval.slack_dm_message_ts
+        ):
             return None
         pr = approval.pull_request
         author = (
@@ -264,6 +276,21 @@ class ReviewCard:
             diff_image_id=approval.slack_diff_file_id or None,
         )
         text, blocks = await self._warn_target((text, blocks))
+        if in_thread:
+            try:
+                approval.slack_message_ts = await post_slack_thread_reply_with_ts(
+                    approval.slack_channel_id,
+                    approval.slack_thread_ts,
+                    text,
+                    blocks=block_payload(blocks),
+                    agent_thread_id=approval.thread_id or None,
+                    login=approval.requester_login,
+                )
+            except SlackRequestError:
+                logger.warning("Could not post kitchen readiness prompt", exc_info=True)
+                return "Slack could not post the author prompt in the kitchen thread; try again."
+            await approval.save()
+            return None
         origin = approval.dm_origin
         dm_location = await send_dm_with_location(
             author.slack_user_id,
@@ -382,6 +409,14 @@ class ReviewCard:
         diff_image_id = request.slack_diff_file_id or None
         author = await request.author_mention()
         if outcome is None:
+            if request.awaiting_ready and not copy and await self.readiness_in_thread():
+                return expedited_card.readiness_prompt(
+                    request,
+                    title=pr.title,
+                    author=author,
+                    files=files,
+                    diff_image_id=diff_image_id,
+                )
             return expedited_card.open_card(
                 request,
                 title=pr.title,

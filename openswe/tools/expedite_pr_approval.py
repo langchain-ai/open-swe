@@ -307,7 +307,11 @@ async def expedite_pr_approval(
             "slack_channel_name": await SlackChannel.name_for(active.slack_channel_id),
             "next": readiness_warning
             or (
-                "The full draft card is in the author's DM; no thread card is posted until ready."
+                (
+                    "The draft card is in the original kitchen thread; only the author can mark it ready."
+                    if await card.readiness_in_thread()
+                    else "The full draft card is in the author's DM; no thread card is posted until ready."
+                )
                 if active.awaiting_ready
                 else _next_step(
                     reused=True,
@@ -371,8 +375,13 @@ async def expedite_pr_approval(
             "slack_channel_id": channel_id,
             "slack_channel_name": await SlackChannel.name_for(channel_id),
             "completion_reply_required": True,
-            "next": "The full draft card was sent only to the author by DM. The thread card "
-            "will be posted once they mark it ready. Keep a /baby-sit watch on the PR.",
+            "next": (
+                "The draft card is in the original kitchen thread; only the author can mark it ready. "
+                "Keep a /baby-sit watch on the PR."
+                if await ReviewCard(approval).readiness_in_thread()
+                else "The full draft card was sent only to the author by DM. The thread card "
+                "will be posted once they mark it ready. Keep a /baby-sit watch on the PR."
+            ),
         }
     try:
         message_ts = await ReviewCard(approval).post_expedited(title=payload.title, files=files)
