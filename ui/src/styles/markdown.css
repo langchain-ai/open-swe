@@ -254,3 +254,42 @@
   cursor: pointer;
   font-weight: 500;
 }
+
+/* A GitHub PR link: the Open SWE review page, then a GitHub mark. */
+.pr-link-chip {
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 0.375rem;
+  vertical-align: baseline;
+  line-height: 1.4;
+}
+
+.pr-link-chip > a {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.35rem;
+  text-decoration: none;
+}
+
+.pr-link-chip > a:first-child {
+  background: var(--bg-surface-level-1);
+  color: var(--text-brand-primary);
+  font-weight: 500;
+}
+
+.pr-link-chip > a + a {
+  border-left: 1px solid var(--border-default);
+  color: var(--text-secondary);
+}
+
+.pr-link-chip > a:hover,
+.pr-link-chip > a:focus-visible {
+  background: var(--bg-surface-level-1-hover);
+}
+
+.pr-link-chip > a:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
