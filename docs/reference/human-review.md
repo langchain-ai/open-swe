@@ -85,7 +85,9 @@ Configure them on the default branch:
 - `criteria` is what the assessment judges the pull request against.
 
 When standard or posted review starts, each policy whose paths the pull request touches gets an isolated, unlisted assessment.
-If the criteria are met, an available team member is rotated in (least recently assigned for that policy, within working hours, honoring out-of-office and opt-outs) and notified through a GitHub review request and comment, the review's Slack thread, and a DM.
+If the criteria are met, an available team member is rotated in (least recently assigned for that policy, within working hours, honoring out-of-office and opt-outs).
+For the `langchain-ai/product-design` team's `design` policy, edit `openswe/resources/design-review-owners.json` in Open SWE to maintain product ownership. The assessment selects the main affected area and passes `supplementary_review_area`; product-specific styling follows the product owner, while shared components, tokens and styling use `design-system`. An unavailable mapped owner waits rather than falling back to an unrelated designer. Unmapped areas retain team rotation.
+The reviewer receives a GitHub review request and one concise Slack ping: impact, diff size, and why they were selected, with up to two images already embedded in the PR description. If Slack rejects the images, delivery falls back to text. A DM is used only if the thread ping was not delivered; retries preserve successful delivery flags. No extra GitHub comment is posted.
 Supplementary reviews never replace the engineering request's owning thread or summary, and a supplementary reviewer's approval does not count as engineering approval unless they also own the code or signed up as an engineering reviewer.
 Agents can also ask for one with `request_human_review`'s `supplementary_review` and `supplementary_review_reason`.
 Settings use the default branch's cached configuration; changes can take 30 minutes to refresh.
