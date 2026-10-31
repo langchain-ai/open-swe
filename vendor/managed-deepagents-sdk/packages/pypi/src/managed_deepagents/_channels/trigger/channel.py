@@ -268,10 +268,10 @@ async def _decide_event(
 ) -> TriggerMessageRoute | None:
     """What a message or interaction starts, as its key's handler decides.
 
-    ``None``, so what it starts without one. An endpoint is asked after
-    Trigger Server has its answer.
+    ``None``, so what it starts without one. Every handler is asked after
+    Trigger Server has its answer, since it may take longer than Trigger Server
+    waits.
     """
-    from managed_deepagents._channels.http.endpoint import is_endpoint_handler  # noqa: PLC0415
     from managed_deepagents._channels.slack.events import (  # noqa: PLC0415
         read_slack_event,
         slack_thread,
@@ -292,29 +292,29 @@ async def _decide_event(
         return await _run_handler(
             event,
             lambda: handler(cast("SlackMessageEvent", event), slack_thread(thread, channel_name)),
+            channel_name,
         )
 
-    if is_endpoint_handler(handler):
-        return TriggerMessageBackground(decide)
-    return await decide()
+    return TriggerMessageBackground(decide)
 
 
 async def _run_handler(
     event: SlackEvent,
     call: Callable[[], ChannelRunResult | Awaitable[ChannelRunResult | None] | None],
+    channel_name: str,
 ) -> TriggerMessageDecision:
     """Run a handler and normalize what it returned into run input.
 
-    A Slack message's blocks and attachments are added to the handler's
+    A handler may return several runs, each with ``(input, options)``: at most
+    one on the Slack thread's own conversation, the others on threads it
+    chooses. A Slack message's blocks and attachments are added to each run's
     messages, as to a message's own.
     """
     from managed_deepagents._channels.http.provider import run_event_handler  # noqa: PLC0415
     from managed_deepagents._channels.run_input import (  # noqa: PLC0415
         InvalidRunInput,
-        normalize_run_input,
-    )
-    from managed_deepagents._channels.slack.message_content import (  # noqa: PLC0415
-        with_slack_rich_content,
+        RunChannel,
+        normalize_run_inputs,
     )
     from managed_deepagents._channels.trigger.http import (  # noqa: PLC0415
         TriggerMessageDecision,
@@ -325,7 +325,7 @@ async def _run_handler(
     if outcome.type != "input":
         return TriggerMessageDecision(outcome.type)
     try:
-        run_input = normalize_run_input(outcome.input)
+        runs = normalize_run_inputs(outcome.input, RunChannel(name=channel_name, provider="slack"))
     except InvalidRunInput as error:
         # MDA's own reason, bounded, unlike a raised exception's message.
         logger.error("slack handler returned invalid run input: %s", error.reason)
@@ -335,16 +335,30 @@ async def _run_handler(
             "slack handler returned invalid run input (%s)", logger.safe_error_label(error)
         )
         return TriggerMessageDecision("failed")
-    if run_input is None:
+    if not runs:
         return TriggerMessageDecision("skipped")
-    if event.key != "interaction" and run_input["messages"]:
-        run_input["messages"] = cast(
-            "list[dict[str, JsonValue]]",
-            with_slack_rich_content(
-                cast("list[dict[str, object]]", run_input["messages"]), event.payload
-            ),
-        )
-    return TriggerMessageDecision("input", run_input)
+    if event.key != "interaction":
+        for run in runs:
+            if run["messages"]:
+                run["messages"] = _with_rich_content(run["messages"], event)
+    return TriggerMessageDecision(
+        "input",
+        next((run for run in runs if "thread" not in run), None),
+        tuple(run for run in runs if "thread" in run),
+    )
+
+
+def _with_rich_content(
+    messages: list[dict[str, JsonValue]], event: SlackEvent
+) -> list[dict[str, JsonValue]]:
+    from managed_deepagents._channels.slack.message_content import (  # noqa: PLC0415
+        with_slack_rich_content,
+    )
+
+    return cast(
+        "list[dict[str, JsonValue]]",
+        with_slack_rich_content(cast("list[dict[str, object]]", messages), event.payload),
+    )
 
 
 class _TriggerSlackArgs(BaseModel):

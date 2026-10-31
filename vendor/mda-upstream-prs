@@ -1,1 +1,10 @@
 1073 17c2e4c9deac10088c09d5cfd656c65ff43d56a6 feat(linear): let an endpoint tell a declined session why
+1133 c798e1254d663fc58b1f92b4b563973763dc6abd feat(channels): handle GitHub merge queue events
+1134 eaa86a942b855f49e9a4921c70bc51e1ab02dbe3 fix(channels): say which signed Linear delivery the replay window refuses
+1135 7d845bdd9dfe7d0b107d3cda7974ca9dcd96f00c feat(channels): keep a Linear agent session alive while its run works
+1136 b5477b73cc1167d9b0f34908d27b1d3593a074bf fix(channels): tell a Linear session at once when its run can't start
+1143 d031eb7d3f3b155698cdcee1a92bceb42042f795 feat(channels): let a GitHub channel handle its own App's events
+1147 e365dc2bf6dc1d125336666e81befeb2a7556edf feat(channels): let handlers start runs on threads they choose
+1149 3cc46489733aecd961883d0ba05fe42bd57ec18b feat(channels): answer the provider first, then ask the channel's handler
+1171 3ad3aa8656f3f7cf5c957134cd01e02aa7113bf7 feat(channels): let Slack handlers choose each run's thread
+1174 b3da45216c4885e4831c0f8a0a722364e86f7884 feat(channels): handle every GitHub action of handled events, and installation events

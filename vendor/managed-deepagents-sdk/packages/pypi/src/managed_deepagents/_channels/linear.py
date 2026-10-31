@@ -5,6 +5,7 @@ One conversation per issue, and one per agent session.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -19,7 +20,6 @@ from typing_extensions import TypeIs
 from managed_deepagents._channel_icon import validate_channel_icon_path
 from managed_deepagents._channels.actor import endpoint_actor
 from managed_deepagents._channels.http import HttpChannel, channel_thread_id, http_channel
-from managed_deepagents._channels.http.endpoint import is_endpoint_handler
 from managed_deepagents._channels.http.provider import (
     EventFinished,
     EventHandlerOutcome,
@@ -126,7 +126,10 @@ def linear_channel(
 
     Args:
         on_event: Event handlers that start runs. Return a prompt (string,
-            message, or state), or ``None`` to skip. A handler may also be an
+            message, or state), or ``None`` to skip. MDA answers Linear before it
+            asks the handler, so a handler may take longer than Linear waits; one
+            that raises starts nothing, and its error is logged, and an agent
+            session hears that something went wrong. A handler may also be an
             endpoint, a URL or an ``httpx.Request`` carrying headers: MDA POSTs it
             the event and its thread, and starts the run it answers with.
         app: The Linear app ``mda deploy`` sets up; team allowlist.
@@ -142,8 +145,10 @@ def linear_channel(
         sessions: Answer Linear agent sessions, which open when someone
             mentions the app or delegates an issue to it. Without a handler, a
             new session runs with Linear's prompt for it (``promptContext``), and
-            a reply in the session continues the conversation. Stop cancels the
-            session's run. A run that stops on interrupts answers with a link to
+            a reply in the session continues the conversation. The session
+            hears every 10 minutes that the run is still working, so Linear
+            doesn't mark it stale. Stop cancels the session's run. A run that
+            stops on interrupts answers with a link to
             its thread in LangSmith Studio, where they are resumed.
             Experimental: sessions use Linear's Agents API, a Developer
             Preview, so they may change as Linear changes it.
@@ -270,19 +275,41 @@ async def _verify(ctx: HttpChannelRequest) -> bool:
         return False
     if not verify_hmac_sha256(secret, ctx.raw_body, signature):
         return False
-    return _is_fresh(ctx.raw_body)
+    # The signature covers only the body, so the window reads the body's
+    # `webhookTimestamp`, never the `Linear-Timestamp` header.
+    age = _delivery_age(ctx.raw_body)
+    if age is not None and abs(age) <= _WEBHOOK_TOLERANCE_SECONDS:
+        return True
+    # Linear retries a failed delivery under the same `Linear-Delivery` ID and
+    # signs each attempt anew. A signed delivery refused here is a replay, or a
+    # retry the window can't take: say which delivery, so retries that keep
+    # failing show up.
+    details: dict[str, object] = {
+        "deliveryId": logger.log_identifier(ctx.request.headers.get("linear-delivery", "")),
+    }
+    if age is not None:
+        details["ageSeconds"] = round(age)
+    logger.warning(
+        "linear delivery refused: %s %s",
+        "it has no webhookTimestamp"
+        if age is None
+        else "its webhookTimestamp is outside the replay window",
+        json.dumps(details),
+    )
+    return False
 
 
-def _is_fresh(raw_body: bytes) -> bool:
-    """Whether a signed delivery was sent within the replay window."""
+def _delivery_age(raw_body: bytes) -> float | None:
+    """How long ago a signed delivery was sent, in seconds; ``None`` when its
+    body has no timestamp to trust."""
     try:
         body = json.loads(raw_body)
     except ValueError:
-        return False
+        return None
     timestamp = body.get("webhookTimestamp") if isinstance(body, Mapping) else None
     if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
-        return False
-    return abs(time.time() - timestamp / 1000) <= _WEBHOOK_TOLERANCE_SECONDS
+        return None
+    return time.time() - timestamp / 1000
 
 
 async def _parse(
@@ -345,9 +372,8 @@ async def _parse(
         "target": _target(event),
         "delivery_key": delivery_id,
     }
-    # An endpoint may take longer to answer than Linear waits.
-    if is_endpoint_handler(handlers.get(key)):
-        message["background"] = True
+    # A handler may take longer to decide than Linear waits, so Linear hears first.
+    message["background"] = True
     # Stop in a session cancels the session's run.
     if _is_stop(event):
         return {
@@ -707,8 +733,55 @@ async def _post_reply(post: HttpChannelPostInput) -> HttpPostedMessage:
     )
 
 
+_KEEPALIVE_SECONDS = 10 * 60.0
+"""How often a session hears from a delivery still under way. Linear marks a
+session stale after 30 minutes without an activity; an ephemeral thought
+counts, and the next activity replaces it."""
+
+
+class _KeepAlive:
+    """A session's deliveries under way, and what keeps it alive."""
+
+    def __init__(self, task: asyncio.Task[None]) -> None:
+        self.deliveries = 1
+        self.task = task
+
+
+_keepalives: dict[str, _KeepAlive] = {}
+
+
+async def _beat(session_id: str) -> None:
+    while True:
+        await asyncio.sleep(_KEEPALIVE_SECONDS)
+        await _say(session_id, {"type": "thought", "body": "Still working on it."}, ephemeral=True)
+
+
+def _keep_session_alive(session_id: str) -> None:
+    """A delivery in the session is under way: keep the session from going stale."""
+    kept = _keepalives.get(session_id)
+    # A keep-alive whose event loop closed under it is started again.
+    if kept is not None and not kept.task.done():
+        kept.deliveries += 1
+        return
+    task = asyncio.get_running_loop().create_task(_beat(session_id))
+    _keepalives[session_id] = _KeepAlive(task)
+
+
+def _release_session(session_id: str) -> None:
+    """A delivery in the session is done; the last one stops the keep-alive."""
+    kept = _keepalives.get(session_id)
+    if kept is None:
+        return
+    kept.deliveries -= 1
+    if kept.deliveries > 0:
+        return
+    kept.task.cancel()
+    del _keepalives[session_id]
+
+
 async def _acknowledge_session(target: JsonValue, delivery: HttpDelivery) -> None:
-    """Acknowledge a session at once, and link a new one to its thread in Studio.
+    """Acknowledge a session at once, keep it alive until the delivery is done,
+    and link a new one to its thread in Studio.
 
     Linear marks a session unresponsive without an activity within seconds,
     even while the run waits behind another one.
@@ -716,6 +789,7 @@ async def _acknowledge_session(target: JsonValue, delivery: HttpDelivery) -> Non
     if not _is_linear_target(target) or "sessionId" not in target:
         return
     session_id = target["sessionId"]
+    _keep_session_alive(session_id)
     await _say(session_id, {"type": "thought", "body": "Working on it."}, ephemeral=True)
     url = studio_url(delivery)
     if url is None or not isinstance(_event(delivery.get("raw_event")), LinearSessionCreatedEvent):
@@ -733,13 +807,18 @@ async def _notify_finished(target: JsonValue, delivery: HttpFinishedDelivery) ->
     that a message found the thread waiting on a decision, or, after Stop, the
     final word Linear waits for.
     """
+    # A Stop is never acknowledged, so it has no keep-alive to release.
     if delivery["type"] == "skipped" and delivery["reason"] == "cancel":
         await _confirm_stopped(target)
         return
-    # A session would keep "working" on a run that never started.
-    # One Linear retries (``retry``) may still start, so it hears nothing yet.
+    if _is_linear_target(target) and "sessionId" in target:
+        _release_session(target["sessionId"])
+    # A session would keep "working" on a run that never started. An issue's
+    # event may be one its handler would have skipped, so its failure is only
+    # logged; one Linear retries (``retry``) may still start.
     if delivery["type"] == "failed" and delivery["reason"] == "start":
-        await _report_error(RuntimeError("channel run could not be started"), target)
+        if _is_linear_target(target) and "sessionId" in target:
+            await _report_error(RuntimeError("channel run could not be started"), target)
         return
     pending = pending_decision(delivery)
     if pending is not None:

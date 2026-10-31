@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
 from collections.abc import Mapping
 from http import HTTPStatus
@@ -20,6 +22,7 @@ from managed_deepagents._identity_auth import (
 )
 from managed_deepagents._ingress import build_ingress_run_context
 from managed_deepagents._ingress_runs import (
+    cancel_ingress_run,
     cancel_ingress_runs,
     lookup_status,
     observe_ingress_run,
@@ -187,6 +190,15 @@ class ResumeTarget(TypedDict):
     assistant_id: str
 
 
+class HandlerThreadTarget(ResumeTarget):
+    """A thread a handler chose, whose parked interrupts an answer resumes."""
+
+    source_thread_key: str
+    """The key that owns the thread, which every call on it names."""
+    reply: Literal["auto", "none"]
+    """Whether the resumed run answers the source thread, as its first did."""
+
+
 #: Thread metadata deepagents sets on an async subagent's thread, naming its lead's thread.
 _PARENT_THREAD_METADATA_KEY = "parent_thread_id"
 #: Most paused subagent threads of one lead searched for an answered interrupt.
@@ -345,6 +357,132 @@ async def cancel_ingress_thread_runs(
         {"provider": source_provider, "thread_key": source_thread_key, "user_id": user_id}
     )
     return len(await cancel_ingress_runs(client=client, thread_id=thread_id))
+
+
+#: Run metadata naming the source thread whose message started a run on a thread
+#: its handler chose, so Stop and the buttons there reach that run, and no other.
+STARTED_FROM_METADATA = "mda_started_from"
+#: Run metadata set on a run whose handler asked it to answer that source thread
+#: (``deliver_to``), so a resumed run there answers it too.
+DELIVERS_METADATA = "mda_deliver_to_conversation"
+#: Most of a channel's handler threads searched for a Stop or an answer.
+_HANDLER_THREAD_SEARCH_LIMIT = 100
+
+
+def handler_threads_key(channel_name: str) -> str:
+    """The source key that owns the threads a channel's handlers choose.
+
+    One per channel, so a thread several conversations start runs on has one
+    owner, and Stop and answers can search them. MDA derives it; no request does.
+    """
+    return "mda:v1:" + json.dumps(
+        [channel_name, "handler-threads"], ensure_ascii=False, separators=(",", ":")
+    )
+
+
+async def cancel_handler_thread_runs(
+    *,
+    channel_name: str,
+    source_provider: str,
+    started_from: str,
+    user_id: str,
+) -> int:
+    """Interrupt the queued and active runs ``started_from``'s messages started on
+    threads the channel's handlers chose; other conversations' runs there go on."""
+    client = _create_trigger_ingress_loopback_client(
+        {
+            "provider": source_provider,
+            "thread_key": handler_threads_key(channel_name),
+            "user_id": user_id,
+        }
+    )
+    threads = await client.threads.search(status="busy", limit=_HANDLER_THREAD_SEARCH_LIMIT)
+    cancelled = await asyncio.gather(
+        *(
+            _cancel_runs_started_from(client, thread_id, started_from)
+            for thread in threads
+            if isinstance(thread_id := thread.get("thread_id"), str)
+        )
+    )
+    return sum(cancelled)
+
+
+async def _cancel_runs_started_from(
+    client: LangGraphClient, thread_id: str, started_from: str
+) -> int:
+    try:
+        runs = await client.runs.list(thread_id, limit=_HANDLER_THREAD_SEARCH_LIMIT)
+    except Exception as error:
+        if lookup_status(error) == HTTPStatus.NOT_FOUND:
+            return 0
+        raise
+    run_ids = [
+        run["run_id"]
+        for run in runs
+        if run.get("status") in ("pending", "running") and _started_from(run) == started_from
+    ]
+    done = await asyncio.gather(
+        *(cancel_ingress_run(client, thread_id, run_id) for run_id in run_ids)
+    )
+    return sum(done)
+
+
+async def handler_thread_resume_target(
+    *,
+    channel_name: str,
+    source_provider: str,
+    started_from: str,
+    interrupt_ids: list[str],
+    user_id: str,
+) -> HandlerThreadTarget | None:
+    """The handler thread whose parked interrupts an answer from ``started_from`` resumes.
+
+    Only a thread holding every answered interrupt, whose latest run that
+    conversation's message started: a button answers the run that posted it.
+    """
+    answered = set(interrupt_ids)
+    if not answered:
+        return None
+    owner = handler_threads_key(channel_name)
+    client = _create_trigger_ingress_loopback_client(
+        {"provider": source_provider, "thread_key": owner, "user_id": user_id}
+    )
+    threads = await client.threads.search(status="interrupted", limit=_HANDLER_THREAD_SEARCH_LIMIT)
+    for thread in threads:
+        thread_id = thread.get("thread_id")
+        if not isinstance(thread_id, str) or not answered <= {
+            item["id"] for item in _parked_interrupts(thread)
+        }:
+            continue
+        runs = await client.runs.list(thread_id, limit=1)
+        if not runs or _started_from(runs[0]) != started_from:
+            continue
+        assistant = runs[0].get("assistant_id")
+        if isinstance(assistant, str) and assistant:
+            metadata = runs[0].get("metadata")
+            delivers = isinstance(metadata, Mapping) and metadata.get(DELIVERS_METADATA) is True
+            return {
+                "thread_id": thread_id,
+                "assistant_id": assistant,
+                "source_thread_key": owner,
+                "reply": "auto" if delivers else "none",
+            }
+    return None
+
+
+def _started_from(run: Mapping[str, Any]) -> object:
+    metadata = run.get("metadata")
+    return metadata.get(STARTED_FROM_METADATA) if isinstance(metadata, Mapping) else None
+
+
+async def delete_ingress_thread(
+    *, thread_id: str, source_provider: str, source_thread_key: str, user_id: str
+) -> None:
+    """Delete a thread a handler started for one run, once the run ended."""
+    client = _create_trigger_ingress_loopback_client(
+        {"provider": source_provider, "thread_key": source_thread_key, "user_id": user_id}
+    )
+    await client.threads.delete(thread_id)
 
 
 def _create_trigger_ingress_loopback_client(

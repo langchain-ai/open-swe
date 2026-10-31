@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, NotRequired, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, cast
 from urllib.parse import urlsplit
 
 from langchain_core.messages import (
@@ -21,7 +21,10 @@ from managed_deepagents._channels.runtime import is_json_value
 from managed_deepagents._log import logger
 
 if TYPE_CHECKING:
-    from managed_deepagents._channels.types import JsonValue
+    from langgraph_sdk.schema import MultitaskStrategy
+
+    from managed_deepagents._channels.types import ChannelDestination, ChannelReply, JsonValue
+    from managed_deepagents.schedules import ScheduleThreadConfig
 
 
 ChannelRunInput = str | BaseMessage | Mapping[str, object]
@@ -47,14 +50,62 @@ class ChannelRunOptions(TypedDict, total=False):
     values and any error), as LangGraph's ``runs.create(webhook=...)`` does: from
     the server, so it reaches you even if the deployment restarts. http(s),
     without credentials in it."""
+    thread: ScheduleThreadConfig
+    """The thread the run starts on, as ``define_schedule`` takes it:
+    ``{"mode": "ephemeral"}`` for a fresh thread, deleted once the run ends, or
+    ``{"mode": "persistent", "id": "<uuid>"}`` for the thread with that id, kept
+    across events. Omitted, the run starts on the event's conversation. GitHub,
+    Linear, HTTP and Slack channels only."""
+    reply: ChannelReply
+    """Whether a run on the event's conversation posts its final answer there,
+    overriding the channel's ``reply`` for this run. Only without ``thread``."""
+    multitask_strategy: MultitaskStrategy
+    """What the run does while its thread already runs, overriding the
+    channel's ``multitask_strategy`` for this run. GitHub, Linear, HTTP and
+    Slack channels only."""
+    deliver_to: ChannelRunDeliveryTarget
+    """Where a run on a ``thread`` posts its final answer; omitted, nowhere.
+    Only with ``thread``, and for now only to the event's own conversation:
+    ``{"channel": "<this channel>", "to": {"type": "current_thread"}}``."""
 
 
-ChannelRunResult = ChannelRunInput | tuple[ChannelRunInput, ChannelRunOptions]
-"""What a channel handler may return to start a run: the input, or the input
-with run options.
+class ChannelRunDeliveryTarget(TypedDict):
+    """Where a run on a thread of the handler's choosing posts its final answer.
+
+    The shape ``define_schedule``'s ``deliver_to`` takes, whose ``to`` may also
+    be ``{"type": "current_thread"}``: the conversation the event came from.
+    """
+
+    channel: str
+    to: ChannelDestination
+
+
+ChannelRunResult = (
+    ChannelRunInput
+    | tuple[ChannelRunInput, ChannelRunOptions]
+    | list[tuple[ChannelRunInput, ChannelRunOptions]]
+)
+"""What a channel handler may return to start a run: the input, the input with
+run options, or, on GitHub, Linear, HTTP and Slack channels, a list of
+``(input, options)`` to start several runs, at most one of them on the event's
+conversation.
 
 Experimental: this may change in a minor release.
 """
+
+
+class RunThreadPersistent(TypedDict):
+    mode: Literal["persistent"]
+    id: str
+    """A lowercase UUID."""
+
+
+class RunThreadEphemeral(TypedDict):
+    mode: Literal["ephemeral"]
+
+
+RunThread = RunThreadEphemeral | RunThreadPersistent
+"""A run's thread as ``normalize_run_inputs`` checked it."""
 
 
 class NormalizedRunInput(TypedDict):
@@ -67,6 +118,11 @@ class NormalizedRunInput(TypedDict):
     context: NotRequired[dict[str, JsonValue]]
     metadata: NotRequired[dict[str, JsonValue]]
     webhook: NotRequired[str]
+    thread: NotRequired[RunThread]
+    reply: NotRequired[ChannelReply]
+    multitask_strategy: NotRequired[MultitaskStrategy]
+    deliver_to_conversation: NotRequired[Literal[True]]
+    """The run posts its final answer on the event's conversation."""
 
 
 class RunStartOptions(TypedDict):
@@ -123,23 +179,82 @@ def _named(value: object) -> str:
 
 
 def normalize_run_input(value: object) -> NormalizedRunInput | None:
-    """Normalize what a handler returned.
+    """Normalize what a handler returned, as one run on the event's conversation.
 
     ``None`` starts nothing; anything else that is not valid input raises
     ``InvalidRunInput``, a ``TypeError``. A run option that is ``None`` is not set.
+    The options that choose a thread are refused: only ``normalize_run_inputs``
+    takes them.
     """
     if value is None:
         return None
+    return _normalize_result(value, None)
+
+
+class RunChannel(TypedDict):
+    """The channel a handler's runs start from, which ``deliver_to`` may name."""
+
+    name: str
+    provider: str
+
+
+def normalize_run_inputs(value: object, channel: RunChannel) -> list[NormalizedRunInput]:
+    """Normalize what a handler of a GitHub, Linear, HTTP or Slack channel returned.
+
+    ``None`` or an empty list starts nothing. A list starts a run per
+    ``(input, options)`` in it. Options may choose each run's thread, reply,
+    ``multitask_strategy`` and ``deliver_to``. At most one run may start on the
+    event's conversation (one without ``thread``). Anything else raises
+    ``InvalidRunInput``.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return [_normalize_result(value, channel)]
+    runs = [_normalize_result(item, channel, listed=True) for item in cast("list[object]", value)]
+    if sum("thread" not in run for run in runs) > 1:
+        raise InvalidRunInput("at most one run may start on the event's conversation")
+    return runs
+
+
+def starts_on_conversation(result: object) -> bool:
+    """Whether a handler's result starts a run on the event's conversation:
+    anything but nothing, or a list whose every run has a ``thread``."""
+    if result is None:
+        return False
+    if not isinstance(result, list):
+        return True
+    return any(
+        not (
+            isinstance(item, tuple)
+            and len(item) > 1
+            and isinstance(item[1], Mapping)
+            and item[1].get("thread") is not None
+        )
+        for item in cast("list[object]", result)
+    )
+
+
+def _normalize_result(
+    value: object, channel: RunChannel | None, *, listed: bool = False
+) -> NormalizedRunInput:
     if isinstance(value, tuple):
         items = cast("tuple[object, ...]", value)
         if len(items) not in (1, 2):
             raise InvalidRunInput("run input must be (input, options)")
         normalized = _normalize_input(items[0])
-        return normalized if len(items) == 1 else _with_options(normalized, items[1])
+        return normalized if len(items) == 1 else _with_options(normalized, items[1], channel)
+    if listed:
+        raise InvalidRunInput("each run in a list must be (input, options)")
     return _normalize_input(value)
 
 
 _RUN_OPTIONS = frozenset({"context", "metadata", "webhook"})
+# The options that choose where a run starts and answers; GitHub, Linear, HTTP and
+# Slack channels only.
+_ROUTING_OPTIONS = frozenset({"thread", "reply", "multitask_strategy", "deliver_to"})
+_MULTITASK_STRATEGIES = frozenset({"enqueue", "interrupt", "rollback", "reject"})
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
 # The metadata keys a handler may set.
 _METADATA_KEY = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
 # Keys MDA, the Agent Server and LangSmith set, which a handler's would override
@@ -152,13 +267,17 @@ _RESERVED_METADATA_KEY = re.compile(
 )
 
 
-def _with_options(normalized: NormalizedRunInput, options: object) -> NormalizedRunInput:
+def _with_options(
+    normalized: NormalizedRunInput, options: object, channel: RunChannel | None
+) -> NormalizedRunInput:
     if not isinstance(options, Mapping):
         raise InvalidRunInput("run options must be a mapping")
-    extra = sorted(str(key) for key in options if key not in _RUN_OPTIONS)
+    allowed = _RUN_OPTIONS if channel is None else _RUN_OPTIONS | _ROUTING_OPTIONS
+    extra = sorted(str(key) for key in options if key not in allowed)
     if extra:
         raise InvalidRunInput(
-            f"unsupported run option {_named(', '.join(extra))}; use context, metadata or webhook"
+            f"unsupported run option {_named(', '.join(extra))}; use "
+            + ("context, metadata or webhook" if channel is None else ", ".join(sorted(allowed)))
         )
     result: NormalizedRunInput = {**normalized}
     context = options.get("context")
@@ -170,7 +289,76 @@ def _with_options(normalized: NormalizedRunInput, options: object) -> Normalized
     webhook = options.get("webhook")
     if webhook is not None:
         result["webhook"] = _run_webhook(webhook)
+    if channel is not None:
+        _with_routing(result, cast("Mapping[str, object]", options), channel)
     return result
+
+
+def _with_routing(
+    result: NormalizedRunInput, options: Mapping[str, object], channel: RunChannel
+) -> None:
+    """Check the options that choose a run's thread and where it answers.
+
+    ``reply`` belongs to a run on the event's conversation, and ``deliver_to`` to
+    a run on a thread of the handler's choosing.
+    """
+    thread = options.get("thread")
+    if thread is not None:
+        result["thread"] = _run_thread(thread)
+    reply = options.get("reply")
+    if reply is not None:
+        if thread is not None:
+            raise InvalidRunInput("reply is only for a run on the event's conversation")
+        if reply not in ("auto", "none"):
+            raise InvalidRunInput('run reply must be "auto" or "none"')
+        result["reply"] = cast("ChannelReply", reply)
+    strategy = options.get("multitask_strategy")
+    if strategy is not None:
+        if strategy not in _MULTITASK_STRATEGIES:
+            raise InvalidRunInput(
+                "run multitask_strategy must be enqueue, interrupt, rollback or reject"
+            )
+        result["multitask_strategy"] = cast("MultitaskStrategy", strategy)
+    deliver_to = options.get("deliver_to")
+    if deliver_to is not None:
+        if thread is None:
+            raise InvalidRunInput("deliver_to is only for a run with a thread")
+        _check_deliver_to(deliver_to, channel)
+        result["deliver_to_conversation"] = True
+
+
+def _run_thread(thread: object) -> RunThread:
+    fields = cast("Mapping[str, object]", thread if isinstance(thread, Mapping) else {"mode": None})
+    # Ephemeral by default, as a schedule's thread is.
+    mode = fields.get("mode", "ephemeral")
+    if mode == "ephemeral" and set(fields) <= {"mode"}:
+        return {"mode": "ephemeral"}
+    thread_id = fields.get("id")
+    if (
+        mode == "persistent"
+        and set(fields) == {"mode", "id"}
+        and isinstance(thread_id, str)
+        and _UUID.fullmatch(thread_id)
+    ):
+        return {"mode": "persistent", "id": thread_id.lower()}
+    raise InvalidRunInput(
+        'run thread must be {"mode": "ephemeral"} or {"mode": "persistent", "id": "<uuid>"}'
+    )
+
+
+def _check_deliver_to(deliver_to: object, channel: RunChannel) -> None:
+    """Only the event's own conversation, for now."""
+    to = deliver_to.get("to") if isinstance(deliver_to, Mapping) else None
+    if (
+        not isinstance(deliver_to, Mapping)
+        or set(deliver_to) != {"channel", "to"}
+        or deliver_to.get("channel") not in (channel["name"], channel["provider"])
+        or not isinstance(to, Mapping)
+        or dict(to) != {"type": "current_thread"}
+    ):
+        raise InvalidRunInput(
+            'run deliver_to must be {"channel": "<this channel>", "to": {"type": "current_thread"}}'
+        )
 
 
 _WEBHOOK_PREFIX = re.compile(r"https?://", re.IGNORECASE)

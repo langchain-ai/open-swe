@@ -562,8 +562,12 @@ A handler gets the `SlackMessageEvent` (`text`, `user_id`, `channel_id`,
 returns the run's input, as `agent.invoke` takes it, optionally with
 `context`, `metadata` and `webhook` as `(input, options)`, as the GitHub and
 Linear handlers do. `None` starts no run, and the app neither reacts nor
-replies. A handler that raises, or returns input the channel can't start,
-starts no run either; the error is logged without its message. The message's
+replies. Trigger Server gets its answer before MDA asks the handler, so a slow
+handler never times out the delivery. A handler that raises, or returns input
+the channel can't start, starts no run either; the error is logged without its
+message. To try a failing call again, retry it inside the handler with the
+backoff you choose; a delivery whose handler is still running or waiting when
+the deployment restarts is lost. The message's
 blocks and attachments are added to the handler's messages, and its files
 still reach `/workspace/attachments/`. Interrupt resumes don't go through
 `on_event`; a click on a button the agent posted does, as `"interaction"`: see
@@ -587,6 +591,30 @@ thread already runs: `enqueue` (the default) waits for the run and starts
 after it, `interrupt` cancels the run, keeping its progress, and starts at
 once, `rollback` cancels it and discards its progress, and `reject` starts
 nothing.
+
+A handler may also choose each run's thread and strategy, as on GitHub, Linear
+and HTTP channels: it returns `(input, options)`, or a list of them, at most
+one on the Slack thread's own conversation:
+
+```python
+def on_message(event: SlackMessageEvent, thread: SlackChannelThread):
+    if event.text.startswith("<@"):
+        return event.text  # a mention interrupts, as the channel says
+    if channel_session_id is not None:
+        # One session for the whole channel: every Slack thread's message waits its turn.
+        return (event.text, {"thread": {"mode": "persistent", "id": channel_session_id},
+                             "multitask_strategy": "enqueue"})
+    return (event.text, {"multitask_strategy": "enqueue"})  # waits behind the running run
+```
+
+A run on a thread of the handler's choosing shows its status, reaction and
+decisions in the Slack thread its message came from, and posts its answer
+there only with `deliver_to`. Stop in that Slack thread cancels the runs its
+messages started, on the conversation and on the handler's threads; another
+Slack thread's run on a shared thread goes on. A decision a run there waits on
+is answered from the Slack thread that started the run. Every thread a
+channel's handlers choose is owned by the channel, not by one Slack thread.
+An ephemeral thread is deleted once its run ends, unless it waits on a decision.
 
 `event.actor` is the Slack user who sent the message, as Trigger Server read
 it from Slack's signed request: a `SlackActor` with `id` and `team_id`.
@@ -911,21 +939,36 @@ from Agent Auth are cached for up to 5 minutes. A matched event fails closed if
 the bot ID is missing or invalid. Calling `channels.github()` without handlers preserves
 receipt-only behavior and needs only the webhook secret.
 
-Supported keys:
+Supported keys are `<event>.<action>`, for every action GitHub sends of these
+events:
 
-- Issues: `issues.opened`, `issues.edited`, `issues.reopened`, `issues.labeled`,
-  `issue_comment.created`, `issue_comment.edited`.
-- Pull requests: `pull_request.opened`, `pull_request.edited`,
-  `pull_request.reopened`, `pull_request.ready_for_review`,
-  `pull_request.converted_to_draft`, `pull_request.synchronize`,
-  `pull_request.labeled`, `pull_request.closed`.
-- Reviews: `pull_request_review.submitted`, `pull_request_review.edited`,
-  `pull_request_review.dismissed`, `pull_request_review_comment.created`,
-  `pull_request_review_comment.edited`.
-- Code and CI: `push`, `status`, `check_run.completed`, `check_suite.completed`,
-  `workflow_run.completed`. `push` and `status` have no action, so their key is
-  the event name. A CI event continues a pull request's conversation when it
-  ran for exactly one pull request.
+- `issues`: `opened`, `edited`, `reopened`, `closed`, `deleted`, `transferred`,
+  `labeled`, `unlabeled`, `assigned`, `unassigned`, `locked`, `unlocked`,
+  `milestoned`, `demilestoned`, `pinned`, `unpinned`, `typed`, `untyped`.
+- `issue_comment`: `created`, `edited`, `deleted`.
+- `pull_request`: `opened`, `edited`, `reopened`, `closed`, `ready_for_review`,
+  `converted_to_draft`, `synchronize`, `labeled`, `unlabeled`, `assigned`,
+  `unassigned`, `review_requested`, `review_request_removed`, `locked`,
+  `unlocked`, `milestoned`, `demilestoned`, `enqueued`, `dequeued`,
+  `auto_merge_enabled`, `auto_merge_disabled`.
+- `pull_request_review`: `submitted`, `edited`, `dismissed`.
+- `pull_request_review_comment`: `created`, `edited`, `deleted`.
+- Code and CI: `push` and `status`, which have no action, so their key is the
+  event name; `check_run`: `created`, `completed`, `rerequested`,
+  `requested_action`; `check_suite`: `requested`, `rerequested`, `completed`;
+  `workflow_run`: `requested`, `in_progress`, `completed`. A CI event continues
+  a pull request's conversation when it ran for exactly one pull request.
+- Merge queue: `merge_group.checks_requested`, `merge_group.destroyed`. A
+  merge group belongs to no conversation, so each delivery gets its own thread.
+- Installation: `installation.created`, `installation.deleted`, `installation.suspend`,
+  `installation.unsuspend`, `installation.new_permissions_accepted`,
+  `installation_repositories.added`, `installation_repositories.removed`.
+  GitHub sends these to every App, so handling one needs no subscription or
+  permission. They are about the installation, not a repository: the handler
+  gets a `GitHubInstallationEvent`, with the `account` the App is installed on
+  instead of a `repository`. A channel limited to `app["repositories"]` gets
+  them too, each delivery gets its own thread, and `on_received` and
+  `on_finish` aren't called for them.
 
 GitHub sends no event for a mention, so each event lists the handles the
 text it wrote mentions in `event.mentions`: the body of a new or edited
@@ -965,9 +1008,14 @@ is application code; incoming webhook payloads are validated at runtime.
 
 Signatures are verified against the raw bytes. Ping returns 200; other valid
 receipts return 202. An unconfigured event or the App's own activity starts
-nothing. The request awaits the configured callback and run creation before
-acknowledgment (an endpoint's is asked after; see "Asking your service what to
-start"); synchronous and async callbacks are supported. A handler returns
+nothing. The App's own activity is what the agent does with the App's token,
+such as its comments, its pushes or a pull request it opened; set
+`include_own_events=True` to hand those to handlers too, with `event.from_app`
+set. A handler that answers comments or reviews then skips `event.from_app`,
+or the agent answers itself. GitHub gets its answer first; then MDA asks the
+configured handler, a callback or an endpoint (see "Asking your service what to
+start"), and starts the run, so a slow handler never times out the delivery.
+Synchronous and async callbacks are supported. A handler returns
 what `agent.invoke` takes: a nonblank string (one user message), a message such
 as `HumanMessage(...)` with text or content blocks, state such as
 `{"messages": [...], "todos": []}`, or `(input, {"context": {...}, "metadata": {...}})`
@@ -983,7 +1031,14 @@ The handler's second argument is the conversation's `thread`: `thread.id` is
 the thread the run starts on, for context that names it, such as a token your
 backend signs for the thread.
 `None` skips without a thread or run.
-Other results and callback failures are safely logged and start nothing.
+Other results are safely logged and start nothing. So does a handler that
+raises: GitHub already has its answer, so the delivery isn't failed; MDA logs
+the error's type only. Nor is a delivery whose run can't start, for example
+while the Agent Server is briefly unavailable: `on_finish` gets `failed` with
+reason `start`.
+To try a failing call again, retry it inside the handler with the backoff
+you choose: the handler may take as long as it needs. A delivery whose
+handler is still running or waiting when the deployment restarts is lost.
 
 Each issue or pull request has one thread, so the agent keeps the conversation:
 an issue, its comments, and a pull request with its reviews and review comments
@@ -991,7 +1046,40 @@ continue the same thread, as does a workflow run for exactly one pull request.
 Other events get a thread of their own. A redelivered webhook starts nothing,
 because each thread runs a delivery once. A comment that arrives while the agent
 is still working waits for that run to finish, so it never skips a decision the
-run stops for. There is no automatic retry.
+run stops for. GitHub never redelivers on its own.
+
+A handler may instead return a list of `(input, options)` to start several
+runs for one event, on threads it chooses (GitHub, Linear, HTTP and Slack channels):
+
+```python
+def on_comment(event, thread):
+    return [
+        # The issue's conversation; this run's answer isn't posted.
+        (prompt, {"reply": "none"}),
+        # A fresh thread, deleted once the run ends; its answer posts on the issue.
+        (triage, {
+            "thread": {"mode": "ephemeral"},
+            "deliver_to": {"channel": "github", "to": {"type": "current_thread"}},
+        }),
+        # A thread your service keeps across events, by its UUID.
+        (plan, {"thread": {"mode": "persistent", "id": plan_thread_id},
+                "multitask_strategy": "interrupt"}),
+    ]
+```
+
+`thread` takes what `define_schedule` does. At most one run may omit it and
+start on the event's conversation; only that run may set `reply`, and only a
+run with `thread` may set `deliver_to`, for now to the event's own conversation
+(`current_thread`). `multitask_strategy` overrides the channel's for one run.
+A persistent id must be a UUID; which ids an event may reach is yours to
+check. A delivery starts at most one run on each thread, so a resent one
+starts nothing there again, even if the handler now starts a different set of
+runs. The handler is asked once per delivery, before any thread is read, and
+not at all once the conversation has seen the delivery. While the conversation
+waits on a decision, the handler is still asked (on GitHub with
+`thread.interrupted` set): its runs on other threads start, and a run on the
+conversation is skipped, with the usual waiting notice. An empty list starts
+nothing.
 
 Handlers can call GitHub with a client of your choice and the App's installation
 token from `await connections.get("mda/github-token", {"type": "agent"})`, which
@@ -1175,6 +1263,17 @@ LangSmith Studio, where the decision is made, also when Studio resumed it;
 replies in the session meanwhile get the same link. Comments that a
 session already delivers, such as the mention itself and replies in the
 session, don't also reach a `Comment.create` handler.
+
+Linear gets its answer before MDA asks the handler, so a slow handler never
+times out the delivery. A handler that raises starts nothing, and Linear doesn't
+send the delivery again; the error is logged by type only. The same holds for a
+run that can't start, for example while the Agent Server is briefly
+unavailable: `on_finish` gets `failed` with reason `start`. In an agent session,
+the session hears at once that something went wrong, since its author waits;
+an issue gets no comment, since its handler may have skipped the event.
+To try a failing call again, retry it inside the handler with the backoff
+you choose: the handler may take as long as it needs. A delivery whose
+handler is still running or waiting when the deployment restarts is lost.
 
 `app` also names the app deploy asks the admin to create: `name` (2-80
 characters, without "Linear"; defaults to the agent's name), `description`,
@@ -1470,8 +1569,8 @@ starts the run the service answers with: `{"input", "context"?, "metadata"?,
 agent session that text, non-blank and up to 2000 characters, instead of its own
 "I'm not set up to work on this request."
 A GitHub event also carries what a handler gets beside the payload: its
-`"action"`, `"repository"`, `"sender"` and `"mentions"`, so a service checks them
-as a handler does. These are optional in `GitHubEndpointRequest`, so a receiver
+`"action"`, `"repository"` (`"account"` for an installation event), `"sender"`
+and `"mentions"`, so a service checks them as a handler does. These are optional in `GitHubEndpointRequest`, so a receiver
 takes requests from older deployments: read `event.get("mentions", [])`. A
 Slack message carries its `"text"`, `"userId"`, `"channelId"`, `"messageTs"`,
 `"threadTs"` and `"files"` the same way, with Slack's own event as `"payload"`;

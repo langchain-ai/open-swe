@@ -94,6 +94,9 @@ class ChannelContext(TypedDict):
     transport: Literal["trigger_server", "direct"]
     target: JsonValue
     raw_event: NotRequired[Annotated[JsonValue, Field(alias="rawEvent")]]
+    #: Whether the run posts its final answer to ``target``, over the channel's
+    #: ``reply``; absent, the channel's applies.
+    reply: NotRequired[Literal["auto", "none"]]
     #: Absent for the channel a thread record names: no message started the run.
     event: NotRequired[
         Annotated[
