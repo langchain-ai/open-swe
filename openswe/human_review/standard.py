@@ -358,13 +358,14 @@ async def _request_supplementary(
     result: RequestResult,
     policy_id: str,
     reason: str,
+    area: str = "",
 ) -> RequestResult:
     """Add a supplementary review to an open request without touching its engineering card."""
     blockers = await review_blockers(pull)
     if blockers is None or blockers:
         return _failure("The pull request must be open and not a draft for a supplementary review.")
     try:
-        await SupplementaryReviews(active).ask(pull, policy_id.strip(), reason)
+        await SupplementaryReviews(active).ask(pull, policy_id.strip(), reason, area)
     except SupplementaryReviewRefused as refused:
         return _failure(str(refused))
     return result
@@ -400,6 +401,7 @@ async def request_review(
     auto_merge: bool | None = None,
     supplementary_review: str = "",
     supplementary_review_reason: str = "",
+    supplementary_review_area: str = "",
 ) -> RequestResult:
     """Post a standard review card for ``pr_ref``, or return the one already open.
 
@@ -416,6 +418,7 @@ async def request_review(
                 auto_merge=auto_merge,
                 supplementary_review=supplementary_review,
                 supplementary_review_reason=supplementary_review_reason,
+                supplementary_review_area=supplementary_review_area,
             )
     except GitHubAppUnavailable:
         return _failure("Open SWE cannot reach this repository's GitHub App installation.")
@@ -431,6 +434,7 @@ async def _request_review(
     auto_merge: bool | None = None,
     supplementary_review: str = "",
     supplementary_review_reason: str = "",
+    supplementary_review_area: str = "",
 ) -> RequestResult:
     if bool(supplementary_review.strip()) != bool(supplementary_review_reason.strip()):
         return _failure("Pass supplementary_review and supplementary_review_reason together.")
@@ -442,7 +446,12 @@ async def _request_review(
             return result
         if supplementary_review:
             return await _request_supplementary(
-                active, pull, result, supplementary_review, supplementary_review_reason
+                active,
+                pull,
+                result,
+                supplementary_review,
+                supplementary_review_reason,
+                supplementary_review_area,
             )
         if active.kind == "standard" and channel.strip():
             target = await _target_channel(pr_ref, pull, channel)
@@ -533,7 +542,10 @@ async def _request_review(
     if supplementary_review:
         try:
             await SupplementaryReviews(request).ask(
-                pull, supplementary_review.strip(), supplementary_review_reason
+                pull,
+                supplementary_review.strip(),
+                supplementary_review_reason,
+                supplementary_review_area,
             )
         except SupplementaryReviewRefused as refused:
             refusal = str(refused)

@@ -166,8 +166,10 @@ async def test_stranded_assessment_claim_retries_after_expiring(review: HumanRev
     assert _state(review).assessment_requested
 
 
+@pytest.mark.parametrize("dm_succeeds", [False, True])
 async def test_delivery_is_idempotent_and_retries_only_missing_notifications(
     review: HumanReviewRequest,
+    dm_succeeds: bool,
 ) -> None:
     user = _user("designer")
     review.run_config = _stored(reason="New trace navigation flow")
@@ -182,22 +184,117 @@ async def test_delivery_is_idempotent_and_retries_only_missing_notifications(
         ) as choose,
         patch.object(User, "for_login", AsyncMock(return_value=user)),
         patch.object(
-            supplementary, "post_slack_thread_reply_with_ts", AsyncMock(side_effect=["", "1.1"])
+            supplementary,
+            "post_slack_thread_reply_with_ts",
+            AsyncMock(side_effect=[supplementary.SlackRequestError("not_in_channel"), "1.1"]),
         ) as thread_reply,
-        patch.object(supplementary, "send_dm", AsyncMock(side_effect=[False, True])) as dm,
+        patch.object(supplementary, "send_dm", AsyncMock(return_value=dm_succeeds)) as dm,
         patch.object(deadlines.queue, "schedule", AsyncMock()),
     ):
-        assert await _review(review)._assign(pull) == "retrying"
+        assert await _review(review)._assign(pull) == ("requested" if dm_succeeds else "retrying")
         assert await _review(review)._assign(pull) == "requested"
         assert await _review(review)._assign(pull) == "requested"
     assert choose.await_count == 1
     assert pull.request_reviewers.await_count == 1
-    assert pull.comment.await_count == 1
-    assert thread_reply.await_count == 2
+    pull.comment.assert_not_awaited()
+    assert thread_reply.await_count == (1 if dm_succeeds else 2)
     assert thread_reply.await_args is not None
     assert thread_reply.await_args.args[:2] == ("C1", "1.0")
-    assert dm.await_count == 2
+    assert dm.await_count == 1
     assert review.participants == []
+
+
+@pytest.mark.parametrize("text_fails", [False, True])
+async def test_rejected_screenshot_retries_as_text_without_a_second_ping(
+    review: HumanReviewRequest,
+    text_fails: bool,
+) -> None:
+    user = _user("designer")
+    review.run_config = _stored(reason="High impact: new navigation", github_login="designer")
+    review.pull_request.body = '<img src="https://example.com/screenshot.png" width="640">'
+    pull = MagicMock(spec=PullRequestClient)
+    pull.request_reviewers = AsyncMock()
+    with (
+        patch.object(User, "for_login", AsyncMock(return_value=user)),
+        patch.object(
+            supplementary,
+            "post_slack_thread_reply_with_ts",
+            AsyncMock(
+                side_effect=[
+                    supplementary.SlackRequestError("invalid_blocks"),
+                    supplementary.SlackRequestError("channel_not_found") if text_fails else "1.1",
+                ]
+            ),
+        ) as post,
+        patch.object(supplementary, "send_dm", AsyncMock(return_value=True)) as dm,
+    ):
+        assert await _review(review)._assign(pull) == "requested"
+        assert await _review(review)._assign(pull) == "requested"
+    assert post.await_count == 2
+    assert (
+        post.await_args_list[0].kwargs["blocks"][1]["image_url"]
+        == "https://example.com/screenshot.png"
+    )
+    assert "blocks" not in post.await_args_list[1].kwargs
+    assert dm.await_count == int(text_fails)
+
+
+@pytest.mark.parametrize(
+    "ineligible", ["", "author", "reviewed", "optedout", "missing", "no-write", "no-slack"]
+)
+async def test_mapped_owner_waits_only_for_temporary_unavailability(
+    review: HumanReviewRequest,
+    ineligible: str,
+) -> None:
+    review.run_config = _stored(reason="Medium impact: new runtime flow", area="runtime")
+    policy = POLICY.model_copy(update={"team": "langchain-ai/product-design"})
+    owner, other = _user("hannahmacaulay-langchain"), _user("other")
+    pull = MagicMock(spec=PullRequestClient)
+    pull.repo = MagicMock()
+    pull.repo.can_write = AsyncMock(return_value=True)
+    users = {user.github_login: user for user in (other, owner)}
+    if ineligible == "missing":
+        del users[owner.github_login]
+    if ineligible == "author":
+        review.pull_request.author = owner.github_login
+    if ineligible == "no-slack":
+        owner.identities = [
+            identity for identity in owner.identities if identity.provider != "slack"
+        ]
+    reviews = {owner.github_login: "APPROVED"} if ineligible == "reviewed" else {}
+
+    async def can_write(login: str) -> bool:
+        return login != owner.github_login or ineligible != "no-write"
+
+    async def opted_in(login: str) -> bool:
+        return login != owner.github_login or ineligible != "optedout"
+
+    pull.repo.can_write = can_write
+
+    async def find_user(provider: str, login: str) -> User:
+        return users[login]
+
+    with (
+        patch.object(supplementary, "team_members", AsyncMock(return_value=list(users))),
+        patch.object(User, "for_login", find_user),
+        patch.object(supplementary, "latest_review_states", AsyncMock(return_value=reviews)),
+        patch.object(supplementary.PROFILES, "allows_auto_human_review", opted_in),
+        patch.object(
+            ReviewerAvailability,
+            "for_user",
+            AsyncMock(return_value=ReviewerAvailability(None, False)),
+        ),
+    ):
+        candidates = await SupplementaryReview(review, policy)._candidates(pull)
+        assert [user.github_login for user, _ in candidates] == [
+            other.github_login if ineligible else owner.github_login
+        ]
+        with patch.object(
+            ReviewerAvailability,
+            "for_user",
+            AsyncMock(return_value=ReviewerAvailability(None, True)),
+        ):
+            assert await SupplementaryReview(review, policy)._candidates(pull) == []
 
 
 @pytest.mark.parametrize("hour", [3, 12])

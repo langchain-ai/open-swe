@@ -1,0 +1,21 @@
+{
+  "team": "langchain-ai/product-design",
+  "areas": {
+    "runtime": {
+      "label": "Runtime: Studio, sandboxes, tools, deployments, fleet",
+      "github_login": "hannahmacaulay-langchain"
+    },
+    "engine-insights-chat": {
+      "label": "Engine, Insights, Polly / LangSmith chat",
+      "github_login": "GuoChen018"
+    },
+    "search-filters": {
+      "label": "AI search and Filters revamp",
+      "github_login": "eli-verdun"
+    },
+    "design-system": {
+      "label": "Shared design system: components, color tokens, styling (not product-specific)",
+      "github_login": "jeeyoonhyun"
+    }
+  }
+}
