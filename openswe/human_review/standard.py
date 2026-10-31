@@ -2,7 +2,7 @@
 
 A request is refused while the pull request is closed or a draft. People sign up from the card; after
 the workspace auto-assignment timeout with nobody signed up Open SWE picks someone (see
-``openswe.human_review.picking``), waking an agent to pick when nobody qualifies. The
+``openswe.human_review.picking``), notifying the author when nobody qualifies. The
 pull request, when auto-merge is enabled, merges once every reviewer approves on
 GitHub, or once ``AUTO_MERGE_AFTER_HOURS`` have passed with at least one approval,
 and only while it is otherwise ready.
@@ -54,6 +54,8 @@ from openswe.human_review.pick_message import PickMessage
 from openswe.human_review.picking import (
     Area,
     Coverage,
+    Covered,
+    NoCandidate,
     Pick,
     ReviewerAvailability,
     Wait,
@@ -722,7 +724,12 @@ async def _github_approvers(request: HumanReviewRequest) -> list[str]:
 
 
 async def assign(
-    request: HumanReviewRequest, github_login: str, reason: str, *, replace: bool = False
+    request: HumanReviewRequest,
+    github_login: str,
+    reason: str,
+    *,
+    replace: bool = False,
+    selection: Pick | None = None,
 ) -> RequestResult:
     """Pick ``github_login`` to review: show them on the card and DM them.
 
@@ -745,6 +752,17 @@ async def assign(
         if not await PROFILES.allows_auto_human_review(user.github_login or github_login):
             return _failure(
                 f"@{github_login} opted out of automatic review picks; pick someone else."
+            )
+        if selection is None:
+            areas = coverage.of(github_login) if coverage is not None else []
+            choice = await choose_reviewer(request, area=areas[0] if areas else None)
+            selection = choice if isinstance(choice, Pick) else None
+        if selection is None or github_login.lower() not in (
+            selection.eligible or {selection.login.lower()}
+        ):
+            return _failure(
+                f"@{github_login} is not in the eligible contributor tier. "
+                "Prefer regular contributors; use smaller recent contributors only when none qualify."
             )
         availability = await ReviewerAvailability.for_user(user)
         if availability.out_of_office is True:
@@ -1207,7 +1225,7 @@ class Suggestion:
 async def start_auto_assign(
     request: HumanReviewRequest, *, asked: bool = False, trigger: PickTrigger | None = None
 ) -> AutoAssignResult:
-    """Pick a reviewer, waking an agent when nobody qualifies.
+    """Pick a reviewer, notifying the author when nobody qualifies.
 
     ``asked`` is someone requesting it now rather than the deadline passing. A
     ``trigger`` hands the pick to the agent owning the request's Slack thread,
@@ -1235,6 +1253,31 @@ async def start_auto_assign(
     return result
 
 
+async def _assignment_failed(request: HumanReviewRequest, *, area: Area | None = None) -> None:
+    pr = request.pull_request
+    scope = f" for {' '.join(area.handles)}" if area is not None else ""
+    text = (
+        f"Automatic reviewer assignment failed{scope} for <{pr.url}|{pr.label}>: "
+        "no suitable available contributor qualified from the past 30 days, "
+        "even after considering smaller contributors. "
+        "Please choose a reviewer yourself."
+    )
+    author = await User.for_login("github", pr.author) if pr.author else None
+    if author is not None and author.slack_user_id:
+        if await send_dm(author.slack_user_id, text, origin=request.dm_origin):
+            return
+        logger.warning(
+            "Could not DM author about failed reviewer assignment",
+            extra={"request_id": str(request.id)},
+        )
+    async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+        await pull.comment(
+            f"@{pr.author} Automatic reviewer assignment failed{scope}: no suitable available "
+            "contributor qualified from the past 30 days, even after considering smaller contributors. "
+            "Please choose a reviewer yourself."
+        )
+
+
 async def _auto_assign(
     request: HumanReviewRequest, *, asked: bool, trigger: PickTrigger | None
 ) -> AutoAssignResult:
@@ -1255,13 +1298,22 @@ async def _auto_assign(
         if await _schedule(request, "unclaimed", choice.until - datetime.now(UTC)):
             return AutoAssignResult("waiting", choice.login, choice.until)
         return AutoAssignResult("failed")
+    if isinstance(choice, NoCandidate):
+        await _assignment_failed(request)
+        return AutoAssignResult("failed")
+    if isinstance(choice, Covered):
+        return AutoAssignResult("claimed")
+    if choice is None:
+        if await _schedule(request, "unclaimed", _DEADLINE_RETRY):
+            return AutoAssignResult("waiting")
+        return AutoAssignResult("failed")
     if trigger is not None:
         woken = await _wake_picker(
             request, asked=asked, trigger=trigger, suggestions=[Suggestion(choice)]
         )
         return AutoAssignResult("woken" if woken else "failed")
     if isinstance(choice, Pick):
-        result = await assign(request, choice.login, choice.reason)
+        result = await assign(request, choice.login, choice.reason, selection=choice)
         if result.success:
             return AutoAssignResult("picked", choice.login)
         if result.claimed:
@@ -1297,7 +1349,23 @@ async def _pick_remaining_owners(request: HumanReviewRequest, approvers: list[st
     suggestions: list[Suggestion] = []
     for area in open_areas:
         choice = await choose_reviewer(request, area=area)
-        suggestions.append(Suggestion(choice if isinstance(choice, Pick) else None, area))
+        if isinstance(choice, NoCandidate):
+            await _assignment_failed(request, area=area)
+        elif isinstance(choice, Pick):
+            suggestions.append(Suggestion(choice, area))
+        elif not isinstance(choice, Covered):
+            async with HumanReviewRequest.locked(request.id) as (_, row):
+                if row is not None:
+                    row.run_config = {
+                        key: value
+                        for key, value in row.run_config.items()
+                        if key != _REMAINING_OWNERS_ASKED
+                    }
+            await _schedule(
+                request,
+                "remaining_owners",
+                choice.until - datetime.now(UTC) if isinstance(choice, Wait) else _DEADLINE_RETRY,
+            )
     logger.info(
         "Asking for reviewers for the code owners an approval left",
         extra={
@@ -1306,6 +1374,8 @@ async def _pick_remaining_owners(request: HumanReviewRequest, approvers: list[st
             "code_owner_areas": [list(area.handles) for area in open_areas],
         },
     )
+    if not suggestions:
+        return
     trigger = PickTrigger("approved", tuple(approvers))
     if not await _wake_picker(request, asked=False, trigger=trigger, suggestions=suggestions):
         async with HumanReviewRequest.locked(request.id) as (_, row):
@@ -1510,11 +1580,13 @@ async def expire_picks(request: HumanReviewRequest) -> str:
         return "accepted"
     area = await _area_left_by(request, {p.github_login.lower() for p in idle})
     choice = await choose_reviewer(request, area=area)
-    if choice is None:
+    if choice is None or isinstance(choice, (NoCandidate, Covered)):
         logger.info(
-            "Nobody else can review, so an unaccepted pick stays",
+            "No alternative reviewer; keeping the pending pick",
             extra={"request_id": str(request.id)},
         )
+        if choice is None:
+            await _schedule(request, "pick_expiry", _DEADLINE_RETRY)
         return "no_alternative"
     logger.info(
         "Rotating away from unaccepted reviewer picks",
@@ -1601,6 +1673,9 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         request = None
     if request is None or request.state != "open":
         return {"status": "closed"}
+    if step == "remaining_owners":
+        await _pick_remaining_owners(request, await _github_approvers(request))
+        return {"status": "retried"}
     if step.startswith(SUPPLEMENTARY_STEP):
         return {"status": await SupplementaryReviews(request).run(step)}
     if step.startswith("snooze:"):

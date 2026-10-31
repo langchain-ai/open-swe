@@ -299,13 +299,15 @@ def push_branch(owner: str, repo: str, branch: str, files: dict[str, str]) -> No
     shutil.rmtree(work)
 
 
-def commit_to_base(owner: str, repo: str, files: dict[str, str]) -> None:
+def commit_to_base(
+    owner: str, repo: str, files: dict[str, str], *, email: str = "seed@example.com"
+) -> None:
     """Commit ``files`` straight onto the base branch, as a merged change would land."""
     remote = _REMOTES[(owner, repo)]
     work = remote.parent / f"base-{owner}-{repo}"
     if work.exists():
         shutil.rmtree(work)
-    ident = ["-c", "user.email=seed@example.com", "-c", "user.name=Seed"]
+    ident = ["-c", f"user.email={email}", "-c", "user.name=Seed"]
     _git("clone", "--branch", BASE_BRANCH, str(remote), str(work))
     for path, content in files.items():
         target = work / path
@@ -329,8 +331,8 @@ def base_sha(pull: dict[str, Any]) -> str:
     return _branch_tip(pull["owner"], pull["repo"], pull["base"])
 
 
-def commit_author_emails(owner: str, repo: str, path: str, ref: str) -> list[str]:
-    """Author emails of the commits touching ``path`` at ``ref``, newest first."""
+def commit_history(owner: str, repo: str, path: str, ref: str, since: str) -> list[tuple[str, str]]:
+    """Commit SHAs and author emails within the requested history window."""
     remote = _REMOTES.get((owner, repo))
     if remote is None:
         return []
@@ -339,14 +341,15 @@ def commit_author_emails(owner: str, repo: str, path: str, ref: str) -> list[str
             "--git-dir",
             str(remote),
             "log",
-            "--format=%ae",
+            "--format=%H %ae",
+            *([f"--since={since}"] if since else []),
             resolve_ref(owner, repo, ref),
             "--",
-            path,
+            *([path] if path else []),
         )
     except subprocess.CalledProcessError:
         return []
-    return [line for line in out.splitlines() if line]
+    return [tuple(line.split(" ", 1)) for line in out.splitlines() if line]
 
 
 def file_at_ref(owner: str, repo: str, path: str, ref: str) -> str | None:

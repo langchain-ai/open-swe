@@ -151,7 +151,13 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
         ChangedFile, "of_pull", AsyncMock(return_value=[ChangedFile(filename="app.py")])
     )
     monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=codeowners))
-    monkeypatch.setattr(picking, "_touched", AsyncMock(return_value=Counter(ada=10, grace=1)))
+    monkeypatch.setattr(
+        picking,
+        "recent_contributors",
+        AsyncMock(
+            return_value=picking.Contributors(Counter(ada=10, grace=1), Counter(ada=10, grace=1))
+        ),
+    )
     monkeypatch.setattr(
         User,
         "for_login",
@@ -169,3 +175,153 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
         record for record in caplog.records if record.message == "Filtered reviewer candidates"
     )
     assert filtered.skipped == ({"ada": skip_reason} if skip_reason else {})
+
+
+@pytest.mark.parametrize(
+    ("count", "total", "qualifies"),
+    [(1, 4, True), (1, 5, False), (3, 15, False), (4, 100, True), (0, 4, False)],
+)
+async def test_recent_contributors_require_volume_or_repo_share_and_substantial_relevant_changes(
+    count: int,
+    total: int,
+    qualifies: bool,
+) -> None:
+    from datetime import timedelta
+
+    from openswe.expedited_review.eligibility import ChangedFile
+    from openswe.human_review.picking import recent_contributors
+
+    commits = [
+        {"sha": f"{login}-{index}", "author": {"login": login}}
+        for login, authored in (("regular", count), ("tiny", count), ("unrelated", count))
+        for index in range(authored)
+    ]
+    repo_history = [
+        {"sha": f"{login}-{index}", "author": {"login": login}}
+        for login, authored in (
+            ("regular", count),
+            ("tiny", count),
+            ("unrelated", count),
+            ("other", total - 3 * count),
+        )
+        for index in range(authored)
+    ]
+    repo = MagicMock()
+    repo.commits = AsyncMock(
+        side_effect=lambda **kwargs: commits if "path" in kwargs else repo_history
+    )
+
+    async def detail(sha: str) -> dict[str, object]:
+        login = sha.split("-")[0]
+        return {
+            "files": [
+                {"filename": "app.py", "additions": 1 if login in {"tiny", "unrelated"} else 20},
+                {"filename": "other.py", "additions": 1000},
+            ]
+        }
+
+    repo.commit = AsyncMock(side_effect=detail)
+    before = datetime.now(UTC) - timedelta(days=30)
+    result = await recent_contributors(
+        repo, "main", [ChangedFile(filename="app.py"), ChangedFile(filename="second.py")]
+    )
+    assert result.regular == ({"regular": 1} if qualifies else {})
+    assert result.small == ({"regular": 2, "tiny": 2, "unrelated": 2} if count else {})
+    after = datetime.now(UTC) - timedelta(days=30)
+    assert all(
+        before <= datetime.fromisoformat(call.kwargs["since"]) <= after
+        and call.kwargs["ref"] == "main"
+        for call in repo.commits.await_args_list
+    )
+
+
+async def test_inactive_code_owner_does_not_qualify_without_recent_contributions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.expedited_review.eligibility import ChangedFile
+    from openswe.human_review import picking
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="author")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    monkeypatch.setattr(
+        ChangedFile, "of_pull", AsyncMock(return_value=[ChangedFile(filename="app.py")])
+    )
+    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse("* @ada")))
+    monkeypatch.setattr(
+        picking,
+        "recent_contributors",
+        AsyncMock(return_value=picking.Contributors(Counter(), Counter())),
+    )
+    assert isinstance(
+        await picking._choose_reviewer(request, MagicMock(), None, {}), picking.NoCandidate
+    )
+
+
+@pytest.mark.parametrize("regular_eligible", [True, False])
+async def test_small_contributor_is_picked_only_without_a_suitable_regular_contributor(
+    monkeypatch: pytest.MonkeyPatch,
+    user_records: FakeUserRecords,
+    regular_eligible: bool,
+) -> None:
+    from openswe.expedited_review.eligibility import ChangedFile
+    from openswe.human_review import picking
+
+    regular = User(identities=[UserIdentity(provider="github", external_id="1", login="regular")])
+    small = User(identities=[UserIdentity(provider="github", external_id="2", login="small")])
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="author")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    monkeypatch.setattr(
+        ChangedFile, "of_pull", AsyncMock(return_value=[ChangedFile(filename="app.py")])
+    )
+    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        picking,
+        "recent_contributors",
+        AsyncMock(
+            return_value=picking.Contributors(Counter(regular=1), Counter(regular=1, small=10))
+        ),
+    )
+    monkeypatch.setattr(
+        User,
+        "for_login",
+        AsyncMock(side_effect=lambda _, login: {"regular": regular, "small": small}[login]),
+    )
+    monkeypatch.setattr(
+        picking.ReviewerAvailability, "for_user", AsyncMock(return_value=ReviewerAvailability(None))
+    )
+    monkeypatch.setattr(
+        HumanReviewRequest,
+        "open_review_counts",
+        AsyncMock(return_value={regular.id: 0, small.id: 0}),
+    )
+    pull = MagicMock()
+    pull.repo.can_write = AsyncMock(side_effect=lambda login: login == "small" or regular_eligible)
+    choice = await picking._choose_reviewer(request, pull, None, {})
+    assert isinstance(choice, picking.Pick)
+    assert choice.login == ("regular" if regular_eligible else "small")
+
+
+async def test_commit_detail_reads_are_bounded_and_small_tier_reuses_history() -> None:
+    from openswe.expedited_review.eligibility import ChangedFile
+    from openswe.human_review.picking import recent_contributors
+
+    commits = [{"sha": str(index), "author": {"login": "ada"}} for index in range(200)]
+    repo = MagicMock()
+    repo.commits = AsyncMock(return_value=commits)
+    repo.commit = AsyncMock(return_value={"files": [{"filename": "app.py", "additions": 20}]})
+    result = await recent_contributors(repo, "main", [ChangedFile(filename="app.py")])
+    assert result.regular == result.small == {"ada": 1}
+    assert repo.commit.await_count == 100
+    assert repo.commits.await_count == 2
+
+
+async def test_unreadable_history_is_not_an_empty_candidate_pool() -> None:
+    from openswe.expedited_review.eligibility import ChangedFile
+    from openswe.human_review.picking import recent_contributors
+
+    repo = MagicMock()
+    repo.commits = AsyncMock(side_effect=ValueError("unreadable history"))
+    with pytest.raises(ValueError, match="unreadable history"):
+        await recent_contributors(repo, "main", [ChangedFile(filename="app.py")])

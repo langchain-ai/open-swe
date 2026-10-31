@@ -15,12 +15,19 @@ If it refuses them, pick someone yourself:
 The first reviewer comes from the code owners of most of the changed files; reviewers for the other code owners are added only after that reviewer approves.
 {% endif %}
 1. Read the repository's CODEOWNERS (`.github/CODEOWNERS`, `CODEOWNERS`, or `docs/CODEOWNERS`) for the files the pull request changes.
-2. Look at who has recently reviewed or changed those files: `gh api` for recent merged pull requests touching them and their reviewers, and `git log` on the files.
+2. Consider only changes made in the past 30 days.
+   Rank contributors with more than three commits or more than 20% of all repository commits in that window, plus at least one commit changing 20 or more lines in the affected files highest.
+   Count all repository commits (not just commits touching the PR files) for the percentage denominator.
+   Prefer these regular, substantial contributors.
+   Only if none is suitable after checking availability, write access and prior assignments, select from smaller contributors who changed the affected files in the past 30 days.
+   Use `git log --since="30 days ago" --numstat` on the files or GitHub commit history and file statistics.
 3. Choose one person with write access who is not the author (@{{ author }}) and is likely to know this code.
-   Prefer a code owner who has reviewed nearby changes recently; skip bots and teams.
+   Prefer a code owner among qualifying regular committers; skip bots and teams.
+   Ownership or recent reviews alone do not qualify someone.
 4. Call `assign_human_reviewer` with the pull request URL, their GitHub login, and one short sentence on why them.
    It shows them on the review card, requests their review on GitHub, and messages them directly.
 
 If `assign_human_reviewer` refuses someone, pick the next best candidate, unless it says the pull request needs no reviewer: then stop.
 If people in the Slack thread asked to stop reviewer requests for this pull request altogether, call `dismiss_human_review_request` instead of picking.
-Do not post anything else in Slack and do not change the pull request.
+If nobody suitable qualifies, fail the assignment and tell the PR author why; consider smaller recent contributors first, and fail only when neither pool has a suitable candidate.
+Otherwise do not post anything else in Slack and do not change the pull request.

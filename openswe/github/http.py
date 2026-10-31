@@ -706,12 +706,28 @@ class RepoClient:
         """The rulesets' rules that apply to branch ``name``."""
         return await self.pages(f"rules/branches/{quote(name, safe='')}")
 
-    async def commits(self, *, path: str, since: str, ref: str | None = None) -> object:
-        """The first 100 commits since ``since`` that touched ``path``, on ``ref`` or the default."""
-        params = {"path": path, "since": since, "per_page": "100"}
+    async def commits(
+        self,
+        *,
+        since: str,
+        path: str | None = None,
+        ref: str | None = None,
+        max_pages: int | None = None,
+    ) -> object:
+        """All commits since ``since`` on ``ref``, optionally limited to one path."""
+        params = {"since": since}
+        if path is not None:
+            params["path"] = path
         if ref:
             params["sha"] = ref
-        return await self.get("commits", params)
+        return await self.pages("commits", params=params, max_pages=max_pages)
+
+    async def commit(self, sha: str) -> dict[str, object]:
+        """A commit's changed files and statistics."""
+        payload = await self.get(f"commits/{quote(sha, safe='')}")
+        if not isinstance(payload, dict):
+            raise ValueError("GitHub answered the commit without an object")
+        return payload
 
     async def delete_review_comment(self, comment_id: int) -> None:
         await self.delete(f"pulls/comments/{comment_id}")
