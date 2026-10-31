@@ -296,7 +296,9 @@ test("adds the app to the frame ancestors a page already allows", () => {
     },
   );
   assert.deepEqual(
-    headersFramedByApp({ "Content-Security-Policy": ["frame-ancestors 'none'"] }),
+    headersFramedByApp({
+      "Content-Security-Policy": ["frame-ancestors 'none'"],
+    }),
     { "Content-Security-Policy": ["frame-ancestors open-swe://app"] },
   );
 });
