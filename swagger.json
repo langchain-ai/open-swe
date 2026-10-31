@@ -7699,6 +7699,34 @@
         "title": "SlackTrigger",
         "type": "object"
       },
+      "SlackUserOption": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "real_name": {
+            "title": "Real Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "display_name",
+          "real_name"
+        ],
+        "title": "SlackUserOption",
+        "type": "object"
+      },
       "SlashCommandResponse": {
         "properties": {
           "response_type": {
@@ -19285,6 +19313,37 @@
         "tags": [
           "dashboard",
           "slack",
+          "slack"
+        ]
+      }
+    },
+    "/dashboard/api/slack/users": {
+      "get": {
+        "operationId": "api_slack_users_dashboard_api_slack_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SlackUserOption"
+                  },
+                  "title": "Response Api Slack Users Dashboard Api Slack Users Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Slack Users",
+        "tags": [
+          "dashboard",
           "slack"
         ]
       }

@@ -840,6 +840,13 @@ export interface WorkspaceOption {
 }
 
 /** A channel the Slack bot can see, offered when binding channels to a workspace. */
+export interface SlackUserOption {
+  id: string
+  name: string
+  display_name: string
+  real_name: string
+}
+
 export interface SlackChannelOption {
   id: string
   name: string
@@ -1672,6 +1679,7 @@ export const api = {
       `/workspaces/${encodeURIComponent(slug)}/settings`,
       { method: "PUT", body: JSON.stringify(overrides) }
     ),
+  listSlackUsers: () => request<SlackUserOption[]>("/slack/users"),
   slackUserName: (userId: string) =>
     request<{ name: string }>(
       `/slack/users/${encodeURIComponent(userId)}/name`

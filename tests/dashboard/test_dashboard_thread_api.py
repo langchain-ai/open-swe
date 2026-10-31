@@ -892,6 +892,8 @@ async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
         }
 
     failed = AsyncMock()
+    notify = AsyncMock()
+    monkeypatch.setattr(thread_proxy.ThreadMentions, "notify", notify)
     patch_thread_module(
         monkeypatch, "langgraph_client", lambda: SimpleNamespace(threads=IdleThreads())
     )
@@ -905,6 +907,7 @@ async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
 
     assert status == status_code
     failed.assert_awaited_once_with("tid", turn_id, error="the message could not be started")
+    notify.assert_not_awaited()
 
 
 async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> None:
