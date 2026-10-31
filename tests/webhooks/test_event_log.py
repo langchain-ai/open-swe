@@ -152,6 +152,40 @@ async def test_kinds_name_actions_and_narrow_by_prefix(registry_db: None) -> Non
     assert opened.payload_shape == {"action": "string", "number": "number"}
 
 
+async def test_diagnostics_share_a_rolling_limit_and_stay_out_of_public_events(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.webhooks import error_log
+
+    clock = 100.0
+    monkeypatch.setattr(error_log, "monotonic", lambda: clock)
+    diagnostics = error_log.ErrorLog()
+    await asyncio.gather(
+        *(
+            diagnostics.record(
+                "internal" if index % 2 else "frontend",
+                endpoint="/dashboard/api/settings",
+                payload={"error_message": "private details"},
+            )
+            for index in range(10)
+        )
+    )
+    async with transaction() as conn:
+        assert await conn.scalar(text("SELECT count(*) FROM event_log")) == 5
+        assert (
+            await conn.scalar(text("SELECT count(*) FROM event_log WHERE workspace_id IS NOT NULL"))
+            == 0
+        )
+    since = datetime.now(UTC) - timedelta(minutes=1)
+    assert await EventLog.kinds(since) == []
+    clock = 159.0
+    await diagnostics.record("internal", endpoint="/", payload={})
+    clock = 160.0
+    await diagnostics.record("frontend", endpoint="/", payload={})
+    async with transaction() as conn:
+        assert await conn.scalar(text("SELECT count(*) FROM event_log")) == 6
+
+
 async def test_rotation_keeps_the_retained_days_and_tomorrow(registry_db: None) -> None:
     first = date(2026, 9, 1)
     await EventLog.rotate_partitions(first)

@@ -3,10 +3,11 @@
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field
 
 from openswe.dashboard.deps import SESSION_DEP
+from openswe.webhooks.error_log import ERROR_LOG
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class ClientErrorReport(BaseModel):
 @router.post("/client-errors", status_code=204)
 async def api_report_client_error(
     report: ClientErrorReport,
+    request: Request,
     session: dict[str, Any] = SESSION_DEP,
 ) -> Response:
     logger.warning(
@@ -40,5 +42,11 @@ async def api_report_client_error(
             "page_path": report.path,
             "login": session["sub"],
         },
+    )
+    await ERROR_LOG.record(
+        "frontend",
+        endpoint=request.url.path,
+        error_id=report.error_id,
+        payload={**report.model_dump(mode="json"), "login": session["sub"]},
     )
     return Response(status_code=204)
