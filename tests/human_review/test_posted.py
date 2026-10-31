@@ -9,7 +9,7 @@ from openswe.expedited_review.readiness import PullRequestSnapshot, Readiness
 from openswe.github.codeowners import CodeOwners
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
-from openswe.human_review import lifecycle, posted, standard
+from openswe.human_review import lifecycle, posted, standard, supplementary
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.pr_links import linked_pull_requests
@@ -264,6 +264,12 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
 async def test_skipped_links_do_not_block_registered_posts_positive_reactions(
     registry_db: None, monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock, skip: str
 ) -> None:
+    monkeypatch.setattr(ReviewCard, "link_on_github", AsyncMock())
+    monkeypatch.setattr(
+        supplementary.SupplementaryReviews,
+        "policies",
+        AsyncMock(side_effect=RuntimeError("repository settings unavailable")),
+    )
     user = User()
     async with postgres.session() as session:
         session.add(user)

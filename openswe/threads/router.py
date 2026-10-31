@@ -341,6 +341,9 @@ class ThreadRouter:
             metadata={**metadata, RUNTIME_METADATA_KEY: MDA_RUNTIME},
             if_exists=if_exists,
         )
+        if channel_of(thread.metadata) is not None:
+            await RUNTIMES.local.create(thread_id, thread.metadata)
+            return thread
         await asyncio.gather(
             RUNTIMES.local.create(thread_id, thread.metadata),
             RUNTIMES.mda.create(thread_id, for_mda(thread.metadata)),

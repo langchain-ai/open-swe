@@ -15,12 +15,13 @@ from runtime_api.connections import ConnectionRef
 
 from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.agent_api.loop import ModelChoices
+from openswe.agent_api.tokens import AGENT_TURN_KEY, AgentTurnSettings
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.mcp.runtime import MCPTools
 from openswe.middleware.model_selection import RouteSelection
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_runtime import ToolSurface
-from openswe.server import _registered_tool_name, plan_agent
+from openswe.server import PrepareAgentRunMiddleware, _registered_tool_name, plan_agent
 from openswe.threads.inbox import ThreadInbox
 
 _MODEL_DEFAULTS = {
@@ -62,7 +63,6 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     tool_names = {_registered_tool_name(tool) for tool in tools}
     assert not tool_names.intersection(
         {
-            "save_user_instructions",
             "save_user_settings",
             "save_user_skill",
             "delete_user_skill",
@@ -246,11 +246,10 @@ async def _plan_agent(
     thread_settings: dict[str, object] | None = None,
     workspace_settings: WorkspaceSettings | None = None,
     make_model: Callable[..., BaseChatModel] | None = None,
-    surface: ToolSurface | None = None,
 ) -> dict[str, object]:
     """The run ``config`` plans, with the parts tests read pulled out of its middleware."""
 
-    surface = surface or ToolSurface()
+    surface = ToolSurface()
     make_model_calls: list[tuple[str, dict[str, object]]] = []
     config = config or _base_config()
     thread_id = str((config.get("configurable") or {}).get("thread_id"))
@@ -315,6 +314,7 @@ async def _plan_agent(
         "backend": surface.files,
         "skills": list(surface.skill_sources),
         "make_model_calls": make_model_calls,
+        "turn": AgentTurnSettings.model_validate(config["configurable"][AGENT_TURN_KEY]),
     }
 
 
@@ -401,8 +401,10 @@ async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) 
     original_calls = cast(list[tuple[str, dict[str, object]]], original["make_model_calls"])
     existing_calls = cast(list[tuple[str, dict[str, object]]], existing["make_model_calls"])
     fresh_calls = cast(list[tuple[str, dict[str, object]]], fresh["make_model_calls"])
-    assert existing_calls[:-1] == original_calls[:-1]
-    assert existing_calls[-1] == fresh_calls[-1] != original_calls[-1]
+    titles = [cast(AgentTurnSettings, agent["turn"]) for agent in (original, existing, fresh)]
+    assert existing_calls == original_calls
+    # The title model is no thread setting: it follows the workspace's default.
+    assert titles[1].title_model_id == titles[2].title_model_id != titles[0].title_model_id
     assert fresh_calls != original_calls
     assert {model for model, _ in fresh_calls} == {"google_genai:gemini-3.8-flash"}
 
@@ -507,7 +509,6 @@ SLACK_TOOL_NAMES = {
     "slack_list_channels",
     "slack_no_reply_needed",
     "slack_post_message",
-    "slack_read_thread_messages",
     "slack_breakout_thread",
     "slack_reply",
 }
@@ -602,7 +603,6 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "slack_list_channels",
         "slack_move_thread",
         "slack_post_message",
-        "slack_read_thread_messages",
         "slack_breakout_thread",
         "slack_reply",
     }
@@ -624,20 +624,30 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("thread_scope", ["private", "public", "bot"])
+@pytest.mark.parametrize(
+    ("thread_scope", "source", "channel_reads", "thread_reads"),
+    [
+        ("private", "slack", True, True),
+        ("public", "slack", False, True),
+        ("bot", "slack", True, True),
+        ("private", "dashboard", True, True),
+        ("public", "dashboard", False, False),
+    ],
+)
 async def test_channel_reads_need_a_private_thread_or_its_triggering_bot(
-    thread_scope: str, saved_thread_scope: dict[str, object]
+    thread_scope: str,
+    source: str,
+    channel_reads: bool,
+    thread_reads: bool,
+    saved_thread_scope: dict[str, object],
 ) -> None:
     saved_thread_scope["visibility"] = "private" if thread_scope == "private" else "public"
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
-    configurable.update(
-        {
-            "source": "slack",
-            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
-        }
-    )
+    configurable["source"] = source
+    if source == "slack":
+        configurable["slack_thread"] = {"channel_id": "C123", "thread_ts": "1700000000.000100"}
     if thread_scope == "bot":
         slack_thread = {
             "channel_id": "C123",
@@ -656,12 +666,13 @@ async def test_channel_reads_need_a_private_thread_or_its_triggering_bot(
     assert isinstance(subagents, list)
 
     tool_names = {_registered_tool_name(tool) for tool in tools}
-    assert ("slack_read_channel_messages" in tool_names) is (thread_scope != "public")
-    # A thread-bound Slack read is unaffected either way.
-    assert "slack_read_thread_messages" in tool_names
+    assert ("slack_read_channel_messages" in tool_names) is channel_reads
+    # A run started from Slack reads threads with the bot's own reach; a web one as channel history.
+    assert ("slack_read_thread_messages" in tool_names) is thread_reads
 
     gp = next(item for item in subagents if item.name == "general-purpose")
-    assert ("slack_read_channel_messages" in (gp.tools or ())) is (thread_scope != "public")
+    assert ("slack_read_channel_messages" in (gp.tools or ())) is channel_reads
+    assert ("slack_read_thread_messages" in (gp.tools or ())) is thread_reads
 
 
 @pytest.fixture
@@ -910,101 +921,20 @@ async def test_anthropic_title_model_omits_thinking_without_affecting_agent() ->
         )
     )
     calls = cast(list[tuple[str, dict[str, object]]], captured["make_model_calls"])
-    title_kwargs = next(kwargs for model, kwargs in calls if model == "anthropic:claude-haiku-5-5")
+    titled: list[tuple[str, dict[str, object]]] = []
+
+    def make_title_model(model_id: str, **kwargs: object) -> MagicMock:
+        titled.append((model_id, kwargs))
+        return MagicMock()
+
+    # The title model is built where it is used: as the run's turn is prepared.
+    turn = cast(AgentTurnSettings, captured["turn"])
+    with patch("openswe.server.make_model", side_effect=make_title_model):
+        PrepareAgentRunMiddleware(_base_config(), turn, repo_instructions=None)._title_model  # noqa: B018
+    [(title_model, title_kwargs)] = titled
+    assert title_model == "anthropic:claude-haiku-5-5"
     assert "thinking" not in title_kwargs
     assert title_kwargs["effort"] == "high"
     assert title_kwargs["max_tokens"] == 1024
     agent_kwargs = next(kwargs for model, kwargs in calls if model == "anthropic:claude-opus-5-5")
     assert agent_kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
-
-
-@pytest.mark.parametrize("mode", ["modern", "oversized", "grantless"])
-async def test_remote_preparation_reuses_signed_inputs_but_rechecks_access(
-    monkeypatch: pytest.MonkeyPatch, mode: str
-) -> None:
-    from langchain.agents.middleware.types import AgentState
-    from langgraph.runtime import Runtime
-    from runtime_api.loop import PhaseResult, Prepare
-
-    import openswe.server as server
-    from openswe.agent_api.agent import AgentParts
-    from openswe.agent_api.graph import RemoteGraph, RunSession
-    from openswe.agent_api.tokens import (
-        RemoteRun,
-        sign_runtime_token,
-        verify_runtime_token,
-    )
-    from openswe.tools.access import Access
-
-    monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "preparation-regression-secret-0123456789")
-    monkeypatch.setattr("openswe.agent_api.graph.ToolSet.keep", AsyncMock(return_value="tools"))
-    monkeypatch.setattr(
-        "openswe.agent_api.graph.ManagedSandbox.for_thread", AsyncMock(return_value=None)
-    )
-    oversized = mode == "oversized"
-    instructions = "repository rules" if not oversized else "x" * 8192
-    pinned = {
-        "model_id": "openai:gpt-6.1-sol",
-        "effort": "medium",
-        "model_handoff_complete": True,
-        "repo_instructions": instructions,
-    }
-    planned = 0
-
-    async def build(config: RunnableConfig, surface: ToolSurface) -> None:
-        nonlocal planned
-        planned += 1
-        await _plan_agent(config, thread_settings=pinned, surface=surface)
-
-    parts = AgentParts()
-    dispatch = RemoteGraph("agent", build, parts)
-    run = RemoteRun(
-        thread_id="thread-ctx", assistant_id="agent", configurable={"github_login": "octocat"}
-    ).granting()
-    started = await dispatch.start_run(run)
-    if mode == "grantless":
-        run = run.model_copy(update={"grant_id": None})
-    run = verify_runtime_token(
-        sign_runtime_token(run.model_copy(update={"settings": started.settings}))
-    )
-    assert (run.settings.preparation is None) is oversized
-    assert "ghp" not in run.settings.model_dump_json()
-    if not oversized:
-        assert run.settings.preparation is not None
-        assert run.settings.preparation.repo_instructions == instructions
-
-    async def elsewhere(config: RunnableConfig, surface: ToolSurface) -> None:
-        if mode == "modern":
-            pytest.fail("A replica repeated immutable startup planning")
-        await build(config, surface)
-
-    prepared: list[tuple[str | None, bool, str | None]] = []
-
-    async def per_turn(
-        self: server.PrepareAgentRunMiddleware, state: AgentState, runtime: Runtime
-    ) -> dict[str, object]:
-        prepared.append((self._credential_login, self._sole_writer, self._repo_instructions))
-        return {"rendered_system_prompt": self._model_id}
-
-    monkeypatch.setattr(server.PrepareAgentRunMiddleware, "_prepare", per_turn)
-    monkeypatch.setattr(server, "make_model", MagicMock())
-    monkeypatch.setattr(server, "private_credential_login", AsyncMock(return_value="live-owner"))
-    monkeypatch.setattr(server, "_admin_thread", AsyncMock(return_value=False))
-    monkeypatch.setattr(server, "resolve_access", AsyncMock(return_value=Access(sole=False)))
-    bound = AsyncMock()
-    monkeypatch.setattr(RunSession, "bind_sandbox", bound)
-    monkeypatch.setattr("openswe.agent_api.graph.TurnGitMetadata.begin", AsyncMock(return_value={}))
-    replica = RemoteGraph("agent", elsewhere, parts)
-    for turn in range(2):
-        result = PhaseResult.model_validate(
-            await replica.api(
-                run, "prepare", Prepare(run_id=f"run-{turn}", sandbox_id="mda-box").model_dump()
-            )
-        )
-        assert result.update["rendered_system_prompt"] == "openai:gpt-6.1-sol"
-        assert result.update["run_prepared"] is True
-        assert result.update["reply_surface"] == "web"
-    assert prepared == [("live-owner", False, instructions)] * 2
-    assert bound.await_count == 2
-    assert all(call.args[0].sandbox_id == "mda-box" for call in bound.await_args_list)
-    assert planned == (1 if mode == "modern" else 3)

@@ -18,7 +18,7 @@ from openswe.dashboard.options import available_requested_models, normalize_mode
 from openswe.dashboard.profiles import get_profile
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.database import postgres
-from openswe.dispatch import COMPLETION_WEBHOOK_URL
+from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.prompts import prompt
 from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
@@ -212,6 +212,7 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
         "workspace": metadata.workspace,
         "admin_thread": metadata.admin_thread,
         "repo_explicitly_none": metadata.repo_explicitly_none,
+        "experience": metadata.experience,
     }
     if metadata.owner_type != "system":
         owner = await metadata.owner()
@@ -386,6 +387,7 @@ def _worker_metadata(
             "repo_owner",
             "repo_name",
             "repo_explicitly_none",
+            "experience",
             "base_branch",
             "branch_prefix",
             "sandbox_id",
@@ -395,6 +397,7 @@ def _worker_metadata(
             GITHUB_TOKEN_REPOSITORIES_KEY,
             PARTICIPANT_LOGINS_KEY,
             PARTICIPANT_EMAILS_KEY,
+            CHANNEL_METADATA_KEY,
         )
         if key in values
     }

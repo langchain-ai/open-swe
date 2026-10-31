@@ -14,7 +14,7 @@ from openswe.github.http import RepoClient
 from openswe.github.queue import NativeQueueSnapshot
 from openswe.merge_queue.admission import QueuePolicy
 from openswe.merge_queue.configuration import QueueConfiguration
-from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected
+from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected, WorkflowPolicyMismatch
 from openswe.merge_queue.models import Lease
 from openswe.merge_queue.runtime import QueueJob
 from openswe.merge_queue.store import LeaseLost, MergeQueue
@@ -88,19 +88,21 @@ class NativeQueueRuntime:
     ) -> None:
         config, dispatcher = self.config, self.dispatcher
         assert config is not None and dispatcher is not None
+        revision = config.workflow_policy_revision if config.sync_workflow_policy else None
+        workflow_digest = config.workflow_digest if config.sync_workflow_policy else None
         trust = config.native_trust
-        previous = await queue.native_validation_work(lease)
-        if (
-            previous is not None
-            and previous.attempt.state == "succeeded"
-            and snapshot.main_sha != previous.batch.base_sha
-        ):
+        history = await queue.native_validation_history(lease)
+        previous = history[0] if history else None
+        for work in history:
             if (
-                await repo.merge_base(previous.request.candidate_sha, snapshot.main_sha)
-                == previous.request.candidate_sha
+                work.attempt.state == "succeeded"
+                and snapshot.main_sha != work.request.workflow_sha
+                and await repo.merge_base(work.request.candidate_sha, snapshot.main_sha)
+                == work.request.candidate_sha
             ):
-                await queue.record_native_landing(previous, lease)
+                await queue.record_native_landing(work, lease)
                 previous = None
+                break
         policy = (
             QueuePolicy.model_validate(previous.batch.policy["policy"])
             if previous is not None and previous.batch.policy.get("trust") == trust
@@ -116,18 +118,46 @@ class NativeQueueRuntime:
         if work is None:
             return
         if work.dispatch:
+            if config.sync_workflow_policy:
+                await queue.record_evidence(
+                    work.attempt.id,
+                    "workflow-policy",
+                    {
+                        "revision": revision,
+                        "digest": workflow_digest,
+                    },
+                    lease,
+                )
             await queue.renew(lease, timedelta(seconds=60))
             try:
                 # The saved intent authorizes tests, not merging. Do not hold database
                 # locks during dispatch; publication below rechecks current authority.
-                await dispatcher.dispatch(work.request, work.attempt.deadline)
+                await dispatcher.dispatch(
+                    work.request,
+                    work.attempt.deadline,
+                    workflow_policy_revision=revision,
+                    workflow_digest=workflow_digest,
+                )
+            except WorkflowPolicyMismatch:
+                logger.info(
+                    "Queue dispatch deferred until gateway policy agrees",
+                    extra={"attempt_id": str(work.attempt.id)},
+                )
+                await queue.record_evidence(work.attempt.id, "dispatch-policy-deferred", {}, lease)
+                return
             except DispatchRejected as exc:
                 await queue.finish_native_validation(
                     work, {"error": str(exc)}, lease, succeeded=False
                 )
                 return
             async with queue.native_publication(lease):
-                await dispatcher.report(work.request, work.attempt.deadline, "in_progress")
+                await dispatcher.report(
+                    work.request,
+                    work.attempt.deadline,
+                    "in_progress",
+                    workflow_policy_revision=revision,
+                    workflow_digest=workflow_digest,
+                )
             return
         run_id = work.run_id
         if work.attempt.state == "running":
@@ -157,7 +187,12 @@ class NativeQueueRuntime:
         if await queue.authorize_native_result(work, snapshot, lease):
             async with queue.native_publication(lease):
                 await dispatcher.report(
-                    work.request, work.attempt.deadline, "success", run_id=run_id
+                    work.request,
+                    work.attempt.deadline,
+                    "success",
+                    run_id=run_id,
+                    workflow_policy_revision=revision,
+                    workflow_digest=workflow_digest,
                 )
 
     async def reconcile(self, payload: QueueJob) -> None:

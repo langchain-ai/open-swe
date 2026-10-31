@@ -133,7 +133,7 @@ async def remove_refresh_cron(record: Workspace | None) -> None:
 async def _release_builder_sandbox(sandbox_id: str) -> None:
     """Stop the builder so the platform reclaims it on its delete-after-stop window.
 
-    Nothing here deletes a sandbox: an id-keyed delete is how a running box with
+    Nothing here deletes a sandbox: an id-keyed delete is how a running sandbox with
     uncommitted work gets destroyed, so reclamation stays the platform's job.
     """
     from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
@@ -371,8 +371,9 @@ async def refresh_workspace(
         raise
     except Exception as exc:
         logger.warning("Refresh failed", extra={**context, "step": step}, exc_info=True)
-        await attempt.settle("failed", log=log, error=str(exc))
-        return {"status": "failed", "slug": slug, "error": str(exc), "log": log}
+        error = str(exc) or type(exc).__name__
+        await attempt.settle("failed", log=log, error=error)
+        return {"status": "failed", "slug": slug, "error": error, "log": log}
     finally:
         if sandbox_id:
             await _release_builder_sandbox(sandbox_id)
@@ -496,7 +497,7 @@ async def _read_builder_log(sandbox_id: str, path: str) -> str | None:
     """Tail a script's live ``bash -x`` trace off the builder, or ``None``.
 
     Best-effort by design: the builder is released the moment the capture lands,
-    so an unreachable box means "no live trace", never a failed poll.
+    so an unreachable sandbox means "no live trace", never a failed poll.
     """
     from openswe.sandboxes.providers.registry import connect_existing_sandbox
 

@@ -4969,17 +4969,6 @@
             ],
             "title": "Draft Prs"
           },
-          "experimental_act_as_approval": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Act As Approval"
-          },
           "experimental_background_callbacks": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -5003,6 +4992,17 @@
             ],
             "title": "Experimental Fleet"
           },
+          "experimental_memory": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Memory"
+          },
           "pr_failure_reactions": {
             "anyOf": [
               {
@@ -5013,17 +5013,6 @@
               }
             ],
             "title": "Pr Failure Reactions"
-          },
-          "pr_review_links": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pr Review Links"
           },
           "review_draft_prs": {
             "anyOf": [
@@ -5931,6 +5920,11 @@
             "default": false,
             "title": "Summary Updated",
             "type": "boolean"
+          },
+          "supplementary_refusal": {
+            "default": "",
+            "title": "Supplementary Refusal",
+            "type": "string"
           }
         },
         "required": [
@@ -8043,6 +8037,20 @@
       "ToolCallView": {
         "additionalProperties": false,
         "properties": {
+          "attachments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachments"
+          },
           "ended_at": {
             "anyOf": [
               {
@@ -8128,6 +8136,7 @@
           "output_preview",
           "output_truncated",
           "has_output",
+          "attachments",
           "namespace",
           "started_at",
           "ended_at"
@@ -11633,140 +11642,6 @@
         ]
       }
     },
-    "/dashboard/api/fleet-chat/{path}": {
-      "get": {
-        "operationId": "proxy_dashboard_api_fleet_chat__path__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Proxy",
-        "tags": [
-          "dashboard",
-          "fleet-chat"
-        ]
-      },
-      "patch": {
-        "operationId": "proxy_dashboard_api_fleet_chat__path__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Proxy",
-        "tags": [
-          "dashboard",
-          "fleet-chat"
-        ]
-      },
-      "post": {
-        "operationId": "proxy_dashboard_api_fleet_chat__path__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Proxy",
-        "tags": [
-          "dashboard",
-          "fleet-chat"
-        ]
-      }
-    },
     "/dashboard/api/incidents/documents/history": {
       "get": {
         "operationId": "search_history_dashboard_api_incidents_documents_history_get",
@@ -12191,6 +12066,41 @@
         "tags": [
           "dashboard",
           "incidents"
+        ]
+      }
+    },
+    "/dashboard/api/l/{token}": {
+      "get": {
+        "operationId": "open_short_link_dashboard_api_l__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open Short Link",
+        "tags": [
+          "short-links"
         ]
       }
     },
@@ -21707,7 +21617,7 @@
     },
     "/dashboard/api/threads/{thread_id}/transcript/attachments/{attachment_id}": {
       "get": {
-        "description": "The bytes of one file attached to a message in this thread.",
+        "description": "The bytes of one file attached to a message or tool result in this thread.",
         "operationId": "api_get_thread_attachment_dashboard_api_threads__thread_id__transcript_attachments__attachment_id__get",
         "parameters": [
           {
