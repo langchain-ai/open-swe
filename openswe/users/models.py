@@ -431,6 +431,7 @@ class User(Base):
         """Attach another provider account to this person, taking it over if needed."""
         cls = type(self)
         async with postgres.session() as session:
+            await _lock_login(session, provider, login)
             await _release_login(session, provider, external_id, login)
             upsert = insert(UserIdentity).values(
                 user_id=self.id,
@@ -507,6 +508,7 @@ class User(Base):
         and rolled back when the identity upsert reports that a concurrent first
         sign in already claimed it.
         """
+        await _lock_login(session, provider, login)
         owner = await session.scalar(
             select(UserIdentity.user_id).where(
                 UserIdentity.provider == provider,
@@ -556,6 +558,18 @@ class User(Base):
     @classmethod
     def _with_identities(cls, statement: Select[Self]) -> Select[Self]:
         return statement.options(selectinload(cls.identities))
+
+
+async def _lock_login(session: AsyncSession, provider: Provider, login: str) -> None:
+    """Take turns with anyone else claiming ``login``, until this transaction ends.
+
+    The unique index on GitHub logins is not the upsert's conflict target, so two
+    sign ins that wrote the same login at once would fail rather than merge.
+    """
+    if provider == "github" and login:
+        await session.execute(
+            select(func.pg_advisory_xact_lock(func.hashtext(f"github-login:{login.lower()}")))
+        )
 
 
 async def _release_login(
