@@ -81,8 +81,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    outputs:
-      mda_deployed: ${{ steps.mda-deploy.outcome == 'success' }}
     concurrency:
       group: deploy-preview
       cancel-in-progress: false
@@ -95,25 +93,45 @@ jobs:
           sparse-checkout: scripts
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Roll out the preview revision
-        id: rollout
         env:
           DEPLOYMENT_ID: ${{ vars.PREVIEW_DEPLOYMENT_ID }}
           EXPECTED_SHA: ${{ needs.build.outputs.sha }}
           LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
           LANGSMITH_WORKSPACE_ID: ${{ vars.PREVIEW_WORKSPACE_ID }}
         run: uv run scripts/deploy_preview.py
-      # The Managed Deep Agents runtime the preview backend calls (open-swe-mda-preview),
-      # from the same tree. Last: `mda deploy` runs the tree's code, labeled PRs included.
+
+  # The Managed Deep Agents runtime the preview backend calls (open-swe-mda-preview), from
+  # the same tree, just after the backend serves it or a newer tree. Apart from the backend
+  # rollout, which a newer tree supersedes: with its own queue, a deploy that starts always
+  # finishes, and the pending one is the newest tree.
+  deploy-mda:
+    name: Deploy the MDA preview
+    needs: build
+    if: needs.build.outputs.changed == 'true' && vars.PREVIEW_DEPLOYMENT_ID != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      mda_deployed: ${{ steps.mda-deploy.outcome == 'success' }}
+    concurrency:
+      group: deploy-mda-preview
+      cancel-in-progress: false
+    timeout-minutes: 75
+    steps:
       - uses: actions/checkout@v7.0.1
-        if: steps.rollout.outputs.superseded != 'true'
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || 'main' }}
+          persist-credentials: false
+          sparse-checkout: scripts
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ needs.build.outputs.sha }}
           path: preview-tree
           fetch-depth: 0
           persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Check whether the MDA preview is behind
         id: mda-changed
-        if: steps.rollout.outputs.superseded != 'true'
         working-directory: preview-tree
         run: |
           if [[ -f mda/agent.py ]] && ! git diff --quiet refs/tags/mda-deployed/preview HEAD -- mda packages/runtime-api vendor/managed-deepagents-sdk vendor/langchain-quickjs .github/workflows/build_preview_branch.yml; then
@@ -133,6 +151,15 @@ jobs:
         working-directory: preview-tree
         # From the vendored SDK, into the runtime mda/ installs.
         run: make mda-cli
+      # After the build, so MDA trails the backend by little more than its deploy.
+      - name: Wait for the backend to serve this tree or a newer one
+        if: steps.mda-changed.outputs.deploy == 'true'
+        env:
+          DEPLOYMENT_ID: ${{ vars.PREVIEW_DEPLOYMENT_ID }}
+          EXPECTED_SHA: ${{ needs.build.outputs.sha }}
+          LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
+          LANGSMITH_WORKSPACE_ID: ${{ vars.PREVIEW_WORKSPACE_ID }}
+        run: uv run scripts/deploy_preview.py --follow
       - name: Deploy the MDA preview
         id: mda-deploy
         if: steps.mda-changed.outputs.deploy == 'true'
@@ -180,11 +207,11 @@ jobs:
             echo "- recorded as \`mda-deployed/preview\` → \`${TREE_SHA}\`"
           } >>"$GITHUB_STEP_SUMMARY"
 
-  # A job of its own: the deploy job ran the tree's code, so it never holds a token that can write.
+  # A job of its own: deploy-mda ran the tree's code, so it never holds a token that can write.
   record-mda:
     name: Record what the MDA preview runs
-    needs: [build, deploy]
-    if: needs.deploy.outputs.mda_deployed == 'true'
+    needs: [build, deploy-mda]
+    if: needs.deploy-mda.outputs.mda_deployed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
