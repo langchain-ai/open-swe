@@ -333,3 +333,25 @@ async def test_expired_user_token_is_never_replaced_with_a_bot_token(
 
     assert await github_token.resolve_thread_github_token(config) is None
     mint.assert_not_awaited()
+
+
+@pytest.mark.parametrize("expired", [False, True])
+async def test_langsmith_run_cannot_read_or_refresh_a_cached_bot_token(
+    monkeypatch: pytest.MonkeyPatch, expired: bool
+) -> None:
+    expiry = datetime.now(UTC) + timedelta(hours=-1 if expired else 1)
+    github_token.cache_github_token_for_thread(
+        "tid", "bot-secret", expires_at=expiry.isoformat(), is_bot_token=True
+    )
+    mint = AsyncMock(return_value=("another-secret", None))
+    monkeypatch.setattr(github_token, "get_github_app_installation_token_with_expiry", mint)
+    config = {
+        "configurable": {
+            "thread_id": "tid",
+            "auth_provider": "langsmith",
+            "user_id": "019abcde-0000-7000-8000-000000000001",
+        }
+    }
+    assert github_token.get_github_token(config) is None
+    assert await github_token.resolve_thread_github_token(config) is None
+    mint.assert_not_awaited()

@@ -97,6 +97,8 @@ async def resolve_github_token(
 ) -> tuple[str, str | None]:
     """Use workspace bot auth publicly and the verified owner's OAuth privately."""
     cfg = RunConfig.from_config(config)
+    if cfg.auth_provider == "langsmith":
+        return "", None
     login = await private_credential_login(config, thread_id=thread_id)
     await invalidate_cached_github_token(thread_id)
     if login is None:

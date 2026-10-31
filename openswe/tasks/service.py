@@ -30,6 +30,7 @@ from openswe.tasks.schemas import LaunchedThread, Run, Thread, ThreadMetadata, u
 from openswe.threads.access import resolve_run_email
 from openswe.threads.creation import create_thread
 from openswe.threads.handlers import interrupt_transcript_turns
+from openswe.threads.identity import ThreadIdentity
 from openswe.threads.runtimes import RUNTIMES
 from openswe.threads.status import refresh_thread_status
 from openswe.threads.summary import assert_thread_postable, assert_thread_readable
@@ -86,7 +87,11 @@ class Actor:
         """
         if not self.login:
             raise PermissionError("Task operations on a user-owned thread require its owner")
-        await enforce_github_login_gate(self.login)
+        identity = ThreadIdentity(self.login)
+        if identity.github_login:
+            await enforce_github_login_gate(self.login)
+        else:
+            await identity.authorize()
         user = await user_for_login(self.login)
         if user is None:
             raise PermissionError(
@@ -95,7 +100,7 @@ class Actor:
         owner = await metadata.owner()
         is_owner = owner.id == user.id
         access_metadata = metadata.json_metadata() | {
-            "owner_login": self.login if is_owner else owner.github_login
+            "owner_login": self.login if is_owner else metadata.owner_subject(owner)
         }
         if not is_owner and not (
             allow_participants and f"user:{user.id}" in participant_ids(access_metadata)
@@ -212,14 +217,20 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
         "workspace": metadata.workspace,
         "admin_thread": metadata.admin_thread,
         "repo_explicitly_none": metadata.repo_explicitly_none,
-        "experience": metadata.experience,
+        "experience": "coding",
     }
     if metadata.owner_type != "system":
         owner = await metadata.owner()
-        login = owner.github_login
+        login = metadata.owner_subject(owner)
         if not login:
-            raise PermissionError("Task delivery requires the owner's GitHub login")
-        await enforce_github_login_gate(login)
+            raise PermissionError("Task delivery requires the owner's identity")
+        identity = ThreadIdentity(login)
+        if identity.user_id is not None:
+            if identity.user_id != owner.id or metadata.experience != "agent_workspace":
+                raise PermissionError("Task delivery requires the Agent Workspace owner")
+            await identity.authorize()
+        else:
+            await enforce_github_login_gate(login)
         profile = await get_profile(login) or {}
         email = await resolve_run_email(login, profile)
         values |= {"owner_login": login}
@@ -228,7 +239,15 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
             await langgraph_client().threads.update(
                 thread_id, metadata={"owner_user_id": str(owner.id)}
             )
-        config |= {"github_login": login, "user_email": email}
+        config |= {"user_email": email}
+        if identity.user_id is not None:
+            config |= {
+                "user_id": str(owner.id),
+                "auth_provider": "langsmith",
+                "experience": "agent_workspace",
+            }
+        else:
+            config["github_login"] = login
     config.update(_JSON_OBJECT.validate_python(SourceContext.from_metadata(values).dump()))
     if metadata.repo_owner and metadata.repo_name:
         config["repo"] = {"owner": metadata.repo_owner, "name": metadata.repo_name}
@@ -316,7 +335,11 @@ async def _status_owner_actor(actor: Actor) -> Actor:
     config = await recipient_config(actor.thread_id)
     email = config.get("user_email")
     return Actor(
-        actor.thread_id, str(config["github_login"]), email if isinstance(email, str) else None
+        actor.thread_id,
+        f"user:{config['user_id']}"
+        if config.get("auth_provider") == "langsmith"
+        else str(config["github_login"]),
+        email if isinstance(email, str) else None,
     )
 
 

@@ -184,6 +184,34 @@ async def test_github_sender_can_use_thread_tools_only_when_authorized(
         assert sent["run_id"] == "run-2"
 
 
+@pytest.mark.parametrize("authorized", [True, False])
+async def test_langsmith_thread_actor_requires_current_authorization(
+    monkeypatch: pytest.MonkeyPatch, authorized: bool
+) -> None:
+    user_id = "01900000-0000-7000-8000-000000000001"
+    monkeypatch.setattr(
+        threads_tool,
+        "get_config",
+        lambda: {"configurable": {"auth_provider": "langsmith", "user_id": user_id}},
+    )
+    monkeypatch.setattr(
+        threads_tool.ThreadIdentity,
+        "authorize",
+        AsyncMock(side_effect=None if authorized else HTTPException(403, "Membership revoked")),
+    )
+    monkeypatch.setattr(
+        threads_tool.ThreadIdentity,
+        "user",
+        AsyncMock(return_value=SimpleNamespace(display_name="Member")),
+    )
+    actor = await threads_tool.resolve_thread_actor()
+    assert actor == (
+        threads_tool._Actor(login=f"user:{user_id}", email=None, name="Member")
+        if authorized
+        else None
+    )
+
+
 async def test_list_threads_denies_actor_outside_allowed_org(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
