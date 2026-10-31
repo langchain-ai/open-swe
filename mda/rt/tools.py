@@ -119,6 +119,8 @@ def tool_report(
 def _reading(spec: ToolSpec, state: Mapping[str, object]) -> RunOperation:
     """A call of ``spec``'s operation, carrying the run state it says it reads."""
     run_state = held_state(state)
+    if (spec.reads_all or "async_tasks" in spec.reads) and "async_tasks" in state:
+        run_state["async_tasks"] = _json_object.validate_python(state["async_tasks"])
     keys = list(run_state) if spec.reads_all else [k for k in spec.reads if k != "messages"]
     messages = state.get("messages")
     conversation = (
