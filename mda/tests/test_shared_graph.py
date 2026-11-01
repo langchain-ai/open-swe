@@ -26,7 +26,9 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import BaseTool, tool
 from langchain_quickjs._repl import EvalOutcome, _Registry, _ThreadREPL
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.config import get_config
+from langgraph.constants import CONFIG_KEY_CHECKPOINTER
 from langgraph.errors import NodeCancelledError
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt.tool_node import ToolRuntime
@@ -234,10 +236,14 @@ async def _run(
     thread_id: str,
     context: dict[str, object],
     messages: list[tuple[str, str]] | None = None,
+    checkpointer: InMemorySaver | None = None,
 ) -> CompiledStateGraph:
+    config = _thread(thread_id)
+    if checkpointer is not None:
+        config["configurable"][CONFIG_KEY_CHECKPOINTER] = checkpointer
     graph = await compile_managed_agent_async(
         agent.agent,
-        _thread(thread_id),
+        config,
         runtime=_ExecutionRuntime(
             access_context="threads.create_run", store=store, context=context
         ),
@@ -246,7 +252,7 @@ async def _run(
     )
     await graph.ainvoke(
         {"messages": messages or [("user", "Review it")]},
-        _thread(thread_id),
+        config,
         # The run context as the Agent Server hands it over, which LangGraph reads into the schema.
         context=context,  # ty: ignore[invalid-argument-type]
     )
@@ -1483,6 +1489,7 @@ async def test_closed_eval_recovers_without_replay_but_run_cancellation_is_termi
     else:
         await task
         assert observed[0].status == "error"
+        assert "empty JavaScript state" in observed[0].text
         assert "found" in observed[1].text
         assert attempts == 3
         assert "ordinary eval failure" in observed[2].text
@@ -1492,6 +1499,68 @@ async def test_closed_eval_recovers_without_replay_but_run_cancellation_is_termi
     )
     assert not interpreter._registry._slots
     assert not interpreter._slots
+
+
+async def test_closed_eval_warns_that_the_next_eval_rolls_back_to_the_saved_snapshot(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    """With thread state, a replacement interpreter restores the last run's snapshot, so the
+    model must hear that this run's changes roll back, not that state was discarded."""
+    original = _ThreadREPL.eval_async
+
+    async def evaluate(
+        repl: _ThreadREPL,
+        code: str,
+        *,
+        outer_runtime: ToolRuntime | None = None,
+        snapshot_payload: bytes | None = None,
+        tools: tuple[BaseTool, ...] | None = None,
+        outer_loop: asyncio.AbstractEventLoop | None = None,
+    ) -> EvalOutcome:
+        if code == "crash":
+            await repl.aclose()
+            raise ValueError("engine closed")
+        return await original(
+            repl,
+            code,
+            outer_runtime=outer_runtime,
+            snapshot_payload=snapshot_payload,
+            tools=tools,
+            outer_loop=outer_loop,
+        )
+
+    def replies() -> Iterator[AIMessage]:
+        for run in [["globalThis.kept = 1"], ["globalThis.kept = 2", "crash", "kept"]]:
+            for index, code in enumerate(run):
+                yield AIMessage(
+                    content="",
+                    tool_calls=[ToolCall(name="eval", args={"code": code}, id=f"eval-{index}")],
+                )
+            yield AIMessage(content="done")
+
+    interpreter = next(
+        item for item in agent._parts("agent").middleware if isinstance(item, RunCodeInterpreter)
+    )
+    monkeypatch.setattr(interpreter, "_mode", "thread")
+    monkeypatch.setattr(_ThreadREPL, "eval_async", evaluate)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=replies()))
+    catalog = _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]})
+    checkpointer = InMemorySaver()
+    await _run(
+        InMemoryStore(), "rollback", _context("agent", "a", catalog), checkpointer=checkpointer
+    )
+    graph = await _run(
+        InMemoryStore(), "rollback", _context("agent", "b", catalog), checkpointer=checkpointer
+    )
+
+    state = await graph.aget_state(
+        {"configurable": {"thread_id": "rollback", CONFIG_KEY_CHECKPOINTER: checkpointer}}
+    )
+    crashed, restored = [m for m in state.values["messages"] if isinstance(m, ToolMessage)][-2:]
+    assert crashed.status == "error"
+    assert "rolling back every variable defined or changed since that save" in crashed.text
+    assert "verify their effects before repeating" in crashed.text
+    assert restored.text == "<result>1</result>"
 
 
 @pytest.mark.parametrize("failure", ["before_agent", "before_model", "between_steps"])
