@@ -69,6 +69,7 @@ import {
 } from "@/features/agents/lib/queuedMessages"
 import type { QueuedTurn } from "@/features/agents/lib/transcript/reducer"
 import type {
+  ComposerDraft,
   ComposerSubmission,
   RestoredDraft,
   SubmitOptions,
@@ -90,6 +91,10 @@ import { useConnectionStatus } from "@/features/agents/lib/stream/useReconnectSt
 import { runTranscriptCommitted } from "@/lib/perf/streaming"
 import { ReplyOptionContext } from "@/features/agents/components/chat/ReplyCard"
 import {
+  ImageAnnotationContext,
+  type ImageAnnotation,
+} from "@/components/ImageLightbox"
+import {
   threadHydrated,
   threadHydrationFailed,
   threadTranscriptPainted,
@@ -97,7 +102,7 @@ import {
 
 interface AgentThreadViewProps {
   thread: AgentThread
-  composerDraft?: { key: number; text: string }
+  composerDraft?: ComposerDraft
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
@@ -420,7 +425,7 @@ export function AgentThreadView({
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
         text: composerDraft.text,
-        images: [],
+        images: composerDraft.images ?? [],
         replacesSuggestion: true,
       }))
     }
@@ -765,6 +770,15 @@ export function AgentThreadView({
     return () => cancelAnimationFrame(frame)
   }, [isHydrating, thread.id, visibleMessages])
 
+  const replyWithImage = canPost
+    ? ({ image, comment }: ImageAnnotation) =>
+        setRestoreDraft((previous) => ({
+          key: (previous?.key ?? 0) + 1,
+          text: comment,
+          images: [image],
+        }))
+    : null
+
   return (
     <div className="flex min-w-0 flex-1">
       <div
@@ -919,62 +933,64 @@ export function AgentThreadView({
               <LogoMark alt="" className="size-12 animate-pulse" />
             </div>
           ) : (
-            <ReplyOptionContext.Provider
-              value={canPost ? submitText : undefined}
-            >
-              <PullRequestPreviewProvider
-                pullRequests={thread.pullRequests ?? []}
-                health={pullRequestHealth}
-                healthUnavailable={pullRequestStatus.isError}
+            <ImageAnnotationContext.Provider value={replyWithImage}>
+              <ReplyOptionContext.Provider
+                value={canPost ? submitText : undefined}
               >
-                <Profiler
-                  id="transcript"
-                  onRender={(_id, _phase, actualDuration) =>
-                    runTranscriptCommitted(thread.id, actualDuration)
-                  }
+                <PullRequestPreviewProvider
+                  pullRequests={thread.pullRequests ?? []}
+                  health={pullRequestHealth}
+                  healthUnavailable={pullRequestStatus.isError}
                 >
-                  <Messages
-                    messages={visibleMessages}
-                    threadId={thread.id}
-                    scrollKey={thread.id}
-                    showPlanArtifact={Boolean(thread.planStatus)}
-                    runCosts={thread.runCosts}
-                    emptyState={
-                      <div className="flex min-h-60 items-center justify-center">
-                        {hydrationFailed ? (
-                          <Banner intent="error" className="max-w-3xl">
-                            This thread&apos;s messages could not be loaded.
-                            Reload to try again.
-                          </Banner>
-                        ) : (
-                          (reviewChat?.emptyState ?? (
-                            <p className="text-xs text-tertiary">
-                              This thread has no messages yet.
-                            </p>
-                          ))
-                        )}
-                      </div>
+                  <Profiler
+                    id="transcript"
+                    onRender={(_id, _phase, actualDuration) =>
+                      runTranscriptCommitted(thread.id, actualDuration)
                     }
-                    onOpenFile={handleOpenFile}
-                    loadEarlier={loadEarlier}
-                    queuedMessages={queuedRows}
-                    onRemoveQueuedMessage={
-                      canPost ? removeQueuedMessage : undefined
-                    }
-                    onReply={canPost ? addReply : undefined}
-                    isStreaming={isStreaming}
-                    streamIsLoading={source.isRunning}
-                    scrollControlRef={scrollControlRef}
-                    isThinking={isThinking}
-                    isOffloading={source.isOffloading}
-                    reconnectLabel={reconnect.label}
-                    settingUpSandbox={settingUpSandbox}
-                    pollWorkflowApprovalsWhileActive={isStreaming}
-                    contentWidthClass="max-w-3xl"
-                  />
-                </Profiler>
-              </PullRequestPreviewProvider>
-            </ReplyOptionContext.Provider>
+                  >
+                    <Messages
+                      messages={visibleMessages}
+                      threadId={thread.id}
+                      scrollKey={thread.id}
+                      showPlanArtifact={Boolean(thread.planStatus)}
+                      runCosts={thread.runCosts}
+                      emptyState={
+                        <div className="flex min-h-60 items-center justify-center">
+                          {hydrationFailed ? (
+                            <Banner intent="error" className="max-w-3xl">
+                              This thread&apos;s messages could not be loaded.
+                              Reload to try again.
+                            </Banner>
+                          ) : (
+                            (reviewChat?.emptyState ?? (
+                              <p className="text-xs text-tertiary">
+                                This thread has no messages yet.
+                              </p>
+                            ))
+                          )}
+                        </div>
+                      }
+                      onOpenFile={handleOpenFile}
+                      loadEarlier={loadEarlier}
+                      queuedMessages={queuedRows}
+                      onRemoveQueuedMessage={
+                        canPost ? removeQueuedMessage : undefined
+                      }
+                      onReply={canPost ? addReply : undefined}
+                      isStreaming={isStreaming}
+                      streamIsLoading={source.isRunning}
+                      scrollControlRef={scrollControlRef}
+                      isThinking={isThinking}
+                      isOffloading={source.isOffloading}
+                      reconnectLabel={reconnect.label}
+                      settingUpSandbox={settingUpSandbox}
+                      pollWorkflowApprovalsWhileActive={isStreaming}
+                      contentWidthClass="max-w-3xl"
+                    />
+                  </Profiler>
+                </PullRequestPreviewProvider>
+              </ReplyOptionContext.Provider>
+            </ImageAnnotationContext.Provider>
           )}
           {!isHydrating && (
             <AgentComposerDock>

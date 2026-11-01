@@ -6,6 +6,8 @@ import type { SelectedLineRange } from "@pierre/diffs"
 import type { PullRequestReviewEvent } from "@/lib/api"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
+import type { ComposerDraft } from "@/features/agents/components/composer/ChatComposer"
+import type { ImageChunk } from "@/features/agents/lib/types"
 import type { DiffSide } from "@/features/reviews/lib/chatDiffActions"
 import { rangeBounds } from "@/features/reviews/lib/lineRange"
 import {
@@ -93,7 +95,7 @@ interface VisitState {
   atEnd: boolean
   /** Bumped per request so asking for the same target twice still scrolls. */
   jump: { key: number; target: DiffTarget } | null
-  chatDraft: { key: number; text: string } | undefined
+  chatDraft: ComposerDraft | undefined
   /** A question the chat sends as soon as it can, then clears. */
   chatQuestion: string | undefined
   /** Events not yet taken by the part of the page they're for. */
@@ -145,7 +147,7 @@ interface ReviewPageActions {
   setPendingEdit: (commentId: number, text: string | null) => void
   setThreadOpen: (threadId: number, open: boolean) => void
   focusChat: () => void
-  askInChat: (text: string) => void
+  askInChat: (text: string, images?: Array<ImageChunk>) => void
   sendInChat: (text: string) => void
   clearChatQuestion: () => void
   attachToChat: (excerpts: ReadonlyArray<CodeExcerpt>) => void
@@ -499,8 +501,10 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       set({ railTab: "chat", railOpen: true })
       focusChatComposer()
     },
-    askInChat: (text) => {
-      set({ chatDraft: { key: (get().chatDraft?.key ?? 0) + 1, text } })
+    askInChat: (text, images) => {
+      set({
+        chatDraft: { key: (get().chatDraft?.key ?? 0) + 1, text, images },
+      })
       get().focusChat()
     },
     sendInChat: (chatQuestion) => {

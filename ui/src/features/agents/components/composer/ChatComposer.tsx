@@ -76,6 +76,7 @@ import {
   useSlackChannelDirectory,
 } from "@/lib/slack-channels"
 import { cn } from "@/lib/utils"
+import { ExpandableImage } from "@/components/ImageLightbox"
 
 export type { ActiveRun }
 
@@ -130,6 +131,13 @@ export interface RestoredDraft {
   replies?: Array<PassageReply>
   /** Replace the previous suggested prompt if it is still exactly as suggested, instead of stacking on it. */
   replacesSuggestion?: boolean
+}
+
+/** Text, and optionally images, another part of the page puts in a thread's composer. */
+export interface ComposerDraft {
+  key: number
+  text: string
+  images?: Array<ImageChunk>
 }
 
 export interface ChatComposerProps {
@@ -935,10 +943,11 @@ export const ChatComposer = memo(function ChatComposer({
                 className="group relative"
                 key={`${image.fileName ?? "image"}-${index}`}
               >
-                <img
+                <ExpandableImage
                   alt={image.fileName || "Pending image"}
                   className="size-16 rounded-lg border border-default object-cover"
                   src={`data:${image.mimeType};base64,${image.base64}`}
+                  annotatable={false}
                 />
                 <IconButton
                   className="absolute -top-1.5 -right-1.5 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
