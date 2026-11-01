@@ -467,6 +467,8 @@ async def test_task_wakeup_preserves_current_model_selection(
 
     config = await service.recipient_config(COORDINATOR)
 
+    assert config["github_login"] == OWNER
+    assert "schedule_id" not in config
     assert config["experience"] == "agent_workspace"
     assert config["model_selection"] == selection
     if selection == "explicit":

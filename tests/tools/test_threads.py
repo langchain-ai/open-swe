@@ -12,6 +12,8 @@ from openswe import run_config
 from openswe.input_messages import human_input, person_introduction
 from openswe.message_queue import QueuedMessage
 from openswe.slack import allowed_bots
+from openswe.tasks import service
+from openswe.tasks.schemas import ThreadMetadata
 
 threads_tool = importlib.import_module("openswe.tools.threads")
 slack_channels = importlib.import_module("openswe.slack.tools.channels")
@@ -358,13 +360,32 @@ def _automation_run(
     return page
 
 
+@pytest.mark.parametrize("task_wake", [False, True])
 async def test_automation_run_reads_public_threads_but_cannot_write(
     monkeypatch: pytest.MonkeyPatch,
+    task_wake: bool,
 ) -> None:
     page = _automation_run(
         monkeypatch,
         {"owner_type": "system", "visibility": "public", "schedule_id": _AUTOMATION_ID},
     )
+
+    if task_wake:
+        metadata = ThreadMetadata.model_validate(
+            {"source": "schedule", "owner_type": "system", "schedule_id": _AUTOMATION_ID}
+        )
+        monkeypatch.setattr(service, "thread_metadata", AsyncMock(return_value=metadata))
+        config = {"configurable": await service.recipient_config("automation-thread")}
+        monkeypatch.setattr(threads_tool, "get_config", lambda: config)
+        monkeypatch.setattr(run_config, "get_config", lambda: config)
+        assert config["configurable"]["schedule_id"] == _AUTOMATION_ID
+        assert "github_login" not in config["configurable"]
+        assert "user_email" not in config["configurable"]
+        assert await threads_tool.schedules.authorized_schedule_run(
+            run_config.RunConfig.parse(config["configurable"])
+        )
+        actor = await threads_tool._reader()
+        assert actor is not None and actor.automation
 
     listed = await threads_tool.list_threads(scope="automation", automation_id=_AUTOMATION_ID)
     sent = await threads_tool.manage_thread(
@@ -380,6 +401,35 @@ async def test_automation_run_reads_public_threads_but_cannot_write(
     for refused in (sent, started):
         assert refused["success"] is False
         assert "cannot message" in refused["error"]
+
+
+@pytest.mark.parametrize("schedule_metadata", [{}, {"schedule_id": ""}, {"schedule_id": 42}])
+async def test_task_wake_without_schedule_identity_cannot_read(
+    monkeypatch: pytest.MonkeyPatch, schedule_metadata: dict[str, object]
+) -> None:
+    metadata = {"source": "schedule", "owner_type": "system", "visibility": "public"}
+    metadata.update(schedule_metadata)
+    _automation_run(monkeypatch, metadata)
+    monkeypatch.setattr(
+        service, "thread_metadata", AsyncMock(return_value=ThreadMetadata.model_validate(metadata))
+    )
+    config = {"configurable": await service.recipient_config("automation-thread")}
+    monkeypatch.setattr(threads_tool, "get_config", lambda: config)
+    monkeypatch.setattr(run_config, "get_config", lambda: config)
+
+    assert "schedule_id" not in config["configurable"]
+    assert "github_login" not in config["configurable"]
+    assert "user_email" not in config["configurable"]
+    assert (
+        await threads_tool.schedules.authorized_schedule_run(
+            run_config.RunConfig.parse(config["configurable"])
+        )
+        is None
+    )
+    assert await threads_tool._reader() is None
+    for result in (await threads_tool.get_thread("thread-1"), await threads_tool.list_threads()):
+        assert result["success"] is False
+        assert "No verified triggering user" in result["error"]
 
 
 def _creator_dm(
@@ -676,10 +726,28 @@ class _DetailClient:
 
 
 @pytest.mark.parametrize("visibility", ["public", "private"])
-async def test_allowed_slack_bot_inspects_only_public_threads(
-    monkeypatch: pytest.MonkeyPatch, visibility: str
+@pytest.mark.parametrize("task_wake", [False, True])
+async def test_automation_reader_inspects_only_public_threads(
+    monkeypatch: pytest.MonkeyPatch, visibility: str, task_wake: bool
 ) -> None:
-    _slack_bot_run(monkeypatch)
+    if task_wake:
+        metadata = {
+            "source": "schedule",
+            "owner_type": "system",
+            "visibility": "public",
+            "schedule_id": _AUTOMATION_ID,
+        }
+        _automation_run(monkeypatch, metadata)
+        monkeypatch.setattr(
+            service,
+            "thread_metadata",
+            AsyncMock(return_value=ThreadMetadata.model_validate(metadata)),
+        )
+        config = {"configurable": await service.recipient_config("automation-thread")}
+        monkeypatch.setattr(threads_tool, "get_config", lambda: config)
+        monkeypatch.setattr(run_config, "get_config", lambda: config)
+    else:
+        _slack_bot_run(monkeypatch)
     original_get = threads_tool.langgraph_client().threads.get
     client = _DetailClient()
 
