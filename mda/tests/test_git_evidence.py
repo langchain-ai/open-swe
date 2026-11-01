@@ -61,6 +61,26 @@ async def test_the_work_order_names_the_turns_repository_and_a_pull_request_its_
     }
 
 
+async def test_an_edited_file_is_relative_to_its_actual_checkout(
+    tmp_path: Path, sandbox: LocalShellBackend
+) -> None:
+    repo = _checkout(tmp_path, "repo", "git@github.com:org/actual.git")
+    script = SandboxScript("edited_file.py")
+    assert await script.run(sandbox, {"path": str(repo / "file")}) == {
+        "repository": "org/actual",
+        "branch": "work",
+        "path": "file",
+    }
+    (repo / ".gitignore").write_text("ignored\n")
+    (repo / "ignored").write_text("generated")
+    assert await script.run(sandbox, {"path": str(repo / "ignored")}) == {}
+    assert await script.run(sandbox, {"path": str(repo / ".git" / "config")}) == {}
+    outside = tmp_path / "outside"
+    outside.write_text("not tracked")
+    (repo / "link").symlink_to(outside)
+    assert await script.run(sandbox, {"path": str(repo / "link")}) == {}
+
+
 async def test_a_turn_that_changed_nothing_waits_for_no_fingerprint(
     tmp_path: Path, sandbox: LocalShellBackend, monkeypatch: pytest.MonkeyPatch
 ) -> None:

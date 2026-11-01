@@ -1702,6 +1702,73 @@ async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
     ran.assert_not_awaited()
 
 
+@pytest.mark.parametrize("code_mode", [False, True])
+@pytest.mark.parametrize("succeeds", [False, True])
+async def test_successful_edit_warns_outside_code_mode_result(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, code_mode: bool, succeeds: bool
+) -> None:
+    from langchain_quickjs import CodeInterpreterMiddleware
+    from rt.remote_files import RemoteFiles
+    from rt.sandbox_script import SandboxScript
+    from runtime_api.edit_conflicts import EditConflicts
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    backend = _run_backend(catalog=Catalog(sandbox=_IN_SANDBOX))
+    monkeypatch.setattr(backend.outbox, "started", MagicMock())
+    monkeypatch.setattr(backend.outbox, "finished", MagicMock())
+    check = AsyncMock(
+        return_value=EditConflicts(
+            reminder="<system-reminder>overlap</system-reminder>"
+        ).model_dump()
+    )
+    monkeypatch.setattr(backend, "post", check)
+    monkeypatch.setattr(
+        SandboxScript,
+        "run",
+        AsyncMock(return_value={"repository": "acme/api", "path": "app.py", "branch": "feature"}),
+    )
+    files = FileToolsMiddleware(backend, 300, remote_files=RemoteFiles(backend, lambda: "run-1"))
+    target = tmp_path / "app.py"
+    target.write_text("before" if succeeds else "different")
+    args = {"file_path": str(target), "old_string": "before", "new_string": "after"}
+    code = f"await tools.editFile({json.dumps(args)}); 'discarded edit result'"
+    invocation = ToolCall(
+        name="eval" if code_mode else "edit_file",
+        args={"code": code} if code_mode else args,
+        id="edit-1",
+    )
+    model = GenericFakeChatModel(
+        messages=iter([AIMessage(content="", tool_calls=[invocation]), AIMessage(content="done")])
+    )
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *_, **__: self)
+    middleware: list[AgentMiddleware] = [files]
+    if code_mode:
+        middleware.append(
+            cast(AgentMiddleware, CodeInterpreterMiddleware(ptc=[*files.code_tools(["edit_file"])]))
+        )
+    sandbox = LocalShellBackend(root_dir=tmp_path, virtual_mode=False)
+    monkeypatch.setattr(
+        "rt.file_tools.get_runtime", lambda: type("Runtime", (), {"backend": sandbox})()
+    )
+    graph = create_deep_agent(model=model, backend=sandbox, middleware=middleware)
+    result = await graph.ainvoke({"messages": [HumanMessage(content="edit")]})
+    [message] = [
+        m for m in result["messages"] if isinstance(m, ToolMessage) and m.tool_call_id == "edit-1"
+    ]
+    if not succeeds:
+        assert target.read_text() == "different"
+        assert "<system-reminder>" not in message.text
+        check.assert_not_awaited()
+        return
+    assert target.read_text() == "after", message.text
+    assert "<system-reminder>overlap</system-reminder>" in message.text
+    if code_mode:
+        assert message.text.index("<system-reminder>") > message.text.index("</result>")
+    assert check.await_count == 1
+
+
 async def test_a_read_file_the_backend_serves_gets_the_read_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

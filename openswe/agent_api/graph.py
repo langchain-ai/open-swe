@@ -80,6 +80,7 @@ from runtime_api.catalog import (
     SubagentSpec,
     ToolSpec,
 )
+from runtime_api.edit_conflicts import CHECK_EDIT_CONFLICTS, EditConflicts, EditedFile
 from runtime_api.endpoint import Handlers, UnknownEndpointError
 from runtime_api.files import (
     DeleteRequest,
@@ -1208,6 +1209,11 @@ class TokenRun:
         guards = ShellGuards(self.parts.shell_guards)
         return await self.in_run("check_shell", lambda: check_shell(guards, request))
 
+    async def check_edit_conflicts(self, request: EditedFile) -> EditConflicts:
+        from openswe.github.edit_conflicts import EditOverlap
+
+        return await EditOverlap(RunConfig.from_config(self.config)).check(request)
+
     async def sandbox_replaced(self, _request: RunRequest) -> Done:
         await reconnect_sandbox(self.config, self.graph.assistant_id)
         return Done()
@@ -1638,6 +1644,7 @@ async def _download(run: ReachesFiles, request: DownloadRequest) -> TransferRepl
 # Calls any run answers from its token and request: what it reads and what it reports.
 RUN_CALLS: Final = Handlers[TokenRun]()
 RUN_CALLS.serve(BROWSER, TokenRun.browser)
+RUN_CALLS.serve(CHECK_EDIT_CONFLICTS, TokenRun.check_edit_conflicts)
 RUN_CALLS.serve(SKILLS, TokenRun.skills)
 RUN_CALLS.serve(TOOL_SPECS, TokenRun.tool_specs)
 RUN_CALLS.serve(SEARCH, TokenRun.search_tools)
