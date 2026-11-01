@@ -226,8 +226,10 @@ async def _deliver_answer(
 ) -> None:
     """Post a finished run's answers in the thread it opens, its origin, or ``deliver_to``."""
     binding = run.origin
-    # A channel declared with ``reply="none"`` leaves replying to the agent.
-    if binding is not None and not channel_auto_replies_for_name(binding["name"]):
+    # A channel declared with ``reply="none"`` leaves replying to the agent, as
+    # does a run its handler started with ``reply`` "none" or on a thread of its
+    # own choosing without ``deliver_to``.
+    if binding is not None and not _replies(binding):
         return
     values = final.values if isinstance(final.values, Mapping) else {}
     output = {"messages": values.get("messages")}
@@ -251,6 +253,12 @@ async def _deliver_answer(
             config["configurable"], config.get("metadata") or {}
         )
         await _post_direct(binding, content, scheduled=scheduled)
+
+
+def _replies(binding: ChannelBinding) -> bool:
+    """Whether a run posts its final answer to its binding's target."""
+    reply = binding.get("reply")
+    return channel_auto_replies_for_name(binding["name"]) if reply is None else reply == "auto"
 
 
 def run_boundary(boundary: StateSnapshot | None, messages: object) -> str | None:

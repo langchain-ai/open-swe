@@ -9,7 +9,7 @@ import os
 import re
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
-from typing import TYPE_CHECKING, Literal, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -32,7 +32,8 @@ from managed_deepagents._channels.resolve_user import (
 from managed_deepagents._channels.run_input import (
     InvalidRunInput,
     NormalizedRunInput,
-    normalize_run_input,
+    RunChannel,
+    normalize_run_inputs,
 )
 from managed_deepagents._channels.runtime import is_json_value, json_copy
 from managed_deepagents._channels.types import ChannelError
@@ -40,11 +41,16 @@ from managed_deepagents._log import logger
 from managed_deepagents._telemetry.otel import set_log_attributes
 
 if TYPE_CHECKING:
+    from langgraph_sdk.schema import MultitaskStrategy
+
     from managed_deepagents._channel import ChannelEventsContext
     from managed_deepagents._channels.actor import ChannelActor
     from managed_deepagents._channels.binding import ChannelBinding
     from managed_deepagents._channels.http import HttpChannel
-    from managed_deepagents._channels.http.ingress import PrepareInput, SkippedIngressRun
+    from managed_deepagents._channels.http.ingress import (
+        PrepareInput,
+        SkippedIngressRun,
+    )
     from managed_deepagents._channels.http.types import (
         HttpChannelCancelMessage,
         HttpChannelInboundMessage,
@@ -60,7 +66,12 @@ if TYPE_CHECKING:
         ResolvedIgnore,
         ResolvedReply,
     )
-    from managed_deepagents._channels.types import ChannelEvent, JsonValue, MessageContent
+    from managed_deepagents._channels.types import (
+        ChannelEvent,
+        ChannelReply,
+        JsonValue,
+        MessageContent,
+    )
     from managed_deepagents._ingress_runs import StartedIngressRun
 
     _Finish = Callable[["HttpFinish", "str | None"], Awaitable[None]]
@@ -207,21 +218,40 @@ async def handle_http_request(ctx: ChannelEventsContext, channel: HttpChannel) -
 
     # Joined before the first start, so a cancel during it reaches the message.
     waiter = _join_thread_waiters(thread_id)
-    prepare = functools.partial(_prepare, channel, message, result.get("raw_event"), waiter)
-    run_input = _run_input(user, ctx["name"], channel, message, prepare)
+    prepare = functools.partial(
+        _prepare, channel, message, result.get("raw_event"), waiter, name=ctx["name"]
+    )
+    plan = _ConversationRun(
+        run_input=_run_input(user, ctx["name"], channel, message, prepare),
+        multitask_strategy=channel.multitask_strategy,
+    )
     start = functools.partial(
-        http_ingress.start_http_ingress_agent,
+        _start_conversation,
+        plan,
         user_id=user_id,
         principal_id=principal_id,
         thread_id=thread_id,
         source_thread_key=source_thread_key,
         source_provider=channel.kind,
-        binding=copy.deepcopy(binding),
+        binding=binding,
         assistant_id=assistant_id,
         delivery_key=message.get("delivery_key"),
-        multitask_strategy=channel.multitask_strategy,
-        **run_input,
     )
+    planning = _Delivery(
+        name=ctx["name"],
+        channel=channel,
+        message=message,
+        binding=binding,
+        raw_event=raw_event,
+        user_id=user_id,
+        principal_id=principal_id,
+        assistant_id=assistant_id,
+        delivery_id=delivery_id,
+        # The channel's input decides what the delivery starts, rather than its
+        # content or resolve_user's reply: it may start runs on threads of its own.
+        plans=plan.run_input.get("prepare") is prepare,
+    )
+
     # Every message gets one ``on_received`` and, once it is done, ``on_finish``.
     received = _schedule_received(
         ctx["name"],
@@ -262,6 +292,7 @@ async def handle_http_request(ctx: ChannelEventsContext, channel: HttpChannel) -
     )
 
     async def start_first() -> StartedIngressRun | SkippedIngressRun | None:
+        await _plan_runs(plan, planning, waiter)
         outcome = await _start_first(thread_id, waiter, start)
         if outcome is None and channel.on_finish is not None:
             # Answered with an error, the provider may redeliver it, as a new
@@ -324,7 +355,7 @@ async def _start_and_answer(
 ) -> Response:
     """Start the message's run and answer the provider.
 
-    Input that may take longer than the provider waits, such as an endpoint's, is
+    Input that may take longer than the provider waits, such as a handler's, is
     decided after it has its answer.
     """
     if background:
@@ -436,6 +467,320 @@ async def _finish_skipped(
             {"type": "skipped", "reason": "dropped" if dropped else reason, "interrupts": []},
             None,
         )
+
+
+class _ConversationRun:
+    """The run a delivery starts on its own conversation, once its input is known."""
+
+    __slots__ = ("multitask_strategy", "reply", "run_input", "skip")
+
+    def __init__(self, run_input: dict[str, object], multitask_strategy: MultitaskStrategy) -> None:
+        self.run_input = run_input
+        self.multitask_strategy = multitask_strategy
+        self.reply: ChannelReply | None = None
+        #: The conversation waits on a decision and the channel's input
+        #: started no run on it: it takes none, as ``ignored``.
+        self.skip = False
+
+
+class _Delivery:
+    """What every run a delivery starts shares."""
+
+    __slots__ = (
+        "assistant_id",
+        "binding",
+        "channel",
+        "delivery_id",
+        "message",
+        "name",
+        "plans",
+        "principal_id",
+        "raw_event",
+        "user_id",
+    )
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        channel: HttpChannel,
+        message: HttpChannelInboundMessage,
+        binding: ChannelBinding,
+        raw_event: JsonValue | None,
+        user_id: str,
+        principal_id: str | None,
+        assistant_id: str,
+        delivery_id: str,
+        plans: bool,
+    ) -> None:
+        self.plans = plans
+        self.name = name
+        self.channel = channel
+        self.message = message
+        self.binding = binding
+        self.raw_event = raw_event
+        self.user_id = user_id
+        self.principal_id = principal_id
+        self.assistant_id = assistant_id
+        self.delivery_id = delivery_id
+
+
+async def _plan_runs(plan: _ConversationRun, delivery: _Delivery, waiter: _ThreadWaiter) -> None:
+    """Ask the channel's input what the delivery starts, before any thread is read for it.
+
+    Its run on the event's conversation becomes ``plan``'s input, which the
+    conversation's own start uses as before; every other run starts on its own
+    thread, in the background. A conversation that waits on a decision is
+    asked through the channel's ``interrupted_input``: its run there is then
+    skipped, as ``waiting``, while the others start. A conversation that has
+    seen the delivery already starts nothing, and the input isn't asked.
+    """
+    if not delivery.plans:
+        return
+    message = delivery.message
+    thread_id = message["thread_id"].lower()
+    try:
+        state = await http_ingress.http_ingress_thread_state(
+            user_id=delivery.user_id,
+            principal_id=delivery.principal_id,
+            source_thread_key=_source_thread_key(delivery.name, thread_id),
+            source_provider=delivery.channel.kind,
+            thread_id=thread_id,
+            delivery_key=message.get("delivery_key"),
+        )
+    except Exception as error:  # noqa: BLE001
+        # The conversation's own start reads it again, and says what it finds.
+        logger.warning(
+            "channel thread could not be read before its input (%s)",
+            logger.safe_error_label(error),
+        )
+        state = None
+    if state == "duplicate":
+        return
+    channel = delivery.channel
+    paused = state == "paused"
+    runs = await _prepare_runs(
+        channel,
+        message,
+        delivery.raw_event,
+        waiter,
+        RunChannel(name=delivery.name, provider=channel.kind),
+        interrupted=paused,
+    )
+    conversation = next((run for run in runs if "thread" not in run), None)
+    if (paused or conversation is None) and any("thread" in run for run in runs):
+        # The conversation starts no run for the delivery, so its thread records
+        # it: a redelivery is then a duplicate, and starts nothing twice.
+        await _record_conversation_delivery(delivery, thread_id)
+    for index, run in enumerate(runs):
+        if "thread" in run:
+            _ingress.schedule_ingress_work(
+                functools.partial(_start_threaded_run, delivery, run, index),
+                label=f'channel "{delivery.name}" delivery',
+            )
+    if conversation is not None:
+        plan.multitask_strategy = conversation.get("multitask_strategy", plan.multitask_strategy)
+        plan.reply = conversation.get("reply")
+    plan.run_input = {"prepare": functools.partial(_planned, conversation)}
+    # A waiting conversation would say it waits for a run its input didn't ask for.
+    plan.skip = paused and conversation is None
+
+
+async def _record_conversation_delivery(delivery: _Delivery, thread_id: str) -> None:
+    delivery_key = delivery.message.get("delivery_key")
+    if delivery_key is None:
+        return
+    try:
+        await http_ingress.record_http_ingress_delivery(
+            user_id=delivery.user_id,
+            principal_id=delivery.principal_id,
+            source_thread_key=_source_thread_key(delivery.name, thread_id),
+            source_provider=delivery.channel.kind,
+            thread_id=thread_id,
+            delivery_key=delivery_key,
+        )
+    except Exception as error:  # noqa: BLE001
+        # The runs still start; only a redelivery may start them again.
+        logger.warning(
+            "channel delivery was not recorded on its conversation (%s)",
+            logger.safe_error_label(error),
+        )
+
+
+async def _planned(run: NormalizedRunInput | None) -> NormalizedRunInput | None:
+    return run
+
+
+async def _start_conversation(
+    plan: _ConversationRun,
+    *,
+    binding: ChannelBinding,
+    **options: Any,
+) -> StartedIngressRun | SkippedIngressRun:
+    """Start the delivery's run on its own conversation, as its plan says."""
+    if plan.skip:
+        return {"skipped": "ignored"}
+    return await http_ingress.start_http_ingress_agent(
+        binding=_with_reply(copy.deepcopy(binding), plan.reply),
+        multitask_strategy=plan.multitask_strategy,
+        **options,
+        **plan.run_input,
+    )
+
+
+async def _prepare_runs(
+    channel: HttpChannel,
+    message: HttpChannelInboundMessage,
+    raw_event: JsonValue | None,
+    waiter: _ThreadWaiter,
+    run_channel: RunChannel,
+    *,
+    interrupted: bool = False,
+) -> list[NormalizedRunInput]:
+    """What the channel's ``input`` starts; failures start nothing.
+
+    While the conversation waits on a decision, the channel's
+    ``interrupted_input`` is asked instead, when it has one.
+    """
+    input_ = (channel.interrupted_input if interrupted else None) or channel.input
+    if input_ is None:
+        return []
+    try:
+        result = await _resolve(
+            input_(_copied_message(message), None if raw_event is None else json_copy(raw_event))
+        )
+    except Exception as error:  # noqa: BLE001
+        logger.error("channel input failed (%s)", logger.safe_error_label(error), error=error)
+        return []
+    try:
+        runs = normalize_run_inputs(result, run_channel)
+    except InvalidRunInput as error:
+        # MDA's own reason, bounded, unlike a raised exception's message.
+        logger.error("channel input refused, no run started: %s", error.reason)
+        return []
+    except Exception as error:  # noqa: BLE001
+        logger.error("channel input failed (%s)", logger.safe_error_label(error), error=error)
+        return []
+    # A slow input, such as an endpoint's, may outlast a cancel.
+    if runs and waiter.cancelled:
+        logger.info(
+            "channel run dropped: its thread was cancelled while its input was decided %s",
+            json.dumps({"threadId": message["thread_id"].lower()}),
+        )
+        waiter.dropped = True
+        return []
+    return runs
+
+
+async def _start_threaded_run(delivery: _Delivery, run: NormalizedRunInput, index: int) -> None:
+    """Start a run on a thread its handler chose, and see it through.
+
+    A persistent thread is the channel's own: its source key derives from the
+    channel and the thread, as a conversation's does, so the channel reaches it
+    again for a later event. An ephemeral thread's id derives from the delivery
+    and the run's place in it, so a redelivery finds the run it started; the
+    thread is deleted once the run ends, unless it waits on a decision. The run
+    posts its answer to the event's conversation only with ``deliver_to``.
+    """
+    thread = run["thread"]
+    message = delivery.message
+    key = message.get("delivery_key") or delivery.delivery_id
+    persistent = thread["mode"] == "persistent"
+    thread_id = thread["id"] if persistent else _ephemeral_thread_id(delivery, key, index)
+    source_thread_key = _source_thread_key(delivery.name, thread_id)
+    replies = run.get("deliver_to_conversation", False)
+    binding: ChannelBinding = {
+        **copy.deepcopy(delivery.binding),
+        "source_thread_key": source_thread_key,
+        "reply": "auto" if replies else "none",
+    }
+    channel = delivery.channel
+    start = functools.partial(
+        http_ingress.start_http_ingress_agent,
+        user_id=delivery.user_id,
+        principal_id=delivery.principal_id,
+        thread_id=thread_id,
+        source_thread_key=source_thread_key,
+        source_provider=channel.kind,
+        binding=binding,
+        assistant_id=delivery.assistant_id,
+        # Keyed by its thread, not its place among the handler's runs: a resent
+        # delivery whose handler starts a different set still finds its run.
+        delivery_key=f"{key}#{thread_id}",
+        multitask_strategy=run.get("multitask_strategy", channel.multitask_strategy),
+        prepare=functools.partial(_planned, run),
+    )
+
+    async def ended(done: HttpFinish, _assistant_id: str | None) -> None:
+        # A run that waits on a decision keeps its thread, as a schedule's does.
+        if not persistent and done["type"] == "run" and not done["interrupts"]:
+            await _delete_thread(delivery, source_thread_key, thread_id)
+
+    async def skipped_finish(_done: HttpFinish, _assistant_id: str | None) -> None:
+        return
+
+    deliver = functools.partial(
+        _deliver_reply,
+        binding,
+        delivery.user_id,
+        source_thread_key,
+        # Only a run that posts where the event came from reports its failure there.
+        post=channel.post if replies else None,
+        on_error=channel.on_error if replies else None,
+        finish=ended,
+        principal_id=delivery.principal_id,
+        report_failure=replies,
+    )
+
+    waiter = _join_thread_waiters(thread_id)
+    outcome = await _start_first(thread_id, waiter, start)
+    if outcome is None:
+        return
+    skipped = _skipped(outcome)
+    if skipped is None:
+        await deliver(cast("StartedIngressRun", outcome))
+    elif skipped == "busy":
+        wait = functools.partial(
+            http_ingress.wait_for_http_ingress_thread,
+            user_id=delivery.user_id,
+            principal_id=delivery.principal_id,
+            source_thread_key=source_thread_key,
+            source_provider=channel.kind,
+            thread_id=thread_id,
+        )
+        await _start_when_idle(waiter, start, wait, deliver, skipped_finish, thread_id)
+    else:
+        logger.info(
+            "channel run skipped %s", json.dumps({"threadId": thread_id, "reason": skipped})
+        )
+
+
+def _ephemeral_thread_id(delivery: _Delivery, key: str, index: int) -> str:
+    encoded = json.dumps([delivery.name, key, index], ensure_ascii=False, separators=(",", ":"))
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"mda-thread:v1:ephemeral:{encoded}"))
+
+
+async def _delete_thread(delivery: _Delivery, source_thread_key: str, thread_id: str) -> None:
+    try:
+        await http_ingress.delete_http_ingress_thread(
+            user_id=delivery.user_id,
+            principal_id=delivery.principal_id,
+            source_thread_key=source_thread_key,
+            source_provider=delivery.channel.kind,
+            thread_id=thread_id,
+        )
+    except Exception as error:  # noqa: BLE001
+        logger.error(
+            "ephemeral channel thread could not be deleted (%s)",
+            logger.safe_error_label(error),
+            error=error,
+        )
+
+
+def _with_reply(binding: ChannelBinding, reply: ChannelReply | None) -> ChannelBinding:
+    if reply is not None:
+        binding["reply"] = reply
+    return binding
 
 
 def _source_thread_key(name: str, thread_id: str) -> str:
@@ -657,37 +1002,18 @@ async def _prepare(
     message: HttpChannelInboundMessage,
     raw_event: JsonValue | None,
     waiter: _ThreadWaiter,
+    *,
+    name: str,
 ) -> NormalizedRunInput | None:
-    """What the channel's ``input`` starts the run with; failures start nothing."""
-    if channel.input is None:
-        return None
-    try:
-        result = await _resolve(
-            channel.input(
-                _copied_message(message), None if raw_event is None else json_copy(raw_event)
-            )
-        )
-    except Exception as error:  # noqa: BLE001
-        logger.error("channel input failed (%s)", logger.safe_error_label(error), error=error)
-        return None
-    try:
-        prepared = normalize_run_input(result)
-    except InvalidRunInput as error:
-        # MDA's own reason, bounded, unlike a raised exception's message.
-        logger.error("channel input refused, no run started: %s", error.reason)
-        return None
-    except Exception as error:  # noqa: BLE001
-        logger.error("channel input failed (%s)", logger.safe_error_label(error), error=error)
-        return None
-    # A slow input, such as an endpoint's, may outlast a cancel.
-    if prepared is not None and waiter.cancelled:
-        logger.info(
-            "channel run dropped: its thread was cancelled while its input was decided %s",
-            json.dumps({"threadId": message["thread_id"].lower()}),
-        )
-        waiter.dropped = True
-        return None
-    return prepared
+    """What the channel's ``input`` starts on the event's conversation; failures start nothing.
+
+    Asked here only when its runs weren't planned before the start, as when
+    reading the conversation failed.
+    """
+    runs = await _prepare_runs(
+        channel, message, raw_event, waiter, RunChannel(name=name, provider=channel.kind)
+    )
+    return next((run for run in runs if "thread" not in run), None)
 
 
 async def _deliver_reply(
@@ -699,7 +1025,10 @@ async def _deliver_reply(
     on_error: HttpOnError | None,
     finish: _Finish | None = None,
     principal_id: str | None = None,
+    *,
+    report_failure: bool = True,
 ) -> None:
+    """See the run through: report a failure, and tell the channel how it ended."""
     run_id = started["run_id"]
     logger.info(
         "channel run started %s",
@@ -729,9 +1058,10 @@ async def _deliver_reply(
         return
     if outcome["status"] in ("error", "timeout"):
         logger.error("channel run failed %s", json.dumps({"threadId": started["thread_id"]}))
-        await _notify_failed(
-            ChannelError("channel_run_failed", "channel run failed"), binding, post, on_error
-        )
+        if report_failure:
+            await _notify_failed(
+                ChannelError("channel_run_failed", "channel run failed"), binding, post, on_error
+            )
     if finish is not None:
         await finish(
             {

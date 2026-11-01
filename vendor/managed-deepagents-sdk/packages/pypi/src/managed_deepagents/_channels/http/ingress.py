@@ -106,6 +106,69 @@ async def http_ingress_thread_waits_on(
     return waits_on
 
 
+async def http_ingress_thread_state(
+    *,
+    user_id: str,
+    source_thread_key: str,
+    source_provider: str,
+    thread_id: str,
+    delivery_key: str | None = None,
+    principal_id: str | None = None,
+) -> Literal["ready", "busy", "paused", "duplicate"]:
+    """Whether the thread takes a new run now, waits on a run or a decision, or
+    has seen the delivery already."""
+    client = _create_ingress_loopback_client(
+        user_id=user_id,
+        source_thread_key=source_thread_key,
+        source_provider=source_provider,
+        principal_id=principal_id,
+    )
+    read = await ingress_thread_state(client=client, thread_id=thread_id, delivery_key=delivery_key)
+    return read["state"]
+
+
+async def record_http_ingress_delivery(
+    *,
+    user_id: str,
+    source_thread_key: str,
+    source_provider: str,
+    thread_id: str,
+    delivery_key: str,
+    principal_id: str | None = None,
+) -> None:
+    """Record a delivery on a thread that took no run for it, so a redelivery
+    is a duplicate; a thread that doesn't exist yet records nothing."""
+    client = _create_ingress_loopback_client(
+        user_id=user_id,
+        source_thread_key=source_thread_key,
+        source_provider=source_provider,
+        principal_id=principal_id,
+    )
+    try:
+        await record_thread_delivery(client=client, thread_id=thread_id, delivery_key=delivery_key)
+    except Exception as error:
+        if lookup_status(error) != HTTPStatus.NOT_FOUND:
+            raise
+
+
+async def delete_http_ingress_thread(
+    *,
+    user_id: str,
+    source_thread_key: str,
+    source_provider: str,
+    thread_id: str,
+    principal_id: str | None = None,
+) -> None:
+    """Delete a thread the channel started for one run, as an ephemeral schedule's is."""
+    client = _create_ingress_loopback_client(
+        user_id=user_id,
+        source_thread_key=source_thread_key,
+        source_provider=source_provider,
+        principal_id=principal_id,
+    )
+    await client.threads.delete(thread_id)
+
+
 _RUN_STATUSES: frozenset[str] = frozenset({"success", "error", "timeout", "interrupted"})
 
 
