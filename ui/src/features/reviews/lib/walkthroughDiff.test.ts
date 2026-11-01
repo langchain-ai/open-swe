@@ -74,4 +74,46 @@ describe("walkthroughFileDiff", () => {
       })
     ).toBeNull()
   })
+
+  it("reads a step's scattered lines of an added file with the neighbouring lines around them", () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`)
+    const added: ReviewDiffFile = {
+      ...file(),
+      path: "src/new.ts",
+      status: "added",
+      additions: 30,
+      deletions: 0,
+      patch: [
+        "diff --git a/src/new.ts b/src/new.ts",
+        "new file mode 100644",
+        "--- /dev/null",
+        "+++ b/src/new.ts",
+        "@@ -0,0 +1,30 @@",
+        ...lines.map((line) => `+${line}`),
+        "",
+      ].join("\n"),
+    }
+
+    const slice = walkthroughFileDiff(added, {
+      path: "src/new.ts",
+      added: [
+        [5, 5],
+        [9, 9],
+        [25, 25],
+      ],
+      deleted: [],
+    })
+
+    // The first two share one run; the third stands apart, each with three lines around it.
+    expect(slice?.hunks.map((h) => [h.additionStart, h.additionCount])).toEqual(
+      [
+        [2, 11],
+        [22, 7],
+      ]
+    )
+    expect(slice?.hunks.map((h) => h.hunkContent.map((c) => c.type))).toEqual([
+      ["context", "change", "context", "change", "context"],
+      ["context", "change", "context"],
+    ])
+  })
 })
