@@ -29,27 +29,86 @@ import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { parsePullRequestReference } from "@/features/reviews/search"
 import { useShortcutLabel } from "@/lib/hotkeys"
+import { formatRelativeTime } from "@/lib/utils"
 
-interface CommandResult {
+interface ResultDetails {
+  /** Supporting facts shown after the label, from data already in Postgres. */
+  details?: Array<string>
+  updatedAt?: number
+}
+
+interface CommandResult extends ResultDetails {
   id: string
   kind: "command"
   label: string
   command: AppCommand
 }
 
-interface CloudThreadResult {
+interface CloudThreadResult extends ResultDetails {
   id: string
   kind: "cloud-thread"
   label: string
   thread: AgentThread
 }
 
-interface PullRequestResult {
+interface PullRequestResult extends ResultDetails {
   id: string
   kind: "pull-request"
   label: string
-  pr: Pick<PullRequestSearchResult, "repo" | "number"> &
-    Partial<Pick<PullRequestSearchResult, "state">>
+  pr: Pick<PullRequestSearchResult, "repo" | "number">
+}
+
+const THREAD_STATUS_LABELS: Partial<Record<AgentThread["status"], string>> = {
+  running: "Running",
+  interrupted: "Needs input",
+  error: "Error",
+}
+
+const PR_STATE_LABELS: Record<PullRequestSearchResult["state"], string> = {
+  open: "Open",
+  draft: "Draft",
+  merged: "Merged",
+  closed: "Closed",
+}
+
+function threadResult(thread: AgentThread): CloudThreadResult {
+  const status = thread.resolved
+    ? "Resolved"
+    : THREAD_STATUS_LABELS[thread.status]
+  return {
+    id: `cloud:${thread.id}`,
+    kind: "cloud-thread",
+    label: thread.title,
+    thread,
+    details: [
+      thread.repoFullName || thread.repo,
+      status,
+      thread.pr && `#${thread.pr.number} ${PR_STATE_LABELS[thread.pr.state]}`,
+      thread.ownerLogin && `@${thread.ownerLogin}`,
+    ].filter((detail): detail is string => Boolean(detail)),
+    updatedAt: thread.updatedAt,
+  }
+}
+
+function pullRequestResult(pr: PullRequestSearchResult): PullRequestResult {
+  const findings = pr.review_findings
+  return {
+    id: `pr:${pr.repo}#${pr.number}`,
+    kind: "pull-request",
+    label: pr.title || `${pr.repo} #${pr.number}`,
+    pr,
+    details: [
+      `${pr.repo} #${pr.number}`,
+      PR_STATE_LABELS[pr.state],
+      pr.author && `@${pr.author}`,
+      pr.additions != null &&
+        pr.deletions != null &&
+        `+${pr.additions} −${pr.deletions}`,
+      findings != null &&
+        `${findings} ${findings === 1 ? "finding" : "findings"}`,
+    ].filter((detail): detail is string => Boolean(detail)),
+    updatedAt: pr.updated_at ? Date.parse(pr.updated_at) : undefined,
+  }
 }
 
 type PaletteResult = CommandResult | CloudThreadResult | PullRequestResult
@@ -89,14 +148,7 @@ export function buildPaletteResults(
       label: command.label,
       command,
     }))
-  const cloudResults: Array<CloudThreadResult> = cloudThreads
-    .filter(() => !actionsOnly)
-    .map((thread) => ({
-      id: `cloud:${thread.id}`,
-      kind: "cloud-thread",
-      label: thread.title,
-      thread,
-    }))
+  const cloudResults = actionsOnly ? [] : cloudThreads.map(threadResult)
   return [...commandResults, ...cloudResults]
 }
 
@@ -137,10 +189,31 @@ export function AppCommandPalette({
     },
     { enabled: open && !actionsOnly, staleWhileRevalidate: true }
   )
-  const pullRequests = usePullRequestSearch(
-    query,
-    open && !actionsOnly && !prReference
-  )
+  const pullRequests = usePullRequestSearch(threadQuery, {
+    enabled: open && !actionsOnly,
+    includeRecent: true,
+  })
+  const pullRequestResults =
+    pullRequests.data?.pages.flatMap((page) =>
+      page.pull_requests.map(pullRequestResult)
+    ) ?? []
+  const referencedPullRequest: Array<PullRequestResult> =
+    prReference && pullRequestResults.length === 0
+      ? [
+          {
+            id: `pr:${prReference.owner}/${prReference.repo}#${prReference.number}`,
+            kind: "pull-request",
+            label: "Open Review Page",
+            pr: {
+              repo: `${prReference.owner}/${prReference.repo}`,
+              number: prReference.number,
+            },
+            details: [
+              `${prReference.owner}/${prReference.repo} #${prReference.number}`,
+            ],
+          },
+        ]
+      : []
   const results: Array<PaletteResult> = [
     ...buildPaletteResults(
       commands,
@@ -149,29 +222,7 @@ export function AppCommandPalette({
         : [],
       query
     ),
-    ...(prReference
-      ? [
-          {
-            id: `pr:${prReference.owner}/${prReference.repo}#${prReference.number}`,
-            kind: "pull-request" as const,
-            label: "Open Review Page",
-            pr: {
-              repo: `${prReference.owner}/${prReference.repo}`,
-              number: prReference.number,
-            },
-          },
-        ]
-      : []),
-    ...(open && !actionsOnly && !prReference
-      ? (pullRequests.data?.pages.flatMap((page) =>
-          page.pull_requests.map((pr): PullRequestResult => ({
-            id: `pr:${pr.repo}#${pr.number}`,
-            kind: "pull-request",
-            label: pr.title || `${pr.repo} #${pr.number}`,
-            pr,
-          }))
-        ) ?? [])
-      : []),
+    ...(actionsOnly ? [] : [...referencedPullRequest, ...pullRequestResults]),
   ]
   const resultGroups = new Map<string, Array<PaletteResult>>()
   for (const result of results) {
@@ -289,13 +340,17 @@ export function AppCommandPalette({
                           />
                           <span className="min-w-0 flex-1 truncate">
                             {result.label}
-                            {result.kind === "pull-request" && (
+                            {result.details?.length ? (
                               <span className="ml-space-2 text-xs text-secondary">
-                                {result.pr.repo} #{result.pr.number}
-                                {result.pr.state && ` · ${result.pr.state}`}
+                                {result.details.join(" · ")}
                               </span>
-                            )}
+                            ) : null}
                           </span>
+                          {result.updatedAt ? (
+                            <span className="shrink-0 text-xs text-tertiary">
+                              {formatRelativeTime(result.updatedAt)}
+                            </span>
+                          ) : null}
                           {command?.shortcuts?.[0] && (
                             <ShortcutHint shortcut={command.shortcuts[0]} />
                           )}
@@ -332,16 +387,14 @@ export function AppCommandPalette({
                 )}
               </>
             )}
-            {query.trim() &&
-              !query.trim().startsWith(">") &&
-              pullRequests.isError && (
-                <p
-                  role="alert"
-                  className="px-space-3 py-space-2 text-xs text-error-secondary"
-                >
-                  Pull request search is unavailable.
-                </p>
-              )}
+            {!actionsOnly && pullRequests.isError && (
+              <p
+                role="alert"
+                className="px-space-3 py-space-2 text-xs text-error-secondary"
+              >
+                Pull request search is unavailable.
+              </p>
+            )}
           </CommandList>
         </Command>
       </DialogContent>

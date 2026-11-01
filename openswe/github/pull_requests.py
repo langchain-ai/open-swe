@@ -54,6 +54,7 @@ from openswe.config import ENV
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.comments import PrState, derive_pr_state
+from openswe.github.pull_request_context import parse_pull_request_url
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repositories import Repository
 from openswe.review.findings import REVIEWER_THREAD_KIND
@@ -220,25 +221,30 @@ class PullRequest(Base):
     async def search(
         cls, query: str, *, repositories: Sequence[str], limit: int = 50, offset: int = 0
     ) -> list[Self]:
-        """Rank title/body matches within the caller's authorized repositories."""
-        if not query.strip() or not repositories:
+        """Pull requests in the caller's authorized repositories matching ``query``.
+
+        A pull request URL finds that pull request, text ranks title/body matches,
+        and an empty query lists the most recently updated.
+        """
+        keys = [repository.lower() for repository in repositories]
+        if reference := parse_pull_request_url(query):
+            owner, repo, number = reference
+            keys = [key for key in keys if key == f"{owner}/{repo}".lower()]
+        if not keys:
             return []
-        tsquery = func.websearch_to_tsquery("english", query)
+        statement = (
+            cls._with_links(select(cls)).join(cls.repository).where(Repository.key.in_(keys))
+        )
+        if reference:
+            statement = statement.where(cls.number == reference[2])
+        elif query.strip():
+            tsquery = func.websearch_to_tsquery("english", query)
+            statement = statement.where(cls.search_vector.bool_op("@@")(tsquery)).order_by(
+                func.ts_rank_cd(cls.search_vector, tsquery).desc()
+            )
         async with postgres.session() as session:
             rows = await session.scalars(
-                cls._with_links(select(cls))
-                .join(cls.repository)
-                .where(
-                    Repository.key.in_([repository.lower() for repository in repositories]),
-                    cls.search_vector.bool_op("@@")(tsquery),
-                )
-                .order_by(
-                    func.ts_rank_cd(cls.search_vector, tsquery).desc(),
-                    cls.updated_at.desc(),
-                    cls.id.desc(),
-                )
-                .limit(limit)
-                .offset(offset)
+                statement.order_by(cls.updated_at.desc(), cls.id.desc()).limit(limit).offset(offset)
             )
             return list(rows)
 

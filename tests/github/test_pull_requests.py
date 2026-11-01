@@ -246,7 +246,20 @@ async def test_search_matches_ranked_titles_and_bodies_and_filters_before_pagina
         2
     ]
     assert await PullRequest.search("widget", repositories=[]) == []
-    assert await PullRequest.search("   ", repositories=["lc/repo"]) == []
+    assert [row.number for row in await PullRequest.search("   ", repositories=["lc/repo"])] == [
+        3,
+        2,
+    ]
+    assert [
+        row.number
+        for row in await PullRequest.search(
+            "https://github.com/LC/repo/pull/2", repositories=["lc/repo", "lc/private"]
+        )
+    ] == [2]
+    assert (
+        await PullRequest.search("https://github.com/lc/private/pull/1", repositories=["lc/repo"])
+        == []
+    )
 
 
 @pytest.mark.parametrize("action", ["opened", "edited"])

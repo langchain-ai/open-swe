@@ -1135,6 +1135,14 @@ export interface PullRequestSearchResult {
   url: string
   title: string
   state: "open" | "draft" | "merged" | "closed"
+  author?: string
+  head_ref?: string
+  base_ref?: string
+  additions?: number | null
+  deletions?: number | null
+  changed_files?: number | null
+  review_findings?: number | null
+  updated_at?: string | null
 }
 
 export interface PullRequestSearchResults {
