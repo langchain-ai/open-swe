@@ -30,9 +30,9 @@ from openswe.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_reply,
     post_slack_thread_reply_with_ts,
-    remove_slack_reaction,
     replace_slack_command_message,
     slack_thread_mutation_lock,
+    update_slack_message,
 )
 from openswe.slack.events import claim_slack_event
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
@@ -387,8 +387,30 @@ async def _by_the_way_reply(
             "hint": "Do not post again; end the run.",
         }
     try:
-        await post_slack_thread_reply_with_ts(channel_id, thread_ts, message, blocks=blocks)
-    except SlackRequestError as exc:
+        working_ts = cfg.slack_by_the_way_working_message_ts
+        if working_ts:
+            async with SlackClient.bot() as slack:
+                replies = await slack.conversations_replies(
+                    channel=channel_id, ts=thread_ts, oldest=working_ts, inclusive=False, limit=1
+                )
+                has_newer_reply = bool(replies.get("has_more")) or any(
+                    reply.get("ts") not in (thread_ts, working_ts)
+                    for reply in replies.get("messages", [])
+                )
+                if not has_newer_reply:
+                    try:
+                        await slack.chat_delete(channel=channel_id, ts=working_ts)
+                    except SLACK_REQUEST_ERRORS as exc:
+                        if slack_error(exc) != "message_not_found":
+                            raise
+                        logger.info("The /btw working message was already removed")
+            if has_newer_reply:
+                await update_slack_message(channel_id, working_ts, message, blocks=blocks)
+            else:
+                await post_slack_thread_reply_with_ts(channel_id, thread_ts, message, blocks=blocks)
+        else:
+            await post_slack_thread_reply_with_ts(channel_id, thread_ts, message, blocks=blocks)
+    except (SlackRequestError, *SLACK_REQUEST_ERRORS) as exc:
         try:
             await event_claims.release(_BY_THE_WAY_ANSWER_SCOPE, reservation)
         except Exception:
@@ -396,16 +418,14 @@ async def _by_the_way_reply(
                 "Could not release the /btw answer reservation",
                 extra={"agent_thread_id": cfg.thread_id},
             )
+        error = exc.code if isinstance(exc, SlackRequestError) else slack_error(exc)
+        logger.warning("Could not deliver the /btw answer", extra={"slack_error": error})
         return {
             "success": False,
-            "error": exc.code or "post failed",
-            "slack_error": exc.code,
-            "hint": _slack_reply_failure_hint(exc.code),
+            "error": error or "post failed",
+            "slack_error": error,
+            "hint": _slack_reply_failure_hint(error),
         }
-    if cfg.slack_by_the_way_message_ts:
-        await remove_slack_reaction(
-            channel_id, cfg.slack_by_the_way_message_ts, "hourglass_flowing_sand"
-        )
     # Slack drops a thread's status on any bot post, including a conversation's already there.
     await settle_slack_thread_status(channel_id, thread_ts)
     return {"success": True}
