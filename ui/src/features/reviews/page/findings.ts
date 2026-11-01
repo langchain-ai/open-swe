@@ -1,4 +1,8 @@
 import type { FindingGroup, ReviewFinding } from "@/lib/api"
+import {
+  quoteFromPage,
+  type ComposerAttachment,
+} from "@/features/agents/components/composer/ComposerAttachments"
 import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
 import type { LineTarget } from "./store"
 import { splitPath, withLine } from "./text"
@@ -77,12 +81,20 @@ function findingRef(finding: ReviewFinding): string {
   return `\`${withLine(finding.file, finding.end_line)}\``
 }
 
-export function askAboutFinding(finding: ReviewFinding): string {
-  return `About Open SWE's finding "${finding.title}" at ${findingRef(finding)}: `
-}
-
-export function fixFinding(finding: ReviewFinding): string {
-  return `Fix Open SWE's finding "${finding.title}" at ${findingRef(finding)} on this branch.`
+/** A finding quoted into the next chat message, to ask about or to fix. */
+export function findingAttachment(
+  finding: ReviewFinding,
+  intent: "ask" | "fix"
+): ComposerAttachment {
+  return quoteFromPage({
+    label: intent === "ask" ? "Ask" : "Fix",
+    location: withLine(finding.file, finding.end_line),
+    quote: finding.title,
+    comment:
+      intent === "ask"
+        ? `About Open SWE's finding "${finding.title}" at ${findingRef(finding)}.`
+        : `Fix Open SWE's finding "${finding.title}" at ${findingRef(finding)} on this branch.`,
+  })
 }
 
 export function findingTarget(finding: AnchoredFinding): LineTarget {

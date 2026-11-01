@@ -604,9 +604,10 @@ describe("Messages", () => {
       screen.getByRole("button", { name: "Worked · 1 action" })
     ).toBeTruthy()
     expect(screen.queryByText("README.md")).toBeNull()
-    expect(screen.getByRole("img", { name: "image" }).getAttribute("src")).toBe(
-      dataUrl
-    )
+    const image = screen.getByRole("button", { name: "Enlarge image" })
+    expect(image.getAttribute("src")).toBe(dataUrl)
+    fireEvent.click(image)
+    expect(screen.getByRole("dialog")).toBeTruthy()
     expect(screen.getByText("Captured the page")).toBeTruthy()
   })
 

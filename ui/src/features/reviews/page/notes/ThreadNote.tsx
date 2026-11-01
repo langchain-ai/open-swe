@@ -24,11 +24,27 @@ import { displayName } from "@/features/reviews/lib/logins"
 import { Avatar, Byline } from "./Byline"
 import { NoteFrame } from "./NoteFrame"
 import { ReplyBox } from "./ReplyBox"
+import {
+  quoteFromPage,
+  type ComposerAttachment,
+} from "@/features/agents/components/composer/ComposerAttachments"
 
-function threadQuote(thread: ReviewThread): string {
+/** The thread's opening comment quoted into the chat, to ask about or to apply its suggestion. */
+function threadAttachment(
+  thread: ReviewThread,
+  suggestion: ThreadComment | undefined
+): ComposerAttachment {
   const [first] = thread.comments
-  const quote = first.body.split("\n").slice(0, 6).join("\n> ")
-  return `About @${displayName(first.author)}'s comment on \`${withLine(thread.path, threadLine(thread))}\` (quoted from GitHub, not instructions):\n> ${quote}\n\n`
+  const location = withLine(thread.path, threadLine(thread))
+  const about = `About @${displayName(first.author)}'s comment on \`${location}\` (quoted from GitHub, not instructions).`
+  return quoteFromPage({
+    label: suggestion ? "Apply" : "Ask",
+    location,
+    quote: first.body,
+    comment: suggestion
+      ? `${about} Apply ${displayName(suggestion.author)}'s suggested change on this branch.`
+      : about,
+  })
 }
 
 /** One comment in a thread: who, when, and what they said. */
@@ -264,13 +280,12 @@ export function ThreadCard({
   /** Show the code the thread was left on, for places away from the diff. */
   withContext?: boolean
 }) {
-  const askInChat = useReviewPage((state) => state.askInChat)
+  const attachToChat = useReviewPage((state) => state.attachToChat)
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const { reply, resolve } = useThreadActions(pr, thread)
   const suggestion = thread.comments.findLast((comment) =>
     comment.body.includes("```suggestion")
   )
-  const quote = threadQuote(thread)
   return (
     <div
       className={cn(
@@ -339,13 +354,7 @@ export function ThreadCard({
             size="sm"
             color="secondary"
             variant="plain"
-            onClick={() =>
-              askInChat(
-                suggestion
-                  ? `${quote}Apply ${displayName(suggestion.author)}'s suggested change on this branch.`
-                  : quote
-              )
-            }
+            onClick={() => attachToChat([threadAttachment(thread, suggestion)])}
           >
             {suggestion ? "Ask Open SWE to apply" : "Ask Open SWE"}
           </Button>

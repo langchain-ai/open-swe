@@ -4,7 +4,9 @@ import {
   SAME_USER,
   loginAs,
   seedOpenPullRequest,
+  threadState,
   typeIntoComposer,
+  waitForStateToContain,
   type SeededPullRequest,
 } from "./helpers/dashboard";
 
@@ -652,6 +654,118 @@ test.describe("review page", () => {
       body,
     });
     expect((await fakePull(page, pr)).standalone_comment_posts).toEqual([]);
+  });
+
+  test("attaches marked-up images, code lines, checks and files to the chat as reply cards", async ({
+    page,
+  }) => {
+    const carded = await seedOpenPullRequest(page, {
+      repo: `${OWNER}/${REPO}`,
+      title: "Add the logo",
+      body: "Adds the logo.\n\n![Logo](/favicon.png)",
+      author: "bob",
+      head: "add-logo",
+      files: FILES,
+      check_runs: [
+        {
+          name: "unit-tests",
+          status: "completed",
+          conclusion: "failure",
+          required: true,
+        },
+      ],
+    });
+    await forgetReviewThreads(page, carded);
+    await openReview(page, carded);
+    await openChatTab(page);
+    const cards = chatPanel(page).getByRole("list", {
+      name: "Replies in your next message",
+    });
+
+    await page.getByRole("button", { name: "Enlarge Logo" }).click();
+    const lightbox = page.getByRole("dialog", { name: "Logo" });
+    const canvas = lightbox.getByRole("img", { name: "Markup canvas" });
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error("The markup canvas has no layout box");
+    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.3);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.7, {
+      steps: 5,
+    });
+    await page.mouse.up();
+    await expect(canvas.locator("ellipse")).toHaveCount(1);
+    await lightbox.getByLabel("Your comment").fill("Make the logo smaller");
+    await lightbox.getByRole("button", { name: "Add to reply" }).click();
+    await expect(lightbox).toBeHidden();
+    await expect(cards.getByRole("listitem")).toHaveCount(1);
+    await expect(
+      cards.getByRole("button", { name: /^Enlarge Logo-annotated/ }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Ask why" }).click();
+    // The file header shows its Ask button only on hover.
+    await page
+      .getByRole("button", {
+        name: "Ask Open SWE about alpha.py",
+        includeHidden: true,
+      })
+      .dispatchEvent("click");
+    await expect(cards.getByRole("listitem")).toHaveCount(3);
+    await expect(cards.getByRole("listitem").nth(1)).toContainText(
+      "unit-tests",
+    );
+    await expect(cards.getByRole("listitem").nth(2)).toContainText("alpha.py");
+
+    const diff = diffColumn(page);
+    const second = diff.locator('[data-column-number="2"]').first();
+    await second.scrollIntoViewIfNeeded();
+    const from = await second.boundingBox();
+    const to = await diff
+      .locator('[data-column-number="3"]')
+      .first()
+      .boundingBox();
+    if (!from || !to) throw new Error("The diff lines have no layout box");
+    await page.mouse.move(from.x + from.width + 12, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(to.x + to.width + 140, to.y + to.height / 2, {
+      steps: 8,
+    });
+    await page.mouse.up();
+    await page
+      .getByRole("toolbar", { name: "Selected code" })
+      .getByRole("button", { name: "Ask Open SWE" })
+      .click();
+    await expect(cards.getByRole("listitem")).toHaveCount(4);
+    await expect(cards.getByRole("listitem").nth(3)).toContainText("ALPHA_2");
+
+    await cards
+      .getByRole("listitem")
+      .nth(2)
+      .getByRole("button", { name: "Remove ask" })
+      .click();
+    await expect(cards.getByRole("listitem")).toHaveCount(3);
+
+    await sendChat(page, "Can you take care of these?");
+    await expect(cards).toBeHidden();
+    const chat = await page.request.get(reviewApi(carded, "/chat"));
+    const { thread_id: threadId } = (await chat.json()) as {
+      thread_id: string;
+    };
+    await waitForStateToContain(page, threadId, "Can you take care of these?");
+    const state = await threadState(page, threadId);
+    expect(state).toContain("comment: Why is the `unit-tests` check failing");
+    expect(state).toContain("Make the logo smaller");
+    expect(state).toContain("`alpha.py:R2-3`");
+    expect(state).not.toContain("About `alpha.py` in this pull request.");
+    const sent = chatPanel(page)
+      .getByTestId("user-message")
+      .filter({ hasText: "Can you take care of these?" });
+    await expect(sent.locator("blockquote")).toContainText(
+      "Why is this check failing?",
+    );
+    await expect(
+      sent.getByRole("button", { name: /^Enlarge Logo-annotated/ }),
+    ).toBeVisible();
   });
 
   test("opens the chat as a sheet on a narrow window", async ({ page }) => {
