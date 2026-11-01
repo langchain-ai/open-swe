@@ -18,6 +18,7 @@ from typing import Final, NamedTuple
 
 import httpx
 from langgraph.constants import END
+from langgraph_sdk.errors import NotFoundError
 from pydantic import JsonValue, TypeAdapter
 
 from openswe.agent_api.client import (
@@ -120,6 +121,12 @@ class _MetadataCopies:
             try:
                 await runtime.update(
                     thread.thread_id, for_mda(patch) if runtime is not RUNTIMES.local else patch
+                )
+            except NotFoundError:
+                # A copy MDA alone holds, such as a memory reflection fork, has nothing here.
+                logger.debug(
+                    "Runtime keeps no copy of the thread's metadata",
+                    extra={"thread_id": thread.thread_id},
                 )
             except Exception:
                 logger.warning(
