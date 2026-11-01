@@ -249,6 +249,30 @@ async def test_search_matches_ranked_titles_and_bodies_and_filters_before_pagina
     assert await PullRequest.search("   ", repositories=["lc/repo"]) == []
 
 
+async def test_lookup_returns_stored_rows_only_from_accessible_repositories(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await PullRequest(owner="lc", repo="private", number=1, title="Secret").save()
+    await PullRequest(owner="lc", repo="repo", number=2, title="Widgets", state="merged").save()
+    await _pr().link_review(reviewer_thread_id="rev", head_sha="sha", finding_count=3)
+    monkeypatch.setattr(
+        pull_request_dashboard_routes,
+        "accessible_repo_full_names",
+        AsyncMock(return_value={"lc/repo"}),
+    )
+    keys = [("LC/Repo", 2), ("lc/repo", 7), ("lc/private", 1), ("lc/repo", 404)]
+    rows = await pull_request_dashboard_routes.api_lookup_pull_requests(
+        pull_request_dashboard_routes.PullRequestLookup.model_validate(
+            {"pull_requests": [{"repo": repo, "number": number} for repo, number in keys]}
+        ),
+        session={"sub": "ada"},
+    )
+    by_number = {row.number: row for row in rows}
+    assert set(by_number) == {2, 7}
+    assert by_number[2].state == "merged"
+    assert by_number[7].review_count == 1 and by_number[7].last_review_findings == 3
+
+
 @pytest.mark.parametrize("action", ["opened", "edited"])
 async def test_webhooks_sync_descriptions_without_auto_review(
     action: str,

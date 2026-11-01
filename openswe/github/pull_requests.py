@@ -243,22 +243,29 @@ class PullRequest(Base):
             return list(rows)
 
     @classmethod
+    async def lookup(cls, prs: Sequence[tuple[str, int]]) -> list[Self]:
+        """The stored rows, with their links, of the ``(repo_full_name, number)`` pairs saved so far."""
+        keys = [(repo_full_name.lower(), number) for repo_full_name, number in prs]
+        if not keys or not postgres.configured():
+            return []
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._with_links(select(cls))
+                .join(cls.repository)
+                .where(tuple_(Repository.key, cls.number).in_(keys))
+            )
+            return list(rows)
+
+    @classmethod
     async def diff_stats_for(
         cls, prs: Sequence[tuple[str, int]]
     ) -> dict[tuple[str, int], DiffStats]:
         """Stored line counts keyed by lowercased ``(repo_full_name, number)``."""
-        keys = [(repo_full_name.lower(), number) for repo_full_name, number in prs]
-        if not keys or not postgres.configured():
-            return {}
-        async with postgres.session() as session:
-            rows = await session.scalars(
-                select(cls).join(cls.repository).where(tuple_(Repository.key, cls.number).in_(keys))
-            )
-            return {
-                (row.repo_full_name.lower(), row.number): stats
-                for row in rows
-                if (stats := row.diff_stats) is not None
-            }
+        return {
+            (row.repo_full_name.lower(), row.number): stats
+            for row in await cls.lookup(prs)
+            if (stats := row.diff_stats) is not None
+        }
 
     @property
     def diff_stats(self) -> DiffStats | None:
