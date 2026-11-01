@@ -15,7 +15,10 @@ from openswe.slack import routes as slack_routes
 from openswe.slack import webhook as slack_service
 from openswe.slack.dm import CONCIERGE_TS
 from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.records import bind_slack_thread_id
 from openswe.slack.request import SlackRequest
+from openswe.thread_ids import mda_successor_thread_id
+from openswe.threads import index
 from openswe.webhooks import common as webhook_common
 
 
@@ -152,6 +155,7 @@ async def test_dm_keeps_a_thread_per_message_until_the_person_opts_in(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["busy", "idle"])
+@pytest.mark.usefixtures("no_local_threads")
 async def test_external_dm_is_preserved_while_concierge_is_busy_or_idle(
     monkeypatch: pytest.MonkeyPatch, status: str
 ) -> None:
@@ -173,6 +177,7 @@ async def test_external_dm_is_preserved_while_concierge_is_busy_or_idle(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("concierge_on", [True, False])
+@pytest.mark.usefixtures("no_local_threads")
 async def test_a_note_reaches_the_concierge_thread_only_in_concierge_mode(
     monkeypatch: pytest.MonkeyPatch, concierge_on: bool
 ) -> None:
@@ -191,3 +196,23 @@ async def test_a_note_reaches_the_concierge_thread_only_in_concierge_mode(
         queue.assert_awaited_once_with("concierge-thread", "a note")
     else:
         queue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_a_pre_mda_concierge_conversation_continues_on_a_fresh_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.slack import dm
+
+    old = "00000000-0000-4000-8000-000000000001"
+    await index.create(old, runtime="local")
+    await bind_slack_thread_id("D1", CONCIERGE_TS, old)
+    queue = AsyncMock(return_value=True)
+    monkeypatch.setattr(dm, "queue_message_for_thread", queue)
+
+    await dm.note_for_concierge("U1", "D1", "a note")
+
+    queue.assert_awaited_once_with(
+        mda_successor_thread_id(old), [{"type": "text", "text": "a note"}]
+    )

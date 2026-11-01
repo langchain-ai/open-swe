@@ -6,6 +6,9 @@ channels and incident channels use, so replies post into the DM instead of
 opening a thread and the channel's own history is the conversation transcript. That
 timestamp is also how the rest of the code recognizes the mode: only a DM the
 owner enabled ever reaches a run with it.
+
+A conversation from before Managed Deep Agents takes no new runs, so it starts over
+on an empty MDA thread: its next run binds the DM there and creates the thread.
 """
 
 import logging
@@ -19,6 +22,7 @@ from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestEr
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.records import SlackMessage, lookup_slack_thread_id
 from openswe.slack.thread_notes import note_for_thread_owner
+from openswe.threads import index
 from openswe.users import User
 from openswe.utils.thread_ops import queue_system_note_for_thread
 
@@ -46,11 +50,20 @@ def dm_thread_title(name: str) -> str:
     return f"DMs between Open SWE and {name.strip()}" if name.strip() else ""
 
 
+async def concierge_thread_id(dm_channel_id: str) -> str | None:
+    """The thread the DM's concierge conversation continues on, ``None`` before it starts.
+
+    For a conversation from before MDA, that is the empty thread its next run creates.
+    """
+    thread_id = await lookup_slack_thread_id(dm_channel_id, CONCIERGE_TS)
+    return None if thread_id is None else await index.live_thread_id(thread_id)
+
+
 async def note_for_concierge(slack_user_id: str, dm_channel_id: str, note: str) -> None:
     """Queue ``note`` for the person's concierge thread, which skips the bot's own DM posts."""
     if not await User.concierge_mode_for_slack(slack_user_id):
         return
-    thread_id = await lookup_slack_thread_id(dm_channel_id, CONCIERGE_TS)
+    thread_id = await concierge_thread_id(dm_channel_id)
     if thread_id is None:
         return
     if not await queue_system_note_for_thread(thread_id, note):
@@ -124,7 +137,7 @@ async def _record_in_concierge_thread(
     channel_id: str, text: str, origin: DmOrigin | None = None
 ) -> None:
     """Add a message the bot sent to the person's concierge conversation, so a reply has context."""
-    thread_id = await lookup_slack_thread_id(channel_id, CONCIERGE_TS)
+    thread_id = await concierge_thread_id(channel_id)
     if thread_id is None:
         return
     permalink = await get_slack_permalink(*origin.location) if origin is not None else None
