@@ -2935,37 +2935,6 @@
         "title": "LineComment",
         "type": "object"
       },
-      "LinearChannelCall": {
-        "description": "What MDA's Linear channel POSTs: the event it validated and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
-        "properties": {
-          "event": {
-            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__JsonValue__"
-          },
-          "thread": {
-            "$ref": "#/components/schemas/EndpointThread"
-          }
-        },
-        "required": [
-          "event",
-          "thread"
-        ],
-        "title": "LinearChannelCall",
-        "type": "object"
-      },
-      "LinearDecline": {
-        "description": "An answer that starts nothing and has MDA's Linear channel tell the session why.",
-        "properties": {
-          "decline": {
-            "title": "Decline",
-            "type": "string"
-          }
-        },
-        "required": [
-          "decline"
-        ],
-        "title": "LinearDecline",
-        "type": "object"
-      },
       "LinearEndpointActor": {
         "description": "A ``LinearActor`` as an endpoint is sent it.",
         "properties": {
@@ -23137,37 +23106,27 @@
         "summary": "Health Check"
       }
     },
-    "/linear/channel/events": {
+    "/mda/channel-api/{endpoint}": {
       "post": {
-        "description": "The run a Linear event starts, or ``None`` to start nothing.\n\nAn agent session turn starts the run it prepares, or declines with what the\nchannel tells the session, such as that it names no repository. While the\nsession's thread waits on an interrupt nothing is prepared. Issue events run\nLinear automations.",
-        "operationId": "linear_channel_event_linear_channel_events_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LinearChannelCall"
-              }
+        "description": "What ``endpoint`` answers the channel's call with.",
+        "operationId": "channel_api_mda_channel_api__endpoint__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint",
+            "required": true,
+            "schema": {
+              "title": "Endpoint",
+              "type": "string"
             }
-          },
-          "required": true
-        },
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/EndpointAnswer"
-                    },
-                    {
-                      "$ref": "#/components/schemas/LinearDecline"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Linear Channel Event Linear Channel Events Post"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 }
               }
             },
@@ -23184,7 +23143,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Linear Channel Event"
+        "summary": "Channel Api"
       }
     },
     "/mda/resolve-user": {

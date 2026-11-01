@@ -20,8 +20,8 @@ from openswe.config import ENV
 from openswe.dashboard import router as dashboard_router
 from openswe.github.channel import router as github_channel_router
 from openswe.github.routes import router as github_webhook_router
-from openswe.linear.channel import router as linear_channel_router
 from openswe.mcp import server as agent_mcp_server
+from openswe.mda_channels.api import router as mda_channel_api_router
 from openswe.mda_channels.resolve_user import router as mda_resolve_user_router
 from openswe.openai_responses.routes import router as sandbox_openai_router
 from openswe.review.eval_report_routes import router as reviewer_eval_report_router
@@ -168,7 +168,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(plan_router)
     app.include_router(workflow_approval_router)
-    app.include_router(linear_channel_router)
+    app.include_router(mda_channel_api_router)
     app.include_router(mda_resolve_user_router)
     app.include_router(slack_webhook_router)
     app.include_router(health_router)

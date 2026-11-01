@@ -12,11 +12,12 @@ import re
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
-from pydantic import BaseModel, Field, TypeAdapter, field_validator
+from pydantic import BaseModel, Field, JsonValue, TypeAdapter, field_validator
+from runtime_api.linear import TEAM_KEY_PATTERN, LinearAutomationRun, PlanLinearAutomation
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -78,12 +79,9 @@ SlackSenders = Literal["anyone", "people", "bots"]
 _SLACK_TRIGGER_CHANNEL_RE = re.compile(r"^[CG][A-Z0-9]{8,}$")
 _SLACK_MESSAGE_MAX_CHARS = 8_000
 LinearTriggerEvent = Literal["issue.created", "issue.labeled"]
-LINEAR_EVENT_DESCRIPTIONS: dict[LinearTriggerEvent, str] = {
-    "issue.created": "an issue was created",
-    "issue.labeled": "a label was added to an issue",
-}
-_LINEAR_TEAM_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,9}$")
-_LINEAR_DESCRIPTION_MAX_CHARS = 8_000
+_LINEAR_TEAM_KEY_RE = re.compile(TEAM_KEY_PATTERN)
+# Each automation run a Linear delivery starts gets a thread of its own, named by both.
+_LINEAR_AUTOMATION_THREADS = uuid.uuid5(uuid.NAMESPACE_URL, "open-swe:linear-automation")
 _RATE_WINDOW = timedelta(hours=1)
 _DELIVERY_CLAIM_SCOPE = "automation_delivery"
 _DELIVERY_CLAIM_TTL = timedelta(hours=24)
@@ -1490,175 +1488,140 @@ async def launch_slack_automations(
     return results
 
 
-def _named(items: object) -> dict[str, str]:
-    """``{id: name}`` for a Linear list of ``{id, name}`` objects."""
-    if not isinstance(items, list):
-        return {}
-    return {
-        str(item["id"]): str(item.get("name") or "")
-        for item in items
-        if isinstance(item, dict) and item.get("id")
-    }
-
-
-def _linear_issue_events(payload: dict[str, Any]) -> tuple[set[LinearTriggerEvent], set[str]]:
-    """The trigger events one Linear delivery stands for, and the label names it added."""
-    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
-    if payload.get("type") != "Issue" or not isinstance(data, dict):
-        return set(), set()
-    if payload.get("action") == "create":
-        return {"issue.created"}, set()
-    updated_from = payload.get("updatedFrom")
-    if payload.get("action") != "update" or not isinstance(updated_from, dict):
-        return set(), set()
-    before = updated_from.get("labelIds")
-    after = data.get("labelIds")
-    if not isinstance(before, list) or not isinstance(after, list):
-        return set(), set()
-    added = {str(label) for label in after} - {str(label) for label in before}
-    names = _named(data.get("labels"))
-    added_names = {names.get(label_id, "") for label_id in added} - {""}
-    return ({"issue.labeled"}, added_names) if added else (set(), set())
-
-
-def _linear_team_key(data: dict[str, Any]) -> str:
-    team = data.get("team")
-    if isinstance(team, dict) and isinstance(team.get("key"), str) and team["key"]:
-        return team["key"].upper()
-    identifier = data.get("identifier")
-    if isinstance(identifier, str) and "-" in identifier:
-        return identifier.rsplit("-", 1)[0].upper()
-    return ""
-
-
-def _linear_trigger_fires(
-    config: dict[str, Any],
-    team: str,
-    event: LinearTriggerEvent,
-    *,
-    labels: set[str],
-    added_labels: set[str],
-    project: str,
-) -> bool:
-    if config.get("team") != team or event not in (config.get("events") or []):
-        return False
-    wanted_project = config.get("project")
-    if wanted_project and wanted_project.lower() != project.lower():
-        return False
-    wanted = {label.lower() for label in config.get("labels") or []}
-    if not wanted:
-        return True
-    candidates = added_labels if event == "issue.labeled" else labels
-    return bool(wanted & {label.lower() for label in candidates})
-
-
-async def _linear_event_prompt(
-    record: dict[str, Any],
-    data: dict[str, Any],
-    event: LinearTriggerEvent,
-    *,
-    team: str,
-    labels: set[str],
-    project: str,
-) -> str:
-    creator = data.get("creator") if isinstance(data.get("creator"), dict) else {}
-    creator_email = creator.get("email") if isinstance(creator, dict) else None
-    state = data.get("state") if isinstance(data.get("state"), dict) else {}
-    lines = [
-        f"Issue: {data.get('identifier') or ''} {data.get('title') or ''}",
-        f"URL: {data.get('url') or ''}",
-        f"Team: {team}",
-        f"Project: {project or '(none)'}",
-        f"Labels: {', '.join(sorted(labels)) or '(none)'}",
-        f"State: {state.get('name') if isinstance(state, dict) else ''}",
-        f"Creator: {creator.get('name') if isinstance(creator, dict) else ''}",
-    ]
-    description = str(data.get("description") or "")[:_LINEAR_DESCRIPTION_MAX_CHARS]
-    context = "\n".join(lines) + f"\n\n{description}"
-    registered = bool(await User.login_for_email(creator_email))
-    return prompt(
-        "runs/linear-automation-event",
-        prompt=record["prompt"],
-        event_description=LINEAR_EVENT_DESCRIPTIONS[event],
-        event_context=fence_github_comment_body(context, registered=registered),
-    )
-
-
-async def launch_linear_automations(
-    payload: dict[str, Any], delivery_id: str
-) -> list[dict[str, Any]]:
-    """Run every automation a Linear issue delivery triggers, each at most once per delivery."""
-    events, added_labels = _linear_issue_events(payload)
-    if not events:
-        return []
-    if not delivery_id:
-        logger.warning("Linear automation delivery is missing a delivery ID")
-        return []
-    data: dict[str, Any] = payload["data"]
-    team = _linear_team_key(data)
-    if not _LINEAR_TEAM_KEY_RE.fullmatch(team):
-        return []
-    labels = set(_named(data.get("labels")).values()) - {""}
-    project_value = data.get("project")
-    project = str(project_value.get("name") or "") if isinstance(project_value, dict) else ""
+async def linear_automation_rules(team: str) -> list[dict[str, Any]]:
+    """The enabled automations with a Linear trigger on ``team``, for MDA's channel to match."""
     async with transaction() as conn:
-        records = await _load_records(
+        return await _load_records(
             conn,
             "WHERE a.enabled AND a.id IN (SELECT automation_id FROM automation_trigger "
             "WHERE kind = 'linear' AND match_key = :team)",
             {"team": team},
         )
-    results: list[dict[str, Any]] = []
-    for record in records:
-        schedule_id = record["id"]
-        match = next(
-            (
-                (trigger.get("config") or {}, event)
-                for trigger in record.get("triggers") or []
-                if trigger.get("kind") == "linear"
-                for event in sorted(events)
-                if _linear_trigger_fires(
-                    trigger.get("config") or {},
-                    team,
-                    event,
-                    labels=labels,
-                    added_labels=added_labels,
-                    project=project,
-                )
-            ),
-            None,
-        )
-        if match is None:
-            continue
-        config, event = match
-        claim_prefix = f"{schedule_id}:linear:{team}:"
-        claim_key = f"{claim_prefix}{delivery_id}"
-        if not await _claim_delivery(
-            claim_key, claim_prefix, config.get("max_runs_per_hour"), schedule_id
-        ):
-            continue
-        try:
-            result = await _launch_agent_schedule_record(
-                record,
-                repo=None,
-                prompt=await _linear_event_prompt(
-                    record, data, event, team=team, labels=labels, project=project
-                ),
-            )
-        except Exception:
-            logger.exception(
-                "Failed to launch Linear automation", extra={"schedule_id": schedule_id}
-            )
-            await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
-            continue
-        if result.get("status") != "started":
-            logger.error(
-                "Linear automation did not start",
-                extra={"schedule_id": schedule_id, "launch_status": result.get("status")},
-            )
-            await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
-        results.append(result)
-    return results
+
+
+def linear_trigger_configs(record: dict[str, Any], team: str) -> list[dict[str, Any]]:
+    """The automation's Linear trigger configs on ``team``."""
+    return [
+        trigger.get("config") or {}
+        for trigger in record.get("triggers") or []
+        if trigger.get("kind") == "linear" and (trigger.get("config") or {}).get("team") == team
+    ]
+
+
+async def plan_linear_automation(request: PlanLinearAutomation) -> LinearAutomationRun | None:
+    """The run an automation starts for a Linear issue event MDA's channel matched it to.
+
+    The channel matches and writes the run's prompt; the backend claims the automation once per delivery, within
+    its trigger's hourly cap, and writes and signs the run, on a thread of its own the
+    channel starts it on. The automation must be enabled and have a trigger on the
+    event's team for that event, so a call can't start another automation. A repeat
+    for a delivery already claimed plans the same run again: the channel starts a
+    thread's run for a delivery once.
+    """
+    try:
+        automation_id = uuid.UUID(request.automation_id)
+    except ValueError:
+        return None
+    async with transaction() as conn:
+        records = await _load_records(conn, "WHERE a.enabled AND a.id = :id", {"id": automation_id})
+    record = records[0] if records else None
+    config = next(
+        (
+            config
+            for config in (linear_trigger_configs(record, request.team) if record else [])
+            if request.event in (config.get("events") or [])
+        ),
+        None,
+    )
+    if record is None or config is None:
+        return None
+    schedule_id = record["id"]
+    claim_prefix = f"{schedule_id}:linear:{request.team}:"
+    claim_key = f"{claim_prefix}{request.delivery_id}"
+    claimed = await _claim_delivery(
+        claim_key, claim_prefix, config.get("max_runs_per_hour"), schedule_id
+    )
+    if not claimed and not await event_claims.held(_DELIVERY_CLAIM_SCOPE, claim_key):
+        return None
+    workspace = _record_workspace(record)
+    if not await WORKSPACES.slug_exists(workspace):
+        error = f"workspace {workspace!r} no longer exists"
+        await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
+        await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
+        return None
+    try:
+        return await _planned_linear_automation(record, request)
+    except Exception:
+        # Released, so the channel's call sent again plans it afresh.
+        await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
+        raise
+
+
+async def _planned_linear_automation(
+    record: dict[str, Any], request: PlanLinearAutomation
+) -> LinearAutomationRun:
+    from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
+    from openswe.linear.session import LINEAR_CHANNEL
+    from openswe.threads.router import (
+        adopt_channel_run,
+        channel_run_metadata,
+        channel_run_starting,
+    )
+    from openswe.threads.runtimes import RUNTIMES
+
+    schedule_id = record["id"]
+    thread_id = str(uuid.uuid5(_LINEAR_AUTOMATION_THREADS, f"{schedule_id}/{request.delivery_id}"))
+    admin_thread = _admin_thread_enabled(record)
+    run_config = await _agent_run_config(record, thread_id, None, admin_thread=admin_thread)
+    metadata = _agent_run_metadata(record, thread_id, None, admin_thread=admin_thread)
+    if admin_thread:
+        metadata["system_authorization"] = {
+            "schedule_id": schedule_id,
+            "invocation_id": run_config["configurable"]["invocation_id"],
+        }
+    input_context: InputMessageContext = {
+        "sender_id": f"system:schedule:{schedule_id}",
+        "surface": "automation",
+        "kind": "system",
+    }
+    run_input = build_run_input(
+        request.prompt,
+        input_context,
+        systems=[await _automation_identity(record)],
+    )
+    await adopt_channel_run(thread_id, LINEAR_CHANNEL, metadata=metadata)
+    planned = await prepare_durable_run(
+        _AGENT_ASSISTANT_ID,
+        run_config,
+        {CHANNEL_METADATA_KEY: LINEAR_CHANNEL},
+        source="schedule",
+    )
+    rewritten = await RUNTIMES.mda_runtime.run_payload(
+        thread_id,
+        {
+            "assistant_id": _AGENT_ASSISTANT_ID,
+            "config": planned,
+            "metadata": planned["metadata"],
+        },
+        thread_metadata={},
+    )
+    await channel_run_starting(thread_id)
+    await _put_run_state(
+        record,
+        {
+            "last_thread_id": thread_id,
+            "last_triggered_at": now_iso(),
+            "last_error": None,
+            "last_error_at": None,
+        },
+    )
+    return LinearAutomationRun(
+        thread_id=uuid.UUID(thread_id),
+        input=cast(dict[str, JsonValue], run_input),
+        context=cast(dict[str, JsonValue], rewritten["context"]),
+        metadata=channel_run_metadata(planned["metadata"]),
+        webhook=COMPLETION_WEBHOOK_URL or None,
+    )
 
 
 async def launch_scheduled_agent_run(
