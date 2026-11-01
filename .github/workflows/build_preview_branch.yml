@@ -42,7 +42,7 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || 'main' }}
           fetch-depth: 0
           persist-credentials: true
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Reset the preview to main when due
         if: github.event_name == 'schedule'
         env:
@@ -93,7 +93,7 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || 'main' }}
           persist-credentials: false
           sparse-checkout: scripts
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Roll out the preview revision
         id: rollout
         env:
@@ -123,7 +123,7 @@ jobs:
         if: steps.mda-changed.outputs.deploy == 'true'
       # The preview's own cache. Labeled PRs' code runs here and can write any cache entry
       # in main's scope, so deploy_mda.yml, which staging and prod build with, restores none.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         if: steps.mda-changed.outputs.deploy == 'true'
         with:
           workspaces: preview-tree/vendor/managed-deepagents-sdk
