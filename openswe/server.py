@@ -639,6 +639,8 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "background_execute",
         "background_task",
         "monitor",
+        # Only the parent's own turn can say where the work stands.
+        "report_work_state",
         "submit_thread_feedback",
         "submit_review_assessment_feedback",
         # The review page reads both from the parent's transcript.
