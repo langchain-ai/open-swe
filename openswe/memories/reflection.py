@@ -16,9 +16,11 @@ models and prompts ahead of the conversation as the source run's did
 """
 
 import logging
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Final, Self
 
+from langchain_core.messages import AIMessage, BaseMessage
 from pydantic import BaseModel, JsonValue, ValidationError
 
 from openswe import event_claims
@@ -172,6 +174,30 @@ class IdleReflection(BaseModel):
             configurable=run.configurable,
             acts_for_person=acting_user(run.metadata) is not None,
             request_prefix=run.settings.request_prefix,
+        )
+
+    @staticmethod
+    def log_cache_use(run: RemoteRun, replies: Sequence[BaseMessage]) -> None:
+        """Log how much of a reflection fork's first model call read the source's cache."""
+        reflection = RunConfig.parse(run.configurable).memory_reflection
+        first = next((m for m in replies if isinstance(m, AIMessage) and m.usage_metadata), None)
+        if reflection is None or first is None or first.usage_metadata is None:
+            return
+        usage = first.usage_metadata
+        details = usage.get("input_token_details") or {}
+        cache_read = details.get("cache_read") or 0
+        logger.info(
+            "Memory reflection fork's first model call",
+            extra={
+                "thread_id": run.thread_id,
+                "source_thread_id": reflection.source_thread_id,
+                "input_tokens": usage["input_tokens"],
+                "cache_read_tokens": cache_read,
+                "cache_creation_tokens": details.get("cache_creation") or 0,
+                "cache_hit_ratio": cache_read / usage["input_tokens"]
+                if usage["input_tokens"]
+                else 0,
+            },
         )
 
     @classmethod

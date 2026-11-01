@@ -1323,6 +1323,7 @@ class TokenRun:
         finally:
             self.graph.end(self.run, self.run_id)
         await IdleReflection.schedule(self.graph.assistant_id, self.run)
+        IdleReflection.log_cache_use(self.run, messages_from_dict(request.replies))
         return Done()
 
     async def step_limit_reached(self, _request: RunRequest) -> Done:
