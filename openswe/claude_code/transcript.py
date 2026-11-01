@@ -25,6 +25,18 @@ from pydantic import (
 logger = logging.getLogger(__name__)
 
 _SYSTEM_REMINDER = re.compile(r"<system-reminder>.*?</system-reminder>\s*", re.DOTALL)
+# Context Claude Code and its desktop app wrap around a prompt or send as one; nobody typed it.
+_HARNESS_CONTEXT = re.compile(
+    r"<(system-reminder|local-command-caveat|local-command-stdout|local-command-stderr"
+    r"|task-notification|ci-monitor-event|side-sessions-event|agent-message"
+    r"|cross-session-message|artifact-view-context|ide_opened_file|ide_selection)\b[^>]*>"
+    r".*?</\1>\s*",
+    re.DOTALL,
+)
+_COMMAND_MESSAGE = re.compile(r"<command-message>.*?</command-message>\s*", re.DOTALL)
+_COMMAND = re.compile(
+    r"<command-name>(.*?)</command-name>\s*(?:<command-args>(.*?)</command-args>)?", re.DOTALL
+)
 IMAGE_PLACEHOLDER = "[image omitted]"
 MISSING_TOOL_RESULT = "No result was recorded before the session was uploaded."
 MAX_TITLE_CHARS = 80
@@ -266,6 +278,12 @@ def _clean(text: str) -> str:
     return _SYSTEM_REMINDER.sub("", text).strip()
 
 
+def prompt_text(text: str) -> str:
+    """What the person wrote, without Claude Code's context and with a slash command as typed."""
+    text = _COMMAND_MESSAGE.sub("", _HARNESS_CONTEXT.sub("", text))
+    return _COMMAND.sub(lambda m: f"{m[1].strip()} {(m[2] or '').strip()}".strip(), text).strip()
+
+
 type Block = TextBlock | ImageBlock | ToolUseBlock | ToolResultBlock | OtherBlock
 
 
@@ -418,19 +436,21 @@ def _messages(records: Sequence[ConversationRecord]) -> list[BaseMessage]:
             case UserRecord(is_meta=True, is_compact_summary=False):
                 continue
             case UserRecord(message=UserMessage(content=str() as content)):
-                builder.human(_clean(content), record.uuid)
+                builder.human(prompt_text(content), record.uuid)
             case UserRecord(message=UserMessage(content=list() as blocks)):
                 for block in blocks:
                     if isinstance(block, ToolResultBlock):
                         builder.tool_result(block)
                 builder.human(
-                    _parts_text(
-                        [block for block in blocks if not isinstance(block, ToolResultBlock)]
+                    prompt_text(
+                        _parts_text(
+                            [block for block in blocks if not isinstance(block, ToolResultBlock)]
+                        )
                     ),
                     record.uuid,
                 )
             case AttachmentRecord(attachment=QueuedPrompt(command_mode="prompt") as queued):
-                builder.human(_content_text(queued.prompt), record.uuid)
+                builder.human(prompt_text(_content_text(queued.prompt)), record.uuid)
             case _:
                 continue
     return builder.finish()

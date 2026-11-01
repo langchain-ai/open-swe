@@ -35,7 +35,7 @@ from pydantic import (
 )
 from sqlalchemy import text
 
-from openswe.claude_code.transcript import MAX_TITLE_CHARS
+from openswe.claude_code.transcript import MAX_TITLE_CHARS, prompt_text
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.database import postgres
 from openswe.github.http import GitHubClient, GitHubError
@@ -99,6 +99,20 @@ class PromptSubmitted(_Hook):
     hook_event_name: Literal["UserPromptSubmit"]
     prompt: str
     session_title: str | None = None
+
+    @property
+    def text(self) -> str:
+        """The prompt as the person typed it, or empty when Claude Code sent it on its own."""
+        return prompt_text(self.prompt)
+
+    @property
+    def title(self) -> str:
+        """Claude Code's name for the session, else the prompt's first line."""
+        if self.session_title:
+            return self.session_title
+        text = _PASTED_CONTENT.sub(" ", self.text)
+        first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+        return first_line[:MAX_TITLE_CHARS] or _UNTITLED
 
 
 class _ToolHook(_Hook):
@@ -235,12 +249,6 @@ type HookEvent = Annotated[
 HOOK_EVENT: TypeAdapter[HookEvent] = TypeAdapter(HookEvent)
 
 
-def _title(prompt: str) -> str:
-    text = _PASTED_CONTENT.sub(" ", prompt)
-    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
-    return first_line[:MAX_TITLE_CHARS] or _UNTITLED
-
-
 def _tool_output(response: JsonValue) -> str | None:
     """A tool's result as text: Bash's comes as output streams, an MCP tool's as content blocks."""
     if response is None:
@@ -339,11 +347,7 @@ class SessionMirror:
             raise PermissionError(
                 "your GitHub account is not authorized for this Open SWE instance"
             )
-        title = (
-            (event.session_title or _title(event.prompt))
-            if isinstance(event, PromptSubmitted)
-            else _UNTITLED
-        )
+        title = event.title if isinstance(event, PromptSubmitted) else _UNTITLED
         created_ms = now_ms()
         metadata: dict[str, object] = {
             "source": CLAUDE_CODE_SOURCE,
@@ -394,20 +398,23 @@ class SessionMirror:
         if (open_turn := await steer_target(self.thread_id)) is not None:
             commands.append(self._ended(TurnInterrupted(turn_id=open_turn.turn_id), "interrupted"))
         turn_id = uuid.uuid7()
-        commands += [
-            Command(
-                command_id=f"turn:{turn_id}:requested",
-                event=TurnRequested(
+        if event.text:
+            commands.append(
+                Command(
+                    command_id=f"turn:{turn_id}:requested",
+                    event=TurnRequested(
+                        turn_id=turn_id,
+                        message_id=f"human-{turn_id}",
+                        text=event.text,
+                        sender=MessageSender(
+                            login=self.owner.github_login, kind=CLAUDE_CODE_SOURCE
+                        ),
+                    ),
+                    actor_kind="user",
                     turn_id=turn_id,
-                    message_id=f"human-{turn_id}",
-                    text=event.prompt,
-                    sender=MessageSender(login=self.owner.github_login, kind=CLAUDE_CODE_SOURCE),
-                ),
-                actor_kind="user",
-                turn_id=turn_id,
-            ),
-            self._started(turn_id),
-        ]
+                )
+            )
+        commands.append(self._started(turn_id))
         await self._append(commands)
         renamed = event.session_title if event.session_title not in {None, title} else None
         await self._touch(title=renamed)
