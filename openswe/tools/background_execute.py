@@ -3,11 +3,12 @@
 import logging
 import shlex
 import uuid
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from openswe.dashboard.profiles import get_profile
+from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.sandboxes.scripts import SandboxScript, SandboxScriptError
 from openswe.sandboxes.state import SandboxBackendProxy, get_or_create_sandbox_backend_proxy
@@ -51,13 +52,21 @@ async def list_tasks(backend: Any, *, required: bool = False) -> list[dict[str, 
 
 
 async def _launch(
-    backend: Any, task_id: str, command: str, timeout: int, *, callback: bool, owner_thread_id: str
+    backend: Any,
+    task_id: str,
+    command: str,
+    timeout: int,
+    *,
+    callback: bool,
+    owner_thread_id: str,
+    display_description: str,
 ) -> dict[str, JsonValue]:
     return await execute(
         backend,
         "launch",
         task_id=task_id,
         command=command,
+        display_description=display_description,
         timeout=timeout,
         callback=callback,
         owner_thread_id=owner_thread_id,
@@ -74,9 +83,13 @@ def current_backend() -> tuple[str, SandboxBackendProxy]:
 
 
 async def background_execute(
-    command: str, timeout: int = DEFAULT_TIMEOUT_SECONDS
+    command: str,
+    display_description: Annotated[str, Field(description=prompt("tools/display-description"))],
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     """Implement the `background_execute` tool."""
+    if not display_description.strip():
+        return {"success": False, "error": "display_description must not be empty"}
     if not command.strip():
         return {"success": False, "error": "command must not be empty"}
     if not isinstance(timeout, int) or not 1 <= timeout <= MAX_TIMEOUT_SECONDS:
@@ -84,8 +97,10 @@ async def background_execute(
     try:
         thread_id, backend = current_backend()
         if await uses_completion_callback():
-            return await _launch_with_callback(thread_id, backend, command, timeout)
-        return await _launch_with_cron(thread_id, backend, command, timeout)
+            return await _launch_with_callback(
+                thread_id, backend, command, timeout, display_description
+            )
+        return await _launch_with_cron(thread_id, backend, command, timeout, display_description)
     except Exception as exc:
         logger.exception("Failed to start background command")
         return {"success": False, "error": str(exc)}
@@ -122,14 +137,20 @@ async def _track(thread_id: str, task_id: str, *, running: bool = True) -> None:
 
 
 async def _launch_with_callback(
-    thread_id: str, backend: Any, command: str, timeout: int
+    thread_id: str, backend: Any, command: str, timeout: int, display_description: str
 ) -> dict[str, Any]:
     task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
     # Tracked first: a fast command's completion callback can reconcile before launch returns.
     await _track(thread_id, task_id)
     try:
         state = await _launch(
-            backend, task_id, command, timeout, callback=True, owner_thread_id=thread_id
+            backend,
+            task_id,
+            command,
+            timeout,
+            callback=True,
+            owner_thread_id=thread_id,
+            display_description=display_description.strip(),
         )
     except Exception:
         await _track(thread_id, task_id, running=False)
@@ -138,7 +159,7 @@ async def _launch_with_callback(
 
 
 async def _launch_with_cron(
-    thread_id: str, backend: Any, command: str, timeout: int
+    thread_id: str, backend: Any, command: str, timeout: int, display_description: str
 ) -> dict[str, Any]:
     active = sum(task.get("status") == "running" for task in await list_tasks(backend))
     if active >= MAX_ACTIVE_TASKS:
@@ -151,7 +172,13 @@ async def _launch_with_cron(
         raise RuntimeError("background-task monitor is busy")
     task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
     state = await _launch(
-        backend, task_id, command, timeout, callback=False, owner_thread_id=thread_id
+        backend,
+        task_id,
+        command,
+        timeout,
+        callback=False,
+        owner_thread_id=thread_id,
+        display_description=display_description.strip(),
     )
     await _track(thread_id, task_id)
     wait = await backend.aexecute(wait_for_monitor, timeout=15)

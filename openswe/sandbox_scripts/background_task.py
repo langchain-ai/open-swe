@@ -180,6 +180,7 @@ class Runner:
                 "task_id": self.task.id,
                 "owner_thread_id": self.config["owner_thread_id"],
                 "command": self.config["command"],
+                "display_description": self.config.get("display_description"),
                 "status": status,
                 "pid": self.process.pid if self.process else None,
                 "runner_pid": os.getpid(),
@@ -329,6 +330,7 @@ def launch(request):
             task.config_path,
             {
                 "command": request["command"],
+                "display_description": request.get("display_description"),
                 "timeout": int(request["timeout"]),
                 "callback": callback,
                 "owner_thread_id": request["owner_thread_id"],

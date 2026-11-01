@@ -251,7 +251,7 @@ function CommandRow({
     <Row
       threadId={threadId}
       taskId={command.task_id}
-      title={command.command ?? command.task_id}
+      title={command.display_description || command.command || command.task_id}
       command={command.command}
       summary={started(command.started_at) ?? "Running"}
       details={[]}

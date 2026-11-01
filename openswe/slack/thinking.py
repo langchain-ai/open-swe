@@ -82,6 +82,8 @@ def _basename(value: str) -> str:
 
 
 def _tool_step(name: str, tool_input: Any) -> tuple[str, str]:
+    if description := _text_arg(tool_input, "display_description").strip():
+        return description, _text_arg(tool_input, "command") or "Tool call"
     if name in {"read_file", "write_file", "edit_file", "delete"}:
         action = {
             "read_file": "Reading",

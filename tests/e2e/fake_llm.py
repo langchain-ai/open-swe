@@ -918,6 +918,7 @@ def _inbox_step(messages: list[BaseMessage]) -> AIMessage:
                         "action": "start",
                         "command": INBOX_MONITOR_COMMAND,
                         "description": "the inbox build log",
+                        "display_description": "Watch the inbox build log",
                         "timeout": 120,
                     },
                     "id": "call-inbox-monitor",
@@ -928,7 +929,13 @@ def _inbox_step(messages: list[BaseMessage]) -> AIMessage:
         _wait_for_inbox_gate()
         return AIMessage(
             content="Checking the monitors.",
-            tool_calls=[{"name": "monitor", "args": {"action": "list"}, "id": "call-inbox-list"}],
+            tool_calls=[
+                {
+                    "name": "monitor",
+                    "args": {"action": "list", "display_description": "List active monitors"},
+                    "id": "call-inbox-list",
+                }
+            ],
         )
     if _called(messages, "call-inbox-reply") is not None:
         return AIMessage(content="Reported what the inbox brought.")
@@ -1169,7 +1176,11 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _tool_step(
             "Building the assets in the background.",
             "background_execute",
-            {"command": BACKGROUND_WORK_COMMAND, "timeout": 120},
+            {
+                "command": BACKGROUND_WORK_COMMAND,
+                "display_description": "Build the assets",
+                "timeout": 120,
+            },
             "call-background-work-execute",
         ),
         _tool_step(
@@ -1180,6 +1191,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
                 "command": BACKGROUND_WORK_MONITOR_COMMAND,
                 "filter": "grep -E 'ERROR|Traceback'",
                 "description": BACKGROUND_WORK_MONITOR_DESCRIPTION,
+                "display_description": "Watch the dev server for errors",
                 "timeout": 120,
             },
             "call-background-work-monitor",
@@ -1808,7 +1820,9 @@ class FakeScriptedChatModel(BaseChatModel):
         )
         script = _script_for(context)
         if EVAL_DESCRIPTION_MARKER in context.first_text:
-            assert self.described_tool_names == ["eval"], self.described_tool_names
+            assert set(self.described_tool_names) == {"eval", "monitor", "background_execute"}, (
+                self.described_tool_names
+            )
 
         last_human = max(
             (
