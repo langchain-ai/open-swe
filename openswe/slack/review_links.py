@@ -51,6 +51,8 @@ class _PrLinks:
 
     def link(self, match: re.Match[str]) -> str:
         github = match["md"] or match["slack"] or match["bare"]
+        if _GITHUB_MARK in {match["md_label"], match["slack_label"]}:
+            return match.group()
         owner, repo, number = cast(re.Match[str], _PR_PARTS.search(github)).groups()
         review = dashboard_review_url(owner, repo, int(number))
         if not review:

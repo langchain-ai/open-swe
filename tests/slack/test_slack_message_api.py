@@ -10,6 +10,7 @@ import pytest
 
 from openswe import completion
 from openswe.slack import client as slack_utils
+from openswe.slack import review_links
 from openswe.slack.blocks import actions, block_payload, button, code_blocks, markdown, section
 from openswe.utils import url_safety
 from tests.support.slack_api import SlackAPI
@@ -318,6 +319,8 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
     assert sent_blocks[2]["elements"][0]["value"] == url
     assert sent_blocks[3] == blocks[3]
     assert blocks[0]["text"] == text
+    resent = await review_links.pr_review_links(payload["text"], sent_blocks)
+    assert resent == (payload["text"], sent_blocks)
 
 
 @pytest.mark.parametrize("fail", [False, True])
