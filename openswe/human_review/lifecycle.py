@@ -175,6 +175,20 @@ class ReviewCard:
         approval = self.request
         if approval.awaiting_ready:
             raise SlackRequestError("draft card is author-only")
+        pr = approval.pull_request
+        configured = (await RepoSettings.cached(pr.owner, pr.repo)).channel_for_files(
+            [file.filename for file in files]
+        )
+        if configured:
+            channel = await SlackChannel.resolve(configured)
+            if channel is None or await sendable_channel(channel.id) is None:
+                raise SlackRequestError("configured review channel is unavailable")
+            if channel.id != approval.slack_channel_id:
+                if approval.slack_channel_id and not await still_internal(
+                    approval.slack_channel_id
+                ):
+                    raise SlackRequestError("cannot send review from an externally shared channel")
+                approval.slack_channel_id, approval.slack_thread_ts = channel.id, ""
         if not approval.slack_channel_id:
             raise SlackRequestError("no Slack channel")
         approval.slack_diff_file_id = await self._diff_image_id(files) or ""
@@ -441,38 +455,9 @@ class ReviewCard:
             request.run_config = current.run_config
             return True
 
-    async def broadcast_configured(self) -> None:
-        approval = self.request
-        if approval.sent_elsewhere or approval.approved or approval.awaiting_ready:
-            return
-        pr = approval.pull_request
-        configured = (await RepoSettings.cached(pr.owner, pr.repo)).review_channel.strip()
-        if not configured:
-            return
-        channel = await SlackChannel.resolve(configured)
-        if channel is None:
-            logger.warning(
-                "Configured expedited review channel is unavailable", extra={"channel": configured}
-            )
-            return
-        if not await still_internal(approval.slack_channel_id):
-            logger.warning("Cannot broadcast expedited review from an externally shared channel")
-            return
-        if (channel := await sendable_channel(channel.id)) is None:
-            logger.warning("Configured expedited review channel cannot receive cards")
-            return
-        if channel.id == approval.slack_channel_id:
-            if not await self.broadcast():
-                logger.warning("Could not broadcast expedited review card to its channel")
-        elif error := await self.copy_to(channel):
-            logger.warning(
-                "Could not broadcast expedited review card", extra={"slack_error": error}
-            )
-
     async def refresh(self, *, outcome: str | None = None) -> None:
         """Re-render the posted card from current state; used after clicks and outcomes."""
         request = self.request
-        await self.refresh_author_dm(outcome)
         if (
             request.kind == "expedited"
             and request.state == "open"
@@ -496,8 +481,9 @@ class ReviewCard:
                 request.slack_message_ts = message_ts
                 await request.save()
                 await self.link_on_github()
-                await self.broadcast_configured()
+            await self.refresh_author_dm(outcome)
             return
+        await self.refresh_author_dm(outcome)
         if not request.has_card or not request.slack_channel_id or not request.slack_message_ts:
             return
         text, blocks = await self.render(outcome)

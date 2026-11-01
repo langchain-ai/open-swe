@@ -3,6 +3,7 @@
 import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -17,6 +18,8 @@ from openswe.expedited_review.eligibility import ChangedFile
 from openswe.github import http as github_http
 from openswe.github.http import RepoClient
 from openswe.github.pull_request_status import PullRequestClient
+from openswe.github.pull_requests import PullRequest
+from openswe.github.repo_files import RepoSettings
 from openswe.human_review import lifecycle
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.people import Outcome
@@ -128,6 +131,8 @@ async def test_new_thread_card_is_its_own_root_and_is_not_reposted(
     approval = HumanReviewRequest(
         pull_request_id=uuid4(), head_sha="abc123", kind="expedited", slack_channel_id="C1"
     )
+    approval.pull_request = PullRequest(owner="org", repo="repo", number=1)
+    monkeypatch.setattr(lifecycle.RepoSettings, "cached", AsyncMock(return_value=RepoSettings()))
     channel = AsyncMock()
     channel.post.return_value = "1.0"
     monkeypatch.setattr(
@@ -164,8 +169,6 @@ async def test_root_card_does_not_offer_its_own_channel(monkeypatch: pytest.Monk
         slack_message_ts="1.0",
         slack_channel_choices=[{"id": "C1", "name": "eng"}, {"id": "C2", "name": "reviews"}],
     )
-    from types import SimpleNamespace
-
     approval.pull_request = SimpleNamespace(owner="org", repo="repo")
     monkeypatch.setattr(
         lifecycle.RepoSettings, "cached", AsyncMock(return_value=SimpleNamespace(review_channel=""))
@@ -325,8 +328,12 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     assert len(private_messages) == 1
 
 
+@pytest.mark.parametrize("review_channel", ["", "reviews"])
 async def test_draft_card_is_not_posted_until_ready(
-    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock
+    open_approval: OpenApproval,
+    monkeypatch: pytest.MonkeyPatch,
+    github_app: AsyncMock,
+    review_channel: str,
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
     approval.slack_message_ts = ""
@@ -341,6 +348,18 @@ async def test_draft_card_is_not_posted_until_ready(
     monkeypatch.setattr(lifecycle, "update_slack_message", updated)
     monkeypatch.setattr(lifecycle, "get_slack_permalink", AsyncMock(return_value="https://origin"))
     posted = AsyncMock(return_value="3.0")
+    channel = AsyncMock(id="C_REVIEWS", name="reviews")
+    channel.post.return_value = "5.0"
+    monkeypatch.setattr(ReviewCard, "link_on_github", AsyncMock())
+    monkeypatch.setattr(
+        lifecycle.RepoSettings,
+        "cached",
+        AsyncMock(return_value=RepoSettings(review_channel=review_channel)),
+    )
+    monkeypatch.setattr(lifecycle.SlackChannel, "resolve", AsyncMock(return_value=channel))
+    monkeypatch.setattr(lifecycle.SlackChannel, "load", AsyncMock(return_value=channel))
+    monkeypatch.setattr(lifecycle, "sendable_channel", AsyncMock(return_value=channel))
+    monkeypatch.setattr(lifecycle, "still_internal", AsyncMock(return_value=True))
     monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", posted)
     monkeypatch.setattr(lifecycle, "channel_choices", AsyncMock(return_value=[]))
     monkeypatch.setattr(ChangedFile, "of_pull", AsyncMock(return_value=[]))
@@ -355,7 +374,18 @@ async def test_draft_card_is_not_posted_until_ready(
     await ReviewCard(approval).refresh()
 
     stored = await _stored(approval)
-    assert stored.slack_message_ts == "3.0"
+    if review_channel:
+        assert (stored.slack_channel_id, stored.slack_thread_ts, stored.slack_message_ts) == (
+            "C_REVIEWS",
+            "5.0",
+            "5.0",
+        )
+        posted.assert_not_awaited()
+        assert "open_swe_option_select_approve" in str(channel.post.call_args)
+    else:
+        assert stored.slack_message_ts == "3.0"
+        channel.post.assert_not_awaited()
+        assert "open_swe_option_select_approve" in str(posted.call_args)
     assert (stored.slack_dm_channel_id, stored.slack_dm_message_ts) == ("D_ADA", "4.0")
     deleted.assert_not_awaited()
     assert "Ready for review" in str(updated.call_args)
@@ -375,7 +405,6 @@ async def test_draft_card_is_not_posted_until_ready(
     assert "dismissed by" in str(dm_updates[-1])
     assert "actions" not in str(dm_updates[-1])
     deleted.assert_not_awaited()
-    assert "open_swe_option_select_approve" in str(posted.call_args)
 
 
 async def test_author_only_prompt_delivery_failure_is_reported(
