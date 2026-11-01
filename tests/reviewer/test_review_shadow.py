@@ -16,6 +16,7 @@ from openswe.review.findings import (
     list_findings,
     new_finding,
 )
+from openswe.review.publish import ReviewAssessment
 from openswe.review.shadow import ReviewShadow
 from openswe.run_config import RunConfig
 from openswe.tools.publish_review import publish_review
@@ -56,7 +57,9 @@ async def _stored(thread_id: str) -> ReviewShadow:
     return shadow
 
 
-async def _publish(ranking: list[str], **configurable: object) -> dict[str, object]:
+async def _publish(
+    ranking: list[str], assessment: ReviewAssessment | None = None, **configurable: object
+) -> dict[str, object]:
     config = {
         "configurable": {
             "thread_id": "shadow-1",
@@ -71,7 +74,7 @@ async def _publish(ranking: list[str], **configurable: object) -> dict[str, obje
         patch("openswe.tools.publish_review.get_config", return_value=config),
         patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="shadow-1"),
     ):
-        return await publish_review(ranking=ranking)
+        return await publish_review(ranking=ranking, assessment=assessment)
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -90,9 +93,17 @@ async def test_a_shadow_keeps_its_findings_apart_and_publishes_only_a_snapshot()
         await append_finding("shadow-1", _f("f_a"))
         await append_finding("shadow-1", _f("f_low", severity="low"))
         first = await _publish(["f_a", "f_low"], head_sha="h1")
+        # Left by an earlier run that never published: a re-review of a later head skips it.
+        await append_finding("shadow-1", _f("f_stale", sha="h1"))
         await append_finding("shadow-1", _f("f_new", sha="h2"))
-        # Only what this head introduced is ranked on a re-review, as for the reviewer it shadows.
-        second = await _publish(["f_new"], head_sha="h2", re_review=True)
+        second = await _publish(
+            ["f_new"],
+            ReviewAssessment(
+                head_sha="b" * 40, risk_score=1, decision="would_approve", explanation="Docs only."
+            ),
+            head_sha="h2",
+            re_review=True,
+        )
         control = await list_findings("tid")
 
     assert [finding["id"] for finding in control] == ["f_control"]
@@ -101,10 +112,13 @@ async def test_a_shadow_keeps_its_findings_apart_and_publishes_only_a_snapshot()
     post.assert_not_awaited()
     token.assert_not_awaited()
     shadow = await _stored("shadow-1")
-    assert [finding["id"] for finding in shadow.findings] == ["f_a", "f_low", "f_new"]
+    assert [finding["id"] for finding in shadow.findings] == ["f_a", "f_low", "f_stale", "f_new"]
     assert [
         (p["reviewed_from_sha"], p["head_sha"], p["finding_ids"]) for p in shadow.publications
     ] == [(None, "h1", ["f_a"]), ("h1", "h2", ["f_new"])]
+    # As on GitHub, open findings keep an assessment from approving.
+    assessment = shadow.publications[1]["assessment"]
+    assert assessment is not None and assessment["decision"] == "needs_human_review"
     assert shadow.last_reviewed_sha == "h2"
 
 

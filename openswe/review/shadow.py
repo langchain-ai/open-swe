@@ -30,11 +30,9 @@ from openswe.review.findings import (
     REVIEWER_SHADOW_THREAD_KIND,
     Finding,
     Severity,
-    filter_findings_for_publish,
-    is_surfaced,
     mark_surfaced,
 )
-from openswe.review.publish import ReviewAssessment, render_inline_comment_payload
+from openswe.review.publish import PublishSelection, ReviewAssessment
 from openswe.run_config import RunConfig
 from openswe.thread_ids import review_shadow_thread_id
 from openswe.threads.creation import ensure_titled_thread
@@ -228,10 +226,11 @@ class ReviewShadow(Base):
         thread_id: str,
         *,
         head_sha: str,
+        re_review: bool,
         severity_threshold: Severity,
         assessment: ReviewAssessment | None,
     ) -> dict[str, object]:
-        """Record what this review would post, in place of posting it."""
+        """Record what this review would post, by the rules a published review follows."""
         async with postgres.session() as session:
             shadow = await session.scalar(
                 select(cls).where(cls.reviewer_thread_id == thread_id).with_for_update()
@@ -239,18 +238,14 @@ class ReviewShadow(Base):
             if shadow is None:
                 return {"success": False, "error": "No shadow review records this thread"}
             findings = copy.deepcopy(shadow.findings)
-            unsurfaced = [
-                finding
-                for finding in findings
-                if not is_surfaced(finding) and finding.get("in_diff", True)
-            ]
-            surfaced = [
-                finding
-                for finding in filter_findings_for_publish(
-                    unsurfaced, severity_threshold=severity_threshold
-                )
-                if render_inline_comment_payload(finding) is not None
-            ]
+            selection = PublishSelection(
+                findings,
+                destination="shadow",
+                re_review=re_review,
+                head_sha=head_sha,
+                severity_threshold=severity_threshold,
+            )
+            surfaced = [finding for finding, _payload in selection.postable]
             for finding in surfaced:
                 mark_surfaced(finding)
             publication: ShadowPublication = {
@@ -258,18 +253,17 @@ class ReviewShadow(Base):
                 "reviewed_from_sha": shadow.last_reviewed_sha,
                 "severity_threshold": severity_threshold,
                 "finding_ids": [finding["id"] for finding in surfaced],
-                "assessment": assessment.model_dump() if assessment else None,
+                "assessment": assessment.settled(findings).model_dump() if assessment else None,
                 "published_at": now_iso(),
             }
             shadow.findings = findings
             shadow.publications = [*shadow.publications, publication]
             shadow.last_reviewed_sha = head_sha
-        open_unsurfaced = [f for f in unsurfaced if f.get("status", "open") == "open"]
         return {
             "success": True,
             "dry_run": True,
             "review_id": None,
             "surfaced_count": len(surfaced),
-            "hidden_count": max(len(open_unsurfaced) - len(surfaced), 0),
+            "hidden_count": max(len(selection.open) - len(surfaced), 0),
             "resolved_thread_count": 0,
         }

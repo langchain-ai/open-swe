@@ -46,6 +46,7 @@ from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
+from openswe.github.org_membership import OPEN_SWE_AUTHOR_LOGINS
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
@@ -720,7 +721,7 @@ async def prepare_reviewer_run(
                     thread
                     for thread in threads
                     if not (comments := thread.get("comments"))
-                    or comments[0].get("author") not in {"open-swe", "open-swe[bot]"}
+                    or str(comments[0].get("author") or "").lower() not in OPEN_SWE_AUTHOR_LOGINS
                 ]
             else:
                 await reconcile_findings_with_review_threads(thread_id, threads)
