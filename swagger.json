@@ -868,6 +868,17 @@
             ],
             "title": "Command"
           },
+          "display_description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Description"
+          },
           "started_at": {
             "anyOf": [
               {

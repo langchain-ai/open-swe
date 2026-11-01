@@ -23,6 +23,7 @@ OUTPUT_LINES = 200
 class BackgroundCommand(BaseModel):
     task_id: str
     command: str | None = None
+    display_description: str | None = None
     status: str
     started_at: float | None = None
 

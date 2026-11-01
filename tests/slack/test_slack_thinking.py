@@ -24,7 +24,8 @@ def _event(method: str, data: dict, *, namespace: list[str] | None = None) -> di
     }
 
 
-async def test_streams_sanitized_tool_steps(monkeypatch) -> None:
+@pytest.mark.parametrize("description", [None, "Build the assets"])
+async def test_streams_sanitized_tool_steps(monkeypatch, description: str | None) -> None:
     historical = _event(
         "tools",
         {
@@ -43,7 +44,7 @@ async def test_streams_sanitized_tool_steps(monkeypatch) -> None:
                 "event": "tool-started",
                 "tool_call_id": "call-1",
                 "tool_name": "execute",
-                "input": {"command": "echo secret-token"},
+                "input": {"command": "echo secret-token", "display_description": description},
             },
         ),
         _event("tools", {"event": "tool-finished", "tool_call_id": "call-1"}),
@@ -95,7 +96,7 @@ async def test_streams_sanitized_tool_steps(monkeypatch) -> None:
     assert stop.await_args is not None
     final_chunks = stop.await_args.args[2]
     serialized = str(final_chunks)
-    assert "Running a development command" in serialized
+    assert (description or "Running a development command") in serialized
     assert "echo secret-token" in serialized
     assert "echo historical" not in serialized
     assert final_chunks[-1]["status"] == "complete"

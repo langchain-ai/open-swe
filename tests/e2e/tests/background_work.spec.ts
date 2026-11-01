@@ -48,10 +48,11 @@ test.describe("background work panel (real dashboard UI)", () => {
       timeout: 60_000,
     });
     await expect(monitors).toContainText('echo "GET /health 200');
-    await expect(commands).toContainText("echo 'building assets'; sleep 110", {
+    await expect(commands).toContainText("Build the assets", {
       timeout: 60_000,
     });
     await commands.getByRole("button", { expanded: false }).first().click();
+    await expect(commands).toContainText("echo 'building assets'; sleep 110");
     await expect(commands.getByLabel("Latest output")).toContainText(
       "building assets",
     );

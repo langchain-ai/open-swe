@@ -358,6 +358,7 @@ export interface QueuedThreadMessage {
 
 /** A message in the thread's queue, as `/threads/{id}/queued-messages` returns it. */
 export interface AgentBackgroundCommand {
+  display_description?: string | null
   task_id: string
   command: string | null
   status: string

@@ -277,7 +277,7 @@ _ASYNC_TASK_TOOLS: Final = frozenset(
     }
 )
 # Tools the model labels each call of, for the dashboard to show in place of a bare name.
-_DESCRIBED_TOOLS: Final = ("eval",)
+_DESCRIBED_TOOLS: Final = ("eval", "monitor", "background_execute")
 _MODEL_OBSERVERS: Final = (TranscriptMiddleware, RecordRunUsageMiddleware)
 # The file and shell tools MDA's own filesystem middleware gives the run.
 _FILE_TOOLS: Final = frozenset(DEEP_AGENT_TOOL_NAMES) - _MDA_TOOLS

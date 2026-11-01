@@ -79,6 +79,7 @@ def _launch(script: Path, task_id: str, command: str, timeout: int, *, callback:
         "launch",
         task_id=task_id,
         command=command,
+        display_description="Run the build",
         timeout=timeout,
         callback=callback,
         owner_thread_id="thread-a",
@@ -111,6 +112,7 @@ def test_runner_calls_back_on_completion_until_accepted(
 
         assert state["status"] == "completed"
         assert state["owner_thread_id"] == "thread-a"
+        assert state["display_description"] == "Run the build"
         url = f"{TOOLS_URL}/background-tasks/{task_id}/complete"
         calls_file = fake_curl / "calls"
         deadline = time.monotonic() + 5
@@ -436,7 +438,7 @@ async def test_background_execute_schedules_a_cron_only_without_callbacks(callba
             "openswe.background_tasks.ensure_background_task_polling", AsyncMock()
         ) as ensure_cron,
     ):
-        result = await background_execute("sleep 10")
+        result = await background_execute("sleep 10", "Wait for the build")
 
     assert result == {"success": True, "task_id": "cmd-1", "status": "running"}
     assert ensure_cron.await_count == int(not callback)
@@ -464,7 +466,7 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
             AsyncMock(side_effect=RuntimeError("invalid assistant ID")),
         ),
     ):
-        result = await background_execute("sleep 10")
+        result = await background_execute("sleep 10", "Wait for the build")
 
     assert result == {
         "success": False,
@@ -769,7 +771,7 @@ async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
         patch("openswe.tools.background_execute.update_background_task_state", side_effect=update),
         patch("openswe.tools.background_execute.langgraph_client"),
     ):
-        result = await background_execute("true")
+        result = await background_execute("true", "Check the command")
 
     assert result["success"] is not launch_fails
     assert bool(tracked) is not launch_fails
@@ -851,7 +853,7 @@ async def test_background_execute_rejects_a_thread_without_sandbox_metadata(
     monkeypatch.setattr("openswe.sandboxes.connect.connect_sandbox", connect)
     state.SANDBOX_BACKENDS.clear()
 
-    result = await background_execute("echo hello")
+    result = await background_execute("echo hello", "Print a greeting")
 
     assert result["success"] is False
     assert "Missing sandbox_id in thread metadata for unprepared" in result["error"]
