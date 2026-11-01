@@ -1080,7 +1080,7 @@ async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(mon
             return {"values": {"messages": []}, "next": []}
 
     class FakeRuns:
-        async def list(self, thread_id: str, *, limit: int) -> list[dict[str, str]]:
+        async def list(self, thread_id: str, **kwargs: object) -> list[dict[str, str]]:
             return [{"run_id": "run-1", "status": "running"}]
 
     class FakeClient:
@@ -1203,7 +1203,7 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
             return None
 
     class FakeRuns:
-        async def list(self, thread_id, limit=1):
+        async def list(self, thread_id, **kwargs):
             nonlocal run_list_calls
             run_list_calls += 1
             return []
@@ -1422,7 +1422,7 @@ async def test_list_dashboard_threads_page_scopes_search_to_requested_participan
             return None
 
     class FakeRuns:
-        async def list(self, thread_id, limit=1):
+        async def list(self, thread_id, **kwargs):
             return []
 
     class FakeClient:
@@ -1459,7 +1459,7 @@ async def test_list_dashboard_threads_page_filters_ownerless_threads(monkeypatch
             return threads[offset : offset + limit]
 
     class FakeRuns:
-        async def list(self, thread_id, limit=1):
+        async def list(self, thread_id, **kwargs):
             return []
 
     patch_thread_module(
@@ -1505,7 +1505,7 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
             return None
 
     class FakeRuns:
-        async def list(self, thread_id, limit=1):
+        async def list(self, thread_id, **kwargs):
             run_list_thread_ids.append(thread_id)
             return [{"id": f"run-{thread_id}", "status": run_statuses[thread_id]}]
 

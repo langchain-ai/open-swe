@@ -3,10 +3,11 @@
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Final, Literal
 from urllib.parse import urlencode
 
 from fastapi import HTTPException
+from langgraph_sdk.schema import RunSelectField
 
 from openswe.agent_cost import RUN_COST_KEY_PREFIX
 from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
@@ -650,15 +651,22 @@ def _status_of(run: Any) -> str | None:
     return raw.lower() if isinstance(raw, str) else None
 
 
+# A run's full record carries its config and context, which the dashboard polls never read.
+_RUN_FIELDS: Final[list[RunSelectField]] = ["run_id", "status"]
+
+
 async def _latest_run_info(client: Any, thread_id: str) -> tuple[str | None, str | None]:
     try:
-        runs = await client.runs.list(thread_id, limit=1)
+        runs = await client.runs.list(thread_id, limit=1, select=_RUN_FIELDS)
         # Follow-ups queued behind the live run are newer than it, and so is one
         # withdrawn from the queue; the live run is still the one that says what
         # the thread is doing. LangGraph also marks the thread idle when that
         # withdrawal cancels a pending run, so this is the only busy signal left.
         if runs and _status_of(runs[0]) in {"pending", "interrupted"}:
-            runs = await client.runs.list(thread_id, status="running", limit=1) or runs
+            runs = (
+                await client.runs.list(thread_id, status="running", limit=1, select=_RUN_FIELDS)
+                or runs
+            )
     except Exception:  # noqa: BLE001
         logger.debug("Could not fetch latest run for thread %s", thread_id, exc_info=True)
         return None, None
