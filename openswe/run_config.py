@@ -26,7 +26,7 @@ from collections.abc import Mapping
 from typing import Annotated, Any, Literal, Self
 
 from langgraph.config import get_config
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError, model_validator
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 
 from openswe.invocation import resolve_invocation_id
@@ -105,6 +105,8 @@ class RunConfig(BaseModel):
     workspace: str | None = None
 
     # Actor
+    user_id: str | None = None
+    auth_provider: Literal["github", "langsmith"] = "github"
     github_login: str | None = None
     github_user_id: str | None = None
     user_email: str | None = None
@@ -187,6 +189,15 @@ class RunConfig(BaseModel):
     watch_key: str | None = None
     schedule_id: str | None = None
     background_task_completion: bool | None = None
+
+    @model_validator(mode="after")
+    def authenticated_experience(self) -> Self:
+        if self.auth_provider == "langsmith":
+            self.github_login = None
+            self.github_user_id = None
+            self.repo = None
+            self.repo_explicitly_none = True
+        return self
 
     @classmethod
     def parse(cls, raw: Any) -> Self:
@@ -276,6 +287,8 @@ class RunConfig(BaseModel):
     @property
     def sender_id(self) -> str | None:
         """Who the run acts for, in the form ``Principal.sender_id`` records."""
+        if self.auth_provider == "langsmith" and self.user_id:
+            return f"user:{self.user_id}"
         if self.github_login:
             return f"github:{self.github_login}"
         if self.started_by_id:

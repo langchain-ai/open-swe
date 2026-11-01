@@ -232,7 +232,7 @@ async def test_web_handoff_posts_a_quiet_link_without_a_trace_message(
     [posted] = posts
     assert posted["channel"] == "C1"
     assert posted["thread_ts"] == "1.0"
-    assert "<https://dashboard.example/agents/t1|web UI>" in posted["text"]
+    assert posted["text"] == "<https://dashboard.example/agents/t1|Continued on Web>"
     blocks = posted["blocks"]
     assert isinstance(blocks, list)
     assert [block["type"] for block in blocks] == ["context"]
@@ -244,6 +244,69 @@ async def test_web_handoff_posts_a_quiet_link_without_a_trace_message(
     slack_api.respond({"ok": True, "messages": [{"ts": "2.0", "blocks": blocks}]})
     await _SlackWebHandoff("t1", metadata).notify()
     assert len([method for method, _ in slack_api.calls if method == "chat.postMessage"]) == 1
+
+
+@pytest.mark.parametrize("author", ["UBOT", "UHUMAN", "UOTHERBOT"])
+async def test_web_handoff_updates_only_our_latest_reply_footer(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, author: str
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    link = "<https://dashboard.example/agents/t1|Open in Web>"
+    footer = f"{link} • model • $0.02"
+    blocks = [
+        section("Answer"),
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]},
+    ]
+    message = {"ts": "2.0", "user": author, "text": f"Answer {footer}", "blocks": blocks}
+    metadata = {
+        "source": "slack",
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+    }
+    slack_api.respond({"ok": True, "messages": [{"ts": "1.0", "latest_reply": "2.0"}]})
+    slack_api.respond({"ok": True, "messages": [message]})
+    if author == "UBOT":
+        slack_api.respond({"ok": True, "ts": "2.0"})
+    else:
+        slack_api.respond({"ok": True, "ts": "3.0"})
+        slack_api.respond({"ok": True, "messages": [{"ts": "1.0"}]})
+
+    await _SlackWebHandoff("t1", metadata).notify()
+
+    updates = [params for method, params in slack_api.calls if method == "chat.update"]
+    posts = [params for method, params in slack_api.calls if method == "chat.postMessage"]
+    if author != "UBOT":
+        assert not updates
+        assert len(posts) == 1
+        return
+    assert not posts
+    [updated] = updates
+    assert updated["ts"] == "2.0"
+    assert updated["text"] == f"Answer {footer.replace('|Open in Web>', '|Continued in Web>')}"
+    assert updated["blocks"] == [
+        blocks[0],
+        {
+            "type": "context",
+            "elements": [
+                {"type": "mrkdwn", "text": footer.replace("|Open in Web>", "|Continued in Web>")}
+            ],
+        },
+    ]
+    slack_api.respond({"ok": True, "messages": [{"ts": "1.0", "latest_reply": "2.0"}]})
+    slack_api.respond(
+        {"ok": True, "messages": [message | {"text": updated["text"], "blocks": updated["blocks"]}]}
+    )
+    await _SlackWebHandoff("t1", metadata).notify()
+    assert (
+        len(
+            [
+                method
+                for method, _ in slack_api.calls
+                if method in {"chat.update", "chat.postMessage"}
+            ]
+        )
+        == 1
+    )
 
 
 @pytest.mark.parametrize(

@@ -190,6 +190,8 @@ class TurnContext:
     slack_breakout: bool = False
     slack_by_the_way: bool = False
     slack_follow_up_suggestions: bool = False
+    # The sender only wants to hear about blockers and reviewed, ready PRs.
+    goal_mode: bool = False
     implementation_walkthrough_enabled: bool = False
     sandbox_file_downloads: bool = False
     local_checkout: bool = False
@@ -221,6 +223,8 @@ class TurnContext:
         sections = [prompt("system/source-context", source_guidance=self._source_guidance())]
         if not self.local_checkout and (scope := _render_repository_scope_section()):
             sections.append(scope)
+        if self.goal_mode:
+            sections.append(prompt("system/goal-mode"))
         return "\n\n".join(sections)
 
     def _source_guidance(self) -> str:

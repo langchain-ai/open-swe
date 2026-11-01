@@ -3498,6 +3498,11 @@
             "title": "Action",
             "type": "string"
           },
+          "auto_merge": {
+            "default": false,
+            "title": "Auto Merge",
+            "type": "boolean"
+          },
           "merge_method": {
             "enum": [
               "squash",
@@ -4103,6 +4108,11 @@
               }
             ],
             "title": "Additions"
+          },
+          "autoMerge": {
+            "default": false,
+            "title": "Automerge",
+            "type": "boolean"
           },
           "ci": {
             "default": "unknown",
@@ -5002,6 +5012,17 @@
               }
             ],
             "title": "Experimental Memory"
+          },
+          "goal_mode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Mode"
           },
           "pr_failure_reactions": {
             "anyOf": [
@@ -19574,6 +19595,26 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "experience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "coding",
+                    "agent_workspace"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Experience"
+            }
           }
         ],
         "responses": {
@@ -19879,6 +19920,26 @@
           },
           {
             "in": "query",
+            "name": "experience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "coding",
+                    "agent_workspace"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Experience"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
@@ -19941,6 +20002,28 @@
     "/dashboard/api/threads/pinned": {
       "get": {
         "operationId": "api_list_pinned_threads_dashboard_api_threads_pinned_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "experience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "coding",
+                    "agent_workspace"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Experience"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -19956,6 +20039,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -20082,6 +20175,26 @@
                 }
               ],
               "title": "Exclude Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "experience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "coding",
+                    "agent_workspace"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Experience"
             }
           }
         ],

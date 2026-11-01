@@ -7,6 +7,7 @@ from typing import Annotated, Any
 import httpx2
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
+from pydantic import JsonValue, TypeAdapter
 
 from openswe.analytics.usage import record_reviewer_publication
 from openswe.audit_logs.tools import audit_tool
@@ -22,6 +23,7 @@ from openswe.github.thread_token import (
 from openswe.review.approvals import approval_mode_for
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
+from openswe.review.events import ReviewEvents
 from openswe.review.findings import (
     REVIEWER_EVAL_PUBLICATION_KEY,
     SEVERITY_ORDER,
@@ -146,7 +148,7 @@ async def publish_review(
         return {"success": False, "error": "No GitHub token available"}
 
     try:
-        return await _publish_review_async(
+        result = await _publish_review_async(
             owner=cfg.repo.owner,
             repo=cfg.repo.name,
             pr_number=pr_number,
@@ -159,6 +161,15 @@ async def publish_review(
             state=state,
             assessment=assessment,
         )
+        events = ReviewEvents.from_config(cfg)
+        if events is not None:
+            await events.append(
+                "review.published" if result.get("success") else "review.publish_failed",
+                run_id=cfg.invocation_id,
+                head_sha=head_sha,
+                result=TypeAdapter(dict[str, JsonValue]).validate_python(result),
+            )
+        return result
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
     except GitHubAuthError as exc:

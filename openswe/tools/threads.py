@@ -36,6 +36,7 @@ from openswe.threads.handlers import (
     get_dashboard_thread,
     resolve_dashboard_thread,
 )
+from openswe.threads.identity import ThreadIdentity
 from openswe.threads.listing import list_dashboard_threads_page
 from openswe.threads.plan_store import get_plan_content, list_plan_comments
 from openswe.threads.proxy import proxy_dashboard_thread_commands
@@ -110,11 +111,25 @@ class _Actor:
 
     @property
     def session(self) -> dict[str, Any]:
-        return {"sub": self.login, "email": self.email, "name": self.name}
+        identity = ThreadIdentity(self.login)
+        return {
+            "sub": self.login,
+            "email": self.email,
+            "name": self.name,
+            **(
+                {"provider": "langsmith", "user_id": str(identity.user_id)}
+                if identity.user_id
+                else {}
+            ),
+        }
 
     @property
     def admin(self) -> bool:
-        return not self.automation and is_admin(self.email, login=self.login)
+        return (
+            not self.automation
+            and ThreadIdentity(self.login).github_login is not None
+            and is_admin(self.email, login=self.login)
+        )
 
     async def mirror_of(self, session_id: str) -> tuple[str, Mapping[str, Any]] | None:
         """The thread mirroring this person's Claude Code session, if it has one."""
@@ -146,6 +161,21 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
     configurable = as_json_object(config.get("configurable"))
     email_value = configurable.get("user_email")
     email = email_value.strip() if isinstance(email_value, str) and email_value.strip() else None
+    cfg = RunConfig.parse(configurable)
+    if cfg.auth_provider == "langsmith":
+        if not cfg.user_id:
+            return None
+        identity = ThreadIdentity(f"user:{cfg.user_id}")
+        try:
+            await identity.authorize()
+        except HTTPException:
+            return None
+        user = await identity.user()
+        if user is None:
+            return None
+        return _Actor(
+            login=identity.subject, email=email, name=user.display_name or identity.subject
+        )
     login_value = configurable.get("github_login")
     login = login_value.strip() if isinstance(login_value, str) and login_value.strip() else None
     if not login:

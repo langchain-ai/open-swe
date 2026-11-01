@@ -25,7 +25,11 @@ from openswe.bridge.backend import BridgeSandboxBackend
 from openswe.bridge.store import Bridge
 from openswe.config import ENV
 from openswe.github.app import PermissionMap
-from openswe.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
+from openswe.github.proxy import (
+    clear_proxy_token_expiry,
+    get_recorded_proxy_base_config,
+    record_proxy_token_expiry,
+)
 from openswe.github.sandbox_access import (
     READ_ONLY_REVIEW_PERMISSIONS,
     SandboxGitHubAccess,
@@ -77,6 +81,20 @@ SandboxSource = Literal["workspace", "base"]
 
 # The sandbox ``recreate_sandbox`` asked for, its workspace and source, until MDA creates it.
 _REPLACEMENT_METADATA_KEY = "sandbox_replacement"
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxCredentialPolicy:
+    """The persisted sandbox owner's credential boundary, independent of the current caller."""
+
+    metadata: ThreadMetadata
+
+    async def allows_github(self) -> bool:
+        if self.metadata.owner_type != "user":
+            return True
+        owner = await self.metadata.owner()
+        subject = self.metadata.owner_subject(owner)
+        return not subject.startswith("user:") and bool(owner.github_login)
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,6 +282,16 @@ async def refresh_thread_github_proxy(
     sandbox_id = metadata.get("sandbox_id")
     if not isinstance(sandbox_id, str) or Bridge.bridge_id_of(sandbox_id) is not None:
         return None
+    if not await SandboxCredentialPolicy(ThreadMetadata.model_validate(metadata)).allows_github():
+        clear_proxy_token_expiry(thread_id)
+        base_proxy_config = metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
+        await configure_sandbox_proxy(
+            sandbox_id,
+            None,
+            base_proxy_config=base_proxy_config if isinstance(base_proxy_config, dict) else None,
+            thread_id=thread_id,
+        )
+        return None
     repositories, permissions = await _thread_proxy_scope(
         thread_id, metadata, github_proxy_repositories, github_proxy_permissions
     )
@@ -348,6 +376,7 @@ async def _connect_existing_sandbox(
     base_proxy_config: dict[str, Any] | None = None,
     workspace_slug: str | None = None,
     mda_writes_proxy: bool = False,
+    allow_github: bool = True,
 ) -> SandboxBackendProtocol:
     """Reuse the sandbox already bound to ``thread_id``, or fail unreachable.
 
@@ -370,8 +399,16 @@ async def _connect_existing_sandbox(
         except Exception as exc:
             logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
             raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
-    if mda_writes_proxy:
+    if mda_writes_proxy or not allow_github:
         try:
+            if not allow_github:
+                clear_proxy_token_expiry(thread_id)
+                await configure_sandbox_proxy(
+                    sandbox_backend.id,
+                    None,
+                    base_proxy_config=base_proxy_config,
+                    thread_id=thread_id,
+                )
             async with aphase(thread_id, "sandbox.git_identity"):
                 await configure_git_identity(sandbox_backend)
         except Exception as exc:
@@ -433,6 +470,11 @@ async def _attach_task_worker_sandbox(
         or worker.visibility != host.visibility
     ):
         raise PermissionError("The shared sandbox host has different ownership or permissions")
+    if (
+        await SandboxCredentialPolicy(worker).allows_github()
+        != await SandboxCredentialPolicy(host).allows_github()
+    ):
+        raise PermissionError("The shared sandbox host has different credential permissions")
     host_repositories = host.github_token_repositories
     worker_repositories = narrowed_repositories(
         github_proxy_repositories, worker.github_token_repositories
@@ -487,6 +529,8 @@ async def mda_github_proxy(
     installation, is the token the backend would mint for the sandbox anyway: never where the
     thread, or the caller's ``repositories`` and ``permissions``, narrow it, as a review does.
     """
+    if not await SandboxCredentialPolicy(ThreadMetadata.model_validate(metadata)).allows_github():
+        return None
     if not ENV.MDA_GITHUB_PROXY_CONNECTION.is_set():
         return None
     return _github_proxy_connection(
@@ -640,9 +684,13 @@ async def ensure_sandbox_for_thread(
         if isinstance(metadata_proxy_config, dict)
         else get_recorded_proxy_base_config(thread_id)
     )
-    github_proxy_repositories, github_proxy_permissions = await _thread_proxy_scope(
-        thread_id, sandbox_metadata, github_proxy_repositories, github_proxy_permissions
-    )
+    allow_github = await SandboxCredentialPolicy(
+        ThreadMetadata.model_validate(sandbox_metadata)
+    ).allows_github()
+    if allow_github:
+        github_proxy_repositories, github_proxy_permissions = await _thread_proxy_scope(
+            thread_id, sandbox_metadata, github_proxy_repositories, github_proxy_permissions
+        )
     try:
         sandbox_backend = await _connect_existing_sandbox(
             thread_id,
@@ -652,9 +700,11 @@ async def ensure_sandbox_for_thread(
             github_proxy_permissions=github_proxy_permissions,
             base_proxy_config=base_proxy_config,
             workspace_slug=workspace_slug,
-            mda_writes_proxy=_mda_writes_proxy(
+            mda_writes_proxy=allow_github
+            and _mda_writes_proxy(
                 sandbox_metadata, github_proxy_repositories, github_proxy_permissions
             ),
+            allow_github=allow_github,
         )
     except (SandboxGoneError, SandboxUnreachableError) as exc:
         if require_existing:

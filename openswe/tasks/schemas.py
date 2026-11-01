@@ -7,12 +7,16 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, JsonValue, Type
 from openswe.bridge.constants import SANDBOX_ID_PREFIX
 from openswe.bridge.store import BridgeStore
 from openswe.invocation import resolve_invocation_id
+from openswe.threads.identity import ThreadIdentity
 from openswe.users import User
 
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
 
 
 async def user_for_login(login: str) -> User | None:
+    identity_key = ThreadIdentity(login)
+    if identity_key.user_id is not None:
+        return await identity_key.user()
     user = await User.for_login("github", login)
     if user is None:
         return None
@@ -59,6 +63,13 @@ class ThreadMetadata(BaseModel):
         if self.sandbox_id and self.sandbox_id.startswith(SANDBOX_ID_PREFIX):
             return await BridgeStore.is_connected(self.sandbox_id)
         return True
+
+    def owner_subject(self, owner: User) -> str:
+        if self.owner_login and self.owner_login.startswith("user:"):
+            if ThreadIdentity(self.owner_login).user_id != owner.id:
+                raise PermissionError("Task identity does not match its owner")
+            return self.owner_login
+        return owner.github_login
 
     async def owner(self) -> User:
         if self.owner_type != "user":

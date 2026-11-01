@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import binascii
+import copy
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
@@ -15,7 +16,7 @@ from langchain_core.messages.content import ImageContentBlock, create_image_bloc
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
-from openswe.dashboard.admin import is_admin
+from openswe.config import ENV
 from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     default_vision_model_pair,
@@ -52,7 +53,12 @@ from openswe.input_messages import (
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import SlackNotice, post_slack_thread_reply
+from openswe.slack.client import (
+    SlackNotice,
+    fetch_latest_slack_thread_message,
+    post_slack_thread_reply,
+    update_slack_message,
+)
 from openswe.source_context import SourceContext
 from openswe.threads.access import (
     _ensure_dashboard_github_token,
@@ -60,6 +66,7 @@ from openswe.threads.access import (
     resolve_run_email,
 )
 from openswe.threads.creation import create_thread
+from openswe.threads.identity import ThreadIdentity
 from openswe.threads.moves import SANDBOX_HANDOFF_SYSTEM, SANDBOX_MOVED_KEY, SandboxMove
 from openswe.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
 from openswe.threads.store import THREADS
@@ -298,6 +305,11 @@ async def create_dashboard_thread_record(
         "origin": DASHBOARD_SOURCE,
         "owner_type": "user",
         "owner_login": login.strip(),
+        **(
+            {"owner_user_id": str(ThreadIdentity(login).user_id)}
+            if ThreadIdentity(login).user_id
+            else {}
+        ),
         "visibility": visibility,
         "thread_category": "interactive",
         "trigger_kind": "user",
@@ -313,9 +325,8 @@ async def create_dashboard_thread_record(
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
-    if experience == "agent_workspace":
-        metadata["experience"] = experience
-    if visibility == "private" and is_admin(email, login=login):
+    metadata["experience"] = experience
+    if visibility == "private" and ThreadIdentity(login).is_admin(email):
         metadata["admin_thread"] = True
     if workspace:
         metadata["workspace"] = workspace
@@ -384,12 +395,15 @@ async def _build_dashboard_configurable(
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
         "source": source,
-        "github_login": login,
+        **(
+            {"github_login": login}
+            if ThreadIdentity(login).github_login
+            else {"user_id": str(ThreadIdentity(login).user_id), "auth_provider": "langsmith"}
+        ),
         "user_email": await resolve_run_email(login, profile),
         "background_task_completion": False,
     }
-    if metadata.get("experience") == "agent_workspace":
-        configurable["experience"] = "agent_workspace"
+    configurable["experience"] = metadata.get("experience", "coding")
     repo_config = repo_config_from_metadata(metadata)
     if repo_config:
         configurable["repo"] = repo_config
@@ -433,9 +447,16 @@ async def create_dashboard_session(
 ) -> str:
     """Create a fresh owned thread using the person's dashboard defaults."""
     profile = RepositoryDefaults.model_validate(await get_profile(login) or {})
-    repo = body.repo if body.repo is not None else profile.repository()
+    identity = ThreadIdentity(login)
+    if identity.user_id is not None and body.repo:
+        raise HTTPException(403, "This account has no GitHub repository access")
+    repo = (
+        None
+        if identity.user_id is not None
+        else (body.repo if body.repo is not None else profile.repository())
+    )
     workspace = await _resolve_requested_workspace(body.workspace, _parse_repo(repo), login=login)
-    if body.repo is None:
+    if body.repo is None and identity.user_id is None:
         preferred_workspace = await _resolve_requested_workspace(body.workspace, None, login=login)
         if profile.workspace_default_repos.get(preferred_workspace):
             workspace = preferred_workspace
@@ -452,7 +473,11 @@ async def create_dashboard_session(
         email=email,
         repo_config=repo_config,
         prompt=body.prompt,
-        visibility=await _requested_visibility({"visibility": body.visibility}, login=login),
+        visibility="private"
+        if identity.user_id is not None
+        else await _requested_visibility({"visibility": body.visibility}, login=login),
+        repo_explicitly_none=identity.user_id is not None,
+        experience="agent_workspace" if identity.user_id is not None else "coding",
         workspace=workspace,
     )
     return str(thread["thread_id"])
@@ -469,6 +494,9 @@ async def start_dashboard_thread(
     unlisted: bool = False,
 ) -> str:
     """Start a person's dashboard thread; the first repo is the one its sandbox opens in."""
+    identity = ThreadIdentity(login)
+    if identity.user_id is not None and repos:
+        raise HTTPException(403, "This account has no GitHub repository access")
     repo_configs: list[dict[str, str]] = []
     for repo in repos:
         repo_config = _parse_repo(repo)
@@ -485,7 +513,9 @@ async def start_dashboard_thread(
         repo_config=primary,
         prompt=prompt,
         title=title,
-        visibility=visibility,
+        visibility="private" if identity.user_id is not None else visibility,
+        repo_explicitly_none=identity.user_id is not None,
+        experience="agent_workspace" if identity.user_id is not None else "coding",
         workspace=await _resolve_requested_workspace(None, primary, login=login),
         extra_metadata={"unlisted": True} if unlisted else None,
     )
@@ -801,13 +831,13 @@ async def _attributed_run_messages(
     """
     if content is None:
         content = ""
-    sender_id = f"github:{login}"
+    sender_id = ThreadIdentity(login).sender_id
     injected = (
         set(history.context_hashes)
         if history.context_hashes is not None
         else injected_dynamic_context_hashes_from_metadata(metadata)
     )
-    person: PersonIdentity = {"id": sender_id, "github_login": login}
+    person: PersonIdentity = ThreadIdentity(login).person
     if email:
         person["email"] = email
     sender_id = (await User.canonical_person(person))["id"]
@@ -867,6 +897,9 @@ async def _enrich_run_start_command(
 ) -> dict[str, Any]:
     if command.get("method") != "run.start":
         return command
+    if not creating and ThreadIdentity(login).user_id is not None:
+        if metadata.get("visibility") != "private":
+            raise HTTPException(403, "LangSmith accounts require private tasks")
 
     params = command.get("params")
     if not isinstance(params, dict):
@@ -953,11 +986,11 @@ async def _enrich_run_start_command(
             experience: Literal["coding", "agent_workspace"] = (
                 "agent_workspace" if requested_experience == "agent_workspace" else "coding"
             )
-            if (
-                experience == "agent_workspace"
-                and not (await User.preferences_for_login(login)).experimental_fleet
-            ):
-                raise HTTPException(403, "LangSmith Agent Workspace is not enabled")
+            identity = ThreadIdentity(login)
+            if identity.user_id is not None:
+                visibility = "private"
+                if client_configurable.get("repo"):
+                    raise HTTPException(403, "Agent Workspace has no GitHub repository access")
             repo_config = _parse_repo(client_configurable.get("repo")) or {}
             workspace = await _resolve_requested_workspace(
                 client_configurable.get("workspace") or client_configurable.get("environment"),
@@ -969,7 +1002,8 @@ async def _enrich_run_start_command(
                 login=login,
                 email=email,
                 repo_config=repo_config,
-                repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True
+                repo_explicitly_none=identity.user_id is not None
+                or client_configurable.get("repo_explicitly_none") is True
                 or (experience == "agent_workspace" and not repo_config),
                 experience=experience,
                 visibility=visibility,
@@ -1290,9 +1324,8 @@ async def steer_running_thread(
         "text": _command_prompt_text(content),
         "images": list(image_blocks),
         "sender": {
-            "id": f"github:{login}",
-            "platform": "github",
-            "github_login": login,
+            **ThreadIdentity(login).person,
+            "platform": "langsmith" if ThreadIdentity(login).user_id else "github",
             **({"email": email} if email else {}),
         },
         "queue_id": message_id,
@@ -1526,8 +1559,13 @@ class _SlackWebHandoff:
         if not url:
             return
         notice = SlackNotice(kind="web_handoff", key=self.thread_id)
-        text = f"Conversation continued in the <{url}|web UI>."
+        text = f"<{url}|Continued on Web>"
         try:
+            latest = await fetch_latest_slack_thread_message(*self.location)
+            if latest is not None and (
+                notice.repeats(latest) or await self.update_footer(latest, url)
+            ):
+                return
             await post_slack_thread_reply(
                 *self.location,
                 text,
@@ -1540,13 +1578,50 @@ class _SlackWebHandoff:
                 ],
                 unfurl_links=False,
                 unfurl_media=False,
-                notice=notice,
             )
         except Exception:
             logger.exception(
                 "Failed to post Slack web handoff notice",
                 extra={"thread_id": self.thread_id},
             )
+
+    async def update_footer(self, message: Mapping[str, object], url: str) -> bool:
+        bot_user_id = ENV.SLACK_BOT_USER_ID.get()
+        message_ts = message.get("ts")
+        if not bot_user_id or message.get("user") != bot_user_id or not isinstance(message_ts, str):
+            return False
+        blocks = message.get("blocks")
+        if not isinstance(blocks, list):
+            return False
+        old_link = f"<{url}|Open in Web>"
+        new_link = f"<{url}|Continued in Web>"
+        updated_blocks = copy.deepcopy(blocks)
+        changed = False
+        for block in updated_blocks:
+            if not isinstance(block, dict) or block.get("type") != "context":
+                continue
+            elements = block.get("elements")
+            for element in elements if isinstance(elements, list) else []:
+                if not isinstance(element, dict) or element.get("type") != "mrkdwn":
+                    continue
+                text = element.get("text")
+                if isinstance(text, str) and new_link in text:
+                    return True
+                if isinstance(text, str) and old_link in text:
+                    element["text"] = text.replace(old_link, new_link)
+                    changed = True
+        if not changed or self.location is None:
+            return False
+        text = message.get("text")
+        await update_slack_message(
+            self.location[0],
+            message_ts,
+            text.replace(old_link, new_link) if isinstance(text, str) else "",
+            blocks=updated_blocks,
+            unfurl_links=False,
+            unfurl_media=False,
+        )
+        return True
 
 
 async def _create_system_thread_record(

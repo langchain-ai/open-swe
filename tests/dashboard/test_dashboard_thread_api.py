@@ -32,7 +32,7 @@ from openswe.threads import runs as thread_runs
 from openswe.threads.summary import TRANSCRIPT_VERSION
 from openswe.transcript.engine import AppendResult
 from openswe.transcript.turns import OpenTurn
-from openswe.users import User, UserPreferences
+from openswe.users import User
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import ThreadStoreOverClient, patch_thread_module
 
@@ -78,6 +78,34 @@ async def test_create_session_starts_only_when_requested(monkeypatch, start: boo
         assert command["params"]["input"]["messages"] == [{"type": "human", "content": "Fix login"}]
     else:
         dispatch.assert_not_awaited()
+
+
+async def test_langsmith_cloud_session_is_private_and_has_no_repository(monkeypatch) -> None:
+    from openswe.threads.identity import ThreadIdentity
+
+    subject = f"user:{uuid7()}"
+    monkeypatch.setattr(
+        thread_runs, "get_profile", AsyncMock(return_value={"default_repo": "acme/private"})
+    )
+    monkeypatch.setattr(
+        thread_runs, "_resolve_requested_workspace", AsyncMock(return_value="default")
+    )
+    monkeypatch.setattr(thread_runs, "_ensure_dashboard_github_token", AsyncMock())
+    create = AsyncMock(return_value={"thread_id": "cloud-thread"})
+    monkeypatch.setattr(thread_runs, "create_dashboard_thread_record", create)
+    result = await thread_runs.create_dashboard_session(
+        thread_runs.SessionCreateBody(prompt="Research", visibility="public"), subject
+    )
+    assert result == "cloud-thread"
+    assert create.call_args.kwargs["visibility"] == "private"
+    assert create.call_args.kwargs["repo_config"] == {}
+    assert create.call_args.kwargs["repo_explicitly_none"] is True
+    assert ThreadIdentity(subject).github_login is None
+    with pytest.raises(HTTPException) as rejected:
+        await thread_runs.create_dashboard_session(
+            thread_runs.SessionCreateBody(prompt="Clone", repo="acme/private"), subject
+        )
+    assert rejected.value.status_code == 403
 
 
 async def test_create_session_uses_saved_defaults(monkeypatch, registry_db) -> None:
@@ -226,59 +254,94 @@ async def test_failed_run_start_drains_prefetches(monkeypatch: pytest.MonkeyPatc
         await history_finished.wait()
 
 
-@pytest.mark.parametrize("enabled", [False, True])
-async def test_agent_workspace_experience_is_bound_before_first_dispatch(
-    monkeypatch, enabled: bool
+@pytest.mark.parametrize("langsmith", [False, True])
+@pytest.mark.parametrize("experience", ["coding", "agent_workspace"])
+@pytest.mark.parametrize("local", [False, True])
+async def test_desktop_experience_keeps_authenticated_identity_on_resume(
+    monkeypatch: pytest.MonkeyPatch,
+    registry_db: None,
+    langsmith: bool,
+    experience: str,
+    local: bool,
 ) -> None:
     monkeypatch.setattr(
         thread_runs, "_resolve_requested_workspace", AsyncMock(return_value="default")
     )
-    monkeypatch.setattr(thread_runs, "_requested_visibility", AsyncMock(return_value="private"))
-    monkeypatch.setattr(thread_runs.postgres, "configured", lambda: False)
-    monkeypatch.setattr(
-        User,
-        "preferences_for_login",
-        AsyncMock(return_value=UserPreferences(experimental_fleet=enabled)),
-    )
+    monkeypatch.setattr(thread_runs, "_requested_visibility", AsyncMock(return_value="public"))
+    monkeypatch.setattr(thread_runs, "postgres", SimpleNamespace(configured=lambda: False))
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={"default_repo": "acme/default"})
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    subject = f"user:{uuid7()}" if langsmith else "octocat"
+    bridge = await BridgeStore.register(
+        owner_id=subject if langsmith else "github:octocat",
+        hostname="laptop.local",
+        root_path="/Users/test/tasks",
+        label=None,
+        bridge_id=None,
+    )
+    assert bridge is not None
     command = {
         "method": "run.start",
         "params": {
             "input": {"messages": [{"type": "human", "content": "Research this topic"}]},
-            "config": {"configurable": {"experience": "agent_workspace"}},
+            "config": {
+                "configurable": {
+                    "experience": experience,
+                    **({"sandbox_bridge_id": bridge.bridge_id} if local else {}),
+                }
+            },
         },
     }
-    if not enabled:
-        with pytest.raises(HTTPException) as rejected:
-            await thread_runs._enrich_run_start_command(
-                "new-tid", "octocat", command, metadata={}, creating=True
-            )
-        assert rejected.value.status_code == 403
-        assert "metadata" not in created
-        return
     first = await thread_runs._enrich_run_start_command(
-        "new-tid", "octocat", command, metadata={}, creating=True
+        "new-tid", subject, command, metadata={}, creating=True
     )
-    assert first["params"]["config"]["configurable"]["experience"] == "agent_workspace"
-    assert first["params"]["config"]["configurable"]["repo_explicitly_none"] is True
+    config = first["params"]["config"]["configurable"]
+    assert config["experience"] == experience
+    if langsmith:
+        assert config["auth_provider"] == "langsmith"
+        assert config["user_id"] == subject.removeprefix("user:")
+        assert "github_login" not in config
+        assert "repo" not in config
+    else:
+        assert config["github_login"] == subject
+        assert "auth_provider" not in config
     metadata = created["metadata"]
     assert isinstance(metadata, dict)
-    assert metadata["experience"] == "agent_workspace"
+    assert metadata["owner_login"] == subject
+    if langsmith:
+        assert metadata["owner_user_id"] == subject.removeprefix("user:")
+    assert metadata["visibility"] == ("private" if local or langsmith else "public")
+    if local:
+        assert metadata["sandbox_id"] == bridge.sandbox_id
+    else:
+        assert metadata.get("sandbox_id") is None
     followup = {
         "method": "run.start",
         "params": {
             "input": {"messages": [{"type": "human", "content": "Continue"}]},
-            "config": {"configurable": {"experience": "coding"}},
+            "config": {
+                "configurable": {
+                    "experience": "coding",
+                    "github_login": "admin",
+                    "auth_provider": "github",
+                }
+            },
         },
     }
-    monkeypatch.setattr(User, "preferences_for_login", AsyncMock(return_value=UserPreferences()))
     _patch_new_thread_deps(monkeypatch, profile={})
     next_run = await thread_runs._enrich_run_start_command(
-        "new-tid", "octocat", followup, metadata=metadata
+        "new-tid", subject, followup, metadata=metadata
     )
-    assert next_run["params"]["config"]["configurable"]["experience"] == "agent_workspace"
+    resumed = next_run["params"]["config"]["configurable"]
+    assert resumed["experience"] == experience
+    if langsmith:
+        assert resumed["auth_provider"] == "langsmith"
+        assert resumed["user_id"] == subject.removeprefix("user:")
+        assert "github_login" not in resumed
+    else:
+        assert resumed["github_login"] == subject
+        assert "auth_provider" not in resumed
 
 
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
@@ -760,7 +823,7 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
         {"owner_login", "owner_type", "visibility", "system_authorization"}
         & enriched["params"]["metadata"].keys()
     )
-    assert "experience" not in configurable
+    assert configurable["experience"] == "coding"
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
@@ -1170,7 +1233,10 @@ def _make_threads(count: int, *, resolved_before: int) -> list[dict[str, object]
 
 
 @pytest.mark.parametrize("readable", [True, False])
-async def test_slack_link_search_checks_thread_access(monkeypatch, readable: bool) -> None:
+@pytest.mark.parametrize("experience", [None, "coding", "agent_workspace"])
+async def test_slack_link_search_checks_thread_access(
+    monkeypatch, readable: bool, experience: thread_listing.DashboardThreadExperience | None
+) -> None:
     thread = {"thread_id": "linked", "metadata": {"visibility": "private"}}
     monkeypatch.setattr(
         thread_listing, "lookup_slack_link_thread_id", AsyncMock(return_value="linked")
@@ -1189,9 +1255,12 @@ async def test_slack_link_search_checks_thread_access(monkeypatch, readable: boo
         "octocat",
         query="https://example.slack.com/archives/C123/p1788431248678809",
         scope="interactive",
+        experience=experience,
     )
 
-    assert page["items"] == ([{"id": "linked"}] if readable else [])
+    assert page["items"] == (
+        [{"id": "linked"}] if readable and experience != "agent_workspace" else []
+    )
     assert page["hasMore"] is False
 
 
@@ -1257,6 +1326,51 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     assert all(item["resolved"] is False for item in result["items"])
     assert page_size in offsets
     assert run_list_calls == 0
+
+
+@pytest.mark.parametrize("experience", [None, "coding", "agent_workspace"])
+@pytest.mark.parametrize("status", [None, "finished"])
+async def test_experience_filter_precedes_pagination_search_and_repo_aggregation(
+    monkeypatch: pytest.MonkeyPatch,
+    experience: thread_listing.DashboardThreadExperience | None,
+    status: str | None,
+) -> None:
+    monkeypatch.setattr(thread_listing, "_THREADS_SEARCH_PAGE", 2)
+    threads = _make_threads(5, resolved_before=0)
+    for index, thread in enumerate(threads):
+        metadata = cast(dict[str, object], thread["metadata"])
+        metadata.update(latest_run_status="success", repo_owner="acme", repo_name=f"repo{index}")
+        if index < 2:
+            metadata["experience"] = "agent_workspace"
+        elif index == 2:
+            metadata["experience"] = "coding"
+    cast(dict[str, object], threads[4]["metadata"]).update(
+        visibility="private", owner_login="someone-else", experience="agent_workspace"
+    )
+
+    async def search(*, offset: int, limit: int, **_: object) -> list[dict[str, object]]:
+        return threads[offset : offset + limit]
+
+    monkeypatch.setattr(
+        thread_listing,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=SimpleNamespace(search=search)),
+    )
+    monkeypatch.setattr(thread_listing, "workspace_for_repo", AsyncMock(return_value=None))
+    expected = ["t2", "t3"] if experience == "coding" else ["t0", "t1"]
+    if experience is None:
+        expected += ["t2", "t3"]
+    for offset, thread_id in enumerate(expected):
+        page = await thread_listing.list_dashboard_threads_page(
+            "octocat", experience=experience, query="Thread", status=status, limit=1, offset=offset
+        )
+        assert [item["id"] for item in page["items"]] == [thread_id]
+        assert page["items"][0]["experience"] == (
+            "agent_workspace" if thread_id in ("t0", "t1") else "coding"
+        )
+        assert page["hasMore"] is (offset + 1 < len(expected))
+    repos = await thread_listing.list_dashboard_thread_repos("octocat", experience=experience)
+    assert [repo["repoFullName"] for repo in repos] == [f"acme/repo{key[1:]}" for key in expected]
 
 
 async def test_task_hierarchy_opt_in_visibility_and_idle_refresh(
@@ -1337,6 +1451,18 @@ async def test_task_hierarchy_opt_in_visibility_and_idle_refresh(
     all_threads = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True)
     assert [item["id"] for item in all_threads["items"]] == ["t3", "t4"]
     assert [worker["id"] for worker in all_threads["items"][0]["taskWorkers"]] == ["t0", "t2"]
+    cast(dict[str, object], threads[3]["metadata"])["experience"] = "agent_workspace"
+    coding = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, experience="coding"
+    )
+    assert [item["id"] for item in coding["items"]] == ["t0", "t2", "t4"]
+    assert coding["items"][0]["taskMembership"]["coordinatorThreadId"] is None
+    cast(dict[str, object], threads[0]["metadata"])["experience"] = "agent_workspace"
+    workspace = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, experience="agent_workspace", query="Thread 3"
+    )
+    assert [item["id"] for item in workspace["items"]] == ["t3"]
+    assert [worker["id"] for worker in workspace["items"][0]["taskWorkers"]] == ["t0"]
     cast(dict[str, object], threads[3]["metadata"]).update(
         visibility="private", owner_login="someone-else"
     )

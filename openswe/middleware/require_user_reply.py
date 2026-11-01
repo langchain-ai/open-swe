@@ -43,6 +43,12 @@ REPLY_GUARD: SystemIdentity = {
     "platform": "open-swe",
 }
 
+WORK_STATE_GUARD: SystemIdentity = {
+    "id": "system:work-state-guard",
+    "display_name": "Work state guard",
+    "platform": "open-swe",
+}
+
 
 class ReplySurfaceState(AgentState):
     reply_surface: NotRequired[Annotated[ReplySurface, OmitFromOutput]]
@@ -105,6 +111,16 @@ def reply_nudge(
         {"sender_id": REPLY_GUARD["id"], "surface": "automation", "kind": "system"},
         systems=[REPLY_GUARD],
         injected_dynamic_context_hashes=set(introduced or ()),
+    )
+    return [content_to_text(message["content"]) for message in built]
+
+
+def work_state_nudge(tool_name: str) -> list[str]:
+    """What sends a goal-mode run back to work until it reports where the work stands."""
+    built = build_input_messages(
+        prompt("runs/unfinished-work", tool=tool_name),
+        {"sender_id": WORK_STATE_GUARD["id"], "surface": "automation", "kind": "system"},
+        systems=[WORK_STATE_GUARD],
     )
     return [content_to_text(message["content"]) for message in built]
 

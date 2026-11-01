@@ -955,6 +955,8 @@ async def mutate_findings(
     list in place and returns ``True`` when it changed something; we only write
     on change, so a no-op mutation never clobbers a concurrent update.
     """
+    from openswe.github.pull_requests import PullRequest
+    from openswe.review.events import ReviewEvents
     from openswe.review.shadow import ReviewShadow
 
     with _RUN_SCOPED_FINDINGS_LOCK:
@@ -965,6 +967,7 @@ async def mutate_findings(
         return shadow_findings
     pull_request_id = await _ensure_finding_state(thread_id)
     async with postgres.session() as session:
+        pull = await session.get(PullRequest, pull_request_id)
         await session.execute(
             select(FindingState)
             .where(FindingState.pull_request_id == pull_request_id)
@@ -995,6 +998,10 @@ async def mutate_findings(
             await session.delete(removed)
         await _link_interaction_authors(session, written)
         await _invalidate_review_page(session, pull_request_id)
+    if pull is not None:
+        await ReviewEvents(
+            thread_id, PullRequestKey.of(pull.owner, pull.repo, pull.number)
+        ).finding_changes(before, changed)
     await _record_finding_telemetry(thread_id, changed)
     return findings
 

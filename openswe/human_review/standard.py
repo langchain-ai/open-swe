@@ -199,7 +199,7 @@ def summary_line(text: str) -> str:
     return flat[: SUMMARY_MAX_CHARS - 1].rsplit(" ", 1)[0].rstrip(" ,.;:") + "…"
 
 
-def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
+def request_blockers(snapshot: PullRequestSnapshot | PullRequestPayload) -> list[str]:
     """Why a pull request may not be put up for review yet."""
     blockers: list[str] = []
     if snapshot.merged:
@@ -227,13 +227,14 @@ async def _review_author_allowed(author: str, owner: str, repo: str) -> bool | N
 
 async def review_blockers(pull: PullRequestClient) -> list[str] | None:
     """Why ``pull`` may not be put up for review now; ``None`` when GitHub was unavailable."""
-    readiness = await Readiness.assess(pull)
-    if readiness is None:
+    payload = await or_none(pull.pull())
+    if payload is None:
         return None
-    blockers = request_blockers(readiness.snapshot)
-    author_allowed = await _review_author_allowed(
-        readiness.snapshot.author, pull.repo.owner, pull.repo.name
-    )
+    snapshot = PullRequestPayload.model_validate(payload)
+    if not snapshot.head_sha:
+        return None
+    blockers = request_blockers(snapshot)
+    author_allowed = await _review_author_allowed(snapshot.author, pull.repo.owner, pull.repo.name)
     if author_allowed is None:
         return None
     if not author_allowed:
