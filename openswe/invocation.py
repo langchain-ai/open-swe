@@ -32,10 +32,7 @@ def new_invocation_id() -> str:
 
 
 def with_invocation_id(value: Mapping[str, Any] | None, invocation_id: str) -> dict[str, Any]:
-    """Write both names until all workers use invocation_id and rollback no longer needs the alias.
-
-    Keep legacy reads for queued jobs, callbacks, and historical metadata.
-    """
+    """Write the canonical identity while accepting legacy queued jobs and metadata."""
     if not invocation_id:
         raise ValueError("invocation_id must be a non-empty string")
     result = dict(value or {})
@@ -43,5 +40,5 @@ def with_invocation_id(value: Mapping[str, Any] | None, invocation_id: str) -> d
     if existing is not None and existing != invocation_id:
         raise ValueError("invocation_id conflicts with existing invocation identity")
     result[INVOCATION_ID_KEY] = invocation_id
-    result[LEGACY_INVOCATION_ID_KEY] = invocation_id
+    result.pop(LEGACY_INVOCATION_ID_KEY, None)
     return result
