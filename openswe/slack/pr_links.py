@@ -11,22 +11,31 @@ from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.slack.client import GitHubPrRef, parse_github_pr_url
 from openswe.slack.payloads import SlackEventEnvelope
+from openswe.utils.dashboard_links import dashboard_review_pr_url
 
 logger = logging.getLogger(__name__)
 
-_PR_URL = re.compile(
-    r"https?://(?:www\.)?github\.com/[A-Za-z0-9-]+/[A-Za-z0-9_.-]+/pull/[0-9]+(?!\w)",
-    re.I,
-)
+_URL = re.compile(r"https?://[^\s|<>]+", re.I)
+
+
+def linked_pull_requests(text: str) -> list[GitHubPrRef]:
+    """Distinct GitHub PRs linked directly or through this deployment's review page."""
+    refs: dict[str, GitHubPrRef] = {}
+    for match in _URL.finditer(text):
+        url = match.group().rstrip(".,;:!?)]\"'")
+        try:
+            ref = parse_github_pr_url(dashboard_review_pr_url(url) or url)
+        except ValueError:
+            logger.debug("Ignoring malformed PR link", exc_info=True)
+            continue
+        if ref is not None and ref.number > 0:
+            refs[ref.url.lower()] = ref
+    return list(refs.values())
 
 
 def _linked_urls(value: object) -> set[str]:
     if isinstance(value, str):
-        return {
-            ref.url.lower()
-            for match in _PR_URL.finditer(value)
-            if (ref := parse_github_pr_url(match.group(0))) is not None and ref.number > 0
-        }
+        return {ref.url.lower() for ref in linked_pull_requests(value)}
     if isinstance(value, dict):
         return set().union(*(_linked_urls(item) for item in value.values()))
     if isinstance(value, list):
