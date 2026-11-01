@@ -64,7 +64,11 @@ async def test_a_session_mirrors_as_turns_and_an_interrupted_one_is_closed(
     owner = await User.sign_in("github", "1", login="test-user")
     mirror = await _record(
         owner,
-        _event("UserPromptSubmit", prompt="Fix the flaky test\nmore detail"),
+        _event(
+            "UserPromptSubmit",
+            prompt="<system-reminder>\nYou are in a worktree\n</system-reminder>\n\n"
+            "Fix the flaky test\nmore detail",
+        ),
         _event("PreToolUse", tool_name="Bash", tool_use_id="t1", tool_input={"command": "ls"}),
         # A follow-up with no Stop before it: the person interrupted the first turn.
         _event("UserPromptSubmit", prompt="Actually, run the tests"),
@@ -89,7 +93,11 @@ async def test_a_session_mirrors_as_turns_and_an_interrupted_one_is_closed(
     assert snapshot.thread.status == "idle"
     assert [turn.state for turn in snapshot.turns] == ["interrupted", "completed"]
     assert [(m.role, m.text) for m in snapshot.messages] == [
-        ("human", "Fix the flaky test\nmore detail"),
+        (
+            "human",
+            "<system-reminder>\nYou are in a worktree\n</system-reminder>\n\n"
+            "Fix the flaky test\nmore detail",
+        ),
         ("human", "Actually, run the tests"),
         ("ai", "Running them."),
         ("ai", "The tests\npass."),
