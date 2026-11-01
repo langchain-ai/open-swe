@@ -340,7 +340,7 @@ async def test_slack_reply_hints_not_to_retry_channel_errors(
 
 @pytest.mark.parametrize("response_type", ["progress", "final"])
 @pytest.mark.parametrize("options", [None, ["Yes", "No"]])
-async def test_only_final_reply_has_feedback_for_its_run(
+async def test_replies_have_no_feedback_buttons(
     monkeypatch: pytest.MonkeyPatch,
     response_type: Literal["progress", "final"],
     options: list[str] | None,
@@ -359,25 +359,13 @@ async def test_only_final_reply_has_feedback_for_its_run(
     assert post.await_args is not None
     blocks = post.await_args.kwargs["blocks"]
     feedback = [block for block in blocks if block["type"] == "context_actions"]
-    if response_type == "progress":
-        assert feedback == []
-    else:
-        buttons = feedback[0]["elements"][0]
-        assert buttons["type"] == "feedback_buttons"
-        assert json.loads(buttons["positive_button"]["value"]) == {
-            "run_id": "run-1",
-            "rating": "up",
-        }
-        assert json.loads(buttons["negative_button"]["value"]) == {
-            "run_id": "run-1",
-            "rating": "down",
-        }
+    assert feedback == []
     assert blocks[0] == {"type": "markdown", "text": "Answer"}
     if options:
         assert blocks[1]["type"] == "actions"
 
 
-async def test_long_reply_retains_all_text_alongside_feedback(
+async def test_long_reply_retains_all_text_without_feedback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config()
@@ -393,9 +381,8 @@ async def test_long_reply_retains_all_text_alongside_feedback(
     }
     assert post.await_args is not None
     blocks = post.await_args.kwargs["blocks"]
-    assert "".join(block["text"]["text"] for block in blocks[:-1]) == "x" * 12001
-    assert all(len(block["text"]["text"]) <= 3000 for block in blocks[:-1])
-    assert blocks[-1]["type"] == "context_actions"
+    assert "".join(block["text"]["text"] for block in blocks) == "x" * 12001
+    assert all(len(block["text"]["text"]) <= 3000 for block in blocks)
 
 
 async def test_slack_reply_keeps_code_highlighted_over_native_limit(
@@ -445,17 +432,22 @@ async def test_slack_reply_rejects_oversized_message_with_options(
     post.assert_not_awaited()
 
 
+@pytest.mark.parametrize("response_type", ["progress", "final"])
 @pytest.mark.parametrize("count,accepted", [(49, True), (50, False)])
 async def test_custom_blocks_reserve_room_for_the_dashboard_link(
     monkeypatch: pytest.MonkeyPatch,
     count: int,
     accepted: bool,
+    response_type: Literal["progress", "final"],
 ) -> None:
     post = AsyncMock(return_value="2.0")
-    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    config = _config()
+    config["run_id"] = "run-1"
+    config["configurable"]["slack_thread"]["triggering_user_id"] = "U1"
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
     result = await slack_reply_tool.slack_reply(
-        "Chunk", "progress", blocks=[{"type": "markdown", "text": "code"}] * count
+        "Chunk", response_type, blocks=[{"type": "markdown", "text": "code"}] * count
     )
     assert isinstance(result, dict)
     assert result["success"] is accepted
