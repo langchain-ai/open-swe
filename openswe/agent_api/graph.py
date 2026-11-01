@@ -881,14 +881,6 @@ async def managed_sandbox(
     cfg = RunConfig.from_config(config)
     if cfg.thread_id is None:
         return None
-    if cfg.auth_provider == "langsmith":
-        from openswe.bridge.store import Bridge
-        from openswe.sandboxes.state import get_sandbox_metadata
-
-        metadata = await get_sandbox_metadata(cfg.thread_id)
-        if not Bridge.bridge_id_of(metadata.get("sandbox_id")):
-            raise PermissionError("Agent Workspace tasks run only on a local machine")
-        return None
     repositories, permissions = _run_github_scope(cfg, assistant_id)
     return await ManagedSandbox.for_thread(
         cfg.thread_id,
