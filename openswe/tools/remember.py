@@ -7,6 +7,7 @@ from langgraph.config import get_config
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.agent_overrides import resolve_github_login
+from openswe.memories.curator import WorkspaceCurator
 from openswe.memories.store import MAX_MEMORY_CHARS, MEMORIES, UnknownWorkspaceError
 from openswe.run_config import RunConfig
 from openswe.tools.access import Policy, access, resolve_access, unchanged
@@ -54,6 +55,8 @@ async def remember(
         )
     except UnknownWorkspaceError:
         return {"ok": False, "error": "This thread has no workspace to remember it for."}
+    if row.status == "pending" and cfg.workspace_slug and row.workspace_id is not None:
+        await WorkspaceCurator(cfg.workspace_slug).wake_if_rested()
     return {
         "ok": True,
         "memory_id": str(row.id),
