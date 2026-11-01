@@ -64,6 +64,8 @@ async def repost_thread_card(
 ) -> bool:
     """Replace a thread card with a fresh reply, sent to the channel too if ``broadcast``.
 
+    Its mentions do not notify again: the people in it were already told by the old card.
+
     The new card is posted before the old one is deleted, so a failure leaves one card up.
     ``adopt`` records the new timestamp and answers whether the new copy is the one to
     keep; when it is not, the new copy is deleted instead of the old one.
@@ -76,6 +78,7 @@ async def repost_thread_card(
             blocks=block_payload(blocks),
             agent_thread_id=agent_thread_id,
             reply_broadcast=broadcast,
+            ping=False,
         )
     except SlackRequestError as exc:
         logger.warning(

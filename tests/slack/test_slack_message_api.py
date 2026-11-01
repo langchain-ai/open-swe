@@ -210,6 +210,16 @@ async def test_reply_is_kept_when_the_thread_still_exists(slack_api) -> None:
     ]
 
 
+async def test_quiet_reply_edits_its_mentions_in_so_they_do_not_notify(slack_api) -> None:
+    slack_api.respond({"ok": True, "ts": "2.0", "message": {"thread_ts": "1.0"}})
+    slack_api.respond({"ok": True})
+    text = "Merged — authored by <@U1>"
+    assert await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", text, ping=False) == "2.0"
+    (post, posted), (edit, edited) = slack_api.calls
+    assert (post, posted["text"]) == ("chat.postMessage", "Merged — authored by someone")
+    assert (edit, edited["ts"], edited["text"]) == ("chat.update", "2.0", text)
+
+
 @pytest.mark.parametrize(
     ("status", "reason_code"),
     [("error", "provider_rate_limited"), ("error", None), ("timeout", None)],

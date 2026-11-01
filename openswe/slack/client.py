@@ -4,6 +4,7 @@ import asyncio
 import copy
 import hashlib
 import hmac
+import json
 import logging
 import re
 import time
@@ -879,8 +880,13 @@ async def post_slack_thread_reply_with_ts(
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
     reply_broadcast: bool = False,
+    ping: bool = True,
 ) -> str:
-    """Post a reply in a Slack thread and return its timestamp."""
+    """Post a reply in a Slack thread and return its timestamp.
+
+    With ``ping=False`` user mentions still render but notify nobody: Slack does not
+    notify for mentions added by an edit, so they are posted as ``someone`` and edited in.
+    """
     from openswe.slack.code_channels import is_code_channel_session
 
     if is_code_channel_session(thread_ts):
@@ -888,15 +894,36 @@ async def post_slack_thread_reply_with_ts(
     dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
     blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
     text = append_slack_web_link_footer(text, dashboard_url, usage)
-    return await _post_slack_message_with_ts(
+    payload = json.dumps([text, blocks])
+    quiet = not ping and _SLACK_USER_MENTION_RE.search(payload) is not None
+    posted_text, posted_blocks = (
+        json.loads(_SLACK_USER_MENTION_RE.sub("someone", payload)) if quiet else (text, blocks)
+    )
+    message_ts = await _post_slack_message_with_ts(
         channel_id,
-        text,
+        posted_text,
         thread_ts=thread_ts,
         unfurl_links=unfurl_links,
         unfurl_media=unfurl_media,
-        blocks=blocks,
+        blocks=posted_blocks,
         reply_broadcast=reply_broadcast,
     )
+    if quiet:
+        try:
+            await update_slack_message(
+                channel_id,
+                message_ts,
+                text,
+                unfurl_links=unfurl_links,
+                unfurl_media=unfurl_media,
+                blocks=blocks,
+            )
+        except SlackRequestError as exc:
+            logger.warning(
+                "Could not edit mentions into a quiet Slack reply",
+                extra={"slack_channel": channel_id, "slack_error": exc.code},
+            )
+    return message_ts
 
 
 async def post_slack_ephemeral_reply(
