@@ -86,6 +86,14 @@ export class ThreadDeletedError extends Error {
   }
 }
 
+export async function prefetchThreadTranscript(
+  threadId: string
+): Promise<void> {
+  if (cached(threadId)) return
+  const state = await loadSnapshot(threadId)
+  cache.set(threadId, { state, touchedAt: Date.now() })
+}
+
 class Deferred {
   readonly promise: Promise<void>
   readonly resolve!: () => void
