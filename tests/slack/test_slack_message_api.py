@@ -232,7 +232,7 @@ async def test_web_handoff_posts_a_quiet_link_without_a_trace_message(
     [posted] = posts
     assert posted["channel"] == "C1"
     assert posted["thread_ts"] == "1.0"
-    assert posted["text"] == "Continued on <https://dashboard.example/agents/t1|Web>"
+    assert posted["text"] == "<https://dashboard.example/agents/t1|Continued on Web>"
     blocks = posted["blocks"]
     assert isinstance(blocks, list)
     assert [block["type"] for block in blocks] == ["context"]

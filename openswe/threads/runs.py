@@ -1564,7 +1564,7 @@ class _SlackWebHandoff:
         if not url:
             return
         notice = SlackNotice(kind="web_handoff", key=self.thread_id)
-        text = f"Continued on <{url}|Web>"
+        text = f"<{url}|Continued on Web>"
         try:
             latest = await fetch_latest_slack_thread_message(*self.location)
             if latest is not None and (
