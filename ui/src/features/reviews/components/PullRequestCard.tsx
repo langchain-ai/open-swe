@@ -1,3 +1,4 @@
+import { Badge } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
 import { Text } from "@langchain/macaw-components/Text"
 import {
@@ -24,6 +25,26 @@ export type { PullRequestOutcome }
 const outcomeLabels: Record<PullRequestOutcome, string> = {
   merged: "Merged",
   closed: "Closed",
+}
+
+const assignmentLabels: Partial<
+  Record<NonNullable<OpenPullRequest["assignment"]>, [string, string]>
+> = {
+  tentative: [
+    "May be assigned",
+    "Open SWE may assign you this review if nobody claims it in time",
+  ],
+  mentioned: ["Mentioned", "Linked in a Slack thread that mentions you"],
+}
+
+function AssignmentBadge({ pr }: { pr: OpenPullRequest }) {
+  const label = pr.assignment ? assignmentLabels[pr.assignment] : undefined
+  if (!label) return null
+  return (
+    <Badge size="sm" color="secondary" title={label[1]}>
+      {label[0]}
+    </Badge>
+  )
 }
 
 const interactive =
@@ -96,6 +117,7 @@ export function PullRequestCard({
           ) : (
             <>
               <span className="mt-space-1 flex flex-wrap gap-space-1">
+                <AssignmentBadge pr={pr} />
                 {statusLabels(pr).map((status) => (
                   <StatusPill key={status} status={status} />
                 ))}
@@ -140,6 +162,7 @@ export function PullRequestCard({
               {pr.repo}{" "}
               <span className="font-mono tabular-nums">#{pr.number}</span>
             </span>
+            <AssignmentBadge pr={pr} />
             {statusLabels(pr).map((status) => (
               <StatusPill key={status} status={status} />
             ))}

@@ -804,22 +804,34 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         RequestState,
     )
     from openswe.human_review.routes import api_review_assignments
+    from openswe.human_review.tentative import TentativeReviewers
+    from openswe.slack.payloads import SlackEventEnvelope
+    from openswe.slack.pr_links import SlackPullRequestLink
+    from openswe.slack.thread_mentions import SlackThreadMention
     from openswe.users import User
 
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "ada,grace")
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
     ada = await User.sign_in("github", "1", login="ada")
+    await ada.link("slack", "UADA")
     grace = await User.sign_in("github", "2", login="grace")
-    cases: list[tuple[int, User, bool, RequestState, RequestKind]] = [
+    cases: list[tuple[int, User | None, bool, RequestState, RequestKind]] = [
         (1, ada, True, "open", "standard"),
         (2, ada, False, "open", "standard"),
         (3, grace, True, "open", "standard"),
         (4, ada, True, "cancelled", "standard"),
         (5, ada, True, "open", "posted"),
         (6, ada, True, "open", "standard"),
+        (7, None, False, "open", "standard"),
+        (8, None, False, "open", "standard"),
     ]
     for number, user, assigned, state, kind in cases:
         pr = await PullRequest(
-            owner="o", repo="hidden" if number == 6 else "r", number=number, title=f"PR {number}"
+            owner="o",
+            repo="hidden" if number == 6 else "r",
+            number=number,
+            title=f"PR {number}",
+            author="grace",
         ).save()
         await HumanReviewRequest(
             pull_request_id=pr.id,
@@ -830,8 +842,25 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
                 HumanReviewParticipant(
                     user_id=user.id, decision="review", assigned_by_agent=assigned
                 )
-            ],
+            ]
+            if user is not None
+            else [],
         ).save()
+    for ts, text in [
+        ("1.0", "<@UADA> https://openswe.example.com/agents/reviews/o/r/9"),
+        ("2.0", "<@UADA> https://github.com/o/r/pull/10"),
+        ("3.0", "https://github.com/o/r/pull/11"),
+        ("4.0", "<@UADA> https://github.com/o/r/pull/1"),
+    ]:
+        envelope = SlackEventEnvelope.model_validate(
+            {
+                "type": "event_callback",
+                "team_id": "T1",
+                "event": {"type": "message", "channel": "C1", "ts": ts, "user": "UG", "text": text},
+            }
+        )
+        await SlackPullRequestLink.record(envelope)
+        await SlackThreadMention.record(envelope)
 
     @asynccontextmanager
     async def as_user(login: str) -> AsyncIterator[GitHubClient]:
@@ -842,16 +871,29 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
             raise GitHubError(_response(404))
         return {}
 
+    async def pull(self) -> dict[str, object]:
+        author = "ada" if self.number == 10 else "grace"
+        return {"state": "open", "user": {"login": author}, "title": f"PR {self.number}"}
+
     async def states(pull, author):
         return {"ada": "APPROVED"} if pull.number == 5 else {}
+
+    async def tentative(self) -> frozenset[str]:
+        return frozenset({"ada"} if self.request.pull_request.number == 7 else {"grace"})
 
     with (
         patch("openswe.human_review.routes.GitHubClient.as_user", as_user),
         patch.object(RepoClient, "info", info),
-        patch("openswe.human_review.routes.latest_review_states", states),
+        patch.object(PullRequestClient, "pull", pull),
+        patch.object(TentativeReviewers, "logins", tentative),
+        patch("openswe.human_review.review_queue.latest_review_states", states),
     ):
         result = await api_review_assignments(page=1, session={"sub": "ada"})
-    assert [row.number for row in result.pull_requests] == [1]
+    assert [(row.number, row.assignment) for row in result.pull_requests] == [
+        (1, "assigned"),
+        (7, "tentative"),
+        (9, "mentioned"),
+    ]
 
 
 @asynccontextmanager

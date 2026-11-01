@@ -184,6 +184,9 @@ class PullRequestReviewer(BaseModel):
 _GITHUB_REVIEWS = TypeAdapter(list[_GithubReview])
 
 
+ReviewAssignment = Literal["assigned", "tentative", "mentioned"]
+
+
 class OpenPullRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
@@ -211,6 +214,8 @@ class OpenPullRequest(BaseModel):
     failing_checks: list[str] = Field(default_factory=list)
     pending_checks: list[str] = Field(default_factory=list)
     missing_checks: list[str] = Field(default_factory=list)
+    # Why it is on the To Review list; ``None`` on every other list.
+    assignment: ReviewAssignment | None = None
 
 
 class OpenPullRequests(BaseModel):

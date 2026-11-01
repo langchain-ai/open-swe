@@ -44,23 +44,7 @@ def _linked_urls(value: object) -> set[str]:
 
 
 def event_pull_requests(envelope: SlackEventEnvelope) -> list[GitHubPrRef]:
-    event = envelope.event
-    if (
-        envelope.type != "event_callback"
-        or event is None
-        or event.type not in {"message", "app_mention"}
-        or event.subtype
-        not in {
-            "",
-            "file_share",
-            "thread_broadcast",
-            "bot_message",
-            "message_changed",
-            "me_message",
-        }
-    ):
-        return []
-    message = event.message if event.subtype == "message_changed" else event
+    message = envelope.posted_message()
     if message is None:
         return []
     return [
@@ -87,10 +71,8 @@ class SlackPullRequestLink(Base):
         if not postgres.configured() or event is None:
             return []
         refs = event_pull_requests(envelope)
-        if not refs:
-            return []
-        message = event.message if event.subtype == "message_changed" else event
-        if message is None:
+        message = envelope.posted_message()
+        if not refs or message is None:
             return []
         team_id = envelope.team_id or event.team
         channel_id = event.resolve_channel_id()
