@@ -30,6 +30,13 @@ interface ComposerChannelToken {
   readonly end: number
 }
 
+interface ComposerUserToken {
+  readonly userId: string
+  readonly source: string
+  readonly start: number
+  readonly end: number
+}
+
 interface ComposerSkillToken {
   readonly name: string
   readonly source: string
@@ -46,11 +53,21 @@ const URI_SCHEME_REGEX = /^[A-Za-z][A-Za-z0-9+.-]*:/
 const WINDOWS_DRIVE_PATH_REGEX = /^[A-Za-z]:[\\/]/
 const SKILL_TOKEN_REGEX = /(^|\s)\/([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$)/g
 const CHANNEL_TOKEN_REGEX = /<#([CG][A-Z0-9]+)\|([^>|\s]+)>/g
+const USER_TOKEN_REGEX = /<@([UW][A-Z0-9]+)>/g
 
 function collectChannelTokens(text: string): Array<ComposerChannelToken> {
   return [...text.matchAll(CHANNEL_TOKEN_REGEX)].map((match) => ({
     channelId: match[1] ?? "",
     channelName: match[2] ?? "",
+    source: match[0],
+    start: match.index,
+    end: match.index + match[0].length,
+  }))
+}
+
+function collectUserTokens(text: string): Array<ComposerUserToken> {
+  return [...text.matchAll(USER_TOKEN_REGEX)].map((match) => ({
+    userId: match[1] ?? "",
     source: match[0],
     start: match.index,
     end: match.index + match[0].length,
@@ -148,12 +165,7 @@ export function splitPromptIntoSegments(
     ...collectComposerMentions(prompt),
     ...skills,
     ...collectChannelTokens(prompt),
-    ...[...prompt.matchAll(/<@([UW][A-Z0-9]+)>/g)].map((match) => ({
-      userId: match[1] ?? "",
-      source: match[0],
-      start: match.index,
-      end: match.index + match[0].length,
-    })),
+    ...collectUserTokens(prompt),
   ].sort((left, right) => left.start - right.start)
 
   for (const token of tokens) {

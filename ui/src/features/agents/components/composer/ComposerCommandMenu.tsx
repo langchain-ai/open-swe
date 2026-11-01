@@ -126,9 +126,8 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
                 />
               ) : item.type === "slack-user" ? (
                 <UserIcon
-                  size={14}
+                  className="size-3.5 shrink-0 text-icon-tertiary"
                   weight="regular"
-                  className="shrink-0 text-icon-tertiary"
                 />
               ) : item.type === "slack-channel" ? (
                 <HashIcon

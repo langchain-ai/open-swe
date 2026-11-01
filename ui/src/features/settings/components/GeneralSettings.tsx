@@ -210,7 +210,7 @@ export function GeneralSettings() {
               ? "Your browser doesn't support desktop notifications."
               : denied
                 ? "Permission was denied. Re-enable it in your browser's site settings."
-                : "Notify me when an agent run finishes."
+                : "Notify me when an agent run finishes or someone mentions me. Mentions I miss here arrive as a Slack DM."
           }
           control={
             <Switch

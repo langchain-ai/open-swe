@@ -475,6 +475,19 @@
             "title": "Id",
             "type": "string"
           },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The in-app route for ``url``; ``None`` when it points outside the dashboard.",
+            "readOnly": true,
+            "title": "Path"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -488,7 +501,8 @@
           "id",
           "title",
           "body",
-          "url"
+          "url",
+          "path"
         ],
         "title": "AppNotification",
         "type": "object"

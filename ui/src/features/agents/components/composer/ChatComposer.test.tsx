@@ -318,7 +318,7 @@ describe("ChatComposer people autocomplete", () => {
       onSubmit,
       restoreDraft: { key: 1, text: "Ask @bob", images: [] },
     })
-    await screen.findByRole("option", { name: /@Bob @bob/ })
+    await screen.findByRole("option", { name: /@Bob .*@bob/ })
     const editor = screen.getByTestId("composer-editor")
     fireEvent.keyDown(editor, { key: "Tab", code: "Tab" })
     await screen.findByText("@Bob")

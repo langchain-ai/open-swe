@@ -20,6 +20,8 @@ export interface AppNotification {
   title: string
   body: string
   url: string
+  /** The in-app route for `url`, or null when it points outside the dashboard. */
+  path: string | null
 }
 
 export interface AuditLogFilters {
@@ -846,7 +848,7 @@ export interface WorkspaceOption {
   refresh_steps?: Array<WorkspaceRefreshStep>
 }
 
-/** A channel the Slack bot can see, offered when binding channels to a workspace. */
+/** A person in the Slack workspace, offered when mentioning someone in a composer. */
 export interface SlackUserOption {
   id: string
   name: string
@@ -854,6 +856,7 @@ export interface SlackUserOption {
   real_name: string
 }
 
+/** A channel the Slack bot can see, offered when binding channels to a workspace. */
 export interface SlackChannelOption {
   id: string
   name: string

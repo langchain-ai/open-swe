@@ -244,8 +244,11 @@ function $createComposerSkillNode(
   return $applyNodeReplacement(new ComposerSkillNode(name, source))
 }
 
+type SlackReferenceKind = "user" | "channel"
+
 type SerializedComposerSlackNode = Spread<
   {
+    kind: SlackReferenceKind
     referenceId: string
     name: string
     source: string
@@ -257,6 +260,7 @@ type SerializedComposerSlackNode = Spread<
 
 /** A Slack reference rendered as a chip over its canonical token. */
 class ComposerSlackNode extends DecoratorNode<React.ReactElement> {
+  __kind: SlackReferenceKind
   __referenceId: string
   __name: string
   __source: string
@@ -267,6 +271,7 @@ class ComposerSlackNode extends DecoratorNode<React.ReactElement> {
 
   static override clone(node: ComposerSlackNode): ComposerSlackNode {
     return new ComposerSlackNode(
+      node.__kind,
       node.__referenceId,
       node.__name,
       node.__source,
@@ -278,6 +283,7 @@ class ComposerSlackNode extends DecoratorNode<React.ReactElement> {
     serialized: SerializedComposerSlackNode
   ): ComposerSlackNode {
     return $createComposerSlackNode(
+      serialized.kind,
       serialized.referenceId,
       serialized.name,
       serialized.source
@@ -285,12 +291,14 @@ class ComposerSlackNode extends DecoratorNode<React.ReactElement> {
   }
 
   constructor(
+    kind: SlackReferenceKind,
     referenceId: string,
     name: string,
     source: string,
     key?: NodeKey
   ) {
     super(key)
+    this.__kind = kind
     this.__referenceId = referenceId
     this.__name = name
     this.__source = source
@@ -299,6 +307,7 @@ class ComposerSlackNode extends DecoratorNode<React.ReactElement> {
   override exportJSON(): SerializedComposerSlackNode {
     return {
       ...super.exportJSON(),
+      kind: this.__kind,
       referenceId: this.__referenceId,
       name: this.__name,
       source: this.__source,
@@ -333,9 +342,10 @@ class ComposerSlackNode extends DecoratorNode<React.ReactElement> {
         spellCheck={false}
         title={this.__referenceId}
       >
-        {this.__referenceId.startsWith("U") ||
-        this.__referenceId.startsWith("W") ? (
-          <SlackUserMention userId={this.__referenceId} />
+        {this.__kind === "user" ? (
+          <span className="truncate leading-tight select-none">
+            <SlackUserMention userId={this.__referenceId} />
+          </span>
         ) : (
           <>
             <HashIcon
@@ -354,11 +364,14 @@ class ComposerSlackNode extends DecoratorNode<React.ReactElement> {
 }
 
 function $createComposerSlackNode(
+  kind: SlackReferenceKind,
   referenceId: string,
   name: string,
   source: string
 ): ComposerSlackNode {
-  return $applyNodeReplacement(new ComposerSlackNode(referenceId, name, source))
+  return $applyNodeReplacement(
+    new ComposerSlackNode(kind, referenceId, name, source)
+  )
 }
 
 function isDecoratorNode(
@@ -553,11 +566,12 @@ function $setComposerPrompt(
       paragraph.append($createComposerMentionNode(segment.path, segment.source))
     } else if (segment.type === "user") {
       paragraph.append(
-        $createComposerSlackNode(segment.userId, "", segment.source)
+        $createComposerSlackNode("user", segment.userId, "", segment.source)
       )
     } else if (segment.type === "channel") {
       paragraph.append(
         $createComposerSlackNode(
+          "channel",
           segment.channelId,
           segment.name,
           segment.source

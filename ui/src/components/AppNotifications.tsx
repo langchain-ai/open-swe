@@ -1,55 +1,17 @@
 import { useEffect, useRef } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { toast } from "sonner"
-import { api, type AppNotification } from "@/lib/api"
+import { useRouter } from "@tanstack/react-router"
+import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { invalidationTopic } from "@/lib/invalidations/topics"
+import { DesktopNotification } from "@/lib/notifications"
+import { useHrefLinkOptions } from "@/lib/appLocation"
 
-function NotificationReceipt({
-  notification,
-}: {
-  notification: AppNotification
-}) {
-  const element = useRef<HTMLSpanElement>(null)
-  useEffect(() => {
-    let frame = 0
-    let acknowledged = false
-    const toastElement = element.current?.closest("[data-sonner-toast]")
-    const acknowledge = () => {
-      if (acknowledged || document.visibilityState !== "visible") return
-      frame = requestAnimationFrame(() => {
-        if (
-          acknowledged ||
-          document.visibilityState !== "visible" ||
-          toastElement?.getAttribute("data-mounted") !== "true" ||
-          toastElement.getAttribute("data-visible") !== "true" ||
-          (toastElement.getAttribute("data-front") !== "true" &&
-            toastElement.getAttribute("data-expanded") !== "true")
-        )
-          return
-        acknowledged = true
-        void api
-          .acknowledgeNotification(notification.id)
-          .catch((error: unknown) => {
-            console.warn("Could not confirm notification delivery", error)
-          })
-      })
-    }
-    const observer = new MutationObserver(acknowledge)
-    if (toastElement) observer.observe(toastElement, { attributes: true })
-    acknowledge()
-    document.addEventListener("visibilitychange", acknowledge)
-    return () => {
-      observer.disconnect()
-      cancelAnimationFrame(frame)
-      document.removeEventListener("visibilitychange", acknowledge)
-    }
-  }, [notification.id])
-  return <span ref={element}>{notification.body}</span>
-}
-
+/** Shows pending notifications as OS notifications and confirms each one the OS displayed. */
 export function AppNotifications() {
   const { data: user } = useSession()
+  const router = useRouter()
+  const linkOptions = useHrefLinkOptions()
   const shown = useRef(new Set<string>())
   const { data } = useQuery({
     queryKey: ["notifications", user?.user_id],
@@ -62,17 +24,23 @@ export function AppNotifications() {
   useEffect(() => {
     for (const notification of data ?? []) {
       if (shown.current.has(notification.id)) continue
-      shown.current.add(notification.id)
-      toast.info(notification.title, {
-        id: notification.id,
-        duration: Infinity,
-        description: <NotificationReceipt notification={notification} />,
-        action: {
-          label: "Open conversation",
-          onClick: () => window.location.assign(notification.url),
+      const displayed = DesktopNotification.show(notification.title, {
+        body: notification.body,
+        tag: `notification-${notification.id}`,
+        onClick: () => {
+          if (notification.path)
+            void router.navigate(linkOptions(notification.path))
+          else window.open(notification.url, "_blank", "noopener")
         },
+        onShow: () =>
+          void api
+            .acknowledgeNotification(notification.id)
+            .catch((error: unknown) => {
+              console.warn("Could not confirm notification delivery", error)
+            }),
       })
+      if (displayed) shown.current.add(notification.id)
     }
-  }, [data])
+  }, [data, linkOptions, router])
   return null
 }

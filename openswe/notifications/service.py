@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Self
 from uuid import UUID, uuid7
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 
@@ -16,6 +16,7 @@ from openswe.slack.dm import DmOrigin, post_dm
 from openswe.slack.http import SlackRequestError
 from openswe.ui_invalidations.topics import Topic
 from openswe.users import User
+from openswe.utils.dashboard_links import dashboard_base_url
 
 logger = logging.getLogger(__name__)
 JOB_KIND = "notification-fallback"
@@ -26,6 +27,15 @@ class AppNotification(BaseModel):
     title: str
     body: str
     url: str
+
+    @computed_field
+    @property
+    def path(self) -> str | None:
+        """The in-app route for ``url``; ``None`` when it points outside the dashboard."""
+        base = dashboard_base_url()
+        if not base or not self.url.startswith(f"{base}/"):
+            return None
+        return self.url.removeprefix(base)
 
     @classmethod
     async def send(

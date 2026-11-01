@@ -8,8 +8,20 @@ from sqlalchemy import text
 from openswe.database import postgres
 from openswe.notifications import service
 from openswe.notifications.service import AppNotification
+from openswe.slack.user_options import SlackUserOption
 from openswe.threads import index, mentions
 from openswe.users import User
+
+
+async def test_titles_show_mentions_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    people = [SlackUserOption(id="W123BOB", name="bob", display_name="Bob", real_name="Bob B")]
+    monkeypatch.setattr(SlackUserOption, "all", AsyncMock(return_value=people))
+    assert (
+        await SlackUserOption.readable("Ask <@W123BOB> and <@U999> in <#C123|eng>")
+        == "Ask @Bob and @someone in #eng"
+    )
+    monkeypatch.setattr(SlackUserOption, "all", AsyncMock(side_effect=RuntimeError("down")))
+    assert await SlackUserOption.readable("Ask <@W123BOB>") == "Ask @someone"
 
 
 @pytest.mark.parametrize("review", [False, True])

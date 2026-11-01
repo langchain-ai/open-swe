@@ -1,11 +1,17 @@
 """Slack people available to mention in dashboard conversations."""
 
+import logging
+import re
 from typing import Self
 
 from pydantic import BaseModel
 
 from openswe.slack.http import SlackClient, slack_bot_members, slack_cache_key, slack_http_errors
 from openswe.utils import ttl_cache
+
+logger = logging.getLogger(__name__)
+_USER_TOKEN = re.compile(r"<@([UW][A-Z0-9]+)>")
+_CHANNEL_TOKEN = re.compile(r"<#[CG][A-Z0-9]+\|([^>|]+)>")
 
 
 class SlackUserOption(BaseModel):
@@ -20,6 +26,19 @@ class SlackUserOption(BaseModel):
             return await ttl_cache.cached(
                 f"{slack_cache_key(client)}:mention-users", 300, lambda: cls.load(client)
             )
+
+    @classmethod
+    async def readable(cls, text: str) -> str:
+        """``text`` with Slack mention tokens shown as ``@name`` and ``#channel``."""
+        text = _CHANNEL_TOKEN.sub(r"#\1", text)
+        if not _USER_TOKEN.search(text):
+            return text
+        try:
+            names = {user.id: user.display_name or user.name for user in await cls.all()}
+        except Exception:
+            logger.warning("Could not resolve Slack mention names", exc_info=True)
+            names = {}
+        return _USER_TOKEN.sub(lambda match: f"@{names.get(match[1], 'someone')}", text)
 
     @classmethod
     async def load(cls, client: SlackClient) -> list[Self]:
