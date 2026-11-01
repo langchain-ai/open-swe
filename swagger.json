@@ -7472,6 +7472,24 @@
         "title": "SkillCreate",
         "type": "object"
       },
+      "SkillImport": {
+        "properties": {
+          "files": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 100,
+            "minProperties": 1,
+            "title": "Files",
+            "type": "object"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "SkillImport",
+        "type": "object"
+      },
       "SkillUpdate": {
         "properties": {
           "description": {
@@ -18992,6 +19010,65 @@
           }
         ],
         "summary": "Api Update Skill",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/skills/{name}/import": {
+      "put": {
+        "operationId": "api_import_skill_dashboard_api_skills__name__import_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Import Skill Dashboard Api Skills  Name  Import Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Import Skill",
         "tags": [
           "dashboard"
         ]

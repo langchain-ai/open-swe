@@ -7,10 +7,11 @@ import re
 from typing import Any
 from uuid import UUID
 
+import yaml
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import ColumnElement, ForeignKey, delete, select, update
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import ColumnElement, ForeignKey, delete, func, literal_column, select, update
+from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
@@ -48,6 +49,69 @@ class SkillCreate(BaseModel):
         if not value:
             raise ValueError("description cannot be empty")
         return value
+
+
+class SkillImport(BaseModel):
+    files: dict[str, str] = Field(min_length=1, max_length=100)
+
+    @field_validator("files")
+    @classmethod
+    def valid_files(cls, files: dict[str, str]) -> dict[str, str]:
+        if "SKILL.md" not in files or sum(len(text) for text in files.values()) > 1_000_000:
+            raise ValueError("A skill needs SKILL.md and at most 1 MB of UTF-8 resources")
+        for path, text in files.items():
+            if (
+                not path
+                or len(path) > 256
+                or "\\" in path
+                or any(part in {"", ".", ".."} or part.startswith(".") for part in path.split("/"))
+                or len(text) > 200_000
+                or "\x00" in text
+            ):
+                raise ValueError("Invalid skill resource path or content")
+        return files
+
+    def skill(self, name: str) -> SkillCreate:
+        content = self.files["SKILL.md"].replace("\r\n", "\n")
+        frontmatter = re.match(r"\A---\n(.*?)\n---[ \t]*(?:\n|$)(.*)\Z", content, re.DOTALL)
+        if frontmatter is None:
+            raise ValueError("SKILL.md needs YAML frontmatter")
+        try:
+            metadata = yaml.safe_load(frontmatter[1])
+        except yaml.YAMLError as error:
+            raise ValueError("Invalid SKILL.md YAML frontmatter") from error
+        if not isinstance(metadata, dict) or metadata.get("name") != name:
+            raise ValueError("Skill name must match its directory")
+        return SkillCreate(
+            name=name,
+            description=metadata.get("description"),
+            instructions=frontmatter[2].strip(),
+        )
+
+    async def save(self, login: str, name: str) -> dict[str, object]:
+        body = self.skill(name)
+        owner = await _person(login)
+        value = _record(body.name, body.description, body.instructions)
+        value.update(content=self.files["SKILL.md"], files=self.files, source="desktop")
+        statement = insert(Skill).values(user_id=owner, name=name, value=value)
+        statement = statement.on_conflict_do_update(
+            index_elements=[
+                func.coalesce(
+                    Skill.user_id, literal_column("'00000000-0000-0000-0000-000000000000'::uuid")
+                ),
+                Skill.name,
+            ],
+            set_={
+                "value": statement.excluded.value.op("||")(
+                    func.jsonb_build_object("created_at", Skill.value["created_at"])
+                )
+            },
+            where=Skill.value["source"].astext == "desktop",
+        ).returning(Skill.id)
+        async with postgres.session() as session:
+            if await session.scalar(statement) is None:
+                raise HTTPException(409, "A cloud-managed skill already has this name")
+        return {"name": name}
 
 
 class SkillUpdate(BaseModel):
