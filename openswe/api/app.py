@@ -62,11 +62,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.slack.http import validate_slack_startup_config
+    from openswe.threads.local_writes import LOCAL_WRITES
     from openswe.transcript import listener as transcript_listener
     from openswe.ui_invalidations.hub import HUB
     from openswe.users import User
     from openswe.utils.model import validate_local_dev_llm_config
 
+    # Before anything is served: no thread or run is ever made on this Agent Server.
+    LOCAL_WRITES.seal()
     pin_single_event_loop()
     validate_github_login_allowlist()
     validate_sandbox_startup_config()
