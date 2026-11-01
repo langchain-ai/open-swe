@@ -26,10 +26,7 @@ import {
   markPullRequestReady,
   pullRequestStatusQuery,
 } from "@/features/reviews/lib/cache"
-import {
-  actionLabel,
-  githubActions,
-} from "@/features/reviews/lib/githubActions"
+import { actionLabel } from "@/features/reviews/lib/githubActions"
 import {
   standingReview,
   withSubmittedReview,
@@ -67,10 +64,7 @@ const VERDICTS: ReadonlyArray<{
 const approveColors =
   "bg-success-strong! border-transparent! text-white! dark:text-black! hover:brightness-110"
 
-/**
- * The header's review action: one click for the viewer's next step (Approve,
- * or Mark ready on their own draft), with GitHub's review form behind it.
- */
+/** The viewer's next review action, with the review form behind it. */
 export function ReviewButton({
   owner,
   repo,
@@ -189,10 +183,19 @@ export function ReviewButton({
       }}
     >
       {isAuthor ? (
-        <div className="flex items-center gap-space-2">
-          {status.data?.draft && (
+        status.data?.draft ? (
+          <ButtonGroup size="sm" color="primary" variant="normal">
             <MarkReadyButton pr={status.data} onReady={refresh.status} />
-          )}
+            <PopoverTrigger asChild>
+              <Button
+                tagText={pendingTag}
+                aria-label={`Comment${pendingLabel}`}
+              >
+                <CaretDownIcon aria-hidden className="size-4" />
+              </Button>
+            </PopoverTrigger>
+          </ButtonGroup>
+        ) : (
           <PopoverTrigger asChild>
             <Button
               size="sm"
@@ -204,7 +207,7 @@ export function ReviewButton({
               Comment
             </Button>
           </PopoverTrigger>
-        </div>
+        )
       ) : (
         <ButtonGroup size="sm" color="primary" variant="normal">
           <Button
@@ -411,7 +414,15 @@ function MarkReadyButton({
       aria-live="polite"
       onClick={() => ready.mutate()}
     >
-      {actionLabel(githubActions["mark-ready"].labels, ready)}
+      {actionLabel(
+        {
+          idle: "Undraft",
+          pending: "Undrafting…",
+          done: "Undrafted",
+          retry: "Retry undraft",
+        },
+        ready
+      )}
     </Button>
   )
 }
