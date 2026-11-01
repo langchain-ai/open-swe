@@ -982,6 +982,49 @@ async def test_finished_runs_release_their_tools_and_interpreters(
     assert not interpreter._ptc_tools_by_slot
 
 
+@pytest.mark.parametrize("size", [8_000, 16_000, 18_000])
+async def test_code_mode_output_limits(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, size: int
+) -> None:
+    seen: list[BaseMessage] = []
+    generate = GenericFakeChatModel._agenerate
+
+    async def answering(
+        model: GenericFakeChatModel,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        seen[:] = messages
+        return await generate(model, messages, stop, run_manager, **kwargs)
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", answering)
+    code = f'const output = "x".repeat({size}); console.log(output); output'
+    replies = [
+        AIMessage(content="", tool_calls=[ToolCall(name="eval", args={"code": code}, id="eval")]),
+        AIMessage(content="done"),
+    ]
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=iter(replies)))
+    catalog = _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]})
+
+    await _run(InMemoryStore(), f"output-{size}", _context("agent", "token", catalog))
+
+    [evaluated] = [m for m in seen if isinstance(m, ToolMessage) and m.tool_call_id == "eval"]
+    stdout = evaluated.text.split("<stdout>\n", 1)[1].split("\n</stdout>", 1)[0]
+    result = evaluated.text.split("<result>", 1)[1].split("</result>", 1)[0]
+    for block, dropped in ((stdout, size - 16_000), (result, None)):
+        if size <= 16_000:
+            assert block == "x" * size
+        else:
+            prefix, marker = block.split("… [truncated ")
+            assert prefix == "x" * len(prefix)
+            assert len(prefix) > 15_900
+            assert len(block) <= 16_010
+            omitted = size - len(prefix) if dropped is None else dropped
+            assert marker == f"{omitted} chars]"
+
+
 async def test_code_mode_calls_tools_its_catalog_leaves_out(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
 ) -> None:

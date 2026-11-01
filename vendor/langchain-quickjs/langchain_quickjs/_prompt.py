@@ -27,7 +27,10 @@ _REPL_SYSTEM_PROMPT_TEMPLATE = (
     "unavailable or stubbed).\n"
     "{side_effects_line}\n"
     "- Timeout: {timeout}s per call. Memory: {memory_limit_mb} MB total.\n"
-    "- `console.log` output is captured and returned alongside the result."
+    "- `console.log` output is captured and returned alongside the result. "
+    "Stdout and returned results are each truncated to {max_result_chars} characters. "
+    "Return compact summaries or slices; use file tools such as `read_file` "
+    "directly for whole-file contents."
 )
 _SUBAGENT_SYSTEM_PROMPT_TEMPLATE = """
 
@@ -211,9 +214,8 @@ const deepReviews = await Promise.all(riskyHandlers.map((it) =>
 The value of the last expression in an `{tool_name}` call (or a resolved
 top-level `await`) is returned to you as the result. Make that final
 expression the variable holding your result and read it from there.
-`console.log` is only for incidental debugging: its output is capped and
-truncated, while the returned value is not, so never `console.log` your
-actual results.
+`console.log` is for incidental debugging. Both stdout and returned values
+are truncated at the interpreter limit shown above.
 
 Keep large intermediate sets in JS variables and return only a compact
 summary or a small slice, not the entire dataset. To persist full output,
@@ -266,15 +268,11 @@ def render_repl_system_prompt(
     tool_name: str,
     timeout: float,
     memory_limit_mb: int,
+    max_result_chars: int,
     mode: Literal["thread", "turn", "call"],
     ptc_attached: bool = False,
 ) -> str:
-    """Render the base REPL system prompt text for `CodeInterpreterMiddleware`.
-
-    `ptc_attached` controls the "external side effects" bullet: when host
-    tools are exposed as the `tools.*` namespace it points the model at the
-    API reference; otherwise it states the REPL is pure computation.
-    """
+    """Render the base REPL system prompt from the interpreter configuration."""
     if ptc_attached:
         side_effects_line = (
             "- External side effects from inside the REPL are only reachable "
@@ -318,6 +316,7 @@ def render_repl_system_prompt(
         side_effects_line=side_effects_line,
         timeout=timeout,
         memory_limit_mb=memory_limit_mb,
+        max_result_chars=max_result_chars,
     )
 
 

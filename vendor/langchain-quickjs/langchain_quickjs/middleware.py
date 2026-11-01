@@ -552,6 +552,7 @@ class CodeInterpreterMiddleware(AgentMiddleware[REPLState, ContextT, ResponseT])
                 tool_name=self._tool_name,
                 timeout=self._timeout,
                 memory_limit_mb=self._memory_limit_mb,
+                max_result_chars=self._max_result_chars,
                 mode=self._mode,
                 ptc_attached=ptc_attached,
             )
