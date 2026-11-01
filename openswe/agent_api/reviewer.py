@@ -7,13 +7,16 @@ from typing import Final
 from deepagents.backends.protocol import BackendProtocol
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
+from runtime_api.loop import RunStarted
 
 from openswe.agent_api.graph import RemoteGraph
 from openswe.agent_api.run_parts import RunParts
+from openswe.agent_api.tokens import RunSettings
 from openswe.github.thread_token import get_github_token
 from openswe.middleware.record_run_usage import record_run_usage
 from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.review.diff import compute_diff_line_set
+from openswe.review.events import ReviewEvents
 from openswe.reviewer import (
     ensure_reviewer_github_token,
     plan_reviewer,
@@ -42,6 +45,24 @@ class ReviewerParts(RunParts):
         diff_text = state.get("diff_text")
         if isinstance(diff_text, str) and diff_text and "diff_line_set" not in state:
             state["diff_line_set"] = compute_diff_line_set(diff_text)
+
+    async def started(
+        self, config: RunnableConfig, settings: RunSettings, started: RunStarted, *, carried: bool
+    ) -> None:
+        del settings, carried
+        cfg = RunConfig.from_config(config)
+        events = ReviewEvents.from_config(cfg)
+        if events is not None and started.run_id:
+            run_id = started.run_id
+            await events.append(
+                "run.started",
+                delivery_id=f"{cfg.thread_id}:{run_id}:started",
+                run_id=run_id,
+                head_sha=cfg.head_sha,
+                re_review=bool(cfg.re_review),
+                model_id=started.model_id,
+                effort=started.effort,
+            )
 
     async def credentials(self, config: RunnableConfig) -> None:
         cfg = RunConfig.from_config(config)
