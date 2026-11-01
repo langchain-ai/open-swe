@@ -19,9 +19,14 @@ from typing import Self
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
+from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
+from openswe.run_config import RunConfig
+from openswe.sandboxes.lifecycle import ensure_sandbox_for_thread
+from openswe.slack.client import parse_github_pr_url
+from openswe.threads.store import THREADS
 from openswe.walkthrough.checkout import PinnedCheckout
 from openswe.walkthrough.diff import DiffIndex
 from openswe.walkthrough.lines import LinePoint, LineSet
@@ -110,6 +115,31 @@ class PlanWorkspace:
         checkout = await PinnedCheckout.locate(backend, repo)
         pull_request = await PullRequest(owner=owner, repo=repo, number=number).ensure()
         return await cls.open(pull_request, checkout)
+
+    @classmethod
+    async def for_implementation(cls, cfg: RunConfig, pr_url: str) -> Self:
+        """Pin a linked PR in its implementation thread's existing checkout."""
+        if not cfg.thread_id:
+            raise PlannerUnavailableError("an implementation thread is required")
+        settings = await cached_workspace_settings(cfg.workspace_slug)
+        if settings.get("implementation_walkthrough_enabled") is not True:
+            raise PlannerUnavailableError("implementation walkthroughs are disabled")
+        ref = parse_github_pr_url(pr_url)
+        thread = await THREADS.get(cfg.thread_id)
+        if ref is None or thread is None:
+            raise PlannerUnavailableError("a linked pull request is required")
+        urls = thread.metadata.get("pr_urls")
+        linked = isinstance(urls, list) and pr_url in urls
+        if pr_url != thread.metadata.get("pr_url") and not linked:
+            raise PlannerUnavailableError("the pull request must be linked to this thread first")
+        async with PullRequestClient.as_app(ref.owner, ref.repo, ref.number) as pull:
+            head_sha = await pull.head_sha()
+        backend = await ensure_sandbox_for_thread(cfg.thread_id, workspace_slug=cfg.workspace_slug)
+        checkout = await PinnedCheckout.locate(backend, ref.repo)
+        await checkout.pin(
+            full_name=f"{ref.owner}/{ref.repo}", pr_number=ref.number, head_sha=head_sha
+        )
+        return await cls.locate(backend, owner=ref.owner, repo=ref.repo, number=ref.number)
 
     @staticmethod
     async def _carry(

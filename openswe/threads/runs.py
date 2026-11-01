@@ -51,8 +51,7 @@ from openswe.input_messages import (
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import update_slack_trace_reply_for_web_handoff
-from openswe.slack.records import lookup_slack_thread_run_mapping
+from openswe.slack.client import SlackNotice, post_slack_thread_reply
 from openswe.source_context import SourceContext
 from openswe.threads.access import (
     _ensure_dashboard_github_token,
@@ -95,7 +94,8 @@ from openswe.utils.dashboard_handoff import (
     dashboard_input_context,
     passage_replies,
 )
-from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
+from openswe.utils.dashboard_links import dashboard_thread_url
+from openswe.utils.json_types import as_thread_dict, thread_metadata
 from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
 from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
@@ -443,11 +443,15 @@ async def create_dashboard_session(
     """Create a fresh owned thread using the person's dashboard defaults."""
     profile = RepositoryDefaults.model_validate(await get_profile(login) or {})
     identity = ThreadIdentity(login)
-    if identity.user_id is not None:
-        raise HTTPException(422, "Start Agent Workspace tasks with a connected local machine")
-    repo = body.repo if body.repo is not None else profile.repository()
+    if identity.user_id is not None and body.repo:
+        raise HTTPException(403, "This account has no GitHub repository access")
+    repo = (
+        None
+        if identity.user_id is not None
+        else (body.repo if body.repo is not None else profile.repository())
+    )
     workspace = await _resolve_requested_workspace(body.workspace, _parse_repo(repo), login=login)
-    if body.repo is None:
+    if body.repo is None and identity.user_id is None:
         preferred_workspace = await _resolve_requested_workspace(body.workspace, None, login=login)
         if profile.workspace_default_repos.get(preferred_workspace):
             workspace = preferred_workspace
@@ -464,7 +468,11 @@ async def create_dashboard_session(
         email=email,
         repo_config=repo_config,
         prompt=body.prompt,
-        visibility=await _requested_visibility({"visibility": body.visibility}, login=login),
+        visibility="private"
+        if identity.user_id is not None
+        else await _requested_visibility({"visibility": body.visibility}, login=login),
+        repo_explicitly_none=identity.user_id is not None,
+        experience="agent_workspace" if identity.user_id is not None else "coding",
         workspace=workspace,
     )
     return str(thread["thread_id"])
@@ -481,8 +489,9 @@ async def start_dashboard_thread(
     unlisted: bool = False,
 ) -> str:
     """Start a person's dashboard thread; the first repo is the one its sandbox opens in."""
-    if ThreadIdentity(login).user_id is not None:
-        raise HTTPException(422, "Start Agent Workspace tasks with a connected local machine")
+    identity = ThreadIdentity(login)
+    if identity.user_id is not None and repos:
+        raise HTTPException(403, "This account has no GitHub repository access")
     repo_configs: list[dict[str, str]] = []
     for repo in repos:
         repo_config = _parse_repo(repo)
@@ -499,7 +508,9 @@ async def start_dashboard_thread(
         repo_config=primary,
         prompt=prompt,
         title=title,
-        visibility=visibility,
+        visibility="private" if identity.user_id is not None else visibility,
+        repo_explicitly_none=identity.user_id is not None,
+        experience="agent_workspace" if identity.user_id is not None else "coding",
         workspace=await _resolve_requested_workspace(None, primary, login=login),
         extra_metadata={"unlisted": True} if unlisted else None,
     )
@@ -882,14 +893,8 @@ async def _enrich_run_start_command(
     if command.get("method") != "run.start":
         return command
     if not creating and ThreadIdentity(login).user_id is not None:
-        sandbox_id = metadata.get("sandbox_id")
-        if not isinstance(sandbox_id, str) or Bridge.bridge_id_of(sandbox_id) is None:
-            raise HTTPException(403, "Agent Workspace tasks run only on a local machine")
-        if (
-            metadata.get("experience") != "agent_workspace"
-            or metadata.get("visibility") != "private"
-        ):
-            raise HTTPException(403, "Agent Workspace requires a private local task")
+        if metadata.get("visibility") != "private":
+            raise HTTPException(403, "LangSmith accounts require private tasks")
 
     params = command.get("params")
     if not isinstance(params, dict):
@@ -978,8 +983,6 @@ async def _enrich_run_start_command(
             )
             identity = ThreadIdentity(login)
             if identity.user_id is not None:
-                if sandbox_bridge is None:
-                    raise HTTPException(422, "Agent Workspace requires a connected local machine")
                 visibility = "private"
                 experience = "agent_workspace"
                 if client_configurable.get("repo"):
@@ -997,7 +1000,8 @@ async def _enrich_run_start_command(
                 login=login,
                 email=email,
                 repo_config=repo_config,
-                repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True
+                repo_explicitly_none=identity.user_id is not None
+                or client_configurable.get("repo_explicitly_none") is True
                 or (experience == "agent_workspace" and not repo_config),
                 experience=experience,
                 visibility=visibility,
@@ -1359,12 +1363,7 @@ async def steer_running_thread(
         },
     )
     if not relayed_from:
-        try:
-            await _notify_slack_web_handoff(thread_id, metadata)
-        except Exception:
-            logger.exception(
-                "Failed to update Slack message for dashboard handoff on %s", thread_id
-            )
+        await _SlackWebHandoff(thread_id, metadata).notify()
     return {
         "id": command.get("id"),
         "type": "success",
@@ -1419,6 +1418,7 @@ async def queue_follow_up_run(
     params = command.get("params")
     # An agent's relayed message is not its sender's own: it acts as no one.
     relayed = isinstance(params, dict) and bool(params.get(RELAYED_FROM_KEY))
+    handoff = _SlackWebHandoff(thread_id, metadata)
     enriched = await _enrich_run_start_command(
         thread_id, login, command, metadata=metadata, email=email
     )
@@ -1500,6 +1500,8 @@ async def queue_follow_up_run(
                 exc_info=True,
                 extra={"queue": {"thread_id": thread_id, "run_id": run_id}},
             )
+    if not relayed:
+        await handoff.notify()
     return {
         "id": command.get("id"),
         "type": "success",
@@ -1539,38 +1541,43 @@ async def dispatch_pending_follow_ups(
     return run_id if isinstance(run_id, str) else None
 
 
-def _slack_thread_context(metadata: Mapping[str, Any]) -> JsonObject | None:
-    context = SourceContext.from_metadata(metadata)
-    if context.slack_thread is None:
-        return None
-    return context.dump()["slack_thread"]
-
-
-async def _notify_slack_web_handoff(thread_id: str, metadata: Mapping[str, Any]) -> None:
-    if metadata.get("source") != "slack":
-        return
-    slack_thread = _slack_thread_context(metadata)
-    if not slack_thread:
-        return
-    channel_id = slack_thread.get("channel_id")
-    thread_ts = slack_thread.get("thread_ts")
-    if not isinstance(channel_id, str) or not channel_id:
-        return
-    if not isinstance(thread_ts, str) or not thread_ts:
-        return
-
-    trace_message_ts = slack_thread.get("trace_message_ts")
-    if not isinstance(trace_message_ts, str) or not trace_message_ts:
-        mapping = await lookup_slack_thread_run_mapping(channel_id, thread_ts)
-        if mapping is not None:
-            trace_message_ts = mapping.trace_message_ts
-    if not isinstance(trace_message_ts, str) or not trace_message_ts:
-        logger.info(
-            "Skipping Slack web handoff update for thread %s: missing trace message ts", thread_id
+class _SlackWebHandoff:
+    def __init__(self, thread_id: str, metadata: Mapping[str, object]) -> None:
+        self.thread_id = thread_id
+        self.location = (
+            SourceContext.from_metadata(metadata).slack_location
+            if metadata.get("source") == "slack"
+            else None
         )
-        return
 
-    await update_slack_trace_reply_for_web_handoff(channel_id, trace_message_ts, thread_id)
+    async def notify(self) -> None:
+        if self.location is None:
+            return
+        url = dashboard_thread_url(self.thread_id)
+        if not url:
+            return
+        notice = SlackNotice(kind="web_handoff", key=self.thread_id)
+        text = f"Conversation continued in the <{url}|web UI>."
+        try:
+            await post_slack_thread_reply(
+                *self.location,
+                text,
+                blocks=[
+                    {
+                        "type": "context",
+                        "block_id": notice.block_id,
+                        "elements": [{"type": "mrkdwn", "text": text}],
+                    }
+                ],
+                unfurl_links=False,
+                unfurl_media=False,
+                notice=notice,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to post Slack web handoff notice",
+                extra={"thread_id": self.thread_id},
+            )
 
 
 async def _create_system_thread_record(

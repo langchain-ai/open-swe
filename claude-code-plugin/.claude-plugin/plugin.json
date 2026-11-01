@@ -1,0 +1,19 @@
+{
+  "name": "open-swe",
+  "displayName": "Open SWE",
+  "version": "0.1.0",
+  "description": "Mirror Claude Code sessions into Open SWE threads, use Open SWE's MCP tools, and find a session's thread",
+  "author": {
+    "name": "LangChain"
+  },
+  "repository": "https://github.com/langchain-ai/open-swe",
+  "license": "MIT",
+  "userConfig": {
+    "server_url": {
+      "type": "string",
+      "title": "Open SWE URL",
+      "description": "Origin of your Open SWE deployment",
+      "default": "https://openswe.langchain.dev"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "open-swe": {
+      "type": "http",
+      "url": "${user_config.server_url}/oswe/mcp"
+    }
+  }
+}

@@ -70,6 +70,8 @@ class DashboardPrincipal:
         )
         if any(relative == group or relative.startswith(group + "/") for group in personal):
             return
+        if relative == "my-credentials/langsmith" and method in {"GET", "DELETE"}:
+            return
         if relative in {
             "options",
             "desktop/environments",

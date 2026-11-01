@@ -34,11 +34,12 @@ import type {
   WorkflowApprovalStatus,
   WorkflowPushApprovalsResponse,
 } from "./types"
+import { pendingSenderName } from "./queuedMessages"
 import { CLAUDE_CODE_SOURCE } from "./sidebarFilter"
 import type { PassageReply } from "@/features/agents/utils/passageReply"
 import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
-import type { Skill, SkillInput } from "@/lib/api"
+import type { SessionUser, Skill, SkillInput } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { api } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
@@ -1270,9 +1271,17 @@ export function optimisticThread(
      * page picks the SDK stream first and swaps sources on the next refetch.
      */
     recorded?: boolean
+    /** Who started it: the thread's owner, and the sender of its prompt. */
+    owner?: SessionUser | null
+    /** When the prompt was sent, so every placeholder built for it agrees. */
+    sentAt?: number
   } = {}
 ): AgentThread {
-  const now = Date.now()
+  const now = options.sentAt ?? Date.now()
+  const owner = options.owner
+  const senderName = owner
+    ? pendingSenderName([], owner.login, owner.display_name || undefined)
+    : undefined
   const text = vars.prompt.trim()
   const repoFullName = vars.repo ?? ""
   const chunks: Array<Chunk> = [
@@ -1283,10 +1292,12 @@ export function optimisticThread(
     id: vars.client_message_id ?? `optimistic-user-${threadId}`,
     author: "user",
     timestamp: new Date(now).toISOString(),
+    ...(senderName ? { structuredSenderName: senderName } : {}),
     chunks,
   }
   return {
     id: threadId,
+    ...(owner ? { ownerLogin: owner.login } : {}),
     visibility: vars.visibility ?? "public",
     ...(options.recorded ? { transcript: "v2" as const } : {}),
     title: text.slice(0, 80) || "New agent",
@@ -1307,7 +1318,7 @@ export function optimisticThread(
     // The thread page reads the transcript from its own source, which starts
     // empty while it hydrates. Carrying the prompt as a pending message keeps
     // it on screen across the handoff; the source drops it again as soon as it
-    // has the message under the same id.
+    // has the message under the same id. Its run has already started.
     pendingMessages:
       chunks.length > 0
         ? [
@@ -1316,7 +1327,7 @@ export function optimisticThread(
               content: text,
               images: vars.images,
               createdAt: now,
-              status: "sending",
+              status: "sent",
             },
           ]
         : [],

@@ -80,6 +80,34 @@ async def test_create_session_starts_only_when_requested(monkeypatch, start: boo
         dispatch.assert_not_awaited()
 
 
+async def test_langsmith_cloud_session_is_private_and_has_no_repository(monkeypatch) -> None:
+    from openswe.threads.identity import ThreadIdentity
+
+    subject = f"user:{uuid7()}"
+    monkeypatch.setattr(
+        thread_runs, "get_profile", AsyncMock(return_value={"default_repo": "acme/private"})
+    )
+    monkeypatch.setattr(
+        thread_runs, "_resolve_requested_workspace", AsyncMock(return_value="default")
+    )
+    monkeypatch.setattr(thread_runs, "_ensure_dashboard_github_token", AsyncMock())
+    create = AsyncMock(return_value={"thread_id": "cloud-thread"})
+    monkeypatch.setattr(thread_runs, "create_dashboard_thread_record", create)
+    result = await thread_runs.create_dashboard_session(
+        thread_runs.SessionCreateBody(prompt="Research", visibility="public"), subject
+    )
+    assert result == "cloud-thread"
+    assert create.call_args.kwargs["visibility"] == "private"
+    assert create.call_args.kwargs["repo_config"] == {}
+    assert create.call_args.kwargs["repo_explicitly_none"] is True
+    assert ThreadIdentity(subject).github_login is None
+    with pytest.raises(HTTPException) as rejected:
+        await thread_runs.create_dashboard_session(
+            thread_runs.SessionCreateBody(prompt="Clone", repo="acme/private"), subject
+        )
+    assert rejected.value.status_code == 403
+
+
 async def test_create_session_uses_saved_defaults(monkeypatch, registry_db) -> None:
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={"default_repo": "acme/oss"})
@@ -227,8 +255,9 @@ async def test_failed_run_start_drains_prefetches(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.parametrize("langsmith", [False, True])
+@pytest.mark.parametrize("local", [False, True])
 async def test_agent_workspace_requires_langsmith_and_keeps_identity_on_resume(
-    monkeypatch: pytest.MonkeyPatch, registry_db: None, langsmith: bool
+    monkeypatch: pytest.MonkeyPatch, registry_db: None, langsmith: bool, local: bool
 ) -> None:
     monkeypatch.setattr(
         thread_runs, "_resolve_requested_workspace", AsyncMock(return_value="default")
@@ -254,7 +283,7 @@ async def test_agent_workspace_requires_langsmith_and_keeps_identity_on_resume(
             "config": {
                 "configurable": {
                     "experience": "agent_workspace",
-                    "sandbox_bridge_id": bridge.bridge_id,
+                    **({"sandbox_bridge_id": bridge.bridge_id} if local else {}),
                 }
             },
         },
@@ -281,7 +310,10 @@ async def test_agent_workspace_requires_langsmith_and_keeps_identity_on_resume(
     assert metadata["owner_login"] == subject
     assert metadata["owner_user_id"] == subject.removeprefix("user:")
     assert metadata["visibility"] == "private"
-    assert metadata["sandbox_id"] == bridge.sandbox_id
+    if local:
+        assert metadata["sandbox_id"] == bridge.sandbox_id
+    else:
+        assert metadata.get("sandbox_id") is None
     followup = {
         "method": "run.start",
         "params": {
@@ -554,6 +586,40 @@ async def test_only_a_person_on_web_moves_a_slack_thread_to_web(
     source = "slack" if relayed else "dashboard"
     assert enriched["params"]["config"]["configurable"]["source"] == source
     assert cast(dict[str, object], created["metadata"])["source"] == source
+
+
+@pytest.mark.parametrize("relayed", [False, True])
+async def test_queued_web_follow_up_notifies_slack_only_for_a_person(
+    monkeypatch: pytest.MonkeyPatch, relayed: bool
+) -> None:
+    metadata = {
+        "source": "slack",
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+    }
+    created: dict[str, object] = {"metadata": dict(metadata)}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    posted = AsyncMock(return_value=True)
+    monkeypatch.setattr(thread_runs, "post_slack_thread_reply", posted)
+    monkeypatch.setattr(
+        thread_runs, "create_durable_run", AsyncMock(return_value={"run_id": "queued-run"})
+    )
+    params: dict[str, object] = {
+        "input": {"messages": [{"type": "human", "content": "Also fix this"}]}
+    }
+    if relayed:
+        params[thread_runs.RELAYED_FROM_KEY] = "coordinator-tid"
+
+    result = await thread_runs.queue_follow_up_run(
+        "tid", "octocat", {"method": "run.start", "params": params}, metadata=metadata
+    )
+
+    assert result["result"]["queued"] is True
+    assert posted.await_count == (0 if relayed else 1)
+    if not relayed:
+        assert posted.call_args.args[:2] == ("C1", "1.0")
+        assert "https://dashboard.example/agents/tid" in posted.call_args.args[2]
 
 
 @pytest.mark.parametrize("selection_changed", [False, True])

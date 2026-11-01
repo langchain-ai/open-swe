@@ -195,7 +195,16 @@ async def test_worker_does_not_hand_over_a_deleted_host_sandbox(
 @pytest.mark.parametrize("owner_type", ["user", "system"])
 @pytest.mark.parametrize(
     "invalid_binding",
-    ["membership", "repository_scope", "workspace", "owner", "owner_type", "admin", "visibility"],
+    [
+        "membership",
+        "repository_scope",
+        "workspace",
+        "owner",
+        "owner_type",
+        "admin",
+        "visibility",
+        "credential_mode",
+    ],
 )
 async def test_worker_cannot_attach_to_a_host_outside_its_permissions(
     shared_sandbox: dict[str, dict[str, object]],
@@ -205,7 +214,15 @@ async def test_worker_cannot_attach_to_a_host_outside_its_permissions(
 ) -> None:
     for metadata in shared_sandbox.values():
         metadata["owner_type"] = owner_type
-    if invalid_binding == "owner_type":
+    if invalid_binding == "credential_mode":
+        if owner_type == "system":
+            shared_sandbox["worker"]["owner_type"] = "user"
+        else:
+            owner = await User.for_login("github", "owner")
+            assert owner is not None
+            shared_sandbox["worker"]["owner_user_id"] = str(owner.id)
+            shared_sandbox["worker"]["owner_login"] = f"user:{owner.id}"
+    elif invalid_binding == "owner_type":
         shared_sandbox["coordinator"]["owner_type"] = "system" if owner_type == "user" else "user"
     elif invalid_binding == "admin":
         shared_sandbox["worker"]["admin_thread"] = True

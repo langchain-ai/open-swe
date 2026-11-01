@@ -190,6 +190,7 @@ class TurnContext:
     slack_breakout: bool = False
     slack_by_the_way: bool = False
     slack_follow_up_suggestions: bool = False
+    implementation_walkthrough_enabled: bool = False
     sandbox_file_downloads: bool = False
     local_checkout: bool = False
     local_checkout_client: BridgeClient = "cli"
@@ -208,6 +209,8 @@ class TurnContext:
             agent_workspace=self.agent_workspace,
             sandbox_defaults=None if self.local_checkout else LangSmithCreateOptions.resolve(),
         )
+        if self.implementation_walkthrough_enabled:
+            environment += "\n\n" + prompt("system/implementation-walkthrough")
         if self.sandbox_file_downloads:
             environment += "\n\n" + prompt("system/sandbox-file-downloads")
         if note := self.tool_catalog_note.strip():
