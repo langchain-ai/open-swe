@@ -4,11 +4,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe.run_config import Repo
-from openswe.slack import failures as slack_failures
 from openswe.slack import webhook as slack_webhook
+from openswe.slack.client import SlackThreadLocation
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
 from openswe.webhooks import common as webhook_common
+from tests.slack_helpers import at_location
 
 
 class _FakeThreads:
@@ -48,7 +49,7 @@ async def test_slack_processing_error_replies_even_without_an_agent_thread(
         slack_webhook.common, "lookup_slack_thread_id", AsyncMock(return_value=None)
     )
     monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: _FakeClient())
-    monkeypatch.setattr(slack_failures, "post_slack_thread_reply", post_reply)
+    monkeypatch.setattr(SlackThreadLocation, "try_reply", at_location(post_reply))
 
     await slack_webhook.process_slack_mention(
         _event_data(),

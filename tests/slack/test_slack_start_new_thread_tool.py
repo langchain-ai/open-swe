@@ -14,9 +14,11 @@ from openswe.credential_scope import (
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.slack import solo_threads, staged_files
 from openswe.slack.channels import SlackChannel
+from openswe.slack.client import SlackConversation, SlackThreadLocation
 from openswe.slack.http import SlackRequestError
 from openswe.users.models import User, UserIdentity
 from tests.slack.test_slack_solo_threads import _Harness
+from tests.slack_helpers import at_location
 
 slack_breakout_tool = importlib.import_module("openswe.slack.tools.start_new_thread")
 
@@ -54,7 +56,7 @@ async def test_slack_breakout_thread_refuses_private_channel(
         ),
     )
     post = AsyncMock()
-    monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
+    monkeypatch.setattr(SlackConversation, "post", at_location(post))
 
     result = await slack_breakout_tool.slack_breakout_thread(
         "Title", "Do the thing.", channel_id="C2"
@@ -202,11 +204,9 @@ async def test_breakout_queues_source_thread_files_best_effort(
         lambda: SimpleNamespace(threads=SimpleNamespace(update=write_metadata)),
     )
     monkeypatch.setattr(
-        slack_breakout_tool,
-        "post_slack_top_level_message_with_ts",
-        AsyncMock(return_value="1700000002.0"),
+        SlackConversation, "post", at_location(AsyncMock(return_value="1700000002.0"))
     )
-    monkeypatch.setattr(slack_breakout_tool, "post_slack_thread_reply_with_ts", AsyncMock())
+    monkeypatch.setattr(SlackThreadLocation, "reply", at_location(AsyncMock()))
     monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", AsyncMock())
     monkeypatch.setattr(slack_breakout_tool, "allow_solo_thread_followup", AsyncMock())
     monkeypatch.setattr(slack_breakout_tool, "store_slack_run_mapping", AsyncMock())
@@ -252,7 +252,7 @@ async def test_breakout_rejects_invalid_model_settings_without_creating_thread(
     captured: dict[str, object] = {}
     monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: _FakeClient(captured))
     post = AsyncMock()
-    monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
+    monkeypatch.setattr(SlackConversation, "post", at_location(post))
 
     result = await slack_breakout_tool.slack_breakout_thread(
         "Title", "Do the thing.", model=model, effort=effort
@@ -279,7 +279,7 @@ async def test_web_breakout_does_not_post_or_bind_slack(
     post = AsyncMock()
     bind = AsyncMock()
     monkeypatch.setattr(slack_breakout_tool.webhook, "process_slack_web_mention", dispatch)
-    monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
+    monkeypatch.setattr(SlackConversation, "post", at_location(post))
     monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", bind)
     result = await slack_breakout_tool.slack_breakout_thread(
         "Side question", "Explain this", web_only=True, model=model
@@ -424,12 +424,8 @@ async def test_slack_breakout_thread_success(
     monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
     monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", fake_bind)
     monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: fake_client)
-    monkeypatch.setattr(
-        slack_breakout_tool, "post_slack_top_level_message_with_ts", fake_post_top_level
-    )
-    monkeypatch.setattr(
-        slack_breakout_tool, "post_slack_thread_reply_with_ts", fake_post_thread_reply
-    )
+    monkeypatch.setattr(SlackConversation, "post", at_location(fake_post_top_level))
+    monkeypatch.setattr(SlackThreadLocation, "reply", at_location(fake_post_thread_reply))
     monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", fake_dispatch_agent_run)
     monkeypatch.setattr(slack_breakout_tool, "store_slack_run_mapping", fake_store_mapping)
     monkeypatch.setattr(slack_breakout_tool, "get_langsmith_trace_url", _fake_trace_url)
@@ -619,8 +615,8 @@ async def test_breakout_preserves_requester_and_credential_scope(
     dispatch = AsyncMock(return_value={"run_id": "run-123"})
     monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
     monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: client)
-    monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
-    monkeypatch.setattr(slack_breakout_tool, "post_slack_thread_reply_with_ts", post)
+    monkeypatch.setattr(SlackConversation, "post", at_location(post))
+    monkeypatch.setattr(SlackThreadLocation, "reply", at_location(post))
     monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", AsyncMock())
     monkeypatch.setattr(slack_breakout_tool, "store_slack_run_mapping", AsyncMock())
     monkeypatch.setattr(slack_breakout_tool, "get_langsmith_trace_url", _fake_trace_url)
@@ -676,7 +672,7 @@ async def test_breakout_rejects_unreadable_parent_scope(monkeypatch: pytest.Monk
     post = AsyncMock()
     monkeypatch.setattr("openswe.run_config.get_config", _config)
     monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: client)
-    monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
+    monkeypatch.setattr(SlackConversation, "post", at_location(post))
 
     with pytest.raises(RuntimeError, match="store unavailable"):
         await slack_breakout_tool.slack_breakout_thread("Title", "Instructions")
@@ -703,12 +699,8 @@ async def test_slack_breakout_thread_returns_detail_failure_without_dispatch(
         return {"run_id": "run-123"}
 
     monkeypatch.setattr("openswe.run_config.get_config", _config)
-    monkeypatch.setattr(
-        slack_breakout_tool, "post_slack_top_level_message_with_ts", fake_post_top_level
-    )
-    monkeypatch.setattr(
-        slack_breakout_tool, "post_slack_thread_reply_with_ts", fake_post_thread_reply
-    )
+    monkeypatch.setattr(SlackConversation, "post", at_location(fake_post_top_level))
+    monkeypatch.setattr(SlackThreadLocation, "reply", at_location(fake_post_thread_reply))
     monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", fake_dispatch_agent_run)
     monkeypatch.setattr(slack_breakout_tool.asyncio, "sleep", fake_sleep)
 

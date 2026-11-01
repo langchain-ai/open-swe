@@ -13,9 +13,9 @@ from openswe.config import ENV
 from openswe.prompts import prompt
 from openswe.slack.blocks import actions, block_payload, button, section
 from openswe.slack.client import (
+    SlackConversation,
     fetch_slack_message_by_ts,
     fetch_slack_thread_message_by_ts,
-    post_slack_ephemeral_message,
 )
 from openswe.slack.dm import CONCIERGE_TS
 from openswe.slack.failures import SlackRequestError
@@ -89,8 +89,7 @@ class SlackRetry(BaseModel):
         from openswe.slack.request import SlackRequest
 
         if self.channel_id != interaction.channel_id or self.user_id != interaction.user.id:
-            await post_slack_ephemeral_message(
-                interaction.channel_id,
+            await SlackConversation(interaction.channel_id).post_ephemeral(
                 interaction.user.id,
                 "Only the person whose request failed can retry it. No action was taken.",
                 interaction.message.thread_ts or None,
@@ -100,9 +99,7 @@ class SlackRetry(BaseModel):
         if not await event_claims.claim(BUTTON_TYPE, claim_key, ttl=_RETRY_LIFETIME):
             return ignored("Retry already queued")
         try:
-            await common.update_slack_message(
-                self.channel_id,
-                interaction.message_ts,
+            await common.SlackMessageLocation(self.channel_id, interaction.message_ts).update(
                 interaction.message.text,
                 blocks=[
                     block for block in interaction.message.blocks if block.get("type") != "actions"
@@ -163,11 +160,8 @@ class SlackRetry(BaseModel):
         except Exception:
             await event_claims.release(BUTTON_TYPE, claim_key)
             try:
-                await common.update_slack_message(
-                    self.channel_id,
-                    interaction.message_ts,
-                    interaction.message.text,
-                    blocks=interaction.message.blocks,
+                await common.SlackMessageLocation(self.channel_id, interaction.message_ts).update(
+                    interaction.message.text, blocks=interaction.message.blocks
                 )
             except Exception:
                 logger.exception("Could not restore Slack retry button")

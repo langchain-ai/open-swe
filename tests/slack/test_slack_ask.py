@@ -6,6 +6,7 @@ import pytest
 from openswe.slack import ask as slack_ask
 from openswe.slack import routes as slack_routes
 from openswe.slack.channels import SlackChannel
+from openswe.slack.client import SlackConversation, SlackThreadLocation
 from openswe.slack.payloads import SlackChannelContext, SlackMessage
 from openswe.slack.tools import reply as slack_reply
 from openswe.tasks import schemas as task_schemas
@@ -13,6 +14,7 @@ from openswe.tasks import service as task_service
 from openswe.threads.listing import _metadata_matches_filters
 from openswe.users import User
 from openswe.users.models import UserIdentity
+from tests.slack_helpers import at_location
 
 
 @pytest.fixture
@@ -117,7 +119,7 @@ async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
     post = AsyncMock(return_value="123.999")
     remove_reaction = AsyncMock()
     monkeypatch.setattr(slack_reply, "replace_slack_command_message", replace)
-    monkeypatch.setattr(slack_reply, "post_slack_thread_reply_with_ts", post)
+    monkeypatch.setattr(SlackThreadLocation, "reply", at_location(post))
     monkeypatch.setattr(slack_reply, "remove_slack_reaction", remove_reaction)
 
     assert await slack_reply.slack_reply("the worker's answer", "final") == {"success": True}
@@ -156,7 +158,7 @@ def test_unlisted_threads_stay_out_of_the_thread_list() -> None:
 @pytest.mark.asyncio
 async def test_ask_mode_reply_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> None:
     post = AsyncMock(return_value=True)
-    monkeypatch.setattr(slack_reply, "post_slack_ephemeral_reply", post)
+    monkeypatch.setattr(SlackConversation, "post_ephemeral", at_location(post))
     monkeypatch.setattr(
         slack_reply,
         "get_config",
@@ -196,7 +198,7 @@ async def test_an_unreplaceable_acknowledgement_falls_back_to_a_fresh_ephemeral(
 ) -> None:
     post = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_reply, "replace_slack_command_message", AsyncMock(return_value=False))
-    monkeypatch.setattr(slack_reply, "post_slack_ephemeral_reply", post)
+    monkeypatch.setattr(SlackConversation, "post_ephemeral", at_location(post))
     monkeypatch.setattr(slack_reply, "claim_slack_event", AsyncMock(return_value=True))
     monkeypatch.setattr(
         slack_reply, "get_config", lambda: _ask_config("https://hooks.slack.com/commands/T1/1/x")

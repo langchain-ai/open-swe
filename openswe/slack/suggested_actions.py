@@ -20,7 +20,7 @@ from fastapi import BackgroundTasks
 from openswe.prompts import prompt
 from openswe.slack import webhook as service
 from openswe.slack.blocks import ButtonElement, actions, block_payload, button, section
-from openswe.slack.client import post_slack_ephemeral_message, respond_to_slack_interaction
+from openswe.slack.client import SlackConversation, respond_to_slack_interaction
 from openswe.slack.payloads import SlackButtonValue, SlackInteraction
 from openswe.slack.request import SlackRequest
 from openswe.slack.responses import WebhookResponse, accepted, ignored
@@ -71,8 +71,7 @@ class SuggestedAction:
     ) -> None:
         """Show the suggestion to one person, in the Slack thread it would act in."""
         text = self.question.format(subject=subject)
-        await post_slack_ephemeral_message(
-            channel_id,
+        await SlackConversation(channel_id).post_ephemeral(
             slack_user_id,
             text,
             reply_thread_ts or None,

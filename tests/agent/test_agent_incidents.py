@@ -20,11 +20,13 @@ from openswe.mcp.workspace import workspace_mcp_source
 from openswe.middleware.model_call_shape import CallShape
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.slack.channels import SlackChannel
+from openswe.slack.client import SlackThreadLocation
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 from tests.agent.test_agent_assembly_context import (
     _plan_agent,
 )
 from tests.agent.test_agent_assembly_context import saved_thread_scope as saved_thread_scope
+from tests.slack_helpers import at_location
 
 CHANNEL = {
     "id": "C1",
@@ -194,7 +196,7 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     )
     monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
     posted = AsyncMock(return_value="9.0")
-    monkeypatch.setattr(runtime, "post_slack_thread_reply_with_ts", posted)
+    monkeypatch.setattr(SlackThreadLocation, "reply", at_location(posted))
     config = _incident_config(
         **({"incident_request": "Open a PR for the confirmed fix"} if requested_action else {})
     )

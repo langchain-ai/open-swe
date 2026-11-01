@@ -52,7 +52,7 @@ from openswe.input_messages import (
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import update_slack_trace_reply_for_web_handoff
+from openswe.slack.client import SlackMessageLocation
 from openswe.slack.records import lookup_slack_thread_run_mapping
 from openswe.source_context import SourceContext
 from openswe.threads.access import (
@@ -1543,7 +1543,7 @@ async def _notify_slack_web_handoff(thread_id: str, metadata: Mapping[str, Any])
         )
         return
 
-    await update_slack_trace_reply_for_web_handoff(channel_id, trace_message_ts, thread_id)
+    await SlackMessageLocation(channel_id, trace_message_ts).show_moved_to_web(thread_id)
 
 
 async def _create_system_thread_record(

@@ -38,11 +38,7 @@ from openswe.linear.notifications import post_linear_notification
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.review.run_failure import ReviewRunFailure
 from openswe.session_cost import schedule_session_cost_refresh
-from openswe.slack.client import (
-    SANDBOX_UNREACHABLE_NOTICE,
-    SlackNotice,
-    post_slack_thread_reply,
-)
+from openswe.slack.client import SANDBOX_UNREACHABLE_NOTICE, SlackNotice, SlackThreadLocation
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
@@ -218,13 +214,8 @@ async def _post_failure_reply(
             )
             if blocks is not None:
                 blocks[0]["block_id"] = notice.block_id
-            return await post_slack_thread_reply(
-                location[0],
-                location[1],
-                slack_text,
-                blocks=blocks,
-                agent_thread_id=thread_id,
-                notice=notice,
+            return await SlackThreadLocation(*location).try_reply(
+                slack_text, blocks=blocks, agent_thread_id=thread_id, notice=notice
             )
         return False
 

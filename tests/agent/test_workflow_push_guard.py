@@ -20,6 +20,8 @@ from openswe.middleware import workflow_push_guard as guard
 from openswe.sandboxes import connect, state
 from openswe.sandboxes.state import SandboxBackendProxy
 from openswe.sandboxes.tool_runtime import ToolSurface
+from openswe.slack.client import SlackThreadLocation
+from tests.slack_helpers import at_location
 
 
 class _Response:
@@ -411,7 +413,7 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
 
     monkeypatch.setattr(guard, "workflow_push_approved", fake_approved)
     monkeypatch.setattr(guard, "ensure_workflow_push_pending", fake_pending)
-    monkeypatch.setattr(guard, "post_slack_thread_reply_with_ts", fake_post)
+    monkeypatch.setattr(SlackThreadLocation, "reply", at_location(fake_post))
     monkeypatch.setattr(guard, "mark_workflow_push_notified", fake_notified)
 
     class _NoThreadsClient:

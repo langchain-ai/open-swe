@@ -15,11 +15,10 @@ from openswe.slack.breakout_links import (
     source_thread_line,
 )
 from openswe.slack.client import (
-    append_slack_web_link_footer,
+    SlackConversation,
+    SlackMessageLocation,
+    SlackWebLinkFooter,
     get_active_slack_thread,
-    post_slack_ephemeral_message,
-    post_slack_top_level_message_with_ts,
-    update_slack_message,
 )
 from openswe.slack.http import SlackRequestError
 from openswe.slack.move import move_slack_thread
@@ -105,8 +104,8 @@ async def _mark_done(request: SlackRequest, target: str, new_ts: str) -> None:
 
 async def _tell_sender(request: SlackRequest, text: str) -> None:
     if request.user_id:
-        await post_slack_ephemeral_message(
-            request.channel_id, request.user_id, text, request.thread_ts
+        await SlackConversation(request.channel_id).post_ephemeral(
+            request.user_id, text, request.thread_ts
         )
 
 
@@ -179,8 +178,7 @@ async def _start(
     heading = BreakoutCommand.heading(command.instruction)
     root_text = await _root_text(request, heading)
     try:
-        new_ts = await post_slack_top_level_message_with_ts(
-            target,
+        new_ts = await SlackConversation(target).post(
             root_text,
             blocks=block_payload([section(root_text)]),
             unfurl_links=False,
@@ -198,10 +196,8 @@ async def _start(
     web_url = dashboard_thread_url(thread_id)
     if web_url:
         try:
-            await update_slack_message(
-                target,
-                new_ts,
-                append_slack_web_link_footer(root_text, web_url),
+            await SlackMessageLocation(target, new_ts).update(
+                SlackWebLinkFooter(web_url).append_to(root_text),
                 blocks=block_payload(breakout_root_blocks(root_text, web_url)),
                 unfurl_links=False,
                 unfurl_media=False,

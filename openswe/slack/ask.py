@@ -18,6 +18,7 @@ from openswe.dispatch import dispatch_agent_run
 from openswe.prompts import prompt
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
+    SlackConversation,
     acknowledge_slack_command,
     add_slack_reaction,
     clear_slack_command_message,
@@ -25,7 +26,6 @@ from openswe.slack.client import (
     format_slack_messages_for_prompt,
     get_slack_user_info,
     get_slack_user_names,
-    post_slack_ephemeral_message,
     remove_slack_reaction,
     replace_slack_command_message,
 )
@@ -170,8 +170,8 @@ async def _refuse(request: SlackAskRequest, text: str) -> None:
     await _settle_thinking_status(request)
     if request.response_url and await replace_slack_command_message(request.response_url, text):
         return
-    await post_slack_ephemeral_message(
-        request.channel_id, request.user_id, text, request.reply_thread_ts or None
+    await SlackConversation(request.channel_id).post_ephemeral(
+        request.user_id, text, request.reply_thread_ts or None
     )
 
 

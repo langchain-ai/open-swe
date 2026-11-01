@@ -14,7 +14,7 @@ from openswe.input_messages import dynamic_context_hash, human_input, input_mess
 from openswe.prompts import prompt
 from openswe.slack.blocks import block_payload
 from openswe.slack.breakout_links import breakout_root_blocks
-from openswe.slack.client import append_slack_web_link_footer, update_slack_message
+from openswe.slack.client import SlackMessageLocation, SlackWebLinkFooter
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS, is_code_channel, rename_session
 from openswe.slack.http import SlackRequestError
 from openswe.source_context import SourceContext
@@ -160,9 +160,8 @@ async def generate_and_store_thread_title(
             ):
                 try:
                     root_text = f"`/breakout`: {title}{ref.breakout_root_suffix}"
-                    await update_slack_message(
-                        *ref.location,
-                        append_slack_web_link_footer(root_text, dashboard_thread_url(thread_id)),
+                    await SlackMessageLocation(*ref.location).update(
+                        SlackWebLinkFooter(dashboard_thread_url(thread_id)).append_to(root_text),
                         blocks=block_payload(
                             breakout_root_blocks(root_text, dashboard_thread_url(thread_id))
                         ),

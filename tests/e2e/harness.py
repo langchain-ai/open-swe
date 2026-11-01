@@ -1756,12 +1756,9 @@ async def slack_post_message(request: Request) -> JSONResponse:
 @app.post("/fake-slack/chat.update")
 async def slack_update_message(request: Request) -> JSONResponse:
     body = await request.json()
-    message = fakes.update_slack_message(
-        str(body.get("channel") or ""),
-        str(body.get("ts") or ""),
-        text=str(body.get("text") or ""),
-        blocks=body.get("blocks"),
-    )
+    message = fakes.SlackMessageLocation(
+        str(body.get("channel") or ""), str(body.get("ts") or "")
+    ).update(text=str(body.get("text") or ""), blocks=body.get("blocks"))
     if message is None:
         return JSONResponse({"ok": False, "error": "message_not_found"})
     return _ok({"ts": message["ts"], "message": message})
@@ -1777,7 +1774,9 @@ async def _slack_form(request: Request) -> dict[str, Any]:
 @app.post("/fake-slack/chat.delete")
 async def slack_delete_message(request: Request) -> JSONResponse:
     body = await _slack_form(request)
-    if not fakes.delete_slack_message(str(body.get("channel") or ""), str(body.get("ts") or "")):
+    if not fakes.SlackMessageLocation(
+        str(body.get("channel") or ""), str(body.get("ts") or "")
+    ).delete():
         return JSONResponse({"ok": False, "error": "message_not_found"})
     return _ok()
 

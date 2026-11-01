@@ -35,7 +35,7 @@ from openswe.human_review.requests import HumanReviewParticipant, HumanReviewReq
 from openswe.input_messages import PersonIdentity, split_person_id
 from openswe.prompts import prompt
 from openswe.slack.blocks import block_payload, context
-from openswe.slack.client import update_slack_message
+from openswe.slack.client import SlackMessageLocation
 from openswe.slack.dm import note_for_concierge
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
@@ -238,7 +238,9 @@ async def process_vote(
             pending = [block for block in message_blocks if block.get("type") != "actions"]
             pending.extend(block_payload([context("Working on your click…")]))
             try:
-                await update_slack_message(channel_id, message_ts, message_text, blocks=pending)
+                await SlackMessageLocation(channel_id, message_ts).update(
+                    message_text, blocks=pending
+                )
             except SlackRequestError:
                 logger.warning("Could not acknowledge expedited review click", exc_info=True)
         original = (
@@ -266,8 +268,8 @@ async def process_vote(
                         == original
                         or (current.awaiting_ready and current.state == "open")
                     ):
-                        await update_slack_message(
-                            channel_id, message_ts, message_text, blocks=message_blocks
+                        await SlackMessageLocation(channel_id, message_ts).update(
+                            message_text, blocks=message_blocks
                         )
                     elif current is not None and not completed:
                         await ReviewCard(current).refresh(

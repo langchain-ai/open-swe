@@ -21,10 +21,11 @@ from openswe.human_review import lifecycle
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.people import Outcome
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
-from openswe.slack import cards
+from openswe.slack.client import SlackConversation, SlackMessageLocation, SlackThreadLocation
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
 from tests.expedited_review.conftest import OpenApproval
+from tests.slack_helpers import at_location
 
 
 class _Harness:
@@ -115,10 +116,10 @@ def slack(monkeypatch: pytest.MonkeyPatch) -> _FakeSlack:
     monkeypatch.setattr(
         lifecycle, "own_choices", AsyncMock(return_value=[{"id": "C1", "name": "eng"}])
     )
-    monkeypatch.setattr(lifecycle, "delete_slack_message", fake.delete)
+    monkeypatch.setattr(SlackMessageLocation, "delete", at_location(fake.delete))
     monkeypatch.setattr(lifecycle, "get_slack_permalink", AsyncMock(return_value="https://t"))
-    monkeypatch.setattr(cards, "post_slack_thread_reply_with_ts", fake.post)
-    monkeypatch.setattr(cards, "delete_slack_message", fake.delete)
+    monkeypatch.setattr(SlackThreadLocation, "reply", at_location(fake.post))
+    monkeypatch.setattr(SlackMessageLocation, "delete", at_location(fake.delete))
     return fake
 
 
@@ -143,7 +144,7 @@ async def test_new_thread_card_is_its_own_root_and_is_not_reposted(
     refreshed = AsyncMock()
     monkeypatch.setattr(lifecycle.ReviewCard, "refresh", refreshed)
     reply = AsyncMock()
-    monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", reply)
+    monkeypatch.setattr(SlackThreadLocation, "reply", at_location(reply))
 
     message_ts = await lifecycle.ReviewCard(approval).post_expedited(title="Fix", files=[])
     assert message_ts == approval.slack_thread_ts == "1.0"
@@ -290,7 +291,7 @@ async def test_readiness_button_is_delivered_only_to_the_author(
         return "D_ADA", "4.0"
 
     ephemeral = AsyncMock(return_value=True)
-    monkeypatch.setattr("openswe.slack.client.post_slack_ephemeral_message", ephemeral)
+    monkeypatch.setattr(SlackConversation, "post_ephemeral", at_location(ephemeral))
     monkeypatch.setattr(lifecycle, "send_dm_with_location", deliver)
     monkeypatch.setattr(
         "openswe.slack.diff_image.upload_slack_thread_file",
@@ -334,14 +335,14 @@ async def test_draft_card_is_not_posted_until_ready(
     approval.slack_dm_message_ts = "4.0"
     approval = await approval.save()
     deleted = AsyncMock(return_value=True)
-    monkeypatch.setattr(lifecycle, "delete_slack_message", deleted)
+    monkeypatch.setattr(SlackMessageLocation, "delete", at_location(deleted))
     notes = AsyncMock()
     monkeypatch.setattr(lifecycle, "note_for_concierge", notes)
     updated = AsyncMock()
-    monkeypatch.setattr(lifecycle, "update_slack_message", updated)
+    monkeypatch.setattr(SlackMessageLocation, "update", at_location(updated))
     monkeypatch.setattr(lifecycle, "get_slack_permalink", AsyncMock(return_value="https://origin"))
     posted = AsyncMock(return_value="3.0")
-    monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", posted)
+    monkeypatch.setattr(SlackThreadLocation, "reply", at_location(posted))
     monkeypatch.setattr(lifecycle, "channel_choices", AsyncMock(return_value=[]))
     monkeypatch.setattr(ChangedFile, "of_pull", AsyncMock(return_value=[]))
 
@@ -594,7 +595,7 @@ async def test_author_dm_success_is_quiet_only_when_the_status_card_updates(
     monkeypatch.setattr(clicks, "slack_thread_mutation_lock", lock)
     monkeypatch.setattr(clicks, "langgraph_client", lambda: None)
     ephemeral = AsyncMock(return_value=True)
-    monkeypatch.setattr(clicks, "post_slack_ephemeral_message", ephemeral)
+    monkeypatch.setattr(SlackConversation, "post_ephemeral", at_location(ephemeral))
     updated = AsyncMock(return_value=True)
     monkeypatch.setattr(ReviewCard, "refresh_author_dm", updated)
     handle = AsyncMock(return_value=Outcome("Dismissed.", dm_card_success=True))
@@ -639,9 +640,9 @@ async def test_failed_pending_restore_preserves_rejected_vote(
 
     monkeypatch.setattr(voting, "answer_click", answer)
     monkeypatch.setattr(
-        voting,
-        "update_slack_message",
-        AsyncMock(side_effect=[True, SlackRequestError("ratelimited")]),
+        SlackMessageLocation,
+        "update",
+        at_location(AsyncMock(side_effect=[True, SlackRequestError("ratelimited")])),
     )
     await voting.process_vote(
         str(approval.id),

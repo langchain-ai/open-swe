@@ -14,9 +14,9 @@ from openswe.incidents.presentation import report_message
 from openswe.input_messages import PersonIdentity
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
+    SlackThreadLocation,
     fetch_slack_thread_messages,
     get_slack_user_info,
-    post_slack_thread_reply_with_ts,
     slack_message_bot_id,
 )
 from openswe.slack.events import claim_slack_event
@@ -130,13 +130,8 @@ async def _post(
     if record.is_archived:
         return None
     try:
-        ts = await post_slack_thread_reply_with_ts(
-            record.channel_id,
-            turns.SESSION_TS,
-            text,
-            blocks=blocks,
-            unfurl_links=False,
-            unfurl_media=False,
+        ts = await SlackThreadLocation(record.channel_id, turns.SESSION_TS).reply(
+            text, blocks=blocks, unfurl_links=False, unfurl_media=False
         )
     except SlackRequestError as exc:
         ts = None

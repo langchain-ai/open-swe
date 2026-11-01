@@ -1,19 +1,15 @@
 """Interactive cards Open SWE posts in Slack threads, and moving them in and out of the channel."""
 
 import logging
-from collections.abc import Awaitable, Callable
 
 from langgraph_sdk import get_client
 
 from openswe.run_config import RunConfig
-from openswe.slack.blocks import Block, block_payload, context
+from openswe.slack.blocks import Block, context
 from openswe.slack.client import (
-    delete_slack_message,
     get_active_slack_thread,
     get_slack_permalink,
-    post_slack_thread_reply_with_ts,
 )
-from openswe.slack.http import SlackRequestError
 from openswe.source_context import SlackThreadRef
 from openswe.utils.dashboard_links import dashboard_thread_url
 
@@ -50,44 +46,3 @@ async def run_slack_location(cfg: RunConfig, thread_id: str) -> tuple[str, str]:
     if not channel_id and cfg.slack_thread is not None:
         channel_id = cfg.slack_thread.channel_id.strip()
     return channel_id, thread_ts
-
-
-async def repost_thread_card(
-    location: tuple[str, str],
-    old_ts: str,
-    text: str,
-    blocks: list[Block],
-    *,
-    broadcast: bool,
-    agent_thread_id: str | None,
-    adopt: Callable[[str], Awaitable[bool]],
-) -> bool:
-    """Replace a thread card with a fresh reply, sent to the channel too if ``broadcast``.
-
-    Its mentions do not notify again: the people in it were already told by the old card.
-
-    The new card is posted before the old one is deleted, so a failure leaves one card up.
-    ``adopt`` records the new timestamp and answers whether the new copy is the one to
-    keep; when it is not, the new copy is deleted instead of the old one.
-    """
-    try:
-        message_ts = await post_slack_thread_reply_with_ts(
-            location[0],
-            location[1],
-            text,
-            blocks=block_payload(blocks),
-            agent_thread_id=agent_thread_id,
-            reply_broadcast=broadcast,
-            ping=False,
-        )
-    except SlackRequestError as exc:
-        logger.warning(
-            "Failed to repost Slack card",
-            extra={"slack_error": exc.code, "broadcast": broadcast},
-        )
-        return False
-    kept = await adopt(message_ts)
-    stray = old_ts if kept else message_ts
-    if not await delete_slack_message(location[0], stray):
-        logger.warning("Left a stray Slack card", extra={"slack_message_ts": stray})
-    return kept

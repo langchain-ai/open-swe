@@ -1,16 +1,12 @@
 """Cross-links between a Slack thread and the breakout thread started from it."""
 
 from openswe.slack.blocks import Block, context, section
-from openswe.slack.client import (
-    format_slack_web_link_footer,
-    get_slack_permalink,
-    post_slack_thread_reply,
-)
+from openswe.slack.client import SlackThreadLocation, SlackWebLinkFooter, get_slack_permalink
 
 
 def breakout_root_blocks(text: str, dashboard_url: str | None) -> list[Block]:
     blocks: list[Block] = [section(text)]
-    footer = format_slack_web_link_footer(dashboard_url)
+    footer = SlackWebLinkFooter(dashboard_url).text
     if footer:
         blocks.append(context(footer))
     return blocks
@@ -40,9 +36,7 @@ async def mark_broken_out(
 
 
 async def notify_breakout(channel_id: str, thread_ts: str, text: str) -> None:
-    await post_slack_thread_reply(
-        channel_id,
-        thread_ts,
+    await SlackThreadLocation(channel_id, thread_ts).try_reply(
         text,
         blocks=[{"type": "context", "elements": [{"type": "mrkdwn", "text": text}]}],
         unfurl_links=False,

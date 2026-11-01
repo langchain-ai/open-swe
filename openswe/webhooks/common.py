@@ -95,6 +95,9 @@ from openswe.run_config import Repo
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     GitHubPrRef,
+    SlackConversation,
+    SlackMessageLocation,
+    SlackThreadLocation,
     SlackThreadMappingError,  # noqa: F401
     add_slack_reaction,
     fetch_slack_thread_messages,  # noqa: F401
@@ -103,14 +106,10 @@ from openswe.slack.client import (
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
     parse_slack_ts,  # noqa: F401
-    post_slack_ephemeral_message,
-    post_slack_thread_reply,
-    post_slack_trace_reply,  # noqa: F401
     remove_slack_reaction,
     resolve_slack_links_in_context,  # noqa: F401
     select_slack_context_messages,  # noqa: F401
     strip_bot_mention,  # noqa: F401
-    update_slack_message,
     verify_slack_signature,
 )
 from openswe.slack.code_channels import (  # noqa: F401
@@ -259,7 +258,10 @@ __all__ = [
     "get_github_app_installation_token",
     "get_github_app_installation_token_with_expiry",
     "get_profile_default_repo",
+    "SlackConversation",
+    "SlackMessageLocation",
     "SlackRepoResolution",
+    "SlackThreadLocation",
     "get_slack_repo_config",
     "get_slack_user_info",
     "get_slack_user_names",
@@ -274,8 +276,6 @@ __all__ = [
     "model_supports_images",
     "parse_qs",
     "post_review_started_comment",
-    "post_slack_thread_reply",
-    "post_slack_trace_reply",
     "process_agent_session_stopped",
     "process_slack_reaction_added",
     "process_slack_reaction_removed",
@@ -296,7 +296,6 @@ __all__ = [
     "strip_bot_mention",
     "update_agent_pr_usage_from_webhook",
     "update_agent_thread_pr_state",
-    "update_slack_message",
     "upsert_agent_thread_metadata",
     "verify_github_signature",
     "verify_slack_signature",
@@ -1032,10 +1031,10 @@ async def post_account_link_prompt(
         )
     try:
         if ephemeral:
-            await post_slack_ephemeral_message(channel_id, user_id, text)
+            await SlackConversation(channel_id).post_ephemeral(user_id, text)
         else:
-            await post_slack_thread_reply(
-                channel_id, thread_ts, text, agent_thread_id=agent_thread_id
+            await SlackThreadLocation(channel_id, thread_ts).try_reply(
+                text, agent_thread_id=agent_thread_id
             )
     except Exception:  # noqa: BLE001
         logger.debug("Failed to post account-link prompt to Slack", exc_info=True)

@@ -10,11 +10,7 @@ from langgraph_sdk import get_client
 from openswe.middleware.message_content import content_to_text
 from openswe.middleware.trace import scrub_middleware_inputs
 from openswe.run_config import RunConfig
-from openswe.slack.client import (
-    LANGGRAPH_URL,
-    get_active_slack_thread,
-    post_slack_thread_reply,
-)
+from openswe.slack.client import LANGGRAPH_URL, SlackThreadLocation, get_active_slack_thread
 from openswe.utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
@@ -78,11 +74,8 @@ async def notify_step_limit() -> None:
     )
 
     try:
-        await post_slack_thread_reply(
-            channel_id,
-            thread_ts,
-            message,
-            agent_thread_id=cfg.thread_id,
+        await SlackThreadLocation(channel_id, thread_ts).try_reply(
+            message, agent_thread_id=cfg.thread_id
         )
         logger.info("Sent step-limit notification to Slack thread %s", thread_ts)
     except Exception:

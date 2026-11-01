@@ -13,11 +13,13 @@ from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.review_guide.walk import Reader, Walk
 from openswe.sandbox_scripts.walkthrough import parse_index
 from openswe.slack import diff_image
+from openswe.slack.client import SlackConversation, SlackMessageLocation
 from openswe.slack.http import SlackRequestError
 from openswe.walkthrough.diff import DiffIndex
 from openswe.walkthrough.lines import LineSet
 from openswe.walkthrough.plan import Plan, PlanChunk
 from openswe.walkthrough.record import Walkthrough
+from tests.slack_helpers import at_location
 
 DIFF = (
     "diff --git a/a.py b/a.py\nnew file mode 100644\n--- /dev/null\n+++ b/a.py\n"
@@ -146,7 +148,7 @@ async def test_unrenderable_chunk_body_is_not_posted_as_an_empty_next_button(
         thread_id="thread-1", pull_request_id=uuid7(), user_id=uuid7(), slack_channel_id="C1"
     )
     post = AsyncMock()
-    monkeypatch.setattr(messages, "post_slack_top_level_message_with_ts", post)
+    monkeypatch.setattr(SlackConversation, "post", at_location(post))
     text = "x" * 160_000
     assert await messages.post_with_buttons(session, text, [NEXT]) == ""
     post.assert_not_awaited()
@@ -179,8 +181,8 @@ async def test_chunk_images_survive_retirement_and_fall_back_to_accessible_text(
     )
     post = AsyncMock(return_value="2.0")
     update = AsyncMock()
-    monkeypatch.setattr(messages, "post_slack_top_level_message_with_ts", post)
-    monkeypatch.setattr(messages, "update_slack_message", update)
+    monkeypatch.setattr(SlackConversation, "post", at_location(post))
+    monkeypatch.setattr(SlackMessageLocation, "update", at_location(update))
 
     assert (
         await messages.post_with_buttons(session, shown.message_text, [NEXT], shown=shown) == "2.0"

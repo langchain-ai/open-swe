@@ -10,9 +10,11 @@ import pytest
 from openswe.github import notifications, webhook
 from openswe.github.pull_requests import PullRequest
 from openswe.slack import thinking
+from openswe.slack.client import SlackThreadLocation
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
 from openswe.webhooks import common
+from tests.slack_helpers import at_location
 
 
 @pytest.fixture
@@ -42,7 +44,7 @@ def review_notice(
     post = AsyncMock(return_value="1700000001.123456")
     monkeypatch.setattr(notifications, "get_client", lambda **kwargs: client)
     monkeypatch.setattr(notifications, "slack_thread_mutation_lock", locked)
-    monkeypatch.setattr(notifications, "post_slack_thread_reply_with_ts", post)
+    monkeypatch.setattr(SlackThreadLocation, "reply", at_location(post))
     return client, post
 
 

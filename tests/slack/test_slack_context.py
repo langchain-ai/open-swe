@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import astuple
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -13,6 +14,8 @@ from openswe.slack import webhook as slack_webhooks
 from openswe.slack.allowed_bots import AllowedSlackBot
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
+    SlackConversation,
+    SlackThreadLocation,
     format_slack_messages_for_prompt,
 )
 from openswe.slack.payloads import SlackChannelContext, SlackChannelPayload
@@ -23,6 +26,7 @@ from openswe.utils.run_usage import RunUsageSummary
 from openswe.utils.thread_participants import participant_ids
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.slack_helpers import at_location
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
@@ -393,7 +397,9 @@ def _setup_slack_mention_fakes(
     async def fake_resolve_slack_thread_id(client, channel_id, thread_ts):
         return "mapped-thread"
 
-    monkeypatch.setattr(webhook_common, "post_slack_trace_reply", fake_post_slack_trace_reply)
+    monkeypatch.setattr(
+        SlackThreadLocation, "post_trace_reply", at_location(fake_post_slack_trace_reply)
+    )
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", fake_resolve_slack_thread_id)
     client = _FakeLangGraphClientForProcess()
     monkeypatch.setattr(webhook_common, "get_client", lambda url: client)
@@ -1229,10 +1235,13 @@ def test_pending_cost_marks_latest_reply_until_cost_arrives(
 ) -> None:
     url = "https://app.example/agents/t1"
     usage = RunUsageSummary(models=("model-a",), total_tokens=123)
-    blocks = slack_utils._with_slack_web_link_context_block(
-        "Done", [{"type": "section", "text": {"type": "mrkdwn", "text": "Done"}}], url, usage
+    text, blocks = astuple(
+        slack_utils.SlackWebLinkFooter(url, usage).add_to(
+            slack_utils.SlackMessageBody(
+                "Done", [{"type": "section", "text": {"type": "mrkdwn", "text": "Done"}}]
+            )
+        )
     )
-    text = slack_utils.append_slack_web_link_footer("Done", url, usage)
     assert "calculating cost" not in text
 
     pending_text, pending_blocks = slack_utils.with_slack_pending_session_cost(text, blocks)
@@ -1301,7 +1310,7 @@ async def test_performance_directive_switches_unless_quoted(
     feedback = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_webhooks, "create_langsmith_feedback", feedback)
     notice = AsyncMock(return_value=True)
-    monkeypatch.setattr(slack_utils, "post_slack_ephemeral_message", notice)
+    monkeypatch.setattr(SlackConversation, "post_ephemeral", at_location(notice))
     dispatch = AsyncMock(return_value={"run_id": "run-perf"})
     monkeypatch.setattr(slack_webhooks, "_dispatch_or_queue_slack_run", dispatch)
     await slack_webhooks.process_slack_mention(

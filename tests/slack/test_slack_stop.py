@@ -4,13 +4,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from openswe.slack import client as slack_client
 from openswe.slack import http as slack_http
 from openswe.slack import stop as slack_stop
 from openswe.slack import thinking
+from openswe.slack.client import SlackThreadLocation
 from openswe.slack.records import bind_slack_thread_id
 from openswe.threads import handlers
 from openswe.users.models import User, UserIdentity
+from tests.slack_helpers import at_location
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -93,19 +94,22 @@ def _patch_handler(monkeypatch: pytest.MonkeyPatch, client: FakeClient) -> None:
     monkeypatch.setattr(slack_stop, "claim_slack_event", AsyncMock(return_value=True))
 
 
-def _patch_native_stop(monkeypatch: pytest.MonkeyPatch, client: FakeClient) -> AsyncMock:
+def _patch_native_stop(
+    monkeypatch: pytest.MonkeyPatch, client: FakeClient
+) -> tuple[AsyncMock, AsyncMock]:
     _patch_handler(monkeypatch, client)
     user = User(identities=[UserIdentity(provider="github", external_id="123", login="owner")])
     monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=user))
     monkeypatch.setattr(handlers, "langgraph_client", lambda: client)
     monkeypatch.setattr(handlers, "_thread_summary", AsyncMock(return_value={}))
     monkeypatch.setattr(handlers, "settle_run_turn", AsyncMock())
-    monkeypatch.setattr(slack_client, "post_slack_thread_reply", AsyncMock())
+    reply = AsyncMock()
+    monkeypatch.setattr(SlackThreadLocation, "try_reply", at_location(reply))
     monkeypatch.setattr(slack_http.SlackClient, "bot", lambda: AsyncMock())
     monkeypatch.setattr(slack_http, "slack_identity", AsyncMock(return_value={"team_id": "T123"}))
     status = AsyncMock(return_value=True)
     monkeypatch.setattr(thinking, "set_slack_thread_status", status)
-    return status
+    return status, reply
 
 
 @pytest.mark.parametrize("has_follow_up", [False, True])
@@ -120,7 +124,7 @@ async def test_native_stop_targets_ordinary_thread_preserves_queued_work_and_ded
         client.runs.by_status["pending"] = [
             {"run_id": "other-follow-up", "metadata": {"queued_by": "other"}}
         ]
-    status = _patch_native_stop(monkeypatch, client)
+    status, reply = _patch_native_stop(monkeypatch, client)
     monkeypatch.setattr(slack_stop, "claim_slack_event", AsyncMock(side_effect=[True, False]))
     event: dict[str, object] = {"channel": "C123", "thread_ts": "1.000", "user": "UOWNER"}
 
@@ -133,7 +137,7 @@ async def test_native_stop_targets_ordinary_thread_preserves_queued_work_and_ded
     assert client.cleared_queues == []
     assert "latest_run_status" not in client.threads.values[code_thread_id]["metadata"]
     status.assert_awaited_once_with("C123", "1.000", "")
-    slack_client.post_slack_thread_reply.assert_not_awaited()
+    reply.assert_not_awaited()
 
 
 async def test_native_stop_reports_cancellation_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -141,7 +145,7 @@ async def test_native_stop_reports_cancellation_failure(monkeypatch: pytest.Monk
     thread_id = await _add_thread(client)
     client.runs.by_status["running"] = [{"run_id": "running"}]
     client.runs.fail_cancel = True
-    status = _patch_native_stop(monkeypatch, client)
+    status, reply = _patch_native_stop(monkeypatch, client)
 
     await slack_stop.process_agent_session_stopped(
         {"channel": "C123", "thread_ts": "1.000", "user": "UOWNER"}, "EvStop", "T123"
@@ -149,7 +153,7 @@ async def test_native_stop_reports_cancellation_failure(monkeypatch: pytest.Monk
 
     assert client.threads.updates == []
     status.assert_not_awaited()
-    slack_client.post_slack_thread_reply.assert_awaited_once_with(
+    reply.assert_awaited_once_with(
         "C123",
         "1.000",
         "I couldn't stop this thread. Please try Stop again.",
@@ -167,7 +171,7 @@ async def test_native_stop_rejects_wrong_location_or_unauthorized_user(
     slack_thread = metadata["source_context"]["slack_thread"]
     slack_thread["team_id"] = "T123"
     client.runs.by_status["running"] = [{"run_id": "running"}]
-    status = _patch_native_stop(monkeypatch, client)
+    status, reply = _patch_native_stop(monkeypatch, client)
     if rejection == "workspace":
         slack_thread["team_id"] = "TOTHER"
     elif rejection == "moved":
@@ -185,7 +189,7 @@ async def test_native_stop_rejects_wrong_location_or_unauthorized_user(
     assert client.threads.updates == []
     assert client.cleared_queues == []
     status.assert_not_awaited()
-    slack_client.post_slack_thread_reply.assert_not_awaited()
+    reply.assert_not_awaited()
 
 
 @pytest.mark.parametrize("thread_ts", ["0", None])
