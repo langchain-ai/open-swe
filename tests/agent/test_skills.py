@@ -9,6 +9,7 @@ from openswe.skill_store.store import (
     SkillImport,
     create_skill,
     get_skill,
+    list_skills,
     update_skill,
 )
 from openswe.tools.organization_skills import save_organization_skill
@@ -67,6 +68,8 @@ async def test_desktop_import_preserves_resources_and_cloud_edits(
     assert files["/skills/review/SKILL.md"] == content
     assert files["/skills/review/references/checklist.md"] == "Check permissions"
     assert await get_skill("other", "review") is None
+    page = await list_skills("octocat", limit=100, offset=0)
+    assert "files" not in page["items"][0]
     await update_skill(
         "octocat", "review", SkillUpdate(description="Cloud edit", instructions="Keep me")
     )

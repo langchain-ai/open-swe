@@ -214,7 +214,10 @@ async def _get_skill(owner: Owner, name: str) -> dict[str, Any] | None:
 async def _list_skills(owner: Owner, *, limit: int, offset: int) -> dict[str, Any]:
     found = await _search(owner, limit=limit + 1, offset=offset)
     return {
-        "items": found[:limit],
+        "items": [
+            {key: value for key, value in skill.items() if key != "files"}
+            for skill in found[:limit]
+        ],
         "next_offset": offset + limit if len(found) > limit else None,
     }
 
