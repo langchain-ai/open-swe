@@ -5,6 +5,20 @@ Open SWE uses that to mirror a person's Claude Code sessions into the dashboard:
 
 ## Connect a machine
 
+With the `open-swe` Claude Code plugin in `claude-code-plugin/`:
+
+```bash
+claude plugin marketplace add langchain-ai/open-swe
+claude plugin install open-swe@open-swe
+```
+
+Then run `/open-swe:connect` in a session and start a new one.
+It calls the `connect_claude_code` MCP tool, which returns a one-time claim valid for five minutes rather than the token, and a bundled script redeems the claim at `POST /dashboard/api/claude-code/connections` and writes the hooks into `~/.claude/settings.json` itself.
+The token never passes through Claude, so it stays out of the transcript, its mirror and any trace; a claim mints one token, and a second redemption answers 409.
+The plugin also connects Claude Code to Open SWE's MCP server (`/oswe/mcp`, signed in with GitHub) and adds `/open-swe:thread`, which prints the thread mirroring the current session.
+
+Without the plugin:
+
 1. In the dashboard, open **Settings → Claude Code**, name the machine, and choose **Connect Claude Code**.
 1. Merge the settings it shows into `~/.claude/settings.json`.
    They hold the machine's token, which is not shown again.
@@ -14,21 +28,9 @@ Open SWE uses that to mirror a person's Claude Code sessions into the dashboard:
 Revoking a machine under **Machines** on the same page stops that machine from mirroring.
 Threads it already mirrored stay.
 
-The settings register one [HTTP hook](https://code.claude.com/docs/en/hooks#http-hook-fields) per event below, all posting to `POST /dashboard/api/claude-code/hooks` with the token as a bearer token.
+Either way, the settings register one [HTTP hook](https://code.claude.com/docs/en/hooks#http-hook-fields) per event below, all posting to `POST /dashboard/api/claude-code/hooks` with the token as a bearer token.
+The plugin does not ship these hooks itself: Claude Code does not expand plugin options in HTTP hook headers, so a plugin hook could not carry the token.
 If your organization limits hook targets with `allowedHttpHookUrls`, allow that URL.
-
-### Or install the plugin
-
-The `open-swe` plugin in `claude-code-plugin/` does the same mirroring, and also connects Claude Code to Open SWE's MCP server (`/oswe/mcp`, signed in with GitHub) and adds `/open-swe:thread`, which prints the thread mirroring the current session.
-
-```bash
-claude plugin marketplace add langchain-ai/open-swe
-claude plugin install open-swe@open-swe
-```
-
-Claude Code asks for the Open SWE URL and a machine token; create the token under **Settings → Claude Code** as above and ignore the settings block.
-The plugin's hooks run `scripts/forward-hook.sh`, which posts each event to the same endpoint with `curl`, so it needs `curl` and is not covered by `allowedHttpHookUrls`.
-Keep the hooks in `claude-code-plugin/hooks/hooks.json` in step with `MIRRORED_EVENTS`.
 
 ## Find a session's thread
 

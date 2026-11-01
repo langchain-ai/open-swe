@@ -13,6 +13,7 @@ from typing import Self
 from uuid import UUID, uuid7
 
 from sqlalchemy import ForeignKey, delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
@@ -23,6 +24,10 @@ TOKEN_PREFIX = "occ_"
 SECRET_BYTES = 30
 SUFFIX_CHARS = 6
 NAME_MAX_CHARS = 120
+
+
+class ClaimRedeemedError(Exception):
+    """A connect claim that already minted its token."""
 
 
 class ClaudeCodeSyncToken(Base):
@@ -36,6 +41,8 @@ class ClaudeCodeSyncToken(Base):
     token_suffix: Mapped[str]
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     last_used_at: Mapped[datetime | None] = mapped_column(default=None)
+    # The connect claim that minted this token, unique so a claim mints only once.
+    claim_id: Mapped[UUID | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime] = mapped_column(server_default=NOW, onupdate=NOW, init=False)
     created_by: Mapped[UUID | None] = mapped_column(
@@ -54,8 +61,13 @@ class ClaudeCodeSyncToken(Base):
         return hashlib.sha256(token.encode()).hexdigest()
 
     @classmethod
-    async def create(cls, *, user_id: UUID, name: str) -> tuple[Self, str]:
-        """Mint a token for ``user_id``, returning the record and the plaintext secret once."""
+    async def create(
+        cls, *, user_id: UUID, name: str, claim_id: UUID | None = None
+    ) -> tuple[Self, str]:
+        """Mint a token for ``user_id``, returning the record and the plaintext secret once.
+
+        Raises :class:`ClaimRedeemedError` when ``claim_id`` already minted one.
+        """
         secret = TOKEN_PREFIX + secrets.token_urlsafe(SECRET_BYTES)
         token = cls(
             user_id=user_id,
@@ -64,11 +76,17 @@ class ClaudeCodeSyncToken(Base):
             token_suffix=secret[-SUFFIX_CHARS:],
             created_by=user_id,
             updated_by=user_id,
+            claim_id=claim_id,
         )
-        async with postgres.session() as session:
-            session.add(token)
-            await session.flush()
-            await session.refresh(token)
+        try:
+            async with postgres.session() as session:
+                session.add(token)
+                await session.flush()
+                await session.refresh(token)
+        except IntegrityError as exc:
+            if claim_id is not None and "(claim_id)" in str(exc.orig):
+                raise ClaimRedeemedError(str(claim_id)) from exc
+            raise
         return token, secret
 
     @classmethod

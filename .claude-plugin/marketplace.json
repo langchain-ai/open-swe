@@ -8,7 +8,7 @@
     {
       "name": "open-swe",
       "source": "./claude-code-plugin",
-      "description": "Mirror Claude Code sessions into Open SWE threads and use Open SWE's tools from Claude Code"
+      "description": "Mirror Claude Code sessions into Open SWE threads, use Open SWE's MCP tools, and find a session's thread"
     }
   ]
 }

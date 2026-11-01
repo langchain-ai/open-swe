@@ -2,7 +2,7 @@
   "name": "open-swe",
   "displayName": "Open SWE",
   "version": "0.1.0",
-  "description": "Mirror Claude Code sessions into Open SWE threads and use Open SWE's tools from Claude Code",
+  "description": "Mirror Claude Code sessions into Open SWE threads, use Open SWE's MCP tools, and find a session's thread",
   "author": {
     "name": "LangChain"
   },
@@ -14,13 +14,6 @@
       "title": "Open SWE URL",
       "description": "Origin of your Open SWE deployment",
       "default": "https://openswe.langchain.dev"
-    },
-    "token": {
-      "type": "string",
-      "title": "Machine token",
-      "description": "Created under Settings \u2192 Claude Code in the Open SWE dashboard",
-      "required": true,
-      "sensitive": true
     }
   }
 }
