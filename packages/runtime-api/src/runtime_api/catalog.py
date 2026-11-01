@@ -7,6 +7,8 @@ subagents it may delegate to, the models it calls, the sandbox its file and shel
 run in, and what its middleware does around each model call.
 """
 
+import hashlib
+import json
 from typing import Literal
 
 from pydantic import BaseModel, JsonValue, field_validator
@@ -189,6 +191,8 @@ class RoutingRules(BaseModel):
     mode: Literal["auto", "fast"] | None = None
     # The model each route stands for, which the dashboard shows.
     route_model_ids: dict[str, str] = {}
+    # Whether a call with no route kept asks the classifier; False takes the default route.
+    classify: bool = True
 
 
 class LoopRules(BaseModel):
@@ -260,6 +264,38 @@ class Catalog(BaseModel):
     # catalog leaves out from code, and how the model reads the search.
     search_tools: bool = False
     search_tools_description: str | None = None
+    # The only tools the run may call; the rest stay offered, as the provider's prompt
+    # cache needs, and a call of one is refused. None lets every tool run.
+    runnable_tools: list[str] | None = None
+
+    def request_prefix(self, tools_digest: str) -> str:
+        """A digest of what this catalog puts ahead of a conversation in each model call.
+
+        Two runs with the same one send the same tools, models and loop prompts, so one
+        reads from the provider's cache what the other wrote. ``tools_digest`` names the
+        specs ``names_only`` leaves out. What only decides how calls run is left out.
+        """
+        loop = (
+            None
+            if self.loop is None
+            else self.loop.model_dump(
+                mode="json", exclude={"reply": True, "cli_result": True, "routing": {"classify"}}
+            )
+        )
+        shape = self.names_only().model_dump(
+            mode="json",
+            exclude={
+                "sandbox",
+                "files",
+                "inbox",
+                "loop",
+                "trace_metadata",
+                "model_call_limit",
+                "runnable_tools",
+            },
+        )
+        payload = {"catalog": shape, "loop": loop, "tools": tools_digest}
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
     def names_only(self) -> Catalog:
         """This catalog as a run's context carries it: its tools by name alone.

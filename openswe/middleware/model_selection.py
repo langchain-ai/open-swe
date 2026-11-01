@@ -114,9 +114,11 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         route_model_ids: Mapping[str, str],
         *,
         routing_mode: RoutingMode | None = "auto",
+        classify: bool = True,
     ) -> None:
         self._route_model_ids = dict(route_model_ids)
         self._routing_mode = routing_mode
+        self._classify = classify
 
     def use_requested_model(self, model_id: str) -> None:
         self._route_model_ids["default"] = model_id
@@ -135,6 +137,9 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             return RouteSelection(normalize_route(model_route))
         if self._routing_mode == "fast":
             return RouteSelection("fast")
+        if not self._classify:
+            # As a classifier that did not settle on a route: the default, not kept.
+            return RouteSelection("default", JevDecision())
         return await classify_route(state.get("messages", []))
 
     async def abefore_model(

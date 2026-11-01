@@ -178,6 +178,14 @@ class EventSummary(BaseModel):
             )
         if event.source == "workspace":
             return cls._workspace(event, payload)
+        if event.source == "memory":
+            return cls(
+                source=event.source,
+                event_type=event.event_type,
+                target=str(payload.get("thread_id") or ""),
+                status=event.event_type,
+                trusted=True,
+            )
         return cls._linear(event, _LinearDelivery.model_validate(payload))
 
     @classmethod

@@ -35,6 +35,7 @@ from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
 from openswe.linear.notifications import post_linear_notification
+from openswe.memories.reflection import JOB as MEMORY_REFLECTION
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.review.run_failure import ReviewRunFailure
 from openswe.session_cost import schedule_session_cost_refresh
@@ -535,6 +536,12 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         )
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     await _settle_transcript_turn(thread_id, run_id, status)
+    payload_metadata = payload.get("metadata")
+    if isinstance(payload_metadata, dict) and payload_metadata.get("kind") == MEMORY_REFLECTION:
+        # A fork that only remembers: it answers no one, and its failure is only logged.
+        if status in _TERMINAL_FAILURE_STATUSES:
+            _log_run_failure(thread_id, run_id, status, payload.get("error"))
+        return {"status": "ok", "reason": "memory reflection settled"}
     is_worker = False
     if run_id and isinstance(status, str) and status in _TERMINAL_RUN_STATUSES:
         from openswe.tasks.events import worker_finished
@@ -547,7 +554,6 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
                 extra={"thread_id": thread_id, "run_id": run_id},
             )
             raise
-    payload_metadata = payload.get("metadata")
     channel = channel_of(payload_metadata if isinstance(payload_metadata, dict) else None)
     if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
         if pull_request := RunMetadata.model_validate(payload_metadata).pull_request:

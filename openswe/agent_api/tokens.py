@@ -104,6 +104,9 @@ class RunSettings(BaseModel):
     # The digest of every tool the run started with, kept in ``run_tool_sets``;
     # its catalog lists only those the model is offered.
     tools: str | None = None
+    # What the run's catalog puts ahead of the conversation (``Catalog.request_prefix``),
+    # which a memory reflection fork of its thread must match.
+    request_prefix: str | None = None
 
     def configurable(self) -> dict[str, JsonValue]:
         """The run config keys these settings fill."""

@@ -1,6 +1,7 @@
 from uuid import UUID
 
 import pytest
+from sqlalchemy import text
 
 from openswe.database import postgres
 from openswe.memories.store import MEMORIES, MemoryRow, Scope
@@ -60,6 +61,33 @@ async def test_every_memory_reaches_the_curator_but_only_personal_ones_apply_at_
         "kept quiet",
         "my own habit",
     }
+    reflected = await MEMORIES.save(
+        scope="personal",
+        body="learned while idle",
+        person=person.id,
+        workspace=workspace.slug,
+        thread_id="thread-learned with others",
+        from_private_thread=False,
+        reflection_thread_id="fork",
+    )
+    assert await MEMORIES.saved_in_thread("thread-learned with others") == [
+        "learned with others",
+        "learned while idle",
+    ]
+    # Admins see every memory saved, never a private thread's text nor who saved it.
+    async with postgres.session() as session:
+        logged = (
+            await session.execute(
+                text("SELECT delivery_id, payload, user_id FROM event_log WHERE source = 'memory'")
+            )
+        ).all()
+    events = {row.payload["body"]: row for row in logged}
+    assert set(events) == {None, "learned with others", "learned while idle"}
+    assert all(row.user_id is None for row in logged)
+    assert events["learned while idle"].delivery_id == str(reflected.id)
+    assert events["learned while idle"].payload["thread_id"] == "thread-learned with others"
+    assert events["learned while idle"].payload["reflection_thread_id"] == "fork"
+    assert events["learned with others"].payload["reflection_thread_id"] is None
 
 
 async def test_a_superseded_memory_leaves_only_those_who_read_the_workspace_prompt(

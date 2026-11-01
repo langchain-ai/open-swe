@@ -187,6 +187,29 @@ class ThreadStore:
             self.copies.start(updated, metadata)
         return updated
 
+    async def copy(self, thread: IndexedThread, metadata: Mapping[str, JsonValue]) -> IndexedThread:
+        """A new thread on MDA holding every checkpoint of ``thread``, indexed with its
+        metadata and ``metadata`` over it."""
+        if thread.runtime != "mda":
+            raise ValueError(f"Thread {thread.thread_id} is not on MDA")
+        made = _object.validate_python(
+            await RUNTIMES.mda.client.http.post(f"/threads/{thread.thread_id}/copy", json={})
+        )
+        copy_id = made.get("thread_id")
+        if not isinstance(copy_id, str):
+            raise RuntimeError("MDA's thread copy returned no thread id")
+        return await index.create(
+            copy_id,
+            runtime="mda",
+            metadata={**thread.metadata, **metadata},
+            if_exists="do_nothing",
+        )
+
+    async def discard_copy(self, thread: IndexedThread) -> None:
+        """Delete a thread ``copy`` made, which only MDA and the index hold."""
+        await RUNTIMES.mda.delete(thread.thread_id)
+        await index.delete(thread.thread_id)
+
     async def delete(self, thread: IndexedThread) -> None:
         await self.copies.settled(thread.thread_id)
         for runtime in reversed(RUNTIMES.copies(thread.runtime)):

@@ -59,6 +59,7 @@ from rt.middleware import (
     DescribedToolsMiddleware,
     IncidentEvidenceMiddleware,
     ReportRepliesMiddleware,
+    RunnableToolsMiddleware,
     RuntimeToolsMiddleware,
 )
 from rt.model_calls import model_call_guards
@@ -268,6 +269,7 @@ def _parts(graph: Graph) -> _Parts:
             ),
             managed_sandbox,
             *reports,
+            RunnableToolsMiddleware(backend),
             files,
             task_retry(),
             RunToolsMiddleware(toolsets, backend_tools=backend_tools),
