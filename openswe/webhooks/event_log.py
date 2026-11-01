@@ -76,6 +76,7 @@ _EVENT_KINDS = text(
     SELECT source, event_type, count(*) AS count, max(received_at) AS last_received_at
     FROM {_TABLE}
     WHERE received_at >= :since
+      AND source NOT IN ('internal', 'frontend')
       AND (CAST(:source AS text) IS NULL OR source = :source)
       AND NOT (source = ANY(CAST(:hidden_sources AS text[])))
       AND (CAST(:event_type AS text) = ''
