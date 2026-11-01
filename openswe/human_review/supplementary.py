@@ -10,7 +10,12 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from html import escape
+from html.parser import HTMLParser
+from pathlib import Path
+from urllib.parse import urlsplit
 
+from markdown_it import MarkdownIt
 from pydantic import BaseModel
 
 from openswe.dashboard.profiles import PROFILES
@@ -30,13 +35,52 @@ from openswe.human_review.requests import (
 from openswe.prompts import prompt
 from openswe.slack.client import post_slack_thread_reply_with_ts
 from openswe.slack.dm import send_dm
+from openswe.slack.http import SlackRequestError
 from openswe.threads.runs import start_dashboard_thread
 from openswe.users import User
+from openswe.utils.multimodal import extract_image_urls
 from openswe.utils.preview import skip_on_preview
 
 logger = logging.getLogger(__name__)
 STEP_PREFIX = "supplementary_review:"
 _RETRY = timedelta(hours=1)
+
+
+class DesignOwner(BaseModel):
+    label: str
+    github_login: str
+
+
+class DesignOwners(BaseModel):
+    team: str
+    areas: dict[str, DesignOwner]
+
+    @classmethod
+    def load(cls, policy: SupplementaryReviewPolicy) -> DesignOwners | None:
+        owners = cls.model_validate_json(
+            Path(__file__).parents[1].joinpath("resources/design-review-owners.json").read_text()
+        )
+        return owners if policy.id == "design" and policy.team == owners.team else None
+
+
+class ReviewImages(HTMLParser):
+    def __init__(self, body: str) -> None:
+        super().__init__()
+        self.urls = extract_image_urls(body)
+        self.feed(MarkdownIt("commonmark", {"html": True}).render(body))
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "img":
+            src = dict(attrs).get("src")
+            if src and urlsplit(src).scheme == "https" and src not in self.urls:
+                self.urls.append(src)
+
+    def blocks(self) -> list[dict[str, object]]:
+        return [
+            {"type": "image", "image_url": url, "alt_text": "PR screenshot"}
+            for url in self.urls[:2]
+            if urlsplit(url).scheme == "https"
+        ]
 
 
 class SupplementaryReviewRefused(Exception):
@@ -47,6 +91,7 @@ class SupplementaryState(BaseModel):
     assessment_requested: bool = False
     assessment_started_at: datetime | None = None
     reason: str = ""
+    area: str = ""
     github_login: str = ""
     assigned_at: datetime | None = None
     github_requested: bool = False
@@ -93,7 +138,7 @@ class SupplementaryReview:
         if not await schedule(self.request, self.step, after):
             raise RuntimeError("Could not schedule a supplementary review")
 
-    async def start(self, reason: str = "") -> None:
+    async def start(self, reason: str = "", area: str = "") -> None:
         """Queue the assessment, or record an agent's reason that the review is needed."""
         if self.request.state != "open":
             return
@@ -104,7 +149,8 @@ class SupplementaryReview:
                 return
             state = self.state_of(row)
             if reason and not state.reason:
-                state.reason = reason.strip()
+                state.reason = " ".join(reason.split())[:320]
+                state.area = area
                 self.save(row, state)
         await self._schedule()
 
@@ -122,6 +168,11 @@ class SupplementaryReview:
                 return "not_ready"
             if not self.state.reason:
                 return await self._assess()
+            pr.body = details.body or ""
+            pr.changed_files = details.changed_files
+            pr.additions = details.additions
+            pr.deletions = details.deletions
+            await pr.save()
             try:
                 return await self._assign(pull)
             except Exception:
@@ -164,6 +215,7 @@ class SupplementaryReview:
                             policy_id=self.policy.id,
                             label=self.policy.label,
                             criteria=self.policy.criteria,
+                            owners=DesignOwners.load(self.policy),
                         ),
                         title=f"Assess {self.policy.label} for {pr.repo}#{pr.number}",
                         repos=[f"{pr.owner}/{pr.repo}"],
@@ -192,6 +244,8 @@ class SupplementaryReview:
     async def _candidates(self, pull: PullRequestClient) -> list[tuple[User, ReviewerAvailability]]:
         org, team = self.policy.team.split("/", 1)
         members = await team_members(org, team)
+        owners = DesignOwners.load(self.policy)
+        owner = owners.areas.get(self.state.area) if owners else None
         users = await asyncio.gather(*(User.for_login("github", login) for login in members or []))
         reviews = await latest_review_states(pull, self.request.pull_request.author)
         if reviews is None:
@@ -208,11 +262,56 @@ class SupplementaryReview:
                 or not await PROFILES.allows_auto_human_review(user.github_login)
             ):
                 continue
-            hours = await ReviewerAvailability.for_user(user)
-            if hours.out_of_office is not False or not await pull.repo.can_write(user.github_login):
+            if not await pull.repo.can_write(user.github_login):
                 continue
-            eligible.append((user, hours))
+            hours = await ReviewerAvailability.for_user(user)
+            if owner and user.github_login.lower() == owner.github_login.lower():
+                return [(user, hours)] if hours.out_of_office is False else []
+            if hours.out_of_office is False:
+                eligible.append((user, hours))
+        if owner:
+            logger.warning(
+                "Mapped design owner is ineligible; falling back to team rotation",
+                extra={"request_id": str(self.request.id), "owner_login": owner.github_login},
+            )
         return eligible
+
+    async def _post_ping(self, row: HumanReviewRequest, note: str, images: ReviewImages) -> bool:
+        blocks: list[dict[str, object]] = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": note}},
+            *images.blocks(),
+        ]
+        try:
+            try:
+                return bool(
+                    await post_slack_thread_reply_with_ts(
+                        row.slack_channel_id,
+                        row.slack_thread_ts or row.slack_message_ts,
+                        note,
+                        unfurl_links=False,
+                        unfurl_media=False,
+                        blocks=blocks,
+                    )
+                )
+            except SlackRequestError as exc:
+                if exc.code not in {"invalid_blocks", "invalid_arguments"} or len(blocks) == 1:
+                    raise
+                logger.warning("Slack rejected review screenshots; sending text only")
+                return bool(
+                    await post_slack_thread_reply_with_ts(
+                        row.slack_channel_id,
+                        row.slack_thread_ts or row.slack_message_ts,
+                        note,
+                        unfurl_links=False,
+                        unfurl_media=False,
+                    )
+                )
+        except SlackRequestError:
+            logger.exception(
+                "Could not post supplementary review ping; falling back to DM",
+                extra={"request_id": str(row.id), "policy": self.policy.id},
+            )
+            return False
 
     async def _assign(self, pull: PullRequestClient) -> str:
         if not self.state.github_login:
@@ -252,33 +351,35 @@ class SupplementaryReview:
             state = self.state_of(row)
             user = await User.for_login("github", state.github_login)
             pr = row.pull_request
+            owners = DesignOwners.load(self.policy)
+            owner = owners.areas.get(state.area) if owners else None
+            why = (
+                owner.label
+                if owner and state.github_login.lower() == owner.github_login.lower()
+                else f"{self.policy.team} specialist (team rotation)"
+            )
             note = (
-                f"{label} — {slack_mention(user, state.github_login)}: {state.reason}\n"
-                f"<{pr.url}|{pr.repo}#{pr.number}> · Supplementary review; "
-                "engineering review remains separate."
+                f"*{label}* · {slack_mention(user, state.github_login)} · "
+                f"<{pr.url}|{pr.repo}#{pr.number}>\n"
+                f"*Impact:* {escape(' '.join(state.reason.split())[:320], quote=False)}\n"
+                f"*Scope:* {pr.changed_files} files · +{pr.additions}/−{pr.deletions}\n"
+                f"*Why you:* {why}"
             )
             failed = False
             try:
                 if not state.github_requested:
                     await pull.request_reviewers([state.github_login])
                     state.github_requested = True
-                if not state.github_notified:
-                    await pull.comment(
-                        f"### {label}\n\n@{state.github_login} — {state.reason}\n\n"
-                        "Supplementary review; this does not replace engineering or CODEOWNERS review."
+                if not state.slack_notified and not state.dm_notified:
+                    state.slack_notified = await self._post_ping(
+                        row, note, ReviewImages(pr.body or "")
                     )
-                    state.github_notified = True
-                if not state.slack_notified:
-                    state.slack_notified = bool(
-                        await post_slack_thread_reply_with_ts(
-                            row.slack_channel_id,
-                            row.slack_thread_ts or row.slack_message_ts,
-                            note,
-                            unfurl_links=False,
-                            unfurl_media=False,
-                        )
-                    )
-                if not state.dm_notified and user is not None and user.slack_user_id:
+                if (
+                    not state.slack_notified
+                    and not state.dm_notified
+                    and user is not None
+                    and user.slack_user_id
+                ):
                     state.dm_notified = await send_dm(
                         user.slack_user_id, note, origin=row.dm_origin
                     )
@@ -289,7 +390,7 @@ class SupplementaryReview:
                 )
                 failed = True
             self.save(row, state)
-        if failed or not state.dm_notified or not state.slack_notified:
+        if failed or not (state.dm_notified or state.slack_notified):
             await self._schedule(_RETRY)
             return "retrying"
         return "requested"
@@ -333,7 +434,9 @@ class SupplementaryReviews:
             if review.applies_to(files):
                 await review.start()
 
-    async def ask(self, pull: PullRequestClient, policy_id: str, reason: str) -> None:
+    async def ask(
+        self, pull: PullRequestClient, policy_id: str, reason: str, area: str = ""
+    ) -> None:
         """Ask for one policy's review with an agent's reason; raises when it cannot apply."""
         policies = await self.policies()
         policy = next((policy for policy in policies if policy.id == policy_id), None)
@@ -343,6 +446,11 @@ class SupplementaryReviews:
                 f"This repository configures no `{policy_id}` supplementary review "
                 f"(configured: {configured})."
             )
+        owners = DesignOwners.load(policy)
+        if area and (owners is None or area not in {*owners.areas, "unmapped"}):
+            raise SupplementaryReviewRefused("Unknown supplementary review product area.")
+        if owners and not area:
+            raise SupplementaryReviewRefused("Choose a configured product area, or 'unmapped'.")
         review = SupplementaryReview(self.request, policy)
         files = await ChangedFile.of_pull(pull)
         if files is None:
@@ -352,7 +460,7 @@ class SupplementaryReviews:
                 f"None of the pull request's changed files match the {policy.label} paths."
             )
         try:
-            await review.start(reason)
+            await review.start(reason, area)
         except RuntimeError:
             logger.exception(
                 "Could not schedule a requested supplementary review",

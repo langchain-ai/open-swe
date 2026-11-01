@@ -33,8 +33,10 @@ Do not repeat the review summary or link to the Slack card: Slack unfurls that l
 Repositories can configure supplementary reviews, such as design or security, under `supplementaryReviews` in `.open-swe/settings.json`; each has an `id`, a GitHub team, paths, and criteria.
 Open SWE assesses matching pull requests against those criteria on its own when review starts.
 To ask for one yourself, pass `supplementary_review` (the policy `id`) with `supplementary_review_reason` explaining the concrete change that meets its criteria.
-For an existing review request, pass only `pr_url`, `supplementary_review`, and `supplementary_review_reason`; omit `inline_summary` so the engineering card stays unchanged.
-Open SWE rotates a member of the configured team and sends GitHub and Slack notifications without replacing engineering review.
+Keep the reason under 240 characters: High/Medium/Low impact, the visible change, and what needs review.
+For `langchain-ai/product-design` design reviews, also pass `supplementary_review_area` from `openswe/resources/design-review-owners.json` in the Open SWE repository: `runtime`, `engine-insights-chat`, `search-filters`, or `design-system`. Product-specific styling goes to the product owner; use `design-system` only for shared components/tokens/styling, and `unmapped` only for areas outside the map.
+For an existing review request, omit `inline_summary` so the engineering card stays unchanged.
+Open SWE chooses the mapped owner, otherwise rotates a member of the configured team, and sends one Slack ping with available PR screenshots (DM only as delivery fallback), without replacing engineering review.
 Do not use `assign_human_reviewer` for supplementary reviewers.
 
 Pass `auto_merge=false` for review only: reviewer signup, assignment and reminders continue, but a person must merge the PR.
