@@ -307,7 +307,7 @@ export function OpenPullRequests({
             <div className="flex items-center gap-space-2 text-xs text-secondary">
               <span>
                 {scope === "review-assigned"
-                  ? "Assigned to you by Open SWE"
+                  ? "Open SWE assignments, then likely assignments and Slack mentions"
                   : "GitHub review requests"}
               </span>
               {scope === "review-requested" && (
@@ -512,7 +512,7 @@ export function OpenPullRequests({
                           : scope === "mine"
                             ? "No open PRs found"
                             : scope === "review-assigned"
-                              ? "No Open SWE assignments. You’re all caught up."
+                              ? "Nothing to review. You’re all caught up."
                               : "No pending GitHub review requests"
                       }
                       action={githubLink || undefined}

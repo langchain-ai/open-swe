@@ -59,6 +59,7 @@ RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
 # ``expired`` is a pick that was not accepted in time, kept so it is not picked again.
 ParticipantDecision = Literal["approve", "reject", "review", "picked", "expired"]
 SUPPLEMENTARY_REVIEWS_KEY = "supplementary_reviews"
+AUTO_ASSIGN_ASKED = "auto_assign_asked"
 
 
 class ChannelChoice(TypedDict):
@@ -196,6 +197,11 @@ class HumanReviewRequest(Base):
         return [p for p in self.participants if p.decision == "picked"]
 
     @property
+    def auto_assign_asked(self) -> bool:
+        """Someone asked Open SWE to find this request a reviewer."""
+        return AUTO_ASSIGN_ASKED in self.run_config
+
+    @property
     def requester_login(self) -> str:
         if self.requested_by is not None:
             return self.requested_by.github_login
@@ -292,6 +298,24 @@ class HumanReviewRequest(Base):
                     HumanReviewParticipant.user_id == user_id,
                     HumanReviewParticipant.decision == "review",
                     HumanReviewParticipant.assigned_by_agent.is_(True),
+                )
+            )
+            return list(rows)
+
+    @classmethod
+    async def unclaimed(cls) -> list[Self]:
+        """Open review requests nobody has signed up for or been picked for yet."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._loaded(select(cls))
+                .join(cls.pull_request)
+                .where(
+                    cls.state == "open",
+                    cls.kind.in_(("standard", "posted")),
+                    PullRequest.state == "open",
+                    ~cls.participants.any(
+                        HumanReviewParticipant.decision.in_(("review", "picked"))
+                    ),
                 )
             )
             return list(rows)

@@ -59,7 +59,12 @@ from openswe.human_review.picking import (
     Wait,
     choose_reviewer,
 )
-from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
+from openswe.human_review.requests import (
+    AUTO_ASSIGN_ASKED,
+    HumanReviewParticipant,
+    HumanReviewRequest,
+    RequestKind,
+)
 from openswe.human_review.supplementary import (
     STEP_PREFIX as SUPPLEMENTARY_STEP,
 )
@@ -108,7 +113,6 @@ SNOOZE_DURATIONS = {
     "1 day": timedelta(days=1),
     "2 days": timedelta(days=2),
 }
-_AUTO_ASSIGN_ASKED = "auto_assign_asked"
 _REMAINING_OWNERS_ASKED = "remaining_owners_asked"
 
 
@@ -840,7 +844,7 @@ async def assign(
     if replace:
         async with HumanReviewRequest.locked(added.id) as (_, row):
             if row is not None:
-                row.run_config = {**row.run_config, _AUTO_ASSIGN_ASKED: True}
+                row.run_config = {**row.run_config, AUTO_ASSIGN_ASKED: True}
     await _request_github_review(added, github_login)
     minutes = await _assignment_minutes(added)
     if not await _schedule(added, "pick_expiry", timedelta(minutes=minutes)):
@@ -1251,7 +1255,7 @@ async def start_auto_assign(
     if asked:
         async with HumanReviewRequest.locked(request.id) as (_, row):
             if row is not None:
-                row.run_config = {**row.run_config, _AUTO_ASSIGN_ASKED: True}
+                row.run_config = {**row.run_config, AUTO_ASSIGN_ASKED: True}
     result = (
         AutoAssignResult("disabled")
         if not asked and skip_on_preview("start_auto_assign")
@@ -1614,7 +1618,7 @@ async def _auto_assign_hold(request: HumanReviewRequest, step: str) -> str | Non
     A pull request merely linked outside a review channel only gets reactions, so
     its unaccepted picks are withdrawn.
     """
-    if request.kind != "posted" or _AUTO_ASSIGN_ASKED in request.run_config:
+    if request.kind != "posted" or request.auto_assign_asked:
         return None
     pr = request.pull_request
     try:
