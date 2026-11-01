@@ -30,6 +30,7 @@ def _actor(*, login: str = "octocat", admin: bool = False) -> object:
             session=actor.session,
             admin=True,
             automation=actor.automation,
+            private_thread_context=actor.private_thread_context,
         )
     return actor
 
@@ -675,6 +676,70 @@ class _DetailClient:
             ]
 
         self.runs = SimpleNamespace(list=AsyncMock(side_effect=_list_runs))
+
+
+@pytest.mark.parametrize("context", ["private", "public", "nonowner", "missing", "unavailable"])
+async def test_private_thread_discovery_uses_indexed_caller_context(
+    monkeypatch: pytest.MonkeyPatch, context: str
+) -> None:
+    client = _DetailClient()
+    target_id = "11111111-1111-1111-1111-111111111111"
+    target = {"id": target_id, "visibility": "private", "ownerLogin": "octocat"}
+    indexed = SimpleNamespace(
+        metadata={
+            "visibility": "public" if context == "public" else "private",
+            "owner_login": "someone-else" if context == "nonowner" else "OCTOCAT",
+        }
+    )
+    monkeypatch.setattr(
+        threads_tool.THREADS,
+        "get",
+        AsyncMock(
+            return_value=None if context == "missing" else indexed,
+            side_effect=RuntimeError("index unavailable") if context == "unavailable" else None,
+        ),
+    )
+    monkeypatch.setattr(
+        threads_tool, "get_config", lambda: {"configurable": {"thread_id": "mda-caller"}}
+    )
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+    original_get = client.threads.get
+
+    async def get(thread_id: str) -> dict[str, object]:
+        if thread_id == "mda-caller":
+            raise HTTPException(404, "caller exists only in the thread index")
+        return await original_get(thread_id)
+
+    client.threads.get = get
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", AsyncMock(return_value=target))
+    page = AsyncMock(return_value={"items": [], "hasMore": False})
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+    for name, value in (
+        ("get_plan_content", {}),
+        ("list_plan_comments", []),
+        ("get_workflow_push_approvals", {}),
+        ("_queued_message_count", 0),
+        ("_thread_cost", None),
+    ):
+        monkeypatch.setattr(threads_tool, name, AsyncMock(return_value=value))
+
+    allowed = context == "private"
+    for query in (None, "prior work"):
+        result = await threads_tool.list_threads(query=query)
+        assert result["success"] is True
+        assert page.await_args is not None
+        assert page.await_args.kwargs["include_private"] is allowed
+        assert page.await_args.kwargs["query"] == query
+    for result in (
+        await threads_tool.list_threads(query=target_id),
+        await threads_tool.get_thread(target_id),
+    ):
+        assert result["success"] is allowed
+        if not allowed:
+            assert result["status_code"] == 403
+    if not allowed:
+        client.threads.get_state.assert_not_awaited()
 
 
 @pytest.mark.parametrize("visibility", ["public", "private"])

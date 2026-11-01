@@ -116,6 +116,27 @@ class _Actor:
     def admin(self) -> bool:
         return not self.automation and is_admin(self.email, login=self.login)
 
+    async def private_thread_context(self) -> bool:
+        if self.automation:
+            return False
+        cfg = RunConfig.parse(_config().get("configurable"))
+        if cfg.mcp_caller:
+            return True
+        if not cfg.thread_id:
+            return False
+        try:
+            thread = await THREADS.get(cfg.thread_id)
+        except Exception:
+            logger.exception(
+                "Could not verify private thread context", extra={"thread_id": cfg.thread_id}
+            )
+            return False
+        return (
+            thread is not None
+            and thread.metadata.get("visibility") == "private"
+            and thread_is_owner(thread.metadata, self.login)
+        )
+
     async def mirror_of(self, session_id: str) -> tuple[str, Mapping[str, Any]] | None:
         """The thread mirroring this person's Claude Code session, if it has one."""
         owner = await User.for_login("github", self.login)
@@ -410,7 +431,7 @@ async def list_threads(
             automation_id=automation_id,
             filter_participant_login=filter_participant_login,
             surfaced_only=True,
-            include_private=await _private_thread_context(actor),
+            include_private=await actor.private_thread_context(),
             admin_threads=admin_threads,
         )
     except HTTPException as exc:
@@ -791,22 +812,6 @@ def _looks_uuid(value: str) -> bool:
     return True
 
 
-async def _private_thread_context(actor: _Actor) -> bool:
-    if actor.automation:
-        return False
-    if RunConfig.parse(_config().get("configurable")).mcp_caller:
-        return True
-    thread_id = as_json_object(_config().get("configurable")).get("thread_id")
-    if not isinstance(thread_id, str) or not thread_id:
-        return False
-    try:
-        thread = await langgraph_client().threads.get(thread_id)
-    except Exception:
-        return False
-    metadata = thread_metadata(thread)
-    return metadata.get("visibility") == "private" and thread_is_owner(metadata, actor.login)
-
-
 async def _authorized_locator(
     locator: str,
     actor: _Actor,
@@ -857,7 +862,7 @@ async def _authorized_locator(
     if (
         summary.get("visibility") == "private"
         and not admin_override
-        and not await _private_thread_context(actor)
+        and not await actor.private_thread_context()
     ):
         if not (
             action == "send_message"
