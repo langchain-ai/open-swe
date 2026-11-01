@@ -17,7 +17,7 @@ from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
-_MENTION = re.compile(r"<@([UW][A-Z0-9]+)(?:\|[^>]*)?>")
+_MENTION = re.compile(r"<@([A-Z0-9_]+)(?:\|[^>]*)?>")
 
 
 class SlackThreadMention(Base):
