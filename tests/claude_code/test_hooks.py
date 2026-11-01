@@ -1,6 +1,7 @@
 """Claude Code hook events, as the read-only thread that mirrors their session shows them."""
 
 from collections.abc import Mapping
+from uuid import uuid7
 
 import httpx
 import pytest
@@ -10,6 +11,7 @@ from openswe.claude_code import hooks
 from openswe.claude_code.hooks import HOOK_EVENT, SessionMirror, ToolReturned
 from openswe.claude_code.routes import router
 from openswe.claude_code.sync_tokens import ClaudeCodeSyncToken
+from openswe.dashboard.oauth import ConnectClaim
 from openswe.transcript.snapshot import load_snapshot
 from openswe.users import User
 
@@ -127,6 +129,40 @@ async def test_only_the_owners_token_writes_their_session(
     assert await load_snapshot(SessionMirror(owner, "session-1").thread_id) is not None
     # The same session id under someone else names a different thread.
     assert await load_snapshot(SessionMirror(other, "session-1").thread_id) is None
+
+
+async def test_a_connect_claim_mints_one_token_for_its_owner(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "connect-claim-secret-that-is-at-least-32-bytes")
+    owner = await User.sign_in("github", "1", login="test-user")
+    claim = ConnectClaim(sub="test-user", user_id=owner.id, name="laptop", jti=uuid7()).issue()
+    impostor = ConnectClaim(sub="trusted-user", user_id=owner.id, name="x", jti=uuid7()).issue()
+    app = FastAPI()
+    app.include_router(router)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+
+        async def redeem(presented: str) -> httpx.Response:
+            return await client.post(
+                "/claude-code/connections", headers={"Authorization": f"Bearer {presented}"}
+            )
+
+        refused = [(await redeem(presented)).status_code for presented in ("forged", impostor)]
+        minted = await redeem(claim)
+        replayed = await redeem(claim)
+
+    assert refused == [401, 401]
+    assert minted.status_code == 201
+    secret = minted.json()["secret"]
+    stop = minted.json()["settings"]["hooks"]["Stop"][0]["hooks"][0]
+    assert stop["headers"]["Authorization"] == f"Bearer {secret}"
+    token = await ClaudeCodeSyncToken.authenticate(secret)
+    assert token is not None and token.user_id == owner.id
+    assert replayed.status_code == 409
+    assert len(await ClaudeCodeSyncToken.for_user(owner.id)) == 1
 
 
 @pytest.mark.parametrize(

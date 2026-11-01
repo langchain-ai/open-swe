@@ -11352,6 +11352,29 @@
         ]
       }
     },
+    "/dashboard/api/claude-code/connections": {
+      "post": {
+        "description": "Mint the token a ``connect_claude_code`` claim stands for, once, for the script installing it.",
+        "operationId": "api_redeem_claude_code_claim_dashboard_api_claude_code_connections_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MintedSyncToken"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Redeem Claude Code Claim",
+        "tags": [
+          "dashboard",
+          "claude-code"
+        ]
+      }
+    },
     "/dashboard/api/claude-code/hooks": {
       "post": {
         "operationId": "api_claude_code_hook_dashboard_api_claude_code_hooks_post",
