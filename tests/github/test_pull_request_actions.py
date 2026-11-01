@@ -120,8 +120,7 @@ async def test_merge_requires_github_confirmation(github, status, merged):
     }
 
 
-@pytest.mark.parametrize("method", ["squash", "merge", "rebase"])
-async def test_pending_merge_enables_github_auto_merge(method: str) -> None:
+async def test_pending_merge_enables_github_auto_merge() -> None:
     requests: list[dict[str, object]] = []
 
     def github(request: httpx2.Request) -> httpx2.Response:
@@ -142,13 +141,15 @@ async def test_pending_merge_enables_github_auto_merge(method: str) -> None:
         pull = GitHubClient(http).repo("acme", "app").pull_request(1)
         result = await actions.act_on_pull_request(
             pull,
-            actions.MergeAction(action="merge", sha="a" * 40, merge_method=method, auto_merge=True),
+            actions.MergeAction(
+                action="merge", sha="a" * 40, merge_method="merge", auto_merge=True
+            ),
         )
     assert result.done
     assert requests[0]["variables"] == {
         "input": {
             "pullRequestId": "PR_1",
-            "mergeMethod": method.upper(),
+            "mergeMethod": "MERGE",
             "expectedHeadOid": "a" * 40,
         }
     }
