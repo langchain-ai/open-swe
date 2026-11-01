@@ -135,6 +135,53 @@ test.describe("review page", () => {
     await forgetReviewThreads(page, pr);
   });
 
+  test("offers Undraft as the author's primary action and keeps commenting in the dropdown", async ({
+    page,
+  }) => {
+    const draft = await seedOpenPullRequest(page, {
+      repo: `${OWNER}/${REPO}`,
+      title: "Author's draft",
+      author: SAME_USER.login,
+      draft: true,
+      head: "authors-draft",
+      files: FILES,
+    });
+    await openReview(page, draft);
+    const header = page.locator("header").first();
+    await expect(
+      header.getByRole("button", { name: "Undraft", exact: true }),
+    ).toBeVisible();
+    await expect(
+      header.getByRole("button", { name: "Approve", exact: true }),
+    ).toHaveCount(0);
+    await header.getByRole("button", { name: "Comment", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Comment on your pull request" }),
+    ).toBeVisible();
+    await expect(page.getByRole("radio", { name: /Approve/ })).toHaveCount(0);
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    const ready = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/pulls/${draft.number}/action`) &&
+        response.request().method() === "POST",
+    );
+    await header.getByRole("button", { name: "Undraft", exact: true }).click();
+    expect((await ready).ok()).toBeTruthy();
+    await expect(
+      header.getByRole("button", { name: "Undraft", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      header.getByRole("button", { name: "Comment", exact: true }),
+    ).toHaveText("Comment");
+    await openReview(page, pr);
+    await expect(
+      header.getByRole("button", { name: "Approve", exact: true }),
+    ).toBeVisible();
+    await expect(
+      header.getByRole("button", { name: "Undraft", exact: true }),
+    ).toHaveCount(0);
+  });
+
   test("opens a review from a pasted or typed pull request link", async ({
     page,
   }) => {
