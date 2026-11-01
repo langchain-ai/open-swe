@@ -491,7 +491,7 @@ async def _thread_participant(
         _resolve_user_custom_instructions(login),
         MEMORIES.personal(
             user.id if user else None,
-            unprocessed_in=(
+            curated_in=(
                 RunConfig.from_config(config).workspace_slug
                 if user is not None and user.typed_preferences.experimental_memory
                 else None
