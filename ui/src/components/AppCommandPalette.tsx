@@ -338,10 +338,10 @@ export function AppCommandPalette({
                             size={16}
                             weight="regular"
                           />
-                          <span className="min-w-0 flex-1 truncate">
-                            {result.label}
+                          <span className="flex min-w-0 flex-1 flex-col">
+                            <span className="truncate">{result.label}</span>
                             {result.details?.length ? (
-                              <span className="ml-space-2 text-xs text-secondary">
+                              <span className="truncate text-xs text-secondary">
                                 {result.details.join(" · ")}
                               </span>
                             ) : null}
