@@ -48,13 +48,12 @@ import {
 } from "@/features/reviews/lib/status"
 import { AgentMark } from "./AgentMark"
 import {
-  askAboutFinding,
+  findingAttachment,
   findingGroupColor,
   findingGroupLabel,
   findingLocation,
   findingGroupTextColor,
   findingTarget,
-  fixFinding,
   isAnchored,
   openFindingCounts,
   rankFindings,
@@ -73,6 +72,7 @@ import {
   type Standing,
   type StandingTone,
 } from "./pullRequestStanding"
+import { quoteFromPage } from "@/features/agents/components/composer/ComposerAttachments"
 import { usePageEvent, useReviewPage } from "./store"
 import { plural } from "./text"
 
@@ -396,7 +396,7 @@ function ChecksRow({
   login: string
 }) {
   const [expanded, setExpanded] = useState(status.ci === "failing")
-  const askInChat = useReviewPage((state) => state.askInChat)
+  const attachToChat = useReviewPage((state) => state.attachToChat)
   const states = checks.map(checkState)
   const failed = states.filter((s) => s === "fail").length
   const pending = states.filter((s) => s === "pending").length
@@ -499,9 +499,14 @@ function ChecksRow({
                   aria-label="Ask why"
                   type="button"
                   onClick={() =>
-                    askInChat(
-                      `Why is the \`${check.name}\` check failing on this pull request?`
-                    )
+                    attachToChat([
+                      quoteFromPage({
+                        label: "Ask",
+                        location: check.name,
+                        quote: "Why is this check failing?",
+                        comment: `Why is the \`${check.name}\` check failing on this pull request?`,
+                      }),
+                    ])
                   }
                   className="ml-auto h-auto border-0 px-0 text-secondary opacity-0 group-hover:opacity-100 hover:text-primary focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                 >
@@ -826,7 +831,7 @@ function OpenSweRow({
 
 function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
   const showFinding = useReviewPage((state) => state.showFinding)
-  const askInChat = useReviewPage((state) => state.askInChat)
+  const attachToChat = useReviewPage((state) => state.attachToChat)
   const [openId, setOpenId] = useState<string | null>(null)
   return (
     <ol className="flex flex-col">
@@ -897,7 +902,9 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                   variant="plain"
                   color="secondary"
                   aria-label={`Ask Open SWE about: ${finding.title}`}
-                  onClick={() => askInChat(askAboutFinding(finding))}
+                  onClick={() =>
+                    attachToChat([findingAttachment(finding, "ask")])
+                  }
                 >
                   Ask
                 </Button>
@@ -907,7 +914,9 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                     variant="plain"
                     color="secondary"
                     aria-label={`Ask Open SWE to fix: ${finding.title}`}
-                    onClick={() => askInChat(fixFinding(finding))}
+                    onClick={() =>
+                      attachToChat([findingAttachment(finding, "fix")])
+                    }
                   >
                     Fix it
                   </Button>

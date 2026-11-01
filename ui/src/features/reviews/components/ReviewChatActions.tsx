@@ -1,6 +1,4 @@
 import { Button } from "@langchain/macaw-components/Button"
-import { XIcon } from "@langchain/macaw-components/icons"
-import { IconButton } from "@langchain/macaw-components/IconButton"
 import {
   createContext,
   useContext,
@@ -10,9 +8,8 @@ import {
   useState,
 } from "react"
 import type { ReactNode } from "react"
-import { FileCodeIcon } from "@phosphor-icons/react/dist/ssr/FileCode"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
-import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
+import type { ComposerAttachment } from "@/features/agents/components/composer/ComposerAttachments"
 import {
   chatDiffAction,
   isChatDiffActionTool,
@@ -34,10 +31,12 @@ interface ReviewChatActionsValue {
   showInDiff: (range: DiffRange) => void
   /** What an empty chat shows: ways in, specific to this pull request. */
   emptyState?: ReactNode
-  /** Code the reviewer attached to their next message. */
-  excerpts?: ReadonlyArray<CodeExcerpt>
-  removeExcerpt?: (index: number) => void
-  clearExcerpts?: () => void
+  /** What the reviewer attached to their next message from the page: code lines, findings, comments. */
+  attachments?: {
+    items: ReadonlyArray<ComposerAttachment>
+    remove: (index: number) => void
+    clear: () => void
+  }
   /** A question to send as soon as the chat can. */
   question?: string
   clearQuestion?: () => void
@@ -181,55 +180,5 @@ function ReviewChatActionList({
         id={action.id}
       />
     )
-  )
-}
-
-/** "R35-37" → "lines 35–37", with "old" for the deleted side. */
-function excerptLines(label: string): string {
-  const match = /^([LR])(\d+)(?:-(\d+))?$/.exec(label)
-  if (!match) return label
-  const [, side, start, end] = match
-  const old = side === "L" ? "old " : ""
-  return end ? `${old}lines ${start}–${end}` : `${old}line ${start}`
-}
-
-/** The code attached to the next message, as chips the reviewer can drop before sending. */
-export function ReviewExcerptChips() {
-  const review = useContext(ReviewChatActionsContext)
-  const excerpts = review?.excerpts ?? []
-  if (excerpts.length === 0) return null
-  return (
-    <ul
-      aria-label="Code attached to your next message"
-      className="flex flex-wrap gap-space-2 px-space-1 pb-space-1"
-    >
-      {excerpts.map((excerpt, index) => (
-        <li
-          key={`${excerpt.path}:${excerpt.lineLabel}`}
-          title={excerpt.snippet}
-          className="flex max-w-full items-center gap-space-2 rounded-md border border-default bg-surface-level-2 py-0.5 pr-0.5 pl-space-2 text-xxs"
-        >
-          <FileCodeIcon
-            className="size-3.5 shrink-0 text-secondary"
-            weight="regular"
-          />
-          <span className="min-w-0 truncate font-mono">
-            {excerpt.path.split("/").pop()}
-          </span>
-          <span className="shrink-0 text-secondary">
-            {excerptLines(excerpt.lineLabel)}
-          </span>
-          <IconButton
-            icon={XIcon}
-            label={`Remove ${excerpt.path} ${excerptLines(excerpt.lineLabel)}`}
-            size="xs"
-            variant="plain"
-            color="secondary"
-            className="shrink-0"
-            onClick={() => review?.removeExcerpt?.(index)}
-          />
-        </li>
-      ))}
-    </ul>
   )
 }

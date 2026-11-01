@@ -130,9 +130,9 @@ function Description({
     (src: string) => reviewImageProxyUrl(owner, repo, number, src),
     [owner, repo, number]
   )
-  const askInChat = useReviewPage((state) => state.askInChat)
+  const attachToChat = useReviewPage((state) => state.attachToChat)
   const replyWithImage = ({ image, comment }: ImageAnnotation) =>
-    askInChat(comment, [image])
+    attachToChat([{ kind: "image", image, comment }])
   const [overflows, setOverflows] = useState(false)
   const [expanded, setExpanded] = useState(false)
   useLayoutEffect(() => {

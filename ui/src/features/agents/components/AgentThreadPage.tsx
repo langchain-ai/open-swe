@@ -14,14 +14,13 @@ import {
   threadDetailResolved,
 } from "@/lib/perf/threadLoad"
 import { pageTitle } from "@/lib/pageTitle"
-import type { ComposerDraft } from "@/features/agents/components/composer/ChatComposer"
 
 export function AgentThreadPage(props: {
   threadId: string
   active?: boolean
   /** Show this subagent's transcript instead of the thread's own. */
   subagentId?: string
-  composerDraft?: ComposerDraft
+  composerDraft?: { key: number; text: string }
   /** False when the thread is embedded in a page that names the tab itself. */
   ownsTitle?: boolean
 }) {
@@ -52,7 +51,7 @@ function AgentThreadContent({
   threadId: string
   active?: boolean
   subagentId?: string
-  composerDraft?: ComposerDraft
+  composerDraft?: { key: number; text: string }
   ownsTitle?: boolean
 }) {
   const threadQuery = useAgentThread(threadId)

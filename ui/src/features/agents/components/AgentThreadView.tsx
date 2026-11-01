@@ -1,10 +1,6 @@
 import { LogoMark } from "@/components/Branding"
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
-import {
-  ReviewChatActionsContext,
-  ReviewExcerptChips,
-} from "@/features/reviews/components/ReviewChatActions"
-import { serializeExcerpts } from "@/features/agents/utils/codeExcerpt"
+import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import type { PassageReply } from "@/features/agents/utils/passageReply"
 import {
   Profiler,
@@ -68,8 +64,8 @@ import {
   visiblePendingMessages,
 } from "@/features/agents/lib/queuedMessages"
 import type { QueuedTurn } from "@/features/agents/lib/transcript/reducer"
+import type { ComposerAttachment } from "@/features/agents/components/composer/ComposerAttachments"
 import type {
-  ComposerDraft,
   ComposerSubmission,
   RestoredDraft,
   SubmitOptions,
@@ -102,7 +98,7 @@ import {
 
 interface AgentThreadViewProps {
   thread: AgentThread
-  composerDraft?: ComposerDraft
+  composerDraft?: { key: number; text: string }
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
@@ -383,24 +379,6 @@ export function AgentThreadView({
     ]
   )
 
-  // Code attached on the review page rides along as fenced excerpts the transcript renders as blocks.
-  const submitWithExcerpts = useCallback(
-    async (submission: ComposerSubmission, options?: SubmitOptions) => {
-      const excerpts = reviewChat?.excerpts ?? []
-      await submitMessage(
-        excerpts.length
-          ? {
-              ...submission,
-              text: serializeExcerpts(submission.text, excerpts),
-            }
-          : submission,
-        options
-      )
-      if (excerpts.length) reviewChat?.clearExcerpts?.()
-    },
-    [reviewChat, submitMessage]
-  )
-
   const submitText = useCallback(
     (content: string) => submitMessage(plainSubmission(content)),
     [submitMessage]
@@ -425,7 +403,7 @@ export function AgentThreadView({
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
         text: composerDraft.text,
-        images: composerDraft.images ?? [],
+        images: [],
         replacesSuggestion: true,
       }))
     }
@@ -437,7 +415,7 @@ export function AgentThreadView({
     if (!question || !canPost) return
     clearQuestion?.()
     // oxlint-disable-next-line react/set-state-in-effect
-    submitWithExcerpts(plainSubmission(question)).catch((error: unknown) => {
+    submitMessage(plainSubmission(question)).catch((error: unknown) => {
       console.error("Could not send the review question", error)
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
@@ -445,18 +423,22 @@ export function AgentThreadView({
         images: [],
       }))
     })
-  }, [question, canPost, clearQuestion, submitWithExcerpts])
+  }, [question, canPost, clearQuestion, submitMessage])
 
   const [droppedFiles, setDroppedFiles] = useState<{
     key: number
     files: Array<File>
   } | null>(null)
-  const [addedReply, setAddedReply] = useState<{
+  const [addedAttachment, setAddedAttachment] = useState<{
     key: number
-    reply: PassageReply
+    attachment: ComposerAttachment
   } | null>(null)
-  const addReply = (reply: PassageReply) =>
-    setAddedReply((previous) => ({ key: (previous?.key ?? 0) + 1, reply }))
+  const attach = (attachment: ComposerAttachment) =>
+    setAddedAttachment((previous) => ({
+      key: (previous?.key ?? 0) + 1,
+      attachment,
+    }))
+  const addReply = (reply: PassageReply) => attach({ kind: "reply", reply })
   const restoreQueuedToComposer = useCallback(
     (
       texts: ReadonlyArray<string>,
@@ -772,11 +754,7 @@ export function AgentThreadView({
 
   const replyWithImage = canPost
     ? ({ image, comment }: ImageAnnotation) =>
-        setRestoreDraft((previous) => ({
-          key: (previous?.key ?? 0) + 1,
-          text: comment,
-          images: [image],
-        }))
+        attach({ kind: "image", image, comment })
     : null
 
   return (
@@ -1012,7 +990,6 @@ export function AgentThreadView({
                   fixDisabled={!canPost || sendMessage.isPending}
                 />
               )}
-              {reviewChat && <ReviewExcerptChips />}
               <AgentPromptBar
                 placeholder={
                   moving
@@ -1036,11 +1013,12 @@ export function AgentThreadView({
                 activeRun={activeRun}
                 onStop={stopRun}
                 stoppable={!mirroredSession}
-                onSubmit={submitWithExcerpts}
+                onSubmit={submitMessage}
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
                 droppedFiles={droppedFiles}
-                addedReply={addedReply}
+                addedAttachment={addedAttachment}
+                pageAttachments={reviewChat?.attachments}
                 models={models}
                 routed={routed}
                 selection={activeSelection}
