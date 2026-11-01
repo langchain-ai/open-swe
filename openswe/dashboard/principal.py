@@ -58,10 +58,41 @@ class DashboardPrincipal:
             return
         prefix = "/dashboard/api/"
         relative = path.removeprefix(prefix).rstrip("/") if path.startswith(prefix) else ""
+        personal = (
+            "me",
+            "profile",
+            "my-mcps",
+            "my-managed-tools",
+            "my-credentials/langsmith",
+            "threads",
+            "bridges",
+            "skills",
+        )
+        if any(relative == group or relative.startswith(group + "/") for group in personal):
+            return
         if relative == "my-credentials/langsmith" and method in {"GET", "DELETE"}:
             return
-        if relative in {"me", "auth/logout"}:
+        if relative in {
+            "options",
+            "desktop/environments",
+            "client-errors",
+            "ui-invalidations",
+            "auth/logout",
+        }:
             return
+        if method in {"GET", "HEAD"}:
+            if relative in {
+                "settings",
+                "team-settings",
+                "workspaces/options",
+                "organization-skills",
+            }:
+                return
+            parts = relative.split("/")
+            if len(parts) == 3 and parts[0] == "workspaces" and parts[2] == "settings":
+                return
+            if len(parts) == 2 and parts[0] == "plan":
+                return
         raise HTTPException(403, "This operation requires a GitHub account")
 
     async def user(self) -> User | None:

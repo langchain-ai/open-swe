@@ -15,7 +15,6 @@ from langchain_core.messages.content import ImageContentBlock, create_image_bloc
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
-from openswe.dashboard.admin import is_admin
 from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     default_vision_model_pair,
@@ -60,6 +59,7 @@ from openswe.threads.access import (
     resolve_run_email,
 )
 from openswe.threads.creation import create_thread
+from openswe.threads.identity import ThreadIdentity
 from openswe.threads.moves import SANDBOX_HANDOFF_SYSTEM, SANDBOX_MOVED_KEY, SandboxMove
 from openswe.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
 from openswe.threads.store import THREADS
@@ -298,6 +298,11 @@ async def create_dashboard_thread_record(
         "origin": DASHBOARD_SOURCE,
         "owner_type": "user",
         "owner_login": login.strip(),
+        **(
+            {"owner_user_id": str(ThreadIdentity(login).user_id)}
+            if ThreadIdentity(login).user_id
+            else {}
+        ),
         "visibility": visibility,
         "thread_category": "interactive",
         "trigger_kind": "user",
@@ -315,7 +320,7 @@ async def create_dashboard_thread_record(
     }
     if experience == "agent_workspace":
         metadata["experience"] = experience
-    if visibility == "private" and is_admin(email, login=login):
+    if visibility == "private" and ThreadIdentity(login).is_admin(email):
         metadata["admin_thread"] = True
     if workspace:
         metadata["workspace"] = workspace
@@ -384,11 +389,15 @@ async def _build_dashboard_configurable(
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
         "source": source,
-        "github_login": login,
+        **(
+            {"github_login": login}
+            if ThreadIdentity(login).github_login
+            else {"user_id": str(ThreadIdentity(login).user_id), "auth_provider": "langsmith"}
+        ),
         "user_email": await resolve_run_email(login, profile),
         "background_task_completion": False,
     }
-    if metadata.get("experience") == "agent_workspace":
+    if ThreadIdentity(login).user_id is not None:
         configurable["experience"] = "agent_workspace"
     repo_config = repo_config_from_metadata(metadata)
     if repo_config:
@@ -433,9 +442,16 @@ async def create_dashboard_session(
 ) -> str:
     """Create a fresh owned thread using the person's dashboard defaults."""
     profile = RepositoryDefaults.model_validate(await get_profile(login) or {})
-    repo = body.repo if body.repo is not None else profile.repository()
+    identity = ThreadIdentity(login)
+    if identity.user_id is not None and body.repo:
+        raise HTTPException(403, "This account has no GitHub repository access")
+    repo = (
+        None
+        if identity.user_id is not None
+        else (body.repo if body.repo is not None else profile.repository())
+    )
     workspace = await _resolve_requested_workspace(body.workspace, _parse_repo(repo), login=login)
-    if body.repo is None:
+    if body.repo is None and identity.user_id is None:
         preferred_workspace = await _resolve_requested_workspace(body.workspace, None, login=login)
         if profile.workspace_default_repos.get(preferred_workspace):
             workspace = preferred_workspace
@@ -452,7 +468,11 @@ async def create_dashboard_session(
         email=email,
         repo_config=repo_config,
         prompt=body.prompt,
-        visibility=await _requested_visibility({"visibility": body.visibility}, login=login),
+        visibility="private"
+        if identity.user_id is not None
+        else await _requested_visibility({"visibility": body.visibility}, login=login),
+        repo_explicitly_none=identity.user_id is not None,
+        experience="agent_workspace" if identity.user_id is not None else "coding",
         workspace=workspace,
     )
     return str(thread["thread_id"])
@@ -469,6 +489,9 @@ async def start_dashboard_thread(
     unlisted: bool = False,
 ) -> str:
     """Start a person's dashboard thread; the first repo is the one its sandbox opens in."""
+    identity = ThreadIdentity(login)
+    if identity.user_id is not None and repos:
+        raise HTTPException(403, "This account has no GitHub repository access")
     repo_configs: list[dict[str, str]] = []
     for repo in repos:
         repo_config = _parse_repo(repo)
@@ -485,7 +508,9 @@ async def start_dashboard_thread(
         repo_config=primary,
         prompt=prompt,
         title=title,
-        visibility=visibility,
+        visibility="private" if identity.user_id is not None else visibility,
+        repo_explicitly_none=identity.user_id is not None,
+        experience="agent_workspace" if identity.user_id is not None else "coding",
         workspace=await _resolve_requested_workspace(None, primary, login=login),
         extra_metadata={"unlisted": True} if unlisted else None,
     )
@@ -801,13 +826,13 @@ async def _attributed_run_messages(
     """
     if content is None:
         content = ""
-    sender_id = f"github:{login}"
+    sender_id = ThreadIdentity(login).sender_id
     injected = (
         set(history.context_hashes)
         if history.context_hashes is not None
         else injected_dynamic_context_hashes_from_metadata(metadata)
     )
-    person: PersonIdentity = {"id": sender_id, "github_login": login}
+    person: PersonIdentity = ThreadIdentity(login).person
     if email:
         person["email"] = email
     sender_id = (await User.canonical_person(person))["id"]
@@ -867,6 +892,9 @@ async def _enrich_run_start_command(
 ) -> dict[str, Any]:
     if command.get("method") != "run.start":
         return command
+    if not creating and ThreadIdentity(login).user_id is not None:
+        if metadata.get("visibility") != "private":
+            raise HTTPException(403, "LangSmith accounts require private tasks")
 
     params = command.get("params")
     if not isinstance(params, dict):
@@ -953,11 +981,14 @@ async def _enrich_run_start_command(
             experience: Literal["coding", "agent_workspace"] = (
                 "agent_workspace" if requested_experience == "agent_workspace" else "coding"
             )
-            if (
-                experience == "agent_workspace"
-                and not (await User.preferences_for_login(login)).experimental_fleet
-            ):
-                raise HTTPException(403, "LangSmith Agent Workspace is not enabled")
+            identity = ThreadIdentity(login)
+            if identity.user_id is not None:
+                visibility = "private"
+                experience = "agent_workspace"
+                if client_configurable.get("repo"):
+                    raise HTTPException(403, "Agent Workspace has no GitHub repository access")
+            elif experience == "agent_workspace":
+                raise HTTPException(403, "Agent Workspace requires LangSmith authentication")
             repo_config = _parse_repo(client_configurable.get("repo")) or {}
             workspace = await _resolve_requested_workspace(
                 client_configurable.get("workspace") or client_configurable.get("environment"),
@@ -969,7 +1000,8 @@ async def _enrich_run_start_command(
                 login=login,
                 email=email,
                 repo_config=repo_config,
-                repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True
+                repo_explicitly_none=identity.user_id is not None
+                or client_configurable.get("repo_explicitly_none") is True
                 or (experience == "agent_workspace" and not repo_config),
                 experience=experience,
                 visibility=visibility,
@@ -1290,9 +1322,8 @@ async def steer_running_thread(
         "text": _command_prompt_text(content),
         "images": list(image_blocks),
         "sender": {
-            "id": f"github:{login}",
-            "platform": "github",
-            "github_login": login,
+            **ThreadIdentity(login).person,
+            "platform": "langsmith" if ThreadIdentity(login).user_id else "github",
             **({"email": email} if email else {}),
         },
         "queue_id": message_id,

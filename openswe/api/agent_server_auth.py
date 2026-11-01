@@ -12,6 +12,7 @@ import os
 from collections.abc import Sequence
 from typing import Final
 
+from fastapi import HTTPException
 from langgraph_sdk import Auth
 from starlette.authentication import AuthCredentials
 from starlette.requests import HTTPConnection
@@ -19,6 +20,7 @@ from starlette.types import Scope
 
 from openswe.config import ENV
 from openswe.dashboard.oauth import optional_session
+from openswe.dashboard.principal import DashboardPrincipal
 
 BACKEND_PERMISSION: Final = "openswe:backend"
 _BACKEND_IDENTITY: Final = "openswe:backend"
@@ -68,9 +70,17 @@ async def authenticate(scope: Scope) -> Auth.types.MinimalUserDict:
     if api_key and any(hmac.compare_digest(api_key, key) for key in _backend_keys()):
         return {"identity": _BACKEND_IDENTITY, "permissions": [BACKEND_PERMISSION]}
     session = optional_session(conn)
-    login = session.get("sub") if session else None
-    if isinstance(login, str) and login.strip():
-        return {"identity": login.strip(), "permissions": []}
+    if session:
+        try:
+            principal = DashboardPrincipal.from_session(session)
+            if not principal.subject.strip():
+                raise HTTPException(401, "invalid session identity")
+            await principal.authorize()
+        except HTTPException as exc:
+            raise Auth.exceptions.HTTPException(
+                status_code=exc.status_code, detail=exc.detail
+            ) from exc
+        return {"identity": principal.subject.strip(), "permissions": []}
     raise Auth.exceptions.HTTPException(status_code=401, detail="not authenticated")
 
 

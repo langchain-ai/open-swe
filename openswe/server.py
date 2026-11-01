@@ -435,7 +435,9 @@ async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIde
     try:
         thread = await read_thread(thread_id, client)
         logins = participant_logins(thread_metadata(thread).get(PARTICIPANT_LOGINS_KEY))
-        return await resolve_participant_identities(logins)
+        return await resolve_participant_identities(
+            login for login in logins if not login.startswith("user:")
+        )
     except Exception:
         logger.debug("Failed to resolve participant identities for %s", thread_id, exc_info=True)
         return []
@@ -474,9 +476,16 @@ async def _thread_participant(
     elif slack_user_id:
         timezone = await get_slack_user_timezone(slack_user_id)
     if not login:
+        instructions = await _resolve_user_custom_instructions(f"user:{user.id}") if user else None
         return ThreadParticipant(
-            identity=identity,
+            identity=replace(
+                identity, display_name=user.display_name, commit_name="", commit_email=""
+            )
+            if user
+            else identity,
             person_id=person_id or "",
+            instructions=instructions or "",
+            email=user.email if user else "",
             timezone=timezone,
             linked=user is not None,
             slack_user_id=slack_user_id,
@@ -1621,7 +1630,7 @@ def agent_sender(config: RunnableConfig, turn: AgentTurnSettings) -> RunSender:
     """Who an agent run's invocation is attributed to: whoever sent what started it."""
     cfg = RunConfig.from_config(config)
     return RunSender(
-        github_login=turn.profile_login,
+        github_login=cfg.github_login if cfg.auth_provider == "langsmith" else turn.profile_login,
         github_user_id=cfg.github_user_id,
         user_email=cfg.user_email,
         source=cfg.source or "dashboard",

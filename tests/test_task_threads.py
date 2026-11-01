@@ -393,6 +393,8 @@ async def test_task_owner_id_survives_rename_and_rejects_reassigned_login(
     )
     monkeypatch.setattr(User, "get", AsyncMock(return_value=owner))
     client.metadata[COORDINATOR]["visibility"] = "private"
+    config = await service.recipient_config(COORDINATOR)
+    assert config["github_login"] == "renamed-owner"
     assert (
         await service.authorized_metadata(service.Actor(COORDINATOR, "renamed-owner"))
     ).owner_user_id == owner_id
@@ -467,7 +469,7 @@ async def test_task_wakeup_preserves_current_model_selection(
 
     config = await service.recipient_config(COORDINATOR)
 
-    assert config["experience"] == "agent_workspace"
+    assert config["experience"] == "coding"
     assert config["model_selection"] == selection
     if selection == "explicit":
         assert config["agent_model_id"] == "anthropic:claude-opus-5-5"
@@ -1006,3 +1008,44 @@ async def test_concurrent_registrations_of_one_launch_make_one_worker(
     assert delegation.worker_thread_id == registered[0]["worker_thread_id"]
     replayed = await service.authorize_async_worker(actor, "launch", "Implement login fix")
     assert replayed == registered[0]
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_langsmith_task_workers_inherit_uuid_and_local_bridge_without_github(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
+) -> None:
+    from openswe.dashboard.langsmith_login import LangSmithLogin
+
+    grant = AsyncMock(return_value="langsmith-token")
+    monkeypatch.setattr(LangSmithLogin, "access_token", grant)
+    owner = client.owner
+    owner.identities = [UserIdentity(provider="langsmith", external_id="ls-subject")]
+    subject = f"user:{owner.id}"
+    client.metadata[COORDINATOR].update(
+        owner_login=subject,
+        owner_user_id=str(owner.id),
+        visibility="private",
+        experience="agent_workspace",
+        repo_explicitly_none=True,
+        sandbox_id="bridge:local-task",
+        sandbox_kind="bridge",
+        sandbox_bridge_client="desktop",
+    )
+    monkeypatch.setattr(BridgeStore, "is_connected", AsyncMock(return_value=True))
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    actor = service.Actor(COORDINATOR, subject)
+    worker = str((await launch(actor, "local-worker", "Research"))["worker_thread_id"])
+    config = await service.recipient_config(worker)
+    assert config["user_id"] == str(owner.id)
+    assert config["auth_provider"] == "langsmith"
+    assert config["experience"] == "agent_workspace"
+    assert "github_login" not in config
+    assert client.metadata[worker]["owner_user_id"] == str(owner.id)
+    assert client.metadata[worker]["sandbox_id"] == "bridge:local-task"
+    await service.authorized_metadata(service.Actor(worker, subject))
+    service.enforce_github_login_gate.assert_not_awaited()
+    grant.return_value = None
+    with pytest.raises(HTTPException, match="LangSmith login expired"):
+        await service.recipient_config(worker)
+    with pytest.raises(HTTPException, match="LangSmith login expired"):
+        await service.authorized_metadata(service.Actor(worker, subject))

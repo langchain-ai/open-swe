@@ -313,3 +313,81 @@ async def test_a_sandbox_mda_replaced_from_another_workspace_gets_that_workspace
 
 async def _no_update(workspace: object) -> None:
     return None
+
+
+class TestLangSmithSandboxCredentials:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("linked_github", [False, True])
+    async def test_cloud_lifecycle_never_borrows_github_credentials(
+        self, monkeypatch, linked_github: bool
+    ) -> None:
+        from unittest.mock import AsyncMock, MagicMock
+        from uuid import UUID
+
+        from openswe.sandboxes import lifecycle
+        from openswe.sandboxes.managed import ManagedSandbox
+        from openswe.sandboxes.providers.langsmith import sandbox_proxy_config
+        from openswe.users.models import User, UserIdentity
+
+        owner = User(
+            id=UUID("00000000-0000-0000-0000-000000000001"),
+            identities=[UserIdentity(provider="langsmith", external_id="ls-user")],
+        )
+        if linked_github:
+            owner.identities.append(
+                UserIdentity(provider="github", external_id="123", login="alice")
+            )
+        cloud_rule = {
+            "name": "aws",
+            "type": "aws",
+            "aws": {"role_arn": "arn:aws:iam::123456789012:role/ReadOnly"},
+        }
+        base_config = {"rules": [{"name": "github", "headers": [{"value": "stale"}]}, cloud_rule]}
+        workspace = Workspace(slug="default", snapshot_status="ready", snapshot_id="snap-1")
+        metadata = {
+            "owner_type": "user",
+            "owner_user_id": str(owner.id),
+            "owner_login": f"user:{owner.id}",
+        }
+        tools_rule = {"name": "open-swe-thread-tools"}
+        backend = MagicMock(id="sandbox-ls")
+        mint = AsyncMock(side_effect=AssertionError("GitHub token minting is forbidden"))
+        scope = AsyncMock(side_effect=AssertionError("GitHub scope lookup is forbidden"))
+        configure = AsyncMock(side_effect=sandbox_proxy_config)
+        monkeypatch.setenv("MDA_GITHUB_PROXY_CONNECTION", "github-installation")
+        monkeypatch.setattr(User, "get", AsyncMock(return_value=owner))
+        monkeypatch.setattr(lifecycle, "load_workspace", AsyncMock(return_value=workspace))
+        monkeypatch.setattr(lifecycle, "get_sandbox_metadata", AsyncMock(return_value=metadata))
+        monkeypatch.setattr(
+            "openswe.sandboxes.managed.get_sandbox_metadata", AsyncMock(return_value=metadata)
+        )
+        monkeypatch.setattr(lifecycle, "workspace_token", mint)
+        monkeypatch.setattr(lifecycle, "thread_token_repositories", scope)
+        monkeypatch.setattr(lifecycle, "configure_sandbox_proxy", configure)
+        monkeypatch.setattr(lifecycle, "configure_git_identity", AsyncMock())
+        monkeypatch.setattr(lifecycle, "connect_existing_sandbox", AsyncMock(return_value=backend))
+        monkeypatch.setattr(lifecycle, "complete_handoff", AsyncMock())
+        monkeypatch.setattr(lifecycle, "set_sandbox_backend", lambda thread_id, backend: backend)
+        monkeypatch.setattr(lifecycle, "maybe_start_update", AsyncMock())
+        monkeypatch.setattr(lifecycle.client.threads, "update", AsyncMock())
+        monkeypatch.setattr(
+            "openswe.sandboxes.tool_access.tool_proxy_rule", AsyncMock(return_value=tools_rule)
+        )
+
+        managed = await ManagedSandbox.for_thread("ls-thread", "default")
+        assert managed is not None
+        assert managed.github_proxy is None
+        assert managed.create.snapshot_id == "snap-1"
+        await lifecycle.bind_mda_sandbox("ls-thread", "sandbox-ls", workspace_slug="default")
+        metadata.update(
+            sandbox_id="sandbox-ls", sandbox_owner="mda", sandbox_base_proxy_config=base_config
+        )
+        await lifecycle.reconnect_replaced_sandbox("ls-thread", workspace_slug="default")
+        assert await lifecycle.refresh_thread_github_proxy("ls-thread") is None
+        assert configure.await_count == 2
+        for call in configure.await_args_list:
+            assert call.args == ("sandbox-ls", None)
+            clean_config = await sandbox_proxy_config(*call.args, **call.kwargs)
+            assert clean_config["rules"] == [tools_rule, cloud_rule]
+        mint.assert_not_awaited()
+        scope.assert_not_awaited()
