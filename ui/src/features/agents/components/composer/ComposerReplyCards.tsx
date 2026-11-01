@@ -2,6 +2,7 @@ import { XIcon } from "@langchain/macaw-components/icons"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 
 import type { PassageReply } from "@/features/agents/utils/passageReply"
+import { cn } from "@/lib/utils"
 
 export interface PendingReply {
   id: string
@@ -40,7 +41,12 @@ export function ComposerReplyCards({
                 </span>
               )
             )}
-            <p className="line-clamp-3 text-xs [overflow-wrap:anywhere] whitespace-pre-wrap text-secondary">
+            <p
+              className={cn(
+                "text-xs [overflow-wrap:anywhere] whitespace-pre-wrap text-secondary",
+                reply.file || reply.part ? "line-clamp-2" : "line-clamp-3"
+              )}
+            >
               {reply.comment || reply.selection}
             </p>
           </div>

@@ -153,8 +153,8 @@ interface ReviewPageActions {
   clearChatQuestion: () => void
   /** Hands a reply to a passage of the page to the chat composer. */
   replyInChat: (reply: PassageReply) => void
-  /** The oldest reply waiting for the composer, taken off the queue. */
-  takeChatReply: () => PassageReply | undefined
+  /** Takes the oldest waiting reply off the queue; whether `reply` was it. */
+  takeChatReply: (reply: PassageReply) => boolean
   attachToChat: (excerpts: ReadonlyArray<CodeExcerpt>) => void
   removeChatExcerpt: (index: number) => void
   clearChatExcerpts: () => void
@@ -520,10 +520,11 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       set({ chatReplies: [...get().chatReplies, reply] })
       get().focusChat()
     },
-    takeChatReply: () => {
-      const [reply, ...rest] = get().chatReplies
-      if (reply) set({ chatReplies: rest })
-      return reply
+    takeChatReply: (reply) => {
+      const [oldest, ...rest] = get().chatReplies
+      if (oldest !== reply) return false
+      set({ chatReplies: rest })
+      return true
     },
     attachToChat: (excerpts) => {
       const known = new Set(get().chatExcerpts.map(excerptKey))

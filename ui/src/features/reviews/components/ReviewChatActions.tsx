@@ -44,7 +44,7 @@ interface ReviewChatActionsValue {
   clearQuestion?: () => void
   /** The next reply to a passage of the page, for the composer to take. */
   reply?: PassageReply
-  takeReply?: () => PassageReply | undefined
+  takeReply?: (reply: PassageReply) => boolean
 }
 
 export const ReviewChatActionsContext =

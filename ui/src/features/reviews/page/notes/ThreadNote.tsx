@@ -42,10 +42,7 @@ export function CommentRow({
   className?: string
 }) {
   return (
-    <div
-      data-reply-part={`comment by @${displayName(comment.author)}`}
-      className={cn("flex gap-space-3", className)}
-    >
+    <div className={cn("flex gap-space-3", className)}>
       <Avatar author={comment.author} className="mt-px" />
       <div className="min-w-0 flex-1">
         <Byline
@@ -53,7 +50,10 @@ export function CommentRow({
           createdAt={comment.created_at}
           href={comment.html_url || undefined}
         />
-        <div className="mt-space-1 text-xs leading-[1.6] [&_.markdown-body]:text-xs">
+        <div
+          data-reply-part={`comment by @${displayName(comment.author)}`}
+          className="mt-space-1 text-xs leading-[1.6] [&_.markdown-body]:text-xs"
+        >
           <Markdown content={body} />
         </div>
       </div>
