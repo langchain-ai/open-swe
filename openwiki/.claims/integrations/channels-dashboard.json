@@ -1,0 +1,292 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:f7e719909154d7ff0c120cc2af1614b81734e40cb44c64efc3a19afff6a3463d",
+  "claims": [
+    {
+      "id": "claim_e1a9929249ed4572968ea13f3df4d449",
+      "statement": "The FastAPI application mounts the dashboard router, Slack and GitHub webhook routes, and the Slack, GitHub, Linear, and MDA user-resolution channel routers; credentialed CORS admits configured dashboard origins plus `open-swe://app` and rejects a wildcard origin.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/api/app.py#L139-L192",
+          "version": "repo-lines-v1:sha256:845da4f69816875cbee3de83e206e3aee0e5999da8522589b2a469bce03bd6b7:eyJzZWxlY3RlZExpbmVDb3VudCI6NTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3MTgyOTc0NzkyNjRjNGIzMTA4MWJhMDE4MDUzYmQ5ZDE0YjcyM2JjYTY3ZTA3NzI2MDdlZTRiMjE1ZDU4ZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkNjdiNDY2Mzc4NzVjM2JiN2Y5MDNiMWRiODczNGI0YTI5NjY4NWRmNGRiZTY2YTRmNmNlZjdmZGM0MTE2M2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdiNzA1NTdhNTcxYjg5NTA3MTRmNzFlMTQwNDdkMzIxZTlmYzE2Njc2ODZlOTk4NGUwYjQyYmFhYmM1MTAzMmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc3ZjdlNzJkYTFjMTA1MmNjMDBhY2U2MDBjMGNlZjljODAzZGViYWM5NmFlN2ZjYmY5MGViMTlmZjlmMTNhMTQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ec4478f80ade4d158c25f6521824af05",
+      "statement": "All dashboard APIs are aggregated under `/dashboard/api`, and the aggregate router applies `require_same_origin_for_mutations` to its routes.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/dashboard/routes.py#L1-L79",
+          "version": "repo-lines-v1:sha256:289020f9d86fa8fe9e12af91ec87cc3b3fa7e3e658b46aad26124895902d5237:eyJzZWxlY3RlZExpbmVDb3VudCI6NzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA0NDZhMThlZDMxNDAxZmVjMzg1ZmQ3ZTUwZWU2YjI1MzgxZDI0MWNmMDRiOTNkYTRlOGJmYjAwZjAzNDk3NTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgwY2ZkYWI4NDMwMmFhNGI2Zjg4ZjNjYjI2MGZlMzE0ZDNiODQ5ZjJmMWViMDRjMjRmNGJhMTkxMmUxODBlYWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_1240fcf7a1a344ab99e0e5122694c445",
+      "statement": "The backend can serve a same-origin static dashboard while reserving API/runtime paths, and can instead reverse-proxy a Vite development server when `DASHBOARD_DEV_SERVER_URL` is configured.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/utils/dashboard_ui.py#L1-L16",
+          "version": "repo-lines-v1:sha256:eecc35cc837864b29955df5e453153a859fad7d330cbca9b3f155ae2e76ab763:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlZDQyZmQzZTI2NGNkOTNlYjE1MDZmMDMwZjVmM2I4ZTFjN2VhZTZlOTI2ZmZiOGE2MDQ3NTUxOGZmZDA0NGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI5YmVjNGExOTk5YWIyNzhmYzkyNjVmODNkNmYxMWRmZmU3MTA0NmRjMzYzNjJhZjA0N2FjNTA3ZjY0NGE2MjkifQ"
+        },
+        {
+          "resource": "repo://openswe/utils/dashboard_ui.py#L115-L171",
+          "version": "repo-lines-v1:sha256:293cbeacc2a62ca7dab111a2724a0ca81780c359787a726f5e395a38b88da323:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU3YWVjODBmZmU4YjhhMmU1NTViYWNiYjAxNWY1NjVhYWZiOWRjNTgxNDEwNTJkNGQxMmNkZjdhN2FlNjQ1MTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRlZTAyODc1N2JjYzY2MDdlNTc0MmQzYmQwMTFjOTU0M2I5OGY4MWM1OWYyMzlhODRhYmJlMzMwZTU3NGVjODciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFiYzRkODdiZjZhZTk2N2Q3MGU2ZGY1NTZkZmZjNTczODUyMTMzNmM0ZDJlMzAyMjM0NjdjZjA3MmZjNTJkMjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYzZmFjNTRjMDU3YzIyNjJiMjdmMmViYmUwZDQ3ZjEzN2NlNzljYzM1NWYxNGZhZGMwN2VmZTZmNmJhOGU0Y2QifQ"
+        },
+        {
+          "resource": "repo://openswe/utils/dashboard_ui.py#L192-L240",
+          "version": "repo-lines-v1:sha256:80603462f0b002b5d0911f4f240f82775000e34da7727290fcd65ce9673a00c7:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZmNmMzMDM3ODViNDFkNTgzNDBmOWY5NGNmMTJhNDI4YmY0ZGY1ZGQ1OTI0MmEwYjc1YWU0ZTM2ZGJiMWZkYjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkzNzQ5MzQ2NWE2OThhNzJiOTZiZTUxMTYzM2U4N2M3OGEzNWNhZmE1MTgxZTEzZjlhYThmYTA1ZGVmZTg3MTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAxZGM2NWI4Y2RlYWEzYmExMDk4ZDg5NjZlMzMyNjkxYTdiMjUyZGRlMmU2MjhlZjgwN2QzOTIzYzI5NGYxODYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMzYzIzNzM2N2E4ZjVlZmMxOWRkMmU1MzljOTI5MzM0N2NiNjU2YmE0ZDBiNmQ4ZjBkMDI0MjY1Yzk2OTM5ODYifQ"
+        },
+        {
+          "resource": "repo://openswe/utils/dashboard_ui.py#L46-L64",
+          "version": "repo-lines-v1:sha256:bdc86d83cbdce06f576db512c4019aa0688b52311b841eeedaff2dab0318b656:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNhNDIxNDc2NDE3MjlkMGFiNmZhMzRlZGI5M2M0OTljNTdlZmY0ZTk2YTYwZjY5NmU2ZDU5ZDg3MjZiNzQ1MmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhZmJhMDUyN2MzOTUzYzRiNmUwZTViNTczOWJhODM2MTJmODA1M2JjZGM5NDY2NzMwMTkzY2QxZDU5MGI0MDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFmODMxZjgwMzBjMDNjZjI4MGQ0OWNlYTA4NmM1ODVmNGJlMjI5ZGQ0N2RkM2ZjOTdlNzQyYzI0ZDc5MDBhMTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE2MWViMTAxMmFlNzZhZmVmMmRlZGMzMTc4ZDU2MjIzYjA0ZWIzNTQzNjYyNGE5NmQ0Y2YzY2FiZjBlZWM0YzcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b876a847a5fc41e3881d394d971eaa39",
+      "statement": "The separately deployed dashboard proxy requires `DASHBOARD_API_URL`, streams requests to that backend, retains redirects and individual cookies, and strips hop-by-hop and reframed body headers.",
+      "evidence": [
+        {
+          "resource": "repo://ui/server/backend-proxy.ts#L1-L82",
+          "version": "repo-lines-v1:sha256:cce79b187523e9a2d04738a5c5cdd3f196f38b723c18d6994f9c73f719c4877a:eyJzZWxlY3RlZExpbmVDb3VudCI6ODIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRmOWQ0NTkyYWY0NDgyNGJhNGI1NmNjNDNmNjZmMTg1NWExNGMyODgzM2ZjYmI0NTIzYjdlNDE3ZjExMDk0MTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyMzUyNTg5YzM0ZDNjNjA2ODU5MzFiNmVjYzRkNTA5OTFhN2M1NmM4ZmJhMjg5NDExNDY1NzY5MDI3MmNhYzMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ea9bc9acc4b9424fb3b6993ecbe5c691",
+      "statement": "The React entry hydrates on web but creates a root in desktop mode, while the router uses a shared query client with scroll restoration, intent preloading, and a default error component.",
+      "evidence": [
+        {
+          "resource": "repo://ui/src/client.tsx#L1-L20",
+          "version": "repo-lines-v1:sha256:bb72b99fd08ff96299a25fccdd3c41267697f4839de2964d50ba184008faa69e:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyM2VhMTkyYzJhMTkwMDg1MjE5NjhiNzIxNDJjYjFkNzkxZDgzYjNlMWUwMzc2NzcxYjAwYjE0MTUyMjQ4NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRiNjdkNGE0OWNjZjU0MDI5NDMwYjkxYTUyMWE5MmFiZWY5YWE3Njk0NGY5YmRkM2M2ZDJhNzI0ZThkNGU2YjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://ui/src/router.tsx#L1-L31",
+          "version": "repo-lines-v1:sha256:e824d3e2533b9d8fba3f276f36db1be199e16b4847f970da828ab2287dec86e7:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzNmMxM2I1YjZmNzlkNTU4YmM3N2RjYTk0YjBkNDQxMjI3NjQ2ZTJkYWQ0MzQ5ZWI2Zjk4ZWJiYzhlZDdmOGUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFhY2UzYzMzNzgzMzdiZmQ2Y2YzYTA3ZDU4ZWZjNDJkMDdhYzNiYjQxYjZjZTA1ZTM2YTk4ZDMyOWRjMzg1OWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b557ff3a6253434ca4738e6bb3f446e0",
+      "statement": "The shared React Query client shows a reported error toast for failed mutations unless they opt into `silent`, and dashboard query metadata can declare invalidation topics.",
+      "evidence": [
+        {
+          "resource": "repo://ui/src/lib/query.ts#L1-L63",
+          "version": "repo-lines-v1:sha256:906474979ec619fcdb2c816f77c23fdc7cf05a4fb48a68a57bd804d9929e398d:eyJzZWxlY3RlZExpbmVDb3VudCI6NjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY5MmRjNDRjOWZkMTc0M2NkMzEzMjEzMzRjZmJlYjBkNDEyMWEyN2I1MjU5ZDE1ZDAyMTM1MWRjODM5NTdlY2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyMzUyNTg5YzM0ZDNjNjA2ODU5MzFiNmVjYzRkNTA5OTFhN2M1NmM4ZmJhMjg5NDExNDY1NzY5MDI3MmNhYzMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ce5648494df146e8915969542c43ee37",
+      "statement": "The repository-instruction removal mutation demonstrates optimistic update discipline: it cancels reads, removes cached state and selection locally, restores them on error, and invalidates on settlement.",
+      "evidence": [
+        {
+          "resource": "repo://ui/src/components/AgentInstructionsPanel.tsx#L77-L109",
+          "version": "repo-lines-v1:sha256:0adf44e9da337758701a1c9977503950dbac2b7ce431c84bb4db6a2f153bb71d:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRiMDg0MjkzNjIzODI5ZTZlZjRjZWJhMmUyNjIzZmEwMGIxYTc2YjRkMThiMGExNjllNGFmMGQ0NzhjNzg1N2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyMzUyNTg5YzM0ZDNjNjA2ODU5MzFiNmVjYzRkNTA5OTFhN2M1NmM4ZmJhMjg5NDExNDY1NzY5MDI3MmNhYzMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc4ZGU3MjAzNzljMWY0MGU0Nzk3YmYzZWRlM2FmMmNkYWNlZmFmYjE1YTVkNTU5YzlmN2ViNDJiYmU1ODM0NjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEzZmU0ZTQwNTdhZjJmNzFkODZjNzhkMjJjZGM1NTIxMDNjOTY2ZGUxMDhhMGZlMjFhMjI3NDRkZTg3Y2Y1YWIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_6eda332b69e746549140392f920991f6",
+      "statement": "The UI invalidation endpoint authorizes requested topics for the session, replays missed changes in an SSE `hello` frame, emits topic-only invalidation frames and 15-second heartbeats, and makes every topic stale if replay fails.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/ui_invalidations/routes.py#L1-L92",
+          "version": "repo-lines-v1:sha256:e10a4760687cc1b5a45ff70bfaa0d22ef56c718bdbb558bac34ebd42e88ee375:eyJzZWxlY3RlZExpbmVDb3VudCI6OTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFkNmQyYTFkYTUxOTI1OTZjZTU1YTEwODM1MjIzZjZiNDdlZGYwM2I4ZjU2NDkxM2Q0MTk5ZDAyNWRhNDNjOTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI4YzcyYTk2ODQxNzM3ZWZkMmMxYmYxMzIxNjJiN2I1ZTU2YmVhZmM2YzYyOTEyOTRjYjRjMTYyNzYxZDk1NTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc4YzM2ZGE3YmExZmViMmU0ZjNjMjRkYWY0ODJhNjVkYWQzZDVlZGQ2NGQ5NTkxMGVlN2FiOTQ4OTM5MzM1OTgifQ"
+        },
+        {
+          "resource": "repo://openswe/ui_invalidations/topics.py#L1-L8",
+          "version": "repo-lines-v1:sha256:f06c4fafab2250aef169e9929349b3e8c7a96a8c9b5ac52a78339f1622c9f9f0:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMjdiN2U4MGQ1NDEzMTI2Y2RjMDlhYTZhYWZhYmM4YWU1NjYzMzc2ZmEzMzIzYTFlZjMyZmJhZDhmNzFkZjIzZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTMwM2VjZGQ0YTRkMTBmMTljNzNmZDQyZmQxMjQzN2ZkMzM1NGE4MjY4MTYwNWRhNTI1NWE5N2EzOTA2OGRiYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOWYwOTA2MGVhNzExZjBiN2RiNjEyMDM5YmQ4NGMxOTljOWRjMTMwOTY1ZGE3OThhM2ZhNjBlNWJiZWYyZDljOCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_291e51bdbf404e46a198fa5c35db8238",
+      "statement": "UI invalidations are written and notified in the same PostgreSQL transaction, retained for one day for replay, and may be safely published after non-Postgres writes through a non-raising standalone helper.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/ui_invalidations/outbox.py#L1-L104",
+          "version": "repo-lines-v1:sha256:7cfe5b256f9f5b22c783611bf589938d66ef07294bd29a5ada3e3fd2f0f05ca0:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIwNTc5MTFhNDNkZGY1MzA1NTAxODAwMjEwODM0YWM1YjI0N2Q1OGQ2MjViNGYzNWQzNTY0MmMxYjhhZWE3NmEwIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIzYmU5YzFlZjc4M2U1Mjg4MjcyZmI2ZGZkMDRjN2ViNGZmZThkNDdkY2FiM2MzMGFkYzcwOTBmMjRlN2Y3MDAzIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MCwicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI2NGU1YWM1NDhiMTdkNzJkN2NiYWMyNDU2MzZlODE0N2RhNDY5YTcxZDYzNzlmZTRiZDFlMzRjOWMxZGZiOTc3In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_650129bb0e39457aab27cd5d13b99714",
+      "statement": "Each backend replica routes PostgreSQL notifications to locally subscribed streams and replays subscribed topics after reconnect with a safety margin; without configured PostgreSQL the invalidation hub is disabled.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/ui_invalidations/hub.py#L1-L117",
+          "version": "repo-lines-v1:sha256:8f07857f5cebd2e0e560fde64abfc29406ce2cca7763a7ac994a2a387dade1d9:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE3LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI1Yzg5N2Q5ZTIyYThlYmFmMTlhODFmYzMzZTU3MWJmZGRhNTRhZGRlNGUyYjUzM2UwODU2NDczMDM3ZDk3ODA3IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJiMmEwMzY1ODYzNDk2NGRkYjM2ODNkMTRjMmMxNWM1ZDBlOTM3ODJkYzRkOTk2MGEwMGU4ZWE5MDQ0ZGNmYTMzIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MCwicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJhNzZiMGQyZjliYzg1ZjAxMmU5ODNlZWMxYzE4Zjk2OGYxMTFmY2U0OWJlMDgyZmU4NjFkNWY0MzRhYzE5NTkwIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_94b50006ba694c5f8516930c01a15480",
+      "statement": "Dashboard tabs elect one invalidation-stream leader with Web Locks, share query interests and invalidations with BroadcastChannel, invalidate each tab's matching React Query entries, replace streams without a subscription gap, and reconnect after stream errors or silence.",
+      "evidence": [
+        {
+          "resource": "repo://ui/src/lib/invalidations/client.ts#L227-L414",
+          "version": "repo-lines-v1:sha256:e3367f7926f2aa08393a406547512ef011a42f302b7566ca014f771bf114b2b1:eyJzZWxlY3RlZExpbmVDb3VudCI6MTg4LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJlYWYyMmNmMDczMjU5MmMyNDcxNDFjYmU2MWVmYTExMDEyNjEyZjVhMzEyMmI5YWY5YmJhZjUyZjU3MjRkMTk0IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0MTJjYTM0NWNjZjc1YmY5YzA4MDZiY2U2OTViZThkZTgwOGI3OTk4NDI1MWE3YTU0ZDIwMmNmNjEwMWRkNDUxIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiIxZDhiOTFkZjY4NmYwMjcyNDZiMzJlNjQ0MjNlMWMxZjRiODYyMjBmNjRlMmM4Nzg5NjdlNTI5OWEyMjlhODVmIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI2MjU2ODBhMDI1NGYxYWU2NzljZTFmOTYwNjMwZTk3OTg5YWFmOTU3NDk2NWY5MDUyOTRiNWZiYjQ4Y2M5OWZiIn0"
+        },
+        {
+          "resource": "repo://ui/src/lib/invalidations/client.ts#L35-L219",
+          "version": "repo-lines-v1:sha256:96a14ba770a523143ee67c8de1d1ab551f38a5b4d332e07d23d0ab13c51430f4:eyJzZWxlY3RlZExpbmVDb3VudCI6MTg1LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJlYWYyMmNmMDczMjU5MmMyNDcxNDFjYmU2MWVmYTExMDEyNjEyZjVhMzEyMmI5YWY5YmJhZjUyZjU3MjRkMTk0IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0MTJjYTM0NWNjZjc1YmY5YzA4MDZiY2U2OTViZThkZTgwOGI3OTk4NDI1MWE3YTU0ZDIwMmNmNjEwMWRkNDUxIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJkOTM0OWExMDE0MmUyNmRkOWIzYzkwYTI4ZjFkYTRlMDcyNmVjM2E2NTAxNTJiZWUwYjczODhhYmFiMGEwNDMyIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJhNjBmNWMwMDM2YjkxMzhkNmE1Yjc1NDE0YjViYjIyMjgwODFhZmI0NTIxYjEwODM5NzNiNDFjZWJmZjU2NDUyIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_f935e3224cf94137a96aa38120820d30",
+      "statement": "The Electron shell downloads a backend-selected desktop UI descriptor, validates bridge version, release URL and SHA-256, stages and atomically activates snapshots, and continues serving a prior complete cached snapshot if a background refresh fails.",
+      "evidence": [
+        {
+          "resource": "repo://desktop/src/desktop-ui.cts#L139-L254",
+          "version": "repo-lines-v1:sha256:a3dd4784f143247b9e02575748200756b4b08a49c0399a0e5aa069b2a7ebce3d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE2LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJiYjRjOWZiMzAxYzk5NzQxMWZjYWU0MWY4NzQ4NDk2MTI5ZjdmNDExMmEyMWU4MDEwMTk1MGZjMzc3NjQ1MjYyIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0N2M5MjI0MDZlZDVhZDk2MDVkMjYwYzg3MTUyOWY0ZTA1NDY2ODQwOGJiM2M5Mjk1ZDA5OTFjOTBiYjljOGY2IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI5N2Q4NjMyZTU0ZTkyOThhYmI5NTg3MjdlMmQ1MTQwOGFiYWYxMzY2MDM1Mzc5MTAxNDBhYmY2NWIzMGFiNjEzIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI2YTk0NjBjMjkxOTU0YzBiYWJlMjAzOWEyODgyYWQ3ZTBkNjE1MTk3OTAyYTAyMDQ0Y2M3NmI2MGU2NmNiYWEzIn0"
+        },
+        {
+          "resource": "repo://desktop/src/desktop-ui.cts#L49-L107",
+          "version": "repo-lines-v1:sha256:d1b261ef8f70011ed7fddb6e01c326fbc088cbcc6b7c5a4bc038ce7d0dcf21de:eyJzZWxlY3RlZExpbmVDb3VudCI6NTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMxNGFmMjljODYxMGYzNDZkZmI2ZGMwZTJmMzM0NjdkY2JhNWJiYWY1NTFkMzIxODE5MTQ5OTkwMGY5OGZlZGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg0ZTQyMDhjZDZmZmI4YzRhMzU0N2IyZjU0YWRhMTk5NzhjM2YzNjVlNzhmOTUwMmVmNTE0NWNkZDJhYTg1NDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM3MDZhNmY2NzVjZGIxY2YwMTU1MzdmM2ViZDNhNGE4NWNiMGY5NDIwZGMyMzE2ZDlmZTBiODVlYTcwNzg5NDQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI5MjE1MmM4ZGJjYTk5NWI3Yjc5MTdkMTE2YmYwMzEwNmJjYjBmODJjODc0NWY3ZjRlZGM3MzE3ZDlkNzQwOTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_86215211127e4c08be6ab1f4a8f39963",
+      "statement": "Desktop registers `open-swe` as a secure, fetch-capable custom scheme and the backend exposes configured `OPENSWE_ALTERNATIVE_ENVS` through `/desktop/environments` after validating `name:url` entries.",
+      "evidence": [
+        {
+          "resource": "repo://desktop/src/main.cts#L103-L128",
+          "version": "repo-lines-v1:sha256:50ba22a6c06d67a045734e16d01bc2118aa5b1cf53c46eaa702b6be6cdde2b9e:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjliNzM3ZjIzZjFiZTFmYmUzOWI5ODVmOWY4NTdkOGM1YTFlMGMwYWFjNmJhYmY3NWE1ZGFmN2YyYTQ2ODFlMjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1ZTI2Y2Q5MjM2NmY2MGQ4ZWQ5MmQwMjM5ZjA3ZmVmNzRjYWMxNGFhNjlhZGRmOWMyY2MwZDExZWIwMGE0NjMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNlODU5Y2ZjZTcyOGIxNmNhZGEyYjc0MDVkMDUyMGRmOGFiOTVjMzA3M2M0MWY5ZGQ5YmZhMjlhNTUxYzA3ZGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZkNzQ3NzI2ZjZmODdjZmM0ZTlmYWZhZjVlMWE1MzMzNzY1MjZiYzg2ODBkZjA1ZmJmYmQzNmQ2MTAyMDNhYmEifQ"
+        },
+        {
+          "resource": "repo://openswe/dashboard/desktop_environments.py#L1-L49",
+          "version": "repo-lines-v1:sha256:266326e30079b7e8f5cd640785f9820fe9a93c65cfcbdb5eb0be9dcd50ba4b1e:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFmZjQ5NWE5Y2VlZWI4ZjdkZTgzZjVmYTNiMzk2YzMwMjU5Zjg2ZDdlYTM3ZjM3NWM1MTRmNGMwNGY3ODE1NTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIxMzliMThkOTMzNDVmYWMxMTMxN2IzZjFhNGFjOGM1YWMyOWEzMTFhMzY4MTgyYTNmOWRkZjQ2NzFmOTE4OTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_9373212357ef42ba8207f5fce6543df0",
+      "statement": "MDA-facing channel endpoints require a Standard Webhooks signature made with `MDA_SERVICE_SECRET`; without a configured secret or a valid signature they return 401.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/mda_channels/auth.py#L1-L22",
+          "version": "repo-lines-v1:sha256:9ae96a6a77348f3c2676411cd0e759bdbbe49d40d409bb0f3e4961329dc07493:eyJzZWxlY3RlZExpbmVDb3VudCI6MjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE5M2NiYjc1YjI0ZjU5NmUwMGEyNWY4NWIzYjBkYzBlNDc3ZWI3NWU1Y2U5NzAzODNiZmRlMmJkMzkyNWYyMmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE0ZDk2NmVhY2M4YjhiZDQ1YzM4M2U0OWZlYTJjNjMwN2VmYzE4OTliMTJlZThmMzlmZmZiNzAzZWUxNGQ3OTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_67488bd2327d4ea094b1ed859109f4fe",
+      "statement": "MDA resolves verified channel senders to an Open SWE user only when Slack identity and team match, GitHub actor is a human user with a linked numeric ID, or Linear represents a user with email; otherwise it returns null and channel execution retains its default principal.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/mda_channels/resolve_user.py#L1-L16",
+          "version": "repo-lines-v1:sha256:9b50edaeb8bbb62e677354fa6736b153d51041aedd3f1ef9142f7437c9c914cc:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE1MzRiNTI0NWI1NWIzMzU3NmU1YzAyN2ZhMzVkNTI3ZDRkMTg3NjRmOTc0ZTU5NTUxMThlN2ZhZGFjMDRiODQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjczYjRjNjZhYmFmYjNlNjYyNjI1YTc3MWQxZWIxM2I5NTcyNDJlMTg2YjgwZjM5NTQxZDNiNGNkZTQ5ZTA0YTcifQ"
+        },
+        {
+          "resource": "repo://openswe/mda_channels/resolve_user.py#L41-L91",
+          "version": "repo-lines-v1:sha256:408f650746c0d86dcd1463c0cc9e0389423910f0f8ef75a4ab0c18b4effef015:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3YTA0ODhhMWE4MGY0MWMxYWQ4YmM4MDNlZDkyYWNkOWM5OTI4OWVkNDg3ZDZjNzNkMTU4MmI5ZjAzNGY4Y2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc1M2M1MGUwNGFjMGVmNzIzNzBmMDhhMDNlMmExYTlhNjdmNjkxMmQ1M2RjYTY2MTVkZDk2MTlhODNhOWI2YTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMyZjVhNzZlYWVlMTM1ODFhNGMzZjM2OTBjZmNiM2IwZTExNWY3NzM2ZWIxOWEzMDA3YWQ5NzNlNzE5ODQ5YjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMifQ"
+        },
+        {
+          "resource": "repo://tests/mda_channels/test_resolve_user.py#L46-L88",
+          "version": "repo-lines-v1:sha256:1d37aabe06d4a340f51cac5e9ce4e34e83bee8787ff41f676f9352ceb75f4aab:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc4Mjk1ZWE2M2JhOTRjMTY1ZDc2ZmZjMjU2MjQ2YWQ5ZjVjYmMzMmUyNDE5YjVlMTAzNTk2Y2Y2MWQ0YzYxOTAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRhZTFhOWYyMDU0YzkzOThjMTcyNzYxNWNiMjMyOWZmODNiZTUwNzU2YWI2MDQ4YjYzNzc3OWE1OGNmNDA5MjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZhOTljNmRkZGNiYTBkN2RkNTMyNGE2ZDQ4MmI3OWZiMzk0YmI5MjllNmIxMzM2MDYyOTEzNWNmYjE4M2ZhODYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_06ac85635d274990b27692c60061c90d",
+      "statement": "An MDA-owned Slack conversation uses a deterministic UUID based on Slack app, team, channel, and root timestamp, is bound and provisionally private, and stores a gated request for the channel to recall exactly once or replay under the same call ID.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/slack/mda_forwarding.py#L118-L165",
+          "version": "repo-lines-v1:sha256:e183bfeb24e5d3d1a250bbad53308fdbb7b9696f9bda585c4764bda15d5cb3b4:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc1NmEwNWJlMTFkYmI5NTJlYjUxYmFiZDUyODQ2YjhhOGM1ZjhkNjZkYmNlNTc0OWI5OTE1OTY4MTFmZjUxNTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZiZjRkN2FkMDAyOWM5OTMxMTE3OWE1MTZmZjM2Yzc1ZTkwMmYyNzY3NzcwZDRjOTgxODhhNWRmYjU2ZmFhNWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ5MDFhMjNlMjk5NjE3ODVhYmFkNDQ4NmE4MDU5NGRiNDRlYjJjNGMzZTI4ZWRjZWQ5YjgwMWVjYjJmOTFmYWIifQ"
+        },
+        {
+          "resource": "repo://openswe/slack/mda_forwarding.py#L189-L245",
+          "version": "repo-lines-v1:sha256:98c27c21b0f6ded7f830a6c1367008f177302ff98747004ce198e58db7934458:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRiNTAxODhhYzg1MGI4YWMwZGJhZTM2NWMxYTFmZmVlMmUwYTI4MTNmMjUzMmZhZmNmZDQ1Y2IxZGRhODliYTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZhZjU5OGM3ZDZmZjdhY2Y0Yzk5MDIxOTM0ZWMzMjcxNTJhMGIyOGI3OTJiN2Y5ZDJhODZmYzk4MzU2NDkxYjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI4NGQzMmY2OWYzNjJiNzIzMmQzNDhmYTRiNmNmYjkwOGIzMzNjZjUzMzY5M2ZhYjQ1ZGM1M2FmOTkyMjkzOTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc2MjAyNDI5YTliYmJlZWVjZmZiNWI5ZjhlYjVjZjQyNzg5ZmU1YWIyZTM0OTc3ZDJiNDljNDljM2JlYTBhYTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_6aad981d1f7b461a91a26527599c0464",
+      "statement": "The Slack channel event endpoint accepts only forwarded message keys, rejects messages the backend did not hand over, recalls the gated request using the MDA thread, message timestamp, and webhook ID, and returns a prepared durable MDA-thread run or reports a processing error to Slack.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/slack/channel.py#L1-L10",
+          "version": "repo-lines-v1:sha256:4ec4a6b1f32bf02e554f1c8373497973e8472fcd776e3e14116c139106536a13:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5OWE4NTAxN2NmNWVmODhjN2IwOTljODM2YjE5OTBhYTEwNzRlZTEzNjNmMTI1YTY1YWMzMjE2YmU5MmVjNmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAwMjViM2IwMWYyMWVjYmJkYzQ3MDFmMDZkNGE4YTg5OWVkMTllNzdmYjc2YTIwODI4NmY3YzJmNjhmNGM2MTYifQ"
+        },
+        {
+          "resource": "repo://openswe/slack/channel.py#L57-L138",
+          "version": "repo-lines-v1:sha256:00679032fbd0e73a34c061717914e53c67385895c7aab44eed34bccfe2ca5e4c:eyJzZWxlY3RlZExpbmVDb3VudCI6ODIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIzOTNjN2UyN2JlNGI4MDAzY2JhODAyMDgyY2QyZGUxN2U0NTUxZjI5M2ZlZjU5NTQ0YzU3YWI5YWFjMjUyNTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNmZWVlY2ZhMjEwYTE2MzYyYjk5YWE5YmZjM2M5MjkwOGFjZjhmNmQwZTgyYTVlNDFkZjFkYmQ2YmM5NDdiOTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7ed36128347b4559ac9fa77180924e76",
+      "statement": "Slack webhook forwarding retains only signature-relevant headers for Trigger Server, and the tested forwarding path claims an eligible conversation only after gating and remembers the message for that MDA thread.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/slack/mda_forwarding.py#L51-L82",
+          "version": "repo-lines-v1:sha256:bdf4caa0c28b2cfd9b09525b4982dc622001b5a599774e1b50114ba5b473576f:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyNTViOTU0NDIyYmM1YTFhYzcyYjFlNzBhNDhmNGQzZTM2NTIxZDE1YjkwZDYyYjNhYzIyNDg4YjVjYmRhZGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhZmJhMDUyN2MzOTUzYzRiNmUwZTViNTczOWJhODM2MTJmODA1M2JjZGM5NDY2NzMwMTkzY2QxZDU5MGI0MDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg5OGVhM2NlMmUxMTllNTkxNDVmNGI0MGRiMTZkODA2YTA5ZTIxNzFjYWQ3ZTFiYjUyNzc2MDVkOGFjYTAxNDMifQ"
+        },
+        {
+          "resource": "repo://openswe/slack/routes.py#L111-L146",
+          "version": "repo-lines-v1:sha256:822bd4e601eb054fde4209335f631f7fa1686870bcd06f80f2273bdf99c68e7f:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBhMjliMTE1ZDI5OTc0ZTA4NjVhZDFhNzZlNmJjYTdlYjY3MDU3ZDg4OTNkZTk4YTdhMTBhODliNDM4NzQ2YWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhjNjRmOWNjNmRkYTRhY2NkNjJjNzc5ZjM5MDNiN2Y0ZThlN2Y1NGQxNGM2NWFjN2YxZmYyYjM4MzQzMzBhMjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY2NmE2ZDQ1ZTU2MjA3NTAyY2NhZDk5ODE1NDVjNDQ5ZTdiNzViZDVjN2QzOTBjMDViY2EwN2I2YjkwMzQ2ZGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJjZThhZDY3NzBlYTJiYzU0YWQzNzE2N2I4MjYzY2Q2OGNiMjJjMzc2ZDY5ZDBjMzQ2MDk4MDg0YjI1MTBhY2QifQ"
+        },
+        {
+          "resource": "repo://tests/slack/test_slack_mda_forwarding.py#L119-L154",
+          "version": "repo-lines-v1:sha256:1fd1d1027e9174d5f822cd83f5bcda249ab8c92f03f28615a2f0a6354ac8e40c:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU1ZjRkNzI0NDM2NmIyYzIzZTA0NmI1ZmM4OWZmYmMzNjA3NjY3MjNiMTdmZWMyM2M3ZGIxNjM3MzRmOGY3YTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTkzNjFjMGMwZmViMzYzNWNiZDM1ZDFiZDU2Y2UwNGNhZmQ5YWM5ZWU4MDA0MDk3MjFhM2E5MjI5YjYwMDYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYyN2Q3ZmFmMzBjYjQ2MTNmOWRkYTg3YjlhNzI1MDk4YmFmMThhZmE4OGJhZjdlM2ZmYzBlNjhiNWUzYTJlZWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM5ZmIyZTE2ZTM1ZGVmZTAyZWM0M2FjYzVjYjRlYTE2MDZhMzUzZGMzZjhiYzk2NTI2OTQzYzNiY2EyMjU5ZTIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_38a9c64086c94777bc11308e37dc6d78",
+      "statement": "GitHub webhook ingress verifies the provider signature, records deliveries, invalidates referenced pull-request topics, checks workspace routability, and returns 503 on a transient ownership lookup failure so GitHub retries.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/github/routes.py#L40-L113",
+          "version": "repo-lines-v1:sha256:b33a14742455848623545cbcf35ee3ec69a5cdc696118c0ec42a89c4de238da9:eyJzZWxlY3RlZExpbmVDb3VudCI6NzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlkOGQxYjkwZTExOWQ1ZDVhMDEzMWFjMzhiOWQ4M2Y5ZWUzNmY2OTFkMmJmMGY0NzM5MjAwN2ZiOWVhOTI3ODEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE3ZjNiMTc5OGFhZDUzZjA5MjRkNDBmNGUxYWFkNzFhMDJlYTVhMzE4Nzc0ZDZiOGY2ODM2NGZkOWMxZDllODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlhOGQ2M2Y5ZjM1ODBjMGU1MjdhZDFiOWYwY2VkMmZjNjFkMDg2N2EzMWZiOWNjY2VmYmZmM2U0NzhkMTY1YzcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e512a840d1ed4e1abd104a8249439b32",
+      "statement": "Qualifying GitHub issue events and issue comments are forwarded to the MDA GitHub channel while pull-request comments stay on backend intake; the channel endpoint validates accepted event keys and thread identity, re-applies the trigger gate, and does not start a run on an interrupted thread.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/github/channel.py#L148-L178",
+          "version": "repo-lines-v1:sha256:aba669ac7bf7532adeffeeeaf65b9f4a9292c6edc0a25dc325d306fd09373212:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIzOTNjN2UyN2JlNGI4MDAzY2JhODAyMDgyY2QyZGUxN2U0NTUxZjI5M2ZlZjU5NTQ0YzU3YWI5YWFjMjUyNTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNmZWVlY2ZhMjEwYTE2MzYyYjk5YWE5YmZjM2M5MjkwOGFjZjhmNmQwZTgyYTVlNDFkZjFkYmQ2YmM5NDdiOTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3NGRlNjBlNmIxYzBkNjA1OTlmMWI3NTU5YzA0M2ZiODBlOTFkYTdlZGNlODdjZjM1Y2JmM2U1NzNkY2FlYzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhiZjdhY2IwYmZhZTEzNjBlOTdiMGI5ZDZiM2MzZGRlM2RjZTA2YzljOGYzNmRmMGQ2OGExOTA5NmE4OGU0MDgifQ"
+        },
+        {
+          "resource": "repo://openswe/github/channel.py#L70-L105",
+          "version": "repo-lines-v1:sha256:5c559a8ae289f3e14823d57a7967ffc5b1a88fc8cf1259729487db635524d44e:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU4YTJmYzE2NmNjMGRlMzkzYTBhNjYwZWVmYzE4NmE3OTlhMzYzYjhmMTY4ZTQ4MjlkOWJkOTA2ZWFjMTU4NTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTYwMGE3M2QyZTAyZjM1MmI5MGZlZjFkOGQ2MzgxMWJhNGE4ZWUwYzFiZWFhN2FlNDY1OGYzNmFhMmUxOTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNmOTFiNGNkMTY0MjUzN2MzMWRmYzM4ZWQ5MTBhNDJkMDUxZWJlN2FkNGRmYTU3M2VjNTQ1N2FmMDg2N2UwODIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYzYjJkMDE2YzA1NTcwMzAzZDQzNjlmM2UwYTQ1OTgzODQ3NGM1MGI1YjM2NDk3YzM4ZDJiMDBiY2VkZDU1NjUifQ"
+        },
+        {
+          "resource": "repo://openswe/github/routes.py#L215-L240",
+          "version": "repo-lines-v1:sha256:060228222c7171415b67c7cd70deac25b72d972d58227f4e6ae835ba597a3008:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRmZDYzNTc3MzllMjM0MzA3ZDkxYTVjZmI3OGYwZjQzNTJlYmUwMTdkMDIxOGQyMjI3YjhjOGQxZWIwNDc1MTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBmZmU3ZGRkYWJkMzFjOWU5ZWQzYjRlNmI3M2JiZmQ5MjA4MGNmY2ZiZWM0MzE0MDcyOTkyNGMxZWQ2MWZjN2IiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBkYjA4N2M2ZjE0MmM5MmYzNDQ4ZTUyZWI1ODJjMjgzMWM3M2M3NWIyYTdmNTAxM2EyZjE1YzA4ZTI2NTc5YzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ5YzY4OTNmZGEwM2RhMDQ3ZWY2MmE3NDZhODM3OWQ2ZGM4YmZkYjBjMTVmNThkMTAxYmJiYWM2ZTMyNWExMTkifQ"
+        },
+        {
+          "resource": "repo://openswe/github/routes.py#L242-L318",
+          "version": "repo-lines-v1:sha256:9a32bd8720466734d61b20c26fb9ef9f13ade80d52d61c846f1377f324cc34c5:eyJzZWxlY3RlZExpbmVDb3VudCI6NzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5NGY4MzhjYjI3ZDgyYWRlZGYxZDQ5ZjViMjgxNjY4NzUxYzQ4ZjVlNzU5ZTU4YTNhZmIyMTZiMTA0ODFjM2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZhYTgwNjg2YjA1NTE5MTBiMGZmOTZmOGM0YTYzODA0MDFhYTA4ZGQ0YjdjMTE3ZWE2OGI4M2E2OTU0MTBjMTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZiODMxODA1YTcyMTgyMjkyYzdkNmQ0YzY5Njk4MzZjMGI3NDk1ZWZiYTJjZGViMzJiZmM4ZmU1YzdiOWM3NWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc2OWU5MmJjYzI1MDA3NWYxZGYyYWY5MGI3NDFkYTBjYmIxOTA2NDYyZDc0YjhjMDM0YWQ2YzBiYTE2MDBmNDYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_eda0742bff1c4a63b81604f1cf1c81b3",
+      "statement": "The Linear channel endpoint validates supported keys, UUID thread, delivery ID, and payload size; records deliveries once, schedules issue automations, starts runs only for parsed agent-session turns, and does not start a run while that thread is interrupted.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/linear/channel.py#L1-L11",
+          "version": "repo-lines-v1:sha256:38fc4df436d9564e77b154166ce47ecc4400a6f76830783442aee74391241042:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQzNzVmNTljNGE2Y2U5ZjY0NzM3ZGM4OWY5OTJiZDA4NGUzZTJmZjE2OTJlZjM2YTVmZWJmZWY0ODY5YzliZjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgwYjQ5MGU5MmJmMTRlYjQyOTcxNjQ0MTA5YmI3NzQyZGE4Njg0M2FiZjIwNzU4NWJjYzFiMTJmYzZlYTczMWQifQ"
+        },
+        {
+          "resource": "repo://openswe/linear/channel.py#L73-L117",
+          "version": "repo-lines-v1:sha256:f8afeafddf32664e8c23bc70a29cc76f01624677e8020f1c92f88654f921e73a:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIzOTNjN2UyN2JlNGI4MDAzY2JhODAyMDgyY2QyZGUxN2U0NTUxZjI5M2ZlZjU5NTQ0YzU3YWI5YWFjMjUyNTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM0NGFhNWZiNWY5MzA5Y2ZiNTQ1ZmE1ZjQyODQzNWFhMDg0NWJiNjk2YWQxNjdhM2ViMWY5ZGRlMGNjMzRhYTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-11-01T08:08:25.741Z"
+  }
+}

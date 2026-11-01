@@ -4,7 +4,7 @@ okf_version: "0.2"
 
 # Files
 
-- [Open SWE Codebase Guide](quickstart.md) - Start here to set up Open SWE, choose the entrypoint and owner for a safe change, and run focused validation. Links route contributors to the detailed architecture, workflow, integration, operations, and testing guides.
+- [Open SWE Contributor Map](quickstart.md) - A task-routing guide for contributors working across the Open SWE backend, Managed Deep Agents runtime, product integrations, operations, and focused validation. Start with repository evidence, then use this page to identify the owning boundary and smallest appropriate check.
 
 # Directories
 
