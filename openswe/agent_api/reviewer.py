@@ -52,8 +52,8 @@ class ReviewerParts(RunParts):
         del settings, carried
         cfg = RunConfig.from_config(config)
         events = ReviewEvents.from_config(cfg)
-        if events is not None:
-            run_id = started.invocation_id or cfg.invocation_id
+        if events is not None and started.run_id:
+            run_id = started.run_id
             await events.append(
                 "run.started",
                 delivery_id=f"{cfg.thread_id}:{run_id}:started",

@@ -206,7 +206,8 @@ async def test_finding_events_capture_changes_without_duplicate_or_noop_events()
 
 @pytest.mark.usefixtures("registry_db")
 @pytest.mark.parametrize("status", ["success", "error", "timeout", "interrupted"])
-async def test_review_run_events_are_linked_and_deduplicated(status: str) -> None:
+@pytest.mark.parametrize("carried", [False, True])
+async def test_review_run_events_are_linked_and_deduplicated(status: str, carried: bool) -> None:
     from runtime_api.loop import RunStarted
     from sqlalchemy import text
 
@@ -229,13 +230,15 @@ async def test_review_run_events_are_linked_and_deduplicated(status: str) -> Non
             {
                 "configurable": {
                     "thread_id": "tid",
+                    "run_id": "delivery-run" if carried else "run-1",
+                    "invocation_id": "invocation-1",
                     "repo": {"owner": "acme", "name": "app"},
                     "pr_number": 1,
                 }
             },
             RunSettings(),
-            RunStarted(invocation_id="run-1"),
-            carried=False,
+            RunStarted(run_id="run-1", invocation_id="invocation-1"),
+            carried=carried,
         )
         await ReviewEvents.completed("tid", "run-1", status)
     async with connection() as conn:
