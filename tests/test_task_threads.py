@@ -1011,8 +1011,9 @@ async def test_concurrent_registrations_of_one_launch_make_one_worker(
 
 
 @pytest.mark.usefixtures("registry_db")
+@pytest.mark.parametrize("experience", ["coding", "agent_workspace"])
 async def test_langsmith_task_workers_inherit_uuid_and_local_bridge_without_github(
-    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch, experience: str
 ) -> None:
     from openswe.dashboard.langsmith_login import LangSmithLogin
 
@@ -1025,7 +1026,7 @@ async def test_langsmith_task_workers_inherit_uuid_and_local_bridge_without_gith
         owner_login=subject,
         owner_user_id=str(owner.id),
         visibility="private",
-        experience="agent_workspace",
+        experience=experience,
         repo_explicitly_none=True,
         sandbox_id="bridge:local-task",
         sandbox_kind="bridge",
@@ -1038,7 +1039,7 @@ async def test_langsmith_task_workers_inherit_uuid_and_local_bridge_without_gith
     config = await service.recipient_config(worker)
     assert config["user_id"] == str(owner.id)
     assert config["auth_provider"] == "langsmith"
-    assert config["experience"] == "agent_workspace"
+    assert config["experience"] == experience
     assert "github_login" not in config
     assert client.metadata[worker]["owner_user_id"] == str(owner.id)
     assert client.metadata[worker]["sandbox_id"] == "bridge:local-task"

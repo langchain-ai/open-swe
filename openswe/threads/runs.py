@@ -325,8 +325,7 @@ async def create_dashboard_thread_record(
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
-    if experience == "agent_workspace":
-        metadata["experience"] = experience
+    metadata["experience"] = experience
     if visibility == "private" and ThreadIdentity(login).is_admin(email):
         metadata["admin_thread"] = True
     if workspace:
@@ -404,8 +403,7 @@ async def _build_dashboard_configurable(
         "user_email": await resolve_run_email(login, profile),
         "background_task_completion": False,
     }
-    if ThreadIdentity(login).user_id is not None:
-        configurable["experience"] = "agent_workspace"
+    configurable["experience"] = metadata.get("experience", "coding")
     repo_config = repo_config_from_metadata(metadata)
     if repo_config:
         configurable["repo"] = repo_config
@@ -991,11 +989,8 @@ async def _enrich_run_start_command(
             identity = ThreadIdentity(login)
             if identity.user_id is not None:
                 visibility = "private"
-                experience = "agent_workspace"
                 if client_configurable.get("repo"):
                     raise HTTPException(403, "Agent Workspace has no GitHub repository access")
-            elif experience == "agent_workspace":
-                raise HTTPException(403, "Agent Workspace requires LangSmith authentication")
             repo_config = _parse_repo(client_configurable.get("repo")) or {}
             workspace = await _resolve_requested_workspace(
                 client_configurable.get("workspace") or client_configurable.get("environment"),

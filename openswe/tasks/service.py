@@ -226,7 +226,7 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
             raise PermissionError("Task delivery requires the owner's identity")
         identity = ThreadIdentity(login)
         if identity.user_id is not None:
-            if identity.user_id != owner.id or metadata.experience != "agent_workspace":
+            if identity.user_id != owner.id:
                 raise PermissionError("Task delivery requires the Agent Workspace owner")
             await identity.authorize()
         else:
@@ -244,7 +244,7 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
             config |= {
                 "user_id": str(owner.id),
                 "auth_provider": "langsmith",
-                "experience": "agent_workspace",
+                "experience": metadata.experience,
             }
         else:
             config["github_login"] = login

@@ -1798,3 +1798,25 @@ async def test_walkthrough_errors_end_only_a_scout_with_a_stale_head(
         assert json.loads(str(result.content)) == {"success": False, "error": str(error)}
         if scout:
             assert (await session.before_model(RunCall(state=state))).jump_to is None
+
+
+async def test_langsmith_cloud_run_delegates_to_credential_isolated_sandbox(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from openswe.agent_api import graph
+
+    create = AsyncMock(return_value="managed-cloud")
+    monkeypatch.setattr(graph.ManagedSandbox, "for_thread", create)
+    result = await graph.managed_sandbox(
+        {
+            "configurable": {
+                "thread_id": "cloud-thread",
+                "auth_provider": "langsmith",
+                "user_id": "019abcde-0000-7000-8000-000000000001",
+            }
+        },
+        "agent",
+    )
+    assert result == "managed-cloud"
+    assert create.call_args.args[0] == "cloud-thread"
+    assert create.call_args.kwargs["allow_github"] is False

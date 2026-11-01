@@ -137,3 +137,29 @@ async def test_latest_run_requests_are_bounded_and_legacy_idle_status_is_refresh
     assert thread_api.count("POST", "/search") == 1
     assert thread_api.count("GET", "/runs") == 20
     assert 1 < thread_api.peak_runs <= 8
+
+
+@pytest.mark.parametrize("experience", [None, "coding", "agent_workspace"])
+async def test_pins_filter_experience_without_bypassing_readability(
+    thread_api: ThreadAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    experience: listing.DashboardThreadExperience | None,
+) -> None:
+    thread_api.add("legacy")
+    thread_api.add("coding", experience="coding")
+    thread_api.add(
+        "workspace", experience="agent_workspace", visibility="private", owner_login="alice"
+    )
+    thread_api.add("hidden", experience="agent_workspace", visibility="private", owner_login="bob")
+    monkeypatch.setattr(
+        listing,
+        "list_thread_pin_ids",
+        AsyncMock(return_value=["legacy", "coding", "workspace", "hidden"]),
+    )
+    result = await listing.list_dashboard_pinned_threads("alice", experience=experience)
+    expected = {
+        None: ["legacy", "coding", "workspace"],
+        "coding": ["legacy", "coding"],
+        "agent_workspace": ["workspace"],
+    }
+    assert [item["id"] for item in result] == expected[experience]
