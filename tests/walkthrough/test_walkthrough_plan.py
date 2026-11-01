@@ -550,3 +550,44 @@ async def test_a_head_change_during_planning_ends_the_scout(
     assert next_step.call is None
     assert workspace.plan.other_summary == ""
     session.commit.assert_not_awaited()
+
+
+async def test_implementation_tool_completes_the_shared_plan_in_its_own_checkout(
+    repo: Path, checkout: PinnedCheckout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.run_config import RunConfig
+    from openswe.tools.plan_walkthrough import walkthrough_plan_chunk
+    from openswe.ui_invalidations import Topic
+
+    monkeypatch.setattr(RunConfig, "from_runtime", lambda: RunConfig(thread_id="implementation"))
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    head = _commit(repo, {"core.py": BASE.replace("return 1", "return 2")}, "change behavior")
+    index = await _pin(checkout, base, head)
+    plan = Plan.start(head, index)
+    _stored_as(monkeypatch, plan)
+    workspace = PlanWorkspace(
+        PullRequest(owner="lc", repo="repo", number=7), checkout, head, base, index, plan
+    )
+    monkeypatch.setattr(
+        PlanWorkspace,
+        "for_implementation",
+        AsyncMock(return_value=workspace),
+    )
+    monkeypatch.setattr(Topic, "invalidate", AsyncMock())
+
+    initial = await walkthrough_plan_chunk(
+        scout=None, tool_call_id="first", pr_url="https://github.com/lc/repo/pull/7"
+    )
+    assert initial["complete"] is False
+    assert workspace.status().unplanned_hunks
+    result = await walkthrough_plan_chunk(
+        scout=None,
+        tool_call_id="second",
+        pr_url="https://github.com/lc/repo/pull/7",
+        title="Change the return value",
+        show=[FileHunks(path="core.py", hunks=["-4"])],
+        explanation="Return two instead of one.",
+    )
+    assert result["complete"] is True
+    assert len(plan.chunks) == 1
+    assert "return 2" in plan.chunks[0].code
