@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import binascii
+import copy
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
@@ -15,6 +16,7 @@ from langchain_core.messages.content import ImageContentBlock, create_image_bloc
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
+from openswe.config import ENV
 from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     default_vision_model_pair,
@@ -51,7 +53,12 @@ from openswe.input_messages import (
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import SlackNotice, post_slack_thread_reply
+from openswe.slack.client import (
+    SlackNotice,
+    fetch_latest_slack_thread_message,
+    post_slack_thread_reply,
+    update_slack_message,
+)
 from openswe.source_context import SourceContext
 from openswe.threads.access import (
     _ensure_dashboard_github_token,
@@ -1557,8 +1564,13 @@ class _SlackWebHandoff:
         if not url:
             return
         notice = SlackNotice(kind="web_handoff", key=self.thread_id)
-        text = f"Conversation continued in the <{url}|web UI>."
+        text = f"Continued on <{url}|Web>"
         try:
+            latest = await fetch_latest_slack_thread_message(*self.location)
+            if latest is not None and (
+                notice.repeats(latest) or await self.update_footer(latest, url)
+            ):
+                return
             await post_slack_thread_reply(
                 *self.location,
                 text,
@@ -1571,13 +1583,50 @@ class _SlackWebHandoff:
                 ],
                 unfurl_links=False,
                 unfurl_media=False,
-                notice=notice,
             )
         except Exception:
             logger.exception(
                 "Failed to post Slack web handoff notice",
                 extra={"thread_id": self.thread_id},
             )
+
+    async def update_footer(self, message: Mapping[str, object], url: str) -> bool:
+        bot_user_id = ENV.SLACK_BOT_USER_ID.get()
+        message_ts = message.get("ts")
+        if not bot_user_id or message.get("user") != bot_user_id or not isinstance(message_ts, str):
+            return False
+        blocks = message.get("blocks")
+        if not isinstance(blocks, list):
+            return False
+        old_link = f"<{url}|Open in Web>"
+        new_link = f"<{url}|Continued in Web>"
+        updated_blocks = copy.deepcopy(blocks)
+        changed = False
+        for block in updated_blocks:
+            if not isinstance(block, dict) or block.get("type") != "context":
+                continue
+            elements = block.get("elements")
+            for element in elements if isinstance(elements, list) else []:
+                if not isinstance(element, dict) or element.get("type") != "mrkdwn":
+                    continue
+                text = element.get("text")
+                if isinstance(text, str) and new_link in text:
+                    return True
+                if isinstance(text, str) and old_link in text:
+                    element["text"] = text.replace(old_link, new_link)
+                    changed = True
+        if not changed or self.location is None:
+            return False
+        text = message.get("text")
+        await update_slack_message(
+            self.location[0],
+            message_ts,
+            text.replace(old_link, new_link) if isinstance(text, str) else "",
+            blocks=updated_blocks,
+            unfurl_links=False,
+            unfurl_media=False,
+        )
+        return True
 
 
 async def _create_system_thread_record(
