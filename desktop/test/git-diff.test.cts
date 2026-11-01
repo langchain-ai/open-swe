@@ -286,16 +286,95 @@ test("new worktrees fetch the selected branch's upstream without changing the lo
 
   git(repo, ["remote", "set-url", "upstream", path.join(dir, "missing")]);
   const failedWorktree = path.join(dir, "failed-worktree");
-  await assert.rejects(
-    addWorktree(
-      repo,
-      failedWorktree,
-      "open-swe/local-failed",
-      "local-main",
-      true,
-    ),
+  await addWorktree(
+    repo,
+    failedWorktree,
+    "open-swe/local-failed",
+    "local-main",
+    true,
   );
-  assert.equal(fs.existsSync(failedWorktree), false);
+  assert.equal(
+    fs.readFileSync(path.join(failedWorktree, "kept.txt"), "utf8"),
+    "one\n",
+  );
+
+  git(repo, ["remote", "set-url", "upstream", remote]);
+  git(repo, ["config", "user.email", "test@example.com"]);
+  git(repo, ["config", "user.name", "Test"]);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "unpushed work"]);
+  const localTip = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: repo,
+    encoding: "utf8",
+  });
+  const aheadWorktree = path.join(dir, "ahead-worktree");
+  await addWorktree(
+    repo,
+    aheadWorktree,
+    "open-swe/local-ahead",
+    "local-main",
+    true,
+  );
+  assert.equal(
+    execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: aheadWorktree,
+      encoding: "utf8",
+    }),
+    localTip,
+  );
+
+  git(repo, ["switch", "--detach"]);
+  const detachedWorktree = path.join(dir, "detached-worktree");
+  await addWorktree(
+    repo,
+    detachedWorktree,
+    "open-swe/local-detached",
+    "HEAD",
+    true,
+  );
+  assert.equal(
+    execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: detachedWorktree,
+      encoding: "utf8",
+    }),
+    localTip,
+  );
+
+  git(repo, ["switch", "-c", "unpublished"]);
+  git(repo, ["remote", "add", "origin", remote]);
+  const unpublishedWorktree = path.join(dir, "unpublished-worktree");
+  await addWorktree(
+    repo,
+    unpublishedWorktree,
+    "open-swe/local-unpublished",
+    "unpublished",
+    true,
+  );
+  assert.equal(
+    execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: unpublishedWorktree,
+      encoding: "utf8",
+    }),
+    localTip,
+  );
+
+  git(repo, ["remote", "remove", "upstream"]);
+  git(repo, ["remote", "remove", "origin"]);
+  const noRemoteWorktree = path.join(dir, "no-remote-worktree");
+  await addWorktree(
+    repo,
+    noRemoteWorktree,
+    "open-swe/local-no-remote",
+    "unpublished",
+    true,
+  );
+  assert.equal(
+    execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: noRemoteWorktree,
+      encoding: "utf8",
+    }),
+    localTip,
+  );
 });
 
 test("a thread worktree survives its directory being deleted", async (t) => {

@@ -144,32 +144,52 @@ async function addWorktree(
   fetchUpstream = false,
 ) {
   if (fetchUpstream) {
-    const [remote, upstream] = text(
+    const [localRef, remote, upstream] = text(
       await git(
         repo,
         [
           "for-each-ref",
-          "--format=%(upstream:remotename)%0a%(upstream:remoteref)",
+          "--format=%(refname)%0a%(upstream:remotename)%0a%(upstream:remoteref)",
           `refs/heads/${baseRef}`,
         ],
         null,
         5_000,
       ),
     ).split("\n");
-    await git(
-      repo,
-      ["fetch", remote || "origin", upstream || baseRef],
-      null,
-      60_000,
-    );
-    baseRef = text(
-      await git(
-        repo,
-        ["rev-parse", "--verify", "FETCH_HEAD^{commit}"],
-        null,
-        5_000,
-      ),
-    );
+    if (localRef === `refs/heads/${baseRef}`) {
+      try {
+        await git(
+          repo,
+          ["fetch", remote || "origin", upstream || `refs/heads/${baseRef}`],
+          null,
+          60_000,
+        );
+        const tip = text(
+          await git(
+            repo,
+            ["rev-parse", "--verify", "FETCH_HEAD^{commit}"],
+            null,
+            5_000,
+          ),
+        );
+        if (
+          await ok(
+            git(
+              repo,
+              ["merge-base", "--is-ancestor", localRef, tip],
+              null,
+              5_000,
+            ),
+          )
+        )
+          baseRef = tip;
+      } catch (error) {
+        console.warn(
+          "Could not refresh worktree base; using the local branch",
+          error,
+        );
+      }
+    }
   }
   await git(
     repo,
