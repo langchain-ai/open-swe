@@ -372,7 +372,7 @@ async def test_review_log_tracks_committed_changes_without_run_secrets(
     assert "do-not-log" not in json.dumps([row["payload"] for row in rows])
 
 
-@pytest.mark.parametrize("source", ["workspace", "human_review"])
+@pytest.mark.parametrize("source", ["workspace", "human_review", "reviewer"])
 async def test_workspace_events_reach_only_admin_threads_that_name_the_source(
     workspace: dict[str, UUID],
     delivered: list[tuple[str, MultitaskStrategy]],

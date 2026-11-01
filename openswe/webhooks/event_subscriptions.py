@@ -167,7 +167,7 @@ class EventSummary(BaseModel):
             return cls._slack(event, _SlackDelivery.model_validate(payload))
         if event.source == "deployment":
             return cls._deployment(event, payload)
-        if event.source == "human_review":
+        if event.source in ("human_review", "reviewer"):
             link = payload.get("pull_request_url")
             return cls(
                 source=event.source,
