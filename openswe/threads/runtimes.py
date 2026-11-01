@@ -172,7 +172,8 @@ class _SdkThreads:
         )
 
     async def update(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
-        await self.client.threads.update(thread_id, metadata=dict(metadata))
+        # The full reply carries the thread's config and state values, which no copy reads.
+        await self.client.threads.update(thread_id, metadata=dict(metadata), return_minimal=True)
 
     async def delete(self, thread_id: str) -> None:
         try:
