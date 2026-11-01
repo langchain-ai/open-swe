@@ -209,6 +209,16 @@ async def test_desktop_login_is_independent_and_pkce_bound(langsmith_client) -> 
         await github_user.link("langsmith", server.subject)
 
 
+async def test_slack_email_does_not_block_langsmith_login(langsmith_client) -> None:
+    server, client = langsmith_client
+    github_user = await User.sign_in("github", "1", login="alice", email="alice@example.com")
+    await github_user.link("slack", "slack-alice", email="same@example.com")
+    callback = await server.desktop_login(client)
+    assert callback.status_code == 302
+    user = await User.for_identity("langsmith", server.subject)
+    assert user is not None and user.id != github_user.id
+
+
 async def test_one_email_cannot_hold_both_a_github_and_a_langsmith_account(
     langsmith_client,
 ) -> None:

@@ -610,7 +610,7 @@ class User(Base):
         if provider not in ("github", "langsmith") or not wanted:
             return
         other = (
-            UserIdentity.provider != "langsmith"
+            UserIdentity.provider == "github"
             if provider == "langsmith"
             else UserIdentity.provider == "langsmith"
         )
