@@ -31,7 +31,7 @@ from openswe.github.sandbox_access import (
     SandboxGitHubAccess,
     workspace_token,
 )
-from openswe.review.findings import REVIEWER_THREAD_KIND
+from openswe.review.findings import REVIEWER_SHADOW_THREAD_KIND, REVIEWER_THREAD_KIND
 from openswe.sandboxes.handoff import complete_handoff
 from openswe.sandboxes.paths import declared_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith import (
@@ -546,7 +546,7 @@ async def _thread_proxy_scope(
     repositories: Sequence[str] | None = None,
     permissions: PermissionMap | None = None,
 ) -> tuple[Sequence[str] | None, PermissionMap | None]:
-    if metadata.get("kind") in {REVIEWER_THREAD_KIND, "review-scout"}:
+    if metadata.get("kind") in {REVIEWER_THREAD_KIND, REVIEWER_SHADOW_THREAD_KIND, "review-scout"}:
         permissions = READ_ONLY_REVIEW_PERMISSIONS
         reviewed_pr = metadata.get("pr")
         owner = reviewed_pr.get("owner") if isinstance(reviewed_pr, dict) else None

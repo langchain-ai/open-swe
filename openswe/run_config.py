@@ -176,6 +176,8 @@ class RunConfig(BaseModel):
     eval: bool | None = None
     reviewer_eval: bool | None = None
     reviewer_eval_severity_threshold: str | None = None
+    # A shadow review, which records what it would publish (``openswe.review.shadow``).
+    review_shadow: bool | None = None
 
     # Background jobs
     watch_key: str | None = None

@@ -408,6 +408,10 @@ export interface WorkspaceSettings {
   default_reviewer_subagent_reasoning_effort?: string | null
   default_thread_title_model?: string | null
   default_thread_title_reasoning_effort?: string | null
+  /** Share (0–100) of newly reviewed pull requests that also get a shadow review. */
+  review_shadow_percent?: number | null
+  review_shadow_model?: string | null
+  review_shadow_reasoning_effort?: string | null
   updated_at?: string | null
 }
 

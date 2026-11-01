@@ -34,6 +34,7 @@ from openswe.review.findings import (
     get_thread_last_reviewed_sha,
     get_thread_metadata,
     get_thread_slack_ref,
+    is_surfaced,
     mark_surfaced,
     mutate_findings,
     posted_resolution_comment_ids_for_finding,
@@ -67,6 +68,7 @@ from openswe.review.publish import (
     settle_review_check_run,
 )
 from openswe.review.reconcile import reconcile_findings_with_review_threads
+from openswe.review.shadow import ReviewShadow
 from openswe.run_config import RunConfig
 from openswe.slack.client import post_slack_thread_reply
 from openswe.utils.dashboard_links import dashboard_review_url
@@ -119,6 +121,14 @@ async def publish_review(
             return ranking_error
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
+
+    if cfg.review_shadow:
+        return await ReviewShadow.publish(
+            get_thread_id_from_runtime(),
+            head_sha=head_sha,
+            severity_threshold=severity_threshold,
+            assessment=assessment,
+        )
 
     if cfg.is_eval:
         if cfg.reviewer_eval_severity_threshold in {"low", "medium", "high", "critical"}:
@@ -184,7 +194,8 @@ async def _record_ranking(ranking: list[str], cfg: RunConfig) -> dict[str, Any] 
             return False
         if cfg.is_eval:
             return not _has_publication_identity(finding)
-        if comment_ids_for_finding(finding):
+        # A shadow's findings never reach GitHub; its publish marks the ones it would post.
+        if comment_ids_for_finding(finding) or (cfg.review_shadow and is_surfaced(finding)):
             return False
         return not cfg.re_review or finding.get("first_seen_sha") == head_sha
 

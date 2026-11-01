@@ -9438,6 +9438,41 @@
             ],
             "title": "Review Draft Prs"
           },
+          "review_shadow_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Shadow Model"
+          },
+          "review_shadow_percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Shadow Percent"
+          },
+          "review_shadow_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Shadow Reasoning Effort"
+          },
           "review_trace_links": {
             "agent_feature_flag": true,
             "anyOf": [

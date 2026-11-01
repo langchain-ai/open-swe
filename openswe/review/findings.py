@@ -59,6 +59,7 @@ class ReviewerThreadMissingError(RuntimeError):
 
 
 REVIEWER_THREAD_KIND = "reviewer"
+REVIEWER_SHADOW_THREAD_KIND = "reviewer-shadow"
 REVIEWER_EVAL_PUBLICATION_KEY = "reviewer_eval_publication"
 # Sidebar label for reviewer threads that have no PR identity yet. Real PR
 # titles land in ``pr`` metadata from the first webhook that reaches them.
@@ -793,10 +794,15 @@ async def list_findings(thread_id: str) -> list[Finding]:
     Raises :class:`ReviewerThreadMissingError` when a thread not yet copied to
     PostgreSQL does not exist; other failures degrade to no findings.
     """
+    # The shadow module imports this one.
+    from openswe.review.shadow import ReviewShadow
+
     with _RUN_SCOPED_FINDINGS_LOCK:
         if (scoped := _RUN_SCOPED_FINDINGS.get(thread_id)) is not None:
             return copy.deepcopy(scoped)
     try:
+        if (shadow_findings := await ReviewShadow.findings_of(thread_id)) is not None:
+            return shadow_findings
         pull_request_id = await _ensure_finding_state(thread_id)
         async with postgres.session() as session:
             return [row.to_finding() for row in await session.scalars(_rows_query(pull_request_id))]
@@ -949,10 +955,14 @@ async def mutate_findings(
     list in place and returns ``True`` when it changed something; we only write
     on change, so a no-op mutation never clobbers a concurrent update.
     """
+    from openswe.review.shadow import ReviewShadow
+
     with _RUN_SCOPED_FINDINGS_LOCK:
         if (scoped := _RUN_SCOPED_FINDINGS.get(thread_id)) is not None:
             mutator(scoped)
             return copy.deepcopy(scoped)
+    if (shadow_findings := await ReviewShadow.mutate_findings(thread_id, mutator)) is not None:
+        return shadow_findings
     pull_request_id = await _ensure_finding_state(thread_id)
     async with postgres.session() as session:
         await session.execute(

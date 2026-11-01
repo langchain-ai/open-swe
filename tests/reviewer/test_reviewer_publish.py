@@ -195,13 +195,15 @@ async def test_eval_run_publishes_the_findings_it_recorded_without_postgres() ->
     )
     from openswe.tools.publish_review import publish_review
 
-    start_run_scoped_findings("tid")
+    # Run-scoped findings outlive the test in this process; another thread id keeps them
+    # out of the PostgreSQL findings tests that use "tid".
+    start_run_scoped_findings("eval-tid")
     await append_finding(
-        "tid", _f(id="f_one", severity="high", file="a.py", start_line=1, end_line=1)
+        "eval-tid", _f(id="f_one", severity="high", file="a.py", start_line=1, end_line=1)
     )
     with (
         patch("openswe.tools.publish_review.get_config", return_value=_eval_config()),
-        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="eval-tid"),
         patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
     ):
         result = await publish_review(ranking=["f_one"])
