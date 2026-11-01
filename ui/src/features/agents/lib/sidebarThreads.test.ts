@@ -92,10 +92,7 @@ describe("groupSidebarThreadsByDay", () => {
     )
 
     expect(
-      groups.map((group) => [
-        group.label,
-        group.threads.map((item) => item.id),
-      ])
+      groups.map((group) => [group.label, group.threads.map((item) => item.id)])
     ).toEqual([
       ["Today", ["fresh", "busy"]],
       ["Yesterday", ["yesterday"]],
