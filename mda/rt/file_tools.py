@@ -23,9 +23,11 @@ import random
 import re
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
+from contextvars import ContextVar
 from functools import partial
 from typing import Final
 
+from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain.tools import ToolRuntime
@@ -33,10 +35,12 @@ from langchain_core.messages import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.prebuilt.tool_node import ToolCallRequest
+from langgraph.runtime import get_runtime
 from langgraph.types import Command
 from langsmith.sandbox import SandboxRetryableConnectionError
 from pydantic import JsonValue
 from runtime_api.catalog import FilesSpec
+from runtime_api.edit_conflicts import CHECK_EDIT_CONFLICTS, EditedFile
 from runtime_api.endpoint import call
 from runtime_api.operations import CHECK_SHELL, ShellCheck
 
@@ -44,6 +48,7 @@ from rt.backend import OpenSweBackend, RunLocal
 from rt.git_evidence import OBSERVED_TOOLS, turn_git
 from rt.middleware import reported
 from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
+from rt.sandbox_script import SandboxScript
 from rt.sandbox_setup import sandbox_setup
 from rt.subdir_agents import SubdirAgentsReadMiddleware
 from rt.tool_errors import ToolErrorMiddleware
@@ -115,6 +120,10 @@ class FileToolsMiddleware(AgentMiddleware):
         self._image_reads = ValidateImageReadsMiddleware()
         self._agents_md_in_sandbox = SubdirAgentsReadMiddleware(None)
         self._agents_md_remote = SubdirAgentsReadMiddleware(remote_files)
+        self._edit_reminders: ContextVar[list[str] | None] = ContextVar(
+            "edit_reminders", default=None
+        )
+        self._edited_file = SandboxScript("edited_file.py")
 
     @property
     def _in_sandbox(self) -> bool:
@@ -198,6 +207,14 @@ class FileToolsMiddleware(AgentMiddleware):
         self, request: ToolCallRequest, handler: Handler
     ) -> ToolMessage | Command:
         call_ = request.tool_call
+        if call_["name"] == "eval":
+            reminders: list[str] = []
+            token = self._edit_reminders.set(reminders)
+            try:
+                result = await handler(request)
+                return self._with_reminders(result, reminders)
+            finally:
+                self._edit_reminders.reset(token)
         if call_["name"] not in FILE_TOOLS:
             return await handler(request)
         spec = self._spec
@@ -264,9 +281,54 @@ class FileToolsMiddleware(AgentMiddleware):
         await git.changing()
         started = time.time_ns()
         try:
-            return await handler(request)
+            result = await handler(request)
+            if (
+                request.tool_call["name"] == "edit_file"
+                and isinstance(result, ToolMessage)
+                and result.status == "success"
+            ):
+                result = await self._edit_overlap(request, result)
+            return result
         finally:
             git.changed(started)
+
+    def _with_reminders(
+        self, result: ToolMessage | Command, reminders: list[str]
+    ) -> ToolMessage | Command:
+        if isinstance(result, ToolMessage) and reminders:
+            extra = "\n\n".join(dict.fromkeys(reminders))
+            content = result.content
+            return result.model_copy(
+                update={
+                    "content": f"{content}\n\n{extra}"
+                    if isinstance(content, str)
+                    else [*content, {"type": "text", "text": extra}]
+                }
+            )
+        return result
+
+    async def _edit_overlap(self, request: ToolCallRequest, result: ToolMessage) -> ToolMessage:
+        sandbox = getattr(get_runtime(), "backend", None)
+        path = request.tool_call["args"].get("file_path")
+        if not isinstance(sandbox, SandboxBackendProtocol) or not isinstance(path, str):
+            return result
+        try:
+            identified = await self._edited_file.run(sandbox, {"path": path}, timeout=15)
+            if not identified:
+                return result
+            edit = EditedFile.model_validate({**identified, "run_id": run_id()})
+            answer = await call(self._backend, CHECK_EDIT_CONFLICTS, edit)
+        except Exception:
+            logger.warning("Could not check explicit edit overlaps", exc_info=True)
+            return result
+        if not answer.reminder:
+            return result
+        pending = self._edit_reminders.get()
+        if pending is not None:
+            pending.append(answer.reminder)
+            return result
+        appended = self._with_reminders(result, [answer.reminder])
+        return appended if isinstance(appended, ToolMessage) else result
 
     async def _run_remote(self, request: ToolCallRequest) -> ToolMessage | Command:
         """The call against the backend's files, as the sandbox's own tool would run it."""

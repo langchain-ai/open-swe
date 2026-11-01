@@ -4,6 +4,7 @@ from fastapi import APIRouter, Response
 
 from openswe.github import forwarding
 from openswe.github import webhook as service
+from openswe.github.edit_conflicts import FileChangeEvent
 from openswe.github.repo_cache import forget_cached_repos
 from openswe.human_review.completed_reviews import CompletedReview
 from openswe.merge_queue.controller import wake_native_queue
@@ -133,6 +134,7 @@ async def github_webhook(
     is_pull_request_event = event_type == "pull_request"
 
     if is_pull_request_event:
+        background_tasks.add_task(FileChangeEvent.receive, payload)
         action = payload.get("action", "")
         if action not in common.SUPPORTED_GH_PULL_REQUEST_ACTIONS:
             common.logger.info("Ignoring unsupported GitHub pull_request action: %s", action)
