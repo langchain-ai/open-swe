@@ -51,7 +51,7 @@ export function ReasoningBlock({
   const expanded = isLive || userExpanded
   const liveLabel = thought.heading ? `${thought.heading}...` : "Thinking..."
   const label = thought.preview || "Reasoning"
-  const body = thought.body
+  const body = thought.bodyUnder(isLive ? thought.heading : thought.preview)
 
   return (
     <div className="my-space-1">

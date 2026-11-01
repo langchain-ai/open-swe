@@ -40,6 +40,22 @@ describe("ReasoningBlock", () => {
     ).toBeTruthy()
   })
 
+  it("keeps an earlier heading in the live body once the header moves on", () => {
+    render(
+      <ReasoningBlock
+        isLive
+        text={
+          "**Checking the snapshot**\n\nIt looks stale.\n\n**Comparing captures**\n\nThe"
+        }
+      />
+    )
+
+    expect(
+      screen.getByRole("button", { name: "Comparing captures..." })
+    ).toBeTruthy()
+    expect(screen.getByText("Checking the snapshot")).toBeTruthy()
+  })
+
   it("keeps underscores that are part of a name", () => {
     render(
       <ReasoningBlock

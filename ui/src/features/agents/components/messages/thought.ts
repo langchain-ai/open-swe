@@ -26,10 +26,15 @@ export class Thought {
     return heading ? Thought.plain(Thought.headingText(heading)) : null
   }
 
-  /** The thought without the leading heading its row already shows. */
-  get body(): string {
+  /** The thought without its leading heading when the row above already shows that heading. */
+  bodyUnder(shown: string | null): string {
     const [firstLine = "", ...rest] = this.text.split("\n")
-    return HEADING_LINE.test(firstLine) ? rest.join("\n").trim() : this.text
+    const leading = HEADING_LINE.test(firstLine)
+      ? Thought.plain(Thought.headingText(firstLine))
+      : null
+    return leading !== null && leading === shown
+      ? rest.join("\n").trim()
+      : this.text
   }
 
   private static headingText(line: string): string {
