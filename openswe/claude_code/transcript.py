@@ -279,7 +279,7 @@ def _clean(text: str) -> str:
 
 
 def prompt_text(text: str) -> str:
-    """What the person wrote, without Claude Code's context and with a slash command as typed."""
+    """The prompt as the person typed it, for naming a session; messages keep the full text."""
     text = _COMMAND_MESSAGE.sub("", _HARNESS_CONTEXT.sub("", text))
     return _COMMAND.sub(lambda m: f"{m[1].strip()} {(m[2] or '').strip()}".strip(), text).strip()
 
@@ -423,7 +423,7 @@ class ClaudeTranscript:
         first_human = next((m for m in messages if isinstance(m, HumanMessage)), None)
         title = self._title
         if title is None and first_human is not None:
-            title = str(first_human.content).strip()[:MAX_TITLE_CHARS] or None
+            title = prompt_text(str(first_human.content))[:MAX_TITLE_CHARS] or None
         return ClaudeSession(title=title, messages=messages, session_id=self._session_id)
 
 
@@ -436,21 +436,19 @@ def _messages(records: Sequence[ConversationRecord]) -> list[BaseMessage]:
             case UserRecord(is_meta=True, is_compact_summary=False):
                 continue
             case UserRecord(message=UserMessage(content=str() as content)):
-                builder.human(prompt_text(content), record.uuid)
+                builder.human(_clean(content), record.uuid)
             case UserRecord(message=UserMessage(content=list() as blocks)):
                 for block in blocks:
                     if isinstance(block, ToolResultBlock):
                         builder.tool_result(block)
                 builder.human(
-                    prompt_text(
-                        _parts_text(
-                            [block for block in blocks if not isinstance(block, ToolResultBlock)]
-                        )
+                    _parts_text(
+                        [block for block in blocks if not isinstance(block, ToolResultBlock)]
                     ),
                     record.uuid,
                 )
             case AttachmentRecord(attachment=QueuedPrompt(command_mode="prompt") as queued):
-                builder.human(prompt_text(_content_text(queued.prompt)), record.uuid)
+                builder.human(_content_text(queued.prompt), record.uuid)
             case _:
                 continue
     return builder.finish()

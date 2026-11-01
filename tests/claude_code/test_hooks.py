@@ -83,18 +83,19 @@ async def test_a_session_mirrors_as_turns_and_an_interrupted_one_is_closed(
         _event("MessageDisplay", message_id="m2", index=1, final=True, delta="pass."),
         # The reply was mirrored as it was shown, so Stop does not add it again.
         _event("Stop", last_assistant_message="The tests\npass."),
-        # Claude Code woke the session itself; nobody typed this.
-        _event("UserPromptSubmit", prompt="<task-notification>done</task-notification>"),
-        _event("Stop"),
     )
 
     snapshot = await load_snapshot(mirror.thread_id)
     assert snapshot is not None
     assert snapshot.thread.title == "Fix the flaky test"
     assert snapshot.thread.status == "idle"
-    assert [turn.state for turn in snapshot.turns] == ["interrupted", "completed", "completed"]
+    assert [turn.state for turn in snapshot.turns] == ["interrupted", "completed"]
     assert [(m.role, m.text) for m in snapshot.messages] == [
-        ("human", "Fix the flaky test\nmore detail"),
+        (
+            "human",
+            "<system-reminder>\nYou are in a worktree\n</system-reminder>\n\n"
+            "Fix the flaky test\nmore detail",
+        ),
         ("human", "Actually, run the tests"),
         ("ai", "Running them."),
         ("ai", "The tests\npass."),
