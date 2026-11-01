@@ -7728,6 +7728,22 @@
         "title": "SlackTrigger",
         "type": "object"
       },
+      "SlackUserDirectory": {
+        "properties": {
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/SlackUserOption"
+            },
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "required": [
+          "users"
+        ],
+        "title": "SlackUserDirectory",
+        "type": "object"
+      },
       "SlackUserOption": {
         "properties": {
           "display_name": {
@@ -19438,11 +19454,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/SlackUserOption"
-                  },
-                  "title": "Response Api Slack Users Dashboard Api Slack Users Get",
-                  "type": "array"
+                  "$ref": "#/components/schemas/SlackUserDirectory"
                 }
               }
             },

@@ -223,3 +223,14 @@ for (const review of [false, true]) {
     await recipient.close();
   });
 }
+
+test("Escape dismisses empty mention suggestions", async ({ page }) => {
+  await loginAs(page, SAME_USER);
+  await page.goto("/agents", { waitUntil: "domcontentloaded" });
+  const editor = page.getByTestId("composer-editor");
+  await editor.click();
+  await editor.pressSequentially("@no-matching-person-or-file");
+  await expect(page.getByText("No matching people or files.")).toBeVisible();
+  await editor.press("Escape");
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+});

@@ -254,7 +254,7 @@ async def proxy_dashboard_thread_commands(
             if not enqueue and (turn is not None or not transcribed)
             else queue_follow_up_run(thread_id, login, parsed, metadata=metadata, email=email)
         )
-        await mentions.notify()
+        mentions.dispatch()
         return 200, json.dumps(handled).encode(), "application/json"
     # Enrichment rewrites the command in place; a start that loses the thread
     # to another run is queued from the command as sent.
@@ -329,7 +329,7 @@ async def proxy_dashboard_thread_commands(
     if requeueable is not None and not run_start_succeeded:
         requeued = await _queue_if_thread_turned_busy(thread_id, login, requeueable, email=email)
         if requeued is not None:
-            await mentions.notify()
+            mentions.dispatch()
             return 200, json.dumps(requeued).encode(), "application/json"
     if run_start_refused:
         await _fail_requested_turn(thread_id, enriched)
@@ -342,7 +342,7 @@ async def proxy_dashboard_thread_commands(
             )
 
     if run_start_succeeded:
-        await mentions.notify()
+        mentions.dispatch()
 
     if run_start_succeeded and run_id is not None:
         task = asyncio.create_task(
@@ -576,7 +576,7 @@ async def proxy_dashboard_thread_run_enqueue(
     run_id = queued.get("result", {}).get("run_id") if isinstance(queued, dict) else None
     if not isinstance(run_id, str) or not run_id:
         raise HTTPException(502, "LangGraph did not return a run id for the queued follow-up")
-    await mentions.notify()
+    mentions.dispatch()
     # The raw runs REST caller expects a `Run` object back, not the
     # `commands` protocol's `{id, type, result}` envelope `queue_follow_up_run`
     # returns — re-fetch the run it just created to answer in that shape.

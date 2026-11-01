@@ -45,3 +45,7 @@ class SlackUserOption(BaseModel):
                 )
             )
         return sorted(users, key=lambda user: (user.display_name or user.name).casefold())
+
+
+class SlackUserDirectory(BaseModel):
+    users: list[SlackUserOption]

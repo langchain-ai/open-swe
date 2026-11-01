@@ -1692,7 +1692,7 @@ export const api = {
       `/notifications/${encodeURIComponent(id)}/delivered`,
       { method: "POST" }
     ),
-  listSlackUsers: () => request<SlackUserOption[]>("/slack/users"),
+  listSlackUsers: () => request<{ users: SlackUserOption[] }>("/slack/users"),
   slackUserName: (userId: string) =>
     request<{ name: string }>(
       `/slack/users/${encodeURIComponent(userId)}/name`

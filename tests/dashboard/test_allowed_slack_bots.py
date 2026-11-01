@@ -118,7 +118,7 @@ async def test_people_directory_pages_and_excludes_bots_and_deleted_users(
     }
     response = await client.get("/dashboard/api/slack/users")
     assert response.status_code == 200
-    assert [user["id"] for user in response.json()] == ["U123ADA", "U123BOB"]
+    assert [user["id"] for user in response.json()["users"]] == ["U123ADA", "U123BOB"]
     assert "private@example.com" not in response.text
     assert directory["calls"] == ["", "page2"]
 

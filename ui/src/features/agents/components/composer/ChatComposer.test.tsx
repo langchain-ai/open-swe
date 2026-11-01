@@ -278,6 +278,21 @@ describe("ChatComposer options", () => {
 })
 
 describe("ChatComposer people autocomplete", () => {
+  it("dismisses an empty people menu with Escape without stopping a run", async () => {
+    vi.spyOn(api, "listSlackUsers").mockResolvedValue({ users: [] })
+    renderComposer(true, {
+      restoreDraft: { key: 1, text: "@nobody", images: [] },
+    })
+    await screen.findByText("No matching people or files.")
+    fireEvent.keyDown(screen.getByTestId("composer-editor"), {
+      key: "Escape",
+      code: "Escape",
+    })
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    expect(cancelThread).not.toHaveBeenCalled()
+    vi.restoreAllMocks()
+  })
+
   it("inserts a canonical Slack mention by keyboard and submits it", async () => {
     Object.defineProperty(Range.prototype, "getBoundingClientRect", {
       configurable: true,
@@ -287,14 +302,16 @@ describe("ChatComposer people autocomplete", () => {
       configurable: true,
       value: () => [],
     })
-    vi.spyOn(api, "listSlackUsers").mockResolvedValue([
-      {
-        id: "U123BOB",
-        name: "bob",
-        display_name: "Bob",
-        real_name: "Bob Smith",
-      },
-    ])
+    vi.spyOn(api, "listSlackUsers").mockResolvedValue({
+      users: [
+        {
+          id: "U123BOB",
+          name: "bob",
+          display_name: "Bob",
+          real_name: "Bob Smith",
+        },
+      ],
+    })
     vi.spyOn(api, "slackUserName").mockResolvedValue({ name: "Bob" })
     const onSubmit = vi.fn()
     renderComposer(false, {

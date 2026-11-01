@@ -11,6 +11,7 @@ from sqlalchemy import text
 from openswe import event_claims
 from openswe.database import postgres
 from openswe.slack.dm import DmOrigin, post_dm
+from openswe.slack.http import SlackRequestError
 from openswe.ui_invalidations.topics import Topic
 from openswe.users import User
 
@@ -136,7 +137,7 @@ class AppNotification(BaseModel):
                 await conn.scalars(
                     text(
                         "SELECT id FROM app_notification WHERE delivered_at IS NULL "
-                        "AND fallback_sent_at IS NULL AND fallback_at <= clock_timestamp() "
+                        "AND fallback_sent_at IS NULL AND fallback_failed_at IS NULL AND fallback_at <= clock_timestamp() "
                         "ORDER BY fallback_at LIMIT 100"
                     )
                 )
@@ -151,32 +152,70 @@ class AppNotification(BaseModel):
 
     @classmethod
     async def deliver_fallback(cls, notification_id: UUID) -> None:
+        claim = uuid7()
         async with postgres.transaction() as conn:
             row = (
                 (
                     await conn.execute(
                         text(
-                            "SELECT recipient_id, fallback_text, origin FROM app_notification "
+                            "UPDATE app_notification SET fallback_claim = :claim, "
+                            "fallback_attempts = fallback_attempts + 1, "
+                            "fallback_at = clock_timestamp() + interval '5 minutes', "
+                            "updated_at = clock_timestamp(), updated_by = NULL "
                             "WHERE id = :id AND delivered_at IS NULL AND fallback_sent_at IS NULL "
-                            "AND fallback_at <= clock_timestamp() FOR UPDATE SKIP LOCKED"
+                            "AND fallback_failed_at IS NULL AND fallback_at <= clock_timestamp() "
+                            "RETURNING recipient_id, fallback_text, origin, fallback_attempts"
                         ),
-                        {"id": notification_id},
+                        {"id": notification_id, "claim": claim},
                     )
                 )
                 .mappings()
                 .first()
             )
-            if row is None:
-                return
+        if row is None:
+            return
+        failed = False
+        sent = False
+        try:
             recipient = await User.get(row["recipient_id"])
             if recipient is None or not recipient.slack_user_id:
-                return
-            origin = DmOrigin.model_validate(row["origin"]) if row["origin"] else None
-            await post_dm(recipient.slack_user_id, row["fallback_text"], origin=origin)
+                failed = True
+            else:
+                origin = DmOrigin.model_validate(row["origin"]) if row["origin"] else None
+                await post_dm(recipient.slack_user_id, row["fallback_text"], origin=origin)
+                sent = True
+        except Exception as exc:
+            failed = row["fallback_attempts"] >= 5 or (
+                isinstance(exc, SlackRequestError)
+                and exc.code
+                in {
+                    "user_not_found",
+                    "account_inactive",
+                    "cannot_dm_bot",
+                    "user_disabled",
+                    "channel_not_found",
+                }
+            )
+            logger.warning(
+                "Notification fallback delivery failed",
+                extra={"notification_id": str(notification_id), "terminal": failed},
+                exc_info=True,
+            )
+        async with postgres.transaction() as conn:
             await conn.execute(
                 text(
-                    "UPDATE app_notification SET fallback_sent_at = clock_timestamp(), "
-                    "updated_at = clock_timestamp(), updated_by = NULL WHERE id = :id"
+                    "UPDATE app_notification SET fallback_claim = NULL, "
+                    "fallback_sent_at = CASE WHEN :sent THEN clock_timestamp() ELSE fallback_sent_at END, "
+                    "fallback_failed_at = CASE WHEN :failed THEN clock_timestamp() ELSE fallback_failed_at END, "
+                    "fallback_at = clock_timestamp() + make_interval(secs => :delay), "
+                    "updated_at = clock_timestamp(), updated_by = NULL "
+                    "WHERE id = :id AND fallback_claim = :claim"
                 ),
-                {"id": notification_id},
+                {
+                    "id": notification_id,
+                    "claim": claim,
+                    "sent": sent,
+                    "failed": failed,
+                    "delay": min(3600, 60 * 2 ** min(row["fallback_attempts"], 6)),
+                },
             )

@@ -462,7 +462,7 @@ export const ChatComposer = memo(function ChatComposer({
             canOffload,
             slackChannels,
             recentSlackChannels,
-            slackUsers.data
+            slackUsers.data?.users
           )
         : [],
     [
@@ -641,6 +641,10 @@ export const ChatComposer = memo(function ChatComposer({
 
   const handleCommandKeyDown = useCallback(
     (key: ComposerCommandKey, event: KeyboardEvent): boolean => {
+      if (menuOpen && key === "Escape") {
+        setDismissedTriggerKey(triggerKey)
+        return true
+      }
       if (menuOpen && activeItem) {
         switch (key) {
           case "ArrowDown":
@@ -659,9 +663,6 @@ export const ChatComposer = memo(function ChatComposer({
           case "Enter":
           case "Tab":
             selectCommandItem(activeItem)
-            return true
-          case "Escape":
-            setDismissedTriggerKey(triggerKey)
             return true
         }
       }
