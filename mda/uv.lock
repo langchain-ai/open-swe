@@ -1248,7 +1248,7 @@ wheels = [
 
 [[package]]
 name = "langchain-quickjs"
-version = "0.3.10"
+version = "0.3.11"
 source = { editable = "../vendor/langchain-quickjs" }
 dependencies = [
     { name = "bsdiff4" },
@@ -1265,7 +1265,7 @@ requires-dist = [
     { name = "deepagents", specifier = ">=0.7.32,<0.8.0" },
     { name = "langchain", specifier = ">=1.4.7,<2.0.0" },
     { name = "langchain-core", specifier = ">=1.7.0,<2.0.0" },
-    { name = "langgraph", specifier = ">=1.2.17,<2.0.0" },
+    { name = "langgraph", specifier = ">=1.2.18,<2.0.0" },
     { name = "quickjs-rs", specifier = ">=0.2.5,<0.3.0" },
 ]
 

@@ -1419,6 +1419,8 @@ async def test_closed_eval_recovers_without_replay_but_run_cancellation_is_termi
         code: str,
         *,
         outer_runtime: ToolRuntime | None = None,
+        snapshot_payload: bytes | None = None,
+        tools: tuple[BaseTool, ...] | None = None,
         outer_loop: asyncio.AbstractEventLoop | None = None,
     ) -> EvalOutcome:
         nonlocal attempts
@@ -1434,7 +1436,14 @@ async def test_closed_eval_recovers_without_replay_but_run_cancellation_is_termi
                     raise ValueError("already closed") from exc
             await repl.aclose()
             raise ValueError("engine closed with different wording")
-        return await original(repl, code, outer_runtime=outer_runtime, outer_loop=outer_loop)
+        return await original(
+            repl,
+            code,
+            outer_runtime=outer_runtime,
+            snapshot_payload=snapshot_payload,
+            tools=tools,
+            outer_loop=outer_loop,
+        )
 
     def replies() -> Iterator[AIMessage]:
         for index, code in enumerate(

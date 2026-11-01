@@ -9,4 +9,5 @@ Cancellation waits for worker unwinding; synchronous JavaScript can delay it unt
 It waits only for an eval the worker started: a caller cancelled while the worker loop is busy cancels the worker task before its first step, and a coroutine cancelled before it starts never runs its `finally`, so waiting for it would hang.
 The worker and the cancelled caller each take a lock first; the worker starts the eval only if the caller has not abandoned it, and the caller waits only if the worker started it.
 The REPL also exposes `is_closed`, checking its context and engine state so recovery does not depend on Wasmtime's exception wording.
+The 0.3.11 refresh preserves this cancellation wrapper and forwards upstream's snapshot payload and current tool bindings into lazy evaluation.
 Drop this change once upstream waits for worker cancellation to finish before returning from `eval_async`, returns promptly when the worker never started the eval, and exposes closed-state detection.
