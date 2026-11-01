@@ -51,13 +51,18 @@ test("general notifications render in app and confirmed delivery suppresses the 
   await page.goto("/agents", { waitUntil: "domcontentloaded" });
   const notifications = new Notifications(page);
   const title = `App notification ${crypto.randomUUID()}`;
-  await notifications.create(title);
+  const key = crypto.randomUUID();
+  await notifications.create(title, key);
   await expect(page.getByText(title, { exact: true })).toBeVisible();
   await expect
     .poll(async () =>
       (await notifications.pending()).some((n) => n.title === title),
     )
     .toBe(false);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await notifications.create(title, key);
+  await expect(page.getByTestId("composer-editor")).toBeVisible();
+  await expect(page.getByText(title, { exact: true })).toHaveCount(0);
   await notifications.fallback();
   expect(
     (await notifications.dms()).filter((n) => n.text === title),

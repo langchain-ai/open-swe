@@ -6,10 +6,12 @@ from typing import Self
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert
 
 from openswe import event_claims
 from openswe.database import postgres
+from openswe.notifications.models import Notification
 from openswe.slack.dm import DmOrigin, post_dm
 from openswe.slack.http import SlackRequestError
 from openswe.ui_invalidations.topics import Topic
@@ -38,30 +40,27 @@ class AppNotification(BaseModel):
         origin: DmOrigin | None = None,
         by: UUID | None = None,
     ) -> None:
-        async with postgres.transaction() as conn:
-            await conn.execute(
-                text("""
-                    INSERT INTO app_notification
-                        (id, recipient_id, dedupe_key, title, body, url, fallback_text,
-                         origin, fallback_at, created_by, updated_by)
-                    VALUES (:id, :recipient, :key, :title, :body, :url, :fallback,
-                            CAST(:origin AS jsonb), :due, :by, :by)
-                    ON CONFLICT (recipient_id, dedupe_key) DO NOTHING
-                """),
-                {
-                    "id": uuid7(),
-                    "recipient": recipient.id,
-                    "key": key,
-                    "title": title,
-                    "body": body,
-                    "url": url,
-                    "fallback": fallback_text,
-                    "origin": origin.model_dump_json() if origin else None,
-                    "due": datetime.now(UTC) + timedelta(seconds=60),
-                    "by": by,
-                },
+        async with postgres.session() as session:
+            await session.execute(
+                insert(Notification)
+                .values(
+                    id=uuid7(),
+                    recipient_id=recipient.id,
+                    dedupe_key=key,
+                    title=title,
+                    body=body,
+                    url=url,
+                    fallback_text=fallback_text,
+                    origin=origin.model_dump(mode="json") if origin else None,
+                    fallback_at=datetime.now(UTC) + timedelta(seconds=60),
+                    created_by=by,
+                    updated_by=by,
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[Notification.recipient_id, Notification.dedupe_key]
+                )
             )
-            await Topic.NOTIFICATIONS.invalidate(conn, key=str(recipient.id))
+            await Topic.NOTIFICATIONS.invalidate(session, key=str(recipient.id))
 
     @classmethod
     async def send_to_slack(
@@ -102,44 +101,54 @@ class AppNotification(BaseModel):
 
     @classmethod
     async def pending(cls, recipient: UUID) -> list[Self]:
-        async with postgres.connection() as conn:
-            rows = await conn.execute(
-                text(
-                    "SELECT id, title, body, url FROM app_notification "
-                    "WHERE recipient_id = :recipient AND delivered_at IS NULL "
-                    "AND fallback_sent_at IS NULL ORDER BY created_at LIMIT 50"
-                ),
-                {"recipient": recipient},
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(Notification)
+                .where(
+                    Notification.recipient_id == recipient,
+                    Notification.delivered_at.is_(None),
+                    Notification.fallback_sent_at.is_(None),
+                )
+                .order_by(Notification.created_at)
+                .limit(50)
             )
-            return [cls.model_validate(dict(row)) for row in rows.mappings()]
+            return [cls.model_validate(row, from_attributes=True) for row in rows]
 
     @classmethod
     async def acknowledge(cls, recipient: UUID, notification_id: UUID) -> bool:
-        async with postgres.transaction() as conn:
-            result = await conn.execute(
-                text(
-                    "UPDATE app_notification SET delivered_at = clock_timestamp(), "
-                    "updated_at = clock_timestamp(), updated_by = :recipient "
-                    "WHERE id = :id AND recipient_id = :recipient "
-                    "AND fallback_sent_at IS NULL RETURNING id"
-                ),
-                {"id": notification_id, "recipient": recipient},
+        async with postgres.session() as session:
+            acknowledged_id = await session.scalar(
+                update(Notification)
+                .where(
+                    Notification.id == notification_id,
+                    Notification.recipient_id == recipient,
+                    Notification.fallback_sent_at.is_(None),
+                )
+                .values(
+                    delivered_at=func.clock_timestamp(),
+                    updated_at=func.clock_timestamp(),
+                    updated_by=recipient,
+                )
+                .returning(Notification.id)
             )
-            acknowledged = result.first() is not None
-            if acknowledged:
-                await Topic.NOTIFICATIONS.invalidate(conn, key=str(recipient))
-            return acknowledged
+            if acknowledged_id is not None:
+                await Topic.NOTIFICATIONS.invalidate(session, key=str(recipient))
+            return acknowledged_id is not None
 
     @classmethod
     async def fallback(cls) -> None:
-        async with postgres.connection() as conn:
+        async with postgres.session() as session:
             ids = list(
-                await conn.scalars(
-                    text(
-                        "SELECT id FROM app_notification WHERE delivered_at IS NULL "
-                        "AND fallback_sent_at IS NULL AND fallback_failed_at IS NULL AND fallback_at <= clock_timestamp() "
-                        "ORDER BY fallback_at LIMIT 100"
+                await session.scalars(
+                    select(Notification.id)
+                    .where(
+                        Notification.delivered_at.is_(None),
+                        Notification.fallback_sent_at.is_(None),
+                        Notification.fallback_failed_at.is_(None),
+                        Notification.fallback_at <= func.clock_timestamp(),
                     )
+                    .order_by(Notification.fallback_at)
+                    .limit(100)
                 )
             )
         for notification_id in ids:
@@ -153,39 +162,39 @@ class AppNotification(BaseModel):
     @classmethod
     async def deliver_fallback(cls, notification_id: UUID) -> None:
         claim = uuid7()
-        async with postgres.transaction() as conn:
-            row = (
-                (
-                    await conn.execute(
-                        text(
-                            "UPDATE app_notification SET fallback_claim = :claim, "
-                            "fallback_attempts = fallback_attempts + 1, "
-                            "fallback_at = clock_timestamp() + interval '5 minutes', "
-                            "updated_at = clock_timestamp(), updated_by = NULL "
-                            "WHERE id = :id AND delivered_at IS NULL AND fallback_sent_at IS NULL "
-                            "AND fallback_failed_at IS NULL AND fallback_at <= clock_timestamp() "
-                            "RETURNING recipient_id, fallback_text, origin, fallback_attempts"
-                        ),
-                        {"id": notification_id, "claim": claim},
-                    )
+        async with postgres.session() as session:
+            row = await session.scalar(
+                update(Notification)
+                .where(
+                    Notification.id == notification_id,
+                    Notification.delivered_at.is_(None),
+                    Notification.fallback_sent_at.is_(None),
+                    Notification.fallback_failed_at.is_(None),
+                    Notification.fallback_at <= func.clock_timestamp(),
                 )
-                .mappings()
-                .first()
+                .values(
+                    fallback_claim=claim,
+                    fallback_attempts=Notification.fallback_attempts + 1,
+                    fallback_at=func.clock_timestamp() + timedelta(minutes=5),
+                    updated_at=func.clock_timestamp(),
+                    updated_by=None,
+                )
+                .returning(Notification)
             )
         if row is None:
             return
         failed = False
         sent = False
         try:
-            recipient = await User.get(row["recipient_id"])
+            recipient = await User.get(row.recipient_id)
             if recipient is None or not recipient.slack_user_id:
                 failed = True
             else:
-                origin = DmOrigin.model_validate(row["origin"]) if row["origin"] else None
-                await post_dm(recipient.slack_user_id, row["fallback_text"], origin=origin)
+                origin = DmOrigin.model_validate(row.origin) if row.origin else None
+                await post_dm(recipient.slack_user_id, row.fallback_text, origin=origin)
                 sent = True
         except Exception as exc:
-            failed = row["fallback_attempts"] >= 5 or (
+            failed = row.fallback_attempts >= 5 or (
                 isinstance(exc, SlackRequestError)
                 and exc.code
                 in {
@@ -201,21 +210,21 @@ class AppNotification(BaseModel):
                 extra={"notification_id": str(notification_id), "terminal": failed},
                 exc_info=True,
             )
-        async with postgres.transaction() as conn:
-            await conn.execute(
-                text(
-                    "UPDATE app_notification SET fallback_claim = NULL, "
-                    "fallback_sent_at = CASE WHEN :sent THEN clock_timestamp() ELSE fallback_sent_at END, "
-                    "fallback_failed_at = CASE WHEN :failed THEN clock_timestamp() ELSE fallback_failed_at END, "
-                    "fallback_at = clock_timestamp() + make_interval(secs => :delay), "
-                    "updated_at = clock_timestamp(), updated_by = NULL "
-                    "WHERE id = :id AND fallback_claim = :claim"
-                ),
-                {
-                    "id": notification_id,
-                    "claim": claim,
-                    "sent": sent,
-                    "failed": failed,
-                    "delay": min(3600, 60 * 2 ** min(row["fallback_attempts"], 6)),
-                },
+        async with postgres.session() as session:
+            await session.execute(
+                update(Notification)
+                .where(Notification.id == notification_id, Notification.fallback_claim == claim)
+                .values(
+                    fallback_claim=None,
+                    fallback_sent_at=func.clock_timestamp()
+                    if sent
+                    else Notification.fallback_sent_at,
+                    fallback_failed_at=func.clock_timestamp()
+                    if failed
+                    else Notification.fallback_failed_at,
+                    fallback_at=func.clock_timestamp()
+                    + timedelta(seconds=min(3600, 60 * 2 ** min(row.fallback_attempts, 6))),
+                    updated_at=func.clock_timestamp(),
+                    updated_by=None,
+                )
             )
