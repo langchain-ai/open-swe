@@ -217,7 +217,12 @@ from openswe.github.app import PermissionMap
 from openswe.github.proxy import proxy_token_recorded, proxy_token_set_since
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
-from openswe.memories.reflection import REFLECTION_TOOLS, IdleReflection, PromptCacheMissError
+from openswe.memories.reflection import (
+    FORK_OF_KEY,
+    REFLECTION_TOOLS,
+    IdleReflection,
+    PromptCacheMissError,
+)
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.model_selection import classify_route
 from openswe.middleware.notify_step_limit import notify_step_limit
@@ -549,6 +554,11 @@ class RunSession:
                 "trace_metadata": {
                     **trace_actor(self.config),
                     **agent_version_metadata(),
+                    **(
+                        {"memory_reflection": True, FORK_OF_KEY: self._reflection.source_thread_id}
+                        if self._reflection is not None
+                        else {}
+                    ),
                 },
                 "sandbox": spec,
                 "loop": loop,
