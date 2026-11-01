@@ -56,10 +56,19 @@ test("syncs changed bundles to the current account, retries failures, and preser
   session = "";
   await sync.sync();
   assert.equal(requests.length, 4);
-  await fs.rm(directory, { recursive: true });
   session = "bob";
+  status = 409;
+  await fs.writeFile(path.join(directory, "SKILL.md"), "Conflicting skill");
   await sync.sync();
-  assert.equal(requests.length, 4);
+  await sync.sync();
+  assert.equal(requests.length, 5);
+  status = 200;
+  await fs.writeFile(path.join(directory, "SKILL.md"), "Corrected skill");
+  await sync.sync();
+  assert.equal(requests.length, 6);
+  await fs.rm(directory, { recursive: true });
+  await sync.sync();
+  assert.equal(requests.length, 6);
 });
 
 test("discovers standard .agents skills but gives the requested .agent root priority", async (t) => {

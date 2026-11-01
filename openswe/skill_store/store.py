@@ -118,6 +118,18 @@ class SkillUpdate(BaseModel):
     description: str = Field(min_length=1, max_length=MAX_SKILL_DESCRIPTION_CHARS)
     instructions: str = Field(default="", max_length=MAX_SKILL_INSTRUCTIONS_CHARS)
 
+    def content(self, original: str, name: str) -> str:
+        frontmatter = re.match(
+            r"\A---\n(.*?)\n---[ \t]*(?:\n|$)", original.replace("\r\n", "\n"), re.DOTALL
+        )
+        metadata = yaml.safe_load(frontmatter[1]) if frontmatter else {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        metadata.update(name=name, description=self.description)
+        return (
+            f"---\n{yaml.safe_dump(metadata, sort_keys=False)}---\n\n{self.instructions.strip()}\n"
+        )
+
     @field_validator("description")
     @classmethod
     def _non_empty_description(cls, value: str) -> str:
@@ -222,6 +234,9 @@ async def _update_skill(owner: Owner, name: str, body: SkillUpdate) -> dict[str,
     if not existing:
         raise HTTPException(404, "skill not found")
     value = _record(name, body.description, body.instructions, existing)
+    if "files" in existing:
+        content = body.content(existing["content"], name)
+        value.update(content=content, files={**existing["files"], "SKILL.md": content})
     async with postgres.session() as session:
         await session.execute(
             update(Skill).where(_owned_by(owner), Skill.name == name).values(value=value)

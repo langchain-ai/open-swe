@@ -17,6 +17,7 @@ type SkillSyncOptions = {
 
 class SkillSync {
   private readonly uploaded = new Map<string, string>();
+  private readonly readErrors = new Map<string, string>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private running: Promise<void> | null = null;
   private stopped = false;
@@ -100,6 +101,7 @@ class SkillSync {
         try {
           if (!(await fs.stat(directory)).isDirectory()) continue;
           const files = await this.readFiles(directory);
+          this.readErrors.delete(directory);
           if (!files["SKILL.md"]) continue;
           seen.add(name);
           const body = JSON.stringify({ files });
@@ -126,13 +128,30 @@ class SkillSync {
               signal: AbortSignal.timeout(15_000),
             },
           );
+          if (
+            response.status >= 400 &&
+            response.status < 500 &&
+            ![408, 429].includes(response.status)
+          ) {
+            this.uploaded.set(key, hash);
+            this.options.log(
+              `Desktop skill needs changes before upload: ${name}`,
+              new Error(`Skill upload rejected (${response.status})`),
+            );
+            continue;
+          }
           if (!response.ok)
             throw new Error(
               `Skill upload rejected (${response.status}): ${name}`,
             );
           this.uploaded.set(key, hash);
         } catch (error) {
-          this.options.log(`Could not sync desktop skill: ${name}`, error);
+          const message =
+            error instanceof Error ? error.message : String(error);
+          if (this.readErrors.get(directory) !== message) {
+            this.readErrors.set(directory, message);
+            this.options.log(`Could not sync desktop skill: ${name}`, error);
+          }
         }
       }
     }

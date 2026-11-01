@@ -57,7 +57,7 @@ async def test_desktop_import_preserves_resources_and_cloud_edits(
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
     await User.sign_in("github", "1", login="octocat")
     await User.sign_in("github", "2", login="other")
-    content = "---\nname: review\ndescription: >-\n  Review code safely\n---\nCheck references/checklist.md\n"
+    content = "---\nname: review\ndescription: >-\n  Review code safely\nlicense: MIT\n---\nCheck references/checklist.md\n"
     bundle = SkillImport(files={"SKILL.md": content, "references/checklist.md": "Check auth"})
     await bundle.save("octocat", "review")
     bundle.files["references/checklist.md"] = "Check permissions"
@@ -75,6 +75,10 @@ async def test_desktop_import_preserves_resources_and_cloud_edits(
     assert conflict.value.status_code == 409
     saved = await get_skill("octocat", "review")
     assert saved is not None and saved["instructions"] == "Keep me"
+    assert saved["files"]["references/checklist.md"] == "Check permissions"
+    assert "license: MIT" in saved["content"]
+    assert saved["files"]["SKILL.md"] == saved["content"]
+    assert "source" not in saved
 
 
 @pytest.mark.parametrize(
