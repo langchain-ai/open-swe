@@ -7,7 +7,7 @@ import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowC
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import { CircleIcon } from "@phosphor-icons/react/dist/ssr/Circle"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
-import { createContext, useContext, useEffect, useState } from "react"
+import { createContext, useContext, useEffect, useRef, useState } from "react"
 import type { PointerEvent as ReactPointerEvent } from "react"
 import { toast } from "sonner"
 
@@ -53,9 +53,11 @@ export function ExpandableImage({
 }: ExpandableImageProps) {
   const [open, setOpen] = useState(false)
   const annotate = useContext(ImageAnnotationContext)
+  const triggerRef = useRef<HTMLImageElement>(null)
   return (
     <>
       <img
+        ref={triggerRef}
         src={src}
         alt={alt}
         loading={loading}
@@ -85,6 +87,9 @@ export function ExpandableImage({
           alt={alt}
           onClose={() => setOpen(false)}
           onAnnotate={annotatable ? annotate : null}
+          restoreFocus={() =>
+            triggerRef.current?.focus({ preventScroll: true })
+          }
         />
       )}
     </>
@@ -96,11 +101,13 @@ function ImageLightbox({
   alt,
   onClose,
   onAnnotate,
+  restoreFocus,
 }: {
   src: string
   alt: string
   onClose: () => void
   onAnnotate: ((annotation: ImageAnnotation) => void) | null
+  restoreFocus: () => void
 }) {
   return (
     <Dialog
@@ -113,6 +120,11 @@ function ImageLightbox({
         title={alt || "Image"}
         className="h-[calc(100dvh-2rem)] w-[95vw] max-w-[95vw]"
         childrenClassName="flex min-h-0 flex-1 flex-col gap-space-2"
+        onCloseAutoFocus={(event) => {
+          // A trigger inside a clamped or scrolled container would otherwise jump into view.
+          event.preventDefault()
+          restoreFocus()
+        }}
       >
         {onAnnotate ? (
           <ImageAnnotator
