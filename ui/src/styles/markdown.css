@@ -293,3 +293,9 @@
   outline: 2px solid var(--border-focus);
   outline-offset: -2px;
 }
+
+/* A pull request card styles its own links. */
+.chat-markdown .pr-card a {
+  color: inherit;
+  text-decoration: none;
+}

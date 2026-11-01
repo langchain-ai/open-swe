@@ -3,11 +3,14 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@langchain/macaw-components/HoverCard"
-import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
-import { Link } from "@tanstack/react-router"
 import { createContext, useContext, useMemo } from "react"
 import type { ComponentProps, ReactNode } from "react"
 
+import {
+  PullRequestCard,
+  PullRequestChip,
+} from "@/features/agents/components/PullRequestMention"
+import type { PullRequestMentionProps } from "@/features/agents/components/PullRequestMention"
 import {
   PULL_REQUEST_HOVER_CARD_CLASS,
   PullRequestHoverCard,
@@ -91,38 +94,32 @@ export function PullRequestPreviewProvider({
   )
 }
 
-/** A GitHub PR link shown as the Open SWE review page plus a GitHub link. */
-function PullRequestLinkChip({
-  href,
-  repoFullName,
-  number,
-  children,
-  className: _className,
-  target: _target,
-  rel: _rel,
-  ...props
-}: ComponentProps<"a"> & { repoFullName: string; number: number }) {
-  const [owner, repo] = repoFullName.split("/")
-  return (
-    <span className="pr-link-chip">
-      <Link
-        {...props}
-        to="/agents/reviews/$owner/$repo/$number"
-        params={{ owner: owner!, repo: repo!, number: String(number) }}
-      >
-        {children === href ? `${repo}#${number}` : children}
-      </Link>
-      <a
-        href={href}
-        target="_blank"
-        rel="noreferrer"
-        aria-label={`Open ${repoFullName}#${number} on GitHub`}
-        title="Open on GitHub"
-      >
-        <GithubLogoIcon size={13} weight="regular" aria-hidden />
-      </a>
-    </span>
-  )
+/** What the chat knows about a pull request link, or `null` when it is not one. */
+function usePullRequestMention(
+  href: string | undefined
+): PullRequestMentionProps | null {
+  const previews = useContext(PullRequestPreviewContext)
+  const parsed = parseGitHubPullRequestUrl(href)
+  const pullRequest =
+    (href && previews?.pullRequestUrls.get(href)) ||
+    (parsed &&
+      previews?.pullRequests.get(
+        pullRequestKey(parsed.repoFullName, parsed.number)
+      )) ||
+    undefined
+  const ref = parsed ?? pullRequest
+  if (!href || !ref) return null
+  return {
+    href,
+    repoFullName: ref.repoFullName,
+    number: ref.number,
+    pullRequest,
+    health:
+      pullRequest &&
+      previews?.health.get(
+        pullRequestKey(pullRequest.repoFullName, pullRequest.number)
+      ),
+  }
 }
 
 export function PreviewablePullRequestLink({
@@ -131,34 +128,24 @@ export function PreviewablePullRequestLink({
   ...props
 }: ComponentProps<"a">) {
   const previews = useContext(PullRequestPreviewContext)
-  const parsed = parseGitHubPullRequestUrl(href)
-  const pullRequest =
-    (href && previews?.pullRequestUrls.get(href)) ||
-    (parsed &&
-      previews?.pullRequests.get(
-        pullRequestKey(parsed.repoFullName, parsed.number)
-      ))
-  const ref = parsed ?? (pullRequest && previews ? pullRequest : null)
-  const link = ref ? (
-    <PullRequestLinkChip
-      href={href}
-      repoFullName={ref.repoFullName}
-      number={ref.number}
-      {...props}
-    >
-      {children}
-    </PullRequestLinkChip>
-  ) : (
-    <a href={href} {...props}>
-      {children}
-    </a>
-  )
+  const mention = usePullRequestMention(href)
+  if (!mention)
+    return (
+      <a href={href} {...props}>
+        {children}
+      </a>
+    )
 
-  if (!pullRequest || !previews) return link
+  const chip = (
+    <PullRequestChip {...props} {...mention}>
+      {children}
+    </PullRequestChip>
+  )
+  if (!mention.pullRequest || !previews) return chip
 
   return (
     <HoverCard openDelay={250} closeDelay={100}>
-      <HoverCardTrigger asChild>{link}</HoverCardTrigger>
+      <HoverCardTrigger asChild>{chip}</HoverCardTrigger>
       <HoverCardContent
         side="top"
         align="start"
@@ -166,13 +153,25 @@ export function PreviewablePullRequestLink({
         className={PULL_REQUEST_HOVER_CARD_CLASS}
       >
         <PullRequestHoverCard
-          pullRequest={pullRequest}
-          health={previews.health.get(
-            pullRequestKey(pullRequest.repoFullName, pullRequest.number)
-          )}
+          pullRequest={mention.pullRequest}
+          health={mention.health}
           healthUnavailable={previews.healthUnavailable}
         />
       </HoverCardContent>
     </HoverCard>
   )
+}
+
+/** A pull request link on its own line as a card; anything else renders `fallback`. */
+export function PreviewablePullRequestCard({
+  href,
+  label,
+  fallback,
+}: {
+  href: string
+  label: string
+  fallback: ReactNode
+}) {
+  const mention = usePullRequestMention(href)
+  return mention ? <PullRequestCard {...mention} label={label} /> : fallback
 }

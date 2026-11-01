@@ -9,6 +9,8 @@ vi.mock("@/features/agents/components/PullRequestPreview", () => ({
   PreviewablePullRequestLink: (props: React.ComponentProps<"a">) => (
     <a {...props} />
   ),
+  PreviewablePullRequestCard: ({ fallback }: { fallback: React.ReactNode }) =>
+    fallback,
 }))
 
 const attachment =
