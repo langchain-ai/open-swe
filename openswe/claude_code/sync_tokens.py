@@ -24,6 +24,7 @@ TOKEN_PREFIX = "occ_"
 SECRET_BYTES = 30
 SUFFIX_CHARS = 6
 NAME_MAX_CHARS = 120
+_CLAIM_INDEX = "claude_code_sync_token_claim"
 
 
 class ClaimRedeemedError(Exception):
@@ -84,7 +85,7 @@ class ClaudeCodeSyncToken(Base):
                 await session.flush()
                 await session.refresh(token)
         except IntegrityError as exc:
-            if claim_id is not None and "(claim_id)" in str(exc.orig):
+            if claim_id is not None and _CLAIM_INDEX in str(exc.orig):
                 raise ClaimRedeemedError(str(claim_id)) from exc
             raise
         return token, secret

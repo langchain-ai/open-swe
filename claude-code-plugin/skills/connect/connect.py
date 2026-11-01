@@ -38,8 +38,23 @@ def redeem(url: str, claim: str) -> dict[str, object]:
         raise SystemExit(f"Open SWE refused the claim ({exc.code}): {detail}") from None
 
 
-def install(hooks: dict[str, list[dict[str, object]]], path: Path) -> None:
-    settings = json.loads(path.read_text()) if path.exists() else {}
+def load(path: Path) -> dict[str, object]:
+    """The settings to merge into, checked before the claim is spent on a file we cannot write."""
+    try:
+        settings = json.loads(path.read_text()) if path.exists() else {}
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"Cannot read {path}: {exc}") from None
+    if not isinstance(settings, dict) or not isinstance(settings.get("hooks", {}), dict):
+        raise SystemExit(f"Cannot merge into {path}: it is not a settings object")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not os.access(path.parent, os.W_OK) or (path.exists() and not os.access(path, os.W_OK)):
+        raise SystemExit(f"Cannot write {path}")
+    return settings
+
+
+def install(
+    settings: dict[str, object], hooks: dict[str, list[dict[str, object]]], path: Path
+) -> None:
     current = settings.setdefault("hooks", {})
     for event in list(current):
         groups = []
@@ -57,7 +72,6 @@ def install(hooks: dict[str, list[dict[str, object]]], path: Path) -> None:
             del current[event]
     for event, groups in hooks.items():
         current.setdefault(event, []).extend(groups)
-    path.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(dir=path.parent, prefix=".settings.", suffix=".json")
     try:
         with os.fdopen(handle, "w") as file:
@@ -73,13 +87,14 @@ def install(hooks: dict[str, list[dict[str, object]]], path: Path) -> None:
 def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit("Usage: connect.py <claim_url> <claim>")
+    path = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "settings.json"
+    settings = load(path)
     minted = redeem(sys.argv[1], sys.argv[2])
-    settings = minted.get("settings")
-    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    answered = minted.get("settings")
+    hooks = answered.get("hooks") if isinstance(answered, dict) else None
     if not isinstance(hooks, dict):
         raise SystemExit("Open SWE answered without hooks")
-    config_dir = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
-    install(hooks, config_dir / "settings.json")
+    install(settings, hooks, path)
     print(f"Connected {minted.get('name')} to Open SWE.")
 
 
