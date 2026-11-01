@@ -4,9 +4,12 @@ permissions:
   contents: write
 
 on:
-  schedule:
-    - cron: "0 8 * * *"
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Release commit to promote
+        type: string
+        required: true
 
 concurrency:
   group: promote-main-to-prod
@@ -21,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: main
+          ref: ${{ inputs.ref }}
       - name: Record candidate commit
         id: candidate
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"

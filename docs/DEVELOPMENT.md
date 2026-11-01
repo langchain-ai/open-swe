@@ -3,6 +3,16 @@
 Run Open SWE on your machine: the backend and the dashboard on `http://localhost:2024`, with GitHub and Slack webhooks arriving through a tunnel.
 Deploying it for a team is the [installation guide](INSTALLATION.md).
 
+## Production releases
+
+[release-please](https://github.com/googleapis/release-please) keeps a `release: X.Y.Z` PR open with the changelog of everything merged to main since the last release.
+The version and changelog come from Conventional Commit PR titles: `feat`, `fix`, `perf` and `revert` are listed, other types are hidden.
+Merge that PR when you want to release: **Release Please** tags the commit `vX.Y.Z`, then runs **Promote main to prod**, which typechecks it, moves `prod` to it, deploys the production MDA runtime and publishes a desktop nightly.
+Nothing reaches production until a release PR is merged.
+
+GitHub Actions must be allowed to create pull requests in the repository settings.
+The release PR is opened with `GITHUB_TOKEN`, so pull-request checks do not start on their own; close and reopen it to run them.
+
 ## Prerequisites
 
 - **Python 3.14+** and [uv](https://docs.astral.sh/uv/)
