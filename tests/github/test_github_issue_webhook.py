@@ -85,6 +85,11 @@ async def test_github_webhook_skips_automatic_review_when_disabled(
 
     monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(github_webhooks, "process_github_pr_ready", fake_process_github_pr_ready)
+    walkthrough = AsyncMock()
+    monkeypatch.setattr(github_webhooks, "process_github_pr_walkthrough", walkthrough)
+    monkeypatch.setattr(
+        webhook_common, "enforce_public_repo_org_gate", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     if wakeup_fails:
         monkeypatch.setattr(
@@ -98,7 +103,7 @@ async def test_github_webhook_skips_automatic_review_when_disabled(
         {
             "action": "opened",
             "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
-            "pull_request": {"number": 1244},
+            "pull_request": {"number": 1244, "draft": True, "user": {"login": "alice"}},
         },
     )
 
@@ -108,6 +113,7 @@ async def test_github_webhook_skips_automatic_review_when_disabled(
         "reason": "Automatic review disabled for repository",
     }
     assert called is False
+    walkthrough.assert_awaited_once()
 
 
 async def test_github_webhook_launches_issue_automation_for_external_author(

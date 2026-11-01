@@ -226,6 +226,7 @@ from openswe.tools import (
     monitor,
     open_pull_request,
     output_iframe,
+    plan_walkthrough,
     publish_artifact,
     publish_workspace,
     publish_workspace_prompt,
@@ -827,6 +828,14 @@ def agent_tools_by_name() -> Mapping[str, BaseTool]:
         ),
         *walkthrough_tools("reviewer"),
         *walkthrough_tools("author"),
+        *apply_tool_descriptions(
+            [
+                plan_walkthrough.walkthrough_plan_chunk,
+                plan_walkthrough.walkthrough_split_hunks,
+                plan_walkthrough.walkthrough_move_to_other,
+                plan_walkthrough.walkthrough_describe_other,
+            ]
+        ),
     ]
     built = (tool if isinstance(tool, BaseTool) else as_tool(tool) for tool in tools)
     return {tool.name: tool for tool in built}
@@ -1551,6 +1560,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             is True,
             goal_mode=bool(self._profile_login)
             and (await User.preferences_for_login(self._profile_login)).goal_mode,
+            implementation_walkthrough_enabled=(
+                await cached_workspace_settings(workspace_slug(cfg))
+            ).get("implementation_walkthrough_enabled")
+            is True,
             sandbox_file_downloads=_sandbox_file_downloads_enabled(bridged=bridged),
             local_checkout=bridged,
             local_checkout_client=self._bridge_client or "cli",
@@ -2022,6 +2035,14 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             tool
             for tool in static_tools
             if _registered_tool_name(tool) not in INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
+        ]
+    if guide is None and settings.get("implementation_walkthrough_enabled") is True:
+        static_tools = [
+            *static_tools,
+            plan_walkthrough.walkthrough_plan_chunk,
+            plan_walkthrough.walkthrough_split_hunks,
+            plan_walkthrough.walkthrough_move_to_other,
+            plan_walkthrough.walkthrough_describe_other,
         ]
     if guide is not None:
         static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
