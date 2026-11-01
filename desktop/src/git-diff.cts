@@ -136,7 +136,41 @@ async function checkoutBranch(cwd, branch, create = false) {
   return name;
 }
 
-async function addWorktree(repo, worktreePath, branch, baseRef) {
+async function addWorktree(
+  repo,
+  worktreePath,
+  branch,
+  baseRef,
+  fetchUpstream = false,
+) {
+  if (fetchUpstream) {
+    const [remote, upstream] = text(
+      await git(
+        repo,
+        [
+          "for-each-ref",
+          "--format=%(upstream:remotename)%0a%(upstream:remoteref)",
+          `refs/heads/${baseRef}`,
+        ],
+        null,
+        5_000,
+      ),
+    ).split("\n");
+    await git(
+      repo,
+      ["fetch", remote || "origin", upstream || baseRef],
+      null,
+      60_000,
+    );
+    baseRef = text(
+      await git(
+        repo,
+        ["rev-parse", "--verify", "FETCH_HEAD^{commit}"],
+        null,
+        5_000,
+      ),
+    );
+  }
   await git(
     repo,
     ["worktree", "add", "-b", branch, worktreePath, baseRef],

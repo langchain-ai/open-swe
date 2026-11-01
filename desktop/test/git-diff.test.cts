@@ -233,6 +233,71 @@ test("branch diff reports only what the branch committed", async (t) => {
   );
 });
 
+test("new worktrees fetch the selected branch's upstream without changing the local checkout", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-upstream-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const remote = path.join(dir, "remote");
+  const repo = path.join(dir, "repo");
+  git(dir, ["init", "-q", "-b", "main", remote]);
+  git(remote, ["config", "user.email", "test@example.com"]);
+  git(remote, ["config", "user.name", "Test"]);
+  fs.writeFileSync(path.join(remote, "kept.txt"), "one\n");
+  git(remote, ["add", "-A"]);
+  git(remote, ["commit", "-qm", "init"]);
+  git(dir, ["clone", "-q", remote, repo]);
+  fs.writeFileSync(path.join(remote, "kept.txt"), "upstream\n");
+  git(remote, ["commit", "-qam", "upstream work"]);
+  fs.writeFileSync(path.join(repo, "kept.txt"), "local changes\n");
+
+  const worktree = path.join(dir, "worktree");
+  await addWorktree(repo, worktree, "open-swe/local-fresh", "main", true);
+  assert.equal(
+    fs.readFileSync(path.join(worktree, "kept.txt"), "utf8"),
+    "upstream\n",
+  );
+  assert.equal(
+    fs.readFileSync(path.join(repo, "kept.txt"), "utf8"),
+    "local changes\n",
+  );
+  assert.equal(
+    execFileSync("git", ["show", "main:kept.txt"], {
+      cwd: repo,
+      encoding: "utf8",
+    }),
+    "one\n",
+  );
+
+  git(repo, ["remote", "rename", "origin", "upstream"]);
+  git(repo, ["branch", "-m", "local-main"]);
+  fs.writeFileSync(path.join(remote, "kept.txt"), "newer upstream\n");
+  git(remote, ["commit", "-qam", "more upstream work"]);
+  const trackedWorktree = path.join(dir, "tracked-worktree");
+  await addWorktree(
+    repo,
+    trackedWorktree,
+    "open-swe/local-tracked",
+    "local-main",
+    true,
+  );
+  assert.equal(
+    fs.readFileSync(path.join(trackedWorktree, "kept.txt"), "utf8"),
+    "newer upstream\n",
+  );
+
+  git(repo, ["remote", "set-url", "upstream", path.join(dir, "missing")]);
+  const failedWorktree = path.join(dir, "failed-worktree");
+  await assert.rejects(
+    addWorktree(
+      repo,
+      failedWorktree,
+      "open-swe/local-failed",
+      "local-main",
+      true,
+    ),
+  );
+  assert.equal(fs.existsSync(failedWorktree), false);
+});
+
 test("a thread worktree survives its directory being deleted", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-git-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
