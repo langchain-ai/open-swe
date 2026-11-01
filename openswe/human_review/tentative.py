@@ -1,11 +1,14 @@
 """Who an unclaimed review request's deadline may pick, worked out once per head SHA."""
 
+import asyncio
 import logging
+from uuid import UUID
 
 from openswe.github.http import GitHubAppUnavailable, GitHubClient
 from openswe.human_review.picking import Candidates
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import ReviewChannelUnknownError, in_review_channel
+from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
@@ -13,37 +16,42 @@ _KEY = "tentative_reviewers"
 
 
 class TentativeReviewers:
-    """The lowercase logins Open SWE may pick for ``request``, cached in its run config."""
+    """The people Open SWE may pick for ``request``, by ``users.id``, cached in its run config."""
 
     def __init__(self, request: HumanReviewRequest) -> None:
         self.request = request
 
     @property
-    def _cached(self) -> frozenset[str] | None:
+    def _cached(self) -> frozenset[UUID] | None:
         cached = self.request.run_config.get(_KEY)
         if not isinstance(cached, dict) or cached.get("head_sha") != self.request.head_sha:
             return None
-        logins = cached.get("logins")
-        if not isinstance(logins, list):
+        user_ids = cached.get("user_ids")
+        if not isinstance(user_ids, list):
             return None
-        return frozenset(login for login in logins if isinstance(login, str))
+        return frozenset(UUID(user_id) for user_id in user_ids if isinstance(user_id, str))
 
-    async def logins(self) -> frozenset[str]:
+    async def user_ids(self) -> frozenset[UUID]:
         if (cached := self._cached) is not None:
             return cached
         logins = await self._gather()
         if logins is None:
             return frozenset()
+        users = await asyncio.gather(*(User.for_login("github", login) for login in logins))
+        user_ids = frozenset(user.id for user in users if user is not None)
         async with HumanReviewRequest.locked(self.request.id) as (_, row):
             if row is not None:
                 row.run_config = {
                     **row.run_config,
-                    _KEY: {"head_sha": self.request.head_sha, "logins": sorted(logins)},
+                    _KEY: {
+                        "head_sha": self.request.head_sha,
+                        "user_ids": sorted(str(user_id) for user_id in user_ids),
+                    },
                 }
-        return logins
+        return user_ids
 
     async def _gather(self) -> frozenset[str] | None:
-        """``None`` when GitHub cannot say, so the next read tries again."""
+        """The GitHub logins candidates are known by; ``None`` when GitHub cannot say."""
         auto_assigned = await self._auto_assigned()
         if auto_assigned is None:
             return None

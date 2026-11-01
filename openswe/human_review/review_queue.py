@@ -91,7 +91,7 @@ class ReviewQueue:
         async def picks_me(request: HumanReviewRequest) -> bool:
             async with self._gate:
                 try:
-                    return self.login.lower() in await TentativeReviewers(request).logins()
+                    return self.user.id in await TentativeReviewers(request).user_ids()
                 except httpx2.HTTPError, GitHubError:
                     logger.warning(
                         "Could not work out a review request's tentative reviewers",

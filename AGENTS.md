@@ -39,6 +39,8 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
   The only new module-level functions are framework entrypoints: routes, graph nodes, tools and job handlers.
   A private helper (`_person()`, `_workspace_id(cfg)`) is a missing method on the class whose data it reads, and a value functions keep passing around (a request, a client, a `(backend, repo_dir)` pair) is a missing class.
   A new class must own real state, never be a bag of arguments.
+- Identify people by `users.id` everywhere in our code: comparisons, caches, stored state and the values passed between functions.
+  Resolve a provider handle (GitHub login, Slack user id, email) to a `User` where it enters from that provider, and turn it back into a handle only to call that provider or to match its own data (a CODEOWNERS entry, a review's author).
 - Call GitHub through named `RepoClient`/`PullRequestClient` methods (e.g. `pull.comment(body)`); outside `openswe/github/http.py` and `openswe/github/pull_request_status.py`, never pass a REST path or GraphQL query to the transport (`get`, `post`, `patch`, `delete`, `pages`, `graphql`, `request`).
   Open the client as who it acts for, `GitHubClient.as_user(login)` or `GitHubClient.as_app(owner, repo)`; `GitHubClient.connect(token=...)` is only for a token a run was handed.
 - Build a per-call `httpx2.AsyncClient` with `transport=pooled_transport()` (an `aiohttp` session with `connector=pooled_connector(), connector_owner=False`) from `openswe/utils/http_pool.py`, so it reuses the event loop's warm connections instead of opening new ones.

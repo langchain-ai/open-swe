@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import httpx2
@@ -878,14 +879,14 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
     async def states(pull, author):
         return {"ada": "APPROVED"} if pull.number == 5 else {}
 
-    async def tentative(self) -> frozenset[str]:
-        return frozenset({"ada"} if self.request.pull_request.number == 7 else {"grace"})
+    async def tentative(self) -> frozenset[UUID]:
+        return frozenset({ada.id} if self.request.pull_request.number == 7 else {grace.id})
 
     with (
         patch("openswe.human_review.routes.GitHubClient.as_user", as_user),
         patch.object(RepoClient, "info", info),
         patch.object(PullRequestClient, "pull", pull),
-        patch.object(TentativeReviewers, "logins", tentative),
+        patch.object(TentativeReviewers, "user_ids", tentative),
         patch("openswe.human_review.review_queue.latest_review_states", states),
     ):
         result = await api_review_assignments(page=1, session={"sub": "ada"})
