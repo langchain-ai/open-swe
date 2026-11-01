@@ -142,10 +142,40 @@ describe("walkthroughFileDiff", () => {
       deleted: [[6, 6]],
     })
 
-    // A stays an added line, so X is base line 6: deletion lines d, e, X start at line 4.
-    expect(slice?.hunks.map((h) => [h.deletionStart, h.additionStart])).toEqual([
-      [4, 4],
-    ])
+    // A stays an added line, so X is base line 6: deletion lines d, e, X, g start at line 4.
+    expect(slice?.hunks.map((h) => [h.deletionStart, h.additionStart])).toEqual(
+      [[4, 4]]
+    )
     expect(slice?.deletionLines).toEqual(["d\n", "e\n", "X\n", "g\n"])
+  })
+
+  it("keeps a step's own lines when other steps added lines above them at the top of the file", () => {
+    const top: ReviewDiffFile = {
+      ...file(),
+      patch: [
+        "diff --git a/src/a.ts b/src/a.ts",
+        "--- a/src/a.ts",
+        "+++ b/src/a.ts",
+        "@@ -1,3 +1,5 @@",
+        "+A",
+        "+B",
+        " a",
+        "-b",
+        "+Y",
+        " c",
+        "",
+      ].join("\n"),
+    }
+
+    const slice = walkthroughFileDiff(top, {
+      path: "src/a.ts",
+      added: [[4, 4]],
+      deleted: [[2, 2]],
+    })
+
+    expect(slice?.hunks.map((h) => [h.deletionStart, h.additionStart])).toEqual(
+      [[1, 1]]
+    )
+    expect(slice?.deletionLines).toEqual(["a\n", "b\n", "c\n"])
   })
 })
