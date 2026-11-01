@@ -32,6 +32,8 @@ interface Row {
   text: string | undefined
   old: number
   new: number
+  /** A line another step added, shown as context: it has a new line number but no base one. */
+  borrowed?: boolean
 }
 
 function hunkRows(meta: FileDiffMetadata, hunk: Hunk): Array<Row> {
@@ -62,11 +64,13 @@ function hunkRows(meta: FileDiffMetadata, hunk: Hunk): Array<Row> {
 /**
  * The runs of `rows` that hold the step's lines, each with a little context.
  *
- * Context is the unchanged lines around them and the lines other steps added,
- * shown as unchanged: a file the PR adds has no unchanged lines, so without them
- * a step's few lines would show as islands. A run never crosses a deletion the
- * step does not hold, so a hunk the plan split between steps shows each step
- * only its own deletions.
+ * Context is the unchanged lines around them and the lines other steps added:
+ * a file the PR adds has no unchanged lines, so without them a step's few lines
+ * would show as islands. A line another step added is shown as unchanged only at
+ * a run's edges; between base lines it stays an added line, since an unchanged
+ * line would take a base line number and shift the real ones after it. A run
+ * never crosses a deletion the step does not hold, so a hunk the plan split
+ * between steps shows each step only its own deletions.
  */
 function stepRuns(
   rows: Array<Row>,
@@ -89,20 +93,32 @@ function stepRuns(
   let run: Array<Row> = []
   rows.forEach((row, i) => {
     if (shown[i]) {
-      run.push(mine(row) ? row : { ...row, sign: " " })
+      run.push(row)
       return
     }
     if (run.length > 0) runs.push(run)
     run = []
   })
   if (run.length > 0) runs.push(run)
-  return runs
+  return runs.map((found) => {
+    const onBase = (row: Row) => row.sign === "-" || (row.sign === " " && !mine(row))
+    const first = found.findIndex(onBase)
+    const last = found.findLastIndex(onBase)
+    return found.map((row, i) =>
+      row.sign === "+" && !mine(row) && !(first >= 0 && first < i && i < last)
+        ? { ...row, sign: " " as const, borrowed: true }
+        : row
+    )
+  })
 }
 
 function runPatch(run: Array<Row>, hunkContext: string | undefined): string {
   const olds = run.filter((row) => row.sign !== "+")
   const news = run.filter((row) => row.sign !== "-")
-  const oldStart = olds[0]?.old ?? run[0]!.old - 1
+  // Number the base side from its first real line, so borrowed lines before it shift nothing.
+  const base = olds.findIndex((row) => !row.borrowed)
+  const anchor = olds[base]
+  const oldStart = anchor ? anchor.old - base : (olds[0]?.old ?? run[0]!.old - 1)
   const newStart = news[0]?.new ?? run[0]!.new - 1
   const context = hunkContext ? ` ${hunkContext}` : ""
   let out = `@@ -${oldStart},${olds.length} +${newStart},${news.length} @@${context}\n`

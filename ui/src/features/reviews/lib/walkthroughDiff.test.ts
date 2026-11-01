@@ -116,4 +116,36 @@ describe("walkthroughFileDiff", () => {
       ["context", "change", "context"],
     ])
   })
+
+  it("keeps a step's deletion on its real base line after a line another step added", () => {
+    const modified: ReviewDiffFile = {
+      ...file(),
+      patch: [
+        "diff --git a/src/a.ts b/src/a.ts",
+        "--- a/src/a.ts",
+        "+++ b/src/a.ts",
+        "@@ -3,5 +3,6 @@",
+        " c",
+        " d",
+        "+A",
+        " e",
+        "-X",
+        "+Y",
+        " g",
+        "",
+      ].join("\n"),
+    }
+
+    const slice = walkthroughFileDiff(modified, {
+      path: "src/a.ts",
+      added: [[7, 7]],
+      deleted: [[6, 6]],
+    })
+
+    // A stays an added line, so X is base line 6: deletion lines d, e, X start at line 4.
+    expect(slice?.hunks.map((h) => [h.deletionStart, h.additionStart])).toEqual([
+      [4, 4],
+    ])
+    expect(slice?.deletionLines).toEqual(["d\n", "e\n", "X\n", "g\n"])
+  })
 })
