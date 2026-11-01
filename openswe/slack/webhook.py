@@ -1018,7 +1018,7 @@ async def _process_slack_mention_impl(
     )
     # Auto-resolve cross-posted Slack message links in context
     resolved_links_section, image_urls_from_links = await common.resolve_slack_links_in_context(
-        source_messages, user_names_by_id
+        source_messages, user_names_by_id, bot_user_id
     )
 
     clean_text = _label_slack_mentions(clean_text, user_names_by_id, channel_names_by_id)
