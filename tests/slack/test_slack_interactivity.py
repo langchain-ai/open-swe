@@ -10,10 +10,10 @@ from fastapi import BackgroundTasks, Request
 from openswe.slack import retry
 from openswe.slack import routes as slack_routes
 from openswe.slack.blocks import option_actions
-from openswe.slack.client import SlackConversation, SlackMessageLocation
+from openswe.slack.client import SlackConversation
 from openswe.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
 from tests.conftest import MemoryEventClaims
-from tests.slack_helpers import at_location
+from tests.slack_helpers import channel_first
 
 
 def _request(payload: dict[str, Any]) -> Request:
@@ -94,7 +94,7 @@ def _option_payload() -> dict[str, Any]:
 async def test_selected_option_updates_original_message(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = _option_payload()
     update = AsyncMock(return_value=None)
-    monkeypatch.setattr(SlackMessageLocation, "update", at_location(update))
+    monkeypatch.setattr(SlackConversation, "update", channel_first(update))
 
     await slack_routes._update_selected_option_message(
         SlackInteraction.model_validate(payload),
@@ -155,7 +155,7 @@ async def test_option_interaction_schedules_update_only_for_authorized_actor(
     payload["message"]["blocks"][1]["elements"][0]["value"] = action["value"]
     notify = AsyncMock()
     repo = AsyncMock(return_value={"owner": "langchain-ai", "name": "open-swe"})
-    monkeypatch.setattr(SlackConversation, "post_ephemeral", at_location(notify))
+    monkeypatch.setattr(SlackConversation, "post_ephemeral", channel_first(notify))
     update = AsyncMock()
     process = AsyncMock()
     monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
@@ -356,9 +356,9 @@ async def test_retry_is_requester_scoped_and_dispatches_only_once(
     )
     monkeypatch.setattr(retry, "is_kitchen_channel", AsyncMock(return_value=False))
     update = AsyncMock()
-    monkeypatch.setattr(SlackMessageLocation, "update", at_location(update))
+    monkeypatch.setattr(SlackConversation, "update", channel_first(update))
     notify = AsyncMock()
-    monkeypatch.setattr(SlackConversation, "post_ephemeral", at_location(notify))
+    monkeypatch.setattr(SlackConversation, "post_ephemeral", channel_first(notify))
     fetch = AsyncMock(return_value={"user": "U1", "text": "Fix the bug", "ts": message_ts})
     monkeypatch.setattr(retry, "fetch_slack_thread_message_by_ts", fetch)
     monkeypatch.setattr(retry, "fetch_slack_message_by_ts", fetch)

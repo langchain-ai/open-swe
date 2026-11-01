@@ -14,7 +14,7 @@ from openswe.slack.client import SlackConversation
 from openswe.slack.records import lookup_slack_thread_id
 from openswe.slack.tools import move_thread
 from openswe.source_context import SlackThreadRef
-from tests.slack_helpers import at_location
+from tests.slack_helpers import channel_first
 
 StatusCall = tuple[str, str, str]
 
@@ -103,7 +103,7 @@ async def test_breakout_mid_run_moves_the_working_status(
     async def post_root(*_args: object, **_kwargs: object) -> str:
         return "2.0"
 
-    monkeypatch.setattr(SlackConversation, "post", at_location(post_root))
+    monkeypatch.setattr(SlackConversation, "post", channel_first(post_root))
     client = _LangGraph({"channel_id": "C1", "thread_ts": "1.0"})
     await slack_move.bind_slack_thread_id("C1", "1.0", "thread-1")
 
@@ -227,7 +227,7 @@ async def test_unreadable_binding_after_a_breakout_leaves_the_old_thread_alone(
     async def post_root(*_args: object, **_kwargs: object) -> str:
         return "2.0"
 
-    monkeypatch.setattr(SlackConversation, "post", at_location(post_root))
+    monkeypatch.setattr(SlackConversation, "post", channel_first(post_root))
     client = _LangGraph({"channel_id": "C1", "thread_ts": "1.0"})
     await slack_move.bind_slack_thread_id("C1", "1.0", "thread-1")
 
@@ -275,7 +275,7 @@ async def test_move_tool_uses_current_or_explicit_channel_without_moving_twice(
         SlackChannel, "load", AsyncMock(return_value=SimpleNamespace(public=target != "C1"))
     )
     root = AsyncMock(return_value="2.0")
-    monkeypatch.setattr(SlackConversation, "post", at_location(root))
+    monkeypatch.setattr(SlackConversation, "post", channel_first(root))
     await slack_move.bind_slack_thread_id("C1", "1.0", "thread-1")
 
     result = await move_thread.slack_move_thread("Breakout", explicit)

@@ -98,8 +98,10 @@ class SlackRetry(BaseModel):
         claim_key = f"{self.channel_id}:{self.nonce}"
         if not await event_claims.claim(BUTTON_TYPE, claim_key, ttl=_RETRY_LIFETIME):
             return ignored("Retry already queued")
+        conversation = common.SlackConversation(self.channel_id)
         try:
-            await common.SlackMessageLocation(self.channel_id, interaction.message_ts).update(
+            await conversation.update(
+                interaction.message_ts,
                 interaction.message.text,
                 blocks=[
                     block for block in interaction.message.blocks if block.get("type") != "actions"
@@ -160,8 +162,10 @@ class SlackRetry(BaseModel):
         except Exception:
             await event_claims.release(BUTTON_TYPE, claim_key)
             try:
-                await common.SlackMessageLocation(self.channel_id, interaction.message_ts).update(
-                    interaction.message.text, blocks=interaction.message.blocks
+                await conversation.update(
+                    interaction.message_ts,
+                    interaction.message.text,
+                    blocks=interaction.message.blocks,
                 )
             except Exception:
                 logger.exception("Could not restore Slack retry button")

@@ -56,7 +56,7 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
   Before asking whether a change should be personal or shared, confirm from that code which scopes the behavior actually supports; never offer a scope it cannot have.
 - Slack: prefer @mentions with plain-language requests and buttons for explicit actions.
   Typed and slash commands are optional shortcuts, never the only way.
-  Automated messages that only report something (status, outcomes, cards reposted after people were already told) must not ping the people they name: post with `SlackThreadLocation.reply(..., ping=False)`, which edits the `<@U…>` mentions in after posting, since Slack does not notify for mentions added by an edit.
+  Automated messages that only report something (status, outcomes, cards reposted after people were already told) must not ping the people they name: reply with `SlackConversation.reply(..., ping=False)`, which edits the `<@U…>` mentions in after posting, since Slack does not notify for mentions added by an edit.
   Ping only when the message asks that person to act.
 - User-initiated UI mutations are optimistic: update immediately, roll back on failure, show an error toast.
   Skip this only when an immediate update would be unsafe or misleading.

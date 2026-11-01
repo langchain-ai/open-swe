@@ -68,7 +68,7 @@ from openswe.review.publish import (
 )
 from openswe.review.reconcile import reconcile_findings_with_review_threads
 from openswe.run_config import RunConfig
-from openswe.slack.client import SlackThreadLocation
+from openswe.slack.client import SlackConversation
 from openswe.utils.dashboard_links import dashboard_review_url
 from openswe.utils.langsmith import get_langsmith_trace_url
 
@@ -1070,7 +1070,7 @@ async def _maybe_post_slack_completion_reply(
         review_url = f"{review_url}#pullrequestreview-{review_id}"
     text = f"{headline} <{review_url}|View review>"
 
-    await SlackThreadLocation(channel_id, thread_ts).try_reply(text, agent_thread_id=thread_id)
+    await SlackConversation(channel_id).try_reply(thread_ts, text, agent_thread_id=thread_id)
 
 
 async def _store_thread_ids_on_findings(

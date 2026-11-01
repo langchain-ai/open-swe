@@ -7,11 +7,11 @@ import pytest
 from openswe.slack import http as slack_http
 from openswe.slack import stop as slack_stop
 from openswe.slack import thinking
-from openswe.slack.client import SlackThreadLocation
+from openswe.slack.client import SlackConversation
 from openswe.slack.records import bind_slack_thread_id
 from openswe.threads import handlers
 from openswe.users.models import User, UserIdentity
-from tests.slack_helpers import at_location
+from tests.slack_helpers import channel_first
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -104,7 +104,7 @@ def _patch_native_stop(
     monkeypatch.setattr(handlers, "_thread_summary", AsyncMock(return_value={}))
     monkeypatch.setattr(handlers, "settle_run_turn", AsyncMock())
     reply = AsyncMock()
-    monkeypatch.setattr(SlackThreadLocation, "try_reply", at_location(reply))
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(reply))
     monkeypatch.setattr(slack_http.SlackClient, "bot", lambda: AsyncMock())
     monkeypatch.setattr(slack_http, "slack_identity", AsyncMock(return_value={"team_id": "T123"}))
     status = AsyncMock(return_value=True)

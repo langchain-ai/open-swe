@@ -19,7 +19,6 @@ from openswe.slack.breakout_destination import resolve_breakout_destination
 from openswe.slack.breakout_links import breakout_root_blocks, mark_broken_out, source_thread_line
 from openswe.slack.client import (
     SlackConversation,
-    SlackThreadLocation,
     SlackWebLinkFooter,
     fetch_slack_thread_messages,
     get_active_slack_thread,
@@ -389,9 +388,10 @@ async def slack_breakout_thread(
         f"<@{requester}>" if requester else "",
     )
     root_text = " · ".join(part for part in root_parts if part)
+    conversation = SlackConversation(clean_channel_id)
     try:
-        message_ts = await SlackConversation(clean_channel_id).post(
-            SlackWebLinkFooter(dashboard_thread_url(thread_id)).append_to(root_text),
+        message_ts = await conversation.post(
+            SlackWebLinkFooter.for_thread(thread_id).append_to(root_text),
             blocks=block_payload(breakout_root_blocks(root_text, dashboard_thread_url(thread_id))),
             unfurl_links=False,
             unfurl_media=False,
@@ -406,7 +406,8 @@ async def slack_breakout_thread(
 
     for attempt in range(2):
         try:
-            await SlackThreadLocation(clean_channel_id, message_ts).reply(
+            await conversation.reply(
+                message_ts,
                 _thread_details(clean_instructions, repo),
                 agent_thread_id=thread_id,
                 unfurl_links=False,

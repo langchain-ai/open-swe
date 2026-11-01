@@ -11,7 +11,7 @@ from typing_extensions import TypedDict
 from openswe.invocation import resolve_invocation_id
 from openswe.jobs import queue
 from openswe.slack.client import (
-    SlackMessageLocation,
+    SlackConversation,
     fetch_slack_thread_message_by_ts,
     format_slack_session_cost,
     with_slack_pending_session_cost,
@@ -92,8 +92,8 @@ async def _mark_slack_reply_cost_pending(
     if updated_text == text and updated_blocks == blocks:
         return
     try:
-        await SlackMessageLocation(payload["channel_id"], message_ts).update(
-            updated_text, blocks=updated_blocks
+        await SlackConversation(payload["channel_id"]).update(
+            message_ts, updated_text, blocks=updated_blocks
         )
     except SlackRequestError as exc:
         logger.warning("Could not update pending cost label", extra={"slack_error": exc.code})
@@ -207,8 +207,8 @@ async def _refresh_once(
         return "updated", "already current"
 
     try:
-        await SlackMessageLocation(payload["channel_id"], message_ts).update(
-            updated_text, blocks=updated_blocks
+        await SlackConversation(payload["channel_id"]).update(
+            message_ts, updated_text, blocks=updated_blocks
         )
     except SlackRequestError as exc:
         return "pending", exc.code or "Slack update failed"

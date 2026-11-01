@@ -13,13 +13,13 @@ from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.review_guide.walk import Reader, Walk
 from openswe.sandbox_scripts.walkthrough import parse_index
 from openswe.slack import diff_image
-from openswe.slack.client import SlackConversation, SlackMessageLocation
+from openswe.slack.client import SlackConversation
 from openswe.slack.http import SlackRequestError
 from openswe.walkthrough.diff import DiffIndex
 from openswe.walkthrough.lines import LineSet
 from openswe.walkthrough.plan import Plan, PlanChunk
 from openswe.walkthrough.record import Walkthrough
-from tests.slack_helpers import at_location
+from tests.slack_helpers import channel_first
 
 DIFF = (
     "diff --git a/a.py b/a.py\nnew file mode 100644\n--- /dev/null\n+++ b/a.py\n"
@@ -48,6 +48,10 @@ class _Session:
     pull_request: SimpleNamespace = field(
         default_factory=lambda: SimpleNamespace(id=uuid7(), owner="o", repo="r", number=1)
     )
+
+    @property
+    def slack_conversation(self) -> SlackConversation:
+        return SlackConversation(self.slack_channel_id)
 
     async def save_walk(self, walk: Walk) -> None:
         self.walk = walk
@@ -148,7 +152,7 @@ async def test_unrenderable_chunk_body_is_not_posted_as_an_empty_next_button(
         thread_id="thread-1", pull_request_id=uuid7(), user_id=uuid7(), slack_channel_id="C1"
     )
     post = AsyncMock()
-    monkeypatch.setattr(SlackConversation, "post", at_location(post))
+    monkeypatch.setattr(SlackConversation, "post", channel_first(post))
     text = "x" * 160_000
     assert await messages.post_with_buttons(session, text, [NEXT]) == ""
     post.assert_not_awaited()
@@ -181,13 +185,13 @@ async def test_chunk_images_survive_retirement_and_fall_back_to_accessible_text(
     )
     post = AsyncMock(return_value="2.0")
     update = AsyncMock()
-    monkeypatch.setattr(SlackConversation, "post", at_location(post))
-    monkeypatch.setattr(SlackMessageLocation, "update", at_location(update))
+    monkeypatch.setattr(SlackConversation, "post", channel_first(post))
+    monkeypatch.setattr(SlackConversation, "update", channel_first(update))
 
     assert (
         await messages.post_with_buttons(session, shown.message_text, [NEXT], shown=shown) == "2.0"
     )
-    await messages.retire("C1", "2.0", shown.message_text, "✓ Seen", shown=shown)
+    await messages.retire(SlackConversation("C1"), "2.0", shown.message_text, "✓ Seen", shown=shown)
 
     assert post.await_args is not None and update.await_args is not None
     assert post.await_args.args[1] == shown.message_text

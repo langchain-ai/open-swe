@@ -10,8 +10,8 @@ from fastapi import BackgroundTasks, HTTPException
 from openswe.incidents import channels, service, turns
 from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.slack.channels import SlackChannel
-from openswe.slack.client import SlackThreadLocation
-from tests.slack_helpers import at_location
+from openswe.slack.client import SlackConversation
+from tests.slack_helpers import channel_first
 
 CHANNEL = {
     "id": "C1",
@@ -29,7 +29,7 @@ CHANNEL = {
 @pytest.fixture(autouse=True)
 def reply(monkeypatch):
     reply = AsyncMock(return_value="5.0")
-    monkeypatch.setattr(SlackThreadLocation, "reply", at_location(reply))
+    monkeypatch.setattr(SlackConversation, "reply", channel_first(reply))
     return reply
 
 

@@ -13,9 +13,9 @@ from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.incidents.report import CONTEXT_MARKER
 from openswe.middleware.model_call_shape import CallShape
 from openswe.slack.channels import SlackChannel
-from openswe.slack.client import SlackThreadLocation
+from openswe.slack.client import SlackConversation
 from openswe.slack.http import SlackRequestError
-from tests.slack_helpers import at_location
+from tests.slack_helpers import channel_first
 
 CHANNEL = {
     "id": "C1",
@@ -31,7 +31,7 @@ CHANNEL = {
 @pytest.fixture(autouse=True)
 def reply(monkeypatch):
     reply = AsyncMock(return_value="7.0")
-    monkeypatch.setattr(SlackThreadLocation, "reply", at_location(reply))
+    monkeypatch.setattr(SlackConversation, "reply", channel_first(reply))
     return reply
 
 

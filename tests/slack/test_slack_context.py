@@ -13,11 +13,7 @@ from openswe.slack import client as slack_utils
 from openswe.slack import webhook as slack_webhooks
 from openswe.slack.allowed_bots import AllowedSlackBot
 from openswe.slack.channels import SlackChannel
-from openswe.slack.client import (
-    SlackConversation,
-    SlackThreadLocation,
-    format_slack_messages_for_prompt,
-)
+from openswe.slack.client import SlackConversation, format_slack_messages_for_prompt
 from openswe.slack.payloads import SlackChannelContext, SlackChannelPayload
 from openswe.slack.request import SlackRequest
 from openswe.source_context import SourceContext
@@ -26,7 +22,7 @@ from openswe.utils.run_usage import RunUsageSummary
 from openswe.utils.thread_participants import participant_ids
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
-from tests.slack_helpers import at_location
+from tests.slack_helpers import channel_first
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
@@ -398,7 +394,7 @@ def _setup_slack_mention_fakes(
         return "mapped-thread"
 
     monkeypatch.setattr(
-        SlackThreadLocation, "post_trace_reply", at_location(fake_post_slack_trace_reply)
+        SlackConversation, "post_trace_reply", channel_first(fake_post_slack_trace_reply)
     )
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", fake_resolve_slack_thread_id)
     client = _FakeLangGraphClientForProcess()
@@ -1310,7 +1306,7 @@ async def test_performance_directive_switches_unless_quoted(
     feedback = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_webhooks, "create_langsmith_feedback", feedback)
     notice = AsyncMock(return_value=True)
-    monkeypatch.setattr(SlackConversation, "post_ephemeral", at_location(notice))
+    monkeypatch.setattr(SlackConversation, "post_ephemeral", channel_first(notice))
     dispatch = AsyncMock(return_value={"run_id": "run-perf"})
     monkeypatch.setattr(slack_webhooks, "_dispatch_or_queue_slack_run", dispatch)
     await slack_webhooks.process_slack_mention(

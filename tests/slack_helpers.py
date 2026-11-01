@@ -1,15 +1,16 @@
-"""Fakes for Slack location methods, written against the location's ids and the call's arguments."""
+"""Fakes for ``SlackConversation`` methods, written against the channel id and the call's arguments."""
 
 import inspect
 from collections.abc import Callable
-from dataclasses import astuple
+
+from openswe.slack.client import SlackConversation
 
 
-def at_location(fake: Callable[..., object]) -> Callable[..., object]:
-    """A method that calls ``fake`` with its location's ids ahead of the method's arguments."""
+def channel_first(fake: Callable[..., object]) -> Callable[..., object]:
+    """A ``SlackConversation`` method that calls ``fake`` with the channel id ahead of its arguments."""
 
-    async def method(self: object, *args: object, **kwargs: object) -> object:
-        result = fake(*astuple(self), *args, **kwargs)
+    async def method(conversation: SlackConversation, *args: object, **kwargs: object) -> object:
+        result = fake(conversation.channel_id, *args, **kwargs)
         return await result if inspect.isawaitable(result) else result
 
     return method

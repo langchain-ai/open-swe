@@ -398,16 +398,15 @@ class SlackChannel(Base):
 
     async def post(self, text: str, *, blocks: list[dict[str, Any]] | None = None) -> str:
         """Post a top-level message, joining the channel when the bot is outside it."""
+        conversation = SlackConversation(self.id)
         try:
-            return await SlackConversation(self.id).post(
+            return await conversation.post(
                 text, unfurl_links=False, unfurl_media=False, blocks=blocks
             )
         except SlackRequestError as exc:
             if exc.code != "not_in_channel" or not await self.join():
                 raise
-        return await SlackConversation(self.id).post(
-            text, unfurl_links=False, unfurl_media=False, blocks=blocks
-        )
+        return await conversation.post(text, unfurl_links=False, unfurl_media=False, blocks=blocks)
 
     async def messages(self, limit: int = 30) -> list[SlackMessage]:
         """The most recent top-level messages, oldest first.

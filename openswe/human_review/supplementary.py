@@ -28,7 +28,6 @@ from openswe.human_review.requests import (
     slack_mention,
 )
 from openswe.prompts import prompt
-from openswe.slack.client import SlackThreadLocation
 from openswe.slack.dm import send_dm
 from openswe.threads.runs import start_dashboard_thread
 from openswe.users import User
@@ -270,9 +269,12 @@ class SupplementaryReview:
                     state.github_notified = True
                 if not state.slack_notified:
                     state.slack_notified = bool(
-                        await SlackThreadLocation(
-                            row.slack_channel_id, row.slack_thread_ts or row.slack_message_ts
-                        ).reply(note, unfurl_links=False, unfurl_media=False)
+                        await row.slack_conversation.reply(
+                            row.slack_thread_ts or row.slack_message_ts,
+                            note,
+                            unfurl_links=False,
+                            unfurl_media=False,
+                        )
                     )
                 if not state.dm_notified and user is not None and user.slack_user_id:
                     state.dm_notified = await send_dm(

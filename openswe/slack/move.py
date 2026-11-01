@@ -175,7 +175,7 @@ async def move_slack_thread(
     message: str,
 ) -> dict[str, Any]:
     """Post `message` as a new root in `target_channel` and move the thread's Slack binding there."""
-    root_text = SlackWebLinkFooter(dashboard_thread_url(thread_id)).append_to(message)
+    root_text = SlackWebLinkFooter.for_thread(thread_id).append_to(message)
     try:
         new_ts = await SlackConversation(target_channel).post(
             root_text,

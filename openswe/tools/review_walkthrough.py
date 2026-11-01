@@ -101,7 +101,13 @@ class _State:
 
     async def retire(self, shown: OnScreen | None, note: str) -> None:
         if shown is not None:
-            await retire(self.channel_id, shown.message_ts, shown.message_text, note, shown=shown)
+            await retire(
+                self.ctx.session.slack_conversation,
+                shown.message_ts,
+                shown.message_text,
+                note,
+                shown=shown,
+            )
 
     async def post(self, shown: OnScreen) -> dict[str, Any]:
         """Put ``shown`` on screen with its "Next" button, replacing what was there."""

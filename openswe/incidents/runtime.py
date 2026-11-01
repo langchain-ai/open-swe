@@ -27,7 +27,6 @@ from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
-from openswe.slack.client import SlackThreadLocation
 from openswe.slack.http import SlackRequestError
 from openswe.source_context import SlackThreadRef
 from openswe.utils.dashboard_links import dashboard_incident_url
@@ -158,9 +157,13 @@ class IncidentSession:
                 reason="answer" if explicit else "findings",
             )
             try:
-                await SlackThreadLocation(
-                    record.channel_id, self.reply_thread_ts or SESSION_TS
-                ).reply(text, blocks=blocks, unfurl_links=False, unfurl_media=False)
+                await record.slack_conversation.reply(
+                    self.reply_thread_ts or SESSION_TS,
+                    text,
+                    blocks=blocks,
+                    unfurl_links=False,
+                    unfurl_media=False,
+                )
             except SlackRequestError as exc:
                 posted = False
                 logger.warning(

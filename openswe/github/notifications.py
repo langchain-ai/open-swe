@@ -10,7 +10,7 @@ from langgraph_sdk import get_client
 from openswe import event_claims
 from openswe.config import ENV
 from openswe.slack.client import (
-    SlackThreadLocation,
+    SlackConversation,
     get_active_slack_thread,
     slack_thread_mutation_lock,
 )
@@ -61,7 +61,8 @@ async def notify_slack_review(
                 ):
                     return
                 try:
-                    await SlackThreadLocation(location["channel_id"], location["thread_ts"]).reply(
+                    await SlackConversation(location["channel_id"]).reply(
+                        location["thread_ts"],
                         f"@{escape(reviewer, quote=False)} <{review_url}|{notice}>{suffix}",
                         agent_thread_id=thread_id,
                         unfurl_links=False,

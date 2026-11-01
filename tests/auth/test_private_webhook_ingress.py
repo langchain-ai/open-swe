@@ -9,7 +9,7 @@ from openswe.slack import webhook
 from openswe.slack.client import SlackConversation
 from openswe.slack.request import SlackRequest
 from openswe.slack.tools import move_thread
-from tests.slack_helpers import at_location
+from tests.slack_helpers import channel_first
 
 
 @pytest.mark.asyncio
@@ -197,7 +197,7 @@ async def test_private_slack_move_cannot_publish_to_channel(monkeypatch):
         ),
     )
     post = AsyncMock()
-    monkeypatch.setattr(SlackConversation, "post", at_location(post))
+    monkeypatch.setattr(SlackConversation, "post", channel_first(post))
     result = await move_thread.slack_move_thread("Move here", "C1")
     assert result["success"] is False
     post.assert_not_awaited()

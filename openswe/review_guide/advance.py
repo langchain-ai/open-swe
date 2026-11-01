@@ -42,7 +42,7 @@ async def approve_click(
     await session.mark_seen(walk.head_sha, walk.merge_base_sha, approval.lines)
     await session.save_walk(walk)
     await retire(
-        session.slack_channel_id, shown.message_ts, shown.message_text, "✓ Seen", shown=shown
+        session.slack_conversation, shown.message_ts, shown.message_text, "✓ Seen", shown=shown
     )
     return approval
 

@@ -30,6 +30,7 @@ async def answer_click(
         request = await HumanReviewRequest.get(UUID(request_id))
     except ValueError:
         request = None
+    conversation = SlackConversation(channel_id)
     if request is None:
         logger.warning(
             "Human review click names no request",
@@ -37,9 +38,7 @@ async def answer_click(
         )
         gone = Outcome("That review request no longer exists.")
         if ephemeral:
-            await SlackConversation(channel_id).post_ephemeral(
-                slack_user_id, gone.message, thread_ts
-            )
+            await conversation.post_ephemeral(slack_user_id, gone.message, thread_ts)
         return gone
     # A card's copy in another channel shares its thread's lock.
     lock_channel, lock_ts = request.slack_location or (channel_id, thread_ts)
@@ -81,9 +80,7 @@ async def answer_click(
     if (
         ephemeral
         and outcome.message
-        and not await SlackConversation(channel_id).post_ephemeral(
-            slack_user_id, outcome.message, thread_ts
-        )
+        and not await conversation.post_ephemeral(slack_user_id, outcome.message, thread_ts)
     ):
         logger.warning(
             "Could not answer a human review click",

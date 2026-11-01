@@ -10,11 +10,11 @@ from openswe import completion
 from openswe.message_queue import QueuedMessage
 from openswe.review import run_failure
 from openswe.slack import thinking as slack_thinking
-from openswe.slack.client import SlackThreadLocation
+from openswe.slack.client import SlackConversation
 from openswe.tasks import events, store
 from openswe.threads import runs
 from tests.conftest import MemoryEventClaims
-from tests.slack_helpers import at_location
+from tests.slack_helpers import channel_first
 
 
 @pytest.fixture(autouse=True)
@@ -53,7 +53,7 @@ async def test_failed_run_offers_a_requester_scoped_retry(monkeypatch: pytest.Mo
 
     monkeypatch.setenv("SLACK_SIGNING_SECRET", "retry-test-secret-at-least-32-bytes")
     reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(SlackThreadLocation, "try_reply", at_location(reply))
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(reply))
     monkeypatch.setattr(completion, "get_langsmith_error_url", AsyncMock(return_value=None))
     metadata = _slack_metadata()
     metadata["source_context"]["slack_thread"]["triggering_user_id"] = "U1"
@@ -125,7 +125,7 @@ async def test_reviewer_cleanup_failure_does_not_block_failure_reply(
         run_failure, "settle_review_check_run", AsyncMock(side_effect=RuntimeError("boom"))
     )
     reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(SlackThreadLocation, "try_reply", at_location(reply))
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(reply))
 
     result = await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-1", "status": "error"}
@@ -386,7 +386,7 @@ async def test_later_failed_run_posts_even_if_prior_run_replied(
     client = _FakeClient(metadata)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(SlackThreadLocation, "try_reply", at_location(reply))
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(reply))
 
     error_url = "https://smith.example/o/tenant/projects/p/project/r/failed-span"
     trace = AsyncMock(return_value=error_url)
@@ -459,7 +459,7 @@ async def test_completion_waits_for_running_background_tasks(monkeypatch, status
     metadata = {**_slack_metadata(), "running_background_tasks": ["cmd-1"]}
     client = _FakeActiveRunClient(metadata, active=False)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
-    monkeypatch.setattr(SlackThreadLocation, "try_reply", at_location(AsyncMock(return_value=True)))
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(AsyncMock(return_value=True)))
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     await completion.handle_run_completion({"thread_id": "t1", "run_id": "run-1", "status": status})

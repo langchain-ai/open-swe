@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe.slack import failures
-from openswe.slack.client import SlackThreadLocation
+from openswe.slack.client import SlackConversation
 from openswe.slack.request import SlackRequest
 from openswe.slack.retry import SlackRetry
-from tests.slack_helpers import at_location
+from tests.slack_helpers import channel_first
 
 
 @pytest.fixture(autouse=True)
@@ -28,7 +28,7 @@ async def test_unexpected_failure_replies_with_a_uuid7_error_id_that_is_logged(
 ) -> None:
     monkeypatch.setenv("SLACK_SIGNING_SECRET", "retry-test-secret-at-least-32-bytes")
     post_reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(SlackThreadLocation, "try_reply", at_location(post_reply))
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(post_reply))
     target = _target().model_copy(update={"user_id": "U1", "message_ts": "1.5"})
 
     with caplog.at_level(logging.ERROR, logger=failures.logger.name):
@@ -63,7 +63,7 @@ async def test_status_failure_still_delivers_error_reply(
 ) -> None:
     clear_status.side_effect = RuntimeError("status unavailable")
     post_reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(SlackThreadLocation, "try_reply", at_location(post_reply))
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(post_reply))
 
     error_id = await failures.report_slack_failure(_target(), RuntimeError("boom"))
 
@@ -73,7 +73,7 @@ async def test_status_failure_still_delivers_error_reply(
 
 async def test_run_slack_task_reports_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     post_reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(SlackThreadLocation, "try_reply", at_location(post_reply))
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(post_reply))
 
     async def task() -> None:
         raise RuntimeError("boom")
@@ -90,7 +90,7 @@ async def test_failure_retry_only_replays_explicitly_replayable_messages(
 ) -> None:
     monkeypatch.setenv("SLACK_SIGNING_SECRET", "retry-test-secret-at-least-32-bytes")
     post_reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(SlackThreadLocation, "try_reply", at_location(post_reply))
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(post_reply))
     request = SlackRequest(
         channel_id="C1",
         thread_ts="1.0",

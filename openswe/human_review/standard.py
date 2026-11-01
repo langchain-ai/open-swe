@@ -74,7 +74,7 @@ from openswe.slack.cards import origin_footer
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     GitHubPrRef,
-    SlackThreadLocation,
+    SlackConversation,
     get_slack_permalink,
     get_slack_user_info,
 )
@@ -269,8 +269,11 @@ async def _point_to_card(request: HumanReviewRequest, origin: Origin, target: Sl
     """Tell the asking thread where the card went, since a broadcast cannot reach another channel."""
     # A channel mention, not the card's permalink: Slack unfurls that into a second card.
     try:
-        await SlackThreadLocation(origin.slack_channel_id, origin.slack_thread_ts).reply(
-            f"Review requested in <#{target.id}>.", unfurl_links=False, unfurl_media=False
+        await SlackConversation(origin.slack_channel_id).reply(
+            origin.slack_thread_ts,
+            f"Review requested in <#{target.id}>.",
+            unfurl_links=False,
+            unfurl_media=False,
         )
     except SlackRequestError as exc:
         logger.warning(

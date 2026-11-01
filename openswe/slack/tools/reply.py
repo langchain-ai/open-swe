@@ -28,7 +28,6 @@ from openswe.slack.blocks import (
 )
 from openswe.slack.client import (
     SlackConversation,
-    SlackThreadLocation,
     get_active_slack_thread,
     remove_slack_reaction,
     replace_slack_command_message,
@@ -387,7 +386,7 @@ async def _by_the_way_reply(
             "hint": "Do not post again; end the run.",
         }
     try:
-        await SlackThreadLocation(channel_id, thread_ts).reply(message, blocks=blocks)
+        await SlackConversation(channel_id).reply(thread_ts, message, blocks=blocks)
     except SlackRequestError as exc:
         try:
             await event_claims.release(_BY_THE_WAY_ANSWER_SCOPE, reservation)
@@ -604,8 +603,12 @@ async def _post_and_store_mapping(
     triggering_user_id: str | None = None,
     post_thread_ts: str | None = None,
 ) -> str:
-    message_ts = await SlackThreadLocation(channel_id, post_thread_ts or thread_ts).reply(
-        message, blocks=blocks, usage=usage, agent_thread_id=agent_thread_id
+    message_ts = await SlackConversation(channel_id).reply(
+        post_thread_ts or thread_ts,
+        message,
+        blocks=blocks,
+        usage=usage,
+        agent_thread_id=agent_thread_id,
     )
     if message_ts:
         await store_slack_message_run_mapping(

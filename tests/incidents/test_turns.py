@@ -15,14 +15,14 @@ from openswe.incidents.models import (
 )
 from openswe.incidents.report import CONTEXT_MARKER
 from openswe.message_queue import QueuedMessage
-from openswe.slack.client import SlackThreadLocation
-from tests.slack_helpers import at_location
+from openswe.slack.client import SlackConversation
+from tests.slack_helpers import channel_first
 
 
 @pytest.fixture(autouse=True)
 def reply(monkeypatch):
     reply = AsyncMock(return_value="9.0")
-    monkeypatch.setattr(SlackThreadLocation, "reply", at_location(reply))
+    monkeypatch.setattr(SlackConversation, "reply", channel_first(reply))
     return reply
 
 

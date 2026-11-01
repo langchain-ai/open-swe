@@ -5,8 +5,8 @@ from langchain.agents.middleware import AgentState
 from langchain_core.messages import AIMessage, HumanMessage
 
 from openswe.middleware.notify_step_limit import notify_step_limit_reached
-from openswe.slack.client import SlackThreadLocation
-from tests.slack_helpers import at_location
+from openswe.slack.client import SlackConversation
+from tests.slack_helpers import channel_first
 
 
 class TestNotifyStepLimitReached:
@@ -33,7 +33,7 @@ class TestNotifyStepLimitReached:
                     "configurable": {"slack_thread": {"channel_id": "C123", "thread_ts": "171.123"}}
                 },
             ),
-            patch.object(SlackThreadLocation, "try_reply", at_location(mock_post := AsyncMock())),
+            patch.object(SlackConversation, "try_reply", channel_first(mock_post := AsyncMock())),
         ):
             result = await notify_step_limit_reached.aafter_agent(state, self._make_runtime())
 
@@ -44,7 +44,7 @@ class TestNotifyStepLimitReached:
     async def test_skips_when_limit_marker_absent(self) -> None:
         state: AgentState = {"messages": [HumanMessage(content="keep going")]}
 
-        with patch.object(SlackThreadLocation, "try_reply", at_location(mock_post := AsyncMock())):
+        with patch.object(SlackConversation, "try_reply", channel_first(mock_post := AsyncMock())):
             result = await notify_step_limit_reached.aafter_agent(state, self._make_runtime())
 
         assert result is None

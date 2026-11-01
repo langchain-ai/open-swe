@@ -9,10 +9,10 @@ from starlette.requests import Request
 
 from openswe.slack import events as slack_events
 from openswe.slack import routes as slack_routes
-from openswe.slack.client import SlackThreadLocation
+from openswe.slack.client import SlackConversation
 from openswe.slack.payloads import SlackChannelContext
 from openswe.webhooks import common as webhook_common
-from tests.slack_helpers import at_location
+from tests.slack_helpers import channel_first
 
 
 class _FakeClaims:
@@ -219,7 +219,7 @@ async def test_external_channel_refuses_without_starting_a_run(
         "resolve_slack_channel_context",
         AsyncMock(return_value=SlackChannelContext(is_ext_shared=True)),
     )
-    monkeypatch.setattr(SlackThreadLocation, "try_reply", at_location(post_reply))
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(post_reply))
 
     response = await _post(_mention_payload(), background_tasks)
 
@@ -251,7 +251,7 @@ async def test_unverified_channel_retries_without_reply_or_run(
     resolve_thread = cast(AsyncMock, webhook_common.resolve_slack_thread_id)
     resolve_context = AsyncMock(return_value=context)
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", resolve_context)
-    monkeypatch.setattr(SlackThreadLocation, "try_reply", at_location(post_reply))
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(post_reply))
     monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=True))
     payload = _channel_message_payload()
     payload["event"]["text"] = "open a feature request"
@@ -404,7 +404,7 @@ async def test_preprocessing_failure_replies_and_does_not_claim_event(
 ) -> None:
     background_tasks = _FakeBackgroundTasks()
     post_reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(SlackThreadLocation, "try_reply", at_location(post_reply))
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(post_reply))
 
     async def failed_repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         raise RuntimeError

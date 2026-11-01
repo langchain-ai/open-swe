@@ -96,8 +96,6 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     GitHubPrRef,
     SlackConversation,
-    SlackMessageLocation,
-    SlackThreadLocation,
     SlackThreadMappingError,  # noqa: F401
     add_slack_reaction,
     fetch_slack_thread_messages,  # noqa: F401
@@ -259,9 +257,7 @@ __all__ = [
     "get_github_app_installation_token_with_expiry",
     "get_profile_default_repo",
     "SlackConversation",
-    "SlackMessageLocation",
     "SlackRepoResolution",
-    "SlackThreadLocation",
     "get_slack_repo_config",
     "get_slack_user_info",
     "get_slack_user_names",
@@ -1030,12 +1026,11 @@ async def post_account_link_prompt(
             "again."
         )
     try:
+        conversation = SlackConversation(channel_id)
         if ephemeral:
-            await SlackConversation(channel_id).post_ephemeral(user_id, text)
+            await conversation.post_ephemeral(user_id, text)
         else:
-            await SlackThreadLocation(channel_id, thread_ts).try_reply(
-                text, agent_thread_id=agent_thread_id
-            )
+            await conversation.try_reply(thread_ts, text, agent_thread_id=agent_thread_id)
     except Exception:  # noqa: BLE001
         logger.debug("Failed to post account-link prompt to Slack", exc_info=True)
 

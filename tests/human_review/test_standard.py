@@ -24,11 +24,11 @@ from openswe.human_review.standard import (
     summary_line,
 )
 from openswe.slack.blocks import block_payload, section
-from openswe.slack.client import SlackMessageLocation
+from openswe.slack.client import SlackConversation
 from openswe.slack.http import SlackRequestError
 from openswe.users import User, UserIdentity
 from tests.conftest import FakeUserRecords
-from tests.slack_helpers import at_location
+from tests.slack_helpers import channel_first
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
@@ -128,9 +128,9 @@ async def test_completed_pick_marks_dm_stale_and_preserves_reviewer(updated: boo
     with (
         patch.object(HumanReviewRequest, "locked", locked),
         patch.object(
-            SlackMessageLocation,
+            SlackConversation,
             "update",
-            at_location(
+            channel_first(
                 update := AsyncMock(
                     side_effect=None if updated else SlackRequestError("rate_limited")
                 )

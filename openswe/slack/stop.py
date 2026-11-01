@@ -75,7 +75,7 @@ async def _process_agent_session_stopped(
         )
         return
     if thread_ts != CODE_CHANNEL_SESSION_TS:
-        from openswe.slack.client import SlackThreadLocation
+        from openswe.slack.client import SlackConversation
         from openswe.slack.http import SlackClient, slack_identity
         from openswe.slack.thinking import release_slack_location_status
         from openswe.threads.handlers import cancel_dashboard_thread
@@ -110,8 +110,10 @@ async def _process_agent_session_stopped(
         except Exception as exc:
             if isinstance(exc, HTTPException) and exc.status_code < 500:
                 raise
-            await SlackThreadLocation(channel_id, thread_ts).try_reply(
-                "I couldn't stop this thread. Please try Stop again.", agent_thread_id=thread_id
+            await SlackConversation(channel_id).try_reply(
+                thread_ts,
+                "I couldn't stop this thread. Please try Stop again.",
+                agent_thread_id=thread_id,
             )
             raise
         return

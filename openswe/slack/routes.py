@@ -526,7 +526,8 @@ async def slack_webhook(
                 and await common.claim_slack_event(event_id, channel_id, event_ts)
             ):
                 background_tasks.add_task(
-                    common.SlackThreadLocation(channel_id, thread_ts).try_reply,
+                    common.SlackConversation(channel_id).try_reply,
+                    thread_ts,
                     _EXTERNAL_CHANNEL_REFUSAL,
                 )
             common.logger.warning(
@@ -1250,10 +1251,11 @@ async def slack_interactivity(
     target = SlackRequestTarget(channel_id=channel_id, thread_ts=reply_ts or action_ts)
 
     async def dispatch() -> WebhookResponse:
+        conversation = common.SlackConversation(channel_id)
         if button.type == retry.BUTTON_TYPE:
             request_retry = retry.SlackRetry.parse(button.response)
             if request_retry is None:
-                await common.SlackConversation(channel_id).post_ephemeral(
+                await conversation.post_ephemeral(
                     user_id,
                     "This Retry button has expired or is invalid. Send your request again to retry.",
                     thread_ts=reply_ts or None,
@@ -1281,7 +1283,8 @@ async def slack_interactivity(
                 thread_id, button.fingerprint, approved=approved, actor=user_id
             )
             if decision is None:
-                await common.SlackThreadLocation(channel_id, reply_ts).try_reply(
+                await conversation.try_reply(
+                    reply_ts,
                     text="I couldn't find that workflow approval request. Trigger the push again to create a fresh approval.",
                     agent_thread_id=thread_id,
                 )
@@ -1302,13 +1305,15 @@ async def slack_interactivity(
                 "Approve workflow push" if approved else "Reject workflow push",
             )
             if not approved:
-                await common.SlackThreadLocation(channel_id, reply_ts).try_reply(
+                await conversation.try_reply(
+                    reply_ts,
                     text="Workflow push rejected. No workflow files will be pushed.",
                     agent_thread_id=thread_id,
                 )
                 return accepted("Workflow push rejected")
 
-            await common.SlackThreadLocation(channel_id, reply_ts).try_reply(
+            await conversation.try_reply(
+                reply_ts,
                 text="Workflow push approved. Open SWE will retry the blocked push.",
                 agent_thread_id=thread_id,
             )
@@ -1344,7 +1349,7 @@ async def slack_interactivity(
             return ignored("Unknown action type")
 
         if button.user_id is not None and button.user_id != user_id:
-            await common.SlackConversation(channel_id).post_ephemeral(
+            await conversation.post_ephemeral(
                 user_id,
                 "This choice is for someone else. No action was taken.",
                 thread_ts=reply_ts or None,
@@ -1422,8 +1427,8 @@ async def _update_selected_option_message(
         return
 
     try:
-        await common.SlackMessageLocation(channel_id, message_ts).update(
-            interaction.message.text or label, blocks=blocks
+        await common.SlackConversation(channel_id).update(
+            message_ts, interaction.message.text or label, blocks=blocks
         )
     except Exception:
         common.logger.warning(

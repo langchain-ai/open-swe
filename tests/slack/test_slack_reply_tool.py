@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from openswe.slack.client import SlackThreadLocation
+from openswe.slack.client import SlackConversation
 from openswe.slack.http import SlackRequestError
 from openswe.slack.records import SlackThread
-from tests.slack_helpers import at_location
+from tests.slack_helpers import channel_first
 
 slack_reply_tool = importlib.import_module("openswe.slack.tools.reply")
 
@@ -485,9 +485,9 @@ async def test_reply_moves_the_thread_to_the_dashboard_when_its_slack_thread_is_
         AsyncMock(return_value={"channel_id": "C1", "thread_ts": "1.0"}),
     )
     monkeypatch.setattr(
-        SlackThreadLocation,
+        SlackConversation,
         "reply",
-        at_location(AsyncMock(side_effect=SlackRequestError("thread_not_found"))),
+        channel_first(AsyncMock(side_effect=SlackRequestError("thread_not_found"))),
     )
     moved = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_reply_tool, "move_thread_to_dashboard", moved)
@@ -517,7 +517,7 @@ async def test_reply_stops_calling_slack_once_the_thread_lives_in_the_dashboard(
         slack_reply_tool, "_already_moved_to_dashboard", AsyncMock(return_value=True)
     )
     post = AsyncMock()
-    monkeypatch.setattr(SlackThreadLocation, "reply", at_location(post))
+    monkeypatch.setattr(SlackConversation, "reply", channel_first(post))
 
     assert (await slack_reply_tool.slack_reply("The answer", "final"))["moved_to_dashboard"] is True
     post.assert_not_awaited()
@@ -542,9 +542,9 @@ async def test_reply_does_not_claim_a_handoff_when_detaching_fails(
         AsyncMock(return_value={"channel_id": "C1", "thread_ts": "1.0"}),
     )
     monkeypatch.setattr(
-        SlackThreadLocation,
+        SlackConversation,
         "reply",
-        at_location(AsyncMock(side_effect=SlackRequestError("thread_not_found"))),
+        channel_first(AsyncMock(side_effect=SlackRequestError("thread_not_found"))),
     )
     monkeypatch.setattr(slack_reply_tool, "move_thread_to_dashboard", AsyncMock(return_value=False))
 
