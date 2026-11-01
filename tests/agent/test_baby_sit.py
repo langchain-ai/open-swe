@@ -13,9 +13,10 @@ from openswe.github.ci import RequiredCheck
 from openswe.github.http import GitHubError, RepoClient
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review.requests import HumanReviewRequest
-from openswe.slack.client import GitHubPrRef
+from openswe.slack.client import GitHubPrRef, SlackConversation
 from openswe.source_context import SourceContext
 from openswe.tasks.store import Task
+from tests.slack_helpers import channel_first
 from tests.support.github_sdk import mock_github_sdk
 
 
@@ -175,7 +176,7 @@ async def test_failure_dispatch_is_deduplicated_until_retry_is_recorded(
     assert await baby_sit.evaluate_watch("acme/repo#7") == "duplicate"
     assert dispatch.await_count == 1
 
-    monkeypatch.setattr(baby_sit, "post_slack_thread_reply", AsyncMock(return_value=True))
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(AsyncMock(return_value=True)))
     await baby_sit.record_retry(
         "acme/repo#7",
         thread_id="thread-1",
@@ -271,7 +272,7 @@ async def test_green_webhook_keeps_watching_without_waking_for_draft_card(
     )
     monkeypatch.setattr(RepoClient, "commit_statuses", AsyncMock(return_value=[]))
     notify = AsyncMock(return_value=True)
-    monkeypatch.setattr(baby_sit, "post_slack_thread_reply", notify)
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(notify))
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
     payload = {
@@ -367,7 +368,7 @@ async def test_ready_wakeup_failures_are_bounded_and_reset_on_recovery(
     dispatch = AsyncMock(side_effect=RuntimeError("Agent service unavailable"))
     monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
     notify = AsyncMock()
-    monkeypatch.setattr(baby_sit, "post_slack_thread_reply", notify)
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(notify))
 
     for expected in range(1, baby_sit.MAX_EVALUATION_ERRORS):
         watch = await baby_sit.WATCHES.get("acme/repo#7")
@@ -439,7 +440,7 @@ async def test_record_retry_caps_attempts_and_deduplicates_flake_alert(
 ) -> None:
     await _start_watch()
     notify = AsyncMock(return_value=True)
-    monkeypatch.setattr(baby_sit, "post_slack_thread_reply", notify)
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(notify))
 
     for expected in range(1, 4):
         result = await baby_sit.record_retry(
@@ -468,7 +469,7 @@ async def test_new_head_resets_retry_budget(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await _start_watch()
-    monkeypatch.setattr(baby_sit, "post_slack_thread_reply", AsyncMock(return_value=True))
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(AsyncMock(return_value=True)))
     for _ in range(3):
         await baby_sit.record_retry(
             "acme/repo#7",

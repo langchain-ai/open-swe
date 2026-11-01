@@ -22,6 +22,7 @@ from openswe.github.repositories import Repository
 from openswe.jobs import queue
 from openswe.review_guide.github import fetch_head
 from openswe.review_guide.walk import Reader, Walk
+from openswe.slack.client import SlackConversation
 from openswe.slack.code_channels import archive_code_channel, set_session_status
 from openswe.slack.http import SlackRequestError
 from openswe.users.models import User
@@ -84,6 +85,10 @@ class ReviewGuideSession(Base):
     @property
     def closed(self) -> bool:
         return self.closed_at is not None
+
+    @property
+    def slack_conversation(self) -> SlackConversation:
+        return SlackConversation(self.slack_channel_id)
 
     async def is_reader(self, slack_user_id: str) -> bool:
         """Whether this Slack member is the person being walked through; only they approve."""

@@ -192,7 +192,7 @@ async def test_reply_to_a_deleted_parent_is_removed_instead_of_left_at_the_chann
     slack_api.respond({"ok": False, "error": "thread_not_found"})
     slack_api.respond({"ok": True})
     with pytest.raises(slack_utils.SlackRequestError, match="thread_not_found"):
-        await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "Answer")
+        await slack_utils.SlackConversation("C1").reply("1.0", "Answer")
     assert [method for method, _ in slack_api.calls] == [
         "chat.postMessage",
         "conversations.replies",
@@ -204,11 +204,21 @@ async def test_reply_to_a_deleted_parent_is_removed_instead_of_left_at_the_chann
 async def test_reply_is_kept_when_the_thread_still_exists(slack_api) -> None:
     slack_api.respond({"ok": True, "ts": "2.0", "message": {"text": "Answer"}})
     slack_api.respond({"ok": True, "messages": [{"ts": "1.0"}]})
-    assert await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "Answer") == "2.0"
+    assert await slack_utils.SlackConversation("C1").reply("1.0", "Answer") == "2.0"
     assert [method for method, _ in slack_api.calls] == [
         "chat.postMessage",
         "conversations.replies",
     ]
+
+
+async def test_quiet_reply_edits_its_mentions_in_so_they_do_not_notify(slack_api) -> None:
+    slack_api.respond({"ok": True, "ts": "2.0", "message": {"thread_ts": "1.0"}})
+    slack_api.respond({"ok": True})
+    text = "Merged — authored by <@U1>"
+    assert await slack_utils.SlackConversation("C1").reply("1.0", text, ping=False) == "2.0"
+    (post, posted), (edit, edited) = slack_api.calls
+    assert (post, posted["text"]) == ("chat.postMessage", "Merged — authored by someone")
+    assert (edit, edited["ts"], edited["text"]) == ("chat.update", "2.0", text)
 
 
 @pytest.mark.parametrize("source", ["slack", "dashboard"])
@@ -281,7 +291,9 @@ async def test_a_notice_is_not_repeated_while_the_thread_still_ends_with_it(
     sandbox = slack_utils.SlackNotice("sandbox_unreachable", "Sandbox stopped responding")
 
     for _ in range(2):
-        assert await slack_utils.post_slack_thread_reply("C1", "1.0", sandbox.key, notice=sandbox)
+        assert await slack_utils.SlackConversation("C1").try_reply(
+            "1.0", sandbox.key, notice=sandbox
+        )
         assert await completion._post_failure_reply(
             "t1", metadata, "error", reason_code="sandbox_unreachable"
         )
@@ -322,14 +334,11 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
         ]
     )
     if delivery == "post":
-        assert (
-            await slack_utils.post_slack_top_level_message_with_ts("C1", text, blocks=blocks)
-            == "1.0"
-        )
+        assert await slack_utils.SlackConversation("C1").post(text, blocks=blocks) == "1.0"
     elif delivery == "update":
-        await slack_utils.update_slack_message("C1", "1.0", text, blocks=blocks)
+        await slack_utils.SlackConversation("C1").update("1.0", text, blocks=blocks)
     elif delivery == "ephemeral":
-        assert await slack_utils.post_slack_ephemeral_message("C1", "U1", text, blocks=blocks)
+        assert await slack_utils.SlackConversation("C1").post_ephemeral("U1", text, blocks=blocks)
     else:
 
         async def handle(request: httpx2.Request) -> httpx2.Response:
@@ -366,7 +375,7 @@ async def test_direct_github_reply_override_is_scoped_to_one_delivery(
     blocks = block_payload([markdown(f"[GitHub]({url})"), section(f"<{url}|GitHub>")])
 
     async def send(message: str, *_args: object, **_kwargs: object) -> dict[str, object]:
-        await slack_utils.post_slack_top_level_message_with_ts("C1", message, blocks=blocks)
+        await slack_utils.SlackConversation("C1").post(message, blocks=blocks)
         if fail:
             raise RuntimeError("delivery failed")
         return {"success": True}
@@ -381,7 +390,7 @@ async def test_direct_github_reply_override_is_scoped_to_one_delivery(
         }
     assert slack_api.calls[-1][1]["text"] == url
     assert slack_api.calls[-1][1]["blocks"] == blocks
-    await slack_utils.post_slack_top_level_message_with_ts("C1", url)
+    await slack_utils.SlackConversation("C1").post(url)
     assert slack_api.calls[-1][1]["text"] == "https://openswe.example/agents/reviews/acme/app/7"
 
 
@@ -391,5 +400,5 @@ async def test_review_links_fall_back_to_github_without_a_dashboard(
 ) -> None:
     monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
     url = "https://github.com/acme/app/pull/7"
-    await slack_utils.post_slack_top_level_message_with_ts("C1", url)
+    await slack_utils.SlackConversation("C1").post(url)
     assert slack_api.calls[-1][1]["text"] == url

@@ -9,7 +9,7 @@ from langgraph.types import Command
 
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.run_config import RunConfig
-from openswe.slack.client import post_slack_ephemeral_message
+from openswe.slack.client import SlackConversation
 from openswe.slack.dm import is_concierge_thread
 from openswe.utils.langsmith import create_langsmith_feedback
 from openswe.utils.thread_ops import langgraph_client
@@ -58,8 +58,7 @@ async def switch_to_performance_model(
         )
     confirmation = f"Switched to {model_id} (reasoning effort: {effort or 'default'})."
     if cfg.slack_thread and cfg.slack_thread.triggering_user_id:
-        await post_slack_ephemeral_message(
-            cfg.slack_thread.channel_id,
+        await SlackConversation(cfg.slack_thread.channel_id).post_ephemeral(
             cfg.slack_thread.triggering_user_id,
             confirmation,
             thread_ts=cfg.slack_thread.reply_thread_ts or cfg.slack_thread.thread_ts,

@@ -43,15 +43,13 @@ from openswe.human_review.requests import (
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import Block, block_payload, context, escape, section
-from openswe.slack.cards import origin_footer, repost_thread_card
+from openswe.slack.cards import origin_footer
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
+    SlackConversation,
     add_slack_reaction,
-    delete_slack_message,
     get_slack_permalink,
-    post_slack_thread_reply_with_ts,
     remove_slack_reaction,
-    update_slack_message,
 )
 from openswe.slack.diff_image import SlackDiffImage
 from openswe.slack.dm import note_for_concierge, send_dm, send_dm_with_location
@@ -195,8 +193,7 @@ class ReviewCard:
                 raise SlackRequestError("channel_not_found")
             approval.slack_thread_ts = await channel.post(text, blocks=block_payload(blocks))
             return approval.slack_thread_ts
-        return await post_slack_thread_reply_with_ts(
-            approval.slack_channel_id,
+        return await approval.slack_conversation.reply(
             approval.slack_thread_ts,
             text,
             blocks=block_payload(blocks),
@@ -257,9 +254,9 @@ class ReviewCard:
         text, blocks = await self.render(None)
         location = request.slack_location
         if location is not None:
-            return await post_slack_thread_reply_with_ts(
-                location[0],
-                location[1],
+            channel_id, thread_ts = location
+            return await SlackConversation(channel_id).reply(
+                thread_ts,
                 text,
                 blocks=block_payload(blocks),
                 agent_thread_id=request.thread_id or None,
@@ -416,11 +413,8 @@ class ReviewCard:
             )
             text, blocks = expedited_card.author_status(current, status, origin_url=origin_url)
             try:
-                await update_slack_message(
-                    current.slack_dm_channel_id,
-                    current.slack_dm_message_ts,
-                    text,
-                    blocks=block_payload(blocks),
+                await SlackConversation(current.slack_dm_channel_id).update(
+                    current.slack_dm_message_ts, text, blocks=block_payload(blocks)
                 )
             except SlackRequestError:
                 logger.warning(
@@ -502,11 +496,8 @@ class ReviewCard:
             return
         text, blocks = await self.render(outcome)
         try:
-            await update_slack_message(
-                request.slack_channel_id,
-                request.slack_message_ts,
-                text,
-                blocks=block_payload(blocks),
+            await request.slack_conversation.update(
+                request.slack_message_ts, text, blocks=block_payload(blocks)
             )
         except SlackRequestError as exc:
             logger.warning(
@@ -520,7 +511,10 @@ class ReviewCard:
         if outcome is None and (copy := request.slack_copy) is not None:
             text, blocks = await self.render(None, copy=True)
             try:
-                await update_slack_message(*copy, text, blocks=block_payload(blocks))
+                channel_id, message_ts = copy
+                await SlackConversation(channel_id).update(
+                    message_ts, text, blocks=block_payload(blocks)
+                )
             except SlackRequestError as exc:
                 logger.warning(
                     "Failed to update the copy of a human review card",
@@ -557,11 +551,12 @@ class ReviewCard:
                 return kept
 
         await self.refresh_author_dm(outcome)
-        return await repost_thread_card(
-            location,
+        channel_id, thread_ts = location
+        return await SlackConversation(channel_id).replace_card(
+            thread_ts,
             old_ts,
             text,
-            blocks,
+            blocks=block_payload(blocks),
             broadcast=broadcast,
             agent_thread_id=request.thread_id or None,
             adopt=adopt,
@@ -603,7 +598,8 @@ class ReviewCard:
         return None
 
     async def _delete_copy(self, copy: tuple[str, str]) -> bool:
-        if await delete_slack_message(*copy):
+        channel_id, message_ts = copy
+        if await SlackConversation(channel_id).delete(message_ts):
             return True
         logger.warning(
             "Could not delete the copy of a human review card",
@@ -737,7 +733,7 @@ class ReviewCard:
                 or stale.slack_message_ts == stale.slack_thread_ts
             ):
                 continue
-            if not await delete_slack_message(stale.slack_channel_id, stale.slack_message_ts):
+            if not await stale.slack_conversation.delete(stale.slack_message_ts):
                 continue
             async with HumanReviewRequest.locked(stale.id) as (_, row):
                 if row is not None:

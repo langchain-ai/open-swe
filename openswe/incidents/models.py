@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
+from openswe.slack.client import SlackConversation
 from openswe.utils.time import now_iso
 
 IncidentId = NewType("IncidentId", str)
@@ -92,6 +93,10 @@ class Incident(BaseModel):
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
     activity: list[Activity] = Field(default_factory=list)
+
+    @property
+    def slack_conversation(self) -> SlackConversation:
+        return SlackConversation(self.channel_id)
 
 
 class IncidentReportRecord(BaseModel):

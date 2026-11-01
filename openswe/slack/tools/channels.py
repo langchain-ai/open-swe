@@ -13,9 +13,9 @@ from openswe.slack.cards import origin_footer, run_slack_location
 from openswe.slack.channels import SlackChannel as ChannelDirectory
 from openswe.slack.client import (
     SLACK_USER_ID_RE,
+    SlackConversation,
     convert_mentions_to_slack_format,
     get_slack_user_info,
-    post_slack_top_level_message_with_ts,
 )
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
 from openswe.slack.markdown import markdown_blocks, markdown_to_mrkdwn
@@ -259,8 +259,7 @@ async def slack_post_message(
     if len(fallback_text) > 40_000:
         return {"success": False, "error": "msg_too_long"}
     try:
-        message_ts = await post_slack_top_level_message_with_ts(
-            channel_id,
+        message_ts = await SlackConversation(channel_id).post(
             fallback_text,
             unfurl_links=False,
             unfurl_media=False,

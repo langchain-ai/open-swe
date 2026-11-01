@@ -15,9 +15,9 @@ from openswe.run_config import RunConfig
 from openswe.slack.client import (
     LANGGRAPH_URL,
     SANDBOX_UNREACHABLE_NOTICE,
+    SlackConversation,
     SlackNotice,
     get_active_slack_thread,
-    post_slack_thread_reply,
 )
 from openswe.utils.user_messages import warning
 
@@ -135,12 +135,13 @@ async def post_sandbox_unreachable_notification(
     if slack_target is not None:
         channel_id, thread_ts = slack_target
         notice = SlackNotice(SANDBOX_UNREACHABLE_NOTICE, message)
+        conversation = SlackConversation(channel_id)
         if cfg.thread_id:
-            await post_slack_thread_reply(
-                channel_id, thread_ts, message, agent_thread_id=cfg.thread_id, notice=notice
+            await conversation.try_reply(
+                thread_ts, message, agent_thread_id=cfg.thread_id, notice=notice
             )
         else:
-            await post_slack_thread_reply(channel_id, thread_ts, message, notice=notice)
+            await conversation.try_reply(thread_ts, message, notice=notice)
         logger.info("Sent sandbox unreachable notification to Slack thread %s", thread_ts)
         return
 

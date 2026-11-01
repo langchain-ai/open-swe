@@ -12,6 +12,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
 from openswe.input_messages import InputMessageContext, human_input
+from openswe.slack.client import SlackConversation
 from openswe.thread_title import (
     MAX_TITLE_INPUT_CHARS,
     _ThreadTitle,
@@ -19,6 +20,7 @@ from openswe.thread_title import (
     generate_and_store_thread_title,
     schedule_thread_title_generation,
 )
+from tests.slack_helpers import channel_first
 
 # Stands in for LangGraph's stream writer, which travels in a contextvar. A title
 # call that sees a non-default value here is running inside the agent run, and
@@ -217,10 +219,10 @@ async def test_generated_title_updates_only_manual_breakout_roots(
         }
     )
     update = AsyncMock(return_value=None)
-    monkeypatch.setattr("openswe.thread_title.update_slack_message", update)
+    monkeypatch.setattr(SlackConversation, "update", channel_first(update))
     monkeypatch.setattr(
-        "openswe.thread_title.dashboard_thread_url",
-        lambda thread_id: f"https://openswe.langchain.dev/agents/{thread_id}",
+        "openswe.utils.dashboard_links.dashboard_base_url",
+        lambda: "https://openswe.langchain.dev",
     )
 
     await generate_and_store_thread_title(

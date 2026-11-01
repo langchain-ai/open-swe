@@ -16,10 +16,8 @@ async def test_slack_warning_post_logs_error(
     with (
         caplog.at_level(logging.ERROR, logger=slack_utils.logger.name),
     ):
-        result = await slack_utils._post_slack_message_with_ts(
-            "C1",
-            warning("Open SWE reached its maximum step limit."),
-            thread_ts="1.0",
+        result = await slack_utils.SlackConversation("C1").reply(
+            "1.0", warning("Open SWE reached its maximum step limit.")
         )
 
     assert result == "2.0"
@@ -37,11 +35,7 @@ async def test_plain_slack_post_does_not_log_warning_error(
     with (
         caplog.at_level(logging.ERROR, logger=slack_utils.logger.name),
     ):
-        result = await slack_utils._post_slack_message_with_ts(
-            "C1",
-            "Normal Slack reply",
-            thread_ts="1.0",
-        )
+        result = await slack_utils.SlackConversation("C1").reply("1.0", "Normal Slack reply")
 
     assert result == "2.0"
     assert "Sent automated warning message to Slack" not in caplog.text

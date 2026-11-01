@@ -14,7 +14,7 @@ from typing import Any, Self
 from pydantic import BaseModel
 
 from openswe.prompts import prompt
-from openswe.slack.client import get_slack_permalink, post_slack_top_level_message_with_ts
+from openswe.slack.client import SlackConversation, get_slack_permalink
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.records import SlackMessage, lookup_slack_thread_id
@@ -167,8 +167,8 @@ async def post_dm(
 ) -> tuple[str, str]:
     """:func:`send_dm_with_location`, raising ``SlackRequestError`` with Slack's reason."""
     channel_id = await _open_dm_channel(slack_user_id)
-    message_ts = await post_slack_top_level_message_with_ts(
-        channel_id, text, unfurl_links=False, unfurl_media=False, blocks=blocks
+    message_ts = await SlackConversation(channel_id).post(
+        text, unfurl_links=False, unfurl_media=False, blocks=blocks
     )
     if origin is not None:
         await origin.save_for(channel_id, message_ts)

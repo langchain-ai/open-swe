@@ -52,7 +52,7 @@ from openswe.input_messages import (
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import SlackNotice, post_slack_thread_reply
+from openswe.slack.client import SlackConversation, SlackNotice
 from openswe.source_context import SourceContext
 from openswe.threads.access import (
     _ensure_dashboard_github_token,
@@ -1528,8 +1528,9 @@ class _SlackWebHandoff:
         notice = SlackNotice(kind="web_handoff", key=self.thread_id)
         text = f"Conversation continued in the <{url}|web UI>."
         try:
-            await post_slack_thread_reply(
-                *self.location,
+            channel_id, thread_ts = self.location
+            await SlackConversation(channel_id).try_reply(
+                thread_ts,
                 text,
                 blocks=[
                     {

@@ -3,6 +3,7 @@
 from pydantic import BaseModel, Field
 
 from openswe.input_messages import SystemIdentity
+from openswe.slack.client import SlackConversation
 from openswe.slack.failures import SlackRequestTarget
 from openswe.slack.payloads import SlackChannelContext
 from openswe.utils.json_types import JsonObject
@@ -43,6 +44,10 @@ class SlackRequest(BaseModel):
     web_only: bool = False
     explicit_request: bool = False
     explicit_mention: bool = False
+
+    @property
+    def conversation(self) -> SlackConversation:
+        return SlackConversation(self.channel_id)
 
     @property
     def target(self) -> SlackRequestTarget:

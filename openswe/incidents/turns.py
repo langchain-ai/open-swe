@@ -22,11 +22,7 @@ from openswe.input_messages import (
 )
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import (
-    post_slack_thread_reply_with_ts,
-    slack_message_bot_id,
-    slack_message_bot_name,
-)
+from openswe.slack.client import slack_message_bot_id, slack_message_bot_name
 from openswe.threads import succession
 from openswe.ui_invalidations import Topic
 from openswe.utils.thread_ops import queue_message_for_thread
@@ -326,7 +322,7 @@ async def handle_run_completion(thread_id: str, run_id: str | None, status: str)
     service.note(record, "error", FAILURE_NOTICE)
     await service.save(record)
     if not record.is_archived:
-        await post_slack_thread_reply_with_ts(
-            record.channel_id, SESSION_TS, FAILURE_NOTICE, unfurl_links=False, unfurl_media=False
+        await record.slack_conversation.reply(
+            SESSION_TS, FAILURE_NOTICE, unfurl_links=False, unfurl_media=False
         )
     return {"status": "ok", "reason": "incident failure noted"}

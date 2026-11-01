@@ -20,8 +20,9 @@ from openswe.human_review.supplementary import (
     SupplementaryReviews,
     SupplementaryState,
 )
-from openswe.slack.client import GitHubPrRef
+from openswe.slack.client import GitHubPrRef, SlackConversation
 from openswe.users import User, UserIdentity
+from tests.slack_helpers import channel_first
 
 POLICY = SupplementaryReviewPolicy(
     id="design",
@@ -182,8 +183,10 @@ async def test_delivery_is_idempotent_and_retries_only_missing_notifications(
         ) as choose,
         patch.object(User, "for_login", AsyncMock(return_value=user)),
         patch.object(
-            supplementary, "post_slack_thread_reply_with_ts", AsyncMock(side_effect=["", "1.1"])
-        ) as thread_reply,
+            SlackConversation,
+            "reply",
+            channel_first(thread_reply := AsyncMock(side_effect=["", "1.1"])),
+        ),
         patch.object(supplementary, "send_dm", AsyncMock(side_effect=[False, True])) as dm,
         patch.object(deadlines.queue, "schedule", AsyncMock()),
     ):
@@ -253,9 +256,7 @@ async def test_concurrent_rotation_reserves_different_available_team_members(
         patch.object(supplementary, "latest_review_states", AsyncMock(return_value={})),
         patch.object(supplementary.PROFILES, "allows_auto_human_review", opted_in),
         patch.object(ReviewerAvailability, "for_user", availability),
-        patch.object(
-            supplementary, "post_slack_thread_reply_with_ts", AsyncMock(return_value="1.1")
-        ),
+        patch.object(SlackConversation, "reply", channel_first(AsyncMock(return_value="1.1"))),
         patch.object(supplementary, "send_dm", AsyncMock(return_value=True)),
         patch.object(deadlines.queue, "schedule", AsyncMock()) as schedule,
         patch.object(supplementary, "datetime") as clock,

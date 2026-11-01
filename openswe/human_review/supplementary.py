@@ -28,7 +28,6 @@ from openswe.human_review.requests import (
     slack_mention,
 )
 from openswe.prompts import prompt
-from openswe.slack.client import post_slack_thread_reply_with_ts
 from openswe.slack.dm import send_dm
 from openswe.threads.runs import start_dashboard_thread
 from openswe.users import User
@@ -270,8 +269,7 @@ class SupplementaryReview:
                     state.github_notified = True
                 if not state.slack_notified:
                     state.slack_notified = bool(
-                        await post_slack_thread_reply_with_ts(
-                            row.slack_channel_id,
+                        await row.slack_conversation.reply(
                             row.slack_thread_ts or row.slack_message_ts,
                             note,
                             unfurl_links=False,

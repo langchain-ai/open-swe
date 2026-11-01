@@ -21,11 +21,7 @@ from openswe.middleware.pr_creation_guard import executable_name, shell_commands
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.run_config import RunConfig
 from openswe.sandboxes.state import SANDBOX_BACKENDS, get_sandbox_backend
-from openswe.slack.client import (
-    LANGGRAPH_URL,
-    get_active_slack_thread,
-    post_slack_thread_reply_with_ts,
-)
+from openswe.slack.client import LANGGRAPH_URL, SlackConversation, get_active_slack_thread
 from openswe.slack.tools.reply import build_workflow_approval_blocks
 from openswe.threads.workflow_approval import (
     ensure_workflow_push_pending,
@@ -727,8 +723,7 @@ async def _post_slack_approval_if_needed(
     message = _approval_slack_message(
         change, _approval_url(_thread_id(request), change.fingerprint)
     )
-    await post_slack_thread_reply_with_ts(
-        channel_id,
+    await SlackConversation(channel_id).reply(
         thread_ts,
         message,
         blocks=build_workflow_approval_blocks(message, change.fingerprint),

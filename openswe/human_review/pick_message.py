@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from pydantic import BaseModel
 
 from openswe.slack.blocks import Block, ButtonElement, actions, block_payload, context, section
-from openswe.slack.client import update_slack_message
+from openswe.slack.client import SlackConversation
 from openswe.slack.http import SlackRequestError
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,9 @@ class PickMessage(BaseModel):
 
     async def _update(self, text: str, blocks: Sequence[Block]) -> bool:
         try:
-            await update_slack_message(self.channel_id, self.ts, text, blocks=block_payload(blocks))
+            await SlackConversation(self.channel_id).update(
+                self.ts, text, blocks=block_payload(blocks)
+            )
         except SlackRequestError as exc:
             logger.warning(
                 "Could not update a reviewer pick message",

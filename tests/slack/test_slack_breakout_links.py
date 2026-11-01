@@ -3,6 +3,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe.slack import breakout_links
+from openswe.slack.client import SlackConversation
+from tests.slack_helpers import channel_first
 
 
 @pytest.mark.asyncio
@@ -22,7 +24,7 @@ async def test_mark_broken_out_links_breakout_from_source_thread(
 ):
     reply = AsyncMock()
     monkeypatch.setattr(breakout_links, "get_slack_permalink", AsyncMock(return_value=permalink))
-    monkeypatch.setattr(breakout_links, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(reply))
 
     await breakout_links.mark_broken_out("C1", "100.0", target, "200.0")
 

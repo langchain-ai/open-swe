@@ -4,7 +4,9 @@ from typing import TypedDict
 
 import pytest
 
+from openswe.slack.client import SlackConversation
 from openswe.webhooks import common as webhook_common
+from tests.slack_helpers import channel_first
 
 
 class _Reply(TypedDict):
@@ -31,7 +33,7 @@ def test_account_link_prompt_posts_generic_token_free_link(
         calls["reply"] = {"channel_id": channel_id, "thread_ts": thread_ts, "text": text}
         return True
 
-    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", fake_reply)
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(fake_reply))
 
     asyncio.run(
         webhook_common.post_account_link_prompt("C1", "1.1", "U1", "d@x.com", reason="unlinked")
@@ -54,7 +56,7 @@ def test_account_link_prompt_revoked_wording(monkeypatch: pytest.MonkeyPatch) ->
         calls["text"] = text
         return True
 
-    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", fake_reply)
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(fake_reply))
 
     asyncio.run(
         webhook_common.post_account_link_prompt("C1", "1.1", "U1", "d@x.com", reason="revoked")
@@ -77,7 +79,7 @@ def test_account_link_prompt_skips_when_dashboard_url_unset(
         posted = True
         return True
 
-    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", fake_reply)
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(fake_reply))
 
     asyncio.run(
         webhook_common.post_account_link_prompt("C1", "1.1", "U1", "d@x.com", reason="unlinked")

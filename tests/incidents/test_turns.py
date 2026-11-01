@@ -15,6 +15,15 @@ from openswe.incidents.models import (
 )
 from openswe.incidents.report import CONTEXT_MARKER
 from openswe.message_queue import QueuedMessage
+from openswe.slack.client import SlackConversation
+from tests.slack_helpers import channel_first
+
+
+@pytest.fixture(autouse=True)
+def reply(monkeypatch):
+    reply = AsyncMock(return_value="9.0")
+    monkeypatch.setattr(SlackConversation, "reply", channel_first(reply))
+    return reply
 
 
 @pytest.fixture
@@ -37,7 +46,6 @@ def platform(monkeypatch):
     monkeypatch.setattr(turns, "get_client", lambda: client)
     monkeypatch.setattr(turns, "create_durable_run", AsyncMock(return_value={"run_id": "r1"}))
     monkeypatch.setattr(turns, "queue_message_for_thread", AsyncMock(return_value=True))
-    monkeypatch.setattr(turns, "post_slack_thread_reply_with_ts", AsyncMock(return_value="9.0"))
     return client
 
 
@@ -132,7 +140,7 @@ async def test_completion_reschedules_only_stranded_context(record, policy, plat
     assert (await turns.handle_run_completion("unknown", "r3", "success"))["status"] == "ignored"
 
 
-async def test_completion_failure_flags_attention_and_posts_once(record, policy, platform):
+async def test_completion_failure_flags_attention_and_posts_once(reply, record, policy, platform):
     first = await turns.handle_run_completion("thread-1", "r1", "error")
     again = await turns.handle_run_completion("thread-1", "r1", "error")
 
@@ -140,8 +148,8 @@ async def test_completion_failure_flags_attention_and_posts_once(record, policy,
     assert first["status"] == "ok" and again["status"] == "ignored"
     assert (saved.status, saved.reason) == ("needs_attention", "run_failed")
     assert saved.activity[-1].type == "error"
-    turns.post_slack_thread_reply_with_ts.assert_awaited_once()
-    assert turns.post_slack_thread_reply_with_ts.await_args.args[:2] == ("C1", "0")
+    reply.assert_awaited_once()
+    assert reply.await_args.args[:2] == ("C1", "0")
     assert (await turns.handle_run_completion("thread-1", "r9", "interrupted"))["status"] == (
         "ignored"
     )

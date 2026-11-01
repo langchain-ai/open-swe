@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel
 
-from openswe.slack.client import post_slack_thread_reply, set_slack_thread_status
+from openswe.slack.client import SlackConversation, set_slack_thread_status
 from openswe.slack.responses import WebhookResponse, failed
 from openswe.utils.user_messages import warning
 
@@ -83,8 +83,7 @@ async def report_slack_failure(target: SlackRequestTarget, exc: BaseException) -
     if blocks is None:
         text = warning(f"{text}\nError ID: `{error_id}`")
     try:
-        posted = await post_slack_thread_reply(
-            target.channel_id,
+        posted = await SlackConversation(target.channel_id).try_reply(
             target.reply_thread_ts or target.thread_ts,
             text,
             blocks=blocks,

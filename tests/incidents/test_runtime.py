@@ -13,7 +13,9 @@ from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.incidents.report import CONTEXT_MARKER
 from openswe.middleware.model_call_shape import CallShape
 from openswe.slack.channels import SlackChannel
+from openswe.slack.client import SlackConversation
 from openswe.slack.http import SlackRequestError
+from tests.slack_helpers import channel_first
 
 CHANNEL = {
     "id": "C1",
@@ -24,6 +26,13 @@ CHANNEL = {
     "is_pending_ext_shared": False,
     "is_member": True,
 }
+
+
+@pytest.fixture(autouse=True)
+def reply(monkeypatch):
+    reply = AsyncMock(return_value="7.0")
+    monkeypatch.setattr(SlackConversation, "reply", channel_first(reply))
+    return reply
 
 
 @pytest.fixture
@@ -46,7 +55,6 @@ async def incident(registry_db, monkeypatch):
         ),
     )
     monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
-    monkeypatch.setattr(runtime, "post_slack_thread_reply_with_ts", AsyncMock(return_value="7.0"))
     return SimpleNamespace(record=record, policy=policy, metadata=metadata)
 
 
@@ -115,25 +123,25 @@ async def test_paused_incidents_stop_automatic_turns_but_answer_questions(incide
         await shape(runtime.IncidentMiddleware(session))
 
 
-async def test_failed_slack_delivery_is_retried_on_the_next_report(incident):
+async def test_failed_slack_delivery_is_retried_on_the_next_report(reply, incident):
     session = await runtime.load_incident_session(config())
     await shape(runtime.IncidentMiddleware(session), context_message("1.0"))
     draft = {"summary": [{"text": "Errors reported", "evidence_ids": ["slack:1.0"]}]}
-    runtime.post_slack_thread_reply_with_ts.side_effect = SlackRequestError("channel_not_found")
+    reply.side_effect = SlackRequestError("channel_not_found")
 
     first = await session._record_incident_report(**draft)
-    runtime.post_slack_thread_reply_with_ts.side_effect = None
-    runtime.post_slack_thread_reply_with_ts.return_value = "8.0"
+    reply.side_effect = None
+    reply.return_value = "8.0"
     second = await session._record_incident_report(**draft)
     third = await session._record_incident_report(**draft)
 
     assert (first["posted"], second["posted"], third["posted"]) == (False, True, False)
-    assert runtime.post_slack_thread_reply_with_ts.await_count == 2
+    assert reply.await_count == 2
     latest = await service.REPORTS.get("incident")
     assert latest.posted_digest == latest.digest
 
 
-async def test_postmortem_failure_records_nothing(incident, monkeypatch):
+async def test_postmortem_failure_records_nothing(reply, incident, monkeypatch):
     session = await runtime.load_incident_session(config())
     monkeypatch.setattr(
         documents, "update_from_report", AsyncMock(side_effect=RuntimeError("store"))
@@ -141,11 +149,11 @@ async def test_postmortem_failure_records_nothing(incident, monkeypatch):
     with pytest.raises(RuntimeError, match="store"):
         await session._record_incident_report(summary=[])
     assert await service.REPORTS.get("incident") is None
-    runtime.post_slack_thread_reply_with_ts.assert_not_awaited()
+    reply.assert_not_awaited()
 
 
 async def test_the_channel_gets_one_automatic_investigation_and_then_stays_quiet(
-    incident, monkeypatch
+    reply, incident, monkeypatch
 ):
     """Responders asked for one investigation, not a running commentary on their channel."""
     from datetime import UTC, datetime, timedelta
@@ -163,8 +171,8 @@ async def test_the_channel_gets_one_automatic_investigation_and_then_stays_quiet
     second = await session._record_incident_report(**draft)
 
     assert (first["posted"], second["posted"]) == (True, False)
-    runtime.post_slack_thread_reply_with_ts.assert_awaited_once()
-    posted = runtime.post_slack_thread_reply_with_ts.await_args.args[2]
+    reply.assert_awaited_once()
+    posted = reply.await_args.args[2]
     # Nobody asked, so it must not present itself as answering anyone.
     assert posted.startswith("*Investigation*")
     assert "*Problem*" in posted
@@ -176,12 +184,12 @@ async def test_the_channel_gets_one_automatic_investigation_and_then_stays_quiet
     third = await session._record_incident_report(**draft)
 
     assert third["posted"] is False
-    runtime.post_slack_thread_reply_with_ts.assert_awaited_once()
+    reply.assert_awaited_once()
     # The report and the postmortem still move on without it.
     assert (await service.REPORTS.get("incident")).report.summary.startswith("Monitors are back")
 
 
-async def test_an_inconclusive_first_turn_does_not_spend_the_automatic_message(incident):
+async def test_an_inconclusive_first_turn_does_not_spend_the_automatic_message(reply, incident):
     """Otherwise a first turn with nothing to say would silence the real investigation."""
     session = await runtime.load_incident_session(config())
     middleware = runtime.IncidentMiddleware(session)
@@ -192,17 +200,17 @@ async def test_an_inconclusive_first_turn_does_not_spend_the_automatic_message(i
     )
 
     assert empty["posted"] is False
-    runtime.post_slack_thread_reply_with_ts.assert_not_awaited()
+    reply.assert_not_awaited()
 
     findings = await session._record_incident_report(
         summary=[{"text": "Deadline exhausted on oversized uploads", "evidence_ids": ["slack:1.0"]}]
     )
 
     assert findings["posted"] is True
-    runtime.post_slack_thread_reply_with_ts.assert_awaited_once()
+    reply.assert_awaited_once()
 
 
-async def test_questions_are_answered_after_the_investigation_is_published(incident):
+async def test_questions_are_answered_after_the_investigation_is_published(reply, incident):
     """Going quiet silences unprompted updates; it never delays a responder."""
     unprompted = await runtime.load_incident_session(config())
     await shape(runtime.IncidentMiddleware(unprompted), context_message("1.0"))
@@ -217,4 +225,4 @@ async def test_questions_are_answered_after_the_investigation_is_published(incid
     )
 
     assert answer["posted"] is True
-    assert runtime.post_slack_thread_reply_with_ts.await_count == 2
+    assert reply.await_count == 2

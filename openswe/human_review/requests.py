@@ -45,6 +45,7 @@ from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
 from openswe.human_review.pick_message import PickMessage
 from openswe.run_config import RunConfig
+from openswe.slack.client import SlackConversation
 from openswe.slack.dm import DmOrigin
 from openswe.slack.records import lookup_slack_thread_id
 from openswe.users import User
@@ -241,6 +242,10 @@ class HumanReviewRequest(Base):
             return False
         owner = await lookup_slack_thread_id(self.slack_channel_id, root)
         return owner == thread_id
+
+    @property
+    def slack_conversation(self) -> SlackConversation:
+        return SlackConversation(self.slack_channel_id)
 
     @property
     def slack_location(self) -> tuple[str, str] | None:

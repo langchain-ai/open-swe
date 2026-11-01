@@ -14,13 +14,7 @@ from openswe.slack.breakout_links import (
     notify_breakout,
     source_thread_line,
 )
-from openswe.slack.client import (
-    append_slack_web_link_footer,
-    get_active_slack_thread,
-    post_slack_ephemeral_message,
-    post_slack_top_level_message_with_ts,
-    update_slack_message,
-)
+from openswe.slack.client import SlackConversation, SlackWebLinkFooter, get_active_slack_thread
 from openswe.slack.http import SlackRequestError
 from openswe.slack.move import move_slack_thread
 from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
@@ -105,9 +99,7 @@ async def _mark_done(request: SlackRequest, target: str, new_ts: str) -> None:
 
 async def _tell_sender(request: SlackRequest, text: str) -> None:
     if request.user_id:
-        await post_slack_ephemeral_message(
-            request.channel_id, request.user_id, text, request.thread_ts
-        )
+        await request.conversation.post_ephemeral(request.user_id, text, request.thread_ts)
 
 
 def _post_failure(slack_error: str | None, target: str, fallback: str) -> str:
@@ -178,9 +170,9 @@ async def _start(
             return
     heading = BreakoutCommand.heading(command.instruction)
     root_text = await _root_text(request, heading)
+    conversation = SlackConversation(target)
     try:
-        new_ts = await post_slack_top_level_message_with_ts(
-            target,
+        new_ts = await conversation.post(
             root_text,
             blocks=block_payload([section(root_text)]),
             unfurl_links=False,
@@ -198,10 +190,9 @@ async def _start(
     web_url = dashboard_thread_url(thread_id)
     if web_url:
         try:
-            await update_slack_message(
-                target,
+            await conversation.update(
                 new_ts,
-                append_slack_web_link_footer(root_text, web_url),
+                SlackWebLinkFooter(web_url).append_to(root_text),
                 blocks=block_payload(breakout_root_blocks(root_text, web_url)),
                 unfurl_links=False,
                 unfurl_media=False,

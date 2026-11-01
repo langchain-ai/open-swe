@@ -1414,8 +1414,7 @@ async def _process_slack_mention_impl(
     )
     if performance_command and thread_model_choice:
         selected_model = image_model_override or thread_model_choice
-        await slack_utils.post_slack_ephemeral_message(
-            channel_id,
+        await slack_utils.SlackConversation(channel_id).post_ephemeral(
             user_id,
             f"Switched to {selected_model[0]} (reasoning effort: {selected_model[1] or 'default'}).",
             thread_ts=reply_thread_ts or thread_ts,

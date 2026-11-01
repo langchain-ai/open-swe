@@ -32,7 +32,7 @@ from openswe.github.repositories import Repository
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.jobs import queue
 from openswe.prompts import prompt
-from openswe.slack.client import GitHubPrRef, post_slack_thread_reply
+from openswe.slack.client import GitHubPrRef, SlackConversation
 from openswe.source_context import SourceContext
 from openswe.tasks.store import Task, TaskMembership
 from openswe.utils.json_types import JsonObject
@@ -371,7 +371,8 @@ async def _notify_watch(watch: BabySitWatch, message: str) -> bool:
     try:
         destination = context.slack_location
         if destination is not None:
-            return await post_slack_thread_reply(destination[0], destination[1], message)
+            channel_id, thread_ts = destination
+            return await SlackConversation(channel_id).try_reply(thread_ts, message)
         issue_number = context.github_issue.number if context.github_issue else None
         if issue_number is None:
             configured_number = watch.run_config.get("pr_number")

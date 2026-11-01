@@ -9,9 +9,9 @@ from langgraph_sdk.client import LangGraphClient
 from openswe.slack.blocks import block_payload
 from openswe.slack.breakout_links import breakout_root_blocks
 from openswe.slack.client import (
-    append_slack_web_link_footer,
+    SlackConversation,
+    SlackWebLinkFooter,
     get_active_slack_thread,
-    post_slack_top_level_message_with_ts,
     slack_thread_mutation_lock,
 )
 from openswe.slack.code_channels import is_code_channel_session
@@ -175,10 +175,9 @@ async def move_slack_thread(
     message: str,
 ) -> dict[str, Any]:
     """Post `message` as a new root in `target_channel` and move the thread's Slack binding there."""
-    root_text = append_slack_web_link_footer(message, dashboard_thread_url(thread_id))
+    root_text = SlackWebLinkFooter.for_thread(thread_id).append_to(message)
     try:
-        new_ts = await post_slack_top_level_message_with_ts(
-            target_channel,
+        new_ts = await SlackConversation(target_channel).post(
             root_text,
             blocks=block_payload(breakout_root_blocks(message, dashboard_thread_url(thread_id))),
             unfurl_links=False,

@@ -18,12 +18,11 @@ from openswe.slack.blocks import block_payload
 from openswe.slack.breakout_destination import resolve_breakout_destination
 from openswe.slack.breakout_links import breakout_root_blocks, mark_broken_out, source_thread_line
 from openswe.slack.client import (
-    append_slack_web_link_footer,
+    SlackConversation,
+    SlackWebLinkFooter,
     fetch_slack_thread_messages,
     get_active_slack_thread,
     get_slack_permalink,
-    post_slack_thread_reply_with_ts,
-    post_slack_top_level_message_with_ts,
 )
 from openswe.slack.http import SlackRequestError
 from openswe.slack.records import bind_slack_thread_id, store_slack_run_mapping
@@ -389,10 +388,10 @@ async def slack_breakout_thread(
         f"<@{requester}>" if requester else "",
     )
     root_text = " · ".join(part for part in root_parts if part)
+    conversation = SlackConversation(clean_channel_id)
     try:
-        message_ts = await post_slack_top_level_message_with_ts(
-            clean_channel_id,
-            append_slack_web_link_footer(root_text, dashboard_thread_url(thread_id)),
+        message_ts = await conversation.post(
+            SlackWebLinkFooter.for_thread(thread_id).append_to(root_text),
             blocks=block_payload(breakout_root_blocks(root_text, dashboard_thread_url(thread_id))),
             unfurl_links=False,
             unfurl_media=False,
@@ -407,8 +406,7 @@ async def slack_breakout_thread(
 
     for attempt in range(2):
         try:
-            await post_slack_thread_reply_with_ts(
-                clean_channel_id,
+            await conversation.reply(
                 message_ts,
                 _thread_details(clean_instructions, repo),
                 agent_thread_id=thread_id,

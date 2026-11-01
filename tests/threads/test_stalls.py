@@ -7,9 +7,11 @@ from sqlalchemy import text
 
 from openswe import completion
 from openswe.database.postgres import transaction
+from openswe.slack.client import SlackConversation
 from openswe.threads import index, stalls, status
 from openswe.threads.index import Runtime, ThreadStatus
 from openswe.threads.runtimes import MdaRun, RunStatus
+from tests.slack_helpers import channel_first
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -99,7 +101,7 @@ async def test_a_run_that_stopped_responding_is_failed_once(
     monkeypatch.setattr(completion, "langgraph_client", _Client)
     monkeypatch.setattr(completion, "get_langsmith_error_url", AsyncMock(return_value=None))
     reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(reply))
 
     assert await stalls.fail_stalled_runs() == 1
     assert await stalls.fail_stalled_runs() == 0

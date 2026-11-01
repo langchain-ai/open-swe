@@ -140,7 +140,7 @@ class ReviewGuideMiddleware(OpenSWEMiddleware):
             await session.save_walk(walk)
             if gone is not None:
                 await retire(
-                    session.slack_channel_id,
+                    session.slack_conversation,
                     gone.message_ts,
                     gone.message_text,
                     "The pull request changed these lines",

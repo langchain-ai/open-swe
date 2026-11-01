@@ -27,9 +27,8 @@ from openswe.slack.blocks import (
     section,
 )
 from openswe.slack.client import (
+    SlackConversation,
     get_active_slack_thread,
-    post_slack_ephemeral_reply,
-    post_slack_thread_reply_with_ts,
     remove_slack_reaction,
     replace_slack_command_message,
     slack_thread_mutation_lock,
@@ -387,7 +386,7 @@ async def _by_the_way_reply(
             "hint": "Do not post again; end the run.",
         }
     try:
-        await post_slack_thread_reply_with_ts(channel_id, thread_ts, message, blocks=blocks)
+        await SlackConversation(channel_id).reply(thread_ts, message, blocks=blocks)
     except SlackRequestError as exc:
         try:
             await event_claims.release(_BY_THE_WAY_ANSWER_SCOPE, reservation)
@@ -455,13 +454,8 @@ async def _ephemeral_reply(
             "Could not replace the Slack slash command acknowledgement",
             extra={"agent_thread_id": cfg.thread_id},
         )
-    posted = await post_slack_ephemeral_reply(
-        channel_id,
-        user_id,
-        message,
-        blocks=blocks,
-        usage=usage,
-        agent_thread_id=cfg.thread_id,
+    posted = await SlackConversation(channel_id).post_ephemeral(
+        user_id, message, blocks=blocks, usage=usage, agent_thread_id=cfg.thread_id
     )
     if not posted:
         return {
@@ -609,8 +603,7 @@ async def _post_and_store_mapping(
     triggering_user_id: str | None = None,
     post_thread_ts: str | None = None,
 ) -> str:
-    message_ts = await post_slack_thread_reply_with_ts(
-        channel_id,
+    message_ts = await SlackConversation(channel_id).reply(
         post_thread_ts or thread_ts,
         message,
         blocks=blocks,

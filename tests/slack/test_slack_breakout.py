@@ -3,12 +3,14 @@ from unittest.mock import ANY, AsyncMock
 
 import pytest
 
-from openswe.slack import breakout, breakout_links
+from openswe.slack import breakout
 from openswe.slack.channels import SlackChannel
+from openswe.slack.client import SlackConversation
 from openswe.slack.parsed_message import ParsedSlackMessage
 from openswe.slack.request import SlackRequest
 from openswe.users import User
 from openswe.workspaces import routing
+from tests.slack_helpers import channel_first
 
 Command = breakout.BreakoutCommand
 
@@ -59,7 +61,7 @@ def _patch_slack(monkeypatch) -> SimpleNamespace:
     )
     monkeypatch.setattr(breakout, "source_thread_line", posted.source_line)
     monkeypatch.setattr(breakout, "mark_broken_out", posted.notifications)
-    monkeypatch.setattr(breakout, "post_slack_ephemeral_message", posted.ephemeral)
+    monkeypatch.setattr(SlackConversation, "post_ephemeral", channel_first(posted.ephemeral))
     return posted
 
 
@@ -110,7 +112,7 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     )
     posted = _patch_slack(monkeypatch)
     root = AsyncMock(return_value="200.0")
-    monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
+    monkeypatch.setattr(SlackConversation, "post", channel_first(root))
     monkeypatch.setattr(breakout, "langgraph_client", lambda: object())
     monkeypatch.setattr(
         breakout,
@@ -118,7 +120,7 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
         lambda thread_id: f"https://dashboard.example/agents/{thread_id}",
     )
     update = AsyncMock(return_value=None)
-    monkeypatch.setattr(breakout, "update_slack_message", update)
+    monkeypatch.setattr(SlackConversation, "update", channel_first(update))
     monkeypatch.setattr(
         breakout.common, "resolve_slack_thread_id", AsyncMock(return_value="new-thread")
     )
@@ -209,7 +211,7 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
 async def test_breakout_after_mention_preserves_preceding_text_as_prior_message(monkeypatch):
     posted = _patch_slack(monkeypatch)
     root = AsyncMock(return_value="200.0")
-    monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
+    monkeypatch.setattr(SlackConversation, "post", channel_first(root))
     monkeypatch.setattr(breakout, "langgraph_client", lambda: object())
     monkeypatch.setattr(
         breakout.common, "resolve_slack_thread_id", AsyncMock(return_value="new-thread")
@@ -241,7 +243,7 @@ async def test_web_breakout_notifies_source_thread_only_after_starting(monkeypat
     )
     monkeypatch.setattr(breakout, "dashboard_thread_url", lambda _: "https://dashboard/agents/new")
     reply = AsyncMock()
-    monkeypatch.setattr(breakout_links, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(reply))
 
     await breakout.process_slack_web(_request(), Command("fix it"), None)
 
@@ -291,7 +293,7 @@ async def test_breakout_never_goes_to_a_private_channel(monkeypatch, public_chan
     posted = _patch_slack(monkeypatch)
     public_channels.side_effect = lambda channel_id, **_: _channel(channel_id, private=True)
     root = AsyncMock()
-    monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
+    monkeypatch.setattr(SlackConversation, "post", channel_first(root))
     move = AsyncMock()
     monkeypatch.setattr(breakout, "move_slack_thread", move)
 
@@ -310,7 +312,7 @@ async def test_breakout_refuses_a_channel_it_cannot_look_up(monkeypatch, public_
     public_channels.side_effect = None
     public_channels.return_value = None
     root = AsyncMock()
-    monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
+    monkeypatch.setattr(SlackConversation, "post", channel_first(root))
 
     await breakout.process_slack_breakout(_request(), Command("fix it", channel_id=target), None)
 
@@ -325,7 +327,7 @@ async def test_breakout_never_leaves_a_private_channel(monkeypatch, public_chann
         channel_id, private=channel_id == "C1"
     )
     root = AsyncMock()
-    monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
+    monkeypatch.setattr(SlackConversation, "post", channel_first(root))
 
     await breakout.process_slack_breakout(_request(), Command("fix it", "<#C2>", "C2"), None)
 

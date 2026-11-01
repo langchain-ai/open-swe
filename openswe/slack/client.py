@@ -4,10 +4,11 @@ import asyncio
 import copy
 import hashlib
 import hmac
+import json
 import logging
 import re
 import time
-from collections.abc import AsyncIterator, Iterable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import timedelta
@@ -505,144 +506,8 @@ def format_slack_messages_for_prompt(
     return "\n".join(lines)
 
 
-def _log_automated_warning_sent_to_slack(
-    channel_id: str,
-    thread_ts: str | None,
-    text: str,
-) -> None:
-    if not text.lstrip().startswith(WARNING_ICON):
-        return
-    if thread_ts:
-        logger.error(
-            "Sent automated warning message to Slack thread %s/%s: %s",
-            channel_id,
-            thread_ts,
-            text,
-        )
-        return
-    logger.error("Sent automated warning message to Slack channel %s: %s", channel_id, text)
-
-
-def _threaded_under(data: AsyncSlackResponse, reply_ts: str) -> bool:
-    message = data.get("message")
-    if not isinstance(message, Mapping):
-        return True
-    return message.get("thread_ts") == reply_ts
-
-
-async def _slack_thread_exists(channel_id: str, thread_ts: str) -> bool:
-    try:
-        async with SlackClient.bot() as client:
-            await client.conversations_replies(channel=channel_id, ts=thread_ts, limit=1)
-    except SLACK_REQUEST_ERRORS as exc:
-        error = slack_error(exc)
-        if error == "thread_not_found":
-            return False
-        logger.warning(
-            "Slack thread lookup failed",
-            extra={"slack_error": error, "slack_channel": channel_id},
-        )
-    return True
-
-
-async def delete_slack_message(channel_id: str, message_ts: str) -> bool:
-    """Delete one of the bot's own messages; whether Slack confirmed it."""
-    try:
-        async with SlackClient.bot() as client:
-            await client.chat_delete(channel=channel_id, ts=message_ts)
-    except SLACK_REQUEST_ERRORS as exc:
-        logger.warning(
-            "Slack message could not be deleted",
-            extra={"slack_error": slack_error(exc), "slack_channel": channel_id},
-        )
-        return False
-    return True
-
-
-async def _post_slack_message_with_ts(
-    channel_id: str,
-    text: str,
-    *,
-    thread_ts: str | None = None,
-    unfurl_links: bool = True,
-    unfurl_media: bool = True,
-    blocks: list[dict[str, Any]] | None = None,
-    reply_broadcast: bool = False,
-) -> str:
-    from openswe.slack.code_channels import is_code_channel_session
-
-    # A code channel is one flowing session: replies belong in the channel.
-    reply_ts = None if is_code_channel_session(thread_ts) else thread_ts
-    broadcast = {"reply_broadcast": True} if reply_broadcast and reply_ts else {}
-    text, blocks = await pr_review_links(text, blocks)
-
-    try:
-        async with SlackClient.bot() as client:
-            data = await client.chat_postMessage(
-                channel=channel_id,
-                text=text,
-                thread_ts=reply_ts,
-                unfurl_links=unfurl_links,
-                unfurl_media=unfurl_media,
-                blocks=blocks or None,
-                **broadcast,
-            )
-        message_ts = data.get("ts")
-        if isinstance(message_ts, str) and message_ts:
-            # Slack accepts a reply to a deleted parent and posts it at the channel
-            # root, where it reads as a message nobody asked for. Confirm the parent
-            # is really gone before removing what was just posted.
-            if (
-                reply_ts
-                and not _threaded_under(data, reply_ts)
-                and not await _slack_thread_exists(channel_id, reply_ts)
-            ):
-                await delete_slack_message(channel_id, message_ts)
-                logger.warning(
-                    "Slack reply landed outside its thread",
-                    extra={"slack_channel": channel_id, "slack_thread_ts": reply_ts},
-                )
-                raise SlackRequestError("thread_not_found")
-            _log_automated_warning_sent_to_slack(channel_id, thread_ts, text)
-            return message_ts
-        raise SlackRequestError("missing_message_ts")
-    except SLACK_REQUEST_ERRORS as exc:
-        error = slack_error(exc)
-        logger.warning(
-            "Slack message request failed",
-            extra={"slack_error": error, "slack_error_details": slack_error_details(exc)},
-        )
-        raise SlackRequestError(error) from exc
-
-
-def _slack_thread_dashboard_url(
-    channel_id: str, thread_ts: str, agent_thread_id: str | None = None
-) -> str | None:
-    return dashboard_thread_url(agent_thread_id) if agent_thread_id else None
-
-
-def _safe_model_label(model: str) -> str:
-    sanitized = re.sub(r"[^A-Za-z0-9._:/+\-]", "-", model)
-    return sanitized.rsplit("/", 1)[-1][:48].strip("-")
-
-
 SLACK_COST_PENDING_LABEL = "calculating cost..."
 _PENDING_COST_LABEL_RE = re.compile(r"(?: • )?calculating cost(?:\.\.\.)?$")
-
-
-def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
-    if usage is None:
-        return ""
-    labels = sorted({label for model in usage.models if (label := _safe_model_label(model))})
-    model_text = " + ".join(labels[:3])
-    if len(labels) > 3:
-        model_text = f"{model_text} +{len(labels) - 3}"
-    if model_text and usage.reasoning_effort:
-        model_text = f"{model_text} ({_safe_model_label(usage.reasoning_effort)})"
-    parts = [model_text] if model_text else []
-    if usage.session_cost_usd is not None:
-        parts.append(format_slack_session_cost(usage.session_cost_usd))
-    return " • ".join(parts)
 
 
 _SESSION_COST_LABEL_RE = re.compile(
@@ -786,45 +651,6 @@ def with_slack_pending_session_cost(
     return updated_text, updated_blocks
 
 
-def format_slack_web_link_footer(
-    dashboard_url: str | None,
-    usage: RunUsageSummary | None = None,
-) -> str:
-    """Format the compact Slack footer links."""
-    if not dashboard_url:
-        return ""
-    links = [f"<{dashboard_url}|{SLACK_WEB_LINK_FOOTER_LABEL}>"]
-    usage_text = format_slack_run_usage(usage)
-    if usage_text:
-        links.append(usage_text)
-    return " • ".join(links)
-
-
-def append_slack_web_link_footer(
-    text: str,
-    dashboard_url: str | None,
-    usage: RunUsageSummary | None = None,
-) -> str:
-    """Append the compact Slack footer links to fallback text."""
-    footer = format_slack_web_link_footer(dashboard_url, usage)
-    if not footer or footer in text:
-        return text
-    stripped = text.rstrip()
-    if not stripped:
-        return footer
-    return f"{stripped} {footer}"
-
-
-def _slack_web_link_context_block(
-    dashboard_url: str | None,
-    usage: RunUsageSummary | None = None,
-) -> dict[str, Any] | None:
-    footer = format_slack_web_link_footer(dashboard_url, usage)
-    if not footer:
-        return None
-    return {"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]}
-
-
 def _block_contains_text(block: dict[str, Any], needle: str) -> bool:
     text = block.get("text")
     if isinstance(text, dict) and needle in str(text.get("text") or ""):
@@ -837,104 +663,432 @@ def _block_contains_text(block: dict[str, Any], needle: str) -> bool:
     return False
 
 
-def _with_slack_web_link_context_block(
-    text: str,
-    blocks: list[dict[str, Any]] | None,
-    dashboard_url: str | None,
-    usage: RunUsageSummary | None = None,
-) -> list[dict[str, Any]] | None:
-    context_block = _slack_web_link_context_block(dashboard_url, usage)
-    if context_block is None:
-        return blocks
-    if not blocks:
-        if len(text) > SLACK_SECTION_TEXT_MAX_CHARS:
+@dataclass(frozen=True)
+class SlackMessageBody:
+    """What a Slack message says: its fallback ``text`` and optional Block Kit ``blocks``."""
+
+    text: str
+    blocks: list[dict[str, Any]] | None = None
+
+    def muted(self) -> SlackMessageBody | None:
+        """This body with each user mention read as ``someone``; ``None`` if it mentions nobody."""
+        payload = json.dumps([self.text, self.blocks])
+        if _SLACK_USER_MENTION_RE.search(payload) is None:
             return None
-        return [
-            {"type": "section", "text": {"type": "mrkdwn", "text": text}},
-            context_block,
-        ]
-    updated_blocks = copy.deepcopy(blocks)
-    if dashboard_url and any(
-        _block_contains_text(block, dashboard_url) for block in updated_blocks
-    ):
-        usage_text = format_slack_run_usage(usage)
-        if not usage_text or any(
-            _block_contains_text(block, usage_text) for block in updated_blocks
+        text, blocks = json.loads(_SLACK_USER_MENTION_RE.sub("someone", payload))
+        return SlackMessageBody(text, blocks)
+
+    async def with_review_links(self) -> SlackMessageBody:
+        text, blocks = await pr_review_links(self.text, self.blocks)
+        return SlackMessageBody(text, blocks)
+
+
+@dataclass(frozen=True)
+class SlackWebLinkFooter:
+    """The compact "Open in Web" footer, followed by the run's models and cost when known."""
+
+    dashboard_url: str | None
+    usage: RunUsageSummary | None = None
+
+    @classmethod
+    def for_thread(
+        cls, agent_thread_id: str | None, usage: RunUsageSummary | None = None
+    ) -> SlackWebLinkFooter:
+        return cls(dashboard_thread_url(agent_thread_id) if agent_thread_id else None, usage)
+
+    @staticmethod
+    def _model_label(model: str) -> str:
+        sanitized = re.sub(r"[^A-Za-z0-9._:/+\-]", "-", model)
+        return sanitized.rsplit("/", 1)[-1][:48].strip("-")
+
+    @property
+    def usage_text(self) -> str:
+        if self.usage is None:
+            return ""
+        labels = sorted(
+            {label for model in self.usage.models if (label := self._model_label(model))}
+        )
+        model_text = " + ".join(labels[:3])
+        if len(labels) > 3:
+            model_text = f"{model_text} +{len(labels) - 3}"
+        if model_text and self.usage.reasoning_effort:
+            model_text = f"{model_text} ({self._model_label(self.usage.reasoning_effort)})"
+        parts = [model_text] if model_text else []
+        if self.usage.session_cost_usd is not None:
+            parts.append(format_slack_session_cost(self.usage.session_cost_usd))
+        return " • ".join(parts)
+
+    @property
+    def text(self) -> str:
+        if not self.dashboard_url:
+            return ""
+        links = [f"<{self.dashboard_url}|{SLACK_WEB_LINK_FOOTER_LABEL}>"]
+        if self.usage_text:
+            links.append(self.usage_text)
+        return " • ".join(links)
+
+    def append_to(self, text: str) -> str:
+        """``text`` with the footer appended, as fallback text carries it."""
+        footer = self.text
+        if not footer or footer in text:
+            return text
+        stripped = text.rstrip()
+        return f"{stripped} {footer}" if stripped else footer
+
+    def _blocks_for(self, body: SlackMessageBody) -> list[dict[str, Any]] | None:
+        footer = self.text
+        if not footer:
+            return body.blocks
+        context_block: dict[str, Any] = {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": footer}],
+        }
+        if not body.blocks:
+            if len(body.text) > SLACK_SECTION_TEXT_MAX_CHARS:
+                return None
+            return [
+                {"type": "section", "text": {"type": "mrkdwn", "text": body.text}},
+                context_block,
+            ]
+        blocks = copy.deepcopy(body.blocks)
+        if self.dashboard_url and any(
+            _block_contains_text(block, self.dashboard_url) for block in blocks
         ):
-            return updated_blocks
-        context_block["block_id"] = "open_swe_usage_footer"
-        context_block["elements"][0]["text"] = usage_text
-    updated_blocks.append(context_block)
-    return updated_blocks
+            usage_text = self.usage_text
+            if not usage_text or any(_block_contains_text(block, usage_text) for block in blocks):
+                return blocks
+            context_block["block_id"] = "open_swe_usage_footer"
+            context_block["elements"][0]["text"] = usage_text
+        blocks.append(context_block)
+        return blocks
+
+    def add_to(self, body: SlackMessageBody) -> SlackMessageBody:
+        """``body`` carrying the footer in both its blocks and its fallback text."""
+        return SlackMessageBody(self.append_to(body.text), self._blocks_for(body))
 
 
-async def post_slack_thread_reply_with_ts(
-    channel_id: str,
-    thread_ts: str,
-    text: str,
-    *,
-    unfurl_links: bool = True,
-    unfurl_media: bool = True,
-    blocks: list[dict[str, Any]] | None = None,
-    usage: RunUsageSummary | None = None,
-    agent_thread_id: str | None = None,
-    reply_broadcast: bool = False,
-) -> str:
-    """Post a reply in a Slack thread and return its timestamp."""
-    from openswe.slack.code_channels import is_code_channel_session
+@dataclass(frozen=True)
+class SlackConversation:
+    """A Slack channel or DM the bot posts in, and the threads and messages in it."""
 
-    if is_code_channel_session(thread_ts):
-        agent_thread_id = None
-    dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
-    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
-    text = append_slack_web_link_footer(text, dashboard_url, usage)
-    return await _post_slack_message_with_ts(
-        channel_id,
-        text,
-        thread_ts=thread_ts,
-        unfurl_links=unfurl_links,
-        unfurl_media=unfurl_media,
-        blocks=blocks,
-        reply_broadcast=reply_broadcast,
-    )
+    channel_id: str
 
+    async def post(
+        self,
+        text: str,
+        *,
+        unfurl_links: bool = True,
+        unfurl_media: bool = True,
+        blocks: list[dict[str, Any]] | None = None,
+    ) -> str:
+        """Post a top-level message and return its timestamp."""
+        return await self._send(
+            SlackMessageBody(text, blocks), unfurl_links=unfurl_links, unfurl_media=unfurl_media
+        )
 
-async def post_slack_ephemeral_reply(
-    channel_id: str,
-    user_id: str,
-    text: str,
-    *,
-    blocks: list[dict[str, Any]] | None = None,
-    usage: RunUsageSummary | None = None,
-    agent_thread_id: str | None = None,
-) -> bool:
-    """Answer one person in a channel, carrying the same web link a thread reply would."""
-    dashboard_url = dashboard_thread_url(agent_thread_id) if agent_thread_id else None
-    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
-    return await post_slack_ephemeral_message(
-        channel_id,
-        user_id,
-        append_slack_web_link_footer(text, dashboard_url, usage),
-        blocks=blocks,
-    )
+    async def reply(
+        self,
+        thread_ts: str,
+        text: str,
+        *,
+        unfurl_links: bool = True,
+        unfurl_media: bool = True,
+        blocks: list[dict[str, Any]] | None = None,
+        usage: RunUsageSummary | None = None,
+        agent_thread_id: str | None = None,
+        reply_broadcast: bool = False,
+        ping: bool = True,
+    ) -> str:
+        """Reply in the thread at ``thread_ts`` and return the reply's timestamp.
 
+        With ``ping=False`` user mentions still render but notify nobody: Slack does not
+        notify for mentions added by an edit, so they are posted as ``someone`` and edited in.
+        """
+        from openswe.slack.code_channels import is_code_channel_session
 
-async def post_slack_top_level_message_with_ts(
-    channel_id: str,
-    text: str,
-    *,
-    unfurl_links: bool = True,
-    unfurl_media: bool = True,
-    blocks: list[dict[str, Any]] | None = None,
-) -> str:
-    """Post a top-level Slack message and return its timestamp."""
-    return await _post_slack_message_with_ts(
-        channel_id,
-        text,
-        unfurl_links=unfurl_links,
-        unfurl_media=unfurl_media,
-        blocks=blocks,
-    )
+        if is_code_channel_session(thread_ts):
+            agent_thread_id = None
+        body = SlackWebLinkFooter.for_thread(agent_thread_id, usage).add_to(
+            SlackMessageBody(text, blocks)
+        )
+        muted = None if ping else body.muted()
+        message_ts = await self._send(
+            muted or body,
+            thread_ts=thread_ts,
+            unfurl_links=unfurl_links,
+            unfurl_media=unfurl_media,
+            reply_broadcast=reply_broadcast,
+        )
+        if muted is not None:
+            try:
+                await self.update(
+                    message_ts,
+                    body.text,
+                    unfurl_links=unfurl_links,
+                    unfurl_media=unfurl_media,
+                    blocks=body.blocks,
+                )
+            except SlackRequestError as exc:
+                logger.warning(
+                    "Could not edit mentions into a quiet Slack reply",
+                    extra={"slack_channel": self.channel_id, "slack_error": exc.code},
+                )
+        return message_ts
+
+    async def try_reply(
+        self,
+        thread_ts: str,
+        text: str,
+        *,
+        unfurl_links: bool = True,
+        unfurl_media: bool = True,
+        blocks: list[dict[str, Any]] | None = None,
+        agent_thread_id: str | None = None,
+        notice: SlackNotice | None = None,
+    ) -> bool:
+        """Reply in a thread, logging a failure instead of raising; whether it was posted.
+
+        A ``notice`` is skipped, as if posted, when the thread's latest message repeats it.
+        """
+        if notice is not None:
+            latest = await fetch_latest_slack_thread_message(self.channel_id, thread_ts)
+            if latest is not None and notice.repeats(latest):
+                logger.info("Skipped a repeated Slack notice", extra={"slack_notice": notice.kind})
+                return True
+            if blocks is None and len(text) <= SLACK_SECTION_TEXT_MAX_CHARS:
+                blocks = [
+                    {
+                        "type": "section",
+                        "block_id": notice.block_id,
+                        "text": {"type": "mrkdwn", "text": text},
+                    }
+                ]
+        try:
+            await self.reply(
+                thread_ts,
+                text,
+                blocks=blocks,
+                unfurl_links=unfurl_links,
+                unfurl_media=unfurl_media,
+                agent_thread_id=agent_thread_id,
+            )
+        except SlackRequestError as exc:
+            logger.warning("Slack reply failed", extra={"slack_error": exc.code})
+            return False
+        return True
+
+    async def replace_card(
+        self,
+        thread_ts: str,
+        old_ts: str,
+        text: str,
+        *,
+        blocks: list[dict[str, Any]],
+        broadcast: bool,
+        agent_thread_id: str | None,
+        adopt: Callable[[str], Awaitable[bool]],
+    ) -> bool:
+        """Replace a thread's card with a fresh reply, sent to the channel too if ``broadcast``.
+
+        Its mentions do not notify again: the people in it were already told by the old card.
+
+        The new card is posted before the old one is deleted, so a failure leaves one card up.
+        ``adopt`` records the new timestamp and answers whether the new copy is the one to
+        keep; when it is not, the new copy is deleted instead of the old one.
+        """
+        try:
+            message_ts = await self.reply(
+                thread_ts,
+                text,
+                blocks=blocks,
+                agent_thread_id=agent_thread_id,
+                reply_broadcast=broadcast,
+                ping=False,
+            )
+        except SlackRequestError as exc:
+            logger.warning(
+                "Failed to repost Slack card",
+                extra={"slack_error": exc.code, "broadcast": broadcast},
+            )
+            return False
+        kept = await adopt(message_ts)
+        stray = old_ts if kept else message_ts
+        if not await self.delete(stray):
+            logger.warning("Left a stray Slack card", extra={"slack_message_ts": stray})
+        return kept
+
+    async def post_trace_reply(
+        self, thread_ts: str, thread_id: str, *, include_dashboard_link: bool = True
+    ) -> str:
+        """Reply with the run's trace link, and its web link unless left out."""
+        trace_url = await get_langsmith_trace_url(thread_id)
+        links = [f"<{trace_url}|View trace>"] if trace_url else []
+        if include_dashboard_link and (dashboard_url := dashboard_thread_url(thread_id)):
+            links.append(f"<{dashboard_url}|Open in Web>")
+        text = " • ".join(links)
+        return await self.reply(
+            thread_ts, text, unfurl_links=False, unfurl_media=False, agent_thread_id=thread_id
+        )
+
+    async def post_ephemeral(
+        self,
+        user_id: str,
+        text: str,
+        thread_ts: str | None = None,
+        *,
+        blocks: list[dict[str, Any]] | None = None,
+        usage: RunUsageSummary | None = None,
+        agent_thread_id: str | None = None,
+    ) -> bool:
+        """Show a message to one person only, with a thread reply's web link for ``agent_thread_id``."""
+        footer = SlackWebLinkFooter.for_thread(agent_thread_id, usage)
+        body = await footer.add_to(SlackMessageBody(text, blocks)).with_review_links()
+        try:
+            async with SlackClient.bot() as client:
+                await client.chat_postEphemeral(
+                    channel=self.channel_id,
+                    user=user_id,
+                    text=body.text,
+                    thread_ts=thread_ts or None,
+                    blocks=body.blocks,
+                )
+            return True
+        except SLACK_REQUEST_ERRORS as exc:
+            error = slack_error(exc)
+            logger.warning("Slack message request failed", extra={"slack_error": error})
+            return False
+
+    async def update(
+        self,
+        message_ts: str,
+        text: str,
+        *,
+        unfurl_links: bool = True,
+        unfurl_media: bool = True,
+        blocks: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Replace a message's text and blocks; an edit notifies nobody it mentions."""
+        body = await SlackMessageBody(text, blocks).with_review_links()
+        try:
+            async with SlackClient.bot() as client:
+                await client.chat_update(
+                    channel=self.channel_id,
+                    ts=message_ts,
+                    text=body.text,
+                    unfurl_links=unfurl_links,
+                    unfurl_media=unfurl_media,
+                    blocks=body.blocks,
+                )
+        except SLACK_REQUEST_ERRORS as exc:
+            error = slack_error(exc)
+            logger.warning(
+                "Slack message request failed",
+                extra={"slack_error": error, "slack_error_details": slack_error_details(exc)},
+            )
+            raise SlackRequestError(error) from exc
+
+    async def delete(self, message_ts: str) -> bool:
+        """Delete one of the bot's own messages; whether Slack confirmed it."""
+        try:
+            async with SlackClient.bot() as client:
+                await client.chat_delete(channel=self.channel_id, ts=message_ts)
+        except SLACK_REQUEST_ERRORS as exc:
+            logger.warning(
+                "Slack message could not be deleted",
+                extra={"slack_error": slack_error(exc), "slack_channel": self.channel_id},
+            )
+            return False
+        return True
+
+    async def has_thread(self, thread_ts: str) -> bool:
+        """Whether Slack still has the thread at ``thread_ts``; a failed lookup counts as yes."""
+        try:
+            async with SlackClient.bot() as client:
+                await client.conversations_replies(channel=self.channel_id, ts=thread_ts, limit=1)
+        except SLACK_REQUEST_ERRORS as exc:
+            error = slack_error(exc)
+            if error == "thread_not_found":
+                return False
+            logger.warning(
+                "Slack thread lookup failed",
+                extra={"slack_error": error, "slack_channel": self.channel_id},
+            )
+        return True
+
+    async def _send(
+        self,
+        body: SlackMessageBody,
+        *,
+        thread_ts: str | None = None,
+        unfurl_links: bool = True,
+        unfurl_media: bool = True,
+        reply_broadcast: bool = False,
+    ) -> str:
+        from openswe.slack.code_channels import is_code_channel_session
+
+        # A code channel is one flowing session: replies belong in the channel.
+        reply_ts = None if is_code_channel_session(thread_ts) else thread_ts
+        broadcast = {"reply_broadcast": True} if reply_broadcast and reply_ts else {}
+        body = await body.with_review_links()
+        try:
+            async with SlackClient.bot() as client:
+                data = await client.chat_postMessage(
+                    channel=self.channel_id,
+                    text=body.text,
+                    thread_ts=reply_ts,
+                    unfurl_links=unfurl_links,
+                    unfurl_media=unfurl_media,
+                    blocks=body.blocks or None,
+                    **broadcast,
+                )
+            message_ts = data.get("ts")
+            if isinstance(message_ts, str) and message_ts:
+                # Slack accepts a reply to a deleted parent and posts it at the channel
+                # root, where it reads as a message nobody asked for. Confirm the parent
+                # is really gone before removing what was just posted.
+                if (
+                    reply_ts
+                    and not self._threaded_under(data, reply_ts)
+                    and not await self.has_thread(reply_ts)
+                ):
+                    await self.delete(message_ts)
+                    logger.warning(
+                        "Slack reply landed outside its thread",
+                        extra={"slack_channel": self.channel_id, "slack_thread_ts": reply_ts},
+                    )
+                    raise SlackRequestError("thread_not_found")
+                self._log_automated_warning(thread_ts, body.text)
+                return message_ts
+            raise SlackRequestError("missing_message_ts")
+        except SLACK_REQUEST_ERRORS as exc:
+            error = slack_error(exc)
+            logger.warning(
+                "Slack message request failed",
+                extra={"slack_error": error, "slack_error_details": slack_error_details(exc)},
+            )
+            raise SlackRequestError(error) from exc
+
+    @staticmethod
+    def _threaded_under(data: AsyncSlackResponse, reply_ts: str) -> bool:
+        message = data.get("message")
+        if not isinstance(message, Mapping):
+            return True
+        return message.get("thread_ts") == reply_ts
+
+    def _log_automated_warning(self, thread_ts: str | None, text: str) -> None:
+        if not text.lstrip().startswith(WARNING_ICON):
+            return
+        if thread_ts:
+            logger.error(
+                "Sent automated warning message to Slack thread %s/%s: %s",
+                self.channel_id,
+                thread_ts,
+                text,
+            )
+            return
+        logger.error(
+            "Sent automated warning message to Slack channel %s: %s", self.channel_id, text
+        )
 
 
 class SlackStreamError(Exception):
@@ -1073,36 +1227,6 @@ async def set_slack_thread_status(channel_id: str, thread_ts: str, status: str) 
         logger.info("Slack thread status unavailable: %s", exc.code)
         return False
     return True
-
-
-async def update_slack_message(
-    channel_id: str,
-    message_ts: str,
-    text: str,
-    *,
-    unfurl_links: bool = True,
-    unfurl_media: bool = True,
-    blocks: list[dict[str, Any]] | None = None,
-) -> None:
-    """Update a Slack message."""
-    text, blocks = await pr_review_links(text, blocks)
-    try:
-        async with SlackClient.bot() as client:
-            await client.chat_update(
-                channel=channel_id,
-                ts=message_ts,
-                text=text,
-                unfurl_links=unfurl_links,
-                unfurl_media=unfurl_media,
-                blocks=blocks,
-            )
-    except SLACK_REQUEST_ERRORS as exc:
-        error = slack_error(exc)
-        logger.warning(
-            "Slack message request failed",
-            extra={"slack_error": error, "slack_error_details": slack_error_details(exc)},
-        )
-        raise SlackRequestError(error) from exc
 
 
 async def upload_slack_thread_file(
@@ -1266,75 +1390,6 @@ def _validate_slack_upload_url(url: str) -> None:
         raise UnsafeUrlError(url, "Slack returned an invalid upload URL")
 
 
-async def post_slack_thread_reply(
-    channel_id: str,
-    thread_ts: str,
-    text: str,
-    *,
-    unfurl_links: bool = True,
-    unfurl_media: bool = True,
-    blocks: list[dict[str, Any]] | None = None,
-    agent_thread_id: str | None = None,
-    notice: SlackNotice | None = None,
-) -> bool:
-    """Post a reply in a Slack thread.
-
-    A ``notice`` is skipped, as if posted, when the thread's latest message repeats it.
-    """
-    if notice is not None:
-        latest = await fetch_latest_slack_thread_message(channel_id, thread_ts)
-        if latest is not None and notice.repeats(latest):
-            logger.info("Skipped a repeated Slack notice", extra={"slack_notice": notice.kind})
-            return True
-        if blocks is None and len(text) <= SLACK_SECTION_TEXT_MAX_CHARS:
-            blocks = [
-                {
-                    "type": "section",
-                    "block_id": notice.block_id,
-                    "text": {"type": "mrkdwn", "text": text},
-                }
-            ]
-    kwargs: dict[str, Any] = {
-        "blocks": blocks,
-        "unfurl_links": unfurl_links,
-        "unfurl_media": unfurl_media,
-    }
-    if agent_thread_id is not None:
-        kwargs["agent_thread_id"] = agent_thread_id
-    try:
-        await post_slack_thread_reply_with_ts(channel_id, thread_ts, text, **kwargs)
-    except SlackRequestError as exc:
-        logger.warning("Slack reply failed", extra={"slack_error": exc.code})
-        return False
-    return True
-
-
-async def post_slack_ephemeral_message(
-    channel_id: str,
-    user_id: str,
-    text: str,
-    thread_ts: str | None = None,
-    *,
-    blocks: list[dict[str, Any]] | None = None,
-) -> bool:
-    """Post an ephemeral message visible only to one user."""
-    text, blocks = await pr_review_links(text, blocks)
-    try:
-        async with SlackClient.bot() as client:
-            await client.chat_postEphemeral(
-                channel=channel_id,
-                user=user_id,
-                text=text,
-                thread_ts=thread_ts or None,
-                blocks=blocks,
-            )
-        return True
-    except SLACK_REQUEST_ERRORS as exc:
-        error = slack_error(exc)
-        logger.warning("Slack message request failed", extra={"slack_error": error})
-        return False
-
-
 SLACK_USER_ID_RE = re.compile(r"^[UW][A-Z0-9_]+$")
 
 
@@ -1464,16 +1519,16 @@ async def replace_slack_command_message(
     agent_thread_id: str | None = None,
 ) -> bool:
     """Replace a command acknowledgement or publish a new ephemeral shortcut answer."""
-    text, blocks = await pr_review_links(text, blocks)
-    dashboard_url = dashboard_thread_url(agent_thread_id) if agent_thread_id else None
+    body = SlackWebLinkFooter.for_thread(agent_thread_id, usage).add_to(
+        await SlackMessageBody(text, blocks).with_review_links()
+    )
     payload: dict[str, Any] = {
         "response_type": "ephemeral",
         "replace_original": urlparse(response_url).path.startswith("/commands/"),
-        "text": append_slack_web_link_footer(text, dashboard_url, usage),
+        "text": body.text,
     }
-    updated_blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
-    if updated_blocks:
-        payload["blocks"] = updated_blocks
+    if body.blocks:
+        payload["blocks"] = body.blocks
     return await _post_slack_callback(response_url, payload, ("/commands/", "/actions/"))
 
 
@@ -1912,70 +1967,6 @@ async def resolve_slack_links_in_context(
         )
 
     return resolved_links_section, image_urls
-
-
-TRACE_REPLY_WEB_HANDOFF_NOTICE = (
-    "Conversation moved to Web — use the `Open in Web` link above for follow-ups."
-)
-
-
-def _format_trace_reply(
-    trace_url: str | None, dashboard_url: str | None, *, moved_to_web: bool = False
-) -> str:
-    """Format the trace reply with status text."""
-    links = []
-    if trace_url:
-        links.append(f"<{trace_url}|View trace>")
-    if dashboard_url:
-        links.append(f"<{dashboard_url}|Open in Web>")
-    head = f"{' • '.join(links)}\n" if links else ""
-    if moved_to_web:
-        return f"{head}_{TRACE_REPLY_WEB_HANDOFF_NOTICE}_"
-    return head.rstrip()
-
-
-async def post_slack_trace_reply(
-    channel_id: str, thread_ts: str, thread_id: str, *, include_dashboard_link: bool = True
-) -> str | None:
-    """Post a trace URL reply in a Slack thread and return its Slack timestamp."""
-    trace_url = await get_langsmith_trace_url(thread_id)
-    dashboard_url = dashboard_thread_url(thread_id) if include_dashboard_link else None
-    message_ts = await post_slack_thread_reply_with_ts(
-        channel_id,
-        thread_ts,
-        _format_trace_reply(trace_url, dashboard_url),
-        unfurl_links=False,
-        unfurl_media=False,
-        agent_thread_id=thread_id,
-    )
-    return message_ts
-
-
-async def update_slack_trace_reply_for_web_handoff(
-    channel_id: str, message_ts: str, thread_id: str
-) -> bool:
-    """Update the initial Slack trace reply after a dashboard handoff."""
-    trace_url = await get_langsmith_trace_url(thread_id)
-    dashboard_url = dashboard_thread_url(thread_id)
-    try:
-        await update_slack_message(
-            channel_id,
-            message_ts,
-            _format_trace_reply(trace_url, dashboard_url, moved_to_web=True),
-            unfurl_links=False,
-            unfurl_media=False,
-        )
-    except SlackRequestError as exc:
-        logger.warning(
-            "Failed to update Slack trace reply for web handoff",
-            extra={
-                "slack_channel": channel_id,
-                "slack_message_ts": message_ts,
-                "slack_error": exc.code,
-            },
-        )
-        return False
-    return True
 
 
 SLACK_DETACHED_AT_KEY = "slack_thread_detached_at"

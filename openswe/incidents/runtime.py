@@ -27,7 +27,6 @@ from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
-from openswe.slack.client import post_slack_thread_reply_with_ts
 from openswe.slack.http import SlackRequestError
 from openswe.source_context import SlackThreadRef
 from openswe.utils.dashboard_links import dashboard_incident_url
@@ -158,8 +157,7 @@ class IncidentSession:
                 reason="answer" if explicit else "findings",
             )
             try:
-                await post_slack_thread_reply_with_ts(
-                    record.channel_id,
+                await record.slack_conversation.reply(
                     self.reply_thread_ts or SESSION_TS,
                     text,
                     blocks=blocks,

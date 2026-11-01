@@ -10,6 +10,8 @@ from fastapi import BackgroundTasks, HTTPException
 from openswe.incidents import channels, service, turns
 from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.slack.channels import SlackChannel
+from openswe.slack.client import SlackConversation
+from tests.slack_helpers import channel_first
 
 CHANNEL = {
     "id": "C1",
@@ -22,6 +24,13 @@ CHANNEL = {
     "is_pending_ext_shared": False,
     "is_member": True,
 }
+
+
+@pytest.fixture(autouse=True)
+def reply(monkeypatch):
+    reply = AsyncMock(return_value="5.0")
+    monkeypatch.setattr(SlackConversation, "reply", channel_first(reply))
+    return reply
 
 
 @pytest.fixture
@@ -52,7 +61,6 @@ async def configured(registry_db, monkeypatch):
     )
     monkeypatch.setattr(channels, "resolve_slack_thread_id", AsyncMock(return_value="thread-1"))
     monkeypatch.setattr(channels, "upsert_agent_thread_metadata", AsyncMock(return_value=True))
-    monkeypatch.setattr(channels, "post_slack_thread_reply_with_ts", AsyncMock(return_value="5.0"))
     monkeypatch.setattr(
         channels,
         "fetch_slack_thread_messages",
@@ -101,7 +109,7 @@ async def handle(event: dict, **overrides) -> tuple[dict | None, BackgroundTasks
     return response, tasks
 
 
-async def test_enrollment_binds_thread_queues_history_and_starts_one_turn(configured):
+async def test_enrollment_binds_thread_queues_history_and_starts_one_turn(reply, configured):
     response, _ = await handle(
         {"type": "channel_created", "channel": {"id": "C1", "name": "inc-api"}}
     )
@@ -122,7 +130,7 @@ async def test_enrollment_binds_thread_queues_history_and_starts_one_turn(config
     queued = [call.args[1]["ts"] for call in turns.queue_context.await_args_list]
     assert queued == ["1.0", "1.3"]
     turns.schedule_automatic_turn.assert_awaited_once()
-    assert "Open incident" in channels.post_slack_thread_reply_with_ts.await_args.args[2]
+    assert "Open incident" in reply.await_args.args[2]
 
     again, _ = await handle({"type": "channel_rename", "channel": {"id": "C1", "name": "inc-api"}})
     assert again == {"status": "ignored"}
@@ -176,7 +184,7 @@ async def test_anyone_in_the_channel_can_pause_but_questions_need_a_connected_ac
     assert channels.post_account_link_prompt.await_args.args[:3] == ("C1", "3.1", "U9")
 
 
-async def test_pause_cancels_runs_and_tells_the_channel(enrolled):
+async def test_pause_cancels_runs_and_tells_the_channel(reply, enrolled):
     response, _ = await handle(
         {"type": "app_mention", "channel": "C1", "user": "U1", "text": "<@UBOT> pause", "ts": "6.0"}
     )
@@ -185,7 +193,7 @@ async def test_pause_cancels_runs_and_tells_the_channel(enrolled):
     saved = await service.INCIDENTS.get(enrolled.id)
     assert (saved.status, saved.reason) == ("paused", "responder_pause")
     assert saved.activity[-1].type == "control"
-    assert "paused" in channels.post_slack_thread_reply_with_ts.await_args.args[2]
+    assert "paused" in reply.await_args.args[2]
 
 
 async def test_resume_reschedules_when_context_is_waiting(enrolled):

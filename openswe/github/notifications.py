@@ -10,8 +10,8 @@ from langgraph_sdk import get_client
 from openswe import event_claims
 from openswe.config import ENV
 from openswe.slack.client import (
+    SlackConversation,
     get_active_slack_thread,
-    post_slack_thread_reply_with_ts,
     slack_thread_mutation_lock,
 )
 from openswe.slack.http import SlackRequestError
@@ -61,8 +61,7 @@ async def notify_slack_review(
                 ):
                     return
                 try:
-                    await post_slack_thread_reply_with_ts(
-                        location["channel_id"],
+                    await SlackConversation(location["channel_id"]).reply(
                         location["thread_ts"],
                         f"@{escape(reviewer, quote=False)} <{review_url}|{notice}>{suffix}",
                         agent_thread_id=thread_id,

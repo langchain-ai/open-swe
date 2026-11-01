@@ -15,8 +15,10 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review import lifecycle
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
+from openswe.slack.client import SlackConversation
 from openswe.users import User
 from tests.expedited_review.conftest import OpenApproval
+from tests.slack_helpers import channel_first
 
 _SOURCE = ChangedFile(filename="src/app.py", additions=1, patch="+fixed")
 _TEST = ChangedFile(filename="tests/test_app.py", additions=1, patch="+assert fixed")
@@ -397,7 +399,7 @@ async def test_external_merge_only_reacts_to_a_separate_thread_root(
     posts = AsyncMock()
     wakes = AsyncMock()
     monkeypatch.setattr(lifecycle, "add_slack_reaction", reactions)
-    monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", posts)
+    monkeypatch.setattr(SlackConversation, "reply", channel_first(posts))
     monkeypatch.setattr(lifecycle, "dispatch_agent_run", wakes)
     github.pull = {"state": "closed", "merged": True}
 
