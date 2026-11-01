@@ -1137,6 +1137,22 @@ export interface PullRequestSearchResult {
   state: "open" | "draft" | "merged" | "closed"
 }
 
+/** What the backend's database already knows about a PR, without asking GitHub. */
+export interface StoredPullRequest {
+  repo: string
+  number: number
+  url: string
+  title: string
+  state: PullRequestSearchResult["state"]
+  author: string
+  additions: number | null
+  deletions: number | null
+  changed_files: number | null
+  review_count: number
+  last_reviewed_at: string | null
+  last_review_findings: number | null
+}
+
 export interface PullRequestSearchResults {
   pull_requests: PullRequestSearchResult[]
   has_more: boolean
@@ -1162,7 +1178,7 @@ export interface ReviewCheckRun {
 }
 
 export interface ReviewPrDetails {
-  state: string
+  state: PullRequestSearchResult["state"]
   title: string
   body: string
   additions: number
@@ -1843,6 +1859,11 @@ export const api = {
     request<PullRequestSearchResults>(
       `/pull-requests/search?q=${encodeURIComponent(query)}&offset=${offset}`
     ),
+  lookupPullRequests: (pullRequests: Array<{ repo: string; number: number }>) =>
+    request<Array<StoredPullRequest>>("/pull-requests/lookup", {
+      method: "POST",
+      body: JSON.stringify({ pull_requests: pullRequests }),
+    }),
   openPullRequests: (
     repo: string,
     sort: "createdAt" | "updatedAt" = "updatedAt",

@@ -5222,6 +5222,27 @@
         "title": "PullRequestFixContext",
         "type": "object"
       },
+      "PullRequestKey": {
+        "properties": {
+          "number": {
+            "minimum": 1.0,
+            "title": "Number",
+            "type": "integer"
+          },
+          "repo": {
+            "maxLength": 200,
+            "minLength": 3,
+            "title": "Repo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo",
+          "number"
+        ],
+        "title": "PullRequestKey",
+        "type": "object"
+      },
       "PullRequestLabel": {
         "properties": {
           "color": {
@@ -5273,6 +5294,23 @@
           "selected"
         ],
         "title": "PullRequestLabels",
+        "type": "object"
+      },
+      "PullRequestLookup": {
+        "properties": {
+          "pull_requests": {
+            "items": {
+              "$ref": "#/components/schemas/PullRequestKey"
+            },
+            "maxItems": 50,
+            "title": "Pull Requests",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pull_requests"
+        ],
+        "title": "PullRequestLookup",
         "type": "object"
       },
       "PullRequestPreview": {
@@ -7708,6 +7746,117 @@
           "text"
         ],
         "title": "SlashCommandResponse",
+        "type": "object"
+      },
+      "StoredPullRequest": {
+        "description": "What PostgreSQL already knows about a pull request, without asking GitHub.",
+        "properties": {
+          "additions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Additions"
+          },
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "changed_files": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changed Files"
+          },
+          "deletions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deletions"
+          },
+          "last_review_findings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Review Findings"
+          },
+          "last_reviewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Reviewed At"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "review_count": {
+            "title": "Review Count",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "draft",
+              "merged",
+              "closed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo",
+          "number",
+          "url",
+          "title",
+          "state",
+          "author",
+          "additions",
+          "deletions",
+          "changed_files",
+          "review_count",
+          "last_reviewed_at",
+          "last_review_findings"
+        ],
+        "title": "StoredPullRequest",
         "type": "object"
       },
       "SubmittedReview": {
@@ -14528,6 +14677,57 @@
           }
         ],
         "summary": "Api List Pull Requests",
+        "tags": [
+          "dashboard",
+          "pull-requests"
+        ]
+      }
+    },
+    "/dashboard/api/pull-requests/lookup": {
+      "post": {
+        "operationId": "api_lookup_pull_requests_dashboard_api_pull_requests_lookup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PullRequestLookup"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StoredPullRequest"
+                  },
+                  "title": "Response Api Lookup Pull Requests Dashboard Api Pull Requests Lookup Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Lookup Pull Requests",
         "tags": [
           "dashboard",
           "pull-requests"
