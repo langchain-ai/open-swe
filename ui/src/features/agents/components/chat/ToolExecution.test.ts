@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 
+import { toolKind, toolTitle } from "@/features/agents/lib/streamMessagesToUi"
+
 import {
   formatToolDisplay,
   formatToolDisplayParts,
@@ -71,6 +73,27 @@ describe("formatToolDisplay", () => {
     )
     expect(input.command).toBe(command)
   })
+
+  it.each([
+    ["mcp_datadog_search_logs", { query: "errors" }, "Datadog: Search Logs"],
+    [
+      "mcp_google-drive_read_file",
+      { path: "/report" },
+      "Google Drive: Read File",
+    ],
+    ["mcp_linear_edit_issue", { command: "update" }, "Linear: Edit Issue"],
+  ])(
+    "keeps the MCP server and tool visible for %s",
+    (name, input, expected) => {
+      expect(
+        formatToolDisplayParts(toolTitle(name, input), toolKind(name), input)
+          .heading
+      ).toBe(expected)
+      expect(formatToolDisplayParts(name, toolKind(name), input).heading).toBe(
+        expected
+      )
+    }
+  )
 
   it("sentence-cases raw tool names", () => {
     expect(formatToolDisplay("save_plan", "other", {}, repoPath)).toBe(

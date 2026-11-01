@@ -17,6 +17,7 @@ const {
   powerMonitor,
   session,
   shell,
+  webContents,
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const {
@@ -80,6 +81,7 @@ const {
   desktopLoginUrl,
   isAppLoginUrl,
   isAppUrl,
+  headersFramedByApp,
   isConnectProvider,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
@@ -343,6 +345,7 @@ function registeredProject(cwd) {
 }
 
 function threadRoot(thread) {
+  if (thread?.managedTaskFolder) return localThreadStore.taskRoot(thread);
   const project = thread ? registeredProject(thread.cwd) : null;
   if (!project) return null;
   return thread.worktreePath || project;
@@ -798,17 +801,24 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     const cwd =
       typeof input?.cwd === "string" ? registeredProject(input.cwd) : null;
-    if (!cwd)
-      throw new Error(
-        "Add a valid project to Open SWE before starting a local agent",
-      );
-    let thread = localThreadStore.create({ id: input?.threadId, cwd });
+    if (!cwd && input?.taskWorkspace !== true)
+      throw new Error("Choose a folder before starting a local agent");
+    if (!cwd && input?.cwd != null) throw new Error("Folder is not registered");
+    let thread = cwd
+      ? localThreadStore.create({ id: input?.threadId, cwd })
+      : localThreadStore.createTask(input?.threadId);
     try {
-      if (input?.workspaceMode === "worktree")
+      if (cwd && input?.workspaceMode === "worktree")
         thread = await startThreadWorktree(thread, input?.baseBranch);
-      thread = await recordLocalCheckpoint(thread);
+      if (!thread.managedTaskFolder)
+        thread = await recordLocalCheckpoint(thread);
       const bridgeId = await localBridges.ensure(thread.id);
-      return { bridgeId, repo: await originRepo(threadRoot(thread)) };
+      return {
+        bridgeId,
+        repo: thread.managedTaskFolder
+          ? null
+          : await originRepo(threadRoot(thread)),
+      };
     } catch (error) {
       await discardLocalThread(thread);
       throw error;
@@ -822,6 +832,7 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:take-over-thread", async (event, input) => {
     requireTrustedDesktopIpc(event);
     const existing = localThreadStore.get(input?.threadId);
+    if (existing?.managedTaskFolder) return localBridges.ensure(existing.id);
     if (existing) {
       // Its worktree and bridge may be the source of a handoff still pending.
       // A thread that ran in the user's own checkout moves to a worktree, so
@@ -853,6 +864,14 @@ function configureDesktopIpc() {
     if (!thread?.bridgeId)
       throw new Error("This thread does not run on This Mac");
     await localBridges.ensure(thread.id);
+    return true;
+  });
+  ipcMain.handle("desktop:open-task-folder", async (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    const root = threadRoot(localThreadStore.get(threadId));
+    if (!root) throw new Error("Task folder is unavailable");
+    const error = await shell.openPath(root);
+    if (error) throw new Error(error);
     return true;
   });
   ipcMain.handle("desktop:get-local-thread", (event, threadId) => {
@@ -1798,6 +1817,21 @@ function createSetupWindow() {
   return window;
 }
 
+/** The thread's browser panel frames a LangSmith page, which cannot name the app as a frame ancestor. */
+function configureFraming() {
+  session.defaultSession.webRequest.onHeadersReceived(
+    { urls: ["https://*/*"] },
+    (details, callback) => {
+      const page = webContents.fromId(details.webContentsId)?.getURL();
+      callback(
+        details.resourceType === "subFrame" && isAppUrl(page ?? "")
+          ? { responseHeaders: headersFramedByApp(details.responseHeaders) }
+          : {},
+      );
+    },
+  );
+}
+
 function configurePermissions() {
   session.defaultSession.setPermissionRequestHandler(
     (webContents, permission, callback, details) => {
@@ -1900,6 +1934,7 @@ if (!hasSingleInstanceLock) {
     });
     protocol.handle("open-swe", serveDesktopUi);
     configurePermissions();
+    configureFraming();
     configureDesktopIpc();
     createMenu();
     void loadAlternativeEnvironments();

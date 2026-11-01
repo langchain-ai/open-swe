@@ -1,7 +1,7 @@
 """Per-user custom instructions for the main coding agent.
 
 Each record holds a user-authored instruction prompt (edited in the dashboard
-Profile tab, or by the agent itself via ``save_user_instructions``) that is
+Profile tab) that is
 appended to the main agent's system prompt for runs that user triggers.
 
 Stored as its own record rather than on the profile so agent-written

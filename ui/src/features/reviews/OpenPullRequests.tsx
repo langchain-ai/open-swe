@@ -11,6 +11,7 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Typeahead } from "@langchain/macaw-components/Typeahead"
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowsDownUp"
 import { useQueries, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 
 import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
@@ -31,11 +32,18 @@ import {
   refreshPullRequest,
 } from "./lib/cache"
 import { dateLabel } from "./lib/dateLabel"
+import { readPreference, writePreference } from "./lib/preferences"
 import { pullRequestKey, statusLabels } from "./lib/status"
 import { useOpenPullRequests } from "./lib/useOpenPullRequests"
 import { usePullRequestDetails } from "./lib/usePullRequestDetails"
 import { usePullRequestSearch } from "./lib/usePullRequestSearch"
-import { reviewStatuses, type ReviewsSearch, type ReviewSort } from "./search"
+import {
+  parsePullRequestSelection,
+  REVIEW_QUEUE_LIMIT,
+  reviewStatuses,
+  type ReviewsSearch,
+  type ReviewSort,
+} from "./search"
 
 const chunkSize = 10
 
@@ -70,20 +78,28 @@ export function OpenPullRequests({
   filters: ReviewsSearch
   onFiltersChange: (changes: Partial<ReviewsSearch>, replace?: boolean) => void
 }) {
+  const preferenceKey = `open-swe.reviews.sort.${login}`
+  const savedSort = readPreference(preferenceKey)?.split(":")
+  const defaultSort = savedSort?.[0] === "updatedAt" ? "updatedAt" : "createdAt"
+  const defaultDirection = savedSort?.[1] === "asc" ? "asc" : "desc"
   const {
     repo = [],
     q: search = "",
     status: filter,
-    sort = "updatedAt",
-    direction = "desc",
+    sort = defaultSort,
+    direction = defaultDirection,
     pr: selected,
   } = filters
+  useEffect(() => {
+    writePreference(preferenceKey, `${sort}:${direction}`)
+  }, [preferenceKey, sort, direction])
   const toggleSort = (next: ReviewSort) =>
     onFiltersChange({
       sort: next,
       direction: sort === next && direction === "asc" ? "desc" : "asc",
     })
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const query = useOpenPullRequests(login, repo, sort, direction, scope)
   const knownRepos = useRepos()
   const descriptionSearch = usePullRequestSearch(search)
@@ -207,6 +223,23 @@ export function OpenPullRequests({
       void queryClient.prefetchQuery(pullRequestPreviewQuery(nextRow))
   }, [queryClient, nextRow])
 
+  // Everything the filters leave, in list order, not just the rows scrolled into view.
+  const queue = (filter?.length ? filtered : matchingRows)
+    .map(pullRequestKey)
+    .slice(0, REVIEW_QUEUE_LIMIT)
+  const firstInQueue = parsePullRequestSelection(queue[0])
+  const reviewOneByOne = () =>
+    firstInQueue &&
+    void navigate({
+      to: "/agents/reviews/$owner/$repo/$number",
+      params: {
+        owner: firstInQueue.owner,
+        repo: firstInQueue.repo,
+        number: String(firstInQueue.number),
+      },
+      search: { queue },
+    })
+
   const githubLink =
     scope === "review-assigned" &&
     latest &&
@@ -286,6 +319,11 @@ export function OpenPullRequests({
                   }
                 >
                   Back to Open SWE assignments
+                </Button>
+              )}
+              {firstInQueue && (
+                <Button size="xs" className="ml-auto" onClick={reviewOneByOne}>
+                  Review one by one ({queue.length})
                 </Button>
               )}
             </div>

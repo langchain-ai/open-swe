@@ -310,6 +310,41 @@ async def test_record_links_a_github_pr_comment_to_its_rows(registry_db: None) -
     assert tuple(row) == (ids["user"], ids["workspace"], ids["repository"], ids["pull_request"])
 
 
+async def test_a_delivery_asked_about_again_is_logged_and_wakes_threads_once(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.webhooks.event_subscriptions import EventSubscription
+
+    wake = AsyncMock()
+    monkeypatch.setattr(EventSubscription, "deliver", wake)
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/linear/channel/events",
+            "query_string": b"",
+            "headers": [(b"content-type", b"application/json")],
+        }
+    )
+    body = json.dumps({"type": "Comment", "action": "create"}).encode()
+
+    # A delivery that wasn't stored gives its claim back, so its retry records it.
+    with monkeypatch.context() as unstored:
+        unstored.setattr(EventLog, "record", AsyncMock(return_value=False))
+        assert not await EventLog.record_once(
+            request, body, "linear", event_type="Comment", delivery_id="delivery-1"
+        )
+    for _ in range(2):
+        assert await EventLog.record_once(
+            request, body, "linear", event_type="Comment", delivery_id="delivery-1"
+        )
+
+    async with transaction() as conn:
+        count = await conn.scalar(text("SELECT count(*) FROM event_log"))
+    assert count == 1
+    wake.assert_awaited_once()
+
+
 @pytest.mark.parametrize("kind", ["message", "me_message", "edit", "multiple", "unknown"])
 async def test_slack_event_links_a_single_known_pr_without_dispatching(
     registry_db: None,

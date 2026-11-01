@@ -15,6 +15,7 @@ from openswe.dashboard import repo_access
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.expedited_review.eligibility import (
     MAX_CHANGED_LINES,
+    MAX_FILES,
     ChangedFile,
     ExcludedHunk,
     Exclusion,
@@ -22,8 +23,10 @@ from openswe.expedited_review.eligibility import (
     assess_eligibility,
     fingerprint_matches,
 )
+from openswe.expedited_review.readiness import latest_review_states
+from openswe.github.codeowners import CodeOwners
 from openswe.github.comments import derive_pr_state
-from openswe.github.http import GitHubClient, or_none
+from openswe.github.http import GitHubClient, RepoFileUnreadableError, or_none
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoSettings
 from openswe.github.token import resolve_github_token
@@ -205,6 +208,26 @@ async def expedite_pr_approval(
         pull = github.repo(pr_ref.owner, pr_ref.repo).pull_request(pr_ref.number)
         pr = await or_none(pull.pull())
         files = await ChangedFile.of_pull(pull) if pr else None
+        if pr and pr.get("state") == "open" and files is not None and len(files) < MAX_FILES:
+            payload = PullRequestPayload.model_validate(pr)
+            states = await latest_review_states(pull, payload.author)
+            if states is None:
+                return _failure("Could not read the pull request's reviews")
+            approvers = {login for login, state in states.items() if state == "APPROVED"}
+            if approvers and "CHANGES_REQUESTED" not in states.values():
+                try:
+                    codeowners = await CodeOwners.fetch(
+                        pull.repo, payload.base_ref or None, strict=True
+                    )
+                except RepoFileUnreadableError:
+                    return _failure("Could not confirm the pull request's codeowner approvals")
+                if codeowners is None or await codeowners.approved_by(
+                    [file.filename for file in files], approvers
+                ):
+                    return _failure(
+                        "This pull request is already fully reviewed on GitHub, including all "
+                        "code owners. No expedited review is needed; do not request another review."
+                    )
     if not pr:
         return _failure("Pull request is unavailable")
     if pr.get("state") != "open":
@@ -281,6 +304,7 @@ async def expedite_pr_approval(
             "approvers": active.approvers,
             "completion_reply_required": active.awaiting_ready,
             "slack_channel_id": active.slack_channel_id,
+            "slack_channel_name": await SlackChannel.name_for(active.slack_channel_id),
             "next": readiness_warning
             or (
                 "The full draft card is in the author's DM; no thread card is posted until ready."
@@ -345,6 +369,7 @@ async def expedite_pr_approval(
             "pr_url": pr_ref.url,
             "head_sha": head_sha,
             "slack_channel_id": channel_id,
+            "slack_channel_name": await SlackChannel.name_for(channel_id),
             "completion_reply_required": True,
             "next": "The full draft card was sent only to the author by DM. The thread card "
             "will be posted once they mark it ready. Keep a /baby-sit watch on the PR.",
@@ -394,5 +419,6 @@ async def expedite_pr_approval(
         "generated_lines": verdict.generated_lines,
         "excluded_lines": verdict.excluded_lines,
         "slack_channel_id": channel_id,
+        "slack_channel_name": await SlackChannel.name_for(channel_id),
         "next": readiness_warning or next_step,
     }

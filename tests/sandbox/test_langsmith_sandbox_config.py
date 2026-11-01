@@ -100,7 +100,7 @@ async def test_create_sandbox_with_retry_retries_transient_errors(
 
 
 @pytest.mark.asyncio
-async def test_install_create_extra_fields_merges_only_boxes_post() -> None:
+async def test_install_create_extra_fields_merges_only_sandboxes_post() -> None:
     calls: list[tuple[str, dict]] = []
 
     class _FakeHttp:
@@ -122,6 +122,28 @@ async def test_install_create_extra_fields_merges_only_boxes_post() -> None:
 
     assert calls[0][1] == {"snapshot_id": "s", "_internal_runtime": "v2"}
     assert calls[1][1] == {"foo": "bar"}
+
+
+@pytest.mark.asyncio
+async def test_capture_snapshot_request_outlasts_the_client_default_timeout() -> None:
+    sent: list[dict[str, object]] = []
+
+    class _FakeHttp:
+        async def post(self, url: str, **kwargs: object) -> None:
+            sent.append(kwargs)
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self._http = _FakeHttp()
+
+        async def capture_snapshot(self, sandbox_id: str, name: str, *, timeout: int) -> None:
+            await self._http.post("https://api/v2/sandboxes/boxes/x/snapshot", json={"name": name})
+
+    await capture_snapshot_with_tag(
+        cast(AsyncSandboxClient, _FakeClient()), "sb-1", "acme", "latest", timeout=60
+    )
+
+    assert sent == [{"json": {"name": "acme", "tag": "latest"}, "timeout": 600.0}]
 
 
 @pytest.mark.asyncio

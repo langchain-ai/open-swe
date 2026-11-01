@@ -1,23 +1,37 @@
 """The coding agent, as Managed Deep Agents runs play it."""
 
 import logging
-from typing import Final
+from typing import Final, cast
 
 from deepagents.backends.protocol import BackendProtocol
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
+from runtime_api.loop import RunSender, RunStarted
 
 from openswe.agent_api.graph import RemoteGraph
 from openswe.agent_api.run_parts import RunParts
+from openswe.agent_api.tokens import RunSettings
 from openswe.github.thread_token import get_github_token
 from openswe.github.token import resolve_github_token
 from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
 from openswe.middleware.record_run_usage import record_run_usage
 from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
+from openswe.review_guide.middleware import ReviewGuideMiddleware
 from openswe.run_config import RunConfig
-from openswe.server import ThreadFiles, agent_tools_by_name, integration_tools, plan_agent
+from openswe.server import (
+    PrepareAgentRunMiddleware,
+    ThreadFiles,
+    agent_sender,
+    agent_tools_by_name,
+    client,
+    integration_tools,
+    plan_agent,
+    record_agent_run,
+)
 from openswe.skill_store.run_skills import RunSkillStores
+from openswe.utils.thread_settings import load_thread_settings
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +49,50 @@ class AgentParts(RunParts):
         # A requested offload needs the conversation's model, and an incident the
         # evidence its plan collects in memory.
         return cfg.offload_conversation or cfg.source == "incidents_agent"
+
+    async def preparation(
+        self, config: RunnableConfig, settings: RunSettings, *, sandbox_id: str | None
+    ) -> list[AgentMiddleware] | None:
+        turn = settings.agent
+        if turn is None:
+            # A token from before turns were prepared from it.
+            return None
+        thread_id = RunConfig.from_config(config).thread_id
+        if thread_id is None:
+            raise ValueError("An agent run needs a thread")
+        stored = await load_thread_settings(client, thread_id)
+        repo_instructions = stored.get("repo_instructions")
+        prepare = PrepareAgentRunMiddleware(
+            config,
+            turn,
+            repo_instructions=repo_instructions if isinstance(repo_instructions, str) else None,
+            sandbox_id=None if turn.reaches_sandbox else sandbox_id,
+        )
+        if not (turn.review_guide or turn.review_guide_closed):
+            return [prepare]
+        cfg = RunConfig.from_config(config)
+        guide = ReviewGuideMiddleware(thread_id=thread_id, approve_ts=cfg.review_guide_approve_ts)
+        # Middleware types are invariant in the state they extend; a graph merges them all.
+        return cast(list[AgentMiddleware], [prepare, guide])
+
+    def sender(self, config: RunnableConfig, settings: RunSettings) -> RunSender | None:
+        return None if settings.agent is None else agent_sender(config, settings.agent)
+
+    async def started(
+        self, config: RunnableConfig, settings: RunSettings, started: RunStarted, *, carried: bool
+    ) -> None:
+        cfg = RunConfig.from_config(config)
+        if settings.agent is None or cfg.thread_id is None:
+            return
+        try:
+            await record_agent_run(config, settings.agent, started, carried=carried)
+        except Exception:
+            # Bookkeeping: the turn goes on, and the reports behind this one with it.
+            logger.warning(
+                "Recording an agent turn's start failed",
+                extra={"agent_thread_id": cfg.thread_id},
+                exc_info=True,
+            )
 
     async def credentials(self, config: RunnableConfig) -> None:
         thread_id = RunConfig.from_config(config).thread_id

@@ -5,8 +5,8 @@ from typing import Any
 import httpx
 import pytest
 
+from openswe.github import forwarding
 from openswe.github import routes as github_routes
-from openswe.github import webhook as github_webhooks
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces.routing import WorkspaceLookupError
 from tests.conftest import post_signed_github_webhook, register_github_logins
@@ -35,9 +35,9 @@ async def test_unowned_repo_is_ignored_when_policy_is_ignore(
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
     async def fail_if_called(*args: object, **kwargs: object) -> None:
-        raise AssertionError("process_github_issue should not run for an unowned repository")
+        raise AssertionError("an unowned repository's issue run must not start")
 
-    monkeypatch.setattr(github_webhooks, "process_github_issue", fail_if_called)
+    monkeypatch.setattr(forwarding, "queue_forward", fail_if_called)
 
     response = await _post_github_webhook("issue_comment", _unowned_repo_issue_comment_payload())
 
@@ -55,10 +55,10 @@ async def test_unowned_repo_is_not_ignored_for_workspace_when_policy_unset(
 
     called: dict[str, object] = {}
 
-    async def fake_process_github_issue(payload: dict[str, object], event_type: str) -> None:
-        called["event_type"] = event_type
+    async def fake_forward(body: bytes, headers: dict[str, str]) -> None:
+        called["event_type"] = headers["X-GitHub-Event"]
 
-    monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
+    monkeypatch.setattr(forwarding, "queue_forward", fake_forward)
     register_github_logins(monkeypatch, "octocat")
 
     response = await _post_github_webhook("issue_comment", _unowned_repo_issue_comment_payload())
@@ -82,7 +82,7 @@ async def test_unreadable_workspace_list_asks_github_to_retry(
         raise AssertionError("no event may be processed while ownership is unknown")
 
     monkeypatch.setattr(github_routes, "repo_is_routable", unreadable)
-    monkeypatch.setattr(github_webhooks, "process_github_issue", fail_if_called)
+    monkeypatch.setattr(forwarding, "queue_forward", fail_if_called)
 
     response = await _post_github_webhook("issue_comment", _unowned_repo_issue_comment_payload())
 

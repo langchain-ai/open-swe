@@ -198,6 +198,10 @@ function PullRequestUnavailable({
   )
 }
 
+// Review pages currently holding the app's nav collapsed. Moving from one review
+// page straight to another hands the collapse over instead of reopening the nav.
+let pagesHoldingSidebar = 0
+
 /** Collapse the app's nav for room, unless the person came from it; restore it on the way out. */
 function useCollapseAppSidebar(pr: PullRequestRef) {
   const sidebar = useSidebarControls()
@@ -208,8 +212,14 @@ function useCollapseAppSidebar(pr: PullRequestRef) {
   }, [sidebar])
   useLayoutEffect(() => {
     const controls = sidebarRef.current
-    if (!controls || controls.collapsed || fromSidebar.current) return
+    if (!controls || fromSidebar.current) return
+    if (controls.collapsed && pagesHoldingSidebar === 0) return
+    pagesHoldingSidebar += 1
     controls.setCollapsedForPage(true)
-    return () => controls.setCollapsedForPage(false)
+    return () =>
+      queueMicrotask(() => {
+        pagesHoldingSidebar -= 1
+        if (pagesHoldingSidebar === 0) controls.setCollapsedForPage(false)
+      })
   }, [])
 }

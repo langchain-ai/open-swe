@@ -1,0 +1,294 @@
+import fs = require("node:fs");
+import path = require("node:path");
+import { randomUUID } from "node:crypto";
+
+type Checkpoint = {
+  repo: string | null;
+  ref: string | null;
+  branch: string | null;
+};
+
+type LocalThread = {
+  id: string;
+  cwd: string;
+  managedTaskFolder: boolean;
+  worktreePath: string | null;
+  ownedWorktrees: string[];
+  bridgeId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  checkpoint: Checkpoint;
+};
+
+type StoreOptions = { fs?: typeof fs; now?: () => number };
+
+/**
+ * What this Mac knows about its "This Mac" threads that the backend does not:
+ * which checkout each one works in, the worktrees the app made for it, the
+ * diff baseline, and the bridge that lets the cloud agent reach it.
+ *
+ * Everything else about a thread — its title, transcript, read state — is the
+ * backend's, as for any cloud thread. Ids are the cloud thread ids.
+ */
+
+const BRIDGE_ID = /^[0-9a-f]{32}$/;
+const THREAD_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringOrNull(value: unknown, maximum = 512): string | null {
+  return typeof value === "string" && value.length <= maximum ? value : null;
+}
+
+function cleanPaths(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const paths = value
+    .filter(
+      (item) =>
+        typeof item === "string" &&
+        item.length <= 8_192 &&
+        path.isAbsolute(item),
+    )
+    .map((item) => path.normalize(item));
+  return [...new Set(paths)];
+}
+
+function cleanBridgeId(value: unknown): string | null {
+  return typeof value === "string" && BRIDGE_ID.test(value) ? value : null;
+}
+
+function normalizeThread(value: unknown): LocalThread | null {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    !value.id ||
+    typeof value.cwd !== "string" ||
+    !path.isAbsolute(value.cwd) ||
+    typeof value.createdAt !== "number" ||
+    !Number.isFinite(value.createdAt) ||
+    typeof value.updatedAt !== "number" ||
+    !Number.isFinite(value.updatedAt)
+  ) {
+    return null;
+  }
+  const checkpoint = isRecord(value.checkpoint)
+    ? {
+        repo: stringOrNull(value.checkpoint.repo, 8_192),
+        ref: stringOrNull(value.checkpoint.ref, 1_024),
+        branch: stringOrNull(value.checkpoint.branch, 1_024),
+      }
+    : { repo: null, ref: null, branch: null };
+  const worktreePath = stringOrNull(value.worktreePath, 8_192);
+  return {
+    id: value.id,
+    cwd: path.normalize(value.cwd),
+    managedTaskFolder: value.managedTaskFolder === true,
+    worktreePath:
+      worktreePath && path.isAbsolute(worktreePath)
+        ? path.normalize(worktreePath)
+        : null,
+    ownedWorktrees: cleanPaths(value.ownedWorktrees),
+    bridgeId: cleanBridgeId(value.bridgeId),
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+    checkpoint,
+  };
+}
+
+export function atomicWrite(filePath: string, value: unknown, fileSystem = fs) {
+  fileSystem.mkdirSync(path.dirname(filePath), { recursive: true });
+  const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    fileSystem.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, {
+      mode: 0o600,
+    });
+    fileSystem.renameSync(temporary, filePath);
+  } finally {
+    try {
+      fileSystem.rmSync(temporary, { force: true });
+    } catch {}
+  }
+}
+
+export class LocalThreadStore {
+  private readonly fs: typeof fs;
+  private readonly now: () => number;
+  private readonly threads = new Map<string, LocalThread>();
+
+  constructor(
+    private readonly filePath: string,
+    options: StoreOptions = {},
+  ) {
+    this.fs = options.fs || fs;
+    this.now = options.now || Date.now;
+    this.load();
+  }
+
+  load() {
+    let values: unknown[] = [];
+    try {
+      const parsed: unknown = JSON.parse(
+        this.fs.readFileSync(this.filePath, "utf8"),
+      );
+      values = Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      if (
+        !(error instanceof Error && "code" in error && error.code === "ENOENT")
+      )
+        console.warn("Could not read the local thread store", error);
+    }
+    for (const value of values) {
+      const thread = normalizeThread(value);
+      if (thread) this.threads.set(thread.id, thread);
+    }
+  }
+
+  persist() {
+    atomicWrite(this.filePath, [...this.threads.values()], this.fs);
+  }
+
+  list() {
+    return [...this.threads.values()]
+      .sort(
+        (left, right) =>
+          right.createdAt - left.createdAt || left.id.localeCompare(right.id),
+      )
+      .map((thread) => structuredClone(thread));
+  }
+
+  get(id: string) {
+    const thread = this.threads.get(id);
+    return thread ? structuredClone(thread) : null;
+  }
+
+  createTask(id: string) {
+    if (typeof id !== "string" || !THREAD_ID.test(id) || this.threads.has(id))
+      throw new Error("Invalid task thread id");
+    const root = path.join(path.dirname(this.filePath), "tasks");
+    this.fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+    const canonicalRoot = path.join(
+      this.fs.realpathSync(path.dirname(this.filePath)),
+      "tasks",
+    );
+    if (this.fs.realpathSync(root) !== canonicalRoot)
+      throw new Error("Task folder root must not be a symbolic link");
+    const cwd = path.join(canonicalRoot, id);
+    this.fs.mkdirSync(cwd, { mode: 0o700 });
+    return this.create({ id, cwd, managedTaskFolder: true });
+  }
+
+  taskRoot(thread: LocalThread | null) {
+    if (!thread?.managedTaskFolder || !THREAD_ID.test(thread.id)) return null;
+    try {
+      const root = this.fs.realpathSync(
+        path.join(path.dirname(this.filePath), "tasks"),
+      );
+      if (
+        root !==
+        path.join(this.fs.realpathSync(path.dirname(this.filePath)), "tasks")
+      )
+        return null;
+      const expected = path.join(root, thread.id);
+      return thread.cwd === expected &&
+        this.fs.realpathSync(expected) === expected &&
+        this.fs.statSync(expected).isDirectory()
+        ? expected
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Record a thread the renderer is about to create in the cloud under `id`. */
+  create({
+    id,
+    cwd,
+    managedTaskFolder = false,
+  }: {
+    id: string;
+    cwd: string;
+    managedTaskFolder?: boolean;
+  }) {
+    if (typeof id !== "string" || !id || this.threads.has(id))
+      throw new Error("Invalid local thread id");
+    const now = this.now();
+    this.threads.set(id, {
+      id,
+      cwd,
+      managedTaskFolder,
+      worktreePath: null,
+      ownedWorktrees: [],
+      bridgeId: null,
+      createdAt: now,
+      updatedAt: now,
+      checkpoint: { repo: null, ref: null, branch: null },
+    });
+    this.persist();
+    return this.get(id);
+  }
+
+  setBridge(id: string, bridgeId: string) {
+    const current = this.threads.get(id);
+    if (!current) return null;
+    const next = cleanBridgeId(bridgeId);
+    if (!next) throw new Error("Invalid bridge id");
+    this.threads.set(id, { ...current, bridgeId: next, updatedAt: this.now() });
+    this.persist();
+    return this.get(id);
+  }
+
+  /**
+   * `null` moves the thread back into the project's own checkout. `owned` marks
+   * a worktree this app created: it stays recorded even after the thread moves
+   * off it, so nothing the app made is left behind when the thread is deleted.
+   */
+  setWorktree(id: string, worktreePath: string | null, owned = false) {
+    const current = this.threads.get(id);
+    if (!current) return null;
+    if (
+      worktreePath !== null &&
+      (typeof worktreePath !== "string" || !path.isAbsolute(worktreePath))
+    )
+      throw new Error("Invalid worktree path");
+    const next = worktreePath && path.normalize(worktreePath);
+    this.threads.set(id, {
+      ...current,
+      worktreePath: next,
+      ownedWorktrees:
+        owned && next
+          ? [...new Set([...current.ownedWorktrees, next])]
+          : current.ownedWorktrees,
+      updatedAt: this.now(),
+    });
+    this.persist();
+    return this.get(id);
+  }
+
+  setCheckpoint(id: string, checkpoint: Checkpoint) {
+    const current = this.threads.get(id);
+    if (!current) return null;
+    const next = {
+      ...current,
+      checkpoint: {
+        repo: checkpoint.repo,
+        ref: checkpoint.ref,
+        branch: stringOrNull(checkpoint.branch, 1_024),
+      },
+      updatedAt: this.now(),
+    };
+    this.threads.set(id, next);
+    this.persist();
+    return this.get(id);
+  }
+
+  delete(id: string) {
+    const current = this.threads.get(id);
+    if (!current) return null;
+    this.threads.delete(id);
+    this.persist();
+    return structuredClone(current);
+  }
+}

@@ -26,6 +26,7 @@ from openswe.slack.http import (
     SLACK_REQUEST_ERRORS,
     SlackClient,
     SlackRequestError,
+    required_slack_value,
     slack_error,
     slack_error_details,
     slack_retry_after,
@@ -43,7 +44,7 @@ from openswe.utils.user_messages import WARNING_ICON
 
 logger = logging.getLogger(__name__)
 
-SLACK_BOT_TOKEN = ENV.SLACK_BOT_TOKEN.get()
+SANDBOX_UNREACHABLE_NOTICE = "sandbox_unreachable"
 SLACK_THREAD_MAX_MESSAGES = 500
 SLACK_FILE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
 
@@ -60,6 +61,37 @@ _SLACK_THREAD_MUTATION_LOCK_SCOPE = "slack-thread-lock"
 _SLACK_THREAD_MUTATION_LOCK_TTL = timedelta(minutes=1)
 _SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS = 0.1
 _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS = 10
+_SLACK_NOTICE_BLOCK_PREFIX = "open_swe_notice."
+
+
+@dataclass(frozen=True)
+class SlackNotice:
+    """An automatic notice that is not posted again while the thread still ends with it.
+
+    ``key`` is what makes two notices the same, so per-run details such as a trace
+    link stay out of it. The notice is also held back while the thread ends with
+    a notice of a kind in ``quiet_after``.
+    """
+
+    kind: str
+    key: str
+    quiet_after: frozenset[str] = frozenset()
+
+    @property
+    def block_id(self) -> str:
+        digest = hashlib.sha256(self.key.encode()).hexdigest()[:16]
+        return f"{_SLACK_NOTICE_BLOCK_PREFIX}{self.kind}.{digest}"
+
+    def repeats(self, message: Mapping[str, object]) -> bool:
+        blocks = message.get("blocks")
+        for block in blocks if isinstance(blocks, list) else []:
+            block_id = block.get("block_id") if isinstance(block, dict) else None
+            if not isinstance(block_id, str) or not block_id.startswith(_SLACK_NOTICE_BLOCK_PREFIX):
+                continue
+            kind = block_id.removeprefix(_SLACK_NOTICE_BLOCK_PREFIX).partition(".")[0]
+            if block_id == self.block_id or kind in self.quiet_after:
+                return True
+        return False
 
 
 @dataclass(frozen=True)
@@ -536,17 +568,13 @@ async def _post_slack_message_with_ts(
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
     reply_broadcast: bool = False,
-    login: str | None = None,
 ) -> str:
-    if not SLACK_BOT_TOKEN:
-        raise SlackRequestError("missing_slack_bot_token")
-
     from openswe.slack.code_channels import is_code_channel_session
 
     # A code channel is one flowing session: replies belong in the channel.
     reply_ts = None if is_code_channel_session(thread_ts) else thread_ts
     broadcast = {"reply_broadcast": True} if reply_broadcast and reply_ts else {}
-    text, blocks = await pr_review_links(text, blocks, login=login)
+    text, blocks = await pr_review_links(text, blocks)
 
     try:
         async with SlackClient.bot() as client:
@@ -851,7 +879,6 @@ async def post_slack_thread_reply_with_ts(
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
     reply_broadcast: bool = False,
-    login: str | None = None,
 ) -> str:
     """Post a reply in a Slack thread and return its timestamp."""
     from openswe.slack.code_channels import is_code_channel_session
@@ -869,7 +896,6 @@ async def post_slack_thread_reply_with_ts(
         unfurl_media=unfurl_media,
         blocks=blocks,
         reply_broadcast=reply_broadcast,
-        login=login,
     )
 
 
@@ -900,7 +926,6 @@ async def post_slack_top_level_message_with_ts(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
-    login: str | None = None,
 ) -> str:
     """Post a top-level Slack message and return its timestamp."""
     return await _post_slack_message_with_ts(
@@ -909,7 +934,6 @@ async def post_slack_top_level_message_with_ts(
         unfurl_links=unfurl_links,
         unfurl_media=unfurl_media,
         blocks=blocks,
-        login=login,
     )
 
 
@@ -921,8 +945,6 @@ class SlackStreamError(Exception):
 
 
 async def _slack_stream_call(method: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if not SLACK_BOT_TOKEN:
-        raise SlackStreamError("missing_slack_bot_token")
     try:
         async with SlackClient.bot() as client:
             response = await client.api_call(method, json=payload)
@@ -1061,13 +1083,9 @@ async def update_slack_message(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
-    login: str | None = None,
 ) -> None:
     """Update a Slack message."""
-    if not SLACK_BOT_TOKEN:
-        raise SlackRequestError("missing_slack_bot_token")
-
-    text, blocks = await pr_review_links(text, blocks, login=login)
+    text, blocks = await pr_review_links(text, blocks)
     try:
         async with SlackClient.bot() as client:
             await client.chat_update(
@@ -1101,8 +1119,6 @@ async def upload_slack_thread_file(
     Without a channel the file is hosted but never posted, which is what a block
     that renders the file itself needs.
     """
-    if not SLACK_BOT_TOKEN:
-        raise SlackRequestError("missing_slack_bot_token")
     if not content:
         raise SlackRequestError("empty_file")
     if len(content) > SLACK_FILE_UPLOAD_MAX_BYTES:
@@ -1177,8 +1193,8 @@ SLACK_FILE_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024
 class SlackFileDownloadError(Exception):
     """A Slack-hosted file could not be downloaded.
 
-    The code names the failure (``missing_slack_bot_token``,
-    ``unsafe_download_url``, ``file_too_large``, ``download_failed``) without
+    The code names the failure (``unsafe_download_url``,
+    ``file_too_large``, ``download_failed``) without
     embedding response bodies, which the SDK logger may carry.
     """
 
@@ -1193,8 +1209,7 @@ async def download_slack_file(url: str) -> bytes:
     The token is only ever sent to Slack-owned hosts; redirects keep the SSRF
     host validation. Raises :class:`SlackFileDownloadError` on failure.
     """
-    if not SLACK_BOT_TOKEN:
-        raise SlackFileDownloadError("missing_slack_bot_token")
+    token = required_slack_value(ENV.SLACK_BOT_TOKEN)
 
     def auth_headers(original_url: str, current_url: str) -> dict[str, str] | None:
         def slack_host(target: str) -> bool:
@@ -1202,7 +1217,7 @@ async def download_slack_file(url: str) -> bytes:
             return host == "files.slack.com" or host.endswith(".files.slack.com")
 
         if slack_host(original_url) and slack_host(current_url):
-            return {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
+            return {"Authorization": f"Bearer {token}"}
         return None
 
     try:
@@ -1260,8 +1275,25 @@ async def post_slack_thread_reply(
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
     agent_thread_id: str | None = None,
+    notice: SlackNotice | None = None,
 ) -> bool:
-    """Post a reply in a Slack thread."""
+    """Post a reply in a Slack thread.
+
+    A ``notice`` is skipped, as if posted, when the thread's latest message repeats it.
+    """
+    if notice is not None:
+        latest = await fetch_latest_slack_thread_message(channel_id, thread_ts)
+        if latest is not None and notice.repeats(latest):
+            logger.info("Skipped a repeated Slack notice", extra={"slack_notice": notice.kind})
+            return True
+        if blocks is None and len(text) <= SLACK_SECTION_TEXT_MAX_CHARS:
+            blocks = [
+                {
+                    "type": "section",
+                    "block_id": notice.block_id,
+                    "text": {"type": "mrkdwn", "text": text},
+                }
+            ]
     kwargs: dict[str, Any] = {
         "blocks": blocks,
         "unfurl_links": unfurl_links,
@@ -1286,9 +1318,6 @@ async def post_slack_ephemeral_message(
     blocks: list[dict[str, Any]] | None = None,
 ) -> bool:
     """Post an ephemeral message visible only to one user."""
-    if not SLACK_BOT_TOKEN:
-        return False
-
     text, blocks = await pr_review_links(text, blocks)
     try:
         async with SlackClient.bot() as client:
@@ -1325,8 +1354,6 @@ async def invite_to_slack_channel(channel_id: str, user_ids: Iterable[str]) -> l
     users = slack_user_ids(user_ids)
     if not users:
         raise SlackRequestError("no_users")
-    if not SLACK_BOT_TOKEN:
-        raise SlackRequestError("missing_slack_bot_token")
     if not channel_id:
         raise SlackRequestError("missing_channel_id")
     try:
@@ -1459,8 +1486,6 @@ async def clear_slack_command_message(response_url: str) -> bool:
 
 async def open_slack_modal(trigger_id: str, view: dict[str, Any]) -> bool:
     """Open a modal before Slack's short-lived interaction trigger expires."""
-    if not SLACK_BOT_TOKEN:
-        return False
     try:
         async with asyncio.timeout(2), SlackClient.bot() as client:
             await client.views_open(trigger_id=trigger_id, view=view)
@@ -1472,8 +1497,6 @@ async def open_slack_modal(trigger_id: str, view: dict[str, Any]) -> bool:
 
 async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eyes") -> bool:
     """Add a reaction to a Slack message."""
-    if not SLACK_BOT_TOKEN:
-        return False
     try:
         async with SlackClient.bot() as client:
             await client.reactions_add(channel=channel_id, timestamp=message_ts, name=emoji)
@@ -1488,8 +1511,6 @@ async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eye
 
 async def remove_slack_reaction(channel_id: str, message_ts: str, emoji: str) -> bool:
     """Remove the bot's reaction from a Slack message."""
-    if not SLACK_BOT_TOKEN:
-        return False
     try:
         async with SlackClient.bot() as client:
             await client.reactions_remove(channel=channel_id, timestamp=message_ts, name=emoji)
@@ -1507,8 +1528,6 @@ _SLACK_USER_TIMEZONE_TTL_SECONDS = 3600.0
 
 async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
     """Get Slack user details by user ID."""
-    if not SLACK_BOT_TOKEN:
-        return None
     try:
         async with SlackClient.bot() as client:
             data = await client.users_info(user=user_id)
@@ -1580,9 +1599,6 @@ async def fetch_slack_thread_messages(
 
     With ``complete``, a failed page raises instead of returning the pages fetched so far.
     """
-    if not SLACK_BOT_TOKEN:
-        return []
-
     from openswe.slack.code_channels import is_code_channel_session
 
     # A code channel session spans the whole channel rather than one thread.
@@ -1678,9 +1694,6 @@ async def fetch_slack_thread_message_by_ts(
     channel_id: str, thread_ts: str, message_ts: str
 ) -> dict[str, Any] | None:
     """Fetch an exact reply from a Slack thread."""
-    if not SLACK_BOT_TOKEN:
-        return None
-
     from openswe.slack.code_channels import is_code_channel_session
 
     session_channel = is_code_channel_session(thread_ts)
@@ -1716,6 +1729,30 @@ async def fetch_slack_thread_message_by_ts(
         ),
         None,
     )
+
+
+async def fetch_latest_slack_thread_message(
+    channel_id: str, thread_ts: str
+) -> dict[str, Any] | None:
+    """Fetch a Slack thread's newest message, or its parent while it has no replies."""
+    from openswe.slack.code_channels import is_code_channel_session
+
+    if is_code_channel_session(thread_ts):
+        try:
+            async with SlackClient.bot() as client:
+                payload = await client.conversations_history(channel=channel_id, limit=1)
+        except SLACK_REQUEST_ERRORS as exc:
+            logger.warning("Slack message fetch failed", extra={"slack_error": slack_error(exc)})
+            return None
+        messages = payload.get("messages", [])
+        return next((message for message in messages if isinstance(message, dict)), None)
+
+    # Replies come back oldest first, so the parent's ``latest_reply`` names the newest one.
+    parent = await fetch_slack_thread_message_by_ts(channel_id, thread_ts, thread_ts)
+    latest_ts = parent.get("latest_reply") if parent is not None else None
+    if not isinstance(latest_ts, str) or latest_ts == thread_ts:
+        return parent
+    return await fetch_slack_thread_message_by_ts(channel_id, thread_ts, latest_ts)
 
 
 SLACK_MESSAGE_URL_RE = re.compile(
@@ -1765,8 +1802,6 @@ def extract_slack_message_urls(text: str) -> list[tuple[str, str, str]]:
 
 async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[str, Any] | None:
     """Fetch a single Slack message by channel and timestamp."""
-    if not SLACK_BOT_TOKEN:
-        return None
     try:
         async with SlackClient.bot() as client:
             data = await client.conversations_history(
@@ -1785,7 +1820,7 @@ async def get_slack_permalink(channel_id: str, message_ts: str) -> str | None:
     from openswe.slack.code_channels import is_code_channel_session
 
     # A code channel session has no anchor message to permalink to.
-    if not SLACK_BOT_TOKEN or not channel_id or not message_ts:
+    if not channel_id or not message_ts:
         return None
     if is_code_channel_session(message_ts):
         return None

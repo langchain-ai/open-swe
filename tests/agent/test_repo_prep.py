@@ -74,12 +74,9 @@ async def test_prepare_review_repo_clones_and_checks_out_head() -> None:
     cmd = backend.commands[0]
     assert "gh repo clone acme/widget" in cmd
     assert "/work/widget/.git" in cmd
-    assert "git fetch origin def456" in cmd
-    assert "git fetch origin refs/pull/42/head" in cmd
     assert "git checkout --force abc123 --quiet" in cmd
     assert "git checkout --force abc123 --quiet 2>/dev/null || true" not in cmd
     assert '[ "$(git rev-parse HEAD)" = abc123 ]' in cmd
-    assert "git fetch --all --quiet || true" in cmd
 
 
 async def test_prepare_review_repo_returns_false_on_nonzero_exit() -> None:
@@ -95,15 +92,14 @@ async def test_prepare_review_repo_returns_false_on_nonzero_exit() -> None:
 
 
 async def test_materialize_trusted_skills_extracts_from_trusted_ref() -> None:
-    backend = _FakeSandboxBackend(outputs=["/work/.review-skills/.agents/skills\n", ""])
+    backend = _FakeSandboxBackend(outputs=["/work/.review-skills/.agents/skills\n"])
     sources = await materialize_trusted_skills(
         cast(SandboxBackendProtocol, backend), repo_dir="/work/widget", trusted_ref="def456"
     )
     assert sources == ["/work/.review-skills/.agents/skills/"]
-    assert len(backend.commands) == 2
-    for cmd in backend.commands:
-        assert "git cat-file -e def456:" in cmd
-        assert "git archive def456" in cmd
+    [cmd] = backend.commands
+    assert "git cat-file -e def456:" in cmd
+    assert "git archive def456" in cmd
 
 
 @pytest.mark.parametrize("cancel_old", [False, True])
@@ -198,6 +194,7 @@ async def test_prepare_cleans_stale_locks_only_without_git_processes(
         "    echo locks-absent >> fetches\n"
         "  fi\n"
         "fi\n"
+        '[ "$1" != cat-file ]\n'
     )
     git.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
@@ -217,6 +214,37 @@ async def test_prepare_cleans_stale_locks_only_without_git_processes(
         is True
     )
     expected = "locks-absent" if process_status == 1 else "locks-present"
-    assert (repo_dir / "fetches").read_text().splitlines() == [expected, expected]
+    assert (repo_dir / "fetches").read_text().splitlines() == [expected]
     for name in ("index.lock", "shallow.lock"):
         assert (repo_dir / ".git" / name).exists() is (process_status != 1)
+
+
+async def test_reused_checkout_fetches_only_the_pull_requests_commits(tmp_path: Path) -> None:
+    shell = _ShellBackend()
+    source, clone = tmp_path / "source", tmp_path / "work" / "widget"
+    commit = "git -c user.name=Test -c user.email=test@example.com commit -q --allow-empty -m"
+    setup = await shell.aexecute(
+        f"git init -q -b main {shlex.quote(str(source))} && cd {shlex.quote(str(source))} && "
+        f"{commit} base && git rev-parse HEAD && "
+        f"git clone -q . {shlex.quote(str(clone))} && "
+        f"git checkout -q -b other && {commit} other && git rev-parse HEAD && "
+        f"git checkout -q --detach main && {commit} head && git rev-parse HEAD && "
+        "git update-ref refs/pull/7/head HEAD"
+    )
+    assert setup.exit_code == 0, setup.output
+    base, other, head = setup.output.split()
+
+    assert await prepare_review_repo(
+        cast(SandboxBackendProtocol, shell),
+        work_dir=str(tmp_path / "work"),
+        repo_owner="acme",
+        repo_name="widget",
+        head_sha=head,
+        pr_number=7,
+        base_sha=base,
+    )
+    result = await shell.aexecute(
+        f"cd {shlex.quote(str(clone))} && git rev-parse HEAD && "
+        f"{{ git cat-file -e {other} 2>/dev/null && echo fetched-other || echo skipped-other; }}"
+    )
+    assert result.output.split() == [head, "skipped-other"]

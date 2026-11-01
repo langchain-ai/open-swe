@@ -1,13 +1,14 @@
 """What this runtime tells the backend happened, held until the backend says it took it.
 
-Nothing the run does next waits on a report. Each reply and tool call, each inbox
-receipt and each notice (work the backend does for the run whose answer the run
-never reads) joins the outbox in the order it was made, and goes out with whatever
-else is waiting in one ``reports`` call, after a moment's gathering unless a phase
-waits on it. An item
-leaves the outbox only once an answer names it taken; until then it is sent again,
-for as long as the backend takes to come back. Its key, unique in the thread, has
-the backend record it once however often it arrives.
+Nothing the run does next waits on a report, until it ends: the run is done only once
+the backend took them all, since its completion closes the transcript turn they belong
+to. Each reply and tool call, each inbox receipt and each notice (work the backend does
+for the run whose answer the run never reads) joins the outbox in the order it was
+made, and goes out with whatever else is waiting in one ``reports`` call, after a
+moment's gathering unless a phase waits on it. An item leaves the outbox only once an
+answer names it taken; until then it is sent again, for as long as the backend takes to
+come back. Its key, unique in the thread, has the backend record it once however often
+it arrives.
 
 The items still waiting ride in the run's graph state (``open_swe_outbox``), written
 with the step that made them: alongside the reply, the tool call's result, or the
@@ -27,7 +28,6 @@ from dataclasses import dataclass, field
 from typing import Final, Literal
 
 from langchain_core.messages import ToolMessage, messages_to_dict
-from langsmith.run_trees import RunTree
 from pydantic import BaseModel, JsonValue, TypeAdapter
 from runtime_api.endpoint import Endpoint, Transport, call
 from runtime_api.loop import (
@@ -35,14 +35,23 @@ from runtime_api.loop import (
     MODEL_RESULT,
     TOOL_RESULT,
     TOOL_STARTED,
+    InboxItems,
     InboxReceipt,
     ModelResult,
     ToolCallReport,
-    ToolResultReply,
     ToolResultReport,
 )
 from runtime_api.operations import RunRequest
-from runtime_api.reports import REPORTS, Item, Reports, ReportsTaken, Sent, ToolFinished, item
+from runtime_api.reports import (
+    REPORTS,
+    Item,
+    Received,
+    Reports,
+    ReportsTaken,
+    Sent,
+    ToolFinished,
+    item,
+)
 
 from rt.tracing import TurnTrace
 
@@ -105,8 +114,6 @@ class _Waiting:
     order: int
     size: int
     done: asyncio.Future[None]
-    # The turn a tool result's git evidence goes to; unknown for one carried over.
-    turn: RunTree | None = None
     refusals: int = 0
 
     def resolve(self) -> None:
@@ -165,7 +172,6 @@ class Outbox:
         self._known: set[str] = set()
         self._settled: set[str] = set()
         self._last = 0
-        self._receipt: _Waiting | None = None
         self._sending: asyncio.Task[None] | None = None
         # Set while a phase waits on the outbox, so what waits goes out at once.
         self._hurry = asyncio.Event()
@@ -180,17 +186,10 @@ class Outbox:
     def finished(self, report: ToolCallReport, result: ToolMessage) -> None:
         [message] = _json_dicts.validate_python(messages_to_dict([result]))
         finished = ToolResultReport.model_validate({**report.model_dump(), "result": message})
-        # The call's run closes before the backend answers, and with it the way to the
-        # turn's trace, so the turn its git evidence goes to is found now.
-        self._add(
-            TOOL_RESULT,
-            finished,
-            _key(report, report.tool_call_id, "finished"),
-            turn=TurnTrace.live_root(),
-        )
+        self._add(TOOL_RESULT, finished, _key(report, report.tool_call_id, "finished"))
 
     def received(self, receipt: InboxReceipt) -> None:
-        self._receipt = self._add(INBOX_RECEIVED, receipt, uuid.uuid4().hex)
+        self._add(INBOX_RECEIVED, receipt, uuid.uuid4().hex)
 
     def notify[Request: RunRequest, Response: BaseModel](
         self, endpoint: Endpoint[Request, Response], request: Request
@@ -206,10 +205,17 @@ class Outbox:
         """Wait until the backend took every item made so far, or it is too long."""
         await self._until(list(self._waiting.values()))
 
-    async def receipts(self) -> None:
-        """Wait until the backend has every inbox receipt made so far."""
-        if self._receipt is not None:
-            await self._until([self._receipt])
+    def receiving(self) -> InboxItems:
+        """What the inbox receipts the backend has yet to take hold."""
+        receipts = [
+            waiting.item.request
+            for waiting in self._waiting.values()
+            if isinstance(waiting.item, Received)
+        ]
+        return InboxItems(
+            queued=[seq for receipt in receipts for seq in receipt.items.queued],
+            events=[event for receipt in receipts for event in receipt.items.events],
+        )
 
     def adopt(self, state: Mapping[str, object]) -> None:
         """Take over what ``state`` carries that this process never held: a restarted
@@ -264,14 +270,12 @@ class Outbox:
         endpoint: Endpoint[Request, Response],
         request: Request,
         key: str,
-        *,
-        turn: RunTree | None = None,
     ) -> _Waiting:
         made = item(endpoint, request, key=key, trace=TurnTrace.current_headers())
         self._last = max(time.time_ns(), self._last + 1)
-        return self._hold(made, self._last, turn=turn)
+        return self._hold(made, self._last)
 
-    def _hold(self, held: Item, order: int, *, turn: RunTree | None = None) -> _Waiting:
+    def _hold(self, held: Item, order: int) -> _Waiting:
         self._known.add(held.key)
         waiting = self._waiting.get(held.key)
         if waiting is None:
@@ -280,7 +284,6 @@ class Outbox:
                 order=order,
                 size=len(held.model_dump_json()),
                 done=asyncio.get_running_loop().create_future(),
-                turn=turn,
             )
             self._waiting[held.key] = waiting
             self._last = max(self._last, order)
@@ -355,11 +358,7 @@ class Outbox:
 
     def _settle(self, batch: list[_Waiting], answer: ReportsTaken) -> bool:
         """Let go of what ``answer`` took; whether anything moved."""
-        for waiting, reply in zip(batch, answer.replies, strict=False):
-            if waiting.item.endpoint == TOOL_RESULT.name and waiting.turn is not None:
-                # What the call changed in the thread's checkouts, for the turn's git metadata.
-                update = ToolResultReply.model_validate(reply).update
-                TurnTrace.record_evidence(update, waiting.turn)
+        for waiting in batch[: len(answer.replies)]:
             self._let_go(waiting)
         moved = bool(answer.replies)
         if answer.refused is not None and len(answer.replies) < len(batch):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -70,10 +71,17 @@ def load_channel_icon(root: str | os.PathLike[str], path: str) -> ChannelIcon:
         raise ValueError("icon is outside channels/")
     if not file.is_file():
         raise ValueError("icon is not a file")
-    size = file.stat().st_size
-    if size == 0 or size > CHANNEL_ICON_MAX_BYTES:
-        raise ValueError(f"icon must be a file of at most {CHANNEL_ICON_MAX_BYTES} bytes")
-    data = file.read_bytes()
+    too_large = f"icon must be a file of at most {CHANNEL_ICON_MAX_BYTES} bytes"
+    # Check and read the same open file, so it can't change in between.
+    with file.open("rb") as handle:
+        stats = os.fstat(handle.fileno())
+        if not stat.S_ISREG(stats.st_mode):
+            raise ValueError("icon is not a file")
+        if stats.st_size == 0 or stats.st_size > CHANNEL_ICON_MAX_BYTES:
+            raise ValueError(too_large)
+        data = handle.read(CHANNEL_ICON_MAX_BYTES + 1)
+    if not data or len(data) > CHANNEL_ICON_MAX_BYTES:
+        raise ValueError(too_large)
     content_type, magic = _ICON_TYPES[extension]
     if not data.startswith(magic):
         raise ValueError(f"icon is not a {extension.upper()} image")

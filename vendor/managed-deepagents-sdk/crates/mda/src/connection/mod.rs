@@ -39,6 +39,14 @@ pub struct ConnectionTarget {
     pub path: PathBuf,
     pub workspace_id: Option<String>,
     pub host_url: Option<String>,
+    /// Env file to read instead of the project `.env` (`--env-file`).
+    pub env_file: Option<PathBuf>,
+}
+
+impl ConnectionTarget {
+    fn env_path(&self) -> PathBuf {
+        env_file::project_env_path(&self.path, self.env_file.as_deref())
+    }
 }
 
 pub struct CreateOptions {
@@ -614,7 +622,7 @@ pub fn create(opts: CreateOptions) -> Result<CommandCompletion> {
                  per-caller values are collected at runtime.",
             ));
         }
-        let env_vars = env_file::parse_env_file(&opts.target.path.join(".env"));
+        let env_vars = env_file::parse_env_file(&opts.target.env_path());
         let session = Session::open(&opts.target, &env_vars)?;
         session
             .client
@@ -623,7 +631,7 @@ pub fn create(opts: CreateOptions) -> Result<CommandCompletion> {
         show_sequence(&user_slot_created_items(&opts.slug))?;
         return Ok(CommandCompletion::Succeeded);
     }
-    let env_vars = env_file::parse_env_file(&opts.target.path.join(".env"));
+    let env_vars = env_file::parse_env_file(&opts.target.env_path());
     let resolved = if let Some(value) = stdin_secret {
         ResolvedValue {
             value,
@@ -747,7 +755,7 @@ fn create_mcp_oauth(
     _owner: ConnectionOwnerPolicy,
     url: &str,
 ) -> Result<CommandCompletion> {
-    let env_vars = env_file::parse_env_file(&opts.target.path.join(".env"));
+    let env_vars = env_file::parse_env_file(&opts.target.env_path());
     let endpoints = LangSmithEndpoints::resolve(&env_vars, opts.target.host_url.as_deref());
     reject_mcp_address_langsmith_cannot_reach(url, &endpoints.host_url)?;
     let session = Session::open(&opts.target, &env_vars)?;
@@ -853,7 +861,7 @@ fn create_oauth(opts: CreateOptions, owner: ConnectionOwnerPolicy) -> Result<Com
     }
     let token_params = parse_token_params(&oauth.token_params)?;
     let token_request_headers = parse_token_request_headers(&oauth.token_request_headers)?;
-    let env_vars = env_file::parse_env_file(&opts.target.path.join(".env"));
+    let env_vars = env_file::parse_env_file(&opts.target.env_path());
     let session = Session::open(&opts.target, &env_vars)?;
     let deployment_id = (opts.authorize || grant_type == OAuthGrantType::ClientCredentials)
         .then(|| {
@@ -1026,7 +1034,7 @@ fn inferred_user_owned_mcp_connection_for_target(
     slug: &str,
 ) -> Result<Option<compile::McpConnectionEntry>> {
     let project = match project::load(&target.path) {
-        Ok(project) => project,
+        Ok(project) => project.without_env_file(target.env_file.as_deref()),
         Err(err) if category_of(&err) == ErrorCategory::Project => return Ok(None),
         Err(err) => return Err(err),
     };
@@ -1381,7 +1389,7 @@ fn manifest_owner_policy_for_slug(
     let explicit_target = opts.target.workspace_id.is_some() || opts.deployment_id.is_some();
     let requirements = (|| {
         let project = match project::load(&opts.target.path) {
-            Ok(project) => project,
+            Ok(project) => project.without_env_file(opts.target.env_file.as_deref()),
             Err(err) if category_of(&err) == ErrorCategory::Project => return Ok(None),
             Err(err) => return Err(err),
         };
@@ -1456,13 +1464,13 @@ pub fn delete(opts: DeleteOptions) -> Result<CommandCompletion> {
 
 impl Session {
     fn open_at(target: &ConnectionTarget) -> Result<Self> {
-        let env_vars = env_file::parse_env_file(&target.path.join(".env"));
+        let env_vars = env_file::parse_env_file(&target.env_path());
         Self::open(target, &env_vars)
     }
 
     fn open(target: &ConnectionTarget, env_vars: &BTreeMap<String, String>) -> Result<Self> {
-        let env_path = target.path.join(".env");
-        let ctx = LangSmithContext::resolve(
+        let env_path = target.env_path();
+        let ctx = LangSmithContext::resolve_verified(
             env_vars,
             target.host_url.as_deref(),
             target.workspace_id.as_deref(),
@@ -1895,6 +1903,7 @@ mod tests {
                         path: dir.path().to_path_buf(),
                         workspace_id: (!deployment_target).then(|| "workspace".into()),
                         host_url: None,
+                        env_file: None,
                     },
                     slug: "service".into(),
                     value: ValueSource::Unspecified,
@@ -1941,6 +1950,7 @@ mod tests {
                 path: dir.path().to_path_buf(),
                 workspace_id: Some("workspace".into()),
                 host_url: None,
+                env_file: None,
             },
             slug: "doordash".into(),
             value: ValueSource::Unspecified,
@@ -2717,6 +2727,7 @@ mod tests {
                 path: PathBuf::from("."),
                 workspace_id: None,
                 host_url: None,
+                env_file: None,
             },
             slug: "foobar".into(),
             value: ValueSource::Unspecified,
@@ -3067,6 +3078,7 @@ mod tests {
                 path: PathBuf::from("."),
                 workspace_id: None,
                 host_url: None,
+                env_file: None,
             },
             slug: "openai".into(),
             value: ValueSource::Unspecified,
@@ -3089,6 +3101,7 @@ mod tests {
                     path: PathBuf::from("."),
                     workspace_id: None,
                     host_url: None,
+                    env_file: None,
                 },
                 slug: "gh".into(),
                 value: ValueSource::FromEnv("GH_SECRET".into()),

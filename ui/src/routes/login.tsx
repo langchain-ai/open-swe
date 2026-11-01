@@ -62,16 +62,9 @@ function Login() {
       >
         <div className="flex flex-col items-center gap-space-3 text-center">
           <LogoMark alt="Open SWE" className="size-8" />
-          <div className="flex flex-col gap-space-1">
-            <Text as="h1" variant="h3">
-              Sign in to Open SWE
-            </Text>
-            <Text variant="sm" color="secondary">
-              Use your GitHub account. We'll configure your default model,
-              reasoning effort, and default repo for Slack/Linear/GitHub
-              triggered runs.
-            </Text>
-          </div>
+          <Text as="h1" variant="h3">
+            Sign in to Open SWE
+          </Text>
         </div>
         <Button
           as={<a href={loginUrl(intendedPath)} />}

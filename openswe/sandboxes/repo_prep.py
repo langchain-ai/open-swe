@@ -32,6 +32,25 @@ TRUSTED_SKILLS_DIRNAME = ".review-skills"
 BLOBLESS_CLONE_ARGS = "--filter=blob:none"
 
 
+def _fetch_missing(shas: Sequence[str]) -> list[str]:
+    """Shell lines fetching whichever of ``shas`` the clone lacks, and nothing else.
+
+    Workspace images preload a full clone, and refreshing all of its branches
+    (langchainplus has over 12,000) took minutes; a reused sandbox usually has
+    every commit already and fetches nothing.
+    """
+    return [
+        "missing=",
+        f"for sha in {' '.join(shlex.quote(sha) for sha in shas)}; do",
+        '  git cat-file -e "$sha^{commit}" 2>/dev/null || missing="$missing $sha"',
+        "done",
+        # One round trip for all of them, then one each if a commit is unreachable.
+        'if [ -n "$missing" ] && ! git fetch --quiet --no-tags origin $missing 2>/dev/null; then',
+        '  for sha in $missing; do git fetch --quiet --no-tags origin "$sha" 2>/dev/null || true; done',
+        "fi",
+    ]
+
+
 def _prep_command(
     work_dir: str,
     repo_owner: str,
@@ -54,30 +73,28 @@ def _prep_command(
         f"exec 9>{shlex.quote(repo_dir + '.review-prep.lock')}",
         f'flock -w {PREP_LOCK_TIMEOUT_SECONDS} 9 || {{ echo "Timed out waiting for review repository preparation lock" >&2; exit 1; }}',
         f"if [ -d {q_repo_dir}/.git ]; then",
-        # Tolerate fetch-all failures: the targeted head/base fetches below
-        # are what the checkout actually needs.
         f"  cd {q_repo_dir}",
         "  git_process_status=0",
         "  pgrep -x git >/dev/null || git_process_status=$?",
         '  if [ "$git_process_status" -eq 1 ]; then',
         "    rm -f .git/index.lock .git/shallow.lock",
         "  fi",
-        "  git fetch --all --quiet || true",
         "else",
         # The head checkout below replaces the default branch's, so skip fetching its blobs.
         f"  cd {q_work_dir} && gh repo clone {q_full_name} -- {clone_args} && cd {q_repo_name}",
         "fi",
     ]
-    if base_sha:
-        q_base = shlex.quote(base_sha)
-        lines.append(f"git fetch origin {q_base} --quiet 2>/dev/null || true")
+    shas = [sha for sha in (base_sha, head_sha) if sha]
+    if shas:
+        lines.extend(_fetch_missing(shas))
     if q_head:
-        # Direct sha fetch covers same-repo PRs; the pull ref covers fork PRs
-        # whose head commit is not reachable from origin's branches.
-        lines.append(f"git fetch origin {q_head} --quiet 2>/dev/null || true")
         if pr_number is not None:
+            # The pull ref covers fork PRs whose head is not reachable from origin's branches.
             pull_ref = shlex.quote(f"refs/pull/{pr_number}/head")
-            lines.append(f"git fetch origin {pull_ref} --quiet 2>/dev/null || true")
+            lines.append(
+                f"git cat-file -e {q_head}^{{commit}} 2>/dev/null"
+                f" || git fetch --quiet --no-tags origin {pull_ref} 2>/dev/null || true"
+            )
         # --force: a reused sandbox can have a dirty worktree from a previous
         # run, which would otherwise block the checkout and silently leave the
         # tree at the old head. Strict on purpose: a failed checkout must fail
@@ -170,28 +187,25 @@ async def materialize_trusted_skills(
     if not trusted_ref:
         return []
     dest_root = posixpath.join(posixpath.dirname(repo_dir), TRUSTED_SKILLS_DIRNAME)
-    q_repo_dir = shlex.quote(repo_dir)
     q_ref = shlex.quote(trusted_ref)
-
-    sources: list[str] = []
-    for skill_dir in skill_dirs:
-        dest = posixpath.join(dest_root, skill_dir)
-        q_dest = shlex.quote(dest)
-        q_dir = shlex.quote(skill_dir)
-        depth = len(skill_dir.split("/"))
-        command = (
-            f"cd {q_repo_dir} && "
-            f"git cat-file -e {q_ref}:{q_dir} 2>/dev/null && "
-            f"rm -rf {q_dest} && mkdir -p {q_dest} && "
-            f"git archive {q_ref} {q_dir} | tar -x --strip-components={depth} -C {q_dest} && "
-            f"echo {q_dest}"
+    dests = {skill_dir: posixpath.join(dest_root, skill_dir) for skill_dir in skill_dirs}
+    # One round trip for every dir; each extraction stands alone, so one failing
+    # leaves the others.
+    extractions = [
+        f"( git cat-file -e {q_ref}:{shlex.quote(skill_dir)} 2>/dev/null && "
+        f"rm -rf {shlex.quote(dest)} && mkdir -p {shlex.quote(dest)} && "
+        f"git archive {q_ref} {shlex.quote(skill_dir)} | "
+        f"tar -x --strip-components={len(skill_dir.split('/'))} -C {shlex.quote(dest)} && "
+        f"echo {shlex.quote(dest)} )"
+        for skill_dir, dest in dests.items()
+    ]
+    command = f"cd {shlex.quote(repo_dir)} || exit 1\n" + "\n".join(extractions)
+    try:
+        result = await sandbox_backend.aexecute(command)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Failed to extract trusted skills", extra={"repo_dir": repo_dir}, exc_info=True
         )
-        try:
-            result = await sandbox_backend.aexecute(command)
-        except Exception:  # noqa: BLE001
-            logger.warning("Failed to extract trusted skills %s", skill_dir, exc_info=True)
-            continue
-        output = getattr(result, "output", "") or ""
-        if dest in output.splitlines():
-            sources.append(f"{dest}/")
-    return sources
+        return []
+    extracted = set(result.output.splitlines())
+    return [f"{dest}/" for dest in dests.values() if dest in extracted]

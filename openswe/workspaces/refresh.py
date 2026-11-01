@@ -133,7 +133,7 @@ async def remove_refresh_cron(record: Workspace | None) -> None:
 async def _release_builder_sandbox(sandbox_id: str) -> None:
     """Stop the builder so the platform reclaims it on its delete-after-stop window.
 
-    Nothing here deletes a sandbox: an id-keyed delete is how a running box with
+    Nothing here deletes a sandbox: an id-keyed delete is how a running sandbox with
     uncommitted work gets destroyed, so reclamation stays the platform's job.
     """
     from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
@@ -171,7 +171,9 @@ async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) ->
     return backend
 
 
-def _scripts_to_run(record: Workspace, kind: RefreshKind) -> list[tuple[str, str, int]]:
+def _scripts_to_run(
+    record: Workspace, kind: RefreshKind, *, work_dir: str = "/workspace"
+) -> list[tuple[str, str, int]]:
     """The scripts a refresh runs, in order, as ``(label, command, timeout)``.
 
     A full rebuild runs the update script too, so a broken one is caught nightly
@@ -190,7 +192,7 @@ def _scripts_to_run(record: Workspace, kind: RefreshKind) -> list[tuple[str, str
         steps.append(
             (
                 "update",
-                script_command(record.update_script, "update", record.repos),
+                script_command(record.update_script, "update", record.repos, work_dir=work_dir),
                 _seconds(ENV.WORKSPACE_UPDATE_TIMEOUT_SECONDS, DEFAULT_UPDATE_TIMEOUT_SECONDS),
             )
         )
@@ -272,6 +274,8 @@ async def refresh_workspace(
     background run, and none of them should surface a traceback. The same detail
     lands on the workspace record.
     """
+    from openswe.sandboxes.paths import declared_work_dir
+
     record = await WORKSPACES.get(slug)
     if record is None:
         return {"status": "unknown_workspace", "slug": slug}
@@ -331,7 +335,9 @@ async def refresh_workspace(
         await attempt.publish_builder(sandbox_id)
         # Every script runs before the capture, so a snapshot only ships once the
         # whole of what produced it worked.
-        for label, command, timeout in _scripts_to_run(record, kind):
+        for label, command, timeout in _scripts_to_run(
+            record, kind, work_dir=declared_work_dir(backend) or "/workspace"
+        ):
             step = label
             await attempt.start_step(label, log_path=script_log_path(label))
             result = await backend.aexecute(command, timeout=timeout)
@@ -365,8 +371,9 @@ async def refresh_workspace(
         raise
     except Exception as exc:
         logger.warning("Refresh failed", extra={**context, "step": step}, exc_info=True)
-        await attempt.settle("failed", log=log, error=str(exc))
-        return {"status": "failed", "slug": slug, "error": str(exc), "log": log}
+        error = str(exc) or type(exc).__name__
+        await attempt.settle("failed", log=log, error=error)
+        return {"status": "failed", "slug": slug, "error": error, "log": log}
     finally:
         if sandbox_id:
             await _release_builder_sandbox(sandbox_id)
@@ -490,7 +497,7 @@ async def _read_builder_log(sandbox_id: str, path: str) -> str | None:
     """Tail a script's live ``bash -x`` trace off the builder, or ``None``.
 
     Best-effort by design: the builder is released the moment the capture lands,
-    so an unreachable box means "no live trace", never a failed poll.
+    so an unreachable sandbox means "no live trace", never a failed poll.
     """
     from openswe.sandboxes.providers.registry import connect_existing_sandbox
 

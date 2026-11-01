@@ -1,7 +1,8 @@
 """Resolve personal integration access and PR authorship within saved thread scope."""
 
 from collections.abc import Mapping
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from openswe.run_config import RunConfig
 from openswe.utils.json_types import thread_metadata
@@ -80,6 +81,23 @@ async def private_credential_login(
     if metadata.get("visibility", "public") == "public":
         return None
     return _private_owner_login(cfg, metadata)
+
+
+@dataclass(frozen=True)
+class GitHubCredentialScope:
+    """GitHub acts as the verified private owner, or as the workspace App."""
+
+    login: str | None
+
+    @property
+    def kind(self) -> Literal["personal", "system"]:
+        return "personal" if self.login is not None else "system"
+
+    @classmethod
+    async def for_thread(
+        cls, config: Mapping[str, object] | None = None, *, thread_id: str | None = None
+    ) -> GitHubCredentialScope:
+        return cls(await private_credential_login(config, thread_id=thread_id))
 
 
 async def pr_author_login(requested: str | None = None) -> str | None:

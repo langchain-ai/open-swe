@@ -21,7 +21,19 @@ from datetime import datetime
 from typing import Literal, Self, TypedDict
 from uuid import UUID, uuid7
 
-from sqlalchemy import BigInteger, ForeignKey, Text, desc, func, or_, select
+from pydantic import JsonValue
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Text,
+    cast,
+    desc,
+    func,
+    inspect,
+    or_,
+    select,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
@@ -37,6 +49,7 @@ from openswe.slack.dm import DmOrigin
 from openswe.slack.records import lookup_slack_thread_id
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
+from openswe.webhooks.event_log import EventLog, EventRefs
 
 RequestKind = Literal["expedited", "standard", "posted"]
 RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
@@ -45,6 +58,7 @@ RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
 # Open SWE asked who has not accepted yet, so the request is still open to anyone;
 # ``expired`` is a pick that was not accepted in time, kept so it is not picked again.
 ParticipantDecision = Literal["approve", "reject", "review", "picked", "expired"]
+SUPPLEMENTARY_REVIEWS_KEY = "supplementary_reviews"
 
 
 class ChannelChoice(TypedDict):
@@ -346,6 +360,47 @@ class HumanReviewRequest(Base):
             )
             return list(rows)
 
+    @asynccontextmanager
+    async def supplementary_rotation(
+        self, policy_id: str
+    ) -> AsyncIterator[tuple[Self | None, dict[str, datetime]]]:
+        """Read one supplementary review's rotation history and reserve a reviewer atomically."""
+        cls = type(self)
+        pr = self.pull_request
+        repository = f"{pr.owner}/{pr.repo}".lower()
+        review = cls.run_config[SUPPLEMENTARY_REVIEWS_KEY][policy_id]
+        login = review["github_login"].astext
+        assigned_at = cast(review["assigned_at"].astext, DateTime(timezone=True))
+        async with postgres.session() as session:
+            await session.execute(
+                select(
+                    func.pg_advisory_xact_lock(
+                        func.hashtextextended(f"supplementary-review:{repository}:{policy_id}", 0)
+                    )
+                )
+            )
+            row = await session.scalar(
+                cls._loaded(select(cls))
+                .where(cls.id == self.id)
+                .with_for_update(of=cls)
+                .execution_options(populate_existing=True)
+            )
+            rows = await session.execute(
+                select(login, func.max(assigned_at))
+                .join(cls.pull_request)
+                .join(PullRequest.repository)
+                .where(
+                    Repository.key == repository,
+                    login.is_not(None),
+                    login != "",
+                )
+                .group_by(login)
+            )
+            before = row.event_state() if row is not None else None
+            yield row, {name.lower(): at for name, at in rows if name and at is not None}
+        if row is not None and before is not None:
+            await row.log_changes(before)
+
     @classmethod
     async def open_review_counts(
         cls, user_ids: Collection[UUID], *, excluding: UUID
@@ -422,8 +477,89 @@ class HumanReviewRequest(Base):
         """Also in a channel, not only its thread; a card is sent at most once."""
         return self.slack_broadcast or self.slack_copy is not None
 
+    def event_state(self) -> dict[str, JsonValue]:
+        return {
+            "state": self.state,
+            "head_sha": self.head_sha,
+            "detail": self.detail,
+            "auto_merge": self.auto_merge,
+            "awaiting_ready": self.awaiting_ready,
+            "slack_channel_id": self.slack_channel_id,
+            "slack_message_ts": self.slack_message_ts,
+            "slack_dm_channel_id": self.slack_dm_channel_id,
+            "slack_dm_message_ts": self.slack_dm_message_ts,
+            "supplementary_reviews": {
+                policy: {
+                    key: value
+                    for key, value in state.items()
+                    if key
+                    in {
+                        "github_login",
+                        "assigned_at",
+                        "github_requested",
+                        "github_notified",
+                        "slack_notified",
+                        "dm_notified",
+                        "reason",
+                    }
+                }
+                for policy, state in self.run_config.get(SUPPLEMENTARY_REVIEWS_KEY, {}).items()
+                if isinstance(state, dict)
+            },
+            "slack_copy_channel_id": self.slack_copy_channel_id,
+            "slack_copy_ts": self.slack_copy_ts,
+            "slack_broadcast": self.slack_broadcast,
+            "participants": [
+                {
+                    "user_id": str(p.user_id),
+                    "decision": p.decision,
+                    "assigned_by_agent": p.assigned_by_agent,
+                    "joined_at": p.joined_at.isoformat() if p.joined_at else None,
+                    "github_review_id": p.github_review_id,
+                    "dm_channel_id": p.dm_channel_id,
+                    "dm_ts": p.dm_ts,
+                }
+                for p in self.participants
+            ],
+        }
+
+    async def log_event(self, event_type: str, **details: JsonValue) -> None:
+        """Append review activity without exposing run configuration or DM contents."""
+        pr = self.pull_request
+        await EventLog.append(
+            "human_review",
+            {
+                "request_id": str(self.id),
+                "kind": self.kind,
+                "pull_request_url": pr.url,
+                "thread_id": self.thread_id,
+                "requested_by_user_id": str(self.requested_by_user_id)
+                if self.requested_by_user_id
+                else None,
+                **details,
+            },
+            event_type=event_type,
+            delivery_id=str(uuid7()),
+            refs=EventRefs(
+                github_repository=f"{pr.owner}/{pr.repo}",
+                pull_request_number=pr.number,
+                slack_channel_id=self.slack_channel_id,
+            ),
+        )
+
+    async def log_changes(self, before: dict[str, JsonValue]) -> None:
+        changes: dict[str, JsonValue] = {
+            key: {"before": before.get(key), "after": value}
+            for key, value in self.event_state().items()
+            if before.get(key) != value
+        }
+        if changes:
+            await self.log_event("request.updated", changes=changes)
+
     async def save(self) -> Self:
         cls = type(self)
+        previous = await cls.get(self.id)
+        before = previous.event_state() if previous is not None else None
         async with postgres.session() as session:
             session.add(self)
             await session.flush()
@@ -434,6 +570,10 @@ class HumanReviewRequest(Base):
             )
         if stored is None:
             raise RuntimeError(f"human review request {self.id} vanished during save")
+        if before is None:
+            await stored.log_event("request.created", snapshot=stored.event_state())
+        else:
+            await stored.log_changes(before)
         return stored
 
     @classmethod
@@ -447,7 +587,14 @@ class HumanReviewRequest(Base):
                 .with_for_update(of=cls)
                 .execution_options(populate_existing=True)
             )
+            before = row.event_state() if row is not None else None
             yield session, row
+            deleted = row is not None and (row in session.deleted or inspect(row).deleted)
+        if row is not None and before is not None:
+            if deleted:
+                await row.log_event("request.discarded", snapshot=before)
+            else:
+                await row.log_changes(before)
 
     @classmethod
     @asynccontextmanager
@@ -464,7 +611,11 @@ class HumanReviewRequest(Base):
                 .order_by(cls.id)
                 .with_for_update(of=cls)
             )
-            yield list(rows)
+            requests = list(rows)
+            before = {row.id: row.event_state() for row in requests}
+            yield requests
+        for row in requests:
+            await row.log_changes(before[row.id])
 
     async def record_pick_message(self, user_id: UUID, message: PickMessage) -> None:
         """Remember the DM that asked ``user_id`` to take their pick, so it can be edited later."""

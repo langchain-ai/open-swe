@@ -32,7 +32,7 @@ from openswe.threads import runs as thread_runs
 from openswe.threads.summary import TRANSCRIPT_VERSION
 from openswe.transcript.engine import AppendResult
 from openswe.transcript.turns import OpenTurn
-from openswe.users import User
+from openswe.users import User, UserPreferences
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import ThreadStoreOverClient, patch_thread_module
 
@@ -224,6 +224,61 @@ async def test_failed_run_start_drains_prefetches(monkeypatch: pytest.MonkeyPatc
         blocked.set()
         await profile_finished.wait()
         await history_finished.wait()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_agent_workspace_experience_is_bound_before_first_dispatch(
+    monkeypatch, enabled: bool
+) -> None:
+    monkeypatch.setattr(
+        thread_runs, "_resolve_requested_workspace", AsyncMock(return_value="default")
+    )
+    monkeypatch.setattr(thread_runs, "_requested_visibility", AsyncMock(return_value="private"))
+    monkeypatch.setattr(thread_runs.postgres, "configured", lambda: False)
+    monkeypatch.setattr(
+        User,
+        "preferences_for_login",
+        AsyncMock(return_value=UserPreferences(experimental_fleet=enabled)),
+    )
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(monkeypatch, profile={"default_repo": "acme/default"})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Research this topic"}]},
+            "config": {"configurable": {"experience": "agent_workspace"}},
+        },
+    }
+    if not enabled:
+        with pytest.raises(HTTPException) as rejected:
+            await thread_runs._enrich_run_start_command(
+                "new-tid", "octocat", command, metadata={}, creating=True
+            )
+        assert rejected.value.status_code == 403
+        assert "metadata" not in created
+        return
+    first = await thread_runs._enrich_run_start_command(
+        "new-tid", "octocat", command, metadata={}, creating=True
+    )
+    assert first["params"]["config"]["configurable"]["experience"] == "agent_workspace"
+    assert first["params"]["config"]["configurable"]["repo_explicitly_none"] is True
+    metadata = created["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["experience"] == "agent_workspace"
+    followup = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Continue"}]},
+            "config": {"configurable": {"experience": "coding"}},
+        },
+    }
+    monkeypatch.setattr(User, "preferences_for_login", AsyncMock(return_value=UserPreferences()))
+    _patch_new_thread_deps(monkeypatch, profile={})
+    next_run = await thread_runs._enrich_run_start_command(
+        "new-tid", "octocat", followup, metadata=metadata
+    )
+    assert next_run["params"]["config"]["configurable"]["experience"] == "agent_workspace"
 
 
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
@@ -642,6 +697,7 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
                     "invocation_id": "stolen",
                     "prepare_run_id": "stolen",
                     "repo": {"owner": "evil", "name": "repo"},
+                    "experience": "agent_workspace",
                     "agent_model_id": _VISION_MODEL,
                     "agent_effort": "medium",
                 }
@@ -670,6 +726,7 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
         {"owner_login", "owner_type", "visibility", "system_authorization"}
         & enriched["params"]["metadata"].keys()
     )
+    assert "experience" not in configurable
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
@@ -817,7 +874,9 @@ async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
     turn_id = uuid7()
 
     class UndeliverableThreads(ThreadStoreOverClient):
-        async def command(self, thread_id: str, body: bytes) -> thread_proxy.CommandReply:
+        async def command(
+            self, thread_id: str, body: bytes, *, user_id: str | None = None
+        ) -> thread_proxy.CommandReply:
             if isinstance(refusal, Exception):
                 raise refusal
             return refusal
@@ -1074,6 +1133,56 @@ def _make_threads(count: int, *, resolved_before: int) -> list[dict[str, object]
             }
         )
     return threads
+
+
+@pytest.mark.parametrize("readable", [True, False])
+async def test_slack_link_search_checks_thread_access(monkeypatch, readable: bool) -> None:
+    thread = {"thread_id": "linked", "metadata": {"visibility": "private"}}
+    monkeypatch.setattr(
+        thread_listing, "lookup_slack_link_thread_id", AsyncMock(return_value="linked")
+    )
+    monkeypatch.setattr(
+        thread_listing,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(return_value=thread))),
+    )
+    monkeypatch.setattr(thread_listing, "thread_is_readable", lambda *args: readable)
+    monkeypatch.setattr(
+        thread_listing, "_summarize_thread", AsyncMock(return_value={"id": "linked"})
+    )
+
+    page = await thread_listing.list_dashboard_threads_page(
+        "octocat",
+        query="https://example.slack.com/archives/C123/p1788431248678809",
+        scope="interactive",
+    )
+
+    assert page["items"] == ([{"id": "linked"}] if readable else [])
+    assert page["hasMore"] is False
+
+
+async def test_pr_link_search_finds_exact_associations_outside_participation(monkeypatch) -> None:
+    threads = _make_threads(2, resolved_before=0)
+    for thread, number in zip(threads, [42, 420], strict=True):
+        metadata = cast(dict[str, object], thread["metadata"])
+        metadata["pr_url"] = f"https://github.com/acme/repo/pull/{number}"
+        metadata["latest_run_status"] = "success"
+    search = AsyncMock(return_value=threads)
+    client = SimpleNamespace(threads=SimpleNamespace(search=search))
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        thread_listing,
+        "_summarize_threads",
+        AsyncMock(side_effect=lambda client, rows: [{"id": row["thread_id"]} for row in rows]),
+    )
+
+    page = await thread_listing.list_dashboard_threads_page(
+        "octocat", query="https://github.com/acme/repo/pull/42/files#diff-123"
+    )
+
+    assert page["items"] == [{"id": threads[0]["thread_id"]}]
+    assert search.call_args.kwargs["metadata"] == {}
+    assert search.call_args.kwargs["params"] == {"text": "https://github.com/acme/repo/pull/42"}
 
 
 async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monkeypatch) -> None:

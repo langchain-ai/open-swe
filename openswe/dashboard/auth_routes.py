@@ -38,11 +38,11 @@ from openswe.dashboard.oauth import (
     rebind_session,
     redeem_desktop_handoff,
     sanitize_redirect_to,
-    session_user_id,
     set_session_cookie,
     set_state_cookie,
     valid_handoff_challenge,
 )
+from openswe.dashboard.principal import DashboardPrincipal
 from openswe.dashboard.profiles import (
     upsert_access_token,
     upsert_access_token_from_github_response,
@@ -246,9 +246,10 @@ async def auth_logout() -> Response:
 async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
     # Best-effort: this endpoint is what the dashboard boots on, and it must
     # answer from the session alone when the database is unreachable.
+    principal = DashboardPrincipal.from_session(session)
     user = None
     try:
-        user = await User.for_session(session_user_id(session), session["sub"])
+        user = await principal.user()
     except Exception:
         logger.warning(
             "Could not read the signed-in user's row",
@@ -258,7 +259,7 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
     else:
         if user is None and postgres.configured():
             raise HTTPException(401, "Open SWE account not found — sign in with GitHub again")
-    if user is not None and session_user_id(session) != user.id:
+    if user is not None and principal.user_id != user.id:
         # The dashboard boots here, so every stale cookie is repaired on its next load.
         set_session_cookie(response, rebind_session(session, str(user.id)))
         logger.info(

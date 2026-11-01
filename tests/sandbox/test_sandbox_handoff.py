@@ -57,7 +57,7 @@ async def test_handoff_carries_unpushed_commits_and_uncommitted_changes(
 async def test_a_mac_gone_before_the_cloud_carry_leaves_the_branch_as_pushed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A move to the cloud carries once MDA's box exists; the Mac may have left by then."""
+    """A move to the cloud carries once MDA's sandbox exists; the Mac may have left by then."""
     threads = MagicMock(update=AsyncMock())
     connect = AsyncMock()
     monkeypatch.setattr(handoff, "get_client", lambda: MagicMock(threads=threads))
@@ -67,7 +67,7 @@ async def test_a_mac_gone_before_the_cloud_carry_leaves_the_branch_as_pushed(
     await handoff.complete_handoff(
         "thread",
         {handoff.HANDOFF_FROM_KEY: "bridge:mac", "repo": {"owner": "o", "name": "repo"}},
-        MagicMock(id="mda-box"),
+        MagicMock(id="mda-sandbox"),
     )
 
     connect.assert_not_awaited()

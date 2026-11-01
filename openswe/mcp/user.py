@@ -29,7 +29,9 @@ async def prepare_user_mcp(login: str, name: str, update: MCPConnectionUpdate) -
     """Validate a draft, reusing saved authentication only from the same user's record."""
     if name != update.name:
         raise ValueError("Connection name must match its URL path")
-    return await prepare_connection(update, await get_user_mcp(login, name))
+    return await prepare_connection(
+        update, await get_user_mcp(login, name), scope=UserMCPConnections(login).scope
+    )
 
 
 async def save_user_mcp(login: str, name: str, update: MCPConnectionUpdate) -> dict[str, Any]:
