@@ -5013,6 +5013,17 @@
             ],
             "title": "Experimental Memory"
           },
+          "goal_mode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Mode"
+          },
           "pr_failure_reactions": {
             "anyOf": [
               {
