@@ -214,7 +214,11 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
         "repo_explicitly_none": metadata.repo_explicitly_none,
         "experience": metadata.experience,
     }
-    if metadata.owner_type != "system":
+    if metadata.owner_type == "system":
+        schedule_id = values.get("schedule_id")
+        if isinstance(schedule_id, str) and schedule_id:
+            config["schedule_id"] = schedule_id
+    else:
         owner = await metadata.owner()
         login = owner.github_login
         if not login:
