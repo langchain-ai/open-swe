@@ -271,12 +271,14 @@ async def test_pr_ready_draft_reads_the_owning_workspaces_team_default(
 @pytest.mark.parametrize("inline", [False, True])
 @pytest.mark.parametrize("action", ["opened", "synchronize"])
 @pytest.mark.parametrize("implementation_busy", [False, True])
+@pytest.mark.parametrize("registered", [False, True])
 async def test_walkthrough_generation_includes_drafts_without_starting_an_assessment(
     monkeypatch: pytest.MonkeyPatch,
     draft: bool,
     inline: bool,
     action: str,
     implementation_busy: bool,
+    registered: bool,
 ) -> None:
     from openswe.dashboard import workspace_settings_cache
     from openswe.review_scout.launch import ReviewScoutTarget
@@ -294,12 +296,17 @@ async def test_walkthrough_generation_includes_drafts_without_starting_an_assess
     monkeypatch.setattr(
         github_webhooks.PullRequest,
         "get",
-        AsyncMock(return_value=MagicMock(thread_ids=["implementation"])),
+        AsyncMock(return_value=MagicMock(thread_ids=["implementation"]) if registered else None),
     )
     monkeypatch.setattr(
         github_webhooks.THREADS,
         "get",
         AsyncMock(return_value=MagicMock(status="busy" if implementation_busy else "idle")),
+    )
+    monkeypatch.setattr(
+        github_webhooks.index.ThreadSearch,
+        "run",
+        AsyncMock(return_value=[MagicMock()] if implementation_busy else []),
     )
     monkeypatch.setattr(ReviewScoutTarget, "walkthrough", AsyncMock(return_value=None))
     start = AsyncMock(return_value="run")
@@ -309,5 +316,5 @@ async def test_walkthrough_generation_includes_drafts_without_starting_an_assess
 
     await github_webhooks.process_github_pr_walkthrough(payload)
 
-    assert start.await_count == (0 if inline and implementation_busy and action == "opened" else 1)
+    assert start.await_count == (0 if inline and implementation_busy else 1)
     assessment.assert_not_awaited()
