@@ -307,18 +307,25 @@ class LangSmithLogin:
                 },
             )
             tokens = self.tokens(data)
-            token = str(tokens["access_token"])
-            authorized_until = datetime.now(UTC) + LANGSMITH_AUTHORIZATION_TTL
-            await self.check_identity(token, principal)
             await self.save(
                 principal.subject,
                 tokens,
                 credential.token_endpoint,
                 previous=credential,
                 email=credential.account_email,
-                authorized_until=authorized_until,
+                authorized_until=None,
             )
-            return token
+            rotated = await self.credential(principal.subject)
+            try:
+                return await self.authorize_credential(rotated, principal)
+            except HTTPException as exc:
+                if exc.status_code in {401, 403}:
+                    await delete_credential(
+                        "langsmith_login",
+                        principal.subject,
+                        encrypted_access_token=rotated.encrypted_access_token,
+                    )
+                raise
 
     async def authorize_credential(
         self, credential: OAuthCredential, principal: DashboardPrincipal

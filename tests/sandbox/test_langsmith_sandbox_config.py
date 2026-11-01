@@ -125,6 +125,28 @@ async def test_install_create_extra_fields_merges_only_sandboxes_post() -> None:
 
 
 @pytest.mark.asyncio
+async def test_capture_snapshot_request_outlasts_the_client_default_timeout() -> None:
+    sent: list[dict[str, object]] = []
+
+    class _FakeHttp:
+        async def post(self, url: str, **kwargs: object) -> None:
+            sent.append(kwargs)
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self._http = _FakeHttp()
+
+        async def capture_snapshot(self, sandbox_id: str, name: str, *, timeout: int) -> None:
+            await self._http.post("https://api/v2/sandboxes/boxes/x/snapshot", json={"name": name})
+
+    await capture_snapshot_with_tag(
+        cast(AsyncSandboxClient, _FakeClient()), "sb-1", "acme", "latest", timeout=60
+    )
+
+    assert sent == [{"json": {"name": "acme", "tag": "latest"}, "timeout": 600.0}]
+
+
+@pytest.mark.asyncio
 async def test_capture_snapshot_restores_the_client_after_a_failure() -> None:
     class _FakeHttp:
         async def post(self, url, **kwargs):  # noqa: ANN001, ANN003

@@ -9,14 +9,16 @@
 """
 
 import logging
+from dataclasses import dataclass
 from typing import Literal
 
 from openswe.review_guide.buttons import CONTINUE
 from openswe.review_guide.sessions import ReviewGuideSession
-from openswe.review_guide.walk import Reader
-from openswe.slack.blocks import block_payload, context, option_actions
+from openswe.review_guide.walk import OnScreen, Reader
+from openswe.slack.blocks import block_payload, context, image, option_actions
 from openswe.slack.client import post_slack_top_level_message_with_ts, update_slack_message
 from openswe.slack.code_channels import set_summary_message
+from openswe.slack.diff_image import SlackDiffImage
 from openswe.slack.http import SlackRequestError
 from openswe.slack.markdown import markdown_blocks
 from openswe.utils.json_types import JsonObject
@@ -36,9 +38,45 @@ _HEADINGS: dict[Stage, str] = {
 def _text_blocks(
     text: str, *, note: str = "", buttons: list[str] | None = None
 ) -> list[JsonObject]:
-    body = markdown_blocks(text) or []
+    body = markdown_blocks(text)
+    if body is None:
+        raise SlackRequestError("msg_too_long")
     extra = [context(note)] if note else []
     return [*block_payload([*body, *extra]), *option_actions(buttons)]
+
+
+@dataclass
+class ChunkMessage:
+    shown: OnScreen
+
+    async def prepare(self) -> None:
+        if not self.shown.diff_file_id:
+            self.shown.diff_file_id = (
+                await SlackDiffImage(
+                    self.shown.diff_files(), f"walkthrough-{self.shown.chunk_id}.png"
+                ).upload()
+                or ""
+            )
+
+    def blocks(self, *, note: str = "", buttons: list[str] | None = None) -> list[JsonObject]:
+        shown = self.shown
+        if not shown.diff_file_id:
+            return _text_blocks(shown.message_text, note=note, buttons=buttons)
+        body = markdown_blocks(shown.explanation)
+        if body is None:
+            raise SlackRequestError("msg_too_long")
+        ranges = "; ".join(shown.lines.spans())
+        extra = [context(note)] if note else []
+        return [
+            *block_payload(
+                [
+                    *body,
+                    image(shown.diff_file_id, f"{shown.title}: {ranges}"[:2000]),
+                    *extra,
+                ]
+            ),
+            *option_actions(buttons),
+        ]
 
 
 async def refresh_progress(
@@ -80,11 +118,17 @@ async def refresh_progress(
         )
 
 
-async def post_with_buttons(session: ReviewGuideSession, text: str, buttons: list[str]) -> str:
+async def post_with_buttons(
+    session: ReviewGuideSession, text: str, buttons: list[str], *, shown: OnScreen | None = None
+) -> str:
     """Post a planned chunk without a model turn; its timestamp, or ``""`` when Slack refused."""
+    chunk = ChunkMessage(shown) if shown is not None else None
+    if chunk is not None:
+        await chunk.prepare()
     try:
+        blocks = chunk.blocks(buttons=buttons) if chunk else _text_blocks(text, buttons=buttons)
         return await post_slack_top_level_message_with_ts(
-            session.slack_channel_id, text, blocks=_text_blocks(text, buttons=buttons)
+            session.slack_channel_id, text, blocks=blocks
         )
     except SlackRequestError as exc:
         logger.warning(
@@ -94,13 +138,20 @@ async def post_with_buttons(session: ReviewGuideSession, text: str, buttons: lis
         return ""
 
 
-async def retire(channel_id: str, message_ts: str, text: str, note: str) -> None:
+async def retire(
+    channel_id: str, message_ts: str, text: str, note: str, *, shown: OnScreen | None = None
+) -> None:
     """Take the buttons off a message the guide posted, saying why."""
     if not message_ts:
         return
     try:
         await update_slack_message(
-            channel_id, message_ts, text, blocks=_text_blocks(text, note=note)
+            channel_id,
+            message_ts,
+            text,
+            blocks=ChunkMessage(shown).blocks(note=note)
+            if shown
+            else _text_blocks(text, note=note),
         )
     except SlackRequestError as exc:
         logger.warning(

@@ -12,9 +12,11 @@ from openswe.github.comments import (
     UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG,
     UNTRUSTED_GITHUB_COMMENT_OPEN_TAG,
 )
+from openswe.github.pull_requests import PullRequest
+from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.channels import SlackChannel
 from openswe.webhooks import event_log
-from openswe.webhooks.event_log import EventLog, EventRefs
+from openswe.webhooks.event_log import EventLog, EventRefs, WebhookSource
 from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
 from openswe.webhooks.event_subscriptions import EventSubscription
 from tests.support.slack_api import SlackAPI
@@ -308,23 +310,88 @@ async def test_slack_matches_joined_channels_but_not_dms(
         assert list(deliveries) == ["s-private", "s-public", "s-own"]
 
 
+@pytest.mark.parametrize("flush_delete", [False, True])
+async def test_review_log_tracks_committed_changes_without_run_secrets(
+    workspace: dict[str, UUID],
+    flush_delete: bool,
+) -> None:
+    request = HumanReviewRequest(
+        pull_request_id=workspace["pull_request"],
+        head_sha="abc",
+        kind="standard",
+        run_config={"private_credential": "do-not-log"},
+    )
+    pull = await PullRequest.get("acme", "widgets", 7)
+    assert pull is not None
+    request.pull_request = pull
+    stored = await request.save()
+    async with HumanReviewRequest.locked(stored.id) as (_, row):
+        assert row is not None
+        row.state = "cancelled"
+    with pytest.raises(RuntimeError, match="rollback"):
+        async with HumanReviewRequest.locked(stored.id) as (_, row):
+            assert row is not None
+            row.state = "open"
+            raise RuntimeError("rollback")
+    with pytest.raises(RuntimeError, match="rollback deletion"):
+        async with HumanReviewRequest.locked(stored.id) as (session, row):
+            assert row is not None
+            await session.delete(row)
+            await session.flush()
+            raise RuntimeError("rollback deletion")
+    assert await HumanReviewRequest.get(stored.id) is not None
+    async with HumanReviewRequest.locked(stored.id) as (session, row):
+        assert row is not None
+        await session.delete(row)
+        if flush_delete:
+            await session.flush()
+    assert await HumanReviewRequest.get(stored.id) is None
+    async with transaction() as conn:
+        rows = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT event_type, payload, workspace_id, pull_request_id FROM event_log "
+                        "WHERE source = 'human_review' ORDER BY received_at"
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+    assert [row["event_type"] for row in rows] == [
+        "request.created",
+        "request.updated",
+        "request.discarded",
+    ]
+    assert rows[2]["payload"]["request_id"] == str(stored.id)
+    assert rows[2]["payload"]["snapshot"]["state"] == "cancelled"
+    assert rows[1]["payload"]["changes"]["state"] == {"before": "open", "after": "cancelled"}
+    assert all(row["workspace_id"] == workspace["workspace"] for row in rows)
+    assert all(row["pull_request_id"] == workspace["pull_request"] for row in rows)
+    assert "do-not-log" not in json.dumps([row["payload"] for row in rows])
+
+
+@pytest.mark.parametrize("source", ["workspace", "human_review"])
 async def test_workspace_events_reach_only_admin_threads_that_name_the_source(
-    workspace: dict[str, UUID], delivered: list[tuple[str, MultitaskStrategy]]
+    workspace: dict[str, UUID],
+    delivered: list[tuple[str, MultitaskStrategy]],
+    source: WebhookSource,
 ) -> None:
     await _subscribe(workspace, event_types=["refresh"])
-    await _subscribe(workspace, sources=["workspace"], event_types=["refresh"])
+    await _subscribe(workspace, sources=[source], event_types=["refresh"])
     await EventSubscription(
         thread_id="admin-thread",
         workspace_id=workspace["workspace"],
         multitask_strategy="enqueue",
         run_config={"thread_id": "admin-thread", "admin_thread": True},
         expires_at=datetime.now(UTC) + timedelta(hours=1),
-        sources=["workspace"],
+        sources=[source],
         event_types=["refresh"],
     ).create()
 
     await EventLog.append(
-        "workspace",
+        source,
         {
             "workspace_slug": "acme",
             "error": "TimeoutError with opaque-error-credential",
@@ -343,5 +410,5 @@ async def test_workspace_events_reach_only_admin_threads_that_name_the_source(
     since = datetime.now(UTC) - timedelta(hours=1)
     assert await EventLog.kinds(since) == []
     assert [(kind.source, kind.event_type) for kind in await EventLog.kinds(since, admin=True)] == [
-        ("workspace", "refresh.failed")
+        (source, "refresh.failed")
     ]

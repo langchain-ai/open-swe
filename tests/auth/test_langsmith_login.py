@@ -391,7 +391,7 @@ async def test_inflight_authorization_cannot_restore_or_delete_a_replaced_grant(
         assert (await client.get("/dashboard/api/me")).status_code == 200
 
 
-async def test_refreshed_identity_is_checked_before_grant_is_saved(langsmith_client) -> None:
+async def test_refreshed_identity_mismatch_removes_the_rotated_grant(langsmith_client) -> None:
     server, client = langsmith_client
     exchanged = await server.exchange(client, await server.desktop_login(client))
     session = oauth.decode_session(exchanged.json()["session"])
@@ -410,3 +410,30 @@ async def test_refreshed_identity_is_checked_before_grant_is_saved(langsmith_cli
     assert (await client.get("/dashboard/api/me")).status_code == 401
     assert server.refreshes == 1
     assert await load_credential("langsmith_login", session["sub"]) is None
+
+
+async def test_refresh_survives_transient_membership_failure(langsmith_client) -> None:
+    server, client = langsmith_client
+    exchanged = await server.exchange(client, await server.desktop_login(client))
+    session = oauth.decode_session(exchanged.json()["session"])
+    await save_credential(
+        "langsmith_login",
+        session["sub"],
+        encrypted_access_token=encrypt_token("expired"),
+        encrypted_refresh_token=encrypt_token("refresh"),
+        access_token_expires_at=datetime.now(UTC) - timedelta(seconds=1),
+        client_id="test-client",
+        token_endpoint=ISSUER + "/oauth/token",
+        account_email="same@example.com",
+    )
+    client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
+    server.unavailable = True
+    assert (await client.get("/dashboard/api/me")).status_code == 503
+    stored = await load_credential("langsmith_login", session["sub"])
+    assert stored is not None
+    assert decrypt_token(stored.encrypted_access_token) == "access"
+    assert stored.login_authorized_until is None
+    assert server.refreshes == 1
+    server.unavailable = False
+    assert (await client.get("/dashboard/api/me")).status_code == 200
+    assert server.refreshes == 1

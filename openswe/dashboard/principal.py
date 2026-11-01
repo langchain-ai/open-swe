@@ -58,6 +58,8 @@ class DashboardPrincipal:
             return
         prefix = "/dashboard/api/"
         relative = path.removeprefix(prefix).rstrip("/") if path.startswith(prefix) else ""
+        if relative == "my-credentials/langsmith" and method in {"GET", "DELETE"}:
+            return
         if relative in {"me", "auth/logout"}:
             return
         raise HTTPException(403, "This operation requires a GitHub account")

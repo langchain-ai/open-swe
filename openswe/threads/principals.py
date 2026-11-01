@@ -110,9 +110,7 @@ class Principal:
         if principal.provider != "github":
             raise HTTPException(403, "Agent execution is not enabled for this account")
         email = session.get("email")
-        return cls.of_login(
-            principal.github_login.strip(), email if isinstance(email, str) else None
-        )
+        return cls.of_login(principal.subject.strip(), email if isinstance(email, str) else None)
 
     @property
     def machine(self) -> bool:
