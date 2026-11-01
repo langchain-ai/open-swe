@@ -339,6 +339,7 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         self._slots: dict[str, asyncio.Lock] = {}
         super().__init__(
             ptc=[],
+            max_result_chars=16_000,
             subagents=subagents,
             mode=mode,
             resolve_tool=None if backend_tools is None else backend_tools.tool,
