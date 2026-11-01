@@ -1,5 +1,9 @@
 /** Where a passage someone replied to came from. */
-export type PassageSource = "conversation" | "terminal" | "file"
+export type PassageSource =
+  | "conversation"
+  | "terminal"
+  | "file"
+  | "pull_request"
 
 /**
  * A passage someone selected, the text around it, and what they said about it.
@@ -8,6 +12,8 @@ export type PassageSource = "conversation" | "terminal" | "file"
  */
 export interface PassageReply {
   source: PassageSource
+  /** For a pull request: the part read, such as "description" or "review thread on a.ts:4 › comment by @ada". */
+  part?: string
   /** For a file: its path and selected lines, such as "6" or "4-6". */
   file?: string
   lines?: string

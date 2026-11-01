@@ -452,6 +452,15 @@ export function AgentThreadView({
   } | null>(null)
   const addReply = (reply: PassageReply) =>
     setAddedReply((previous) => ({ key: (previous?.key ?? 0) + 1, reply }))
+  // Passages replied to elsewhere on the review page join the composer one at a time.
+  const pageReply = reviewChat?.reply
+  const takePageReply = reviewChat?.takeReply
+  useEffect(() => {
+    const reply = pageReply && takePageReply?.()
+    if (!reply) return
+    // oxlint-disable-next-line react/set-state-in-effect
+    setAddedReply((previous) => ({ key: (previous?.key ?? 0) + 1, reply }))
+  }, [pageReply, takePageReply])
   const restoreQueuedToComposer = useCallback(
     (
       texts: ReadonlyArray<string>,

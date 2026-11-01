@@ -63,7 +63,9 @@ def test_replies_ride_as_escaped_elements_even_without_text() -> None:
             after="\n",
             comment="Use a <constant>",
         ),
-        PassageReply(source="conversation", selection="Opening a PR.", comment="Draft?"),
+        PassageReply(
+            source="pull_request", part="description", selection="Opening a PR.", comment="Draft?"
+        ),
     ]
     message = human_input([image], dashboard_input_context("github:octocat", None, replies))
 
@@ -75,7 +77,8 @@ def test_replies_ride_as_escaped_elements_even_without_text() -> None:
     assert "comment: Use a <constant>" in (first.text or "")
     assert "before:\n  def greet():\n      \n" in (first.text or "")
     assert (second.text or "").split("\n")[1:] == [
-        "source: conversation",
+        "source: pull_request",
+        "part: description",
         "selection: Opening a PR.",
         "comment: Draft?",
         "",

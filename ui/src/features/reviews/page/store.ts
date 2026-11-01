@@ -6,6 +6,7 @@ import type { SelectedLineRange } from "@pierre/diffs"
 import type { PullRequestReviewEvent } from "@/lib/api"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import type { DiffSide } from "@/features/reviews/lib/chatDiffActions"
 import { rangeBounds } from "@/features/reviews/lib/lineRange"
 import {
@@ -96,6 +97,8 @@ interface VisitState {
   chatDraft: { key: number; text: string } | undefined
   /** A question the chat sends as soon as it can, then clears. */
   chatQuestion: string | undefined
+  /** Replies to passages of the page, waiting for the chat composer to take them. */
+  chatReplies: ReadonlyArray<PassageReply>
   /** Events not yet taken by the part of the page they're for. */
   events: ReadonlySet<PageEvent>
   entryOrder: ReadonlyArray<DiffEntry>
@@ -148,6 +151,10 @@ interface ReviewPageActions {
   askInChat: (text: string) => void
   sendInChat: (text: string) => void
   clearChatQuestion: () => void
+  /** Hands a reply to a passage of the page to the chat composer. */
+  replyInChat: (reply: PassageReply) => void
+  /** The oldest reply waiting for the composer, taken off the queue. */
+  takeChatReply: () => PassageReply | undefined
   attachToChat: (excerpts: ReadonlyArray<CodeExcerpt>) => void
   removeChatExcerpt: (index: number) => void
   clearChatExcerpts: () => void
@@ -299,6 +306,7 @@ function freshVisit(): VisitState {
     jump: null,
     chatDraft: undefined,
     chatQuestion: undefined,
+    chatReplies: [],
     events: new Set(),
     entryOrder: [],
     fileFilter: "",
@@ -508,6 +516,15 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       get().focusChat()
     },
     clearChatQuestion: () => set({ chatQuestion: undefined }),
+    replyInChat: (reply) => {
+      set({ chatReplies: [...get().chatReplies, reply] })
+      get().focusChat()
+    },
+    takeChatReply: () => {
+      const [reply, ...rest] = get().chatReplies
+      if (reply) set({ chatReplies: rest })
+      return reply
+    },
     attachToChat: (excerpts) => {
       const known = new Set(get().chatExcerpts.map(excerptKey))
       set({

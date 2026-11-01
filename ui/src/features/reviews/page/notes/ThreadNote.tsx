@@ -42,7 +42,10 @@ export function CommentRow({
   className?: string
 }) {
   return (
-    <div className={cn("flex gap-space-3", className)}>
+    <div
+      data-reply-part={`comment by @${displayName(comment.author)}`}
+      className={cn("flex gap-space-3", className)}
+    >
       <Avatar author={comment.author} className="mt-px" />
       <div className="min-w-0 flex-1">
         <Byline
@@ -317,7 +320,10 @@ export function ThreadCard({
         </div>
       )}
       {withContext && <ThreadContext thread={thread} />}
-      <ol className="divide-y">
+      <ol
+        data-reply-part={`review thread on ${withLine(thread.path, threadLine(thread))}`}
+        className="divide-y"
+      >
         {thread.comments.map((comment) => (
           <li key={comment.id} className="px-space-3 py-space-2">
             <CommentRow
