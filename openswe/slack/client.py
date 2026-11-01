@@ -63,9 +63,6 @@ _SLACK_THREAD_MUTATION_LOCK_TTL = timedelta(minutes=1)
 _SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS = 0.1
 _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS = 10
 _SLACK_NOTICE_BLOCK_PREFIX = "open_swe_notice."
-TRACE_REPLY_WEB_HANDOFF_NOTICE = (
-    "Conversation moved to Web — use the `Open in Web` link above for follow-ups."
-)
 
 
 @dataclass(frozen=True)
@@ -924,29 +921,14 @@ class SlackConversation:
         self, thread_ts: str, thread_id: str, *, include_dashboard_link: bool = True
     ) -> str:
         """Reply with the run's trace link, and its web link unless left out."""
-        text = await self._trace_reply_text(
-            thread_id, include_dashboard_link=include_dashboard_link
-        )
+        trace_url = await get_langsmith_trace_url(thread_id)
+        links = [f"<{trace_url}|View trace>"] if trace_url else []
+        if include_dashboard_link and (dashboard_url := dashboard_thread_url(thread_id)):
+            links.append(f"<{dashboard_url}|Open in Web>")
+        text = " • ".join(links)
         return await self.reply(
             thread_ts, text, unfurl_links=False, unfurl_media=False, agent_thread_id=thread_id
         )
-
-    async def show_moved_to_web(self, message_ts: str, thread_id: str) -> bool:
-        """Turn the run's trace reply into a note that the conversation moved to Web."""
-        text = await self._trace_reply_text(thread_id, moved_to_web=True)
-        try:
-            await self.update(message_ts, text, unfurl_links=False, unfurl_media=False)
-        except SlackRequestError as exc:
-            logger.warning(
-                "Failed to update Slack trace reply for web handoff",
-                extra={
-                    "slack_channel": self.channel_id,
-                    "slack_message_ts": message_ts,
-                    "slack_error": exc.code,
-                },
-            )
-            return False
-        return True
 
     async def post_ephemeral(
         self,
@@ -1092,19 +1074,6 @@ class SlackConversation:
         if not isinstance(message, Mapping):
             return True
         return message.get("thread_ts") == reply_ts
-
-    @staticmethod
-    async def _trace_reply_text(
-        thread_id: str, *, include_dashboard_link: bool = True, moved_to_web: bool = False
-    ) -> str:
-        trace_url = await get_langsmith_trace_url(thread_id)
-        links = [f"<{trace_url}|View trace>"] if trace_url else []
-        if include_dashboard_link and (dashboard_url := dashboard_thread_url(thread_id)):
-            links.append(f"<{dashboard_url}|Open in Web>")
-        head = f"{' • '.join(links)}\n" if links else ""
-        if moved_to_web:
-            return f"{head}_{TRACE_REPLY_WEB_HANDOFF_NOTICE}_"
-        return head.rstrip()
 
     def _log_automated_warning(self, thread_ts: str | None, text: str) -> None:
         if not text.lstrip().startswith(WARNING_ICON):

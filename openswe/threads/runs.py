@@ -52,8 +52,7 @@ from openswe.input_messages import (
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import SlackConversation
-from openswe.slack.records import lookup_slack_thread_run_mapping
+from openswe.slack.client import SlackConversation, SlackNotice
 from openswe.source_context import SourceContext
 from openswe.threads.access import (
     _ensure_dashboard_github_token,
@@ -95,7 +94,8 @@ from openswe.utils.dashboard_handoff import (
     dashboard_input_context,
     passage_replies,
 )
-from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
+from openswe.utils.dashboard_links import dashboard_thread_url
+from openswe.utils.json_types import as_thread_dict, thread_metadata
 from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
 from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
@@ -1332,12 +1332,7 @@ async def steer_running_thread(
         },
     )
     if not relayed_from:
-        try:
-            await _notify_slack_web_handoff(thread_id, metadata)
-        except Exception:
-            logger.exception(
-                "Failed to update Slack message for dashboard handoff on %s", thread_id
-            )
+        await _SlackWebHandoff(thread_id, metadata).notify()
     return {
         "id": command.get("id"),
         "type": "success",
@@ -1392,6 +1387,7 @@ async def queue_follow_up_run(
     params = command.get("params")
     # An agent's relayed message is not its sender's own: it acts as no one.
     relayed = isinstance(params, dict) and bool(params.get(RELAYED_FROM_KEY))
+    handoff = _SlackWebHandoff(thread_id, metadata)
     enriched = await _enrich_run_start_command(
         thread_id, login, command, metadata=metadata, email=email
     )
@@ -1473,6 +1469,8 @@ async def queue_follow_up_run(
                 exc_info=True,
                 extra={"queue": {"thread_id": thread_id, "run_id": run_id}},
             )
+    if not relayed:
+        await handoff.notify()
     return {
         "id": command.get("id"),
         "type": "success",
@@ -1512,38 +1510,44 @@ async def dispatch_pending_follow_ups(
     return run_id if isinstance(run_id, str) else None
 
 
-def _slack_thread_context(metadata: Mapping[str, Any]) -> JsonObject | None:
-    context = SourceContext.from_metadata(metadata)
-    if context.slack_thread is None:
-        return None
-    return context.dump()["slack_thread"]
-
-
-async def _notify_slack_web_handoff(thread_id: str, metadata: Mapping[str, Any]) -> None:
-    if metadata.get("source") != "slack":
-        return
-    slack_thread = _slack_thread_context(metadata)
-    if not slack_thread:
-        return
-    channel_id = slack_thread.get("channel_id")
-    thread_ts = slack_thread.get("thread_ts")
-    if not isinstance(channel_id, str) or not channel_id:
-        return
-    if not isinstance(thread_ts, str) or not thread_ts:
-        return
-
-    trace_message_ts = slack_thread.get("trace_message_ts")
-    if not isinstance(trace_message_ts, str) or not trace_message_ts:
-        mapping = await lookup_slack_thread_run_mapping(channel_id, thread_ts)
-        if mapping is not None:
-            trace_message_ts = mapping.trace_message_ts
-    if not isinstance(trace_message_ts, str) or not trace_message_ts:
-        logger.info(
-            "Skipping Slack web handoff update for thread %s: missing trace message ts", thread_id
+class _SlackWebHandoff:
+    def __init__(self, thread_id: str, metadata: Mapping[str, object]) -> None:
+        self.thread_id = thread_id
+        self.location = (
+            SourceContext.from_metadata(metadata).slack_location
+            if metadata.get("source") == "slack"
+            else None
         )
-        return
 
-    await SlackConversation(channel_id).show_moved_to_web(trace_message_ts, thread_id)
+    async def notify(self) -> None:
+        if self.location is None:
+            return
+        url = dashboard_thread_url(self.thread_id)
+        if not url:
+            return
+        notice = SlackNotice(kind="web_handoff", key=self.thread_id)
+        text = f"Conversation continued in the <{url}|web UI>."
+        try:
+            channel_id, thread_ts = self.location
+            await SlackConversation(channel_id).try_reply(
+                thread_ts,
+                text,
+                blocks=[
+                    {
+                        "type": "context",
+                        "block_id": notice.block_id,
+                        "elements": [{"type": "mrkdwn", "text": text}],
+                    }
+                ],
+                unfurl_links=False,
+                unfurl_media=False,
+                notice=notice,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to post Slack web handoff notice",
+                extra={"thread_id": self.thread_id},
+            )
 
 
 async def _create_system_thread_record(

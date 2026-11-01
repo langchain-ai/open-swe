@@ -22,6 +22,7 @@ from openswe.dashboard.workspace_settings import (
 )
 from openswe.input_messages import dynamic_context_hash, person_introduction
 from openswe.message_queue import QueuedMessage
+from openswe.slack.client import SlackConversation
 from openswe.tasks.store import SidebarTaskMembership
 from openswe.threads import diffs as thread_diffs
 from openswe.threads import handlers
@@ -35,6 +36,7 @@ from openswe.transcript.turns import OpenTurn
 from openswe.users import User, UserPreferences
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import ThreadStoreOverClient, patch_thread_module
+from tests.slack_helpers import channel_first
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/kimi-k3"
 _VISION_MODEL = "openai:gpt-6.1-sol"
@@ -529,6 +531,40 @@ async def test_only_a_person_on_web_moves_a_slack_thread_to_web(
     source = "slack" if relayed else "dashboard"
     assert enriched["params"]["config"]["configurable"]["source"] == source
     assert cast(dict[str, object], created["metadata"])["source"] == source
+
+
+@pytest.mark.parametrize("relayed", [False, True])
+async def test_queued_web_follow_up_notifies_slack_only_for_a_person(
+    monkeypatch: pytest.MonkeyPatch, relayed: bool
+) -> None:
+    metadata = {
+        "source": "slack",
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+    }
+    created: dict[str, object] = {"metadata": dict(metadata)}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    posted = AsyncMock(return_value=True)
+    monkeypatch.setattr(SlackConversation, "try_reply", channel_first(posted))
+    monkeypatch.setattr(
+        thread_runs, "create_durable_run", AsyncMock(return_value={"run_id": "queued-run"})
+    )
+    params: dict[str, object] = {
+        "input": {"messages": [{"type": "human", "content": "Also fix this"}]}
+    }
+    if relayed:
+        params[thread_runs.RELAYED_FROM_KEY] = "coordinator-tid"
+
+    result = await thread_runs.queue_follow_up_run(
+        "tid", "octocat", {"method": "run.start", "params": params}, metadata=metadata
+    )
+
+    assert result["result"]["queued"] is True
+    assert posted.await_count == (0 if relayed else 1)
+    if not relayed:
+        assert posted.call_args.args[:2] == ("C1", "1.0")
+        assert "https://dashboard.example/agents/tid" in posted.call_args.args[2]
 
 
 @pytest.mark.parametrize("selection_changed", [False, True])

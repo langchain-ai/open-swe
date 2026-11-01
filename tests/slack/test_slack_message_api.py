@@ -11,6 +11,7 @@ import pytest
 from openswe import completion
 from openswe.slack import client as slack_utils
 from openswe.slack.blocks import actions, block_payload, button, code_blocks, markdown, section
+from openswe.threads.runs import _SlackWebHandoff
 from openswe.utils import url_safety
 from tests.support.slack_api import SlackAPI
 
@@ -218,6 +219,41 @@ async def test_quiet_reply_edits_its_mentions_in_so_they_do_not_notify(slack_api
     (post, posted), (edit, edited) = slack_api.calls
     assert (post, posted["text"]) == ("chat.postMessage", "Merged — authored by someone")
     assert (edit, edited["ts"], edited["text"]) == ("chat.update", "2.0", text)
+
+
+@pytest.mark.parametrize("source", ["slack", "dashboard"])
+async def test_web_handoff_posts_a_quiet_link_without_a_trace_message(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    metadata = {
+        "source": source,
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+    }
+    slack_api.respond({"ok": True, "messages": [{"ts": "1.0", "text": "Fix it"}]})
+    slack_api.respond({"ok": True, "ts": "2.0", "message": {"thread_ts": "1.0", "text": "Notice"}})
+
+    await _SlackWebHandoff("t1", metadata).notify()
+
+    posts = [params for method, params in slack_api.calls if method == "chat.postMessage"]
+    if source != "slack":
+        assert not posts
+        return
+    [posted] = posts
+    assert posted["channel"] == "C1"
+    assert posted["thread_ts"] == "1.0"
+    assert "<https://dashboard.example/agents/t1|web UI>" in posted["text"]
+    blocks = posted["blocks"]
+    assert isinstance(blocks, list)
+    assert [block["type"] for block in blocks] == ["context"]
+    assert posted["unfurl_links"] is False
+    assert posted["unfurl_media"] is False
+    slack_api.respond(
+        {"ok": True, "messages": [{"ts": "1.0", "text": "Fix it", "latest_reply": "2.0"}]}
+    )
+    slack_api.respond({"ok": True, "messages": [{"ts": "2.0", "blocks": blocks}]})
+    await _SlackWebHandoff("t1", metadata).notify()
+    assert len([method for method, _ in slack_api.calls if method == "chat.postMessage"]) == 1
 
 
 @pytest.mark.parametrize(
