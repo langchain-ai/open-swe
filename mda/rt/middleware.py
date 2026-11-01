@@ -67,8 +67,9 @@ from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
+from langsmith import trace
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from runtime_api.catalog import InboxSpec
+from runtime_api.catalog import InboxSpec, ModelSpec
 from runtime_api.endpoint import Endpoint, call
 from runtime_api.loop import (
     AFTER_AGENT,
@@ -139,6 +140,13 @@ def _merge(
     left: dict[str, JsonValue] | None, right: dict[str, JsonValue] | None
 ) -> dict[str, JsonValue]:
     return {**(left or {}), **(right or {})}
+
+
+_CONTENT_REFUSAL_MARKERS: Final = (
+    "flagged for possible cybersecurity risk",
+    "content_policy",
+    "invalid_prompt",
+)
 
 
 _TOOL_PAIRING_ERRORS: Final = (
@@ -564,8 +572,20 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         carried = self._backend.outbox.carried(request.state)
         if carried is None:
             return response
+        if isinstance(response, ExtendedModelResponse) and response.command is not None:
+            update = response.command.update
+            return dataclasses.replace(
+                response,
+                command=dataclasses.replace(
+                    response.command,
+                    update={**(update if isinstance(update, dict) else {}), OUTBOX_KEY: carried},
+                ),
+            )
         return ExtendedModelResponse(
-            model_response=response, command=Command(update={OUTBOX_KEY: carried})
+            model_response=response.model_response
+            if isinstance(response, ExtendedModelResponse)
+            else response,
+            command=Command(update={OUTBOX_KEY: carried}),
         )
 
     async def awrap_tool_call(
@@ -593,11 +613,36 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             return dataclasses.replace(result, update={**result.update, OUTBOX_KEY: carried})
         return result
 
+    @staticmethod
+    def _content_refusal_error(exc: Exception) -> bool:
+        body = getattr(exc, "body", None)
+        if getattr(exc, "stop_reason", None) == "refusal" or (
+            isinstance(body, Mapping) and body.get("stop_reason") == "refusal"
+        ):
+            return True
+        return getattr(exc, "status_code", None) == 400 and any(
+            marker in str(exc).lower() for marker in _CONTENT_REFUSAL_MARKERS
+        )
+
+    def _refusal_scope(
+        self, request: ModelRequest, planned: ModelCall, model: ModelSpec | None
+    ) -> dict[str, JsonValue]:
+        event = request.state.get("_summarization_event")
+        event = event if isinstance(event, Mapping) else {}
+        summary = event.get("summary_message")
+        return {
+            "run": run_id() or self._invocation(),
+            "model": model.model_dump(mode="json") if model is not None else None,
+            "fallback": planned.fallback.model_dump(mode="json") if planned.fallback else None,
+            "cutoff": _json.validate_python(event.get("cutoff_index")),
+            "summary": summary.id if isinstance(summary, BaseMessage) else None,
+        }
+
     async def _call_model(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
+    ) -> ModelResponse | ExtendedModelResponse:
         own = self._own_model()
         if own is not None:
             # The run's own model, unless the loop names another for this call.
@@ -615,6 +660,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if model is not None:
             request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
             turn_trace(self._backend.run).record_model(model.model_id)
+        held = request.state.get(STATE_KEY)
+        refused = held.get("primary_refused") if isinstance(held, Mapping) else None
+        if planned.fallback is not None and refused is not None:
+            if refused == self._refusal_scope(request, planned, model):
+                return await self._fallback_call(request, handler, planned, model, sticky=True)
         try:
             return await handler(request)
         except GraphBubbleUp:
@@ -626,8 +676,43 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 raise
             # As the in-process graph does: another provider before failing the run.
             logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
-            fallback = build_model(planned.fallback, use_gateway=planned.use_gateway)
-            turn_trace(self._backend.run).record_model(planned.fallback.model_id)
+            sticky = self._content_refusal_error(exc)
+            response = await self._fallback_call(request, handler, planned, model, sticky=sticky)
+            if not sticky:
+                return response
+            return ExtendedModelResponse(
+                model_response=response,
+                command=Command(
+                    update={
+                        STATE_KEY: {"primary_refused": self._refusal_scope(request, planned, model)}
+                    }
+                ),
+            )
+
+    async def _fallback_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+        planned: ModelCall,
+        model: ModelSpec | None,
+        *,
+        sticky: bool,
+    ) -> ModelResponse:
+        assert planned.fallback is not None
+        fallback = build_model(planned.fallback, use_gateway=planned.use_gateway)
+        turn_trace(self._backend.run).record_model(planned.fallback.model_id)
+        if not sticky:
+            return await handler(request.override(model=fallback))
+        async with trace(
+            "model_retry",
+            inputs={},
+            metadata={
+                "failed_model": (model.model_id if model is not None else None)
+                or str(getattr(request.model, "model_name", "unknown")),
+                "next_model": planned.fallback.model_id,
+                "reason": "content_refusal",
+            },
+        ):
             return await handler(request.override(model=fallback))
 
     @hook_config(can_jump_to=["model", "end"])
