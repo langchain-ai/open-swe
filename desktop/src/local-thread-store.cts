@@ -1,6 +1,26 @@
-const fs = require("node:fs");
-const path = require("node:path");
-const { randomUUID } = require("node:crypto");
+import fs = require("node:fs");
+import path = require("node:path");
+import { randomUUID } from "node:crypto";
+
+type Checkpoint = {
+  repo: string | null;
+  ref: string | null;
+  branch: string | null;
+};
+
+type LocalThread = {
+  id: string;
+  cwd: string;
+  managedTaskFolder: boolean;
+  worktreePath: string | null;
+  ownedWorktrees: string[];
+  bridgeId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  checkpoint: Checkpoint;
+};
+
+type StoreOptions = { fs?: typeof fs; now?: () => number };
 
 /**
  * What this Mac knows about its "This Mac" threads that the backend does not:
@@ -15,15 +35,15 @@ const BRIDGE_ID = /^[0-9a-f]{32}$/;
 const THREAD_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function isRecord(value) {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function stringOrNull(value, maximum = 512) {
+function stringOrNull(value: unknown, maximum = 512): string | null {
   return typeof value === "string" && value.length <= maximum ? value : null;
 }
 
-function cleanPaths(value) {
+function cleanPaths(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const paths = value
     .filter(
@@ -36,18 +56,20 @@ function cleanPaths(value) {
   return [...new Set(paths)];
 }
 
-function cleanBridgeId(value) {
+function cleanBridgeId(value: unknown): string | null {
   return typeof value === "string" && BRIDGE_ID.test(value) ? value : null;
 }
 
-function normalizeThread(value) {
+function normalizeThread(value: unknown): LocalThread | null {
   if (
     !isRecord(value) ||
     typeof value.id !== "string" ||
     !value.id ||
     typeof value.cwd !== "string" ||
     !path.isAbsolute(value.cwd) ||
+    typeof value.createdAt !== "number" ||
     !Number.isFinite(value.createdAt) ||
+    typeof value.updatedAt !== "number" ||
     !Number.isFinite(value.updatedAt)
   ) {
     return null;
@@ -76,7 +98,7 @@ function normalizeThread(value) {
   };
 }
 
-function atomicWrite(filePath, value, fileSystem = fs) {
+export function atomicWrite(filePath: string, value: unknown, fileSystem = fs) {
   fileSystem.mkdirSync(path.dirname(filePath), { recursive: true });
   const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
   try {
@@ -91,22 +113,31 @@ function atomicWrite(filePath, value, fileSystem = fs) {
   }
 }
 
-class LocalThreadStore {
-  constructor(filePath, options = {}) {
-    this.filePath = filePath;
+export class LocalThreadStore {
+  private readonly fs: typeof fs;
+  private readonly now: () => number;
+  private readonly threads = new Map<string, LocalThread>();
+
+  constructor(
+    private readonly filePath: string,
+    options: StoreOptions = {},
+  ) {
     this.fs = options.fs || fs;
     this.now = options.now || Date.now;
-    this.threads = new Map();
     this.load();
   }
 
   load() {
-    let values = [];
+    let values: unknown[] = [];
     try {
-      const parsed = JSON.parse(this.fs.readFileSync(this.filePath, "utf8"));
+      const parsed: unknown = JSON.parse(
+        this.fs.readFileSync(this.filePath, "utf8"),
+      );
       values = Array.isArray(parsed) ? parsed : [];
     } catch (error) {
-      if (error?.code !== "ENOENT")
+      if (
+        !(error instanceof Error && "code" in error && error.code === "ENOENT")
+      )
         console.warn("Could not read the local thread store", error);
     }
     for (const value of values) {
@@ -128,12 +159,12 @@ class LocalThreadStore {
       .map((thread) => structuredClone(thread));
   }
 
-  get(id) {
+  get(id: string) {
     const thread = this.threads.get(id);
     return thread ? structuredClone(thread) : null;
   }
 
-  createTask(id) {
+  createTask(id: string) {
     if (typeof id !== "string" || !THREAD_ID.test(id) || this.threads.has(id))
       throw new Error("Invalid task thread id");
     const root = path.join(path.dirname(this.filePath), "tasks");
@@ -149,7 +180,7 @@ class LocalThreadStore {
     return this.create({ id, cwd, managedTaskFolder: true });
   }
 
-  taskRoot(thread) {
+  taskRoot(thread: LocalThread | null) {
     if (!thread?.managedTaskFolder || !THREAD_ID.test(thread.id)) return null;
     try {
       const root = this.fs.realpathSync(
@@ -172,7 +203,15 @@ class LocalThreadStore {
   }
 
   /** Record a thread the renderer is about to create in the cloud under `id`. */
-  create({ id, cwd, managedTaskFolder = false }) {
+  create({
+    id,
+    cwd,
+    managedTaskFolder = false,
+  }: {
+    id: string;
+    cwd: string;
+    managedTaskFolder?: boolean;
+  }) {
     if (typeof id !== "string" || !id || this.threads.has(id))
       throw new Error("Invalid local thread id");
     const now = this.now();
@@ -191,7 +230,7 @@ class LocalThreadStore {
     return this.get(id);
   }
 
-  setBridge(id, bridgeId) {
+  setBridge(id: string, bridgeId: string) {
     const current = this.threads.get(id);
     if (!current) return null;
     const next = cleanBridgeId(bridgeId);
@@ -206,7 +245,7 @@ class LocalThreadStore {
    * a worktree this app created: it stays recorded even after the thread moves
    * off it, so nothing the app made is left behind when the thread is deleted.
    */
-  setWorktree(id, worktreePath, owned = false) {
+  setWorktree(id: string, worktreePath: string | null, owned = false) {
     const current = this.threads.get(id);
     if (!current) return null;
     if (
@@ -228,7 +267,7 @@ class LocalThreadStore {
     return this.get(id);
   }
 
-  setCheckpoint(id, checkpoint) {
+  setCheckpoint(id: string, checkpoint: Checkpoint) {
     const current = this.threads.get(id);
     if (!current) return null;
     const next = {
@@ -245,7 +284,7 @@ class LocalThreadStore {
     return this.get(id);
   }
 
-  delete(id) {
+  delete(id: string) {
     const current = this.threads.get(id);
     if (!current) return null;
     this.threads.delete(id);
@@ -253,5 +292,3 @@ class LocalThreadStore {
     return structuredClone(current);
   }
 }
-
-module.exports = { LocalThreadStore, atomicWrite };

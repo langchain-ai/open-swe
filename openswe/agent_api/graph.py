@@ -893,6 +893,7 @@ async def managed_sandbox(
     return await ManagedSandbox.for_thread(
         cfg.thread_id,
         cfg.workspace_slug,
+        allow_github=cfg.auth_provider != "langsmith",
         github_repositories=repositories,
         github_permissions=permissions,
     )

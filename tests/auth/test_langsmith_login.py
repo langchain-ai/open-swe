@@ -10,15 +10,17 @@ import httpx2
 import pytest
 from cryptography.fernet import Fernet
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 
 from openswe.dashboard import auth_routes, langsmith_login, langsmith_oauth, langsmith_routes, oauth
+from openswe.dashboard.langsmith_login import LangSmithAccount
 from openswe.dashboard.oauth_credentials import load_credential, save_credential
 from openswe.dashboard.profiles import PROFILES, get_profile
 from openswe.dashboard.user_preferences import USER_PREFERENCES
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.github import dashboard_routes
 from openswe.review.routes import router as review_router
-from openswe.users import UnauthorizedUser, User
+from openswe.users import AccountConflict, UnauthorizedUser, User
 
 ISSUER = "https://api.smith.langchain.com"
 ALLOWED_ORG = "f5c798a2-2155-4999-ad27-6d466bd26e1c"
@@ -140,6 +142,10 @@ async def langsmith_client(registry_db, monkeypatch: pytest.MonkeyPatch):
         langsmith_login, "pooled_transport", lambda: httpx2.MockTransport(server.respond)
     )
     app = FastAPI()
+    app.add_exception_handler(
+        AccountConflict,
+        lambda _request, exc: JSONResponse({"detail": str(exc)}, status_code=409),
+    )
     app.include_router(auth_routes.router, prefix="/dashboard/api")
     app.include_router(langsmith_routes.router, prefix="/dashboard/api")
     app.include_router(dashboard_routes.router, prefix="/dashboard/api")
@@ -152,7 +158,7 @@ async def langsmith_client(registry_db, monkeypatch: pytest.MonkeyPatch):
 
 async def test_desktop_login_is_independent_and_pkce_bound(langsmith_client) -> None:
     server, client = langsmith_client
-    github_user = await User.sign_in("github", "1", login="alice", email="same@example.com")
+    github_user = await User.sign_in("github", "1", login="alice", email="alice@example.com")
     callback = await server.desktop_login(client)
     assert callback.status_code == 302
     assert urlparse(callback.headers["location"]).netloc == "127.0.0.1:43210"
@@ -174,8 +180,7 @@ async def test_desktop_login_is_independent_and_pkce_bound(langsmith_client) -> 
     assert all(
         identity.provider == "langsmith" and identity.login == "" for identity in user.identities
     )
-    email_user = await User.for_email("same@example.com")
-    assert email_user is not None and email_user.id == github_user.id
+    assert await User.for_email("same@example.com") is None
     assert (await User.canonical_person({"id": session["sub"]}))["id"] == session["sub"]
     await PROFILES.put(session["sub"], {"draft_prs": False})
     await USER_PREFERENCES.put(session["sub"], {"follow_up_behavior": "queue"})
@@ -202,6 +207,36 @@ async def test_desktop_login_is_independent_and_pkce_bound(langsmith_client) -> 
         await user.link("github", "1", login="alice")
     with pytest.raises(UnauthorizedUser):
         await github_user.link("langsmith", server.subject)
+
+
+async def test_slack_email_does_not_block_langsmith_login(langsmith_client) -> None:
+    server, client = langsmith_client
+    github_user = await User.sign_in("github", "1", login="alice", email="alice@example.com")
+    await github_user.link("slack", "slack-alice", email="same@example.com")
+    callback = await server.desktop_login(client)
+    assert callback.status_code == 302
+    user = await User.for_identity("langsmith", server.subject)
+    assert user is not None and user.id != github_user.id
+
+
+async def test_one_email_cannot_hold_both_a_github_and_a_langsmith_account(
+    langsmith_client,
+) -> None:
+    server, client = langsmith_client
+    await User.sign_in("github", "1", login="alice", email="Same@Example.com")
+    callback = await server.desktop_login(client)
+    assert callback.status_code == 409
+    assert "GitHub" in callback.json()["detail"]
+    assert await User.for_identity("langsmith", server.subject) is None
+
+    await User.sign_in(
+        "langsmith",
+        "ls-other",
+        email="langsmith@example.com",
+        authorization=LangSmithAccount(sub="ls-other", ls_org_id=server.organization),
+    )
+    with pytest.raises(AccountConflict):
+        await User.sign_in("github", "2", login="alice", email="LangSmith@example.com")
 
 
 async def test_login_without_desktop_proof_and_cross_purpose_codes_are_rejected(
@@ -391,7 +426,7 @@ async def test_inflight_authorization_cannot_restore_or_delete_a_replaced_grant(
         assert (await client.get("/dashboard/api/me")).status_code == 200
 
 
-async def test_refreshed_identity_is_checked_before_grant_is_saved(langsmith_client) -> None:
+async def test_refreshed_identity_mismatch_removes_the_rotated_grant(langsmith_client) -> None:
     server, client = langsmith_client
     exchanged = await server.exchange(client, await server.desktop_login(client))
     session = oauth.decode_session(exchanged.json()["session"])
@@ -410,3 +445,30 @@ async def test_refreshed_identity_is_checked_before_grant_is_saved(langsmith_cli
     assert (await client.get("/dashboard/api/me")).status_code == 401
     assert server.refreshes == 1
     assert await load_credential("langsmith_login", session["sub"]) is None
+
+
+async def test_refresh_survives_transient_membership_failure(langsmith_client) -> None:
+    server, client = langsmith_client
+    exchanged = await server.exchange(client, await server.desktop_login(client))
+    session = oauth.decode_session(exchanged.json()["session"])
+    await save_credential(
+        "langsmith_login",
+        session["sub"],
+        encrypted_access_token=encrypt_token("expired"),
+        encrypted_refresh_token=encrypt_token("refresh"),
+        access_token_expires_at=datetime.now(UTC) - timedelta(seconds=1),
+        client_id="test-client",
+        token_endpoint=ISSUER + "/oauth/token",
+        account_email="same@example.com",
+    )
+    client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
+    server.unavailable = True
+    assert (await client.get("/dashboard/api/me")).status_code == 503
+    stored = await load_credential("langsmith_login", session["sub"])
+    assert stored is not None
+    assert decrypt_token(stored.encrypted_access_token) == "access"
+    assert stored.login_authorized_until is None
+    assert server.refreshes == 1
+    server.unavailable = False
+    assert (await client.get("/dashboard/api/me")).status_code == 200
+    assert server.refreshes == 1

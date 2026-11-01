@@ -45,6 +45,7 @@ class ManagedSandbox(BaseModel):
         *,
         github_repositories: Sequence[str] | None = None,
         github_permissions: PermissionMap | None = None,
+        allow_github: bool = True,
     ) -> ManagedSandbox | None:
         """The sandbox the thread's MDA run declares, or ``None`` when the backend keeps its own.
 
@@ -83,7 +84,11 @@ class ManagedSandbox(BaseModel):
             thread_id=owner,
             sandbox_id=metadata.sandbox_id if owner or metadata.sandbox_owner == "mda" else None,
             # The sandbox's own thread decides: a worker's coordinator.
-            github_proxy=await mda_github_proxy(
-                owner or thread_id, sandbox_metadata, github_repositories, github_permissions
+            github_proxy=(
+                await mda_github_proxy(
+                    owner or thread_id, sandbox_metadata, github_repositories, github_permissions
+                )
+                if allow_github
+                else None
             ),
         )

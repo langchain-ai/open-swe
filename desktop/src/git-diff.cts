@@ -136,7 +136,61 @@ async function checkoutBranch(cwd, branch, create = false) {
   return name;
 }
 
-async function addWorktree(repo, worktreePath, branch, baseRef) {
+async function addWorktree(
+  repo,
+  worktreePath,
+  branch,
+  baseRef,
+  fetchUpstream = false,
+) {
+  if (fetchUpstream) {
+    const [localRef, remote, upstream] = text(
+      await git(
+        repo,
+        [
+          "for-each-ref",
+          "--format=%(refname)%0a%(upstream:remotename)%0a%(upstream:remoteref)",
+          `refs/heads/${baseRef}`,
+        ],
+        null,
+        5_000,
+      ),
+    ).split("\n");
+    if (localRef === `refs/heads/${baseRef}`) {
+      try {
+        await git(
+          repo,
+          ["fetch", remote || "origin", upstream || `refs/heads/${baseRef}`],
+          null,
+          60_000,
+        );
+        const tip = text(
+          await git(
+            repo,
+            ["rev-parse", "--verify", "FETCH_HEAD^{commit}"],
+            null,
+            5_000,
+          ),
+        );
+        if (
+          await ok(
+            git(
+              repo,
+              ["merge-base", "--is-ancestor", localRef, tip],
+              null,
+              5_000,
+            ),
+          )
+        )
+          baseRef = tip;
+      } catch (error) {
+        console.warn(
+          "Could not refresh worktree base; using the local branch",
+          error,
+        );
+      }
+    }
+  }
   await git(
     repo,
     ["worktree", "add", "-b", branch, worktreePath, baseRef],

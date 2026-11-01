@@ -33,7 +33,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.input_messages import PersonIdentity, split_person_id
-from openswe.users.authorization import UnauthorizedUser, is_authorized_github_login
+from openswe.users.authorization import (
+    AccountConflict,
+    UnauthorizedUser,
+    is_authorized_github_login,
+)
 from openswe.users.preferences import UserPreferences, UserPreferencesPatch
 from openswe.utils.json_types import JsonObject
 
@@ -568,6 +572,7 @@ class User(Base):
         if speculative is not None:
             if provider != "langsmith":
                 await _authorize(provider, login)
+            await cls._require_single_login_kind(session, provider, email)
             await session.execute(insert(cls).values(id=speculative))
         upsert = insert(UserIdentity).values(
             user_id=owner or speculative,
@@ -595,6 +600,34 @@ class User(Base):
                 extra={"user_provider": provider, "user_id": str(claimed)},
             )
         return claimed
+
+    @staticmethod
+    async def _require_single_login_kind(
+        session: AsyncSession, provider: Provider, email: str
+    ) -> None:
+        """Refuse a new GitHub or LangSmith person whose email already signs in the other way."""
+        wanted = email.strip().lower()
+        if provider not in ("github", "langsmith") or not wanted:
+            return
+        other = (
+            UserIdentity.provider == "github"
+            if provider == "langsmith"
+            else UserIdentity.provider == "langsmith"
+        )
+        if await session.scalar(
+            select(UserIdentity.user_id)
+            .where(other, func.lower(UserIdentity.email) == wanted)
+            .limit(1)
+        ):
+            logger.warning(
+                "Refused a second account for the same email",
+                extra={"user_provider": provider},
+            )
+            raise AccountConflict(
+                "This email already has an Open SWE account that signs in with "
+                + ("GitHub" if provider == "langsmith" else "LangSmith")
+                + "; sign in with that instead"
+            )
 
     @classmethod
     async def _load(cls, session: AsyncSession, user_id: UUID) -> Self | None:
