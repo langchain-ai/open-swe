@@ -3,6 +3,8 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@langchain/macaw-components/HoverCard"
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
+import { Link } from "@tanstack/react-router"
 import { createContext, useContext, useMemo } from "react"
 import type { ComponentProps, ReactNode } from "react"
 
@@ -89,6 +91,40 @@ export function PullRequestPreviewProvider({
   )
 }
 
+/** A GitHub PR link shown as the Open SWE review page plus a GitHub link. */
+function PullRequestLinkChip({
+  href,
+  repoFullName,
+  number,
+  children,
+  className: _className,
+  target: _target,
+  rel: _rel,
+  ...props
+}: ComponentProps<"a"> & { repoFullName: string; number: number }) {
+  const [owner, repo] = repoFullName.split("/")
+  return (
+    <span className="pr-link-chip">
+      <Link
+        {...props}
+        to="/agents/reviews/$owner/$repo/$number"
+        params={{ owner: owner!, repo: repo!, number: String(number) }}
+      >
+        {children === href ? `${repo}#${number}` : children}
+      </Link>
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`Open ${repoFullName}#${number} on GitHub`}
+        title="Open on GitHub"
+      >
+        <GithubLogoIcon size={13} weight="regular" aria-hidden />
+      </a>
+    </span>
+  )
+}
+
 export function PreviewablePullRequestLink({
   href,
   children,
@@ -102,22 +138,27 @@ export function PreviewablePullRequestLink({
       previews?.pullRequests.get(
         pullRequestKey(parsed.repoFullName, parsed.number)
       ))
+  const ref = parsed ?? (pullRequest && previews ? pullRequest : null)
+  const link = ref ? (
+    <PullRequestLinkChip
+      href={href}
+      repoFullName={ref.repoFullName}
+      number={ref.number}
+      {...props}
+    >
+      {children}
+    </PullRequestLinkChip>
+  ) : (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  )
 
-  if (!pullRequest || !previews) {
-    return (
-      <a href={href} {...props}>
-        {children}
-      </a>
-    )
-  }
+  if (!pullRequest || !previews) return link
 
   return (
     <HoverCard openDelay={250} closeDelay={100}>
-      <HoverCardTrigger asChild>
-        <a href={href} {...props}>
-          {children}
-        </a>
-      </HoverCardTrigger>
+      <HoverCardTrigger asChild>{link}</HoverCardTrigger>
       <HoverCardContent
         side="top"
         align="start"
