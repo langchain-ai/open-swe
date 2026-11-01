@@ -1,6 +1,8 @@
 """Claude Code hook events, as the read-only thread that mirrors their session shows them."""
 
+import json
 from collections.abc import Mapping
+from pathlib import Path
 
 import httpx
 import pytest
@@ -8,7 +10,7 @@ from fastapi import FastAPI
 
 from openswe.claude_code import hooks
 from openswe.claude_code.hooks import HOOK_EVENT, SessionMirror, ToolReturned
-from openswe.claude_code.routes import router
+from openswe.claude_code.routes import hook_settings, router
 from openswe.claude_code.sync_tokens import ClaudeCodeSyncToken
 from openswe.transcript.snapshot import load_snapshot
 from openswe.users import User
@@ -172,3 +174,15 @@ def test_the_pull_request_a_tool_call_ties_the_session_to(
     )
     assert isinstance(event, ToolReturned)
     assert event.pull_request_url() == expected
+
+
+def test_plugin_forwards_every_mirrored_event_with_its_timeout() -> None:
+    plugin_hooks = json.loads(
+        (Path(__file__).parents[2] / "claude-code-plugin/hooks/hooks.json").read_text()
+    )["hooks"]
+    settings_hooks = hook_settings("secret")["hooks"]
+
+    assert plugin_hooks.keys() == settings_hooks.keys()
+    for event, [group] in plugin_hooks.items():
+        [handler] = group["hooks"]
+        assert handler["timeout"] == settings_hooks[event][0]["hooks"][0]["timeout"]

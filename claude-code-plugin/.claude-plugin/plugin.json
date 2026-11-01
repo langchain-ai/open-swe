@@ -1,0 +1,26 @@
+{
+  "name": "open-swe",
+  "displayName": "Open SWE",
+  "version": "0.1.0",
+  "description": "Mirror Claude Code sessions into Open SWE threads and use Open SWE's tools from Claude Code",
+  "author": {
+    "name": "LangChain"
+  },
+  "repository": "https://github.com/langchain-ai/open-swe",
+  "license": "MIT",
+  "userConfig": {
+    "server_url": {
+      "type": "string",
+      "title": "Open SWE URL",
+      "description": "Origin of your Open SWE deployment",
+      "default": "https://openswe.langchain.dev"
+    },
+    "token": {
+      "type": "string",
+      "title": "Machine token",
+      "description": "Created under Settings \u2192 Claude Code in the Open SWE dashboard",
+      "required": true,
+      "sensitive": true
+    }
+  }
+}

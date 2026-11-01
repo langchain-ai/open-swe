@@ -1,0 +1,14 @@
+{
+  "name": "open-swe",
+  "description": "Open SWE's Claude Code plugin",
+  "owner": {
+    "name": "Open SWE"
+  },
+  "plugins": [
+    {
+      "name": "open-swe",
+      "source": "./claude-code-plugin",
+      "description": "Mirror Claude Code sessions into Open SWE threads and use Open SWE's tools from Claude Code"
+    }
+  ]
+}
