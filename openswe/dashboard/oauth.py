@@ -268,7 +268,15 @@ async def enforce_github_login_gate(login: str) -> None:
     raise HTTPException(403, "your GitHub account is not authorized")
 
 
-def issue_session(*, login: str, email: str | None, avatar_url: str | None, user_id: str) -> str:
+def issue_session(
+    *,
+    login: str,
+    email: str | None,
+    avatar_url: str | None,
+    user_id: str,
+    provider: Literal["github", "langsmith"] = "github",
+    langsmith_subject: str | None = None,
+) -> str:
     now = int(time.time())
     payload = {
         "sub": login,
@@ -277,7 +285,10 @@ def issue_session(*, login: str, email: str | None, avatar_url: str | None, user
         "user_id": user_id,
         "iat": now,
         "exp": now + SESSION_TTL_SECONDS,
+        "purpose": "session",
     }
+    if provider == "langsmith":
+        payload.update(provider=provider, langsmith_subject=langsmith_subject)
     return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
 
 
@@ -299,9 +310,12 @@ def session_user_id(session: dict[str, Any]) -> UUID | None:
 
 def decode_session(token: str) -> dict[str, Any]:
     try:
-        return jwt.decode(token, _secret(), algorithms=[JWT_ALG])
+        payload = jwt.decode(token, _secret(), algorithms=[JWT_ALG])
     except jwt.PyJWTError as e:
         raise HTTPException(401, f"invalid session: {e}") from e
+    if "challenge" in payload or payload.get("purpose", "session") != "session":
+        raise HTTPException(401, "invalid session purpose")
+    return payload
 
 
 def new_state_nonce() -> str:
@@ -326,6 +340,9 @@ def issue_state(
     nonce_hash: str,
     handoff_challenge: str | None = None,
     handoff_port: int | None = None,
+    provider: Literal["github", "langsmith"] = "github",
+    encrypted_code_verifier: str | None = None,
+    redirect_uri: str | None = None,
 ) -> str:
     now = int(time.time())
     payload: dict[str, Any] = {
@@ -334,6 +351,12 @@ def issue_state(
         "iat": now,
         "exp": now + STATE_TTL_SECONDS,
     }
+    if provider == "langsmith":
+        payload.update(
+            provider=provider,
+            encrypted_code_verifier=encrypted_code_verifier,
+            redirect_uri=redirect_uri,
+        )
     if handoff_challenge and handoff_port:
         payload["handoff_challenge"] = handoff_challenge
         payload["handoff_port"] = handoff_port
@@ -424,17 +447,30 @@ def issue_desktop_handoff(
     avatar_url: str | None,
     challenge: str,
     user_id: str,
+    provider: Literal["github", "langsmith"] = "github",
+    langsmith_subject: str | None = None,
 ) -> str:
     """Mint the code the browser hands back after a desktop login."""
-    return _mint_handoff(
-        challenge=challenge,
-        claims={"sub": login, "email": email, "avatar_url": avatar_url, "user_id": user_id},
-    )
+    claims: dict[str, object] = {
+        "sub": login,
+        "email": email,
+        "avatar_url": avatar_url,
+        "user_id": user_id,
+        "purpose": "login",
+    }
+    if provider == "langsmith":
+        claims.update(provider=provider, langsmith_subject=langsmith_subject)
+    return _mint_handoff(challenge=challenge, claims=claims)
 
 
 def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
     """Mint the session a desktop handoff code was issued for."""
     payload = _decode_handoff(code=code, verifier=verifier)
+    if payload.get("purpose") != "login":
+        raise HTTPException(400, "handoff purpose mismatch")
+    provider = payload.get("provider", "github")
+    if provider not in {"github", "langsmith"}:
+        raise HTTPException(400, "invalid handoff provider")
     login = payload.get("sub")
     user_id = payload.get("user_id")
     if not isinstance(login, str) or not login or not isinstance(user_id, str) or not user_id:
@@ -446,6 +482,8 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
         email=email if isinstance(email, str) else None,
         avatar_url=avatar_url if isinstance(avatar_url, str) else None,
         user_id=user_id,
+        provider=provider,
+        langsmith_subject=payload.get("langsmith_subject"),
     )
 
 
@@ -493,13 +531,18 @@ def build_settings_url() -> str | None:
     return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
 
 
-def require_session(
+async def require_session(
     request: HTTPConnection, _cookie: str | None = Depends(SESSION_COOKIE)
 ) -> dict[str, Any]:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise HTTPException(401, "not authenticated")
     session = decode_session(token)
+    from openswe.dashboard.principal import DashboardPrincipal
+
+    principal = DashboardPrincipal.from_session(session)
+    principal.authorize_path(request.url.path, request.scope.get("method", "GET"))
+    await principal.authorize()
     bind_audit_session(request, session)
     return session
 

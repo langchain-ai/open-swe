@@ -122,7 +122,7 @@ async def slack_callback(
         _clear_slack_state_cookie(response)
         return response
 
-    session = require_session(request)
+    session = await require_session(request)
     nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(SLACK_STATE_COOKIE_NAME)
     if (

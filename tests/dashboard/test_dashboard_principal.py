@@ -55,3 +55,23 @@ def test_github_thread_identity_preserves_attribution(monkeypatch):
     assert principal.sender_id == "github:Alice"
     assert principal.admin
     principal.authorize("system")
+
+
+def test_langsmith_login_does_not_enable_agent_execution():
+    user_id = "00000000-0000-0000-0000-000000000001"
+    session = {
+        "provider": "langsmith",
+        "sub": f"user:{user_id}",
+        "user_id": user_id,
+        "langsmith_subject": "external-user",
+    }
+    principal = DashboardPrincipal.from_session(session)
+    principal.authorize_path("/dashboard/api/me", "GET")
+    principal.authorize_path("/dashboard/api/auth/logout", "POST")
+    for path in ("/dashboard/api/threads", "/dashboard/api/bridges", "/dashboard/api/profile"):
+        with pytest.raises(HTTPException) as exc:
+            principal.authorize_path(path, "POST")
+        assert exc.value.status_code == 403
+    with pytest.raises(HTTPException) as exc:
+        Principal.of_person(session)
+    assert exc.value.status_code == 403
