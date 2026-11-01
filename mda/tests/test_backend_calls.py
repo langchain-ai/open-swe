@@ -2109,6 +2109,7 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
     ("status", "message", "retries"),
     [
         (400, "No tool output found for function call call_1", False),
+        (400, "No tool output found for function call call_1 content_policy", False),
         (400, "No tool call found for function call output call_1", False),
         (400, "unexpected `tool_use_id` found in `tool_result` blocks", False),
         (400, "tool_use ids were found without `tool_result` blocks", False),
@@ -2150,6 +2151,101 @@ async def test_mda_does_not_retry_tool_pairing_errors(
         with pytest.raises(type(error)) as caught:
             await middleware.awrap_model_call(request, handler)
         assert caught.value is error
+
+
+@pytest.mark.parametrize(
+    ("status", "message", "sticky"),
+    [
+        (400, "This content was flagged for possible cybersecurity risk", True),
+        (400, "content_policy", True),
+        (400, "invalid_prompt", True),
+        (400, "Anthropic refusal", True),
+        (503, "provider unavailable", False),
+    ],
+)
+async def test_content_refusal_fallback_is_scoped_to_the_run_and_context(
+    monkeypatch: pytest.MonkeyPatch, status: int, message: str, sticky: bool
+) -> None:
+    from langchain.agents.middleware.types import ExtendedModelResponse, ModelRequest, ModelResponse
+    from rt.outbox import OUTBOX_KEY
+    from runtime_api.loop import RUN_STARTED, RunStarted
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    primary = FakeListChatModel(responses=["primary"])
+    fallback = FakeListChatModel(responses=["fallback"])
+    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: fallback)
+    error_class = (
+        anthropic.BadRequestError if message == "Anthropic refusal" else openai.APIStatusError
+    )
+    error = error_class(
+        message,
+        response=httpx2.Response(
+            status, request=httpx2.Request("POST", "https://provider.invalid")
+        ),
+        body={"stop_reason": "refusal"} if message == "Anthropic refusal" else {},
+    )
+    backend = _run_backend("token", invocation_id="turn")
+    middleware = BackendRunMiddleware(backend)
+    state: RunState = {
+        "messages": [],
+        "open_swe_state": {"existing": "kept"},
+        "open_swe_call": ModelCall(
+            system_prompt="test",
+            model=None,
+            fallback=ModelSpec(model_id="fallback", kwargs={}),
+            use_gateway=False,
+        ).model_dump(mode="json"),
+    }
+    backend.outbox.notify(RUN_STARTED, RunStarted(run_id="run-1", humans=[]))
+
+    async def invoke(request: ModelRequest) -> ModelResponse:
+        if request.model is primary:
+            raise error
+        return ModelResponse(result=[AIMessage(content="fallback")])
+
+    handler = AsyncMock(side_effect=invoke)
+    response = await middleware.awrap_model_call(
+        ModelRequest(model=primary, messages=[], state=state), handler
+    )
+    assert isinstance(response, ExtendedModelResponse)
+    assert response.model_response.result[0].content == "fallback"
+    assert response.command is not None and isinstance(response.command.update, dict)
+    assert OUTBOX_KEY in response.command.update
+    update = response.command.update.get("open_swe_state", {})
+    assert isinstance(update, dict)
+    state["open_swe_state"].update(update)
+    assert state["open_swe_state"]["existing"] == "kept"
+    assert bool(state["open_swe_state"].get("primary_refused")) is sticky
+    handler.reset_mock()
+    await middleware.awrap_model_call(
+        ModelRequest(model=primary, messages=[], state=state), handler
+    )
+    assert [call.args[0].model for call in handler.call_args_list] == (
+        [fallback] if sticky else [primary, fallback]
+    )
+
+    fresh: RunState = {**state, "open_swe_state": {}}
+    handler.reset_mock()
+    await middleware.awrap_model_call(
+        ModelRequest(model=primary, messages=[], state=fresh), handler
+    )
+    assert handler.call_args_list[0].args[0].model is primary
+
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-2")
+    handler.reset_mock()
+    await middleware.awrap_model_call(
+        ModelRequest(model=primary, messages=[], state=state), handler
+    )
+    assert handler.call_args_list[0].args[0].model is primary
+
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    cast("dict[str, object]", state)["_summarization_event"] = {"cutoff_index": 4}
+    handler.reset_mock()
+    await middleware.awrap_model_call(
+        ModelRequest(model=primary, messages=[], state=state), handler
+    )
+    assert handler.call_args_list[0].args[0].model is primary
 
 
 async def test_a_model_call_paused_for_a_connection_is_not_retried_on_the_fallback(
