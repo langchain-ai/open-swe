@@ -21,9 +21,14 @@ Open SWE may approve a pull request when it fits one of these and has no unresol
 
 5. **Automated LangChain/LangGraph dependency refreshes only.**
    PRs produced by the scheduled LangChain dependency-refresh automation, confined to `pyproject.toml`, `uv.lock`, `mda/pyproject.toml`, and `mda/uv.lock`.
-   Manifest edits may only raise existing `langchain`, `langchain-*`, `langgraph`, or `langgraph-*` dependency versions within the existing major version; lockfile changes must follow solely from those targeted upgrades.
+   Manifest edits may only raise existing `langchain`, `langchain-*`, `langgraph`, or `langgraph-*` dependency versions between stable releases within the existing major version; for `0.x` dependencies, the minor version must also remain unchanged.
+   Any prerelease or development-version change requires human review, even on an already opted-in track.
+   Lockfile changes must be reproducible from the base lockfiles using only the eligible targeted upgrades, without a blanket upgrade or unrelated lockfile regeneration.
+   The PR must enumerate every added, removed, or version-changed transitive package with its before/after versions and a dependency path from an upgraded direct dependency; each change must be required by a changed dependency constraint, not merely reachable from an upgraded package.
+   Transitive upgrades must also be stable-to-stable within the existing major version (and minor version for `0.x`); new or removed transitive packages require human review.
+   Unexplained changes, changes to unrelated package records or lockfile metadata, and missing reproducibility or dependency evidence require human review.
    Preserve extras, Python requirements, compatibility caps, dependency groups, and source overrides.
-   Do not add or remove dependencies, change vendored code, or introduce a new prerelease track; updates within an already opted-in prerelease track are allowed.
+   Do not add or remove direct dependencies or change vendored code.
    Require all required checks and test jobs to complete successfully on the current PR head and no unresolved review findings.
    Missing, pending, cancelled, or failed checks do not qualify.
    This exception waives only the dependency-manifest and lockfile exclusion below; all other human-review requirements still apply.
