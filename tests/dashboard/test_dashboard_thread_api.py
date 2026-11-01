@@ -311,7 +311,7 @@ async def test_desktop_experience_keeps_authenticated_identity_on_resume(
     assert metadata["owner_login"] == subject
     if langsmith:
         assert metadata["owner_user_id"] == subject.removeprefix("user:")
-    assert metadata["visibility"] == "private"
+    assert metadata["visibility"] == ("private" if local or langsmith else "public")
     if local:
         assert metadata["sandbox_id"] == bridge.sandbox_id
     else:

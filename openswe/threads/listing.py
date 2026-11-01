@@ -838,7 +838,21 @@ async def list_dashboard_pinned_threads(
     email: str | None = None,
     experience: DashboardThreadExperience | None = None,
 ) -> list[dict[str, Any]]:
-    return await _pinned_thread_summaries(langgraph_client(), login, email, experience=experience)
+    if experience is not None:
+        threads = await list_dashboard_pinned_threads(login, email=email)
+        return [
+            {
+                **thread,
+                "taskWorkers": [
+                    worker
+                    for worker in thread.get("taskWorkers", [])
+                    if worker.get("experience", "coding") == experience
+                ],
+            }
+            for thread in threads
+            if thread.get("experience", "coding") == experience
+        ]
+    return await _pinned_thread_summaries(langgraph_client(), login, email)
 
 
 async def list_dashboard_thread_repos(
