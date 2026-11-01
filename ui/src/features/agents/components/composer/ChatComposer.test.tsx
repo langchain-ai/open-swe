@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ChatComposer, buildCommandItems } from "./ChatComposer"
+import { api } from "@/lib/api"
 import { AgentWorkspaceProvider } from "@/features/agents/lib/agentWorkspace"
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import { replaceTextRange } from "./composerTrigger"
@@ -273,6 +274,62 @@ describe("ChatComposer options", () => {
       await screen.findByRole("menuitem", { name: "Attach images" })
     ).toBeTruthy()
     expect(screen.queryByRole("menuitem", { name: /plan mode/i })).toBeNull()
+  })
+})
+
+describe("ChatComposer people autocomplete", () => {
+  it("dismisses an empty people menu with Escape without stopping a run", async () => {
+    vi.spyOn(api, "listSlackUsers").mockResolvedValue({ users: [] })
+    renderComposer(true, {
+      restoreDraft: { key: 1, text: "@nobody", images: [] },
+    })
+    await screen.findByText("No matching people or files.")
+    fireEvent.keyDown(screen.getByTestId("composer-editor"), {
+      key: "Escape",
+      code: "Escape",
+    })
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    expect(cancelThread).not.toHaveBeenCalled()
+    vi.restoreAllMocks()
+  })
+
+  it("inserts a canonical Slack mention by keyboard and submits it", async () => {
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(),
+    })
+    Object.defineProperty(Range.prototype, "getClientRects", {
+      configurable: true,
+      value: () => [],
+    })
+    vi.spyOn(api, "listSlackUsers").mockResolvedValue({
+      users: [
+        {
+          id: "U123BOB",
+          name: "bob",
+          display_name: "Bob",
+          real_name: "Bob Smith",
+        },
+      ],
+    })
+    vi.spyOn(api, "slackUserName").mockResolvedValue({ name: "Bob" })
+    const onSubmit = vi.fn()
+    renderComposer(false, {
+      onSubmit,
+      restoreDraft: { key: 1, text: "Ask @bob", images: [] },
+    })
+    await screen.findByRole("option", { name: /@Bob @bob/ })
+    const editor = screen.getByTestId("composer-editor")
+    fireEvent.keyDown(editor, { key: "Tab", code: "Tab" })
+    await screen.findByText("@Bob")
+    fireEvent.keyDown(editor, { key: "Enter", code: "Enter" })
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ text: "Ask <@U123BOB>" }),
+        expect.anything()
+      )
+    )
+    vi.restoreAllMocks()
   })
 })
 

@@ -2,12 +2,20 @@ import { Button } from "@langchain/macaw-components/Button"
 import { memo, useLayoutEffect, useRef } from "react"
 import { FileIcon } from "@phosphor-icons/react/dist/ssr/File"
 import { HashIcon } from "@phosphor-icons/react/dist/ssr/Hash"
+import { UserIcon } from "@phosphor-icons/react/dist/ssr/User"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 
 import type { ComposerTriggerKind } from "./composerTrigger"
 import { cn } from "@/lib/utils"
 
 export type ComposerCommandItem =
+  | {
+      id: string
+      type: "slack-user"
+      userId: string
+      label: string
+      description: string
+    }
   | {
       id: string
       type: "path"
@@ -77,7 +85,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
       role="listbox"
       aria-label={
         triggerKind === "path"
-          ? "Files"
+          ? "People and files"
           : triggerKind === "skill-command"
             ? "Skills"
             : triggerKind === "slack-channel"
@@ -115,6 +123,12 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
                 <FileIcon
                   className="size-3.5 shrink-0 text-icon-tertiary"
                   weight="regular"
+                />
+              ) : item.type === "slack-user" ? (
+                <UserIcon
+                  size={14}
+                  weight="regular"
+                  className="shrink-0 text-icon-tertiary"
                 />
               ) : item.type === "slack-channel" ? (
                 <HashIcon

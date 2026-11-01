@@ -93,6 +93,36 @@ async def client(
         yield client
 
 
+async def test_people_directory_pages_and_excludes_bots_and_deleted_users(
+    client: httpx.AsyncClient, directory: dict[str, Any]
+) -> None:
+    directory["pages"] = {
+        "": {
+            "ok": True,
+            "members": [
+                {
+                    "id": "U123BOB",
+                    "name": "bob",
+                    "profile": {
+                        "display_name": "Bob",
+                        "real_name": "Bob Smith",
+                        "email": "private@example.com",
+                    },
+                },
+                {"id": "U123BOT", "name": "bot", "is_bot": True},
+                {"id": "U123OLD", "name": "old", "deleted": True},
+            ],
+            "response_metadata": {"next_cursor": "page2"},
+        },
+        "page2": {"ok": True, "members": [{"id": "U123ADA", "name": "ada"}]},
+    }
+    response = await client.get("/dashboard/api/slack/users")
+    assert response.status_code == 200
+    assert [user["id"] for user in response.json()["users"]] == ["U123ADA", "U123BOB"]
+    assert "private@example.com" not in response.text
+    assert directory["calls"] == ["", "page2"]
+
+
 async def test_admin_can_add_list_and_remove_bot(
     client: httpx.AsyncClient, directory: dict[str, Any]
 ) -> None:

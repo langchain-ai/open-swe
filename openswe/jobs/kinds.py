@@ -39,6 +39,8 @@ from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
 from openswe.merge_queue.runtime import reconcile_queue
 from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
 from openswe.monitors.delivery import poll_monitors
+from openswe.notifications.service import JOB_KIND as NOTIFICATION_FALLBACK
+from openswe.notifications.service import AppNotification
 
 __all__ = ["WORKER"]
 from openswe.reconcile import reconcile_stale_runs
@@ -250,6 +252,11 @@ async def _wake_thread(job: Job) -> None:
     logger.info("Thread woken", extra={"job_id": str(job.id), "run_id": run_id})
 
 
+@WORKER.register(NOTIFICATION_FALLBACK)
+async def notification_fallback(_job: Job) -> None:
+    await AppNotification.fallback()
+
+
 async def start_jobs() -> None:
     """Startup work: move old scheduler crons over, and keep the standing jobs in place."""
     steps: list[Callable[[], Awaitable[object]]] = [
@@ -257,6 +264,7 @@ async def start_jobs() -> None:
         import_agent_server_threads,
         start_queue,
         ensure_directory_sync,
+        lambda: queue.schedule(NOTIFICATION_FALLBACK, cron="* * * * *", key=NOTIFICATION_FALLBACK),
         schedule_slack_lost_requests,
         lambda: queue.schedule(
             THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE

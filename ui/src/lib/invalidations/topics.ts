@@ -11,6 +11,7 @@ type Topic =
   | "slack-channels"
 /** Topics whose records each have one of their own, `<topic>/<key>`. */
 type KeyedTopic =
+  | "notifications"
   | "review-styles"
   | "incidents"
   | "pull-requests"

@@ -111,6 +111,8 @@ class Topic(BaseTopic):
     ANNOUNCEMENTS: ClassVar[Topic]
     """Admin announcements and their delivery progress; admins only."""
 
+    NOTIFICATIONS: ClassVar[KeyedTopic[str]]
+
     SLACK_CHANNELS: ClassVar[Topic]
     """The Slack channel directory, after each walk over Slack."""
 
@@ -230,3 +232,14 @@ Topic.THREAD_BACKGROUND_WORK = KeyedTopic(
 )
 Topic.ANNOUNCEMENTS = AdminTopic("announcements")
 Topic.SLACK_CHANNELS = Topic("slack-channels")
+
+
+class RecipientTopic(KeyedTopic[str]):
+    async def authorize(self, session: Session, keys: set[str]) -> set[str]:
+        from openswe.dashboard.oauth import session_user_id
+
+        user_id = session_user_id(session)
+        return keys & {str(user_id)} if user_id is not None else set()
+
+
+Topic.NOTIFICATIONS = RecipientTopic("notifications")

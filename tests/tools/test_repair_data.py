@@ -83,7 +83,9 @@ async def test_sql_repair_commits_ddl_bulk_writes_and_migration_metadata(registr
     )
     assert result == {"ok": True, "row_count": 101}
     result = await execute_database_sql(
-        "UPDATE alembic_version SET version_num = 'repaired'", confirm=True
+        "UPDATE alembic_version SET version_num = 'repaired' "
+        "WHERE version_num = (SELECT min(version_num) FROM alembic_version)",
+        confirm=True,
     )
     assert result["row_count"] == 1
     await execute_database_sql("ALTER TABLE repair_example ADD COLUMN config jsonb", confirm=True)
@@ -93,7 +95,12 @@ async def test_sql_repair_commits_ddl_bulk_writes_and_migration_metadata(registr
     )
     async with postgres.connection() as conn:
         assert await conn.scalar(text("SELECT count(*) FROM repair_example")) == 101
-        assert await conn.scalar(text("SELECT version_num FROM alembic_version")) == "repaired"
+        assert (
+            await conn.scalar(
+                text("SELECT count(*) FROM alembic_version WHERE version_num = 'repaired'")
+            )
+            == 1
+        )
         assert await conn.scalar(text("SELECT config FROM repair_example LIMIT 1")) == {
             "enabled": True,
             "disabled": False,
