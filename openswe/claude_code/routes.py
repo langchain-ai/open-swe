@@ -16,9 +16,9 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, f
 from openswe.audit_logs.middleware import audit_endpoint, bind_actor
 from openswe.audit_logs.models import AuditLogEnrichments
 from openswe.claude_code.hooks import HOOK_EVENT, MIRRORED_EVENTS, SessionMirror
-from openswe.claude_code.sync_tokens import NAME_MAX_CHARS, ClaudeCodeSyncToken
+from openswe.claude_code.sync_tokens import NAME_MAX_CHARS, ClaimRedeemedError, ClaudeCodeSyncToken
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.dashboard.oauth import session_user_id
+from openswe.dashboard.oauth import ConnectClaim, session_user_id
 from openswe.database import postgres
 from openswe.github.token_auth import bearer_github_token
 from openswe.users.models import User
@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/claude-code", tags=["claude-code"])
 
 HOOKS_PATH = "/dashboard/api/claude-code/hooks"
+CONNECTIONS_PATH = "/dashboard/api/claude-code/connections"
 # Hooks run inline in Claude Code, so a slow mirror must never hold up the session.
 _HOOK_TIMEOUT_SECONDS = 5
 # Claude Code holds each batch of a message off the screen until this hook answers.
@@ -157,6 +158,40 @@ async def api_create_claude_code_token(
     logger.info(
         "Minted a Claude Code sync token",
         extra={"sync_token_id": str(token.id), "github_login": session["sub"]},
+    )
+    return MintedSyncToken(
+        **SyncTokenView.model_validate(token).model_dump(),
+        secret=secret,
+        settings=hook_settings(secret),
+    )
+
+
+@router.post("/connections", status_code=201)
+@audit_endpoint
+async def api_redeem_claude_code_claim(request: Request) -> MintedSyncToken:
+    """Mint the token a ``connect_claude_code`` claim stands for, once, for the script installing it."""
+    _require_database()
+    presented = bearer_github_token(request)
+    if presented is None:
+        raise HTTPException(401, "missing claim", headers={"WWW-Authenticate": "Bearer"})
+    claim = ConnectClaim.decode(presented)
+    owner = await User.get(claim.user_id)
+    if owner is None or not owner.github_login or owner.github_login.lower() != claim.sub.lower():
+        raise HTTPException(401, "invalid or expired claim")
+    bind_actor(
+        request,
+        user_id=owner.id,
+        enrichments=AuditLogEnrichments(actor_kind="person", actor_login=owner.github_login),
+    )
+    try:
+        token, secret = await ClaudeCodeSyncToken.create(
+            user_id=owner.id, name=claim.name, claim_id=claim.jti
+        )
+    except ClaimRedeemedError:
+        raise HTTPException(409, "this claim was already used") from None
+    logger.info(
+        "Minted a Claude Code sync token from a claim",
+        extra={"sync_token_id": str(token.id), "github_login": owner.github_login},
     )
     return MintedSyncToken(
         **SyncTokenView.model_validate(token).model_dump(),

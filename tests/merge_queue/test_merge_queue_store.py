@@ -1460,6 +1460,49 @@ async def test_native_selection_survives_restart_and_recovers_ac_before_def(queu
     )
     assert work is not None and work.dispatch
     initial = work.request
+    old = datetime.now(UTC) - timedelta(days=2)
+    async with postgres.session() as session:
+        history = Batch(
+            queue_id=queue.id,
+            request_key="historical",
+            base_sha=work.batch.base_sha,
+            policy={},
+            deadline=old,
+            max_attempts=101,
+            max_plans=0,
+            state="invalidated",
+            finished_at=old,
+        )
+        session.add(history)
+        await session.flush()
+        for number in range(1, 102):
+            attempt = Attempt(
+                batch_id=history.id,
+                request_key=str(number),
+                number=number,
+                deadline=old,
+                state="timed_out",
+                finished_at=old,
+            )
+            attempt.created_at = old
+            session.add(attempt)
+            await session.flush()
+            session.add(
+                Evidence(
+                    attempt_id=attempt.id,
+                    key="native-request",
+                    reference=initial.model_copy(
+                        update={
+                            "batch_id": history.id,
+                            "attempt_id": attempt.id,
+                            "candidate_sha": "b" * 40,
+                        }
+                    ).model_dump(mode="json"),
+                )
+            )
+    await queue.record_evidence(
+        work.attempt.id, "workflow-policy", {"revision": 1, "digest": "a" * 64}, lease
+    )
     restarted = await MergeQueue.load(queue.id, queue.workspace_id)
     assert restarted is not None
 
@@ -1488,6 +1531,24 @@ async def test_native_selection_survives_restart_and_recovers_ac_before_def(queu
         )
         is None
     )
+    with pytest.raises(RuntimeError, match="lost report"):
+        async with queue.native_check_update(native_snapshot((1, 2, 3, 4, 5, 6)), lease) as pending:
+            assert pending is not None and pending.state == "recovering"
+            assert pending.envelope.contract == initial
+            assert pending.envelope.workflow_policy_revision == 1
+            raise RuntimeError("lost report")
+    restarted = await MergeQueue.load(queue.id, queue.workspace_id)
+    assert restarted is not None
+    queue = restarted
+    async with queue.native_check_update(native_snapshot((1, 2, 3, 4, 5, 6)), lease) as replay:
+        assert replay == pending
+    async with queue.native_check_update(native_snapshot((1, 2, 3, 4, 5, 6)), lease) as repeated:
+        assert repeated is None
+    async with postgres.session() as session:
+        cancelled = await session.execute(
+            select(func.count()).select_from(Evidence).where(Evidence.key == "check-cancelled")
+        )
+        assert cancelled.scalar_one() > 1
     recovered = await queue.prepare_native_validation(
         native_snapshot((1, 3, 4, 5, 6)), 600, lease, policy=tuned, trust="trusted-policy"
     )
@@ -1529,6 +1590,12 @@ async def test_native_selection_survives_restart_and_recovers_ac_before_def(queu
     history = await queue.history(initial.batch_id)
     assert history.batch.state == "landed"
     assert [attempt.state for attempt in history.attempts] == ["failed", "succeeded"]
+    async with queue.native_check_update(
+        native_snapshot((4, 5, 6), main=recovered.request.candidate_sha), lease
+    ) as cleanup:
+        assert cleanup is not None and cleanup.state == "cancelled"
+        assert cleanup.envelope == pending.envelope
+    assert (await queue.history(initial.batch_id)).batch.state == "landed"
 
 
 @pytest.mark.parametrize(
@@ -1625,6 +1692,7 @@ async def test_native_success_cannot_authorize_stale_or_paused_work(queue, fault
         "policy_discovery",
         "policy_adoption_after_success",
         "rerun_after_success",
+        "validation_failed",
         "report_rejected",
         "issuer",
         "capacity",
@@ -1732,9 +1800,11 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
             )
         if report:
             body = json.loads(request.content)
-            assert body["dispatch_body"].encode() == next(
-                item.content for item in reversed(sent) if item.url.path.endswith("/dispatch")
-            )
+            assert body["dispatch_body"].encode() in {
+                item.content for item in sent if item.url.path.endswith("/dispatch")
+            }
+            if body["state"] in {"recovering", "cancelled"}:
+                return httpx2.Response(report_status)
             if body["state"] == "success":
                 return httpx2.Response(report_status)
         elif fault == "slow_dispatch":
@@ -1857,6 +1927,30 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
             "tested_sha": request.candidate_sha,
         }
     )
+    if fault == "validation_failed":
+        repo.validation_run.return_value = run.model_copy(update={"conclusion": "failure"})
+        await reconcile()
+        assert (await queue.history(request.batch_id)).attempts[0].state == "failed"
+        assert json.loads(sent[-1].content)["state"] == "recovering"
+        recovery_report = sent[-1].content
+        report_status = 204
+        await reconcile()
+        assert sent[-1].content == recovery_report
+        before = len(sent)
+        await reconcile()
+        assert len(sent) == before
+        report_status = 502
+        repo.native_queue.return_value = native_snapshot((1, 3, 4, 5, 6))
+        await reconcile()
+        history = await queue.history(request.batch_id)
+        assert [attempt.state for attempt in history.attempts] == ["failed", "running"]
+        assert json.loads(sent[-1].content)["state"] == "cancelled"
+        assert all(
+            json.loads(r.content)["state"] != "success"
+            for r in sent
+            if r.url.path.endswith("/check-reports")
+        )
+        return
     with pytest.raises(httpx2.HTTPStatusError):
         await reconcile()
     assert (await queue.history(request.batch_id)).attempts[0].state == "succeeded"
@@ -2001,3 +2095,50 @@ async def test_configuration_fences_stale_workers_and_serializes_check_publicati
     await queue.release(new_lease)
     with pytest.raises(LeaseLost, match="disabled or invalid"):
         await queue.claim(uuid7(), timedelta(minutes=1), config=changed_trust)
+
+
+@pytest.mark.parametrize("expiry", ["attempt", "batch", "superseded"])
+async def test_native_check_expiry_does_not_cancel_live_policy_replacements(queue, expiry):
+    policy, lease, operator = await enable_native_validation(queue)
+    snapshot = native_snapshot()
+    work = await queue.prepare_native_validation(
+        snapshot, 600, lease, policy=policy, trust="trusted-policy"
+    )
+    assert work is not None
+    async with postgres.session() as session:
+        if expiry == "superseded":
+            await session.execute(
+                update(Batch)
+                .where(Batch.id == work.batch.id)
+                .values(
+                    policy={
+                        **work.batch.policy,
+                        "superseded_attempts": 1,
+                        "trust": "replacement-policy",
+                    },
+                )
+            )
+        row = Batch if expiry == "batch" else Attempt
+        await session.execute(
+            update(row)
+            .where(row.id == (work.batch.id if row is Batch else work.attempt.id))
+            .values(
+                deadline=func.clock_timestamp() - timedelta(seconds=1),
+            )
+        )
+    if expiry == "superseded":
+        await queue.finish_native_validation(work, {}, lease, succeeded=False)
+        replacement = await queue.prepare_native_validation(
+            snapshot, 600, lease, policy=policy, trust="replacement-policy"
+        )
+        assert replacement is not None and replacement.attempt.id != work.attempt.id
+    await queue.set_paused(True, actor=operator.id)
+    async with queue.native_check_update(snapshot, lease) as cleanup:
+        if expiry == "superseded":
+            assert cleanup is None
+        else:
+            assert cleanup is not None and cleanup.state == "cancelled"
+    if expiry == "superseded":
+        async with queue.native_check_update(native_snapshot(()), lease) as cleanup:
+            assert cleanup is not None and cleanup.state == "cancelled"
+    assert (await queue.history(work.batch.id)).attempts[0].state == "timed_out"

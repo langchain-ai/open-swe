@@ -3,7 +3,7 @@
  * server. Skips straight from /auth/login to the loopback redirect, then logs
  * every proxied request so you can see the session cookie arrive.
  *
- *   node desktop/test/manual/stub-backend.cjs 4999
+ *   node desktop/test/manual/stub-backend.cts 4999
  *   OPEN_SWE_BACKEND_URL=http://127.0.0.1:4999 pnpm --dir desktop run dev
  */
 const http = require("node:http");

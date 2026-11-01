@@ -1,4 +1,3 @@
-const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 
@@ -15,8 +14,4 @@ execFileSync(
     cwd: root,
     stdio: "inherit",
   },
-);
-fs.copyFileSync(
-  path.join(root, "src", "local-thread-store.cjs"),
-  path.join(root, "build", "local-thread-store.cjs"),
 );

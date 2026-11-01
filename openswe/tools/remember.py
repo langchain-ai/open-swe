@@ -1,6 +1,5 @@
-"""Tools: keep what a thread learned, for its person or for the workspace's curator."""
+"""Tools: keep a memory for the person a thread works for, and offer it to the curator."""
 
-from typing import Literal
 from uuid import UUID
 
 from langgraph.config import get_config
@@ -14,20 +13,16 @@ from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User
 from openswe.utils.json_types import as_json_object
 
+# Where only its person writes, a memory may apply to them at once; anywhere else
+# someone else's words could reach it, so it waits for the curator instead.
 _PERSONAL = Policy(trusted="private", actor="owner", sole=unchanged)
-_WORKSPACE = Policy(trusted="anywhere")
+_ANYWHERE = Policy(trusted="anywhere")
 
 
 @expose_mcp()
-# A workspace memory changes nothing until the curator adopts it, and the prompt it
-# then publishes is audited; only a personal one changes how a person's runs go.
-@audit_tool(reads={"workspace"}, read_key="scope")
-@access(
-    _WORKSPACE, per_call=lambda args: _PERSONAL if args.get("scope") == "personal" else _WORKSPACE
-)
-async def remember(
-    text: str, scope: Literal["personal", "workspace"], share_with_workspace: bool = False
-) -> dict[str, object]:
+@audit_tool()
+@access(_ANYWHERE)
+async def remember(text: str) -> dict[str, object]:
     """Implement the `remember` tool."""
     body = text.strip()
     if not body:
@@ -37,20 +32,16 @@ async def remember(
     cfg = RunConfig.from_runtime()
     login = await resolve_github_login(as_json_object(get_config()))
     person = await User.for_login("github", login) if login else None
-    if scope == "personal" and person is None:
-        return {
-            "ok": False,
-            "error": "Could not tell whose memory this is; personal memories need a person.",
-        }
+    run_access = await resolve_access(cfg)
+    personal = person is not None and run_access.mode(_PERSONAL) is not None
     try:
         row = await MEMORIES.save(
-            scope=scope,
+            scope="personal" if personal else "workspace",
             body=body,
             person=person.id if person else None,
             workspace=cfg.workspace_slug,
             thread_id=cfg.thread_id,
-            from_private_thread=(await resolve_access(cfg)).private,
-            shared=share_with_workspace,
+            from_private_thread=run_access.private,
         )
     except UnknownWorkspaceError:
         return {"ok": False, "error": "This thread has no workspace to remember it for."}
@@ -60,29 +51,16 @@ async def remember(
         "status": row.status,
         "applies": (
             "to this person's future runs now; follow it for the rest of this thread too"
-            if scope == "personal"
-            else "to this person's runs in this workspace as if personal until the curator "
-            "processes it, and to everyone's once it adopts it"
-            if row.from_private_thread
-            and person is not None
-            and person.typed_preferences.experimental_memory
-            else "once the workspace's curator adopts it, never sooner"
-        ),
-        **(
-            {"held": "Saved in a private thread and not shared: the curator will never see it."}
-            if row.status == "held"
-            else {}
+            if personal
+            else "once the workspace's curator adopts it, never sooner: others write here"
         ),
     }
 
 
 @expose_mcp()
-# Withdrawing a workspace memory only asks the curator, like remembering one.
-@audit_tool(reads={"workspace"}, read_key="scope")
-@access(
-    _WORKSPACE, per_call=lambda args: _PERSONAL if args.get("scope") == "personal" else _WORKSPACE
-)
-async def forget(memory_id: str, scope: Literal["personal", "workspace"]) -> dict[str, object]:
+@audit_tool()
+@access(_PERSONAL)
+async def forget(memory_id: str) -> dict[str, object]:
     """Implement the `forget` tool."""
     login = await resolve_github_login(as_json_object(get_config()))
     person = await User.for_login("github", login) if login else None
@@ -92,9 +70,9 @@ async def forget(memory_id: str, scope: Literal["personal", "workspace"]) -> dic
         parsed = UUID(memory_id)
     except ValueError:
         return {"ok": False, "error": "memory_id is not a memory id"}
-    withdrawal = await MEMORIES.withdraw(parsed, person.id, scope)
+    withdrawal = await MEMORIES.withdraw(parsed, person.id)
     if withdrawal is None:
-        return {"ok": False, "error": f"No {scope} memory you saved has that id."}
+        return {"ok": False, "error": "No memory you saved has that id."}
     return {
         "ok": True,
         "memory_id": memory_id,
@@ -104,7 +82,5 @@ async def forget(memory_id: str, scope: Literal["personal", "workspace"]) -> dic
             if withdrawal == "deleted"
             else "at once for this person's runs, and the workspace's curator decides what "
             "leaves its prompt"
-            if scope == "personal"
-            else "once the workspace's curator decides it, even if it already adopted it"
         ),
     }

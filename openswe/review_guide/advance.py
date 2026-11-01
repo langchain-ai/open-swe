@@ -41,7 +41,9 @@ async def approve_click(
         return None
     await session.mark_seen(walk.head_sha, walk.merge_base_sha, approval.lines)
     await session.save_walk(walk)
-    await retire(session.slack_channel_id, shown.message_ts, shown.message_text, "✓ Seen")
+    await retire(
+        session.slack_channel_id, shown.message_ts, shown.message_text, "✓ Seen", shown=shown
+    )
     return approval
 
 
@@ -50,7 +52,7 @@ async def _guide_turn(session: ReviewGuideSession, approve_ts: str = "") -> None
 
 
 async def _post(session: ReviewGuideSession, walk: Walk, shown: OnScreen) -> bool:
-    message_ts = await post_with_buttons(session, shown.message_text, [NEXT])
+    message_ts = await post_with_buttons(session, shown.message_text, [NEXT], shown=shown)
     if not message_ts:
         return False
     shown.message_ts = message_ts
