@@ -53,9 +53,13 @@ RETIRED_PROFILE_KEYS = frozenset(
 
 
 class ProfileRecords(UserRecords):
-    async def allows_auto_human_review(self, login: str) -> bool:
+    async def allows_auto_human_review(self, login: str, repository: str) -> bool:
         profile = await self.get(login) or {}
-        return profile.get("auto_human_review_enabled", True) is not False
+        if profile.get("auto_human_review_enabled", True) is False:
+            return False
+        return repository.lower() not in {
+            repo.lower() for repo in profile.get("auto_human_review_excluded_repos", [])
+        }
 
     @staticmethod
     def cache_key(login: str) -> str:
@@ -87,6 +91,7 @@ class ProfileUpdate(BaseModel):
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
     auto_human_review_enabled: bool = True
+    auto_human_review_excluded_repos: list[str] = Field(default_factory=list)
     concierge_mode: bool | None = None
     pr_failure_reactions: bool | None = None
     experimental_fleet: bool | None = None
@@ -97,6 +102,20 @@ class ProfileUpdate(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     slack_onboarding_dismissed: bool = False
+
+    @field_validator("auto_human_review_excluded_repos")
+    @classmethod
+    def validate_review_excluded_repos(cls, value: list[str]) -> list[str]:
+        repositories = []
+        for repo in value:
+            normalized = repo.strip().lower()
+            parts = normalized.split("/")
+            if len(parts) != 2 or any(
+                not part or any(char.isspace() for char in part) for part in parts
+            ):
+                raise ValueError("Review exclusions must be owner/name repositories")
+            repositories.append(normalized)
+        return sorted(set(repositories))
 
     @field_validator("workspace_default_repos")
     @classmethod
@@ -156,6 +175,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.auto_human_review_enabled
             if "auto_human_review_enabled" in update.model_fields_set
             else existing.get("auto_human_review_enabled", True)
+        ),
+        "auto_human_review_excluded_repos": (
+            update.auto_human_review_excluded_repos
+            if "auto_human_review_excluded_repos" in update.model_fields_set
+            else existing.get("auto_human_review_excluded_repos", [])
         ),
         "draft_prs": (
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)

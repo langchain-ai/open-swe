@@ -4914,6 +4914,13 @@
             "title": "Auto Human Review Enabled",
             "type": "boolean"
           },
+          "auto_human_review_excluded_repos": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Auto Human Review Excluded Repos",
+            "type": "array"
+          },
           "base_branch": {
             "anyOf": [
               {

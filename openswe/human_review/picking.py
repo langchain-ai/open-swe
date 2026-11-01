@@ -344,7 +344,9 @@ async def _choose_reviewer(
             skipped[login] = "no_open_swe_account"
         elif _is_bot(login):
             skipped[login] = "bot"
-        elif not await PROFILES.allows_auto_human_review(user.github_login or login):
+        elif not await PROFILES.allows_auto_human_review(
+            user.github_login or login, f"{pr.owner}/{pr.repo}"
+        ):
             skipped[login] = "opted_out"
         elif request.is_author(user.id, login):
             skipped[login] = "author"

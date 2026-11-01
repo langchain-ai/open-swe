@@ -772,8 +772,11 @@ async def assign(
     user = await User.for_login("github", github_login)
     if user is None:
         return _failure(f"@{github_login} is not an Open SWE user; pick someone who is.")
+    pr = request.pull_request
     if not replace:
-        if not await PROFILES.allows_auto_human_review(user.github_login or github_login):
+        if not await PROFILES.allows_auto_human_review(
+            user.github_login or github_login, f"{pr.owner}/{pr.repo}"
+        ):
             return _failure(
                 f"@{github_login} opted out of automatic review picks; pick someone else."
             )
@@ -792,7 +795,6 @@ async def assign(
     reviewer = await resolve_writer(request, user)
     if isinstance(reviewer, Outcome):
         return _failure(reviewer.message)
-    pr = request.pull_request
     label = f"<{pr.url}|{pr.label}>"
     theirs = coverage.of(github_login) if coverage is not None else []
     if replace and (

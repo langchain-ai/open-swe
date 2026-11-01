@@ -126,6 +126,9 @@ This affects reviewer assignment, not the two-hour auto-merge deadline.
 - **Allow automatic review picks** in dashboard Settings controls whether Open SWE can automatically assign you, including fallback agent picks.
   It defaults to on and can also be changed with `save_user_settings` using `auto_human_review_enabled`.
   Turning it off does not prevent someone explicitly naming you as a reviewer or you signing up yourself.
+- `auto_human_review_excluded_repos` in `save_user_settings` excludes specific `owner/repo` repositories from automatic picks without disabling other repositories.
+  It is a complete list; preserve existing exclusions when adding one, or pass an empty list to clear it.
+  Repository names are case-insensitive; explicit named assignments and voluntary sign-ups still work.
 - **I'll review** adds the clicker as a reviewer and requests their review on GitHub.
   Any number of people may sign up; they need write access and cannot be the author.
 - **Dismiss** closes the card; anyone may click it.
