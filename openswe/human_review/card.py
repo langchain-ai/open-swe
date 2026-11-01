@@ -141,6 +141,11 @@ def _buttons(request: HumanReviewRequest) -> list[ButtonElement]:
             style="primary",
         ),
         button(
+            "Review in code channel",
+            action_id="open_swe_option_select_code_channel",
+            value=_button_value("code_channel", request),
+        ),
+        button(
             "Dismiss",
             action_id="open_swe_option_select_dismiss",
             value=_button_value("dismiss", request),
