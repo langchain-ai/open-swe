@@ -21,6 +21,7 @@ from openswe.config import ENV
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.users.models import User
+from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.workspaces.rows import WorkspaceRow
 
 # A personal memory applies to its person; a workspace one only reaches the curator.
@@ -168,11 +169,14 @@ class Memories:
         workspace: str | None,
         thread_id: str | None,
         from_private_thread: bool,
+        reflection_thread_id: str | None = None,
     ) -> MemoryRow:
         """Keep a memory for the curator; a workspace one never takes effect without it.
 
         A personal memory keeps the workspace it was saved in when there is one, for that
-        workspace's curator; a workspace memory needs it.
+        workspace's curator; a workspace memory needs it. ``reflection_thread_id``: the
+        fork of the idle thread ``thread_id`` that saved it (``openswe.memories.reflection``).
+        Admins see each one saved in the event log, never who saved it.
         """
         async with postgres.session() as session:
             workspace_id = (
@@ -192,7 +196,38 @@ class Memories:
                 updated_by=person,
             )
             session.add(row)
+        await EventLog.append(
+            "memory",
+            {
+                "memory_id": str(row.id),
+                "scope": row.scope,
+                "status": row.status,
+                "workspace": workspace,
+                "thread_id": thread_id,
+                "from_private_thread": from_private_thread,
+                "saved_by_idle_reflection": reflection_thread_id is not None,
+                "reflection_thread_id": reflection_thread_id,
+                "body": None if from_private_thread else body,
+            },
+            event_type="memory.saved",
+            delivery_id=str(row.id),
+            refs=EventRefs(workspace_id=workspace_id),
+        )
         return row
+
+    async def saved_in_thread(self, thread_id: str) -> list[str]:
+        """What was remembered in ``thread_id`` and its reflection forks, oldest first."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(MemoryRow.body)
+                .where(
+                    MemoryRow.thread_id == thread_id,
+                    MemoryRow.withdrawal_requested.is_(False),
+                )
+                .order_by(MemoryRow.created_at)
+                .limit(_CURATOR_PAGE)
+            )
+            return list(rows)
 
     async def personal(
         self, person: UUID | None, *, curated_in: str | None = None

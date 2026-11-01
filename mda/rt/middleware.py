@@ -790,6 +790,35 @@ class RuntimeToolsMiddleware(AgentMiddleware):
         return await reported(self._backend, request, handler)
 
 
+class RunnableToolsMiddleware(AgentMiddleware):
+    """Refuse a call of a tool the run's catalog does not let run (``runnable_tools``).
+
+    The tool stays offered, so the run's model calls start as its source thread's did
+    and read the provider's prompt cache that thread wrote.
+    """
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
+
+    def __init__(self, backend: OpenSweBackend) -> None:
+        self._backend = backend
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        runnable = self._backend.run.catalog.runnable_tools
+        name = request.tool_call["name"]
+        if runnable is None or name in runnable:
+            return await handler(request)
+        return ToolMessage(
+            content=f"{name} is disabled in this run. Only these tools run: {', '.join(runnable)}.",
+            name=name,
+            tool_call_id=request.tool_call["id"] or "",
+            status="error",
+        )
+
+
 class IncidentEvidenceMiddleware(AgentMiddleware):
     """Record each tool result of an incident run as evidence, which the result then cites.
 

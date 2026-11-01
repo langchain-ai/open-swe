@@ -5,6 +5,8 @@ Admin threads also see `workspace` events: Open SWE's own workspace activity, su
 Admin threads also see `human_review` events for request creation and changes, assignment and agent wakes, GitHub review requests, notification delivery outcomes, snoozes and declines, supplementary reviews, and scheduled/fired deadlines.
 Payloads include the request ID and PR URL; run configuration and DM bodies are excluded.
 
+Admin threads also see `memory` events: `memory.saved` for each memory a thread saves, with its scope, status, workspace and `thread_id`, and, when a fork of that idle thread saved it, `saved_by_idle_reflection` and the fork's `reflection_thread_id`; never who saved it, nor the text of one saved in a private thread.
+
 Each entry has `source`, `event_type`, `count`, and `last_received_at`.
 An event whose payload has an `action` is named `<event>.<action>`, e.g. `pull_request.opened` or `check_suite.completed`; one without keeps the bare name, e.g. `push`.
 Use it to pick `event_types` and `payload_match` for `listen_events`.

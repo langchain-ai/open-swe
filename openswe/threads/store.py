@@ -12,10 +12,13 @@ reaches MDA through MDA's trusted-backend ingress.
 import asyncio
 import json
 import logging
+import uuid
 from collections.abc import Mapping
 from typing import Final, NamedTuple
 
 import httpx
+from langgraph.constants import END
+from langgraph_sdk.errors import NotFoundError
 from pydantic import JsonValue, TypeAdapter
 
 from openswe.agent_api.client import (
@@ -119,6 +122,12 @@ class _MetadataCopies:
                 await runtime.update(
                     thread.thread_id, for_mda(patch) if runtime is not RUNTIMES.local else patch
                 )
+            except NotFoundError:
+                # A copy MDA alone holds, such as a memory reflection fork, has nothing here.
+                logger.debug(
+                    "Runtime keeps no copy of the thread's metadata",
+                    extra={"thread_id": thread.thread_id},
+                )
             except Exception:
                 logger.warning(
                     "Copying thread metadata to its runtime failed",
@@ -186,6 +195,39 @@ class ThreadStore:
         if updated is not None and metadata:
             self.copies.start(updated, metadata)
         return updated
+
+    async def copy(self, thread: IndexedThread, metadata: Mapping[str, JsonValue]) -> IndexedThread:
+        """A new thread on MDA whose state is ``thread``'s, byte for byte, indexed with its
+        metadata and ``metadata`` over it.
+
+        Not the runtime's own thread copy: that rewrites the source's id wherever its
+        checkpoints say it, the conversation included, so the copy would no longer read
+        the provider's prompt cache the source wrote.
+        """
+        if thread.runtime != "mda":
+            raise ValueError(f"Thread {thread.thread_id} is not on MDA")
+        state = await self.state(thread.thread_id)
+        values = (state or {}).get("values")
+        if not isinstance(values, dict):
+            raise RuntimeError(f"Thread {thread.thread_id} has no state to copy")
+        copy_id = str(uuid.uuid4())
+        copied = await index.create(
+            copy_id,
+            runtime="mda",
+            metadata={**thread.metadata, **metadata},
+            if_exists="raise",
+        )
+        threads = RUNTIMES.mda.client.threads
+        await RUNTIMES.mda.create(copy_id, {**for_mda(copied.metadata), "graph_id": MDA_GRAPH_ID})
+        await threads.update_state(copy_id, values=values)
+        # Written as the graph's input, which leaves its first node pending, as if a run were.
+        await threads.update_state(copy_id, values=None, as_node=END)
+        return copied
+
+    async def discard_copy(self, thread: IndexedThread) -> None:
+        """Delete a thread ``copy`` made, which only MDA and the index hold."""
+        await RUNTIMES.mda.delete(thread.thread_id)
+        await index.delete(thread.thread_id)
 
     async def delete(self, thread: IndexedThread) -> None:
         await self.copies.settled(thread.thread_id)

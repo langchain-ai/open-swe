@@ -9,13 +9,15 @@ from langchain_core.messages import (
     AIMessage,
     BaseMessage,
     HumanMessage,
+    ToolCall,
     ToolMessage,
     messages_from_dict,
 )
+from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from pydantic import BaseModel, JsonValue
 from rt.backend import BackendCallError, OpenSweBackend, Run, RunContext
 from rt.loop import RunLoop
-from rt.middleware import BackendRunMiddleware
+from rt.middleware import BackendRunMiddleware, RunnableToolsMiddleware
 from rt.tools import STATE_KEY
 from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
@@ -383,6 +385,78 @@ async def test_a_route_the_classifier_fell_back_to_is_not_kept(
     assert recovered.call is not None and recovered.call.model == _FAST
     assert recovered.update["model_route"] == "fast"
     assert [name for name, _ in calls] == ["route_model", "route_model"]
+
+
+async def test_a_reflection_fork_takes_its_sources_route_without_the_classifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, calls = _backend(
+        monkeypatch, {}, LoopRules(routing=RoutingRules(mode="auto", classify=False))
+    )
+    loop = RunLoop(backend)
+    human = HumanMessage(content="Fix the login", id="human-1")
+
+    unrouted = await loop.before_model(_state(human, model_route_attempted_for="source-run"))
+    routed = await loop.before_model(_state(human, model_route="fast"))
+
+    assert unrouted.call is not None and unrouted.call.model == _MAIN
+    assert "model_route" not in unrouted.update
+    assert routed.call is not None and routed.call.model == _FAST
+    assert calls == []
+
+
+def test_a_reflection_fork_matches_its_source_only_on_what_starts_each_model_call() -> None:
+    source = Catalog(
+        tool_names=["execute", "remember"],
+        models=_MODELS,
+        loop=LoopRules(routing=RoutingRules(mode="auto"), reply=_REPLY),
+    )
+    fork = source.model_copy(
+        update={
+            "runnable_tools": ["remember"],
+            "loop": LoopRules(routing=RoutingRules(mode="auto", classify=False)),
+        }
+    )
+
+    assert fork.request_prefix("tools") == source.request_prefix("tools")
+    assert fork.request_prefix("other tools") != source.request_prefix("tools")
+    assert source.loop is not None
+    hidden = source.model_copy(
+        update={"loop": source.loop.model_copy(update={"hidden_tools": ["execute"]})}
+    )
+    assert hidden.request_prefix("tools") != source.request_prefix("tools")
+
+
+async def test_a_tool_the_run_may_not_run_stays_offered_but_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, _ = _backend(monkeypatch, {})
+    backend.run.catalog.runnable_tools = ["remember"]
+    middleware = RunnableToolsMiddleware(backend)
+    ran: list[str] = []
+
+    async def handler(request: ToolCallRequest) -> ToolMessage:
+        ran.append(request.tool_call["name"])
+        return ToolMessage(content="ok", tool_call_id=request.tool_call["id"] or "")
+
+    def request(name: str) -> ToolCallRequest:
+        call = ToolCall(name=name, args={}, id=f"call-{name}")
+        runtime = ToolRuntime(
+            state={},
+            context=None,
+            config={},
+            stream_writer=lambda event: None,
+            tool_call_id=call["id"],
+            store=None,
+        )
+        return ToolCallRequest(tool_call=call, tool=None, state={}, runtime=runtime)
+
+    refused = await middleware.awrap_tool_call(request("execute"), handler)
+    allowed = await middleware.awrap_tool_call(request("remember"), handler)
+
+    assert isinstance(refused, ToolMessage) and refused.status == "error"
+    assert isinstance(allowed, ToolMessage) and allowed.content == "ok"
+    assert ran == ["remember"]
 
 
 @pytest.mark.parametrize(

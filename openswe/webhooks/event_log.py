@@ -1,4 +1,4 @@
-"""Append-only log of verified GitHub, Slack, Linear, and deployment deliveries, and Open SWE's own workspace events.
+"""Append-only log of verified GitHub, Slack, Linear, and deployment deliveries, and Open SWE's own workspace, review and memory events.
 
 Sources in ``ADMIN_ONLY_SOURCES`` are listed and subscribable only from admin threads.
 """
@@ -24,9 +24,11 @@ from openswe.slack.pr_links import event_pull_requests
 
 logger = logging.getLogger(__name__)
 
-type WebhookSource = Literal["github", "slack", "linear", "deployment", "workspace", "human_review"]
+type WebhookSource = Literal[
+    "github", "slack", "linear", "deployment", "workspace", "human_review", "memory"
+]
 
-ADMIN_ONLY_SOURCES: frozenset[WebhookSource] = frozenset({"workspace", "human_review"})
+ADMIN_ONLY_SOURCES: frozenset[WebhookSource] = frozenset({"workspace", "human_review", "memory"})
 
 RETAINED_DAYS = 14
 _TABLE = "event_log"

@@ -484,6 +484,9 @@ class RunLoop:
             route = "fast"
         elif held.get("model_route_attempted_for") == run_id():
             return None
+        elif not rules.classify:
+            # The route a classifier that did not settle on one takes.
+            route, persist = "default", False
         else:
             asked = Routed(run_id=run_id(), humans=human_messages(messages))
             routed = await call(self._backend, ROUTE_MODEL, asked)

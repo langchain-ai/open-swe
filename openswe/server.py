@@ -1178,7 +1178,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._admin_workspaces = turn.admin_workspaces
         self._sole_writer = turn.sole_writer
         self._model_selection = ModelSelectionMiddleware(
-            turn.routing.route_model_ids, routing_mode=turn.routing.mode
+            turn.routing.route_model_ids,
+            routing_mode=turn.routing.mode,
+            classify=cfg.memory_reflection is None,
         )
         self._routing_defaults = dict(turn.route_models)
         self._tool_catalog_note = catalog_note(turn.tool_discovery_failures)

@@ -454,7 +454,8 @@ async def create_durable_run(
     if recorded.pull_request is not None:
         await Topic.PULL_REQUESTS.invalidate(key=recorded.pull_request)
     cfg = RunConfig.from_config(run_config)
-    if assistant_id == "agent" and cfg.slack_ask is not True:
+    # A memory reflection fork answers no one, so its source's Slack thread shows nothing.
+    if assistant_id == "agent" and cfg.slack_ask is not True and cfg.memory_reflection is None:
         from openswe.slack.thinking import sync_slack_background_status
 
         await sync_slack_background_status(

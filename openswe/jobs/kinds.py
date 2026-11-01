@@ -34,6 +34,8 @@ from openswe.jobs.worker import WORKER
 from openswe.memories.curator import WAKE_JOB as CURATOR_WAKE
 from openswe.memories.curator import WAKE_SCHEDULE as CURATOR_SCHEDULE
 from openswe.memories.curator import WorkspaceCurator
+from openswe.memories.reflection import JOB as MEMORY_REFLECTION
+from openswe.memories.reflection import IdleReflection
 from openswe.merge_queue.controller import start_queue
 from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
 from openswe.merge_queue.runtime import reconcile_queue
@@ -225,6 +227,7 @@ async def _tool_sets_purge(_job: Job) -> None:
 
 
 WORKER.register(CURATOR_WAKE)(WorkspaceCurator.wake_pending)
+WORKER.register(MEMORY_REFLECTION)(IdleReflection.fire)
 
 
 @WORKER.register(GITHUB_CHANNEL_FORWARD)

@@ -40,11 +40,12 @@ if not os.environ.get("E2E_REAL_LLM"):
     # From the build directory langgraph dev serves. Every model the runtime builds,
     # the run's own and each call's override from the backend, is built here.
     from e2e_env import BASE_URL
-    from fake_llm import LAST_SYSTEM_PROMPT, FakeScriptedChatModel, build_script
+    from fake_llm import LAST_SYSTEM_PROMPT, MODEL_CALLS, FakeScriptedChatModel, build_script
     from langchain_core.language_models import BaseChatModel
     from rt import models
 
     LAST_SYSTEM_PROMPT.report_to = f"{BASE_URL}/control/last-system-prompt"
+    MODEL_CALLS.report_to = f"{BASE_URL}/control/memory-reflection/check"
 
     def _fake_model(_model_id: str, _kwargs_json: str, _use_gateway: bool) -> BaseChatModel:
         return FakeScriptedChatModel(script=build_script())

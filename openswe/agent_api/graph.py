@@ -74,6 +74,7 @@ from runtime_api.catalog import (
     SEARCH_TOOLS,
     Catalog,
     FilesSpec,
+    LoopRules,
     ModelSpec,
     RunModels,
     SandboxSpec,
@@ -216,6 +217,12 @@ from openswe.github.app import PermissionMap
 from openswe.github.proxy import proxy_token_recorded, proxy_token_set_since
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
+from openswe.memories.reflection import (
+    FORK_OF_KEY,
+    REFLECTION_TOOLS,
+    IdleReflection,
+    PromptCacheMissError,
+)
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.model_selection import classify_route
 from openswe.middleware.notify_step_limit import notify_step_limit
@@ -228,7 +235,7 @@ from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, queue_run_notice, within_namespace
 from openswe.prompts import common_prompt, prompt
 from openswe.review_scout.graph import finish_scout_plan
-from openswe.run_config import RunConfig
+from openswe.run_config import MemoryReflectionRun, RunConfig
 from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.sandboxes.lifecycle import (
     bind_mda_sandbox,
@@ -501,7 +508,9 @@ class RunSession:
             inbox=self.surface.inbox,
             loop=None
             if self.surface.loop is None
-            else self.surface.loop.model_copy(update={"deployment_prompt": common_prompt()}),
+            else self._reflecting(
+                self.surface.loop.model_copy(update={"deployment_prompt": common_prompt()})
+            ),
             search_tools=searches,
             search_tools_description=prompt(f"tools/{SEARCH_TOOLS}") if searches else None,
             model_call_limit=next(
@@ -512,7 +521,20 @@ class RunSession:
                 ),
                 None,
             ),
+            runnable_tools=list(REFLECTION_TOOLS) if self._reflection is not None else None,
         )
+
+    @property
+    def _reflection(self) -> MemoryReflectionRun | None:
+        return RunConfig.from_config(self.config).memory_reflection
+
+    def _reflecting(self, loop: LoopRules) -> LoopRules:
+        """``loop`` for a run on a memory reflection fork: it answers no one, and keeps the
+        route its source thread's calls took rather than classify the request again."""
+        if self._reflection is None:
+            return loop
+        routing = loop.routing.model_copy(update={"classify": False}) if loop.routing else None
+        return loop.model_copy(update={"reply": None, "cli_result": None, "routing": routing})
 
     async def plan(self) -> Catalog:
         """The catalog, with who the run acts for, the sandbox MDA creates for it, and the grant
@@ -532,6 +554,11 @@ class RunSession:
                 "trace_metadata": {
                     **trace_actor(self.config),
                     **agent_version_metadata(),
+                    **(
+                        {"memory_reflection": True, FORK_OF_KEY: self._reflection.source_thread_id}
+                        if self._reflection is not None
+                        else {}
+                    ),
                 },
                 "sandbox": spec,
                 "loop": loop,
@@ -1305,6 +1332,8 @@ class TokenRun:
             )
         finally:
             self.graph.end(self.run, self.run_id)
+        await IdleReflection.schedule(self.graph.assistant_id, self.run)
+        IdleReflection.log_cache_use(self.run, messages_from_dict(request.replies))
         return Done()
 
     async def step_limit_reached(self, _request: RunRequest) -> Done:
@@ -1417,7 +1446,11 @@ class RemoteGraph:
         """What ``run``'s MDA graph is built from, and the settings its calls read."""
         session = await self._planned(run, None, fresh=False)
         tools, catalog = await asyncio.gather(session.tool_set().keep(), session.plan())
-        settings = session.settings().model_copy(update={"tools": tools})
+        prefix = catalog.request_prefix(tools)
+        reflection = RunConfig.parse(run.configurable).memory_reflection
+        if reflection is not None and reflection.request_prefix != prefix:
+            raise PromptCacheMissError(reflection.source_thread_id)
+        settings = session.settings().model_copy(update={"tools": tools, "request_prefix": prefix})
         return RunStart(catalog=catalog, settings=settings)
 
     async def session(

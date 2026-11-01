@@ -75,6 +75,15 @@ class Repo(BaseModel):
         return bool(self.owner and self.name)
 
 
+class MemoryReflectionRun(BaseModel):
+    """What a run on a fork of an idle thread reflects on, and what its model calls must match."""
+
+    # The thread the fork was copied from, which its memories are saved for.
+    source_thread_id: str
+    # The source run's ``Catalog.request_prefix``: the fork's run starts only with the same.
+    request_prefix: str
+
+
 class GitHubPROrIssueRef(BaseModel):
     """A cross-repo PR/issue target, which may name a repo other than the run's."""
 
@@ -176,6 +185,9 @@ class RunConfig(BaseModel):
     eval: bool | None = None
     reviewer_eval: bool | None = None
     reviewer_eval_severity_threshold: str | None = None
+
+    # A run on a fork of an idle thread that only saves what the thread learned.
+    memory_reflection: MemoryReflectionRun | None = None
 
     # Background jobs
     watch_key: str | None = None

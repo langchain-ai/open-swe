@@ -34,14 +34,17 @@ async def remember(text: str) -> dict[str, object]:
     person = await User.for_login("github", login) if login else None
     run_access = await resolve_access(cfg)
     personal = person is not None and run_access.mode(_PERSONAL) is not None
+    reflection = cfg.memory_reflection
     try:
         row = await MEMORIES.save(
             scope="personal" if personal else "workspace",
             body=body,
             person=person.id if person else None,
             workspace=cfg.workspace_slug,
-            thread_id=cfg.thread_id,
+            # A reflection fork remembers for the thread it was copied from.
+            thread_id=reflection.source_thread_id if reflection else cfg.thread_id,
             from_private_thread=run_access.private,
+            reflection_thread_id=cfg.thread_id if reflection else None,
         )
     except UnknownWorkspaceError:
         return {"ok": False, "error": "This thread has no workspace to remember it for."}
