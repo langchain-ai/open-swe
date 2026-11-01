@@ -29,7 +29,6 @@ When one changes the diff shown on the card or an excluded hunk, `merge_expedite
 Use `action="cancel"` to withdraw a card, but only replace it with a standard review when the requester explicitly asks.
 
 Pass `inline_summary` for a short description shown above the diff, like a human review card.
-When the repository configures `reviewChannel` in `.open-swe/settings.json`, the ready card is automatically broadcast there without a broadcast button; {% if mcp %}otherwise it offers the posting channel.
-`channel` (a Slack channel name like `#eng-reviews` or a channel id) is required: the card is posted there as a new thread, and the person you are working for is sent a Slack DM pointing to it.{% else %}otherwise it offers the current channel.
-The card goes in the current Slack thread when there is one, and naming that thread's own channel changes nothing.
-Pass `channel` (a Slack channel name like `#eng-reviews` or a channel id) to post it as a new thread in a different channel; this is required when the conversation is not in Slack.{% endif %}
+When the repository configures `reviewChannel` or matching `reviewChannelRules` in `.open-swe/settings.json`, the ready card is posted only in that review channel, not also in the source thread.
+{% if mcp %}Otherwise `channel` (a Slack channel name like `#eng-reviews` or a channel id) is required: the card is posted there as a new thread, and the person you are working for is sent a Slack DM pointing to it.{% else %}Otherwise the card goes in the current Slack thread when there is one, and naming that thread's own channel changes nothing.
+Pass `channel` (a Slack channel name like `#eng-reviews` or a channel id) to post it as a new thread in a different channel; this is required when the conversation is not in Slack and no review channel is configured.{% endif %}

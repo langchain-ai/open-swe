@@ -185,12 +185,6 @@ async def expedite_pr_approval(
         # thread; a second root there would strand it from the conversation.
         if target.id != own_channel or not own_thread:
             channel_id, thread_ts = target.id, ""
-    if not channel_id:
-        return _failure(
-            "Expedited review posts its approval card in Slack. This thread has no Slack "
-            "location, so pass `channel` with the Slack channel name or id to post in."
-        )
-
     try:
         if caller:
             token = await repo_access.require_repo_access_for_user(
@@ -266,6 +260,11 @@ async def expedite_pr_approval(
             f"The configured review channel {review_channel!r} is unavailable to the bot. "
             "Invite the bot to that channel or update `reviewChannel` in `.open-swe/settings.json`."
         )
+    if not channel_id and broadcast_target is None:
+        return _failure(
+            "Expedited review posts its approval card in Slack. Configure `reviewChannel` "
+            "or pass `channel` with the Slack channel name or id to post in."
+        )
     broadcast_choice = (
         [{"id": broadcast_target.id, "name": broadcast_target.name}]
         if broadcast_target is not None and broadcast_target.name
@@ -293,7 +292,7 @@ async def expedite_pr_approval(
         card = ReviewCard(active)
         if not active.awaiting_ready:
             await card.refresh()
-            await card.broadcast_configured()
+            active = card.request
         readiness_warning = await card.prompt_author_ready()
         return {
             "success": True,
@@ -389,7 +388,7 @@ async def expedite_pr_approval(
     approval.slack_message_ts = message_ts
     card = ReviewCard(await approval.save())
     await card.link_on_github()
-    await card.broadcast_configured()
+    channel_id, thread_ts = approval.slack_channel_id, approval.slack_thread_ts
     await card.remove_superseded()
     readiness_warning = await card.prompt_author_ready()
     next_step = _next_step(
