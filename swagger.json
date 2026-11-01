@@ -3498,6 +3498,11 @@
             "title": "Action",
             "type": "string"
           },
+          "auto_merge": {
+            "default": false,
+            "title": "Auto Merge",
+            "type": "boolean"
+          },
           "merge_method": {
             "enum": [
               "squash",
@@ -4103,6 +4108,11 @@
               }
             ],
             "title": "Additions"
+          },
+          "autoMerge": {
+            "default": false,
+            "title": "Automerge",
+            "type": "boolean"
           },
           "ci": {
             "default": "unknown",

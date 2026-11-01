@@ -338,6 +338,28 @@ describe("My PRs", () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
+  it("enables auto-merge for pending checks without marking the PR merged", async () => {
+    vi.mocked(api.openPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1, { ci: "pending", pendingChecks: ["Tests"] })],
+    })
+    vi.mocked(api.mergePullRequest).mockResolvedValue({
+      action: "merge",
+      done: true,
+    })
+    mount()
+    await screen.findByText("Change 1")
+    await chooseMergeMethod(1, "Squash merge")
+    fireEvent.click(screen.getByRole("button", { name: "Enable auto-merge" }))
+    expect(
+      await screen.findByRole("button", { name: "Auto-merge enabled" })
+    ).toBeTruthy()
+    expect(screen.queryByText(/^Merged ·/)).toBeNull()
+    expect(toast.success).toHaveBeenCalledWith(
+      "Auto-merge enabled for acme/app#1"
+    )
+  })
+
   it("rolls a rejected merge back to a retry action", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
