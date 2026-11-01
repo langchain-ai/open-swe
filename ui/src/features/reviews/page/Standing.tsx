@@ -915,7 +915,10 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
               </span>
             </div>
             {open && (
-              <div className="markdown-body mt-space-1 max-w-prose text-xs text-secondary">
+              <div
+                data-reply-part={`Open SWE finding at ${findingLocation(finding)}: ${finding.title}`}
+                className="markdown-body mt-space-1 max-w-prose text-xs text-secondary"
+              >
                 <Markdown content={finding.description} />
                 {finding.resolution_note && (
                   <p className="mt-space-1 flex items-center gap-space-1">

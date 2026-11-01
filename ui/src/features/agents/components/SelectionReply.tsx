@@ -123,6 +123,37 @@ export function textPassage(
   }
 }
 
+const REPLY_PART = "data-reply-part"
+
+/**
+ * A text selection inside one part of a pull request marked with
+ * `data-reply-part`, named by every marked part around it, outermost first.
+ * Context stays inside the innermost part.
+ */
+export function pullRequestPassage(container: HTMLElement): Passage | null {
+  const selection = window.getSelection()
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0)
+    return null
+  const common = selection.getRangeAt(0).commonAncestorContainer
+  const element = common instanceof Element ? common : common.parentElement
+  const innermost = element?.closest<HTMLElement>(`[${REPLY_PART}]`)
+  if (!innermost || !container.contains(innermost)) return null
+  const passage = textPassage("pull_request")(innermost)
+  if (!passage) return null
+  const names: Array<string> = []
+  for (
+    let part: Element | null = innermost;
+    part && container.contains(part);
+    part = part.parentElement?.closest(`[${REPLY_PART}]`) ?? null
+  )
+    names.unshift(part.getAttribute(REPLY_PART) ?? "")
+  const part = names.filter(Boolean).join(" › ")
+  return {
+    ...passage,
+    reply: (comment) => ({ ...passage.reply(comment), part }),
+  }
+}
+
 /** Offset of the start of 1-based `line` in `text`, or its length past the end. */
 function lineOffset(text: string, line: number): number {
   let offset = 0

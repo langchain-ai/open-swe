@@ -42,6 +42,9 @@ export function SentReply({ reply }: { reply: PassageReply }) {
         />
       ) : (
         <blockquote className="border-l-2 border-default pl-space-3 [overflow-wrap:anywhere] whitespace-pre-wrap text-secondary">
+          {reply.part && (
+            <span className="block text-xxs text-tertiary">{reply.part}</span>
+          )}
           {reply.selection}
         </blockquote>
       )}

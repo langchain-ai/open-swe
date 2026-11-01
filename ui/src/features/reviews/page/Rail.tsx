@@ -172,6 +172,8 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
   const clearExcerpts = useReviewPage((state) => state.clearChatExcerpts)
   const question = useReviewPage((state) => state.chatQuestion)
   const clearQuestion = useReviewPage((state) => state.clearChatQuestion)
+  const reply = useReviewPage((state) => state.chatReplies[0])
+  const takeReply = useReviewPage((state) => state.takeChatReply)
   const actions = useMemo(
     () => ({
       owner: pr.owner,
@@ -190,6 +192,8 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
       clearExcerpts,
       question,
       clearQuestion,
+      reply,
+      takeReply,
     }),
     [
       pr,
@@ -199,6 +203,8 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
       clearExcerpts,
       question,
       clearQuestion,
+      reply,
+      takeReply,
     ]
   )
   if (meta.isPending)

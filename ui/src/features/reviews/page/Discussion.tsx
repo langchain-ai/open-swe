@@ -23,8 +23,12 @@ import {
   type ReviewThread,
   type ThreadComment,
 } from "@/features/reviews/lib/conversationApi"
-import { sameLogin } from "@/features/reviews/lib/logins"
+import { displayName, sameLogin } from "@/features/reviews/lib/logins"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import {
+  SelectionReply,
+  pullRequestPassage,
+} from "@/features/agents/components/SelectionReply"
 import { cn, INHERITED_LINK } from "@/lib/utils"
 import { threadLocation } from "./findings"
 import {
@@ -40,7 +44,7 @@ import {
   useOpenConversations,
   type PullRequestRef,
 } from "./queries"
-import { usePageEvent } from "./store"
+import { usePageEvent, useReviewPage } from "./store"
 import { useResolveThreads } from "./useThreadActions"
 import { plainFirstLine, plural } from "./text"
 
@@ -199,6 +203,7 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
   )
   const open = useOpenConversations(pr)?.threads ?? []
   const scroller = useRef<HTMLDivElement>(null)
+  const replyInChat = useReviewPage((state) => state.replyInChat)
   const [awayFromLatest, setAwayFromLatest] = useState(false)
   const measure = (node: HTMLElement) =>
     setAwayFromLatest(
@@ -272,6 +277,11 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
           </>
         )}
       </div>
+      <SelectionReply
+        containerRef={scroller}
+        readPassage={pullRequestPassage}
+        onReply={replyInChat}
+      />
       {awayFromLatest && (
         <Button
           color="secondary"
@@ -600,7 +610,10 @@ function ItemBlock({
       )}
       {body &&
         (open ? (
-          <div className="mt-space-1 rounded-lg border border-default bg-surface-level-1 px-space-3 py-space-2 text-xs leading-[1.6]">
+          <div
+            data-reply-part={`${item.kind} by @${displayName(item.author)}`}
+            className="mt-space-1 rounded-lg border border-default bg-surface-level-1 px-space-3 py-space-2 text-xs leading-[1.6]"
+          >
             <Markdown content={item.body} />
             {bot && (
               <Button

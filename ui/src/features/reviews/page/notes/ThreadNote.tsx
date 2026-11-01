@@ -50,7 +50,10 @@ export function CommentRow({
           createdAt={comment.created_at}
           href={comment.html_url || undefined}
         />
-        <div className="mt-space-1 text-xs leading-[1.6] [&_.markdown-body]:text-xs">
+        <div
+          data-reply-part={`comment by @${displayName(comment.author)}`}
+          className="mt-space-1 text-xs leading-[1.6] [&_.markdown-body]:text-xs"
+        >
           <Markdown content={body} />
         </div>
       </div>
@@ -317,7 +320,10 @@ export function ThreadCard({
         </div>
       )}
       {withContext && <ThreadContext thread={thread} />}
-      <ol className="divide-y">
+      <ol
+        data-reply-part={`review thread on ${withLine(thread.path, threadLine(thread))}`}
+        className="divide-y"
+      >
         {thread.comments.map((comment) => (
           <li key={comment.id} className="px-space-3 py-space-2">
             <CommentRow
