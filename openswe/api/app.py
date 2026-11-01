@@ -68,14 +68,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.users import User
     from openswe.utils.model import validate_local_dev_llm_config
 
-    # Before anything is served: no thread or run is ever made on this Agent Server.
-    LOCAL_WRITES.seal()
     pin_single_event_loop()
     validate_github_login_allowlist()
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
     validate_mda_startup_config()
     validate_slack_startup_config()
+    # Before anything is served: no thread or run is ever made on this Agent Server.
+    LOCAL_WRITES.seal()
     database.require_configured()
     await database.migrate()
     try:
