@@ -1219,12 +1219,11 @@ export interface ReviewDetail extends Omit<
   checks: Array<ReviewCheckRun>
   findings: Array<ReviewFinding>
   walkthrough: ReviewWalkthrough | null
-  /** A review scout is working on this head, so `walkthrough` is on its way. */
-  walkthrough_running: boolean
-  /** Why the latest scout run on this head failed, when it did. */
-  walkthrough_error: string | null
+  /** The latest scout run, set only while `walkthrough` is missing. */
+  walkthrough_scout: ScoutStatus | null
   walkthrough_scout_thread_id: string | null
-  /** What the running scout has done so far; set only while `walkthrough_running`. */
+  walkthrough_trace_url: string | null
+  /** What the running scout has done so far; set only while it is `running`. */
   walkthrough_progress: ScoutProgress | null
   /** Why the latest reviewer run failed, when `status` is `"error"`. */
   review_error: string | null
@@ -1233,6 +1232,16 @@ export interface ReviewDetail extends Omit<
 export interface ScoutAction {
   tool: string
   target: string | null
+}
+
+/**
+ * The latest scout run, read against the PR's current head: `outdated` is a run
+ * still working on an older head, `finished` one on this head that ended without failing.
+ */
+export interface ScoutStatus {
+  state: "idle" | "running" | "outdated" | "failed" | "finished"
+  head_sha: string | null
+  error: string | null
 }
 
 export interface ScoutProgress {
