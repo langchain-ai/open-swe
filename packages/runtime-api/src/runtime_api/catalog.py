@@ -294,6 +294,10 @@ class Catalog(BaseModel):
                 "runnable_tools",
             },
         )
+        if isinstance(models := shape.get("models"), dict):
+            # Offered on a thread's first run only; a call reaches it only once the
+            # conversation holds an image.
+            models.pop("vision", None)
         payload = {"catalog": shape, "loop": loop, "tools": tools_digest}
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 

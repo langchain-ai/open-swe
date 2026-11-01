@@ -263,6 +263,104 @@ class SystemPromptRecord:
 
 LAST_SYSTEM_PROMPT = SystemPromptRecord()
 
+# A memory reflection fork's turn opens with openswe/resources/prompts/memory/reflection.md.jinja.
+MEMORY_REFLECTION_MARKER = "E2E_MEMORY_REFLECTION"
+_REFLECTION_PROMPT_OPENING = "This thread has gone idle.\nYou are a fork of it"
+MEMORY_REFLECTION_LESSON = "E2E lesson: the greeting module lives in greet.py."
+
+
+def _wire(content: Any) -> Any:
+    """``content`` as the provider compares it for its cache: without breakpoints, nor the
+    ``id`` LangChain mints for each text block, which langchain-anthropic never sends."""
+    if isinstance(content, list):
+        return [_wire(part) for part in content]
+    if isinstance(content, dict):
+        dropped = {"cache_control", "id"} if content.get("type") == "text" else {"cache_control"}
+        return {key: _wire(value) for key, value in content.items() if key not in dropped}
+    return content
+
+
+def _wire_message(message: BaseMessage) -> dict[str, Any]:
+    wired: dict[str, Any] = {"type": message.type, "content": _wire(message.content)}
+    if isinstance(message, AIMessage):
+        wired["tool_calls"] = [
+            {"name": call["name"], "args": call["args"], "id": call["id"]}
+            for call in message.tool_calls
+        ]
+    if isinstance(message, ToolMessage):
+        wired["tool_call_id"] = message.tool_call_id
+    return wired
+
+
+@dataclass(frozen=True)
+class _ModelCall:
+    tools: str
+    messages: list[dict[str, Any]]
+    reply: dict[str, Any]
+
+
+class ModelCalls:
+    """Every model call this process answered, as its provider would receive it, so a
+    memory reflection fork's first call can be checked against its source thread's last.
+
+    The fork reads its source's prompt cache only if its request starts with that call
+    and the reply to it, byte for byte: the same tools, then the same messages. The
+    result goes to the harness (``report_to``), which the spec reads.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[_ModelCall] = []
+        self.report_to: str | None = None
+        self.reflection: dict[str, Any] = {}
+
+    def record(self, tools: str, messages: list[dict[str, Any]], reply: dict[str, Any]) -> None:
+        self.calls = [*self.calls[-499:], _ModelCall(tools, messages, reply)]
+
+    def check_fork(self, tools: str, messages: list[dict[str, Any]]) -> None:
+        source = next(
+            (
+                call
+                for call in reversed(self.calls)
+                if call.tools == tools
+                and messages[: len(call.messages) + 1] == [*call.messages, call.reply]
+            ),
+            None,
+        )
+        same_tools = any(call.tools == tools for call in self.calls)
+        self.reflection = {
+            "checked": True,
+            "prefix_matches": source is not None,
+            "same_tools": same_tools,
+            "prefix_messages": len(source.messages) + 1 if source else 0,
+            "appended_messages": len(messages) - len(source.messages) - 1 if source else 0,
+            "divergence": None if source else self._divergence(messages),
+        }
+        if self.report_to is not None:
+            httpx.post(self.report_to, json=self.reflection, timeout=10).raise_for_status()
+
+    def _divergence(self, messages: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Where the fork's messages first differ from the closest earlier call's, to debug a miss."""
+        best: tuple[int, list[dict[str, Any]]] | None = None
+        for call in self.calls:
+            sent = [*call.messages, call.reply]
+            same = next(
+                (i for i, (a, b) in enumerate(zip(sent, messages, strict=False)) if a != b),
+                min(len(sent), len(messages)),
+            )
+            if best is None or same > best[0]:
+                best = (same, sent)
+        if best is None:
+            return None
+        index, sent = best
+        return {
+            "index": index,
+            "source": json.dumps(sent[index])[:2000] if index < len(sent) else None,
+            "fork": json.dumps(messages[index])[:2000] if index < len(messages) else None,
+        }
+
+
+MODEL_CALLS = ModelCalls()
+
 # Opening line of openswe/resources/prompts/thread-title.md. Title calls get an
 # empty reply so background titling never renames threads or code channels mid-spec.
 _THREAD_TITLE_PROMPT_PREFIX = "Generate a title that will help the user recognize"
@@ -1614,6 +1712,32 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         StepSpec(content=f"The `{WORKSPACE_NAME}` workspace is captured and live."),
     ),
     "followup": (_dynamic_step(_followup_step),),
+    # Substantial work, so the thread is reflected on once idle; then the reply.
+    "memory_reflection_source": (
+        _tool_step(
+            "Checking the repository.",
+            "execute",
+            {"command": "echo checking the repository"},
+            "call-reflection-execute",
+        ),
+        _tool_step(
+            "Replying in the Slack thread.",
+            "slack_reply",
+            {"message": "Checked the repository."},
+            "call-reflection-reply",
+        ),
+        StepSpec(content="Checked the repository."),
+    ),
+    # The fork remembers one lesson and ends.
+    "memory_reflection_fork": (
+        _tool_step(
+            "Saving what this thread learned.",
+            "remember",
+            {"text": MEMORY_REFLECTION_LESSON},
+            "call-reflection-remember",
+        ),
+        StepSpec(content="Saved one lesson."),
+    ),
 }
 
 
@@ -1656,6 +1780,10 @@ def _is_pull_request_fix(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule(
+        "memory_reflection_fork", lambda ctx: _REFLECTION_PROMPT_OPENING in ctx.pending_text
+    ),
+    ScriptRule("memory_reflection_source", lambda ctx: MEMORY_REFLECTION_MARKER in ctx.first_text),
     ScriptRule("inbox", lambda ctx: INBOX_MARKER in ctx.first_text),
     ScriptRule("review_chat_comments", lambda ctx: REVIEW_CHAT_COMMENTS_MARKER in ctx.last_text),
     ScriptRule("review_chat_review", lambda ctx: REVIEW_CHAT_REVIEW_MARKER in ctx.last_text),
@@ -1772,12 +1900,17 @@ class FakeScriptedChatModel(BaseChatModel):
     }
     script: list[Any] = []
     described_tool_names: list[str] = []
+    # The tools the latest call was offered, as the provider receives them.
+    offered_tools: str = "[]"
 
     @property
     def _llm_type(self) -> str:
         return "fake-scripted"
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> FakeScriptedChatModel:  # noqa: ARG002
+        self.offered_tools = json.dumps(
+            [_wire(convert_to_openai_tool(offered)) for offered in tools], sort_keys=True
+        )
         self.described_tool_names = [
             spec["function"]["name"]
             for offered in tools
@@ -1832,6 +1965,9 @@ class FakeScriptedChatModel(BaseChatModel):
         hold = _BUSY_HOLD_RE.search(context.last_text) if step_index == 1 else None
         if hold:
             time.sleep(float(hold.group(1) or os.environ.get("E2E_BUSY_HOLD_SECONDS", "10")))
+        wired = [_wire_message(message) for message in messages]
+        if script is SCRIPT_LIBRARY["memory_reflection_fork"] and step_index == 0:
+            MODEL_CALLS.check_fork(self.offered_tools, wired)
         step = script[step_index] if step_index < len(script) else SCRIPT_LIBRARY["followup"][0]
         reply = _render_step(step, messages)
         if THOUGHT_MARKER in context.first_text and isinstance(reply.content, str):
@@ -1843,4 +1979,5 @@ class FakeScriptedChatModel(BaseChatModel):
                     ]
                 }
             )
+        MODEL_CALLS.record(self.offered_tools, wired, _wire_message(reply))
         return ChatResult(generations=[ChatGeneration(message=reply)])

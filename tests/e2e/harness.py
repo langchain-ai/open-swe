@@ -243,6 +243,52 @@ async def control_record_system_prompt(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
+@app.get("/control/memory-reflection/check")
+async def control_memory_reflection_check() -> JSONResponse:
+    """How a reflection fork's first model call compared with its source's last."""
+    from fake_llm import MODEL_CALLS
+
+    return JSONResponse(MODEL_CALLS.reflection or {"checked": False})
+
+
+@app.post("/control/memory-reflection/check")
+async def control_record_memory_reflection_check(request: Request) -> JSONResponse:
+    """Where the Managed Deep Agents server's fake model reports a fork's comparison."""
+    from fake_llm import MODEL_CALLS
+
+    MODEL_CALLS.reflection = await request.json()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/control/memory-reflection/fork")
+async def control_memory_reflection_fork(thread_id: str) -> JSONResponse:
+    """Run the thread's queued memory reflection now, as if it had been idle long enough."""
+    from openswe.jobs import queue
+    from openswe.memories.reflection import JOB, IdleReflection
+
+    job = await queue.get(f"{JOB}:{thread_id}")
+    if job is None:
+        raise HTTPException(404, f"no memory reflection queued for {thread_id}")
+    fork_id = await IdleReflection.model_validate(job.payload).reflect()
+    if fork_id is None:
+        raise HTTPException(409, f"{thread_id} was not forked")
+    return JSONResponse({"fork_thread_id": fork_id})
+
+
+@app.get("/control/memory-events")
+async def control_memory_events() -> JSONResponse:
+    """Every ``memory.saved`` event the event log holds."""
+    from sqlalchemy import text
+
+    from openswe.database import postgres
+
+    async with postgres.session() as session:
+        rows = await session.execute(
+            text("SELECT payload FROM event_log WHERE source = 'memory' ORDER BY received_at")
+        )
+        return JSONResponse({"events": [row.payload for row in rows]})
+
+
 @app.post("/control/repo-private")
 async def control_repo_private(request: Request) -> JSONResponse:
     body = await request.json()

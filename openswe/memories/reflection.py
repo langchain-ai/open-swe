@@ -34,6 +34,10 @@ from openswe.jobs.queue import Job
 from openswe.memories.store import MEMORIES
 from openswe.prompts import prompt
 from openswe.run_config import MemoryReflectionRun, RunConfig
+from openswe.sandboxes.tool_access import (
+    SANDBOX_HOST_THREAD_KEY,
+    SANDBOX_PROXY_CONFIG_METADATA_KEY,
+)
 from openswe.threads.index import IndexedThread
 from openswe.threads.store import THREADS
 from openswe.users import User
@@ -48,6 +52,14 @@ REFLECTED_THROUGH_KEY: Final = "memory_reflected_through"
 # A fork's metadata: the thread it was copied from.
 FORK_OF_KEY: Final = "memory_reflection_of"
 _SENDER_ID: Final = "system:memory-reflection"
+# The source's sandbox binding, which a fork must not inherit.
+_SANDBOX_KEYS: Final = (
+    "sandbox_id",
+    "sandbox_owner",
+    SANDBOX_HOST_THREAD_KEY,
+    SANDBOX_PROXY_CONFIG_METADATA_KEY,
+    "sandbox_bridge_client",
+)
 _SHELL_TOOLS: Final = frozenset({"execute", "background_execute"})
 _EDIT_TOOLS: Final = frozenset({"edit_file", "write_file"})
 _EDITED_FILES: Final = 5
@@ -209,24 +221,25 @@ class IdleReflection(BaseModel):
             return
         await reflection.reflect()
 
-    async def reflect(self) -> None:
-        """Fork the thread and start the fork's run, if it is idle and did something worth it."""
+    async def reflect(self) -> str | None:
+        """Fork the thread and start the fork's run, if it is idle and did something worth it;
+        the fork's id, or None when it did not."""
         thread = await THREADS.get(self.thread_id)
         if thread is None or thread.status != "idle" or channel_of(thread.metadata) is not None:
-            return
+            return None
         cfg = RunConfig.parse(self.configurable)
         login = cfg.github_login or ""
         if not (await User.preferences_for_login(login)).experimental_memory:
-            return
+            return None
         state = await THREADS.state(self.thread_id)
         messages = _State.model_validate(state or {}).values.messages
         through = thread.metadata.get(REFLECTED_THROUGH_KEY)
         since = through if isinstance(through, int) and 0 <= through <= len(messages) else 0
         if not ThreadActivity(messages[since:]).substantial:
-            return
+            return None
         # Once for these messages: a job claimed again after a crash may have forked already.
         if not await event_claims.claim(JOB, f"{self.thread_id}:{len(messages)}", ttl=_CLAIM_TTL):
-            return
+            return None
         title = thread.metadata.get("title")
         fork = await THREADS.copy(
             thread,
@@ -234,6 +247,9 @@ class IdleReflection(BaseModel):
                 "unlisted": True,
                 FORK_OF_KEY: self.thread_id,
                 "title": f"Memory reflection: {title}" if isinstance(title, str) else None,
+                # MDA opens one sandbox per thread: the fork gets its own, never its source's.
+                **dict.fromkeys(_SANDBOX_KEYS),
+                "running_background_tasks": [],
             },
         )
         try:
@@ -244,12 +260,13 @@ class IdleReflection(BaseModel):
                 extra={"thread_id": self.thread_id, "fork_thread_id": fork.thread_id},
             )
             await THREADS.discard_copy(fork)
-            return
+            return None
         await THREADS.update(self.thread_id, {REFLECTED_THROUGH_KEY: len(messages)})
         logger.info(
             "Forked an idle thread to reflect on its memories",
             extra={"thread_id": self.thread_id, "fork_thread_id": fork.thread_id},
         )
+        return fork.thread_id
 
     async def _start(self, fork: IndexedThread) -> None:
         reflection = MemoryReflectionRun(
