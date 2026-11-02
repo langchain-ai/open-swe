@@ -212,6 +212,12 @@ test.describe("review page", () => {
     await expect(input).toBeFocused();
     await expect(description.locator(".view-lines")).toContainText(DESCRIPTION);
     await expect(save).toBeDisabled();
+    await input.press("ControlOrMeta+f");
+    const find = description.locator(".find-widget");
+    await expect(find).toHaveAttribute("aria-hidden", "false");
+    await page.keyboard.press("Escape");
+    await expect(find).toHaveAttribute("aria-hidden", "true");
+    await expect(input).toBeFocused();
     await input.focus();
     await input.press("ControlOrMeta+A");
     await page.keyboard.insertText("Discard this draft");

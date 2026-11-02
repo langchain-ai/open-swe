@@ -218,6 +218,8 @@ function Description({
                 event.stopPropagation()
                 save()
               }
+            }}
+            onKeyDown={(event) => {
               if (event.key === "Escape") event.stopPropagation()
             }}
           >
