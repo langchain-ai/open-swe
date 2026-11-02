@@ -844,7 +844,18 @@ function configureDesktopIpc() {
           );
       return localBridges.ensure(thread.id);
     }
-    const cwd = await projectForRepo(input?.repo);
+    if (input?.repo != null && typeof input.repo !== "string")
+      throw new Error("Invalid thread repository");
+    if (!input?.repo?.trim()) {
+      const thread = localThreadStore.createTask(input?.threadId);
+      try {
+        return await localBridges.ensure(thread.id);
+      } catch (error) {
+        await discardLocalThread(thread);
+        throw error;
+      }
+    }
+    const cwd = await projectForRepo(input.repo);
     if (!cwd)
       throw new Error(`Add a checkout of ${input?.repo} to Open SWE first`);
     let thread = localThreadStore.create({ id: input?.threadId, cwd });

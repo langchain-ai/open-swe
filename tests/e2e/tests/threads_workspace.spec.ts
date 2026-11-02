@@ -72,6 +72,9 @@ function deferred() {
 async function loginAs(page: Page) {
   const response = await page.request.post("/control/login", { data: USER });
   expect(response.ok()).toBeTruthy();
+  await page.addInitScript((login) => {
+    localStorage.setItem(`open-swe.desktop.experience:${login}`, "coding");
+  }, USER.login);
 }
 
 function baseMetadata(
@@ -402,7 +405,11 @@ test.describe("threads workspace", () => {
       })),
     );
     await loginAs(page);
-    await page.addInitScript(() => {
+    await page.addInitScript((login) => {
+      localStorage.setItem(
+        `open-swe.desktop.experience:${login}`,
+        "agent_workspace",
+      );
       Object.defineProperty(window, "openSweDesktop", {
         value: {
           isDesktop: true,
@@ -417,7 +424,7 @@ test.describe("threads workspace", () => {
           onLocalThreadsChanged: () => () => {},
         },
       });
-    });
+    }, USER.login);
     await page.goto("/agents");
     await dismissOnboardingIfShown(page);
     const sidebar = page.locator("[data-sidebar-frame]");

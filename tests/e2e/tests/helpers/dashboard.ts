@@ -28,6 +28,9 @@ export async function loginAs(
 ) {
   const res = await page.request.post("/control/login", { data: user });
   expect(res.ok()).toBeTruthy();
+  await page.addInitScript((login) => {
+    localStorage.setItem(`open-swe.desktop.experience:${login}`, "coding");
+  }, user.login);
 }
 
 // What a message sent while a run is live does. It is the person's saved
