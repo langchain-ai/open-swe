@@ -124,3 +124,27 @@ async def test_a_workers_runs_leave_its_coordinators_goal_alone(
     kept = await goal.current()
     assert kept is not None and (kept.state, kept.reason) == ("paused", "stopped")
     assert await worker.current() is None
+
+
+async def test_a_goal_starts_from_the_request_and_the_agent_can_rewrite_or_pause_it(
+    goal: ThreadGoal, wakeups: list[SimpleNamespace]
+) -> None:
+    await goal.change("working", request="Fix the login redirect")
+    started = await goal.current()
+    assert started is not None and started.objective is not None
+    assert started.objective.startswith("Fix the login redirect")
+
+    await goal.rewritten("Fix the login redirect and the logout one")
+    await goal.paused_on_request()
+    # A run still finishing, a wake or a failure cannot undo a pause the person asked for.
+    await goal.change("waiting")
+    await goal.failed()
+    paused = await goal.current()
+
+    assert paused is not None
+    assert (paused.state, paused.reason) == ("paused", "requested")
+    assert paused.objective == "Fix the login redirect and the logout one"
+    await goal.change("working")
+    await goal.failed()
+    errored = await goal.current()
+    assert errored is not None and (errored.state, errored.reason) == ("paused", "error")

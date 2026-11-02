@@ -283,6 +283,9 @@ class Goal(BaseModel):
     # Why it waits on its person (``blocked``, ``ready``) or paused (``stopped``,
     # ``no_progress``).
     reason: str | None = None
+    # The goal's objective, the person's request in the shape the work should take, as
+    # the run's guidance block for the conversation (``<dynamic-context id="goal">``).
+    objective: str | None = None
     # What the agent asked its person for, while it waits on them.
     ask: str | None = None
     # When the goal last changed, in epoch milliseconds.
@@ -296,7 +299,9 @@ class GoalChange(RunRequest):
     """The run moved its thread's goal; None clears it."""
 
     state: Literal["working", "waiting", "paused"] | None
-    reason: Literal["no_progress"] | None = None
+    reason: Literal["no_progress", "failing_commands"] | None = None
+    # The person's request that starts a goal, which its objective is made from.
+    request: str | None = None
 
 
 class ReplyOnBehalf(RunCall):

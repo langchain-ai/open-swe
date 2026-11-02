@@ -20,6 +20,7 @@ from runtime_api.loop import GoalState
 
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.jobs import queue
+from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.tasks.store import PauseReason, Task, UserWaitReason
 from openswe.threads.access import _readable_thread_metadata
@@ -51,16 +52,19 @@ class _GoalChange(TypedDict, total=False):
     state: GoalState | None
     reason: UserWaitReason | PauseReason | None
     ask: str | None
+    objective: str | None
     waits: list[dict[str, JsonValue]] | None
     by: UUID | None
     over_stop: bool
 
 
 class Goal(BaseModel):
-    """What the thread's metadata keeps of its goal."""
+    """What the thread's task keeps of its goal."""
 
     state: GoalState = "working"
     reason: UserWaitReason | PauseReason | None = None
+    # What the goal is for: the person's request, in the shape the work should take.
+    objective: str | None = None
     # What the agent waits on its person for, in its own words, while it does.
     ask: str | None = None
     waits: list[GoalWait] = []
@@ -86,9 +90,16 @@ class ThreadGoal:
         task = await self._task()
         return None if task is None else self._of(task)
 
-    async def change(self, state: GoalState | None, reason: PauseReason | None = None) -> None:
+    async def change(
+        self,
+        state: GoalState | None,
+        reason: PauseReason | None = None,
+        *,
+        request: str | None = None,
+    ) -> None:
         """Move the goal as the run decided: working again, resting on what will wake the
-        thread (whose waits are recorded), paused, or gone once Goal mode is off.
+        thread (whose waits are recorded), paused, or gone once Goal mode is off. A goal
+        that starts from the person's ``request`` takes its objective from it.
 
         A rest never overrides a stop: the person who stopped the goal resumes it.
         """
@@ -105,8 +116,46 @@ class ThreadGoal:
         elif state == "waiting":
             waits = [wait.model_dump(mode="json") for wait in await self.waits()]
             await self._move(task.id, state="waiting", waits=waits, over_stop=False)
+        elif task.goal_state is None and request:
+            await self._move(
+                task.id, state=state, objective=prompt("goal/objective", request=request)
+            )
         else:
             await self._move(task.id, state=state)
+
+    async def rewritten(self, objective: str) -> None:
+        """The agent rewrote its goal's objective."""
+        task = await self._task()
+        if task is None or task.goal_state is None:
+            raise ValueError("This thread has no goal to rewrite; Goal mode sets one")
+        await self._move(
+            task.id,
+            state=task.goal_state,
+            reason=task.goal_reason,
+            ask=task.goal_ask,
+            waits=task.goal_waits,
+            objective=objective,
+            over_stop=False,
+        )
+
+    async def failed(self) -> None:
+        """A run on the thread failed: its goal pauses rather than retry into the same error.
+
+        The failure is the run's; one the goal cannot record is logged, not raised.
+        """
+        try:
+            task = await self._task()
+            if task is not None and task.goal_state in {"working", "waiting"}:
+                await self._pause(task.id, "error", over_stop=False)
+        except Exception:
+            logger.exception("Could not pause the goal of a failed run", extra=self._log)
+
+    async def paused_on_request(self) -> None:
+        """The agent paused the goal because its person asked: only they resume it."""
+        task = await self._task()
+        if task is None or task.goal_state is None:
+            raise ValueError("This thread has no goal to pause; Goal mode sets one")
+        await self._pause(task.id, "requested")
 
     async def reported(self, state: Literal["blocked", "complete"], message: str) -> None:
         """The agent said the work is blocked on the person, or complete: it waits on them
@@ -205,6 +254,7 @@ class ThreadGoal:
                 {
                     "state": task.goal_state,
                     "reason": task.goal_reason,
+                    "objective": task.goal_objective,
                     "ask": task.goal_ask,
                     "waits": task.goal_waits or [],
                     "updated_at_ms": int(task.goal_updated_at.timestamp() * 1000)

@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Final, Literal
 from uuid import UUID, uuid7
 
 from pydantic import JsonValue
@@ -19,10 +19,13 @@ type TaskRole = Literal["coordinator", "worker"]
 # Why a goal waits on its person: the agent needs something only they can give, or
 # the work is ready for them, such as a reviewed draft to mark ready.
 type UserWaitReason = Literal["blocked", "ready"]
-# Why a goal paused: the person stopped the run, or the agent kept ending turns without
-# saying where the work stands or waiting on anything.
-type PauseReason = Literal["stopped", "no_progress"]
+# Why a goal paused: the person stopped the run or asked the agent to pause; or, as
+# Codex blocks a goal, three automatic turns in a row did nothing, three in a row ran
+# only failing commands, or a run failed.
+type PauseReason = Literal["stopped", "requested", "no_progress", "failing_commands", "error"]
 type GoalReason = UserWaitReason | PauseReason
+# Pauses only the person lifts, by writing again: their stop, or one they asked for.
+_PERSON_PAUSES: Final = ("stopped", "requested")
 
 
 class WorkerAlreadyLaunchedError(PermissionError):
@@ -52,6 +55,8 @@ class Task(Base):
     coordinator_thread_id: Mapped[str | None] = mapped_column(default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     delegated: Mapped[bool] = mapped_column(default=False)
+    # What the goal is for: the person's request, in the shape the work should take.
+    goal_objective: Mapped[str | None] = mapped_column(Text, default=None)
     goal_state: Mapped[GoalState | None] = mapped_column(Text, default=None)
     goal_reason: Mapped[GoalReason | None] = mapped_column(Text, default=None)
     goal_ask: Mapped[str | None] = mapped_column(Text, default=None)
@@ -152,18 +157,24 @@ class Task(Base):
         state: GoalState | None,
         reason: GoalReason | None = None,
         ask: str | None = None,
+        objective: str | None = None,
         waits: list[dict[str, JsonValue]] | None = None,
         by: UUID | None = None,
         over_stop: bool = True,
     ) -> bool:
-        """Set the task's goal, or clear it with no ``state``; whether it moved.
+        """Set the task's goal, or clear it with no ``state``; whether it moved. Its
+        ``objective`` stays unless given, and goes with the goal.
 
-        Without ``over_stop`` a goal its person stopped stays paused: only they resume it.
+        Without ``over_stop`` a goal its person paused stays paused: only they resume it.
         """
+        kept_objective = {"goal_objective": objective} if objective is not None else {}
+        if state is None:
+            kept_objective = {"goal_objective": None}
         statement = (
             update(cls)
             .where(cls.id == task_id)
             .values(
+                **kept_objective,
                 goal_state=state,
                 goal_reason=reason,
                 goal_ask=ask,
@@ -175,7 +186,8 @@ class Task(Base):
         if not over_stop:
             statement = statement.where(
                 (cls.goal_state.is_distinct_from("paused"))
-                | (cls.goal_reason.is_distinct_from("stopped"))
+                | (cls.goal_reason.not_in(_PERSON_PAUSES))
+                | cls.goal_reason.is_(None)
             )
         async with postgres.session() as session:
             return await session.scalar(statement.returning(cls.id)) is not None

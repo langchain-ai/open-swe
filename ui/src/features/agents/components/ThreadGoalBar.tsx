@@ -32,6 +32,16 @@ function waitLabel(wait: AgentGoalWait): string {
   }
 }
 
+const PAUSE_REASONS: Partial<
+  Record<NonNullable<AgentThreadGoal["reason"]>, string>
+> = {
+  stopped: "You stopped the run.",
+  requested: "Paused as you asked.",
+  no_progress: "The agent kept stopping without progress.",
+  failing_commands: "Every command failed three turns in a row.",
+  error: "A run failed.",
+}
+
 /** What the bar says for each state, or null when there is nothing to show. */
 function describe(goal: AgentThreadGoal): {
   intent: BannerIntent
@@ -40,7 +50,7 @@ function describe(goal: AgentThreadGoal): {
 } {
   switch (goal.state) {
     case "working":
-      return { intent: "neutral", title: "Goal: working", body: null }
+      return { intent: "neutral", title: "Goal: working", body: goal.objective }
     case "waiting":
       return {
         intent: "info",
@@ -57,10 +67,7 @@ function describe(goal: AgentThreadGoal): {
       return {
         intent: "neutral",
         title: "Goal paused",
-        body:
-          goal.reason === "stopped"
-            ? "You stopped the run. Send a message to resume."
-            : "The agent kept stopping without progress. Send a message to resume.",
+        body: `${PAUSE_REASONS[goal.reason ?? "no_progress"] ?? PAUSE_REASONS.no_progress} Send a message to resume.`,
       }
   }
 }

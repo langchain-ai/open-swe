@@ -212,6 +212,7 @@ from openswe.tools import (
     expose_port,
     fetch_url,
     forget,
+    get_goal,
     get_human_review_status,
     get_thread,
     http_request,
@@ -269,6 +270,7 @@ from openswe.tools import (
     switch_to_performance_model,
     trigger_automation,
     update_automation,
+    update_goal,
     web_search,
     write_database_rows,
 )
@@ -655,6 +657,8 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "monitor",
         # Only the parent's own turn can say where the work stands.
         "report_work_state",
+        "get_goal",
+        "update_goal",
         "submit_thread_feedback",
         "submit_review_assessment_feedback",
         # The review page reads both from the parent's transcript.
@@ -774,6 +778,8 @@ AGENT_TOOLS: Final = (
     report_platform_issue,
     schedule_thread_wakeup,
     report_work_state,
+    get_goal,
+    update_goal,
     request_rollout_check,
     listen_events,
     list_event_types,
@@ -2031,7 +2037,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_start_review_channel,
     ]
     withheld = [
-        *(() if goal_mode else (report_work_state,)),
+        *(() if goal_mode else (report_work_state, get_goal, update_goal)),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
         *(() if managed_gateway else (connect_managed_tools,)),

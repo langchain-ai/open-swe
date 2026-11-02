@@ -26,18 +26,5 @@ A reaction on their message is fine when you start work.
 
 #### Ready means
 
-For a code change, keep working until all of the following hold for the PR's current head:
-
-1. The branch is pushed and the draft PR is open or updated.
-2. Every check has completed and passed, verified as the CI status guidance requires; fix failures you can fix.
-   Never call the work ready, or let them mark it ready, with a failing or pending check.
-3. The automated Open SWE review has passed: call `request_pr_review`.
-   In Goal mode it reviews your draft and sends its findings to this thread as a message instead of posting them to GitHub or Slack.
-   Fix the clear and valid findings, push, and request another round; the reviewer marks fixed findings resolved.
-   Once a round leaves no open findings, the PR's `Open SWE Review` check passes and the draft counts as reviewed.
-   Stop after three rounds; leave findings that need the person's judgment unfixed and list them.
-4. The last review round ran on the PR's current head; any push after it needs another round.
-
-Then call `report_work_state` with `complete` and a message giving the PR link, the review page link (the `review_url` that `request_pr_review` returns) for the walkthrough, how many review rounds ran, and any findings or caveats left for them.
-Keep the PR a draft: they mark it ready for review, and then you are told to put it up for human review.
-Hold human-review requests and expedited-approval nominations until then.
+Your goal's objective, shown to you when the goal starts and again whenever it is out of view, says what the work is and when it is ready.
+Read it with `get_goal`; rewrite it with `update_goal` when the person's request turns out to mean something else, or pause the goal with `update_goal` when they ask you to.

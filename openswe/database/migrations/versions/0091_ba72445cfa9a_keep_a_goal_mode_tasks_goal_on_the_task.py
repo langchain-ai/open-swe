@@ -2,7 +2,8 @@
 
 Every agent thread coordinates a task from its next run on. Goal mode keeps where a
 task's work stands there: its state, why it waits or paused, what it asked its person
-for, what will wake it, and who last moved it.
+for, what will wake it, and who last moved it; and its objective, the request it was
+given in the shape the work should take.
 """
 
 from alembic import op
@@ -16,6 +17,7 @@ depends_on = None
 def upgrade() -> None:
     op.execute("""
         ALTER TABLE task
+            ADD COLUMN goal_objective text,
             ADD COLUMN goal_state text,
             ADD COLUMN goal_reason text,
             ADD COLUMN goal_ask text,

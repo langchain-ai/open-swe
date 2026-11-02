@@ -221,6 +221,7 @@ from openswe.github.app import PermissionMap
 from openswe.github.proxy import proxy_token_recorded, proxy_token_set_since
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
+from openswe.input_messages import run_context
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.model_selection import classify_route
 from openswe.middleware.notify_step_limit import notify_step_limit
@@ -1309,13 +1310,16 @@ class TokenRun:
         return Goal(
             state=kept.state,
             reason=kept.reason,
+            objective=None if kept.objective is None else run_context("goal", kept.objective),
             ask=kept.ask,
             updated_at_ms=kept.updated_at_ms,
             waits=[wait.kind for wait in await thread_goal.waits()] if request.waits else [],
         )
 
     async def set_goal(self, request: GoalChange) -> Done:
-        await ThreadGoal(self.run.thread_id).change(request.state, request.reason)
+        await ThreadGoal(self.run.thread_id).change(
+            request.state, request.reason, request=request.request
+        )
         return Done()
 
     async def run_ended(self, request: RunEnded) -> Done:

@@ -17,6 +17,7 @@ import json
 import logging
 import uuid
 from collections.abc import Awaitable, Collection, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Final
 from xml.etree import ElementTree
@@ -89,6 +90,15 @@ _LIMIT_MARKER: Final = "Model call limits exceeded"
 _SUMMARIZATION_EVENT: Final = "_summarization_event"
 # The goal's last change the model saw: an input after it carries the goal's reminder.
 _GOAL_SEEN: Final = "goal_seen_ms"
+# The id of the goal's guidance block.
+_GOAL: Final = "goal"
+# Turns in a row Codex lets a goal do nothing, or run only failing commands, before
+# blocking it; counted in the run's state.
+_STALLED_TURNS: Final = 3
+_EMPTY_TURNS: Final = "goal_empty_turns"
+_FAILING_TURNS: Final = "goal_failing_turns"
+# How ``execute`` ends the result of a command that exited non-zero.
+_FAILED_COMMAND: Final = "[Command failed with exit code"
 # Held state: when the sandbox's GitHub token next needs replacing. It lives in the thread's
 # checkpoint, so it holds for the next run on whichever backend replica serves it.
 _GITHUB_PROXY_DUE: Final = "github_proxy_refresh_at"
@@ -181,6 +191,20 @@ def _latest(messages: Sequence[BaseMessage], prefix: str) -> str | None:
         if isinstance(message.id, str) and message.id.startswith(prefix):
             return content_text(message.content)
     return None
+
+
+@dataclass(frozen=True)
+class _GoalTurn:
+    """What a Goal mode turn did, as Codex counts it toward blocking the goal."""
+
+    # Sent back by the guard, the model did nothing: no tool call and no words.
+    empty: bool
+    # It did something, which ends a run of empty turns.
+    active: bool
+    # Its only results were commands that ran and failed.
+    failing: bool
+    # A tool call succeeded, which ends a run of failing turns.
+    succeeded: bool
 
 
 class _RunGuidance:
@@ -371,7 +395,7 @@ class RunLoop:
             context, update = await asked.answers()
         finally:
             await asked.close()
-        stopped, reminder = await self._goal(state, held, update)
+        stopped, reminder, objective = await self._goal(state, held, update)
         if stopped:
             return BeforeModel(update=update, jump_to="end")
         messages = _messages(state)
@@ -383,8 +407,16 @@ class RunLoop:
                 HumanMessage(content=text, id=f"run-guidance:{uuid.uuid4()}"), source="run_guidance"
             )
             for key, text in guidance.latest(messages).items()
-            if key != "task-role" and text != visible_guidance.get(key)
+            if key not in {"task-role", _GOAL} and text != visible_guidance.get(key)
         ]
+        # The goal is always in view: told when it starts or changes, and again once
+        # summarization drops it; as a message, so a change never moves the cached prefix.
+        if objective is not None and objective != visible_guidance.get(_GOAL):
+            added.append(
+                add_notification_metadata(
+                    HumanMessage(content=objective, id=f"goal:{uuid.uuid4()}"), source="goal"
+                )
+            )
         if context.instructions and context.instructions != _latest(visible, _ROLE):
             added.append(
                 add_notification_metadata(
@@ -635,46 +667,60 @@ class RunLoop:
 
     async def _goal(
         self, state: Mapping[str, object], held: Mapping[str, object], update: dict[str, JsonValue]
-    ) -> tuple[bool, str | None]:
+    ) -> tuple[bool, str | None, str | None]:
         """Move the thread's goal for what this model call answers: whether the run stops
-        here, and what to remind the model of.
+        here, what to remind the model of, and the goal's objective to keep in view.
 
-        A person's message puts the goal back to work; so does a wait waking the thread,
-        unless the person stopped it, when the run ends without a model call. While the
-        goal waits on its person, each input after the one that reported it carries a
-        reminder of what for.
+        A person's message puts the goal back to work, starting it from their request;
+        so does a wait waking the thread, unless the person stopped it, when the run
+        ends without a model call. While the goal waits on its person, each input after
+        the one that reported it carries a reminder of what for.
         """
         rules = self.rules.work_state
         if rules is None:
-            return False, None
+            return False, None, None
         goal = await self._read_goal(GoalRead(run_id=run_id()))
         if goal is None:
-            return False, None
+            return False, None, None
         inputs = self._inputs(_messages(state))
-        person = any(self._from_person(message) for message in inputs)
-        woken = not person and any(
+        requests = [text for message in inputs if (text := self._request(message)) is not None]
+        woken = not requests and any(
             isinstance(message, HumanMessage)
             and not _dynamic_context(message)
             and _system_sender(message) not in self._guards
             for message in inputs
         )
-        if woken and (goal.state, goal.reason) == ("paused", "stopped"):
-            return True, None
+        # A pause the person made, or asked for, lasts until they write.
+        if woken and goal.state == "paused" and goal.reason in {"stopped", "requested"}:
+            return True, None, goal.objective
         if (
             goal.state is None
-            or (person and goal.state != "working")
+            or (requests and goal.state != "working")
             or (woken and goal.state in {"waiting", "paused"})
         ):
-            await self._set_goal(GoalChange(run_id=run_id(), state="working"))
-            return False, None
+            started = goal.state is None
+            await self._set_goal(
+                GoalChange(
+                    run_id=run_id(),
+                    state="working",
+                    request="\n\n".join(requests) if started and requests else None,
+                )
+            )
+            if started:
+                goal = await self._read_goal(GoalRead(run_id=run_id())) or goal
+            return False, None, goal.objective
         if goal.state != "waiting_on_user":
-            return False, None
+            return False, None, goal.objective
         seen = held.get(_GOAL_SEEN)
         update[_GOAL_SEEN] = goal.updated_at_ms
         # Changed since the last call: what comes in is the report itself.
         if seen != goal.updated_at_ms:
-            return False, None
-        return False, "\n\n".join(text for text in (rules.reminder, goal.ask) if text)
+            return False, None, goal.objective
+        return (
+            False,
+            "\n\n".join(text for text in (rules.reminder, goal.ask) if text),
+            goal.objective,
+        )
 
     async def _work_state(
         self,
@@ -684,30 +730,85 @@ class RunLoop:
         update: dict[str, JsonValue],
     ) -> PhaseResult | None:
         """Send the model back to work until the thread's goal rests: waiting on its person,
-        paused, or on something that wakes the thread again; pause it after ``max_nudges``.
+        paused, or on something that wakes the thread again.
 
         The backend reads what will wake the thread from where each wait lives, so a wait
-        counts however the model started it, code mode included, and whenever.
+        counts however the model started it, code mode included, and whenever. As Codex
+        blocks a goal, three turns in a row the model was sent back for that did nothing,
+        or three in a row that ran only failing commands, pause it instead.
         """
-        nudges = held.get("work_state_nudges")
-        asked = nudges if isinstance(nudges, int) else 0
         goal = await self._read_goal(GoalRead(run_id=run_id(), waits=True))
-        if goal is None or goal.state in {"waiting_on_user", "paused"}:
-            update["work_state_nudges"] = 0
+        if goal is None or goal.state in {"waiting_on_user", "paused"} or goal.waits:
+            update.update({_EMPTY_TURNS: 0, _FAILING_TURNS: 0})
+            if goal is not None and goal.waits and goal.state not in {"waiting_on_user", "paused"}:
+                await self._set_goal(GoalChange(run_id=run_id(), state="waiting"))
             return None
-        if goal.waits or asked >= rules.max_nudges:
-            await self._set_goal(
-                GoalChange(run_id=run_id(), state="waiting")
-                if goal.waits
-                else GoalChange(run_id=run_id(), state="paused", reason="no_progress")
-            )
-            update["work_state_nudges"] = 0
+        turn = self._last_turn(_messages(state))
+        empty = self._counted(held, _EMPTY_TURNS, turn.empty, reset=turn.active)
+        failing = self._counted(held, _FAILING_TURNS, turn.failing, reset=turn.succeeded)
+        update.update({_EMPTY_TURNS: empty, _FAILING_TURNS: failing})
+        # TODO: a token budget, as Codex has: count the goal's tokens across its runs and,
+        # once spent, tell the model to wrap up and pause the goal as over budget.
+        if empty >= _STALLED_TURNS or failing >= _STALLED_TURNS:
+            reason = "no_progress" if empty >= _STALLED_TURNS else "failing_commands"
+            await self._set_goal(GoalChange(run_id=run_id(), state="paused", reason=reason))
+            update.update({_EMPTY_TURNS: 0, _FAILING_TURNS: 0})
             return None
         return PhaseResult(
-            update={**update, "work_state_nudges": asked + 1},
+            update=update,
             messages=self._nudge(rules.nudge, state),
             jump_to="model",
         )
+
+    @staticmethod
+    def _counted(held: Mapping[str, object], key: str, counts: bool, *, reset: bool) -> int:
+        """A run of turns: one more when this turn ``counts``, none after one that ``reset``s."""
+        if reset:
+            return 0
+        so_far = held.get(key)
+        so_far = so_far if isinstance(so_far, int) else 0
+        return so_far + 1 if counts else so_far
+
+    def _last_turn(self, messages: Sequence[AnyMessage]) -> _GoalTurn:
+        """What the model did since it was last prompted, by a person, an event or a nudge."""
+        start = 0
+        for index in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[index], HumanMessage):
+                start = index
+                break
+        prompt = messages[start] if messages else None
+        nudged = isinstance(prompt, HumanMessage) and (
+            _system_sender(prompt)
+            == (self.rules.work_state.nudge_sender if self.rules.work_state else None)
+        )
+        after = messages[start + 1 :]
+        calls = [
+            call
+            for message in after
+            if isinstance(message, AIMessage)
+            for call in message.tool_calls
+        ]
+        said = any(
+            isinstance(message, AIMessage) and content_text(message.content).strip()
+            for message in after
+        )
+        results = [message for message in after if isinstance(message, ToolMessage)]
+        failed = [message for message in results if self._failed_command(message)]
+        succeeded = any(
+            not _reported_failure(message) and message not in failed for message in results
+        )
+        active = bool(calls) or said
+        return _GoalTurn(
+            empty=nudged and not active,
+            active=active,
+            failing=bool(failed) and not succeeded,
+            succeeded=succeeded,
+        )
+
+    @staticmethod
+    def _failed_command(message: ToolMessage) -> bool:
+        """An ``execute`` that ran its command and exited non-zero."""
+        return message.name == "execute" and _FAILED_COMMAND in content_text(message.content)
 
     @staticmethod
     def _inputs(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
@@ -718,11 +819,15 @@ class RunLoop:
         return list(messages)
 
     @staticmethod
-    def _from_person(message: BaseMessage) -> bool:
-        return isinstance(message, HumanMessage) and any(
-            (root := _root(text, "input-message")) is not None and root.get("kind") == "human"
-            for text in _texts(message.content)
-        )
+    def _request(message: BaseMessage) -> str | None:
+        """What a person asked in ``message``; None for any other input."""
+        if not isinstance(message, HumanMessage):
+            return None
+        for text in _texts(message.content):
+            root = _root(text, "input-message")
+            if root is not None and root.get("kind") == "human":
+                return "".join(root.itertext()).strip()
+        return None
 
     async def _read_goal(self, request: GoalRead) -> Goal | None:
         """The thread's goal; None when the backend cannot say, which never holds the run."""

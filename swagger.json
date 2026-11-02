@@ -2557,7 +2557,7 @@
         "type": "object"
       },
       "Goal": {
-        "description": "What the thread's metadata keeps of its goal.",
+        "description": "What the thread's task keeps of its goal.",
         "properties": {
           "ask": {
             "anyOf": [
@@ -2569,6 +2569,17 @@
               }
             ],
             "title": "Ask"
+          },
+          "objective": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objective"
           },
           "reason": {
             "anyOf": [
@@ -4583,7 +4594,10 @@
       "PauseReason": {
         "enum": [
           "stopped",
-          "no_progress"
+          "requested",
+          "no_progress",
+          "failing_commands",
+          "error"
         ],
         "type": "string"
       },

@@ -452,31 +452,68 @@ _GOAL_RULES = LoopRules(
 )
 
 
+def _turn(kind: str) -> list[BaseMessage]:
+    """A turn the guard sent the model back for: idle, running a command that failed, or
+    one that succeeded; or the person's own request, answered with nothing."""
+    if kind == "asked":
+        return [HumanMessage(content="Fix it", id="human-1"), AIMessage(content="", id="ai-1")]
+    nudged: list[BaseMessage] = [
+        HumanMessage(content="Fix it", id="human-1"),
+        AIMessage(content="", id="ai-0"),
+        HumanMessage(content=_WORK_NUDGE, id="nudge-1"),
+    ]
+    if kind == "idle":
+        return [*nudged, AIMessage(content="", id="ai-1")]
+    exit_code = 1 if kind == "failing" else 0
+    status = "failed" if exit_code else "succeeded"
+    return [
+        *nudged,
+        AIMessage(
+            content="",
+            id="ai-1",
+            tool_calls=[{"id": "c1", "name": "execute", "args": {"command": "make test"}}],
+        ),
+        ToolMessage(
+            content=f"boom\n[Command {status} with exit code {exit_code}]",
+            tool_call_id="c1",
+            name="execute",
+        ),
+        AIMessage(content="", id="ai-2"),
+    ]
+
+
 @pytest.mark.parametrize(
-    ("goal", "nudges", "sent_back", "moved"),
+    ("goal", "turn", "held", "sent_back", "moved"),
     [
-        (Goal(state="working"), 0, True, None),
-        (Goal(state="working", waits=["wakeup"]), 0, False, ("waiting", None)),
-        (Goal(state="working"), 3, False, ("paused", "no_progress")),
-        (Goal(state="waiting_on_user", reason="ready"), 0, False, None),
-        (BackendCallError("down"), 0, False, None),
+        (Goal(state="working"), "asked", {}, True, None),
+        (Goal(state="working", waits=["wakeup"]), "asked", {}, False, ("waiting", None)),
+        # As Codex blocks a goal: three idle turns in a row, or three running only failing
+        # commands; anything the model gets done starts the count again.
+        (Goal(state="working"), "idle", {"goal_empty_turns": 2}, False, ("paused", "no_progress")),
+        (
+            Goal(state="working"),
+            "failing",
+            {"goal_failing_turns": 2},
+            False,
+            ("paused", "failing_commands"),
+        ),
+        (Goal(state="working"), "working", {"goal_failing_turns": 2}, True, None),
+        (Goal(state="waiting_on_user", reason="ready"), "asked", {}, False, None),
+        (BackendCallError("down"), "asked", {}, False, None),
     ],
 )
-async def test_goal_mode_work_is_sent_back_until_its_goal_rests_then_pauses(
+async def test_goal_mode_work_is_sent_back_until_its_goal_rests_or_stalls(
     monkeypatch: pytest.MonkeyPatch,
     goal: Goal | BackendCallError,
-    nudges: int,
+    turn: str,
+    held: dict[str, JsonValue],
     sent_back: bool,
     moved: tuple[str, str | None] | None,
 ) -> None:
     answers: dict[str, BaseModel | BackendCallError] = {"goal": goal, "set_goal": Done()}
     backend, calls = _backend(monkeypatch, answers, _GOAL_RULES)
-    asked = HumanMessage(content="Fix it", id="human-1")
-    stopped = AIMessage(content="", id="ai-1")
 
-    ended = await RunLoop(backend).after_model(
-        _state(asked, stopped, reply_surface="web", work_state_nudges=nudges)
-    )
+    ended = await RunLoop(backend).after_model(_state(*_turn(turn), reply_surface="web", **held))
 
     assert (ended.jump_to == "model") is sent_back
     assert [(body["state"], body["reason"]) for name, body in calls if name == "set_goal"] == (
@@ -513,6 +550,30 @@ async def test_what_comes_in_moves_the_goal_before_the_model_answers_it(
     assert [body["state"] for name, body in calls if name == "set_goal"] == (
         [] if moved is None else [moved]
     )
+
+
+async def test_a_goal_starts_from_the_request_and_its_objective_stays_in_view(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    objective = '<dynamic-context kind="run" id="goal"><![CDATA[\nFix it\n]]></dynamic-context>'
+    answers: dict[str, BaseModel | BackendCallError] = {"goal": Goal(), "set_goal": Done()}
+    backend, calls = _backend(monkeypatch, answers, _GOAL_RULES)
+    loop = RunLoop(backend)
+    asked = HumanMessage(
+        content='<input-message sender="u" surface="web" kind="human">Fix it</input-message>',
+        id="in-1",
+    )
+
+    await loop.before_model(_state(asked))
+    answers["goal"] = Goal(state="working", objective=objective)
+    shown = await loop.before_model(_state(asked))
+    seen = await loop.before_model(
+        _state(asked, *messages_from_dict(shown.messages), AIMessage(content="", id="ai-1"))
+    )
+
+    assert [body["request"] for name, body in calls if name == "set_goal"] == ["Fix it"]
+    assert [m.content for m in messages_from_dict(shown.messages)] == [objective]
+    assert messages_from_dict(seen.messages) == []
 
 
 async def test_a_goal_waiting_on_its_person_is_reminded_after_the_report_not_with_it(

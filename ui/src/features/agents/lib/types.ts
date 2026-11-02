@@ -374,7 +374,16 @@ export interface AgentGoalWait {
 /** Where a Goal mode thread's work stands (`openswe/threads/goal.py`). */
 export interface AgentThreadGoal {
   state: "working" | "waiting" | "waiting_on_user" | "paused"
-  reason: "blocked" | "ready" | "stopped" | "no_progress" | null
+  reason:
+    | "blocked"
+    | "ready"
+    | "stopped"
+    | "requested"
+    | "no_progress"
+    | "failing_commands"
+    | "error"
+    | null
+  objective: string | null
   ask: string | null
   waits: Array<AgentGoalWait>
   updated_at_ms: number
