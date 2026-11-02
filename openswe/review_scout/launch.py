@@ -108,6 +108,7 @@ class ReviewScoutTarget(BaseModel):
     base_sha: str
     head_sha: str
     workspace_slug: str | None
+    installation_id: int | None = None
 
     async def current_thread_id(self) -> str:
         """The scout thread to read, which follows its successor once one exists."""
@@ -181,11 +182,7 @@ class ReviewScoutTarget(BaseModel):
         return await thread_run_error(thread_id) or "The review scout run ended with an error."
 
     async def start(self) -> str:
-        """The scout run for this head, started when none is already running.
-
-        A newer head interrupts a scout still working on an older one, so only
-        the latest head's walkthrough is ever written.
-        """
+        """Start this head when idle, interrupting a scout on an older head."""
         client = dispatch_client()
         thread_id = await succession.succeed(
             review_scout_thread_id(self.owner, self.repo, self.pr_number)
@@ -211,6 +208,7 @@ class ReviewScoutTarget(BaseModel):
             "base_sha": self.base_sha,
             "head_sha": self.head_sha,
             "workspace": self.workspace_slug,
+            "github_installation_id": self.installation_id,
         }
         run = await create_durable_run(
             thread_id,

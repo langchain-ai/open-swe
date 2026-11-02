@@ -423,3 +423,38 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
         assert state["messages"] == [*previous, context]
         system_prompts.append(rendered)
     assert system_prompts[0] == system_prompts[1]
+
+
+class TestReviewerInstallation:
+    @pytest.mark.parametrize("installation_id", [None, 456])
+    async def test_repo_installation_is_used_for_preparation_and_launch(
+        self, monkeypatch: pytest.MonkeyPatch, installation_id: int | None
+    ) -> None:
+        from openswe.github import thread_token
+        from openswe.run_config import RunConfig
+        from openswe.webhooks import common
+
+        resolve = AsyncMock(return_value=456)
+        mint = AsyncMock(return_value=("repo-token", None))
+        monkeypatch.setattr(reviewer, "get_github_app_installation_id_for_repo", resolve)
+        monkeypatch.setattr(common, "get_github_app_installation_id_for_repo", resolve)
+        monkeypatch.setattr(reviewer, "get_github_app_installation_token_with_expiry", mint)
+        monkeypatch.setattr(common, "get_github_app_installation_token_with_expiry", mint)
+        repo = {"owner": "acme", "name": "widgets"}
+        assert (
+            await reviewer.ensure_reviewer_github_token(
+                "review-installation",
+                RunConfig.parse(
+                    {"source": "github", "repo": repo, "github_installation_id": installation_id}
+                ),
+            )
+            == "repo-token"
+        )
+        mint.assert_awaited_once_with(installation_id=456, repositories=["widgets"])
+        assert resolve.await_count == (1 if installation_id is None else 0)
+        assert await common.reviewer_token_for_repo(repo, repo_private=False) == (
+            "repo-token",
+            None,
+        )
+        mint.assert_awaited_with(installation_id=456, repositories=["widgets"])
+        await thread_token.invalidate_cached_github_token("review-installation")

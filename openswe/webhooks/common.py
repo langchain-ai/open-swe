@@ -36,6 +36,7 @@ from openswe.dashboard.profiles import (  # noqa: F401
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.dispatch import dispatch_agent_run
 from openswe.github.app import (
+    get_github_app_installation_id_for_repo,
     get_github_app_installation_token,  # noqa: F401
     get_github_app_installation_token_with_expiry,
 )
@@ -1254,13 +1255,21 @@ async def reviewer_token_for_repo(
     repo_private: bool | None,
     repo_id: int | None = None,
 ) -> tuple[str | None, str | None]:
+    installation_id = await get_github_app_installation_id_for_repo(
+        repo_config.get("owner", ""), repo_config.get("name", "")
+    )
+    installation = {"installation_id": installation_id} if installation_id is not None else {}
     if repo_private is False:
         if repo_id is not None:
-            return await get_github_app_installation_token_with_expiry(repository_ids=[repo_id])
+            return await get_github_app_installation_token_with_expiry(
+                **installation, repository_ids=[repo_id]
+            )
         repo_name = repo_config.get("name")
         if repo_name:
-            return await get_github_app_installation_token_with_expiry(repositories=[repo_name])
-    return await get_github_app_installation_token_with_expiry()
+            return await get_github_app_installation_token_with_expiry(
+                **installation, repositories=[repo_name]
+            )
+    return await get_github_app_installation_token_with_expiry(**installation)
 
 
 async def store_current_reviewer_run_id(thread_id: str, run: Any) -> None:

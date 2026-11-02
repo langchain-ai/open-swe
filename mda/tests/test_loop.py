@@ -629,3 +629,33 @@ async def test_reports_carry_what_they_report_never_the_conversation(
     ]
     [started] = [body for name, body in calls if name == "tool_started"]
     assert started["message_id"] == "ai-1"
+
+
+class TestSkippedScout:
+    @pytest.mark.parametrize("nothing_to_plan", [False, True])
+    async def test_only_a_scout_with_work_settles_its_plan(
+        self, monkeypatch: pytest.MonkeyPatch, nothing_to_plan: bool
+    ) -> None:
+        backend, calls = _backend(
+            monkeypatch,
+            {
+                "prepare": Prepared(update={"scout_nothing_to_plan": nothing_to_plan}),
+                "run_started": Done(),
+                "finish_scout_plan": Done(),
+                "run_ended": Done(),
+            },
+            LoopRules(stop_when=["scout_nothing_to_plan"], at_end=["finish_scout_plan"]),
+        )
+        monkeypatch.setattr(
+            "rt.middleware.build_model",
+            lambda spec, use_gateway: FakeListChatModel(responses=["Planned"]),
+        )
+        backend.run.invocation_id = "turn"
+        graph = create_agent(
+            model=FakeListChatModel(responses=["unused"]),
+            middleware=[BackendRunMiddleware(backend)],
+        )
+        result = await graph.ainvoke({"messages": [("user", "Plan it")]})
+        assert any(name == "finish_scout_plan" for name, _ in calls) is not nothing_to_plan
+        assert any(message.type == "ai" for message in result["messages"]) is not nothing_to_plan
+        assert any(name == "run_ended" for name, _ in calls)

@@ -301,13 +301,20 @@ async def test_publish_review_invalidates_cached_token_on_401(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("installation_id", [None, 456])
 async def test_expired_bot_token_is_re_minted_at_its_original_scope(
     monkeypatch: pytest.MonkeyPatch,
+    installation_id: int | None,
 ) -> None:
     config = {"configurable": {"thread_id": "tid"}}
     expired = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
     github_token.cache_github_token_for_thread(
-        "tid", "stale-token", expires_at=expired, is_bot_token=True, repositories=["r"]
+        "tid",
+        "stale-token",
+        expires_at=expired,
+        is_bot_token=True,
+        repositories=["r"],
+        installation_id=installation_id,
     )
     fresh_expiry = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
     mint = AsyncMock(return_value=("fresh-token", fresh_expiry))
@@ -315,7 +322,7 @@ async def test_expired_bot_token_is_re_minted_at_its_original_scope(
 
     assert await github_token.resolve_thread_github_token(config) == "fresh-token"
     assert await github_token.resolve_thread_github_token(config) == "fresh-token"
-    mint.assert_awaited_once_with(repositories=("r",))
+    mint.assert_awaited_once_with(installation_id=installation_id, repositories=("r",))
 
 
 @pytest.mark.asyncio

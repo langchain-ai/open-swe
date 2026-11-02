@@ -481,7 +481,10 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(
     async def fake_get_github_app_installation_token() -> str | None:
         return "app-token"
 
-    async def fake_get_github_app_installation_token_with_expiry() -> tuple[str | None, str | None]:
+    async def fake_get_github_app_installation_token_with_expiry(
+        *, installation_id: int | None = None
+    ) -> tuple[str | None, str | None]:
+        assert installation_id == 456
         return "app-token", None
 
     async def fake_fetch_github_pr_metadata(
@@ -521,6 +524,9 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(
         captured["set_metadata_thread_id"] = thread_id
         captured["set_metadata_kwargs"] = kwargs
 
+    monkeypatch.setattr(
+        webhook_common, "get_github_app_installation_id_for_repo", AsyncMock(return_value=456)
+    )
     monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(
         webhook_common, "get_github_app_installation_token", fake_get_github_app_installation_token
