@@ -409,7 +409,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             await self._backend.run.load_tool_specs(run_id())
             return None, True
         # An earlier run that ended before its start went out sends it now.
-        self._send_start(state, _held(state).get("model_route"))
+        self._send_start(state)
         # Asking for the sandbox takes a round trip; reading the tool specs needs none of it.
         opening = asyncio.create_task(self._opened(runtime))
         try:
@@ -476,9 +476,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             sender=prepared.sender,
         )
 
-    def _send_start(self, state: Mapping[str, object], route: object) -> dict[str, object]:
-        """Send the run's start if it still waits, routed to ``route``; the update that lets
-        it go."""
+    def _send_start(self, state: Mapping[str, object], route: object = None) -> dict[str, object]:
+        """Send the held start with only a route chosen for this run's first model call."""
         held = state.get(_START_KEY)
         if not isinstance(held, Mapping):
             return {}
@@ -663,7 +662,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     async def _after_agent(self, state: RunState) -> dict[str, object] | None:
         run = self._backend.run
         # A run that never called the model, such as one a rule stopped, starts as it ends.
-        started = self._send_start(state, _held(state).get("model_route"))
+        started = self._send_start(state)
         try:
             self._loop.after_agent(state)
             # Not before the backend took the run's reports: once the run is done, its
