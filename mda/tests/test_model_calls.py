@@ -108,6 +108,38 @@ async def test_parallel_results_are_replayed_in_tool_call_order() -> None:
     assert messages == original
 
 
+@pytest.mark.parametrize(
+    ("after", "answered"),
+    [
+        ([], [("a", "error"), ("b", "error")]),
+        ([_result("other-loop")], [("a", "error"), ("b", "error")]),
+        ([_result("b")], [("a", "error"), ("b", "success")]),
+        ([_result("a"), _result("b")], [("a", "success"), ("b", "success")]),
+        ([_result("a"), _result("a")], [("a", "success"), ("b", "error")]),
+    ],
+)
+async def test_every_tool_call_is_answered_once_before_the_next_turn(
+    after: list[AnyMessage], answered: list[tuple[str, str]]
+) -> None:
+    """An interrupted call is answered with an error; a stray, duplicate or late result is
+    dropped, so no provider rejects the history."""
+    messages: list[AnyMessage] = [
+        HumanMessage(content="go"),
+        _calls("a", "b"),
+        *after,
+        HumanMessage(content="next"),
+        _result("a"),
+    ]
+    original = list(messages)
+
+    forwarded = await _forwarded(ReplayableHistoryMiddleware(), messages, _ANTHROPIC)
+
+    results = [m for m in forwarded.messages if isinstance(m, ToolMessage)]
+    assert [(m.tool_call_id, m.status) for m in results] == answered
+    assert forwarded.messages[-1] == HumanMessage(content="next")
+    assert messages == original
+
+
 async def test_empty_thinking_blocks_are_dropped_only_for_anthropic() -> None:
     reply = AIMessage(
         content=[

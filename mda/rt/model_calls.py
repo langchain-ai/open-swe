@@ -19,7 +19,7 @@ from langchain.agents.middleware import (
 from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
-from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, ToolCall, ToolMessage
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 
@@ -35,6 +35,10 @@ PROMPT_CACHE_TTL: Final = "1h"
 # Bindings nest a few deep at most; the bound stops a self-referencing chain.
 _MAX_BINDINGS: Final = 10
 _SUBAGENT_TIMED_OUT: Final = "This subagent could not finish: its model call timed out."
+_NO_RESULT: Final = (
+    "No matching result was captured for this tool call. "
+    "Its effects are unknown; check before retrying."
+)
 
 
 class ModelCallTimeoutError(TimeoutError):
@@ -89,6 +93,45 @@ def _for_provider(message: AnyMessage, model: object) -> AnyMessage:
     return message.model_copy(update=update) if update else message
 
 
+def _answered(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
+    """Each tool call answered once, by the results right after the message that made it.
+
+    A call interrupted before its result, or a result that lands after a later turn or
+    for another loop's call, leaves a call unanswered or a result with no call, which
+    every provider rejects. A missing result is answered with an error; a stray one is
+    dropped.
+    """
+    answered: list[AnyMessage] = []
+    pending: dict[str, ToolCall] = {}
+    inserted = dropped = 0
+    for message in [*messages, None]:
+        if isinstance(message, ToolMessage):
+            if pending.pop(message.tool_call_id, None) is None:
+                dropped += 1
+            else:
+                answered.append(message)
+            continue
+        answered.extend(
+            ToolMessage(content=_NO_RESULT, tool_call_id=call_id, name=call["name"], status="error")
+            for call_id, call in pending.items()
+        )
+        inserted += len(pending)
+        if message is None:
+            break
+        answered.append(message)
+        pending = (
+            {call["id"]: call for call in message.tool_calls if call["id"]}
+            if isinstance(message, AIMessage)
+            else {}
+        )
+    if inserted or dropped:
+        logger.warning(
+            "Repaired tool history before model call",
+            extra={"inserted_results": inserted, "dropped_results": dropped},
+        )
+    return answered
+
+
 def _in_call_order(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
     """Each parallel batch's results in the order of its tool calls.
 
@@ -127,7 +170,11 @@ class _ModelCallGuard(AgentMiddleware):
 
 
 class ReplayableHistoryMiddleware(_ModelCallGuard):
-    """Send each call a history the provider it goes to accepts, in a stable order."""
+    """Send each call a history the provider it goes to accepts, in a stable order.
+
+    Every tool call is answered there, so a run interrupted mid-call or a stray result
+    does not fail every later call.
+    """
 
     async def awrap_model_call(
         self,
@@ -135,8 +182,12 @@ class ReplayableHistoryMiddleware(_ModelCallGuard):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
         model = _chat_model(request.model)
-        messages = [_for_provider(message, model) for message in _in_call_order(request.messages)]
-        if any(a is not b for a, b in zip(messages, request.messages, strict=True)):
+        messages = [
+            _for_provider(message, model) for message in _in_call_order(_answered(request.messages))
+        ]
+        if len(messages) != len(request.messages) or any(
+            a is not b for a, b in zip(messages, request.messages, strict=True)
+        ):
             request = request.override(messages=messages)
         return await handler(request)
 
