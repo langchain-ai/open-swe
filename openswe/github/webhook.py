@@ -45,7 +45,8 @@ from openswe.review.findings import (
 )
 from openswe.review.goal_review import GOAL_REVIEW_KEY, GoalReview
 from openswe.review.reconcile import reconcile_linked_findings
-from openswe.run_config import Repo
+from openswe.review.shadow import ReviewShadow
+from openswe.run_config import Repo, RunConfig
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
 from openswe.thread_ids import (
@@ -450,6 +451,9 @@ async def trigger_pr_review_from_ref(
         client=langgraph_client,
     )
     await common.store_current_reviewer_run_id(thread_id, run)
+    await ReviewShadow.follow(
+        RunConfig.parse(configurable), kickoff=review_prompt, pr_title=pr_title
+    )
     return {
         "success": True,
         "queued": False,
@@ -603,6 +607,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     )
     await common.store_current_reviewer_run_id(thread_id, run)
     common.logger.info("Reviewer run dispatched for thread %s (source=%s)", thread_id, source)
+    await ReviewShadow.follow(RunConfig.parse(configurable), kickoff=prompt, pr_title=pr_title)
 
 
 async def process_github_pr_walkthrough(payload: dict[str, object]) -> None:
@@ -1129,6 +1134,9 @@ async def _process_github_head_update(
         client=langgraph_client,
     )
     await common.store_current_reviewer_run_id(thread_id, run)
+    await ReviewShadow.follow(
+        RunConfig.parse(configurable), kickoff=re_review_prompt, pr_title=pr_title
+    )
 
 
 async def process_github_ci_event(
