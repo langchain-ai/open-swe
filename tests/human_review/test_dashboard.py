@@ -24,6 +24,7 @@ from openswe.users import User
     "case",
     [
         "eligible",
+        "custom_summary",
         "large",
         "unregistered",
         "disabled",
@@ -89,6 +90,7 @@ async def test_dashboard_selects_review_workflow(
                     "base": {"ref": "main"},
                     "user": {"login": "alice"},
                     "title": "Manual PR",
+                    "body": "<!-- hidden -->\nThe PR description.\nWith more context.",
                 }
             ),
         ),
@@ -130,15 +132,20 @@ async def test_dashboard_selects_review_workflow(
         ),
     ):
         result = await DashboardReviewRequest(pr_ref, Origin(requester=requester), "token").request(
-            channel="C1"
+            channel="C1", inline_summary="Custom summary." if case == "custom_summary" else None
         )
     assert result.success
-    if case == "eligible":
+    if case in {"eligible", "custom_summary"}:
         assert result.channel == "C1"
         assert result.permalink == "https://slack/card"
         post.assert_awaited_once()
         standard.assert_not_awaited()
         saved = save.call_args_list[0].args[0]
+        assert saved.tldr == (
+            "Custom summary."
+            if case == "custom_summary"
+            else "The PR description. With more context."
+        )
         assert saved.kind == "expedited"
         assert saved.requested_by_user_id == requester.id
         assert saved.thread_id == ""

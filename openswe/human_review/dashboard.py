@@ -45,7 +45,7 @@ class DashboardReviewRequest:
                                 pr, self.origin, self.token
                             ).start(
                                 target.id,
-                                inline_summary=inline_summary or "",
+                                inline_summary=inline_summary,
                                 replace_standard=False,
                             )
                         except ExpeditedReviewIneligible as exc:
