@@ -44,7 +44,7 @@ from langchain_core.tools import BaseTool
 
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.dashboard.options import gate_fable_model
-from openswe.dashboard.profiles import get_profile
+from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.http import GitHubClient
@@ -614,13 +614,18 @@ async def prepare_reviewer_run(
     if not cfg.is_eval and github_token and isinstance(pr_number, int):
         async with GitHubClient.connect(token=github_token) as github:
             pull = github.repo(repo_owner, repo_name).pull_request(pr_number)
-            live = await pull.pull()
-            author = live.get("user")
-            login = author.get("login") if isinstance(author, dict) else None
-            profile = await get_profile(login) if isinstance(login, str) else None
-            description_review_enabled = bool(
-                profile and profile.get("experimental_description_review") is True
-            )
+            try:
+                live = await pull.pull()
+            except Exception:
+                logger.warning(
+                    "Could not identify PR author for description experiment", exc_info=True
+                )
+            else:
+                author = live.get("user")
+                login = author.get("login") if isinstance(author, dict) else None
+                description_review_enabled = await PROFILES.description_review_enabled(
+                    login if isinstance(login, str) else ""
+                )
             if description_review_enabled:
                 await pull.start_description_review(head_sha)
 

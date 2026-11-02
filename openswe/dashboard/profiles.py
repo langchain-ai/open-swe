@@ -53,6 +53,21 @@ RETIRED_PROFILE_KEYS = frozenset(
 
 
 class ProfileRecords(UserRecords):
+    async def description_review_enabled(self, login: str) -> bool:
+        """Read the author's opt-in, disabling the experiment when its lookup fails."""
+        if not login:
+            return False
+        try:
+            profile = await self.get(login)
+        except Exception:
+            logger.warning(
+                "Description review experiment lookup failed",
+                extra={"github_login": login},
+                exc_info=True,
+            )
+            return False
+        return bool(profile and profile.get("experimental_description_review") is True)
+
     async def allows_auto_human_review(self, login: str) -> bool:
         profile = await self.get(login) or {}
         return profile.get("auto_human_review_enabled", True) is not False

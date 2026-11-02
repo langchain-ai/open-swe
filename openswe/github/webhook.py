@@ -12,6 +12,7 @@ from langgraph_sdk.errors import NotFoundError
 from pydantic import AliasChoices, AliasPath, BaseModel, Field, JsonValue, ValidationError
 
 from openswe.baby_sit import handle_ci_webhook
+from openswe.dashboard.profiles import PROFILES
 from openswe.database import postgres
 from openswe.dispatch import channel_of
 from openswe.expedited_review.reviews import REVIEW_BODY_PREFIX
@@ -715,6 +716,10 @@ async def process_github_pr_description_edit(payload: dict[str, object]) -> None
         common.logger.warning("PR edit lacks head context", exc_info=True)
         return
     if await common.enforce_public_repo_org_gate(payload, "pull_request") is not None:
+        return
+    author = update.pull_request.get("user")
+    login = author.get("login") if isinstance(author, dict) else None
+    if not await PROFILES.description_review_enabled(login if isinstance(login, str) else ""):
         return
     await _process_github_head_update(
         payload,

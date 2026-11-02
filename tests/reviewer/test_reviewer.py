@@ -19,7 +19,7 @@ def github_pr_author() -> Iterator[None]:
             "openswe.github.pull_request_status.PullRequestClient.pull",
             AsyncMock(return_value={"user": {"login": "bob"}}),
         ),
-        patch("openswe.reviewer.get_profile", AsyncMock(return_value=None)),
+        patch("openswe.dashboard.profiles.PROFILES.get", AsyncMock(return_value=None)),
     ):
         yield
 
@@ -72,7 +72,10 @@ async def _run_prepare(prepare: AgentMiddleware) -> dict[str, object]:
 
 
 @pytest.mark.asyncio
-async def test_reviewer_limits_sandbox_to_reviewed_repository_in_workspace() -> None:
+@pytest.mark.parametrize("lookup_failure", ["none", "metadata", "profile"])
+async def test_reviewer_limits_sandbox_to_reviewed_repository_in_workspace(
+    lookup_failure: str,
+) -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -87,6 +90,18 @@ async def test_reviewer_limits_sandbox_to_reviewed_repository_in_workspace() -> 
     }
 
     with (
+        patch(
+            "openswe.github.pull_request_status.PullRequestClient.pull",
+            AsyncMock(side_effect=RuntimeError("GitHub unavailable"))
+            if lookup_failure == "metadata"
+            else AsyncMock(return_value={"user": {"login": "bob"}}),
+        ),
+        patch(
+            "openswe.dashboard.profiles.PROFILES.get",
+            AsyncMock(side_effect=RuntimeError("Profile unavailable"))
+            if lookup_failure == "profile"
+            else AsyncMock(return_value=None),
+        ),
         patch(
             "openswe.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,

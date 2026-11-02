@@ -208,6 +208,7 @@ async def test_head_update_triggers_re_review_run_when_watching(
         "number": 7,
         "html_url": "https://github.com/lc/repo/pull/7",
         "title": "T",
+        "user": {"login": "bob"},
         "head": {"sha": "newsha", "ref": "feat-x", "repo": {"id": 456 if fork else 123}},
         "base": {"sha": "basesha", "ref": "main"},
     }
@@ -222,6 +223,10 @@ async def test_head_update_triggers_re_review_run_when_watching(
     fake_client.runs.create = AsyncMock()
 
     with (
+        patch(
+            "openswe.dashboard.profiles.PROFILES.get",
+            AsyncMock(return_value={"experimental_description_review": True}),
+        ),
         patch("openswe.github.webhook.approval_mode_for", AsyncMock(return_value=approval_mode)),
         patch(
             "openswe.github.webhook.approval_policy_for_review", AsyncMock(return_value="Policy")
@@ -595,3 +600,30 @@ async def test_pr_reopened_re_enables_watch() -> None:
     ):
         await github_webhooks.process_github_pr_close(_pr_close_payload(action="reopened"))
     assert captured and captured[0][1]["watch"] is True
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [None, {}, {"experimental_description_review": False}, RuntimeError("Profile unavailable")],
+)
+async def test_description_edits_do_not_dispatch_without_author_opt_in(profile: object) -> None:
+    payload = {
+        "changes": {"body": {"from": "Old"}},
+        "repository": {"id": 123},
+        "pull_request": {
+            "user": {"login": "bob"},
+            "head": {"sha": "head", "ref": "feature", "repo": {"id": 123}},
+        },
+    }
+    with (
+        patch("openswe.webhooks.common.enforce_public_repo_org_gate", AsyncMock(return_value=None)),
+        patch(
+            "openswe.dashboard.profiles.PROFILES.get",
+            AsyncMock(side_effect=profile)
+            if isinstance(profile, Exception)
+            else AsyncMock(return_value=profile),
+        ),
+        patch("openswe.github.webhook._process_github_head_update", AsyncMock()) as dispatch,
+    ):
+        await github_webhooks.process_github_pr_description_edit(payload)
+    dispatch.assert_not_awaited()
