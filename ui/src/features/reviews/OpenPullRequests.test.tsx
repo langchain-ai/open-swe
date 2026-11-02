@@ -94,6 +94,7 @@ const pull = (
   pendingChecks: [],
   missingChecks: [],
   unresolvedThreads: 0,
+  conversationResolutionRequired: false,
   ...fields,
 })
 const payload = {
@@ -326,7 +327,8 @@ describe("My PRs", () => {
     expect(screen.getByText("Change 1")).toBeTruthy()
     expect(api.mergePullRequest).toHaveBeenCalledWith(
       expect.objectContaining({ number: 1, headSha: "a".repeat(40) }),
-      "squash"
+      "squash",
+      false
     )
     finish({ action: "merge", done: true })
     await waitFor(() =>
@@ -336,6 +338,38 @@ describe("My PRs", () => {
     expect(within(card).queryByRole("button", { name: MERGE })).toBeNull()
     expect(toast.success).toHaveBeenCalledWith("Merged acme/app#1")
     expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it("asks to resolve conversations the base branch requires before merging", async () => {
+    vi.mocked(api.openPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(1, { unresolvedThreads: 2, conversationResolutionRequired: true }),
+      ],
+    })
+    vi.mocked(api.mergePullRequest).mockResolvedValue({
+      action: "merge",
+      done: true,
+    })
+    mount()
+    const card = (await screen.findByText("Change 1")).closest("li")!
+    await chooseMergeMethod(1, "Squash merge")
+    fireEvent.click(
+      within(card).getByRole("button", { name: "Squash and merge" })
+    )
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText(/2 unresolved conversations/)).toBeTruthy()
+    expect(api.mergePullRequest).not.toHaveBeenCalled()
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Resolve and merge" })
+    )
+    await waitFor(() =>
+      expect(api.mergePullRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ number: 1 }),
+        "squash",
+        true
+      )
+    )
   })
 
   it("enables auto-merge for pending checks without marking the PR merged", async () => {
@@ -827,7 +861,8 @@ describe("My PRs", () => {
     await waitFor(() =>
       expect(api.mergePullRequest).toHaveBeenCalledWith(
         expect.objectContaining({ number: 1 }),
-        "squash"
+        "squash",
+        false
       )
     )
   })
@@ -857,7 +892,8 @@ describe("My PRs", () => {
     await waitFor(() =>
       expect(api.mergePullRequest).toHaveBeenCalledWith(
         expect.objectContaining({ number: 1 }),
-        "rebase"
+        "rebase",
+        false
       )
     )
   })

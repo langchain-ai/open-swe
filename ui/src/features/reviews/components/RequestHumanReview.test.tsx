@@ -56,6 +56,7 @@ const pr: OpenPullRequest = {
   pendingChecks: [],
   missingChecks: [],
   unresolvedThreads: 1,
+  conversationResolutionRequired: false,
 }
 
 it.each([

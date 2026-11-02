@@ -26,7 +26,7 @@ import type {
   UserPreferences,
 } from "@/lib/api"
 import { useTheme } from "@/lib/theme"
-import { ConfirmDialog } from "./ConfirmDialog"
+import { ConfirmDialog } from "@/components/ConfirmDialog"
 
 const THEMES: Array<{ value: Theme; label: string }> = [
   { value: "system", label: "System" },

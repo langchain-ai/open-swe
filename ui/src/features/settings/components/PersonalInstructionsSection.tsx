@@ -7,7 +7,7 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { EditorScreen } from "@/components/EditorScreen"
 import { TextEditor } from "@/components/TextEditor"
 import { api, type UserInstructions } from "@/lib/api"
-import { ConfirmDialog } from "./ConfirmDialog"
+import { ConfirmDialog } from "@/components/ConfirmDialog"
 
 export function PersonalInstructionsSection() {
   const qc = useQueryClient()

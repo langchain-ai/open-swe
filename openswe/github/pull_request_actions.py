@@ -1,6 +1,7 @@
 """Act on a pull request using the signed-in user's GitHub permissions."""
 
 import logging
+from collections.abc import Collection
 from typing import Annotated, ClassVar, Literal
 
 import httpx2
@@ -116,6 +117,7 @@ class MergeAction(_PullRequestActionBase):
     sha: str = Field(pattern=r"^[0-9a-fA-F]{40,64}$")
     merge_method: MergeMethod
     auto_merge: bool = False
+    resolve_conversations: bool = False
 
     transport_failure: ClassVar[str] = (
         "Could not confirm merge. Refresh to check the PR before retrying."
@@ -126,13 +128,21 @@ class MergeAction(_PullRequestActionBase):
     unconfirmed: ClassVar[str] = "GitHub did not confirm the merge."
 
     async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> None:
+        pull = GitHubClient(client).repo(owner, repo).pull_request(number)
+        if self.resolve_conversations:
+            result = await resolve_review_threads(pull)
+            if result.failed:
+                raise HTTPException(
+                    502,
+                    f"Could not resolve {len(result.failed)} conversation"
+                    f"{'' if len(result.failed) == 1 else 's'}; nothing was merged.",
+                )
         message = (
             await self._squash_message(client, owner, repo, number)
             if self.merge_method == "squash"
             else None
         )
         if self.auto_merge:
-            pull = GitHubClient(client).repo(owner, repo).pull_request(number)
             try:
                 await pull.enable_auto_merge(
                     sha=self.sha, method=self.merge_method, commit_message=message
@@ -372,9 +382,9 @@ async def _resolve_review_thread(client: httpx2.AsyncClient, thread_id: str) -> 
 
 
 async def resolve_review_threads(
-    pull: PullRequestClient, body: ResolveReviewThreads
+    pull: PullRequestClient, thread_ids: Collection[str] | None = None
 ) -> ResolveReviewThreadsResult:
-    """Resolve review threads, limited to this PR's open threads."""
+    """Resolve ``thread_ids`` among this PR's open threads, or all of them when ``None``."""
     owner, repo, number = pull.repo.owner, pull.repo.name, pull.number
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
@@ -386,10 +396,11 @@ async def resolve_review_threads(
         )
         raise HTTPException(502, "GitHub did not return the review threads")
     open_ids = {thread["thread_id"] for thread in threads if thread.get("thread_id")}
+    wanted = open_ids if thread_ids is None else dict.fromkeys(thread_ids)
     resolved: list[str] = []
     failed: list[str] = []
     # Serial on purpose: GitHub's secondary rate limit punishes concurrent mutations.
-    for thread_id in dict.fromkeys(body.thread_ids):
+    for thread_id in wanted:
         if thread_id not in open_ids:
             continue
         resolved_now = await _resolve_review_thread(pull.repo.github.http, thread_id)
