@@ -416,10 +416,10 @@ function MarkReadyButton({
     >
       {actionLabel(
         {
-          idle: "Undraft",
-          pending: "Undrafting…",
-          done: "Undrafted",
-          retry: "Retry undraft",
+          idle: "Mark ready",
+          pending: "Marking ready…",
+          done: "Marked ready",
+          retry: "Retry mark ready",
         },
         ready
       )}
