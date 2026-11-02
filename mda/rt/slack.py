@@ -6,9 +6,7 @@ the backend what a message starts (``plan_slack_turn``): it builds the run from
 that request, as for its own Slack runs, and signs its context. A mention, a
 direct message or an explicit request redirects the thread's work in progress;
 any other follow-up waits its turn behind it, as on the backend's own Slack
-threads. A concierge DM is one conversation for every Slack thread in it: the
-backend names its thread, which the run starts on, so Slack's Stop in each Slack
-thread reaches only the runs that thread started.
+threads. A concierge DM's runs go on the DM's one thread, which the backend names.
 """
 
 from managed_deepagents import (
@@ -52,7 +50,6 @@ def run_result(start: SlackTurnStart) -> ChannelRunResult | None:
     if run.webhook:
         options["webhook"] = run.webhook
     if start.thread_id is not None:
-        # The DM's one thread. The agent answers in Slack with its own tools, so the
-        # run delivers nothing itself.
+        # The agent answers with its own Slack tools, so no ``deliver_to``.
         options["thread"] = {"mode": "persistent", "id": str(start.thread_id)}
     return (run.input, options)

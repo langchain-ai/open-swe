@@ -6,12 +6,7 @@ handler then asks here what the message starts (``plan_slack_turn``): the backen
 builds the run from the request it remembered, as for its own Slack runs, signs
 its context, and says whether the message redirects the thread's work in
 progress or waits its turn behind it, which the channel starts the run with.
-
-A click on one of the agent's buttons in those conversations reaches the
-channel's handler too, which decides who may click it and updates the message;
-``plan_slack_click`` builds the run the click starts, from what the backend
-keeps: the conversation's thread, a workflow push's approvals, the message a
-Retry sends again.
+``plan_slack_click`` does the same for a click on the agent's buttons.
 """
 
 from typing import Annotated, Final, Literal
@@ -28,9 +23,7 @@ class PlanSlackTurn(BaseModel):
     thread_id: UUID
     # Slack's timestamp of the message, which names it in its channel.
     message_ts: str = Field(min_length=1, max_length=64)
-    # Where the message is in Slack: its conversation and its thread's first message.
-    # A concierge DM is one conversation for every Slack thread in it, so the backend
-    # finds the DM's thread from them. Empty from a deployment that predates them.
+    # The message's Slack address, to find a concierge DM's thread; empty from older deployments.
     channel_id: str = Field(default="", max_length=64)
     thread_ts: str = Field(default="", max_length=64)
 
@@ -51,8 +44,7 @@ class SlackTurnStart(BaseModel):
     # work in progress; any other follow-up waits for it, as on the backend's own
     # Slack threads.
     interrupts: bool = True
-    # The thread the run belongs on when it isn't the Slack thread's own: a
-    # concierge DM's, which every Slack thread in the DM shares.
+    # A concierge DM's thread, when the run doesn't go on the Slack thread's own.
     thread_id: UUID | None = None
 
 
@@ -75,7 +67,6 @@ class RetryClick(BaseModel):
     """Send a failed request again: the message that failed, in its Slack thread."""
 
     kind: Literal["retry"] = "retry"
-    # The failed request's thread and message; no message retries the thread.
     thread_ts: str = Field(min_length=1, max_length=64)
     message_ts: str = Field(default="", max_length=64)
     reply_thread_ts: str = Field(default="", max_length=64)
