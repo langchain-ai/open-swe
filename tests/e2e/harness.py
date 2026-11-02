@@ -1655,6 +1655,21 @@ def gh_graphql(request: Request, body: _JsonBody) -> JSONResponse:
         return JSONResponse({"data": {"updatePullRequestReviewComment": payload}})
     owner = variables.get("owner")
     repo = variables.get("repo")
+    expression = variables.get("expression")
+    if "...on Tree" in query and isinstance(expression, str):
+        ref, _, path = expression.partition(":")
+        files = fakes.files_in_dir(str(owner), str(repo), path, ref)
+        tree = (
+            None
+            if files is None
+            else {
+                "entries": [
+                    {"path": name, "type": "blob", "object": {"text": text}}
+                    for name, text in files.items()
+                ]
+            }
+        )
+        return JSONResponse({"data": {"repository": {"object": tree}}})
     number = variables.get("number")
     if not isinstance(owner, str) or not isinstance(repo, str) or not isinstance(number, int):
         return JSONResponse({"errors": [{"message": "Invalid variables"}]}, status_code=400)

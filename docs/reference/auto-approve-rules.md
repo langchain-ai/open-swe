@@ -15,8 +15,10 @@ Open SWE may approve a pull request that only changes documentation.
 - The Markdown body is the rule, written for the reviewer to apply.
 - Two optional frontmatter keys scope a rule, each a list of globs matched with Python's `fnmatch`, where `*` also matches `/`.
   Changed files include a renamed file's old path.
-  - `match-all-files`: the rule applies only when every changed file matches at least one glob. Use it for rules that grant approval to one kind of change.
-  - `match-any-files`: the rule applies when at least one changed file matches. Use it for restrictions on part of the repository, such as requiring human review for changes under `auth/`.
+  - `match-all-files`: the rule applies only when every changed file matches at least one glob.
+    Use it for rules that grant approval to one kind of change.
+  - `match-any-files`: the rule applies when at least one changed file matches.
+    Use it for restrictions on part of the repository, such as requiring human review for changes under `auth/`.
   - With both, both must hold; with neither, the rule applies to every pull request.
 - If any rule on the default branch cannot be read or parsed (invalid YAML, an unknown frontmatter key, an empty body), no rule applies: the review says why auto approval did not run, and nothing is approved or left off an expedited card.
 - When a pull request changes `.open-swe/auto-approve-rules/` or `.open-swe/settings.json` and the result is invalid, Open SWE's review requests changes and lists the problems.
