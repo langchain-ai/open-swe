@@ -117,7 +117,7 @@ from openswe.middleware import (
 )
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
-from openswe.middleware.model_selection import ModelSelectionState, RoutingMode
+from openswe.middleware.model_selection import RoutingMode
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.require_cli_result import RequireCliResultMiddleware, cli_result_nudge
 from openswe.middleware.require_user_reply import (
@@ -1193,9 +1193,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._draft_prs = cfg.draft_prs is True
         self._admin_workspaces = turn.admin_workspaces
         self._sole_writer = turn.sole_writer
-        self._model_selection = ModelSelectionMiddleware(
-            turn.routing.route_model_ids, routing_mode=turn.routing.mode
-        )
         self._routing_defaults = dict(turn.route_models)
         self._tool_catalog_note = catalog_note(turn.tool_discovery_failures)
 
@@ -1312,7 +1309,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         "pin_persisted": decision.pin_persisted,
                         "selected_model_id": prepared.get("selected_model_id"),
                         "selected_effort": prepared.get("selected_effort"),
-                        "route": prepared.get("model_route"),
                     },
                     error=None if prepared else "Model selection preparation failed",
                 )
@@ -1357,7 +1353,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
         requested_model: str | None = None
         requested_effort: str | None = None
-        if self._requested_models is not None and self._model_selection is not None:
+        if self._requested_models is not None:
             settings = (await load_thread_settings(client, self._thread_id)).copy()
             if not settings.get("model_handoff_complete"):
                 handoff_config = RunConfig.from_config(self._config)
@@ -1453,7 +1449,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 option = self._requested_models[requested_model]
                 requested_effort = settings.get("effort") or option["default_effort"]
                 decision.requested_effort = requested_effort
-                self._model_selection.use_requested_model(requested_model)
                 if decision.outcome != "reused_saved_choice":
                     decision.outcome = "accepted_request"
                     decision.reason = "validated_and_persisted"
@@ -1499,35 +1494,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         rendered_prompt = (
             asyncio.create_task(self._render_system_prompt(cfg)) if render_prompt else None
         )
-        # Reads only who the run is for, so it runs alongside routing and participants.
+        # Reads only who the run is for, so it runs alongside participants.
         recent_threads = asyncio.create_task(self._recent_threads(cfg))
         async with aphase(self._thread_id, "prepare.participants"):
-            attribution_model_id = self._model_id
-            attribution_effort = self._effort
-            attribution_route = None
-            persist_route = False
-            if self._model_selection is not None:
-                routing_state = cast(ModelSelectionState, state).copy()
-                if (
-                    cfg.source == "dashboard"
-                    and cfg.model_selection == "auto"
-                    and cfg.model_selection_changed
-                ):
-                    routing_state.pop("model_route", None)
-                    routing_state.pop("requested_model", None)
-                if requested_model:
-                    attribution_route = "default"
-                    persist_route = True
-                else:
-                    selection = await self._model_selection.select_route(routing_state)
-                    attribution_route = selection.route
-                    persist_route = selection.persist
-                if attribution_route != "default":
-                    attribution_model_id, attribution_effort = self._routing_defaults[
-                        attribution_route
-                    ]
-            configurable["resolved_agent_model_id"] = attribution_model_id
-            configurable["resolved_agent_effort"] = attribution_effort
+            configurable["resolved_agent_model_id"] = self._model_id
+            configurable["resolved_agent_effort"] = self._effort
             bot_id = (
                 cfg.slack_thread.triggering_bot_id
                 if self._source == "slack" and cfg.slack_thread
@@ -1581,14 +1552,20 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
         added = [*sender_messages, *turn.messages(visible_dynamic_context_hashes(state))]
         system_prompt = (await rendered_prompt).state() if rendered_prompt is not None else {}
+        auto_reset = (
+            cfg.source == "dashboard"
+            and cfg.model_selection == "auto"
+            and cfg.model_selection_changed
+        )
         return {
             "work_dir": work_dir,
             "requested_model": requested_model,
             "requested_effort": requested_effort,
-            "selected_model_id": attribution_model_id,
-            "selected_effort": attribution_effort,
+            "selected_model_id": self._model_id,
+            "selected_effort": self._effort,
             **({"messages": added} if added else {}),
-            **({"model_route": attribution_route} if persist_route else {}),
+            # Switching back to auto routes the thread afresh: MDA's loop picks its route again.
+            **({"model_route": None} if auto_reset else {}),
             **system_prompt,
         }
 
@@ -1661,8 +1638,14 @@ async def record_agent_run(
     if thread_id is None:
         return
     sender = started.sender or (None if carried else agent_sender(config, turn))
-    model_id = started.model_id or (None if carried else cfg.resolved_agent_model_id)
-    effort = started.effort or (None if carried else cfg.resolved_agent_effort)
+    # A routed run runs as its route's model, which MDA picked after preparation.
+    route = started.model_route
+    routed = turn.route_models.get(route) if route is not None and route != "default" else None
+    if routed is not None:
+        model_id, effort = routed
+    else:
+        model_id = started.model_id or (None if carried else cfg.resolved_agent_model_id)
+        effort = started.effort or (None if carried else cfg.resolved_agent_effort)
     source = (sender.source if sender is not None else None) or "dashboard"
 
     async def on_thread() -> None:

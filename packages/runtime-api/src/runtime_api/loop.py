@@ -164,7 +164,8 @@ class RunStarted(Report):
 
     # The human messages since the conversation's last reply; the latest asked for the turn.
     humans: list[dict[str, JsonValue]] = []
-    # The model, effort and route preparation chose.
+    # The model and effort preparation chose, and the route the run's first model call took,
+    # whose model it runs as instead.
     model_id: str | None = None
     effort: str | None = None
     model_route: str | None = None
