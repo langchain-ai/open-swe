@@ -21,6 +21,7 @@ from openswe.expedited_review.readiness import latest_review_states
 from openswe.github.http import GitHubClient, GitHubError
 from openswe.github.pull_request_status import OpenPullRequest
 from openswe.github.pull_request_status import ReviewAssignment as Assignment
+from openswe.github.repos import accessible_repo_full_names
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.tentative import TentativeReviewers
 from openswe.slack.client import GitHubPrRef, parse_github_pr_url
@@ -58,7 +59,7 @@ class QueuedPullRequest:
 
 
 class ReviewQueue:
-    """The To Review list of ``login``, read from GitHub as them."""
+    """The To Review list of ``login``, read as them."""
 
     def __init__(
         self, github: GitHubClient, login: str, user: User, repositories: set[str]
@@ -77,12 +78,14 @@ class ReviewQueue:
         return [QueuedPullRequest.of_request(request, "assigned") for request in requests]
 
     async def unclaimed(self) -> list[HumanReviewRequest]:
-        """Unclaimed requests the deadline could pick this person for, by who they are alone."""
+        """Unclaimed requests in repos this person can read that the deadline could pick them for."""
         if not await PROFILES.allows_auto_human_review(self.login):
             return []
+        readable = await accessible_repo_full_names(self.login)
+        wanted = [name for name in readable if self._wanted(name)]
         return [
             request
-            for request in await HumanReviewRequest.unclaimed()
+            for request in await HumanReviewRequest.unclaimed(wanted)
             if not request.is_author(self.user.id, self.login)
             and request.participant(self.user.id) is None
         ]
@@ -117,23 +120,24 @@ class ReviewQueue:
             if (ref := parse_github_pr_url(url)) is not None
         ]
 
+    async def readable(self, full_name: str) -> bool:
+        owner, name = full_name.split("/", 1)
+        try:
+            await self.github.repo(owner, name).info()
+        except GitHubError as exc:
+            if exc.response.status_code not in {403, 404}:
+                raise
+            logger.info(
+                "To Review repository no longer accessible", extra={"repository": full_name}
+            )
+            return False
+        return True
+
     async def accessible(self, repo_full_names: set[str]) -> set[str]:
         """The repositories this person can still read, lowercased."""
-        allowed: set[str] = set()
-        for full_name in repo_full_names:
-            owner, name = full_name.split("/", 1)
-            try:
-                await self.github.repo(owner, name).info()
-            except GitHubError as exc:
-                if exc.response.status_code not in {403, 404}:
-                    raise
-                logger.info(
-                    "To Review repository no longer accessible",
-                    extra={"repository": full_name},
-                )
-            else:
-                allowed.add(full_name.lower())
-        return allowed
+        names = sorted(repo_full_names)
+        readable = await asyncio.gather(*(self.readable(name) for name in names))
+        return {name.lower() for name, ok in zip(names, readable, strict=True) if ok}
 
     async def _live(self, queued: QueuedPullRequest) -> Mapping[str, object] | None:
         """The open PR's GitHub payload, or ``None`` once it is closed or unreadable."""
@@ -212,14 +216,11 @@ class ReviewQueue:
         assigned, unclaimed, mentioned = await asyncio.gather(
             self.assigned(), self.unclaimed(), self.mentioned()
         )
-        unclaimed = [r for r in unclaimed if self._wanted(r.pull_request.repo_full_name)]
         queued = [q for q in [*assigned, *mentioned] if self._wanted(q.repo_full_name)]
-        allowed = await self.accessible(
-            {q.repo_full_name for q in queued} | {r.pull_request.repo_full_name for r in unclaimed}
+        allowed, tentative = await asyncio.gather(
+            self.accessible({q.repo_full_name for q in queued}), self.tentative(unclaimed)
         )
-        tentative = await self.tentative(
-            [r for r in unclaimed if r.pull_request.repo_full_name.lower() in allowed]
-        )
+        allowed |= {t.repo_full_name.lower() for t in tentative}
         seen: set[str] = set()
         distinct: list[QueuedPullRequest] = []
         for item in sorted([*queued, *tentative], key=lambda item: _ORDER.index(item.assignment)):

@@ -303,13 +303,17 @@ class HumanReviewRequest(Base):
             return list(rows)
 
     @classmethod
-    async def unclaimed(cls) -> list[Self]:
-        """Open review requests nobody has signed up for or been picked for yet."""
+    async def unclaimed(cls, repositories: Collection[str]) -> list[Self]:
+        """Open requests in these lowercase ``owner/repo``s nobody has signed up for or been picked for."""
+        if not repositories:
+            return []
         async with postgres.session() as session:
             rows = await session.scalars(
                 cls._loaded(select(cls))
                 .join(cls.pull_request)
+                .join(PullRequest.repository)
                 .where(
+                    Repository.key.in_(repositories),
                     cls.state == "open",
                     cls.kind.in_(("standard", "posted")),
                     PullRequest.state == "open",

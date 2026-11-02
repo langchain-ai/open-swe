@@ -828,11 +828,12 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         (6, ada, True, "open", "standard"),
         (7, None, False, "open", "standard"),
         (8, None, False, "open", "standard"),
+        (14, None, False, "open", "standard"),
     ]
     for number, user, assigned, state, kind in cases:
         pr = await PullRequest(
             owner="o",
-            repo="hidden" if number == 6 else "r",
+            repo={6: "hidden", 14: "unreadable"}.get(number, "r"),
             number=number,
             title=f"PR {number}",
             author="grace",
@@ -898,13 +899,17 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         return {"ada": "APPROVED"} if pull.number == 5 else {}
 
     async def tentative(self) -> frozenset[UUID]:
-        return frozenset({ada.id} if self.request.pull_request.number == 7 else {grace.id})
+        return frozenset({ada.id} if self.request.pull_request.number in {7, 14} else {grace.id})
 
     with (
         patch("openswe.human_review.routes.GitHubClient.as_user", as_user),
         patch.object(RepoClient, "info", info),
         patch.object(PullRequestClient, "pull", pull),
         patch.object(TentativeReviewers, "user_ids", tentative),
+        patch(
+            "openswe.human_review.review_queue.accessible_repo_full_names",
+            AsyncMock(return_value=frozenset({"o/r"})),
+        ),
         patch("openswe.human_review.review_queue.latest_review_states", states),
     ):
         result = await api_review_assignments(page=1, session={"sub": "ada"})
