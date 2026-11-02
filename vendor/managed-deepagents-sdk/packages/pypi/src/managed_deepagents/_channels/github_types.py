@@ -30,6 +30,8 @@ from managed_deepagents._channels.github_schema import (
     _ReviewCommentPayload,
     _ReviewPayload,
     _StatusPayload,
+    _UnlabeledIssuePayload,
+    _UnlabeledPullRequestPayload,
     _WorkflowPayload,
 )
 from managed_deepagents._channels.http.endpoint import EndpointRequest, EventEndpoint
@@ -265,13 +267,11 @@ GitHubEndpointRequest = (
     ]
     | EndpointRequest[
         GitHubEndpointEvent[
-            Literal[
-                "issues.labeled",
-                "issues.unlabeled",
-            ],
+            Literal["issues.labeled"],
             _LabeledIssuePayload,
         ]
     ]
+    | EndpointRequest[GitHubEndpointEvent[Literal["issues.unlabeled"], _UnlabeledIssuePayload]]
     | EndpointRequest[
         GitHubEndpointEvent[
             Literal[
@@ -310,12 +310,12 @@ GitHubEndpointRequest = (
     ]
     | EndpointRequest[
         GitHubEndpointEvent[
-            Literal[
-                "pull_request.labeled",
-                "pull_request.unlabeled",
-            ],
+            Literal["pull_request.labeled"],
             _LabeledPullRequestPayload,
         ]
+    ]
+    | EndpointRequest[
+        GitHubEndpointEvent[Literal["pull_request.unlabeled"], _UnlabeledPullRequestPayload]
     ]
     | EndpointRequest[
         GitHubEndpointEvent[
@@ -459,7 +459,7 @@ GitHubHandlers = TypedDict(
         "issues.unpinned": GitHubEventCallback[_IssuePayload] | EventEndpoint,
         "issues.assigned": GitHubEventCallback[_IssuePayload] | EventEndpoint,
         "issues.unassigned": GitHubEventCallback[_IssuePayload] | EventEndpoint,
-        "issues.unlabeled": GitHubEventCallback[_LabeledIssuePayload] | EventEndpoint,
+        "issues.unlabeled": GitHubEventCallback[_UnlabeledIssuePayload] | EventEndpoint,
         "issues.locked": GitHubEventCallback[_IssuePayload] | EventEndpoint,
         "issues.unlocked": GitHubEventCallback[_IssuePayload] | EventEndpoint,
         "issues.milestoned": GitHubEventCallback[_IssuePayload] | EventEndpoint,
@@ -482,7 +482,7 @@ GitHubHandlers = TypedDict(
         "pull_request.review_requested": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
         "pull_request.review_request_removed": GitHubEventCallback[_PullRequestPayload]
         | EventEndpoint,
-        "pull_request.unlabeled": GitHubEventCallback[_LabeledPullRequestPayload] | EventEndpoint,
+        "pull_request.unlabeled": GitHubEventCallback[_UnlabeledPullRequestPayload] | EventEndpoint,
         "pull_request.locked": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
         "pull_request.unlocked": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
         "pull_request.milestoned": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,

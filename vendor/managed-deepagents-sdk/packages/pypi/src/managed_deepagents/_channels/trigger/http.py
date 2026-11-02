@@ -8,6 +8,7 @@ import functools
 import json
 import os
 import uuid
+import weakref
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -46,6 +47,11 @@ from managed_deepagents._channels.resolve_user import (
     user_resolution,
 )
 from managed_deepagents._channels.run_input import run_start_options
+from managed_deepagents._channels.slack.code_channel import (
+    code_channel_conversation,
+    is_code_channel_address,
+    set_code_channel_status,
+)
 from managed_deepagents._channels.trigger.client import (
     LANGSMITH_MDA_TRIGGER_SERVER_URL_ENV,
     TriggerClientError,
@@ -72,6 +78,7 @@ from managed_deepagents._channels.trigger.ingress import (
     ingress_thread_interrupts,
     newer_ingress_run,
     observe_ingress_agent,
+    other_active_ingress_run,
     resume_ingress_agent,
     start_ingress_agent,
 )
@@ -84,6 +91,7 @@ from managed_deepagents._channels.trigger.types import (
     TriggerChannelInterrupt,
     TriggerChannelInterruptResumeEvent,
     TriggerChannelMessageEvent,
+    TriggerChannelProviderEvent,
     TriggerChannelResume,
     TriggerChannelRunCancelEvent,
     TriggerChannelRunEvent,
@@ -115,6 +123,7 @@ if TYPE_CHECKING:
     )
     from managed_deepagents._channels.resolve_user import ChannelResolveUser
     from managed_deepagents._channels.run_input import NormalizedRunInput
+    from managed_deepagents._channels.slack.code_channel import CodeChannelSessionStatus
     from managed_deepagents._channels.trigger.ingress import (
         HandlerThreadTarget,
         ObservedIngressRun,
@@ -184,6 +193,13 @@ DecideMessageFn = Callable[
 """Decide what a message event starts, before its run; ``None`` starts it with
 ``message_input``'s messages. Interrupt resumes never ask."""
 
+DecideProviderEventFn = Callable[
+    [TriggerChannelProviderEvent, TriggerChannelThread, "ChannelActor | None"],
+    Awaitable[TriggerMessageRoute | None],
+]
+"""Decide what a provider event the channel asked for starts, such as a Slack
+edit or reaction; ``None`` starts nothing."""
+
 DecideInteractionFn = Callable[
     [TriggerChannelUserPromptResponseEvent, TriggerChannelThread, "ChannelActor | None"],
     Awaitable[TriggerMessageRoute | None],
@@ -220,6 +236,7 @@ class ResumeAgentFn(Protocol):
         user_id: str,
         context: Mapping[str, object],
         binding: ChannelBinding,
+        metadata: Mapping[str, JsonValue] | None = None,
     ) -> StartedIngressRun: ...
 
 
@@ -255,6 +272,10 @@ class NewerRunFn(Protocol):
         source_thread_key: str,
         user_id: str,
     ) -> bool: ...
+
+
+OtherActiveRunFn = NewerRunFn
+"""Whether a run other than ``run_id`` is queued or running on its thread."""
 
 
 OnlyContinuesThreadFn = Callable[[TriggerChannelMessageEvent], Awaitable[bool]]
@@ -453,6 +474,7 @@ async def _start_event_run(
     decided: NormalizedRunInput | None = None,
     multitask_strategy: MultitaskStrategy | None = None,
     answered_interrupt: str | None = None,
+    owner_key: str | None = None,
 ) -> tuple[StartedIngressRun, str]:
     """Start or resume the delivery's run, and the source key that owns its thread.
 
@@ -460,8 +482,10 @@ async def _start_event_run(
     and otherwise starts a turn, as a message does. An answer to an interrupt
     neither the conversation nor its subagents hold resumes the thread a
     handler chose for a run this conversation's message started, if one holds it.
+    ``owner_key`` owns ``thread_id`` when the event's own key doesn't, as a
+    code channel's key owns its conversation's thread.
     """
-    source_thread_key = event["source_thread_key"]
+    source_thread_key = owner_key or event["source_thread_key"]
     context: dict[str, object] = {}
     binding = trigger_channel_binding(provider=source_provider, name=channel_name, event=event)
     if event["type"] == "user_prompt_response" and answered_interrupt is not None:
@@ -477,13 +501,13 @@ async def _start_event_run(
             binding=binding,
         )
         return started, source_thread_key
-    if event["type"] == "message" or event["type"] == "user_prompt_response":
+    if event["type"] in ("message", "user_prompt_response", "provider_event"):
         start = start_agent or start_ingress_agent
         options: dict[str, object] = {}
         if multitask_strategy is not None:
             options["multitask_strategy"] = multitask_strategy
         if decided is None:
-            if event["type"] == "user_prompt_response":
+            if event["type"] != "message":
                 messages = []
             elif message_input is not None:
                 messages = message_input(event)
@@ -526,11 +550,15 @@ async def _start_event_run(
             thread_interrupts=thread_interrupts,
             handler_resume_target=handler_resume_target,
             handler_threads=handler_threads,
+            owner_key=source_thread_key,
         )
+        run_metadata: dict[str, Mapping[str, JsonValue]] = {}
         if "source_thread_key" in target:
             handler_target = cast("HandlerThreadTarget", target)
             source_thread_key = handler_target["source_thread_key"]
             binding["reply"] = handler_target["reply"]
+            # The resumed run is the one Stop and the next answer look for.
+            run_metadata["metadata"] = handler_target["run_metadata"]
         resume = resume_agent or resume_ingress_agent
         started = await resume(
             thread_id=target["thread_id"],
@@ -541,6 +569,7 @@ async def _start_event_run(
             user_id=user_id,
             context=context,
             binding=binding,
+            **run_metadata,
         )
         return started, source_thread_key
     _assert_never(event)
@@ -558,11 +587,15 @@ async def _answered_thread(
     thread_interrupts: ThreadInterruptsFn | None,
     handler_resume_target: HandlerResumeTargetFn | None,
     handler_threads: bool,
+    owner_key: str,
 ) -> ResumeTarget | HandlerThreadTarget:
     """The thread an answer resumes: the conversation's, one of its subagents', or
-    else the handler thread a run this conversation's message started waits on."""
+    else the handler thread a run this conversation's message started waits on.
+
+    ``owner_key`` owns the conversation's thread.
+    """
     interrupt_ids = list(event["interaction"]["resume"])
-    source_thread_key = event["source_thread_key"]
+    source_thread_key = owner_key
     target = await (resume_target or ingress_resume_target)(
         thread_id=thread_id,
         assistant_id=assistant_id,
@@ -632,6 +665,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     thread_interrupts: ThreadInterruptsFn | None = None,
     thread_exists: ThreadExistsFn | None = None,
     newer_run: NewerRunFn | None = None,
+    other_active_run: OtherActiveRunFn | None = None,
     resume_target: ResumeTargetFn | None = None,
     conversation_thread: ConversationThreadFn | None = None,
     observe_agent: ObserveAgentFn | None = None,
@@ -639,6 +673,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     cancel_handler_runs: CancelHandlerRunsFn | None = None,
     handler_resume_target: HandlerResumeTargetFn | None = None,
     delete_thread: DeleteThreadFn | None = None,
+    code_channels: bool = False,
     trigger_client: TriggerClientLike | None = None,
     reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
     started_status: TriggerChannelRuntimeStatus | None = None,
@@ -646,6 +681,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     only_continues_thread: OnlyContinuesThreadFn | None = None,
     decide_message: DecideMessageFn | None = None,
     decide_interaction: DecideInteractionFn | None = None,
+    decide_provider_event: DecideProviderEventFn | None = None,
     multitask_strategy: MultitaskStrategy | None = None,
     on_finish: HttpOnFinish | None = None,
     identity_context_key: IdentityContextKey | None = None,
@@ -706,6 +742,22 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         logger.log_identifier(event["channel_id"]),
     )
 
+    code_channel: CodeChannel | None = None
+    if code_channels:
+        try:
+            code_channel = _code_channel(event, source_provider)
+        except ValueError:
+            logger.warning(
+                "channel event names a malformed code channel; it starts nothing (delivery_id=%s)",
+                logger.log_identifier(event["delivery_id"]),
+            )
+            return _accepted_response(event)
+    # The key the event's conversation runs under: in a code channel, the
+    # whole channel's, as a Stop there carries it.
+    conversation_key = (
+        code_channel.source_thread_key if code_channel is not None else event["source_thread_key"]
+    )
+
     if event["type"] == "run_cancel":
         return await _cancel_event_runs(
             event,
@@ -716,6 +768,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             cancel_handler_runs=cancel_handler_runs,
             conversation_thread=conversation_thread,
             handler_threads=decide_message is not None,
+            conversation_key=conversation_key,
         )
 
     resolve_principal = resolve_principal or resolve_external_principal_id
@@ -777,10 +830,11 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             )
         _log_no_run(event, TriggerMessageDecision("skipped"))
 
+    owner_key = conversation_key
     try:
         thread_id = await (conversation_thread or conversation_thread_id)(
             source_provider=source_provider,
-            source_thread_key=event["source_thread_key"],
+            source_thread_key=conversation_key,
             user_id=user_id,
         )
     except Exception as error:  # noqa: BLE001 - never expose Agent Server details in the response
@@ -799,7 +853,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             answered_interrupt = await _interrupt_answered_by(
                 thread_id=thread["id"],
                 source_provider=source_provider,
-                source_thread_key=event["source_thread_key"],
+                source_thread_key=owner_key,
                 user_id=user_id,
                 correlation_id=normalized_user_prompt_response(event).get("correlation_id"),
                 thread_interrupts=thread_interrupts,
@@ -822,7 +876,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             return _start_failed_response()
     # Whether the delivery starts a turn of its own, which finishes: a message,
     # or a prompt response that answers no interrupt. Resumes don't.
-    starts_turn = event["type"] == "message" or (
+    starts_turn = event["type"] in ("message", "provider_event") or (
         event["type"] == "user_prompt_response" and answered_interrupt is None
     )
 
@@ -850,6 +904,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
                 decided=decided,
                 multitask_strategy=strategy,
                 answered_interrupt=answered_interrupt,
+                owner_key=owner_key,
             )
         except Exception as error:
             if starts_turn and rejected_as_busy(strategy, error):
@@ -904,6 +959,14 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             started_status=started_status,
             multitask_strategy=started.multitask_strategy,
             newer_run=newer_run,
+            other_active_run=other_active_run,
+            thread_interrupts=thread_interrupts,
+            # The code channel's session shows how its conversation's runs go.
+            code_channel=(
+                code_channel.conversation_id
+                if code_channel is not None and started.run["thread_id"] == thread_id
+                else None
+            ),
         )
 
     async def run_on_thread(run: NormalizedRunInput, index: int, *, react: bool) -> None:
@@ -930,7 +993,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             run["messages"],
         )
         binding["reply"] = "auto" if delivers else "none"
-        stamped: dict[str, JsonValue] = {STARTED_FROM_METADATA: event["source_thread_key"]}
+        stamped: dict[str, JsonValue] = {STARTED_FROM_METADATA: conversation_key}
         if delivers:
             stamped[DELIVERS_METADATA] = True
         options: dict[str, object] = {
@@ -989,13 +1052,18 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
                 schedule=schedule,
             )
 
-    if event["type"] == "message" and not await _may_start_in(
-        event,
-        thread_id=thread["id"],
-        user_id=user_id,
-        source_provider=source_provider,
-        only_continues_thread=only_continues_thread,
-        thread_exists=thread_exists,
+    # Every message in a code channel continues its one conversation.
+    if (
+        event["type"] == "message"
+        and code_channel is None
+        and not await _may_start_in(
+            event,
+            thread_id=thread["id"],
+            user_id=user_id,
+            source_provider=source_provider,
+            only_continues_thread=only_continues_thread,
+            thread_exists=thread_exists,
+        )
     ):
         logger.info(
             "channel message started no run: the agent never ran on its thread (delivery_id=%s)",
@@ -1009,6 +1077,13 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         decision = await decide_message(event, thread, actor)
     elif starts_turn and event["type"] == "user_prompt_response" and decide_interaction is not None:
         decision = await decide_interaction(event, thread, actor)
+    elif event["type"] == "provider_event":
+        # Only a handler starts a run for a provider event.
+        decision = (
+            await decide_provider_event(event, thread, actor)
+            if decide_provider_event is not None
+            else None
+        ) or TriggerMessageDecision("skipped")
     if isinstance(decision, TriggerMessageBackground):
         decide = decision.decide
 
@@ -1094,6 +1169,30 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     return _accepted_response(event)
 
 
+class CodeChannel(NamedTuple):
+    """A Slack code channel, and the key it is one conversation under."""
+
+    conversation_id: str
+    source_thread_key: str
+
+
+def _code_channel(event: TriggerChannelEvent, source_provider: str) -> CodeChannel | None:
+    """The Slack code channel a delivery is from; ``None`` for any other delivery.
+
+    Only the address's ``code_channel`` marker says so; the app and workspace
+    come from the source key, the channel from the address, never from the
+    key's last part. Raises ``ValueError`` for a marked delivery that names
+    neither.
+    """
+    address = event["address"]
+    if source_provider != "slack" or not is_code_channel_address(address):
+        return None
+    found = code_channel_conversation(address, event["source_thread_key"])
+    if found is None:
+        raise ValueError("code channel delivery names no workspace or channel")
+    return CodeChannel(*found)
+
+
 class _StartedRun(NamedTuple):
     run: StartedIngressRun
     source_thread_key: str
@@ -1148,6 +1247,7 @@ async def _cancel_event_runs(
     cancel_handler_runs: CancelHandlerRunsFn | None,
     conversation_thread: ConversationThreadFn | None,
     handler_threads: bool,
+    conversation_key: str,
 ) -> object:
     """Stop the source thread's runs; each run's observer reports ``run.cancelled``.
 
@@ -1155,17 +1255,18 @@ async def _cancel_event_runs(
     filter confines the cancel to this source conversation. On threads the
     channel's handlers chose, only the runs this conversation's messages
     started are cancelled; another conversation's run there goes on.
+    ``conversation_key`` is the conversation's key, a code channel's own.
     """
     try:
         thread_id = await (conversation_thread or conversation_thread_id)(
             source_provider=source_provider,
-            source_thread_key=event["source_thread_key"],
+            source_thread_key=conversation_key,
             user_id=user_id,
         )
         cancelled = await (cancel_runs or cancel_ingress_thread_runs)(
             thread_id=thread_id,
             source_provider=source_provider,
-            source_thread_key=event["source_thread_key"],
+            source_thread_key=conversation_key,
             user_id=user_id,
         )
     except Exception as error:  # noqa: BLE001 - never expose Agent Server details in the response
@@ -1179,7 +1280,7 @@ async def _cancel_event_runs(
             cancelled += await (cancel_handler_runs or cancel_handler_thread_runs)(
                 channel_name=channel_name,
                 source_provider=source_provider,
-                started_from=event["source_thread_key"],
+                started_from=conversation_key,
                 user_id=user_id,
             )
         except Exception as error:  # noqa: BLE001 - never log Agent Server details
@@ -1216,9 +1317,28 @@ async def _observe_accepted_run(
     started_status: TriggerChannelRuntimeStatus | None = None,
     multitask_strategy: MultitaskStrategy | None = None,
     newer_run: NewerRunFn | None = None,
+    other_active_run: OtherActiveRunFn | None = None,
+    thread_interrupts: ThreadInterruptsFn | None = None,
+    code_channel: str | None = None,
 ) -> HttpFinish:
     """Observe a started run and say how the delivery finished; the run itself
-    posts its answer (``_channels/delivery.py``)."""
+    posts its answer (``_channels/delivery.py``).
+
+    A run of a code channel's conversation, in Slack channel
+    ``code_channel``, sets the channel session's status too.
+    """
+    session = _CodeChannelSession(
+        code_channel,
+        functools.partial(
+            _thread_session_status,
+            started,
+            source_provider=source_provider,
+            source_thread_key=source_thread_key,
+            user_id=user_id,
+            other_active_run=other_active_run,
+            thread_interrupts=thread_interrupts,
+        ),
+    )
     was_replaced = functools.partial(
         _replaced_by_newer_message,
         event,
@@ -1260,6 +1380,7 @@ async def _observe_accepted_run(
         await _best_effort(client.post_runtime_event(event["channel_id"], request))
 
     await lifecycle("run.started", status=started_status)
+    await session.set("processing")
     # Not awaited here, so the reaction never delays the reply. The `finally`
     # settles it so it cannot outlive this work item.
     reaction = asyncio.create_task(
@@ -1283,6 +1404,7 @@ async def _observe_accepted_run(
             if await was_replaced(error):
                 return replaced
             await lifecycle("run.failed", message=_missing_connection_failure_message(error))
+            await session.set("active")
             return {"type": "failed", "reason": "observe", "interrupts": []}
 
         def ended(interrupts: list[TriggerChannelInterrupt] | None = None) -> HttpFinish:
@@ -1297,20 +1419,93 @@ async def _observe_accepted_run(
         if _is_cancelled_run(observed):
             if not await was_replaced(None):
                 await lifecycle("run.cancelled")
+                await session.set("active")
             return ended()
 
         # The run itself posts its answer, or shows its interrupts, as it ends.
         if _is_interrupted_run(observed):
+            await session.set("suspended")
             return ended(_forwarded_interrupts(observed["values"]))
 
         if observed["status"] != "success":
             await lifecycle("run.failed")
-            return ended()
-
-        await lifecycle("run.completed")
+        else:
+            await lifecycle("run.completed")
+        await session.set("active")
         return ended()
     finally:
         await reaction
+
+
+#: Each code channel's session status lock, by Slack channel, while in use.
+_SESSION_LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+
+
+class _CodeChannelSession:
+    """The status of a code channel's session, which the deployment sets for
+    its conversation's runs; Trigger Server sets none for a code channel.
+
+    Updates go out one at a time per channel, in the order its runs report
+    them, and once a run started, each reads the conversation thread's state
+    as it goes out: another run queued or running keeps the session
+    ``processing``, so Slack still offers Stop for it; a run waiting on a
+    decision makes it ``suspended``; otherwise it is ``active``. A failure is
+    logged by error code, and never fails the run.
+    """
+
+    def __init__(
+        self,
+        conversation_id: str | None,
+        thread_status: Callable[[CodeChannelSessionStatus], Awaitable[CodeChannelSessionStatus]],
+    ) -> None:
+        self._conversation_id = conversation_id
+        self._thread_status = thread_status
+
+    async def set(self, reported: CodeChannelSessionStatus) -> None:
+        if self._conversation_id is None:
+            return
+        lock = _SESSION_LOCKS.setdefault(self._conversation_id, asyncio.Lock())
+        async with lock:
+            status = reported if reported == "processing" else await self._thread_status(reported)
+            await set_code_channel_status(self._conversation_id, status)
+
+
+async def _thread_session_status(
+    started: StartedIngressRun,
+    reported: CodeChannelSessionStatus,
+    *,
+    source_provider: str | None,
+    source_thread_key: str | None,
+    user_id: str,
+    other_active_run: OtherActiveRunFn | None,
+    thread_interrupts: ThreadInterruptsFn | None,
+) -> CodeChannelSessionStatus:
+    """A code channel session's status, from its conversation thread's state;
+    what the run reported when that can't be read."""
+    if source_provider is None or source_thread_key is None:
+        return reported
+    try:
+        if await (other_active_run or other_active_ingress_run)(
+            thread_id=started["thread_id"],
+            run_id=started["run_id"],
+            source_provider=source_provider,
+            source_thread_key=source_thread_key,
+            user_id=user_id,
+        ):
+            return "processing"
+        parked = await (thread_interrupts or ingress_thread_interrupts)(
+            thread_id=started["thread_id"],
+            source_provider=source_provider,
+            source_thread_key=source_thread_key,
+            user_id=user_id,
+        )
+    except Exception as error:  # noqa: BLE001 - never log Agent Server details
+        logger.warning(
+            "channel thread lookup failed; the code channel session follows this run (%s)",
+            logger.safe_error_label(error),
+        )
+        return reported
+    return "suspended" if parked else "active"
 
 
 async def _react_to_trigger_message(
