@@ -1191,7 +1191,7 @@ async def fetch_github_pr_metadata(pr_ref: GitHubPrRef, *, token: str) -> dict[s
         "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with PooledAsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with PooledAsyncClient() as http_client:
         try:
             response = await http_client.get(
                 f"https://api.github.com/repos/{pr_ref.owner}/{pr_ref.repo}/pulls/{pr_ref.number}",
@@ -1410,7 +1410,7 @@ async def _fetch_compare_diff(
         "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with PooledAsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with PooledAsyncClient() as http_client:
         try:
             response = await http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/compare/{base}...{head}",

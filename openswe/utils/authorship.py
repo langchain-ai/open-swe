@@ -16,7 +16,6 @@ from openswe.utils import ttl_cache
 
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance
-from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.http_pool import PooledAsyncClient
 
 logger = logging.getLogger(__name__)
@@ -267,7 +266,7 @@ async def _fetch_public_github_profile(login: str) -> GitHubPublicProfile | None
     if not token:
         return None
     try:
-        async with PooledAsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+        async with PooledAsyncClient() as client:
             response = await client.get(
                 f"https://api.github.com/users/{login}",
                 headers={

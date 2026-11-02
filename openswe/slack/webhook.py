@@ -1092,7 +1092,7 @@ async def _process_slack_mention_impl(
             resolved_model_id = fallback_model_id
             image_model_override = (fallback_model_id, fallback_effort)
         common.logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
-        async with PooledAsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as http_client:
+        async with PooledAsyncClient() as http_client:
             for image_url in image_urls:
                 image_block = await common.fetch_image_block(image_url, http_client)
                 if image_block:

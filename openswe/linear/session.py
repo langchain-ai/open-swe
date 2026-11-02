@@ -412,7 +412,7 @@ class LinearSessionTurn:
         model_id = await common.resolve_agent_model_id(login, workspace=workspace)
         if not common.model_supports_images(model_id):
             override = common.default_vision_model_pair()
-        async with PooledAsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as client:
+        async with PooledAsyncClient() as client:
             fetched = await asyncio.gather(*(common.fetch_image_block(url, client) for url in urls))
         blocks = {
             url: cast(dict[str, JsonValue], block)

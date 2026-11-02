@@ -47,7 +47,6 @@ from openswe.utils.dashboard_handoff import (
     dashboard_input_context,
     passage_replies,
 )
-from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.http_pool import PooledAsyncClient
 from openswe.utils.multimodal import fetch_image_block, vision_not_supported_warning
 from openswe.webhooks.event_matches import EventMatch
@@ -98,7 +97,7 @@ async def _build_blocks_from_payload(
                 "text": text + vision_not_supported_warning(model_id, len(image_urls)),
             }
         return blocks
-    async with PooledAsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with PooledAsyncClient() as client:
         for image_url in image_urls:
             image_block = await fetch_image_block(image_url, client)
             if image_block:

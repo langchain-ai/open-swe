@@ -13,7 +13,6 @@ import httpx2
 from openswe.config import ENV
 from openswe.github.thread_token import GitHubAuthError
 from openswe.prompts import prompt
-from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.http_pool import PooledAsyncClient
 
 logger = logging.getLogger(__name__)
@@ -196,7 +195,7 @@ async def react_to_github_comment(
         owner=owner, repo=repo, comment_id=comment_id, pull_number=pull_number
     )
 
-    async with PooledAsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with PooledAsyncClient() as http_client:
         try:
             response = await http_client.post(
                 url,
@@ -231,7 +230,7 @@ async def _react_via_graphql(node_id: str | None, *, token: str, content: str = 
     }
     }
     """
-    async with PooledAsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with PooledAsyncClient() as http_client:
         try:
             response = await http_client.post(
                 "https://api.github.com/graphql",
@@ -268,7 +267,7 @@ async def post_github_comment(
     owner = repo_config.get("owner", "")
     repo = repo_config.get("name", "")
     url = f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments"
-    async with PooledAsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with PooledAsyncClient() as client:
         try:
             response = await client.post(
                 url,
@@ -297,7 +296,7 @@ async def fetch_github_thread_participants(
         "X-GitHub-Api-Version": "2022-11-28",
     }
     try:
-        async with PooledAsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        async with PooledAsyncClient() as http_client:
             issue_response = await http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}",
                 headers=headers,
@@ -358,7 +357,7 @@ async def fetch_issue_comments(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    async with PooledAsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with PooledAsyncClient() as http_client:
         comments = await _fetch_paginated(
             http_client,
             f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments",
@@ -467,7 +466,7 @@ async def _fetch_pr_timeline(
 
     all_comments: list[dict[str, Any]] = []
 
-    async with PooledAsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with PooledAsyncClient() as http_client:
         pr_comments, review_comments, reviews = await asyncio.gather(
             _fetch_paginated(
                 http_client,
@@ -578,7 +577,7 @@ async def fetch_pr_branch(
     if token:
         headers["Authorization"] = f"Bearer {token}"
     try:
-        async with PooledAsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        async with PooledAsyncClient() as http_client:
             response = await http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}",
                 headers=headers,

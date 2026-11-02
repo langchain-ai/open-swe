@@ -11,10 +11,22 @@ keeps them warm across calls. Closing such a client leaves the pool open.
 import asyncio
 import ssl
 import weakref
+from collections.abc import Callable, Mapping
 
 import aiohttp
 import httpx2
-from httpx2._types import CertTypes
+from httpx2._client import EventHook
+from httpx2._types import (
+    AuthTypes,
+    CertTypes,
+    CookieTypes,
+    HeaderTypes,
+    ProxyTypes,
+    QueryParamTypes,
+    TimeoutTypes,
+)
+
+from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 
 # httpx2 drops idle connections after 5 s; an agent's calls to the same host are
 # often further apart than that.
@@ -59,17 +71,50 @@ _POOLED_TRANSPORT = _PooledTransport()
 class PooledAsyncClient(httpx2.AsyncClient):
     """An HTTP client with isolated request settings and shared warm connections."""
 
-    def _init_transport(
+    def __init__(
         self,
+        *,
+        auth: AuthTypes | None = None,
+        params: QueryParamTypes | None = None,
+        headers: HeaderTypes | None = None,
+        cookies: CookieTypes | None = None,
         verify: ssl.SSLContext | str | bool = True,
         cert: CertTypes | None = None,
-        trust_env: bool = True,
         http1: bool = True,
         http2: bool = False,
+        proxy: ProxyTypes | None = None,
+        mounts: Mapping[str, httpx2.AsyncBaseTransport | None] | None = None,
+        timeout: TimeoutTypes = DEFAULT_HTTP_TIMEOUT,
+        follow_redirects: bool = False,
         limits: httpx2.Limits = _LIMITS,
+        max_redirects: int = 20,
+        event_hooks: Mapping[str, list[EventHook]] | None = None,
+        base_url: httpx2.URL | str = "",
         transport: httpx2.AsyncBaseTransport | None = None,
-    ) -> httpx2.AsyncBaseTransport:
-        return transport if transport is not None else _POOLED_TRANSPORT
+        trust_env: bool = True,
+        default_encoding: str | Callable[[bytes], str | None] = "utf-8",
+    ) -> None:
+        super().__init__(
+            auth=auth,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            verify=verify,
+            cert=cert,
+            http1=http1,
+            http2=http2,
+            proxy=proxy,
+            mounts=mounts,
+            timeout=timeout,
+            follow_redirects=follow_redirects,
+            limits=limits,
+            max_redirects=max_redirects,
+            event_hooks=event_hooks,
+            base_url=base_url,
+            transport=transport if transport is not None else _POOLED_TRANSPORT,
+            trust_env=trust_env,
+            default_encoding=default_encoding,
+        )
 
 
 def pooled_connector() -> aiohttp.TCPConnector:

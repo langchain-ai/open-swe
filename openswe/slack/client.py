@@ -35,7 +35,6 @@ from openswe.slack.review_links import pr_review_links
 from openswe.source_context import SourceContext
 from openswe.utils import ttl_cache
 from openswe.utils.dashboard_links import dashboard_thread_url
-from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.http_pool import PooledAsyncClient
 from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.run_usage import RunUsageSummary
@@ -1132,7 +1131,7 @@ async def upload_slack_thread_file(
             if not isinstance(upload_url, str) or not isinstance(file_id, str):
                 raise SlackRequestError("invalid_upload_ticket")
             # Keep our host and redirect validation for the external byte transfer.
-            async with PooledAsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+            async with PooledAsyncClient() as http_client:
                 uploaded = await request_with_safe_redirects(
                     http_client,
                     "POST",
@@ -1219,7 +1218,7 @@ async def download_slack_file(url: str) -> bytes:
         return None
 
     try:
-        async with PooledAsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        async with PooledAsyncClient() as http_client:
             response = await request_with_safe_redirects(
                 http_client,
                 "GET",
