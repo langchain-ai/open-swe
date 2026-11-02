@@ -8,15 +8,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from deepagents.backends.protocol import ExecuteResponse
-from runtime_api.loop import Prepare
 
-from openswe.agent_api.graph import RunSession
+from openswe.agent_api.run_sandbox import RunSandbox
 from openswe.github.sandbox_access import SandboxGitHubAccess
 from openswe.sandboxes.lifecycle import _connect_existing_sandbox
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy, SandboxUnreachableError
-from openswe.sandboxes.tool_runtime import ToolSurface
 
 
 async def _connect(backend: MagicMock, thread_id: str) -> object:
@@ -183,15 +181,13 @@ async def test_identity_is_reset_each_run_in_the_first_command(
         assert "could not lock config file" not in result.output
         assert (await run("printf still-usable")).output == "still-usable"
 
-        session = RunSession(
-            ToolSurface(), {"configurable": {"thread_id": "thread-reset"}}, None, started_here=True
-        )
         monkeypatch.setitem(
             SANDBOX_BACKENDS, "thread-reset", SandboxBackendProxy(backend, thread_id="thread-reset")
         )
-        monkeypatch.setattr(session, "bind_sandbox", AsyncMock())
         backend.reset_git_identity()
-        await session.prepare(Prepare())
+        await RunSandbox(
+            {"configurable": {"thread_id": "thread-reset"}}, reviews=False
+        ).finish_git_identity()
 
         (home / ".gitconfig.lock").unlink()
         await _connect_existing_sandbox("thread-reset", cached=backend, sandbox_id=backend.id)

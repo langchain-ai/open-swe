@@ -1,22 +1,22 @@
 """The review scout, as Managed Deep Agents runs play it."""
 
 from functools import cache
-from typing import Final
 
 from deepagents.backends.protocol import BackendProtocol
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 
-from openswe.agent_api.graph import RemoteGraph
-from openswe.agent_api.run_parts import RunParts
+from openswe.agent_api.run_kinds import RunKind
+from openswe.agent_api.tokens import RunSettings
 from openswe.review_scout.graph import (
-    plan_review_scout,
+    PrepareReviewScoutRunMiddleware,
+    review_scout_catalog,
     scout_sandbox,
     scout_tools,
 )
 from openswe.run_config import RunConfig
-
-ASSISTANT_ID: Final = "review-scout"
+from openswe.sandboxes.tool_runtime import ToolSurface
 
 
 @cache
@@ -31,14 +31,23 @@ def _thread_id(config: RunnableConfig) -> str:
     return thread_id
 
 
-class ReviewScoutParts(RunParts):
-    """The scout's pieces, as its plan builds them, for a call answered without it."""
+class ReviewScoutKind(RunKind):
+    """The review scout's pieces."""
+
+    assistant_id = "review-scout"
+    reviews = True
+
+    async def catalog(self, config: RunnableConfig, surface: ToolSurface) -> None:
+        await review_scout_catalog(config, surface)
+
+    async def preparation(
+        self, config: RunnableConfig, settings: RunSettings, *, sandbox_id: str | None
+    ) -> list[AgentMiddleware]:
+        del settings, sandbox_id
+        return [PrepareReviewScoutRunMiddleware(thread_id=_thread_id(config), config=config)]
 
     async def files(self, config: RunnableConfig) -> BackendProtocol:
         return scout_sandbox(_thread_id(config), RunConfig.from_config(config))
 
     async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:  # noqa: ARG002
         return _tools_by_name().get(name)
-
-
-REVIEW_SCOUT: Final = RemoteGraph(ASSISTANT_ID, plan_review_scout, ReviewScoutParts())

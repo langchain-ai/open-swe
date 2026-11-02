@@ -1,15 +1,15 @@
-"""The Open SWE graphs Managed Deep Agents runs play, by assistant id."""
+"""The kinds of run Open SWE starts on Managed Deep Agents, by assistant id."""
 
 from collections.abc import Mapping
 from functools import cache
 
-from openswe.agent_api.graph import RemoteGraph
+from openswe.agent_api.run_kinds import RunKind
 
 
 @cache
-def hosted_graphs() -> Mapping[str, RemoteGraph]:
-    from openswe.agent_api.agent import AGENT
-    from openswe.agent_api.review_scout import REVIEW_SCOUT
-    from openswe.agent_api.reviewer import REVIEWER
+def run_kinds() -> Mapping[str, RunKind]:
+    from openswe.agent_api.agent import AgentKind
+    from openswe.agent_api.review_scout import ReviewScoutKind
+    from openswe.agent_api.reviewer import ReviewerKind
 
-    return {graph.assistant_id: graph for graph in (AGENT, REVIEWER, REVIEW_SCOUT)}
+    return {kind.assistant_id: kind for kind in (AgentKind(), ReviewerKind(), ReviewScoutKind())}

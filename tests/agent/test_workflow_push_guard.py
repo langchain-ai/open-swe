@@ -13,13 +13,12 @@ from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 from runtime_api.operations import ShellVerdict
 
-from openswe.agent_api.graph import RemoteGraph
-from openswe.agent_api.run_parts import RunParts
+from openswe.agent_api.run_calls import TokenRun
+from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.tokens import RemoteRun
 from openswe.middleware import workflow_push_guard as guard
 from openswe.sandboxes import connect, state
 from openswe.sandboxes.state import SandboxBackendProxy
-from openswe.sandboxes.tool_runtime import ToolSurface
 
 
 class _Response:
@@ -742,19 +741,17 @@ async def test_check_shell_inspects_workflow_pushes_in_the_threads_sandbox(
 
 
 async def _check_shell(command: str) -> ShellVerdict:
-    class Parts(RunParts):
+    class Parts(RunKind):
+        assistant_id = "agent"
         shell_guards = (guard.WorkflowPushGuardMiddleware(),)
-
-    async def never_plan(config: object, surface: ToolSurface) -> None:
-        raise AssertionError("Shell checks must not plan a run")
 
     run = RemoteRun(
         thread_id="thread-1",
         assistant_id="agent",
         configurable={},
         expires_at=int(time.time()) + 3600,
-    ).granting()
-    verdict = await RemoteGraph("agent", never_plan, Parts()).api(
-        run, "check_shell", {"run_id": "run-1", "tool": "execute", "command": command}
+    )
+    verdict = await TokenRun.answer(
+        Parts(), run, "check_shell", {"run_id": "run-1", "tool": "execute", "command": command}
     )
     return ShellVerdict.model_validate(verdict)

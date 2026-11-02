@@ -11,24 +11,16 @@ import asyncio
 import logging
 import re
 import uuid
-from collections.abc import Mapping
 from functools import partial
-from typing import Any, NotRequired, cast
+from typing import Any, NotRequired
 
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
-from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
-from langchain.agents.middleware.types import (
-    AgentMiddleware,
-    hook_config,
-)
-from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
-from runtime_api.catalog import LoopRules
 
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -39,13 +31,8 @@ from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
-    ExcludeToolsMiddleware,
-    ModelErrorMiddleware,
-    RepairOrphanedToolCallsMiddleware,
 )
-from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.prepare_run import PrepareRunState
-from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.review.author_guidance import SteeringHistory
 from openswe.run_config import RunConfig
@@ -56,7 +43,6 @@ from openswe.runtime import (
 )
 from openswe.sandboxes.repo_prep import ReviewRepoPreparationError, prepare_review_repo_or_raise
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
-from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.tools.plan_walkthrough import (
     walkthrough_describe_other,
     walkthrough_move_to_other,
@@ -73,9 +59,7 @@ from openswe.walkthrough.record import PlanMovedError, Walkthrough
 
 logger = logging.getLogger(__name__)
 
-SCOUT_MODEL_CALL_LIMIT = 150
 _CLOSING_TITLE_TAG_RE = re.compile(r"</\s*pr_title\s*>", re.IGNORECASE)
-_HUMAN_INPUT_TOOL = record_human_input.__name__
 
 
 class ReviewScoutState(PrepareRunState):
@@ -229,34 +213,6 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             "has_human_input": history is not None,
         }
 
-    @hook_config(can_jump_to=["end"])
-    async def abefore_model(
-        self,
-        state: ReviewScoutState,
-        runtime: Runtime,  # noqa: ARG002
-    ) -> dict[str, Any] | None:
-        return {"jump_to": "end"} if state.get("scout_nothing_to_plan") else None
-
-    async def ashape_model_call(
-        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
-    ) -> CallShape:
-        call = await super().ashape_model_call(call, state, runtime)
-        # Without messages from the people who asked for the PR, the model would summarize its description instead.
-        return call if state.get("has_human_input") else call.hiding([_HUMAN_INPUT_TOOL])
-
-
-class FinishPlanMiddleware(OpenSWEMiddleware[ReviewScoutState]):
-    """Send whatever the scout left unplanned to Other, so the plan is complete."""
-
-    state_schema = ReviewScoutState
-
-    def __init__(self, *, thread_id: str, config: RunnableConfig) -> None:
-        self._thread_id = thread_id
-        self._config = config
-
-    async def aafter_agent(self, state: ReviewScoutState, runtime: Runtime) -> None:  # noqa: ARG002
-        await finish_scout_plan(self._thread_id, self._config, state.get("human_input_summary", ""))
-
 
 async def finish_scout_plan(
     thread_id: str, config: RunnableConfig, human_input_summary: str
@@ -343,42 +299,15 @@ def scout_sandbox(thread_id: str, cfg: RunConfig) -> BackendProtocol:
     )
 
 
-async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> None:
-    """Plan a scout run into ``surface``: the tools, middleware, models and subagents its MDA run plays."""
-    config = config.copy()
-    configurable = dict(config.get("configurable") or {})
-    config["configurable"] = configurable
-    cfg = RunConfig.parse(configurable)
-    thread_id = cfg.thread_id
-    if thread_id is None:
+async def review_scout_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
+    """Work out a scout run into ``surface``: its tools, models, subagents and loop rules."""
+    cfg = RunConfig.from_config(config)
+    if cfg.thread_id is None:
         raise ValueError("A scout run needs a thread")
 
     models = await scout_models(cfg)
 
-    middleware = cast(
-        list[AgentMiddleware[Any, Any, Any]],
-        [
-            PrepareReviewScoutRunMiddleware(thread_id=thread_id, config=config),
-            AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
-            ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
-            ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
-            RepairOrphanedToolCallsMiddleware(),
-            ModelRetryMiddleware(retry_on=(TimeoutError,)),
-            ModelErrorMiddleware(),
-            FinishPlanMiddleware(thread_id=thread_id, config=config),
-        ],
-    )
     surface.base_tools = scout_tools()
-    surface.middleware = middleware
-    surface.loop = LoopRules(
-        hidden_tools=sorted(SHELL_SEARCH_EXCLUDED_TOOLS),
-        # Without messages from the people who asked for the PR, the model would
-        # summarize its description instead.
-        hidden_unless={"has_human_input": [_HUMAN_INPUT_TOOL]},
-        stop_when=["scout_nothing_to_plan"],
-        at_end=["finish_scout_plan"],
-    )
-    surface.files = scout_sandbox(thread_id, cfg)
     surface.models = models
     surface.subagents = [
         SurfaceSubagent(

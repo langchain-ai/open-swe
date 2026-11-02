@@ -73,6 +73,7 @@ from rt.backend import (
 )
 from rt.file_tools import FileToolsMiddleware
 from rt.git_evidence import TurnGit, turn_git
+from rt.kinds import KINDS
 from rt.managed_sandbox import declared_sandbox
 from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware, turn_trace
 from rt.model_calls import model_call_guards
@@ -83,6 +84,7 @@ from runtime_api.catalog import (
     Catalog,
     FilesSpec,
     InboxSpec,
+    LoopRules,
     ModelSpec,
     RunModels,
     SandboxCreate,
@@ -92,11 +94,7 @@ from runtime_api.catalog import (
 from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import Delivery, Endpoint, call
 from runtime_api.loop import (
-    AFTER_AGENT,
-    AFTER_MODEL,
-    BEFORE_MODEL,
     PREPARE,
-    BeforeModel,
     Inbox,
     InboxItems,
     InboxRead,
@@ -104,7 +102,7 @@ from runtime_api.loop import (
     ModelCall,
     PhaseResult,
     Prepare,
-    RunCall,
+    Prepared,
     ToolCallReport,
 )
 from runtime_api.operations import (
@@ -238,6 +236,7 @@ type Answer = Callable[[str, dict[str, JsonValue]], Awaitable[BaseModel]]
 
 # A run planned with nothing in particular.
 _NO_PLAN: Final = Catalog()
+_INBOX = InboxSpec(events=True, surface="slack")
 # A run whose files are in MDA's sandbox.
 _IN_SANDBOX: Final = SandboxSpec(
     create=SandboxCreate(fs_capacity_bytes=1, idle_ttl_seconds=60, delete_after_stop_seconds=60)
@@ -287,6 +286,20 @@ def _answering(monkeypatch: pytest.MonkeyPatch, backend: OpenSweBackend, answer:
         return ReportsTaken(replies=replies).model_dump(mode="json")
 
     monkeypatch.setattr(backend, "post", post)
+
+
+def _models(model: ModelSpec) -> Catalog:
+    """A catalog that runs on ``model``."""
+    return Catalog(models=RunModels(model=model, subagent_model=model, use_gateway=False))
+
+
+def _preparing(**update: JsonValue) -> Answer:
+    """A backend whose preparation writes ``update``, and that answers every other call."""
+
+    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        return Prepared(update=update) if name == "prepare" else PhaseResult()
+
+    return answer
 
 
 @pytest.mark.parametrize(
@@ -557,11 +570,6 @@ async def test_a_quick_operation_deadline_yields_to_a_requested_timeout(
     ("endpoint", "status"),
     [
         (PREPARE, 504),
-        (BEFORE_MODEL, 502),
-        (BEFORE_MODEL, 504),
-        (AFTER_MODEL, 502),
-        (AFTER_MODEL, 504),
-        (AFTER_AGENT, 504),
     ],
 )
 async def test_phase_gateway_failure_is_not_replayed(
@@ -586,7 +594,7 @@ async def test_phase_gateway_failure_is_not_replayed(
 
 
 @pytest.mark.parametrize(("failures", "recovers"), [(10, True), (11, False)])
-@pytest.mark.parametrize("endpoint", [PREPARE, LAUNCH_WORKER, BEFORE_MODEL, AFTER_MODEL])
+@pytest.mark.parametrize("endpoint", [PREPARE, LAUNCH_WORKER])
 async def test_a_run_waits_out_a_backend_rollout(
     monkeypatch: pytest.MonkeyPatch, endpoint: Endpoint, failures: int, recovers: bool
 ) -> None:
@@ -618,19 +626,18 @@ async def test_a_run_waits_out_a_backend_rollout(
     assert client.post.await_count == min(failures + 1, 11)
 
 
-@pytest.mark.parametrize("hook", ["prepare", "before_model", "after_model"])
+@pytest.mark.parametrize("hook", ["prepare", "inbox"])
 async def test_an_unreachable_backend_fails_the_run(
     monkeypatch: pytest.MonkeyPatch, hook: str
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    backend = _run_backend(invocation_id="invocation-1")
+    backend = _run_backend(invocation_id="invocation-1", catalog=Catalog(inbox=_INBOX))
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
         if name == hook:
             raise BackendUnavailableError(f"{hook} failed")
-        assert name != "after_agent"
-        return PhaseResult()
+        return Inbox() if name == "inbox" else PhaseResult()
 
     _answering(monkeypatch, backend, phase)
     graph = create_agent(
@@ -640,9 +647,6 @@ async def test_an_unreachable_backend_fails_the_run(
 
     with pytest.raises(BackendUnavailableError):
         await graph.ainvoke({"messages": [("user", "hello")]})
-
-
-_INBOX = InboxSpec(events=True, surface="slack")
 
 
 async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answers(
@@ -658,7 +662,6 @@ async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answer
     reads: list[InboxRead] = []
     read_again, took = asyncio.Event(), asyncio.Event()
     received: list[InboxReceipt] = []
-    planned: list[RunCall] = []
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
         if name == "inbox":
@@ -679,26 +682,41 @@ async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answer
             await read_again.wait()
             received.append(InboxReceipt.model_validate(body))
             took.set()
-        if name == "before_model":
-            planned.append(RunCall.model_validate(body))
-        if name == "after_model" and len(planned) == 1:
-            return PhaseResult(jump_to="model")
         return PhaseResult()
 
-    _answering(monkeypatch, backend, phase)
-    graph = create_agent(
-        model=FakeListChatModel(responses=["first", "second"]),
-        middleware=[BackendRunMiddleware(backend)],
-    )
+    @tool
+    async def look() -> str:
+        """Look around."""
+        return "seen"
 
-    result = await graph.ainvoke({"messages": [("user", "hello")]})
+    _answering(monkeypatch, backend, phase)
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+    graph = create_agent(
+        model=GenericFakeChatModel(
+            messages=iter(
+                [
+                    AIMessage(content="", tool_calls=[ToolCall(name="look", args={}, id="c1")]),
+                    AIMessage(content="second"),
+                ]
+            )
+        ),
+        tools=[look],
+        middleware=[BackendRunMiddleware(backend)],
+        checkpointer=InMemorySaver(),
+    )
+    config: RunnableConfig = {"configurable": {"thread_id": "inbox"}}
+
+    result = await graph.ainvoke({"messages": [("user", "hello")]}, config)
     await asyncio.wait_for(took.wait(), 5)
 
     # The run and how its catalog reads the inbox; never its conversation or state.
     assert [(read.run_id, read.spec) for read in reads] == [("run-1", _INBOX)] * 2
-    assert messages_from_dict(planned[0].messages)[-1].id == "event-match:report-1"
-    assert planned[0].state["reply_surface"] == "web"
-    assert [message.id for message in result["messages"]].count("event-match:report-1") == 1
+    ids = [message.id for message in result["messages"]]
+    # The first model call answers what the inbox brought.
+    assert ids.index("event-match:report-1") == 1
+    assert ids.count("event-match:report-1") == 1
+    held = (await graph.aget_state(config)).values["open_swe_state"]
+    assert held["reply_surface"] == "web"
     assert [receipt.items for receipt in received] == [items]
     # The next read names what the unsent receipt holds, so it cannot hand it back.
     assert reads[1].received == items
@@ -707,21 +725,24 @@ async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answer
 async def test_a_run_the_phase_ends_leaves_the_inbox_queued(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A model-call limit ends the run before any call answers the follow-up: it stays queued."""
+    """The loop ends the run before any call answers the follow-up: it stays queued."""
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    backend = _run_backend(invocation_id="invocation-1", catalog=Catalog(inbox=_INBOX))
+    backend = _run_backend(
+        invocation_id="invocation-1",
+        catalog=Catalog(inbox=_INBOX, loop=LoopRules(stop_when=["limit_reached"])),
+    )
     follow_up = HumanMessage(content="One more thing", id="queued-1")
     called: list[str] = []
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
         called.append(name)
+        if name == "prepare":
+            return Prepared(update={"limit_reached": True})
         if name == "inbox":
             return Inbox.model_validate(
                 {"messages": messages_to_dict([follow_up]), "items": {"queued": [7]}}
             )
-        if name == "before_model":
-            return BeforeModel(jump_to="end")
         return PhaseResult()
 
     _answering(monkeypatch, backend, phase)
@@ -743,12 +764,14 @@ async def test_a_moved_scout_stops_before_another_model_or_tool_call(
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
     monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
-    backend = _run_backend(invocation_id="turn")
+    backend = _run_backend(
+        invocation_id="turn", catalog=Catalog(loop=LoopRules(stop_when=["scout_nothing_to_plan"]))
+    )
     operations: list[str] = []
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
         if name == "prepare":
-            return PhaseResult(update={"scout_nothing_to_plan": False})
+            return Prepared(update={"scout_nothing_to_plan": False})
         if name == "operation":
             operations.append(str(body["name"]))
             assert operations == ["walkthrough_describe_other"]
@@ -756,9 +779,6 @@ async def test_a_moved_scout_stops_before_another_model_or_tool_call(
                 content='{"success": false, "error": "The pull request moved on. Stop."}',
                 state={"scout_nothing_to_plan": True},
             )
-        if name == "before_model":
-            state = RunCall.model_validate(body).state
-            return BeforeModel(jump_to="end" if state.get("scout_nothing_to_plan") else None)
         return PhaseResult()
 
     _answering(monkeypatch, backend, phase)
@@ -881,9 +901,11 @@ async def test_reports_the_backend_never_took_go_out_first_from_the_runs_checkpo
         "tool_started",
         "tool_result",
         "model_result",
+        "run_ended",
         "model_result",
+        "run_ended",
     ]
-    assert {key for _, key in sent[:5]} == set(carried)
+    assert {key for _, key in sent[:6]} == set(carried)
     assert messages_from_dict(results)[0].content == payload
     after = await checkpointer.aget_tuple(config)
     assert after is not None
@@ -956,19 +978,11 @@ async def test_the_model_the_backend_names_gets_a_replayable_history(
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     named = _RecordingAnthropic(model_name="claude-opus-5-5", api_key="test-key", sent=[])
     monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: named)
-    backend = _run_backend(invocation_id="invocation-1")
-
-    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        if name != "before_model":
-            return PhaseResult()
-        return BeforeModel(
-            call=ModelCall(
-                system_prompt="You are Open SWE.",
-                model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
-            )
-        )
-
-    _answering(monkeypatch, backend, phase)
+    backend = _run_backend(
+        invocation_id="invocation-1",
+        catalog=_models(ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})),
+    )
+    _answering(monkeypatch, backend, _preparing(rendered_system_prompt="You are Open SWE."))
     # As the agent orders them: the guards inside the middleware that names the model.
     middleware = cast(
         list[AgentMiddleware],
@@ -1010,20 +1024,18 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     named = _PayloadAnthropic(model_name="claude-opus-5-5", api_key="test-key", payloads=[])
     monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: named)
-    backend = _run_backend(invocation_id="invocation-1")
-
-    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        if name != "before_model":
-            return PhaseResult()
-        return BeforeModel(
-            call=ModelCall(
-                system_prompt="You are Open SWE.",
-                thread_prompt="This thread is yours.",
-                model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
-            )
-        )
-
-    _answering(monkeypatch, backend, phase)
+    backend = _run_backend(
+        invocation_id="invocation-1",
+        catalog=_models(ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})),
+    )
+    _answering(
+        monkeypatch,
+        backend,
+        _preparing(
+            rendered_system_prompt="You are Open SWE.\n\nThis thread is yours.",
+            rendered_thread_prompt="This thread is yours.",
+        ),
+    )
     # deepagents installs its own 5m cache; the guards' must take its place.
     middleware = cast(
         list[AgentMiddleware],
@@ -1078,20 +1090,13 @@ async def test_a_stalled_model_call_goes_to_the_fallback_model(
         "anthropic:claude-sonnet-5-5": fallback,
     }
     monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: built[spec.model_id])
-    backend = _run_backend(invocation_id="invocation-1")
-
-    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        if name != "before_model":
-            return PhaseResult()
-        return BeforeModel(
-            call=ModelCall(
-                system_prompt="You are Open SWE.",
-                model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
-                fallback=ModelSpec(model_id="anthropic:claude-sonnet-5-5", kwargs={}),
-            )
-        )
-
-    _answering(monkeypatch, backend, phase)
+    model = ModelSpec(
+        model_id="anthropic:claude-opus-5-5",
+        kwargs={},
+        fallback=ModelSpec(model_id="anthropic:claude-sonnet-5-5", kwargs={}),
+    )
+    backend = _run_backend(invocation_id="invocation-1", catalog=_models(model))
+    _answering(monkeypatch, backend, _preparing(rendered_system_prompt="You are Open SWE."))
     middleware = cast(
         list[AgentMiddleware],
         [
@@ -1113,10 +1118,14 @@ async def test_turn_model_tracks_the_selected_call_without_relabeling_llm_spans(
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    primary = ModelSpec(model_id="anthropic:primary", kwargs={})
-    routed = ModelSpec(model_id="anthropic:routed", kwargs={})
     vision = ModelSpec(model_id="anthropic:vision", kwargs={})
     fallback = ModelSpec(model_id="anthropic:fallback", kwargs={})
+    primary = ModelSpec(model_id="anthropic:primary", kwargs={}, reads_images=selection != "vision")
+    routed = ModelSpec(
+        model_id="anthropic:routed",
+        kwargs={},
+        fallback=fallback if selection == "fallback" else None,
+    )
     built: dict[str, ChatAnthropic] = {
         spec.model_id: _RecordingAnthropic(model_name=spec.model_id, api_key="test", sent=[])
         for spec in (primary, routed, vision, fallback)
@@ -1126,22 +1135,18 @@ async def test_turn_model_tracks_the_selected_call_without_relabeling_llm_spans(
     monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: built[spec.model_id])
     backend = _run_backend(
         invocation_id="turn",
-        catalog=Catalog(models=RunModels(model=primary, subagent_model=primary, use_gateway=False)),
-    )
-
-    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        if name == "before_model":
-            return BeforeModel(
-                call=ModelCall(
-                    system_prompt="test",
-                    model=None if selection == "primary" else routed,
-                    vision=vision if selection == "vision" else None,
-                    fallback=fallback if selection == "fallback" else None,
-                )
+        catalog=Catalog(
+            models=RunModels(
+                model=primary,
+                subagent_model=primary,
+                use_gateway=False,
+                routes={"fast": routed},
+                vision=vision,
             )
-        return PhaseResult()
-
-    _answering(monkeypatch, backend, phase)
+        ),
+    )
+    routing = {"model_route": "fast"} if selection in {"route", "fallback"} else {}
+    _answering(monkeypatch, backend, _preparing(**routing))
     client = MagicMock(spec=Client)
     patches: dict[object, dict[str, object]] = {}
 
@@ -1298,7 +1303,9 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
         "LANGSMITH_AGENT_VERSION": "backend-sha",
     }
     final = {**actor, "ls_git_repo": "org/actual", "ls_git_branch": "Exact/PR-head"}
-    backend = _run_backend(invocation_id="turn", catalog=Catalog(trace_metadata=actor))
+    backend = _run_backend(
+        invocation_id="turn", catalog=Catalog(trace_metadata=actor, inbox=_INBOX)
+    )
     git = turn_git(backend.run)
 
     @tool
@@ -1312,9 +1319,10 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
         return await RunnableLambda(lambda value: value).ainvoke(text)
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        if name == "before_model":
+        if name == "inbox":
             await nested_call.ainvoke({"text": "nested"})
-        return BeforeModel() if name == "before_model" else PhaseResult()
+            return Inbox()
+        return PhaseResult()
 
     _answering(monkeypatch, backend, phase)
     client = MagicMock(spec=Client)
@@ -1458,7 +1466,7 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    backend = _run_backend(invocation_id="turn")
+    backend = _run_backend(invocation_id="turn", catalog=Catalog(inbox=_INBOX))
 
     def unavailable_trace() -> None:
         raise RuntimeError("trace lookup unavailable")
@@ -1476,9 +1484,10 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
     git = turn_git(backend.run)
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        if name == "before_model":
+        if name == "inbox":
             git.found_pull_requests([PullRequestHead(repo="org/actual", branch="main")], 1)
-        return BeforeModel() if name == "before_model" else PhaseResult()
+            return Inbox()
+        return PhaseResult()
 
     export_failed = False
 
@@ -1975,7 +1984,7 @@ async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_toke
     assert launch["context"] == {
         "graph": "agent",
         "__worker_grant": "worker-grant",
-        "__catalog": COORDINATOR_CATALOG.model_dump(mode="json"),
+        "__catalog": KINDS["agent"].applied(COORDINATOR_CATALOG).model_dump(mode="json"),
     }
     assert launch["input"] == {
         "messages": [{"role": "user", "content": "Your assignment: Fix login"}]
@@ -2255,7 +2264,7 @@ async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(
             },
         )
     [turn] = [run for run in collector.traced_runs if run.name == "LangGraph"]
-    assert {"before_model", "tool_started", "tool_result", "after_agent"} <= sent.keys()
+    assert {"prepare", "tool_started", "tool_result", "run_ended"} <= sent.keys()
     for hook, headers in sent.items():
         assert headers["Authorization"] == "Bearer secret-token", hook
         root, _, span = headers["langsmith-trace"].partition(".")
