@@ -25,6 +25,8 @@ export interface ReviewsSearch {
   pr?: string
   /** Files expanded in the open pull request's preview. */
   files?: string[]
+  /** Read keys whose expansion differs from the viewed-file default. */
+  folds?: string[]
   /** The preview's scroll position, as `formatScrollAnchor` writes it. */
   at?: string
 }
@@ -125,6 +127,18 @@ export function validateReviewsSearch(
         ? search.pr
         : undefined,
     files: Array.isArray(search.files) ? expandedFiles : undefined,
+    folds: Array.isArray(search.folds)
+      ? [
+          ...new Set(
+            search.folds.filter(
+              (value): value is string =>
+                typeof value === "string" &&
+                value.length > 0 &&
+                value.length <= 2000
+            )
+          ),
+        ]
+      : undefined,
     at:
       typeof search.at === "string" &&
       search.at.length <= 520 &&

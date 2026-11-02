@@ -96,8 +96,8 @@ test.describe("my pull requests", () => {
       .getByRole("button", { name: "Collapse src/shared.ts", exact: true })
       .click();
     await expect
-      .poll(() => new URL(page.url()).searchParams.get("files"))
-      .toBe("[]");
+      .poll(() => new URL(page.url()).searchParams.get("folds"))
+      .toBe('["src/shared.ts"]');
     await page.reload();
     await expect(
       preview.getByRole("button", {
@@ -152,6 +152,94 @@ test.describe("my pull requests", () => {
       .click();
     await expect(preview).toHaveCount(0);
     await expect(page).toHaveTitle(listTitle);
+  });
+
+  test("keeps the preview row after merging from its status panel", async ({
+    page,
+  }) => {
+    const pr = await seedOpenPullRequest(page, {
+      repo: DEMO,
+      title: "Merge from status",
+      files: { "src/merge.ts": "export const ready = true;\n" },
+      ...approved,
+    });
+    await openMine(page);
+    await expect(
+      page.getByRole("textbox", { name: "Search pull requests" }),
+    ).toBeEnabled();
+    await card(page, pr)
+      .getByRole("button", { name: "Merge from status", exact: true })
+      .click();
+    const preview = page.getByRole("complementary", {
+      name: `Pull request ${pr.repo} #${pr.number}`,
+    });
+    await expect(
+      preview.getByRole("checkbox", { name: "Viewed src/merge.ts" }),
+    ).toBeVisible();
+    await preview
+      .getByRole("region", { name: "Pull request status" })
+      .getByRole("button", { name: "Squash and merge", exact: true })
+      .click();
+    await expect
+      .poll(
+        async () =>
+          (await readPullRequest(page, "fakeorg", "demo", pr.number)).merged,
+      )
+      .toBe(true);
+    await expect(preview).toContainText(
+      "Merged · leaves the list on the next refresh",
+    );
+    await expect(
+      page.getByRole("button", { name: /Merge from status Merged/ }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: /Merge from status Merged/ }),
+    ).toHaveCount(0);
+  });
+
+  test("keeps large preview URLs proportional to expansion changes", async ({
+    page,
+  }) => {
+    const files = Object.fromEntries(
+      Array.from({ length: 80 }, (_, index) => [
+        `src/file-${index}.ts`,
+        "export const ready = true;\n",
+      ]),
+    );
+    const pr = await seedOpenPullRequest(page, {
+      repo: DEMO,
+      title: "Large preview",
+      files,
+      ...approved,
+    });
+    await page.goto(
+      `/agents/reviews?pr=${encodeURIComponent(`${pr.repo}#${pr.number}`)}`,
+    );
+    const preview = page.getByRole("complementary", {
+      name: `Pull request ${pr.repo} #${pr.number}`,
+    });
+    await preview
+      .getByRole("button", { name: "Collapse src/file-0.ts", exact: true })
+      .click();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("folds"))
+      .toBe('["src/file-0.ts"]');
+    expect(new URL(page.url()).searchParams.has("files")).toBe(false);
+    expect(page.url().length).toBeLessThan(500);
+    await page.reload();
+    await expect(
+      preview.getByRole("button", {
+        name: "Expand src/file-0.ts",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      preview.getByRole("button", {
+        name: "Collapse src/file-1.ts",
+        exact: true,
+      }),
+    ).toBeVisible();
   });
 
   test("finds description-only matches in My PRs and the command palette", async ({

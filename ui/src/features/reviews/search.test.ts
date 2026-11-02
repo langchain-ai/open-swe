@@ -80,3 +80,14 @@ it("finds the pull request in a pasted link with surrounding text", () => {
     parsePullRequestReference("https://github.com/langchain-ai")
   ).toBeNull()
 })
+
+it("keeps compact expansion overrides separate from legacy expanded paths", () => {
+  expect(validateReviewsSearch({ folds: [] }).folds).toEqual([])
+  expect(
+    validateReviewsSearch({ folds: ["src/one.ts", "src/one.ts", null, ""] })
+      .folds
+  ).toEqual(["src/one.ts"])
+  expect(validateReviewsSearch({ files: ["src/legacy.ts"] }).files).toEqual([
+    "src/legacy.ts",
+  ])
+})

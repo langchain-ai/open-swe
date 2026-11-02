@@ -34,8 +34,10 @@ export function ReviewPage({
   pr: PullRequestRef
   onClose?: () => void
   actions?: ReactNode
-  position?: Pick<ReviewsSearch, "files" | "at">
-  onPositionChange?: (position: Pick<ReviewsSearch, "files" | "at">) => void
+  position?: Pick<ReviewsSearch, "files" | "folds" | "at">
+  onPositionChange?: (
+    position: Pick<ReviewsSearch, "files" | "folds" | "at">
+  ) => void
 }) {
   const inline = Boolean(onClose)
   const queryClient = useQueryClient()

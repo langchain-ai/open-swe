@@ -151,8 +151,10 @@ export const Changes = memo(function Changes({
   onPositionChange,
 }: {
   pr: PullRequestRef
-  position?: Pick<ReviewsSearch, "files" | "at">
-  onPositionChange?: (position: Pick<ReviewsSearch, "files" | "at">) => void
+  position?: Pick<ReviewsSearch, "files" | "folds" | "at">
+  onPositionChange?: (
+    position: Pick<ReviewsSearch, "files" | "folds" | "at">
+  ) => void
 }) {
   const diff = useQuery(reviewQueries.diff(pr))
   const detailQuery = useQuery(reviewQueries.detail(pr))
@@ -386,14 +388,11 @@ export const Changes = memo(function Changes({
     window.clearTimeout(writePositionTimer.current)
     writePositionTimer.current = window.setTimeout(() => {
       const state = useReviewPage.getState()
-      const expandedPaths = [
-        ...new Set(
-          state.entryOrder
-            .filter((entry) => !isCollapsed(state, entry))
-            .map((entry) => entry.file.path)
-        ),
-      ]
-      positionChange.current?.({ files: expandedPaths, at: anchor.current })
+      positionChange.current?.({
+        files: undefined,
+        folds: [...state.collapsed],
+        at: anchor.current,
+      })
     }, 250)
   }, [])
   useEffect(() => () => window.clearTimeout(writePositionTimer.current), [])
@@ -406,7 +405,9 @@ export const Changes = memo(function Changes({
     )
       return
     const initial = initialPosition.current
-    if (initial?.files) {
+    if (initial?.folds) {
+      useReviewPage.setState({ collapsed: new Set(initial.folds) })
+    } else if (initial?.files) {
       const expanded = new Set(initial.files)
       useReviewPage.setState({
         collapsed: new Set(

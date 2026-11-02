@@ -71,7 +71,9 @@ function ReviewsPage() {
         )
           ? { page: undefined }
           : {}),
-        ...("pr" in changes ? { files: undefined, at: undefined } : {}),
+        ...("pr" in changes
+          ? { files: undefined, folds: undefined, at: undefined }
+          : {}),
       }),
       replace,
     })

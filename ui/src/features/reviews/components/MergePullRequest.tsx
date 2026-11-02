@@ -1,6 +1,6 @@
 import { CheckIcon } from "@langchain/macaw-components/icons"
 import { useQuery } from "@tanstack/react-query"
-import { useState } from "react"
+import { createContext, useContext, useState } from "react"
 
 import { DropdownMenuItem } from "@/components/MenuItem"
 import { api, type MergeMethod, type OpenPullRequest } from "@/lib/api"
@@ -15,6 +15,10 @@ import {
 } from "../lib/mergeMethod"
 import { usePullRequestAction } from "../lib/usePullRequestAction"
 
+export const PreviewMergeContext = createContext<(() => () => void) | null>(
+  null
+)
+
 /** GitHub's merge button: one click merges; the caret picks how. */
 export function MergePullRequest({
   pr,
@@ -25,6 +29,7 @@ export function MergePullRequest({
   apply?: () => () => void
   onMerged?: () => void
 }) {
+  const settlePreview = useContext(PreviewMergeContext)
   const [choice, setChoice] = useState<MergeMethod | null>(null)
   const [preferred] = useState(readPreferredMergeMethod)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -58,10 +63,19 @@ export function MergePullRequest({
     pr,
     action: "merge",
     method: method ?? undefined,
-    apply: autoMerge ? undefined : apply,
+    apply: autoMerge
+      ? undefined
+      : () => {
+          const undoPreview = settlePreview?.()
+          const undo = apply?.()
+          return () => {
+            undo?.()
+            undoPreview?.()
+          }
+        },
     onDone: () => {
       if (method) writePreferredMergeMethod(method)
-      if (!autoMerge) onMerged?.()
+      if (!autoMerge && !settlePreview) onMerged?.()
     },
   })
   const busy = merge.isPending || merge.isSuccess || pr.autoMerge === true
