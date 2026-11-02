@@ -2573,18 +2573,10 @@
           "reason": {
             "anyOf": [
               {
-                "enum": [
-                  "blocked",
-                  "ready"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/UserWaitReason"
               },
               {
-                "enum": [
-                  "stopped",
-                  "no_progress"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/PauseReason"
               },
               {
                 "type": "null"
@@ -4587,6 +4579,13 @@
         ],
         "title": "PauseChange",
         "type": "object"
+      },
+      "PauseReason": {
+        "enum": [
+          "stopped",
+          "no_progress"
+        ],
+        "type": "string"
       },
       "PendingReview": {
         "description": "The viewer's unsubmitted GitHub review on a PR, with its line comments.",
@@ -8512,6 +8511,13 @@
         ],
         "title": "UserPreferencesUpdate",
         "type": "object"
+      },
+      "UserWaitReason": {
+        "enum": [
+          "blocked",
+          "ready"
+        ],
+        "type": "string"
       },
       "ValidationError": {
         "properties": {
