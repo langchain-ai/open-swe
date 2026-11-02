@@ -75,6 +75,7 @@ from runtime_api.loop import (
 from runtime_api.operations import RunRequest
 
 from rt.backend import (
+    BackendCallError,
     OpenSweBackend,
     RunLocal,
     human_messages,

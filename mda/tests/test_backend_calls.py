@@ -1630,7 +1630,7 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
     [
         ("for i in $(seq 60); do gh pr checks 1 && break; sleep 30; done", True, True),
         ("sleep 240; gh pr view 1", True, True),
-        ("sleep 240; gh pr view 1", False, False),
+        ("sleep 240; make test", False, False),
         ("npm run dev & sleep 3 && curl localhost:3000", True, False),
         ("for i in 1 2 3; do curl -f localhost:3000 && break; sleep 2; done", True, False),
         ('git commit -m "wait: sleep 30 before retry"', True, False),
