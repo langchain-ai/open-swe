@@ -45,7 +45,8 @@ function ExperimentsPage() {
         <ProfileSwitchRow
           field="experimental_background_callbacks"
           label="Background command callbacks"
-          description="Background commands you start report completion from the sandbox instead of being polled every minute."
+          description="Background commands you start report completion from the sandbox instead of being polled every minute. Enabled by default."
+          fallback={true}
         />
       </SettingsSection>
     </SettingsPage>

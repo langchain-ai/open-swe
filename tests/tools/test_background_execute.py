@@ -393,9 +393,10 @@ async def test_shared_sandbox_monitors_deliver_only_their_own_completions(
     [
         ("alice", {"experimental_background_callbacks": True}, True),
         ("alice", {"experimental_background_callbacks": False}, False),
-        ("alice", {"default_model": "openai:test"}, False),
-        ("alice", None, False),
-        (None, {"experimental_background_callbacks": True}, False),
+        ("alice", {"experimental_background_callbacks": None}, True),
+        ("alice", {"default_model": "openai:test"}, True),
+        ("alice", None, True),
+        (None, None, True),
     ],
 )
 async def test_callbacks_follow_the_triggering_persons_flag(

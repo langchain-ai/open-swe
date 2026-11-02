@@ -2,8 +2,8 @@
 
 Two triggers read a sandbox's monitors, chosen per monitor by the starting
 person's ``experimental_background_callbacks`` flag: the runner calling
-``/monitors/{id}/sync`` through the sandbox tools channel, or a per-thread job
-polling every minute. Either one records each event as an ``EventMatch``
+``/monitors/{id}/sync`` through the sandbox tools channel by default, or a
+per-thread job polling every minute for people who opt out. Either one records each event as an ``EventMatch``
 keyed by monitor and sequence number, so a reading that both triggers make
 records it once, then lets ``EventMatch`` deliver it: before the next model call
 of a running thread, or in a run started for it.

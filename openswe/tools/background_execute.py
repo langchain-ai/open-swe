@@ -98,12 +98,13 @@ class _CallbackFlag(BaseModel):
 
 
 async def uses_completion_callback() -> bool:
-    """The triggering person's opt-in to sandbox completion callbacks instead of polling crons."""
+    """Use sandbox completion callbacks unless the triggering person opted out."""
     login = RunConfig.from_runtime().github_login
     if not login:
-        return False
+        return True
     profile = await get_profile(login)
-    return bool(profile and _CallbackFlag.model_validate(profile).experimental_background_callbacks)
+    flag = _CallbackFlag.model_validate(profile or {}).experimental_background_callbacks
+    return flag is not False
 
 
 async def _track(thread_id: str, task_id: str, *, running: bool = True) -> None:
