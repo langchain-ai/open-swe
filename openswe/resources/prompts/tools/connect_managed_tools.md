@@ -12,5 +12,5 @@ Success means the card was offered, not that anything is connected.
 When `continues_automatically` is true, a new run continues this thread once the offered services are connected; stop and wait for it instead of retrying.
 Otherwise some service needs an API key set in LangSmith, and the person asks you to continue when it is.
 
-If the result says the person must connect LangSmith first, the card offers that; tell them to connect it and then ask again.
+If the result says the person must sign in with LangSmith again, the card offers that; tell them to sign in and then ask again.
 If it says nothing is waiting to be connected, the services are either connected already (their tools load on the person's next message) or not in this gateway; in Slack the tool has already told them so.

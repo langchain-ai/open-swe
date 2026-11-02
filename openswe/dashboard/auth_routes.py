@@ -13,7 +13,11 @@ from openswe.config import ENV
 from openswe.dashboard.deps import SESSION_DEP, session_is_admin
 from openswe.dashboard.dev_login import GhUnavailable, dev_login_enabled, gh_credentials
 from openswe.dashboard.github_link import GitHubLink
-from openswe.dashboard.langsmith_login import LANGSMITH_LOGIN_CALLBACK_PATH, LangSmithLogin
+from openswe.dashboard.langsmith_login import (
+    LANGSMITH_LOGIN_CALLBACK_PATH,
+    LANGSMITH_STATE_COOKIE_PATH,
+    LangSmithLogin,
+)
 from openswe.dashboard.oauth import (
     COOKIE_NAME,
     GITHUB_CALLBACK_PATH,
@@ -305,19 +309,22 @@ async def auth_langsmith_login(
         handoff_port=desktop_port,
     )
     response = RedirectResponse(url, status_code=302)
-    set_state_cookie(response, nonce)
+    set_state_cookie(response, nonce, path=LANGSMITH_STATE_COOKIE_PATH)
     return response
 
 
-@router.get("/auth/langsmith/callback")
+@router.get("/langsmith/callback")
 async def auth_langsmith_callback(
     request: Request, state: str, code: str | None = None
 ) -> Response:
+    """Finish LangSmith sign-in on the callback the LangSmith OAuth client registers."""
     if not code:
         raise HTTPException(400, "LangSmith sign-in was cancelled — please retry")
     payload = decode_state(state)
     if payload.get("provider") != "langsmith":
         raise HTTPException(400, "oauth provider mismatch")
+    if payload.get("redirect_uri") != dashboard_api_base_url() + LANGSMITH_LOGIN_CALLBACK_PATH:
+        raise HTTPException(400, "LangSmith sign-in used another callback — please retry")
     handoff = desktop_handoff_from_state(payload)
     nonce_hash = payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(STATE_COOKIE_NAME)
@@ -354,7 +361,7 @@ async def auth_langsmith_callback(
             status_code=302,
         )
         set_session_cookie(response, session_jwt)
-        clear_state_cookie(response)
+        clear_state_cookie(response, path=LANGSMITH_STATE_COOKIE_PATH)
         return response
     challenge, port = handoff
     handoff_code = issue_desktop_handoff(
@@ -367,5 +374,5 @@ async def auth_langsmith_callback(
         challenge=challenge,
     )
     response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
-    clear_state_cookie(response)
+    clear_state_cookie(response, path=LANGSMITH_STATE_COOKIE_PATH)
     return response

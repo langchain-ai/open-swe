@@ -781,7 +781,7 @@ def set_session_cookie(response: Response, jwt_token: str) -> None:
     )
 
 
-def set_state_cookie(response: Response, nonce: str) -> None:
+def set_state_cookie(response: Response, nonce: str, *, path: str = "/dashboard/api/auth") -> None:
     # SameSite=Lax so GitHub's top-level redirect back to /auth/callback
     # still presents this cookie; the cookie is single-purpose and lives
     # only for the duration of one OAuth round-trip.
@@ -793,15 +793,13 @@ def set_state_cookie(response: Response, nonce: str) -> None:
         httponly=True,
         secure=secure,
         samesite="lax",
-        path="/dashboard/api/auth",
+        path=path,
     )
 
 
-def clear_state_cookie(response: Response) -> None:
+def clear_state_cookie(response: Response, *, path: str = "/dashboard/api/auth") -> None:
     secure, _ = cookie_security()
-    response.delete_cookie(
-        STATE_COOKIE_NAME, path="/dashboard/api/auth", samesite="lax", secure=secure
-    )
+    response.delete_cookie(STATE_COOKIE_NAME, path=path, samesite="lax", secure=secure)
 
 
 class DesktopConnectExchange(BaseModel):

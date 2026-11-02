@@ -32,7 +32,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 LANGSMITH_AUTHORIZATION_TTL = timedelta(seconds=60)
-LANGSMITH_LOGIN_CALLBACK_PATH = "/dashboard/api/auth/langsmith/callback"
+# The callback already registered on the LangSmith OAuth client.
+LANGSMITH_LOGIN_CALLBACK_PATH = "/dashboard/api/langsmith/callback"
+LANGSMITH_STATE_COOKIE_PATH = "/dashboard/api/langsmith"
 
 
 class LangSmithAccount(BaseModel):

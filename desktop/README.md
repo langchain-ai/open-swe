@@ -185,7 +185,7 @@ An external user does not need the deployment's server-side `LANGSMITH_API_KEY` 
 
 ## LangSmith deployment
 
-Register a confidential OAuth client (dynamic registration only permits MCP access) with callback `<DASHBOARD_API_BASE_URL>/dashboard/api/auth/langsmith/callback`.
+Register a confidential OAuth client (dynamic registration only permits MCP access) with callback `<DASHBOARD_API_BASE_URL>/dashboard/api/langsmith/callback`; existing clients already register it, so sign-in needs no new client or allowlist entry.
 Configure `LANGSMITH_CONNECTION_URL` (normally `https://api.smith.langchain.com`), `LANGSMITH_OAUTH_CLIENT_ID`, and `LANGSMITH_OAUTH_CLIENT_SECRET` on the backend, alongside its existing dashboard URLs, JWT/encryption secrets and PostgreSQL configuration.
 Set `LANGSMITH_LOGIN_ORG_ID=f5c798a2-2155-4999-ad27-6d466bd26e1c` for the production Agent Workspace organization.
 LangSmith login is disabled when this setting is unset, even if personal LangSmith connections are configured.
@@ -207,7 +207,7 @@ When that GitHub account already belongs to an Open SWE person, the LangSmith id
 A GitHub account already linked to another LangSmith account is refused.
 Once linked, the session acts as the GitHub login while every request still checks the LangSmith grant.
 
-Encrypted `langsmith_login` grants refresh automatically and also serve managed tools.
+Encrypted `langsmith_login` grants refresh automatically and also serve managed tools; there is no separate LangSmith connection to connect or disconnect.
 Every authenticated request, run dispatch, runtime call and worker grant checks the stored grant.
 Successful organization authorization is cached in PostgreSQL for at most 60 seconds, bound to the current grant and configured organization; provider revocation or membership removal can take up to 60 seconds to take effect.
 Expired authorization must be revalidated; temporary provider failures deny access without extending the cache or discarding the grant.
