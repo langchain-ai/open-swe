@@ -1176,6 +1176,7 @@ export interface ReviewPrDetails {
   state: string
   title: string
   body: string
+  description_pull_requests?: Array<number>
   additions: number
   deletions: number
   changed_files: number
