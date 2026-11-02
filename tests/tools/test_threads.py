@@ -1030,6 +1030,20 @@ async def test_manage_thread_uses_followup_sender_for_owner_checks(
     cancel.assert_awaited_once_with("thread-1", "reviewer", email=None)
 
 
+@pytest.mark.parametrize("action", ["approve_workflow_push", "reject_workflow_push"])
+async def test_manage_thread_cannot_decide_workflow_approval(
+    monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+
+    result = await threads_tool.manage_thread("thread-1", action, fingerprint="fp")
+
+    assert result == {
+        "success": False,
+        "error": f"Unexpected arguments for {action}: fingerprint",
+    }
+
+
 async def test_manage_thread_rechecks_admin_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
     cancel = AsyncMock()
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
