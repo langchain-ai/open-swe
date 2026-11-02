@@ -1,9 +1,11 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { CodeIcon } from "@phosphor-icons/react/dist/ssr/Code"
 import { HouseIcon } from "@phosphor-icons/react/dist/ssr/House"
-import { useNavigate } from "@tanstack/react-router"
+import { useNavigate, useRouterState } from "@tanstack/react-router"
+import { useSession } from "@/lib/session"
+import { useHrefLinkOptions } from "@/lib/appLocation"
 import { cn } from "@/lib/utils"
-import { useDesktopExperience } from "@/lib/experience"
+import { desktopExperience, useDesktopExperience } from "@/lib/experience"
 
 export function ExperienceSelector({
   onNavigate,
@@ -12,6 +14,10 @@ export function ExperienceSelector({
 }) {
   const { experience, select } = useDesktopExperience()
   const navigate = useNavigate()
+  const session = useSession()
+  const userId = session.data?.user_id ?? ""
+  const href = useRouterState({ select: (state) => state.location.href })
+  const linkOptions = useHrefLinkOptions()
   if (!experience) return null
   return (
     <div className="px-space-2 pb-space-4">
@@ -39,9 +45,12 @@ export function ExperienceSelector({
                 "border-strong bg-surface-level-4 text-primary hover:bg-surface-level-4 dark:hover:bg-surface-level-4"
             )}
             onClick={() => {
+              if (value === experience) return
+              desktopExperience.rememberLocation(userId, experience, href)
+              const destination = desktopExperience.location(userId, value)
               select(value)
               onNavigate?.()
-              void navigate({ to: "/agents", search: {} })
+              void navigate(linkOptions(destination))
             }}
           >
             {label}

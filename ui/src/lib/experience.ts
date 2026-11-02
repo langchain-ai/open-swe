@@ -7,6 +7,22 @@ export type Experience = "coding" | "agent_workspace"
 class DesktopExperience {
   private listeners = new Set<() => void>()
   private selections = new Map<string, Experience>()
+  private locations = new Map<string, string>()
+
+  rememberLocation(userId: string, experience: Experience, href: string) {
+    if (
+      userId &&
+      (href === "/agents" ||
+        href.startsWith("/agents/") ||
+        href.startsWith("/agents?"))
+    ) {
+      this.locations.set(`${userId}:${experience}`, href)
+    }
+  }
+
+  location(userId: string, experience: Experience): string {
+    return this.locations.get(`${userId}:${experience}`) ?? "/agents"
+  }
 
   key(login: string) {
     return `open-swe.desktop.experience:${login}`
