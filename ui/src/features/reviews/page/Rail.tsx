@@ -12,7 +12,7 @@ import {
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 
 import { AgentThreadPage } from "@/features/agents/components/AgentThreadPage"
 import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
@@ -44,6 +44,10 @@ export function Rail({
   const tab = useReviewPage((state) => state.railTab)
   const setRailTab = useReviewPage((state) => state.setRailTab)
   const chat = useReviewChat(pr, tab === "ask").data
+  // Loading Ask creates its thread, so it mounts only once this PR's Ask tab is opened.
+  const prKey = `${pr.owner}/${pr.repo}#${pr.number}`
+  const [askOpenedFor, setAskOpenedFor] = useState<string | null>(null)
+  if (tab === "ask" && askOpenedFor !== prKey) setAskOpenedFor(prKey)
   const open = useOpenConversations(pr)?.threads.length ?? 0
 
   return (
@@ -98,7 +102,7 @@ export function Rail({
           />
         )}
       </div>
-      {/* All stay mounted: the chats register drafted comments the diff shows, and keep their streams. */}
+      {/* Once mounted they stay: the chats register drafted comments the diff shows, and keep their streams. */}
       <TabPanels className="flex min-h-0 flex-1 flex-col">
         <TabPanel
           unmount={false}
@@ -112,7 +116,7 @@ export function Rail({
           data-rail-panel="ask"
           className="min-h-0 flex-1"
         >
-          <ReviewChatPanel pr={pr} tab="ask" />
+          {askOpenedFor === prKey && <ReviewChatPanel pr={pr} tab="ask" />}
         </TabPanel>
         <TabPanel unmount={false} className="min-h-0 flex-1">
           <Discussion pr={pr} />
