@@ -415,6 +415,7 @@ async def test_retry_is_requester_scoped_and_dispatches_only_once(
         ("dm", "owner", "pending", True),
         ("dm-reject", "owner", "pending", False),
         ("unrelated", "owner", "pending", False),
+        ("unmapped", "owner", "pending", False),
         ("wrong-dm", "owner", "pending", False),
         ("coordinator", "other", "pending", False),
         ("coordinator", "unlinked", "pending", False),
@@ -470,7 +471,13 @@ async def test_workflow_approval_requires_owner_and_authorized_card_location(
     monkeypatch.setattr(
         workflow_approval,
         "lookup_slack_thread_id",
-        AsyncMock(return_value="unrelated" if location == "unrelated" else "coordinator"),
+        AsyncMock(
+            return_value=None
+            if location == "unmapped"
+            else "unrelated"
+            if location == "unrelated"
+            else "coordinator"
+        ),
     )
     monkeypatch.setattr(
         workflow_approval, "fetch_thread_metadata", AsyncMock(return_value=metadata)
@@ -484,7 +491,11 @@ async def test_workflow_approval_requires_owner_and_authorized_card_location(
         workflow_approval.TaskMembership,
         "context_for_thread",
         AsyncMock(
-            return_value=SimpleNamespace(task=SimpleNamespace(coordinator_thread_id="coordinator"))
+            return_value=SimpleNamespace(
+                task=SimpleNamespace(
+                    coordinator_thread_id=None if location == "unmapped" else "coordinator"
+                )
+            )
         ),
     )
     monkeypatch.setattr(

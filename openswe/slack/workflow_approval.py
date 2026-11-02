@@ -71,7 +71,11 @@ async def handle_button(
             eligible = await open_dm(user_id) == channel_id
         else:
             task = await TaskMembership.context_for_thread(thread_id)
-            eligible = task is not None and task.task.coordinator_thread_id == source_id
+            eligible = (
+                source_id is not None
+                and task is not None
+                and task.task.coordinator_thread_id == source_id
+            )
         if not eligible:
             return await refuse("This workflow approval card does not belong in this conversation.")
 
