@@ -179,7 +179,7 @@ test.describe("my pull requests", () => {
     await expect(card(page, mine)).toBeVisible();
     await page.getByRole("button", { name: "To Review", exact: true }).click();
     await expect(
-      page.getByText("No Open SWE assignments. You’re all caught up."),
+      page.getByText("Nothing to review. You’re all caught up."),
     ).toBeVisible();
     await expect(card(page, assigned)).toHaveCount(0);
     await page

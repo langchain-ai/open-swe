@@ -4109,6 +4109,22 @@
             ],
             "title": "Additions"
           },
+          "assignment": {
+            "anyOf": [
+              {
+                "enum": [
+                  "assigned",
+                  "tentative",
+                  "mentioned"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignment"
+          },
           "autoMerge": {
             "default": false,
             "title": "Automerge",

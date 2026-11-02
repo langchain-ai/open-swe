@@ -62,6 +62,7 @@ from openswe.slack.responses import (
 from openswe.slack.run_feedback import FEEDBACK_ACTION, process_feedback
 from openswe.slack.solo_threads import allow_solo_thread_followup, track_explicit_mention
 from openswe.slack.summon import SUMMON_REACTION, process_slack_summon_reaction
+from openswe.slack.thread_mentions import SlackThreadMention
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -415,6 +416,7 @@ async def slack_webhook(
         return ignored("Invalid Slack event")
 
     new_pr_links = await SlackPullRequestLink.record(envelope)
+    await SlackThreadMention.record(envelope)
     if event.type in DIRECTORY_EVENTS and (listed_channel := event.resolve_channel_id()):
         background_tasks.add_task(SlackChannel.observe, event.type, listed_channel)
 
