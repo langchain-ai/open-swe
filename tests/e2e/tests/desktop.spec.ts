@@ -136,8 +136,8 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     const task = tasks.find((thread) => thread.id === taskThreadId);
     expect(task?.managedTaskFolder).toBe(true);
     expect(task?.cwd).toContain(taskThreadId);
-    const work = page.getByRole("button", { name: "Work", exact: true });
-    const coding = page.getByRole("button", { name: "Coding", exact: true });
+    const work = page.getByRole("button", { name: "Home", exact: true });
+    const coding = page.getByRole("button", { name: "Code", exact: true });
     await expect(work).toHaveAttribute("aria-pressed", "true");
     await expect(page).toHaveTitle(/Open SWE/);
     const workBounds = await work.boundingBox();

@@ -62,6 +62,7 @@ from openswe.slack.responses import (
 from openswe.slack.run_feedback import FEEDBACK_ACTION, process_feedback
 from openswe.slack.solo_threads import allow_solo_thread_followup, track_explicit_mention
 from openswe.slack.summon import SUMMON_REACTION, process_slack_summon_reaction
+from openswe.slack.thread_mentions import SlackThreadMention
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -415,6 +416,7 @@ async def slack_webhook(
         return ignored("Invalid Slack event")
 
     new_pr_links = await SlackPullRequestLink.record(envelope)
+    await SlackThreadMention.record(envelope)
     if event.type in DIRECTORY_EVENTS and (listed_channel := event.resolve_channel_id()):
         background_tasks.add_task(SlackChannel.observe, event.type, listed_channel)
 
@@ -1266,7 +1268,7 @@ async def slack_interactivity(
             return await request_retry.queue(interaction, channel_context, background_tasks)
         if button.type == expedited_review.BUTTON_TYPE:
             return await expedited_review.handle_button(interaction, button, background_tasks)
-        if button.type == human_review.BUTTON_TYPE:
+        if button.type in {human_review.BUTTON_TYPE, human_review.readiness.BUTTON_TYPE}:
             return await human_review.handle_button(interaction, button, background_tasks)
         if button.type == suggested_actions.BUTTON_TYPE:
             return await suggested_actions.handle_button(interaction, button, background_tasks)
