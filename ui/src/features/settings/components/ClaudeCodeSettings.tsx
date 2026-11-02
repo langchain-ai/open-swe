@@ -8,7 +8,7 @@ import type { ClaudeCodeSyncToken, MintedClaudeCodeSyncToken } from "@/lib/api"
 import { SettingsSection } from "@/components/AppShell"
 import { api } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
-import { ConfirmDialog } from "./ConfirmDialog"
+import { ConfirmDialog } from "@/components/ConfirmDialog"
 
 const TOKENS_KEY = ["claudeCodeSyncTokens"]
 const SETTINGS_FILE = "~/.claude/settings.json"

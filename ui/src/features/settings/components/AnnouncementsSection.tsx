@@ -10,7 +10,7 @@ import { SettingsSection } from "@/components/AppShell"
 import { api } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 
-import { ConfirmDialog } from "./ConfirmDialog"
+import { ConfirmDialog } from "@/components/ConfirmDialog"
 
 const TEXT_MAX_CHARS = 3000
 const QUERY_KEY = ["adminAnnouncements"]

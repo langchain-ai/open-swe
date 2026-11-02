@@ -197,6 +197,53 @@ async def test_auto_merge_refuses_a_changed_head() -> None:
     assert error.value.status_code == 409
 
 
+@pytest.mark.parametrize("refused", [set(), {"T2"}])
+async def test_merging_resolves_every_open_conversation_first(refused: set[str]) -> None:
+    resolved: list[str] = []
+    merged: list[str] = []
+
+    def github(request: httpx2.Request) -> httpx2.Response:
+        if request.method == "PUT":
+            merged.append(request.url.path)
+            return response({"merged": True})
+        body = json.loads(request.content)
+        thread_id = body["variables"].get("threadId")
+        if thread_id is None:
+            threads = [{"id": "T1", "isResolved": False}, {"id": "T2", "isResolved": False}]
+            return response(
+                {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "reviewThreads": {
+                                    "nodes": threads + [{"id": "T3", "isResolved": True}],
+                                    "pageInfo": {"hasNextPage": False},
+                                }
+                            }
+                        }
+                    }
+                }
+            )
+        resolved.append(thread_id)
+        if thread_id in refused:
+            return response({"errors": [{"message": "Resource not accessible"}]})
+        return response({"data": {"resolveReviewThread": {"thread": {"isResolved": True}}}})
+
+    action = actions.MergeAction(
+        action="merge", sha="a" * 40, merge_method="merge", resolve_conversations=True
+    )
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(1)
+        if refused:
+            with pytest.raises(HTTPException, match="Could not resolve 1 conversation;"):
+                await actions.act_on_pull_request(pull, action)
+        else:
+            await actions.act_on_pull_request(pull, action)
+
+    assert sorted(resolved) == ["T1", "T2"]
+    assert merged == ([] if refused else ["/repos/acme/app/pulls/1/merge"])
+
+
 @pytest.mark.parametrize("auto_merge", [False, True])
 async def test_squash_merge_sends_the_description_and_commits(github, monkeypatch, auto_merge):
     commit = {

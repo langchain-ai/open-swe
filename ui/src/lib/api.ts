@@ -1074,6 +1074,8 @@ export interface OpenPullRequest {
   // null when the review threads could not be read, which is not the same
   // answer as none being unresolved.
   unresolvedThreads: number | null
+  /** The base branch holds merges until every conversation is resolved. */
+  conversationResolutionRequired: boolean
 }
 
 export interface PullRequestReviewer {
@@ -1895,7 +1897,8 @@ export const api = {
   ) => pullRequestThread(repo, number, { intent: "message", title, message }),
   mergePullRequest: (
     pr: OpenPullRequest,
-    method: MergeMethod
+    method: MergeMethod,
+    resolveConversations = false
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, {
       action: "merge",
@@ -1904,6 +1907,7 @@ export const api = {
       ...(pr.ci === "pending" && pr.mergeState === "blocked"
         ? { auto_merge: true }
         : {}),
+      ...(resolveConversations ? { resolve_conversations: true } : {}),
     }),
   closePullRequest: (
     pr: OpenPullRequest,

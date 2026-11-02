@@ -15,6 +15,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from pydantic.alias_generators import to_camel
 
+from openswe.github.branch_rules import BranchMergeRule
 from openswe.github.ci import RequiredCheck, unreported_required_checks
 from openswe.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient, or_none
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
@@ -208,6 +209,7 @@ class OpenPullRequest(BaseModel):
     reviewers: list[PullRequestReviewer] | None = None
     review_required: bool = False
     unresolved_threads: int | None = None
+    conversation_resolution_required: bool = False
     failing_checks: list[str] = Field(default_factory=list)
     pending_checks: list[str] = Field(default_factory=list)
     missing_checks: list[str] = Field(default_factory=list)
@@ -980,6 +982,12 @@ class PullRequestClient:
         )
         result.review_required = review_state.review_required
         result.unresolved_threads = review_state.unresolved_threads
+        base = pull.get("base")
+        base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
+        if base_ref is not None and review_state.unresolved_threads:
+            result.conversation_resolution_required = (
+                await BranchMergeRule.requires_conversation_resolution_on(self.repo, base_ref)
+            )
         if runs is None or statuses is None:
             return result
         failed, _, _ = _normalize_checks(runs, statuses)
@@ -1010,8 +1018,6 @@ class PullRequestClient:
             if runs or statuses
             else "none"
         )
-        base = pull.get("base")
-        base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
         # A check gated on `needs:` has no run until its upstream jobs finish.
         if base_ref is not None and result.merge_state == "blocked" and not pending:
             required = await RequiredCheck.for_branch(self.repo, base_ref)
