@@ -15,6 +15,7 @@ from langgraph_sdk.errors import NotFoundError
 from openswe.config import ENV
 from openswe.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from openswe.dispatch import channel_of
+from openswe.plugins.records import PluginChat
 from openswe.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
@@ -38,8 +39,10 @@ from openswe.threads.summary import (
     TRANSCRIPT_VERSION,
     _assert_thread_postable,
     _now_ms,
+    chats_beside_plugin,
 )
 from openswe.transcript.turns import fail_unstarted_turn, steer_target
+from openswe.users import User
 from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import thread_metadata
@@ -319,6 +322,10 @@ async def proxy_dashboard_thread_commands(
             return 200, json.dumps(requeued).encode(), "application/json"
     if run_start_refused:
         await _fail_requested_turn(thread_id, enriched)
+    if run_start_succeeded and not principal.machine and chats_beside_plugin(metadata):
+        user = await User.for_person(ThreadIdentity(login).person)
+        if user:
+            await PluginChat.deliver_input(thread_id, user.id, enriched["params"].get("input"))
     if run_start_succeeded and not creating and not relayed_from:
         await _SlackWebHandoff(thread_id, metadata).notify()
 

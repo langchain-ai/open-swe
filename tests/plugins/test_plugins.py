@@ -1,5 +1,6 @@
 """PostgreSQL regressions for what keeps apps inside the access they were given."""
 
+import asyncio
 import json
 from datetime import timedelta
 from uuid import UUID
@@ -147,7 +148,8 @@ async def test_a_chat_is_its_persons_and_each_call_is_answered_once() -> None:
     assert await theirs.by_id(chat.id) is None
     assert not await theirs.offer(chat.id, [read_page], "")
     assert await mine.offer(chat.id, [read_page], "Read the page first.")
-    config = await PluginChat.run_config("thread-1")
+    assert await PluginChat.run_config("thread-1", bob) is None
+    config = await PluginChat.run_config("thread-1", ada)
     assert config is not None
     assert (config.prefix, [t.name for t in config.tools]) == ("docs__", ["docs__read_page"])
 
@@ -166,8 +168,14 @@ async def test_a_chat_is_its_persons_and_each_call_is_answered_once() -> None:
     # The plugin's results resume the chat only so often before the person writes again,
     # and what no run delivered goes to the agent with their message, once.
     assert [await chat.calls.spend_resume(2) for _ in range(3)] == [True, True, False]
-    assert [m["content"] for m in await PluginChat.person_wrote("thread-1")] == ["# Hi"]
-    assert await PluginChat.person_wrote("thread-1") == []
+    assert [m["content"] for m in await PluginChat.person_wrote("thread-1", ada)] == ["# Hi"]
+    assert await PluginChat.person_wrote("thread-1", bob) == []
+    held = await PluginChat.person_wrote("thread-1", ada)
+    assert [m["content"] for m in held] == ["# Hi"]
+    await PluginChat.deliver_input("thread-1", bob, {"messages": held})
+    assert await PluginChat.person_wrote("thread-1", ada) == held
+    await PluginChat.deliver_input("thread-1", ada, {"messages": held})
+    assert await PluginChat.person_wrote("thread-1", ada) == []
     assert await chat.calls.spend_resume(2)
 
 
@@ -211,6 +219,24 @@ async def test_a_preview_asking_for_more_waits_for_the_person() -> None:
     )
     running = await PluginInstallations.previewing("t", ada)
     assert running is not None and running.version.id == wider.id
+
+
+async def test_a_preview_cannot_be_replaced_by_another_person_or_keep_another_apps_grants() -> None:
+    ada, bob = await _person("ada", "1"), await _person("bob", "2")
+    first = await PluginApps.publish(ada, _bundle(permissions=[]), origin={}, preview_of="t")
+    assert await PluginInstallations.preview("t", first, user_id=ada)
+    running = await PluginInstallations.previewing("t", ada)
+    assert running is not None
+    await PluginInstallations.share(running.id, ada, ["acme/private"])
+    impostor = await PluginApps.publish(bob, _bundle(permissions=[]), origin={}, preview_of="t")
+    assert not await PluginInstallations.preview("t", impostor, user_id=bob)
+    assert (await PluginInstallations.get(running.id, ada)).version.id == first.id
+    replacement = await PluginApps.publish(
+        ada, _bundle(name="other", permissions=[]), origin={}, preview_of="t"
+    )
+    assert await PluginInstallations.preview("t", replacement, user_id=ada)
+    async with postgres.session() as session:
+        assert not list(await session.scalars(text("SELECT id FROM plugin_repository_grant")))
 
 
 async def test_only_listed_apps_reach_other_people_and_a_name_is_added_once() -> None:
@@ -347,6 +373,36 @@ async def test_compacting_a_room_keeps_what_came_after() -> None:
     assert [u.payload for u in await room.since(0)] == [b"one+two", b"three"]
     assert [u.payload for u in await room.since(second)] == [b"three"]
     assert [u.payload for u in await other.since(0)] == [b"elsewhere"]
+
+
+async def test_room_updates_commit_in_sequence_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    ada = await _person("ada", "1")
+    plugin = (await PluginInstallations.get(await _install(ada), ada)).plugin
+    room = Room(plugin, DocumentScope(repository="acme/app"), "draft/page.md")
+    inserted, release = asyncio.Event(), asyncio.Event()
+    notify = Room._notify
+
+    async def hold_first(self, session, event):
+        if not inserted.is_set():
+            inserted.set()
+            await release.wait()
+        await notify(self, session, event)
+
+    monkeypatch.setattr(Room, "_notify", hold_first)
+    first = asyncio.create_task(room.append(b"one", by=ada))
+    second = None
+    try:
+        await asyncio.wait_for(inserted.wait(), 2)
+        second = asyncio.create_task(room.append(b"two", by=ada))
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(second), 0.1)
+        assert await room.since(0) == []
+    finally:
+        release.set()
+        await first
+        if second is not None:
+            await second
+    assert [update.payload for update in await room.since(0)] == [b"one", b"two"]
 
 
 async def test_document_changes_reach_only_people_who_can_read_their_scope(
