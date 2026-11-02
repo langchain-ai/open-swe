@@ -1,6 +1,6 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { Text } from "@langchain/macaw-components/Text"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useRouter } from "@tanstack/react-router"
 import { useEffect } from "react"
 
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
@@ -53,12 +53,14 @@ function ReviewsPage() {
   const session = useSession()
   const filters = Route.useSearch()
   const navigate = Route.useNavigate()
+  const router = useRouter()
   const tab = filters.tab ?? "mine"
   const clearTrafficLights =
     useSidebarCollapsed() &&
     typeof window !== "undefined" &&
     Boolean(window.openSweDesktop)
   const changeFilters = (changes: Partial<ReviewsSearch>, replace = false) => {
+    if (router.latestLocation.pathname !== "/agents/reviews") return
     if ("repo" in changes) storeRepos(changes.repo)
     void navigate({
       search: (previous) => ({

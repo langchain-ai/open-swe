@@ -380,6 +380,7 @@ export const Changes = memo(function Changes({
       window.clearTimeout(writePositionTimer.current)
     }
   }, [onPositionChange])
+  const restoringAnchor = useRef(false)
   const anchor = useRef(position?.at)
   const writePosition = useCallback(() => {
     window.clearTimeout(writePositionTimer.current)
@@ -423,15 +424,35 @@ export const Changes = memo(function Changes({
     const entry =
       saved &&
       allEntries.find((candidate) => candidate.file.path === saved.path)
-    if (entry && saved)
-      handle.current?.scrollTo({
+    positionRestored.current = true
+    const viewer = handle.current?.getInstance()
+    const container = viewer?.getContainerElement()
+    if (!entry || !saved || !viewer || !container) return
+    restoringAnchor.current = true
+    const restore = () =>
+      viewer.scrollTo({
         type: "item",
         id: entry.id,
         align: "start",
         offset: -saved.offset,
         behavior: "instant",
       })
-    positionRestored.current = true
+    const frame = requestAnimationFrame(restore)
+    const observer = new ResizeObserver(restore)
+    const header = viewer.getHeaderElement()
+    if (header) observer.observe(header)
+    const release = () => {
+      restoringAnchor.current = false
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+      window.clearTimeout(timer)
+      for (const event of events) container.removeEventListener(event, release)
+    }
+    const events = ["wheel", "touchstart", "pointerdown", "keydown"]
+    for (const event of events)
+      container.addEventListener(event, release, { passive: true })
+    const timer = window.setTimeout(release, 3000)
+    return release
   }, [
     diff.isSuccess,
     detailQuery.isSuccess,
@@ -544,7 +565,11 @@ export const Changes = memo(function Changes({
           }
         }
         setActive(active, atEnd)
-        if (positionRestored.current && positionChange.current) {
+        if (
+          positionRestored.current &&
+          !restoringAnchor.current &&
+          positionChange.current
+        ) {
           const anchored =
             active ??
             viewer
