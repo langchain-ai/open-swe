@@ -170,7 +170,7 @@ from openswe.thread_title import (
     schedule_thread_title_generation,
 )
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
-from openswe.threads.goal import ThreadGoal
+from openswe.threads.goal import ThreadGoals
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.store import THREADS
 from openswe.threads.summary import DASHBOARD_SOURCE
@@ -1914,7 +1914,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             )
         if not goal_mode:
             # One left from when the person had Goal mode on would show, and pause, forever.
-            await ThreadGoal(thread_id).change(None)
+            await ThreadGoals.change(thread_id, None)
     except Exception:
         logger.exception("Could not ready the thread's task", extra={"agent_thread_id": thread_id})
     work_state_tool = _registered_tool_name(report_work_state)

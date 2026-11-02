@@ -5,7 +5,7 @@ from openswe.agent_api.tokens import AGENT_TURN_KEY
 from openswe.audit_logs.tools import audit_tool
 from openswe.review.goal_review import GoalReview
 from openswe.slack.client import GitHubPrRef, get_active_slack_thread, parse_github_pr_url
-from openswe.threads.goal import ThreadGoal
+from openswe.threads.goal import ThreadGoals
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.utils.dashboard_links import dashboard_review_url
 
@@ -78,5 +78,5 @@ async def request_pr_review(pr_url: str) -> dict[str, object]:
     ):
         result["review_url"] = review_url
     if result.get("success") and result.get("goal_review") and goal_review is not None:
-        await ThreadGoal(goal_review.thread_id).review_requested(pr_ref.url)
+        await ThreadGoals.review_requested(goal_review.thread_id, pr_ref.url)
     return result

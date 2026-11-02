@@ -192,9 +192,9 @@ class GoalReview(BaseModel):
     async def _tell(self, text: str) -> None:
         from openswe.background_tasks import completion_configurable
         from openswe.dispatch import dispatch_agent_run
-        from openswe.threads.goal import ThreadGoal
+        from openswe.threads.goal import ThreadGoals
 
-        await ThreadGoal(self.thread_id).review_returned()
+        await ThreadGoals.review_returned(self.thread_id)
         thread = await THREADS.get(self.thread_id)
         metadata = {} if thread is None else thread.metadata
         configurable = await completion_configurable(

@@ -47,7 +47,7 @@ from openswe.slack.code_channels import is_code_channel_session, set_session_sta
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
-from openswe.threads.goal import ThreadGoal
+from openswe.threads.goal import ThreadGoals
 from openswe.threads.status import refresh_thread_status
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
@@ -581,7 +581,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return await _handle_successful_run(thread_id, run_id, payload)
     if status in _TERMINAL_FAILURE_STATUSES:
         # As Codex blocks a goal on an error, so it cannot spin on one that recurs.
-        await ThreadGoal(thread_id).failed()
+        await ThreadGoals.failed(thread_id)
     if (
         status in _TERMINAL_FAILURE_STATUSES
         and isinstance(payload_metadata, dict)

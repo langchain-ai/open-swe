@@ -10,14 +10,14 @@ from openswe.database import postgres
 from openswe.tasks.store import Task, TaskMembership
 from openswe.threads import goal as goal_module
 from openswe.threads import index
-from openswe.threads.goal import ThreadGoal
+from openswe.threads.goal import ThreadGoals
 from openswe.workspaces.rows import WorkspaceRow
 
 _THREAD = "thread-1"
 
 
 @pytest.fixture
-async def goal(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> ThreadGoal:
+async def goal(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> str:
     """An agent thread working alone on its own task."""
 
     async def invalidate(**_key: str) -> None:
@@ -29,7 +29,7 @@ async def goal(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> ThreadGoal
         session.add(workspace)
     await index.create(_THREAD, runtime="mda", metadata={})
     await Task.for_thread(_THREAD, title="Fix login", workspace=workspace.slug)
-    return ThreadGoal(_THREAD)
+    return _THREAD
 
 
 @pytest.fixture
@@ -57,14 +57,14 @@ def wakeups(monkeypatch: pytest.MonkeyPatch) -> list[SimpleNamespace]:
 
 
 async def test_a_goal_rests_on_what_will_wake_it_and_stalls_once_that_lapses(
-    goal: ThreadGoal, wakeups: list[SimpleNamespace]
+    goal: str, wakeups: list[SimpleNamespace]
 ) -> None:
     due = datetime(2026, 11, 1, 23, 28, tzinfo=UTC)
     wakeups.append(SimpleNamespace(due_at=due))
-    await goal.review_requested("https://github.com/o/r/pull/1")
+    await ThreadGoals.review_requested(goal, "https://github.com/o/r/pull/1")
 
-    await goal.change("waiting")
-    waiting = await goal.current()
+    await ThreadGoals.change(goal, "waiting")
+    waiting = await ThreadGoals.current(goal)
 
     assert waiting is not None and waiting.state == "waiting"
     assert [(wait.kind, wait.until) for wait in waiting.waits] == [
@@ -72,79 +72,79 @@ async def test_a_goal_rests_on_what_will_wake_it_and_stalls_once_that_lapses(
         ("review", None),
     ]
     wakeups.clear()
-    await goal.review_returned()
-    stalled = await goal.shown()
+    await ThreadGoals.review_returned(goal)
+    stalled = await ThreadGoals.shown(goal)
     assert stalled is not None and (stalled.state, stalled.reason) == ("paused", "no_progress")
 
 
 async def test_a_stop_holds_until_its_person_writes_and_drops_the_wakeups(
-    goal: ThreadGoal, wakeups: list[SimpleNamespace]
+    goal: str, wakeups: list[SimpleNamespace]
 ) -> None:
-    await goal.stopped()
-    assert await goal.current() is None
+    await ThreadGoals.stopped(goal)
+    assert await ThreadGoals.current(goal) is None
 
-    await goal.change("working")
+    await ThreadGoals.change(goal, "working")
     wakeups.append(SimpleNamespace(due_at=datetime(2026, 11, 1, 23, 28, tzinfo=UTC)))
-    await goal.stopped()
+    await ThreadGoals.stopped(goal)
     # A run still finishing cannot rest or report over the stop.
-    await goal.change("waiting")
-    await goal.reported("complete", "Ready for review.")
-    stopped = await goal.current()
+    await ThreadGoals.change(goal, "waiting")
+    await ThreadGoals.reported(goal, "complete", "Ready for review.")
+    stopped = await ThreadGoals.current(goal)
 
     assert stopped is not None and (stopped.state, stopped.reason) == ("paused", "stopped")
     assert not wakeups
-    await goal.change("working")
-    await goal.reported("blocked", "Which Slack channel should review it?")
-    waiting = await goal.current()
+    await ThreadGoals.change(goal, "working")
+    await ThreadGoals.reported(goal, "blocked", "Which Slack channel should review it?")
+    waiting = await ThreadGoals.current(goal)
     assert waiting is not None
     assert (waiting.state, waiting.reason, waiting.ask) == (
         "waiting_on_user",
         "blocked",
         "Which Slack channel should review it?",
     )
-    await goal.change(None)
-    assert await goal.current() is None
+    await ThreadGoals.change(goal, None)
+    assert await ThreadGoals.current(goal) is None
 
 
 async def test_a_workers_runs_leave_its_coordinators_goal_alone(
-    goal: ThreadGoal, wakeups: list[SimpleNamespace]
+    goal: str, wakeups: list[SimpleNamespace]
 ) -> None:
-    await goal.change("working")
-    await goal.stopped()
+    await ThreadGoals.change(goal, "working")
+    await ThreadGoals.stopped(goal)
     task = await Task.of_thread(_THREAD)
     assert task is not None
     async with postgres.session() as session:
         session.add(TaskMembership(thread_id="worker-1", task_id=task.id, role="worker"))
-    worker = ThreadGoal("worker-1")
+    worker = "worker-1"
 
     # A worker's run starts without Goal mode, which clears a goal left on its own task.
-    await worker.change(None)
-    await worker.stopped()
+    await ThreadGoals.change(worker, None)
+    await ThreadGoals.stopped(worker)
 
-    kept = await goal.current()
+    kept = await ThreadGoals.current(goal)
     assert kept is not None and (kept.state, kept.reason) == ("paused", "stopped")
-    assert await worker.current() is None
+    assert await ThreadGoals.current(worker) is None
 
 
 async def test_a_goal_starts_from_the_request_and_the_agent_can_rewrite_or_pause_it(
-    goal: ThreadGoal, wakeups: list[SimpleNamespace]
+    goal: str, wakeups: list[SimpleNamespace]
 ) -> None:
-    await goal.change("working", request="Fix the login redirect")
-    started = await goal.current()
+    await ThreadGoals.change(goal, "working", request="Fix the login redirect")
+    started = await ThreadGoals.current(goal)
     assert started is not None and started.objective is not None
     assert started.objective.startswith("Fix the login redirect")
 
-    await goal.rewritten("Fix the login redirect and the logout one")
-    await goal.paused_on_request()
+    await ThreadGoals.rewritten(goal, "Fix the login redirect and the logout one")
+    await ThreadGoals.paused_on_request(goal)
     # A run still finishing, a wake or a failure cannot undo a pause the person asked for.
-    await goal.change("waiting")
-    await goal.failed()
-    paused = await goal.current()
+    await ThreadGoals.change(goal, "waiting")
+    await ThreadGoals.failed(goal)
+    paused = await ThreadGoals.current(goal)
 
     assert paused is not None
     assert (paused.state, paused.reason) == ("paused", "requested")
     assert paused.objective == "Fix the login redirect and the logout one"
-    await goal.change("working")
-    await goal.failed()
-    errored = await goal.current()
+    await ThreadGoals.change(goal, "working")
+    await ThreadGoals.failed(goal)
+    errored = await ThreadGoals.current(goal)
     assert errored is not None and (errored.state, errored.reason) == ("paused", "error")

@@ -168,7 +168,7 @@ from openswe.run_config import RunConfig
 from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.sandboxes.lifecycle import mda_proxy_config, take_stale_boot
 from openswe.slack.tools.reply import send_slack_reply
-from openswe.threads.goal import ThreadGoal
+from openswe.threads.goal import ThreadGoals
 from openswe.threads.inbox import ThreadInbox
 from openswe.utils.thread_reads import shared_thread_reads
 
@@ -640,8 +640,7 @@ class TokenRun:
 
     async def goal(self, request: GoalRead) -> Goal:
         """The thread's goal, with what will wake the thread again when asked."""
-        thread_goal = ThreadGoal(self.run.thread_id)
-        kept = await thread_goal.current()
+        kept = await ThreadGoals.current(self.run.thread_id)
         if kept is None:
             return Goal()
         return Goal(
@@ -650,12 +649,14 @@ class TokenRun:
             objective=None if kept.objective is None else run_context("goal", kept.objective),
             ask=kept.ask,
             updated_at_ms=kept.updated_at_ms,
-            waits=[wait.kind for wait in await thread_goal.waits()] if request.waits else [],
+            waits=[wait.kind for wait in await ThreadGoals.waits(self.run.thread_id)]
+            if request.waits
+            else [],
         )
 
     async def set_goal(self, request: GoalChange) -> Done:
-        await ThreadGoal(self.run.thread_id).change(
-            request.state, request.reason, request=request.request
+        await ThreadGoals.change(
+            self.run.thread_id, request.state, request.reason, request=request.request
         )
         return Done()
 
