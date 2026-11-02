@@ -175,6 +175,7 @@ from openswe.tools import (
     auto_assign_human_reviewer,
     background_execute,
     background_task,
+    classify,
     code_channel_set_view,
     configure_repository,
     configure_workspace,
@@ -285,6 +286,7 @@ from openswe.utils.authorship import (
 )
 from openswe.utils.dashboard_links import dashboard_base_url, dashboard_plan_url
 from openswe.utils.deferred_model import make_deferred_error_model
+from openswe.utils.jev import SystemOneGateway
 from openswe.utils.json_types import as_json_object, thread_metadata
 from openswe.utils.model import (
     DEFAULT_LLM_REASONING,
@@ -715,6 +717,7 @@ AGENT_TOOLS: Final = (
     http_request,
     fetch_url,
     web_search,
+    classify,
     background_execute,
     background_task,
     monitor,
@@ -1885,9 +1888,8 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
-    goal_mode = bool(profile_login) and (
-        (await User.preferences_for_login(profile_login)).goal_mode
-    )
+    sender_preferences = await User.preferences_for_login(profile_login or "")
+    goal_mode = sender_preferences.goal_mode
     work_state_tool = _registered_tool_name(report_work_state)
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs
@@ -1997,6 +1999,11 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         *(() if cli_result_required else (cli_result,)),
         *(() if bridge_client == "desktop" else (worktree_handoff,)),
         *(() if _writes_database_rows() else (execute_database_sql, write_database_rows)),
+        *(
+            ()
+            if sender_preferences.experimental_classify and SystemOneGateway.configured()
+            else (classify,)
+        ),
     ]
     static_tools = [tool for tool in AGENT_TOOLS if not any(tool is w for w in withheld)]
     static_tools = permitted(static_tools, tool_access)
