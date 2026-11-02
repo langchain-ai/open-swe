@@ -116,13 +116,16 @@ function CommentFacts({ pr }: { pr: PullRequestRef }) {
   return (
     <dl
       aria-label="Details from comments"
-      className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-space-4 gap-y-space-1 rounded-xl border border-default px-space-4 py-space-3 text-xs"
+      className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-space-4 gap-y-space-2 rounded-xl border border-default px-space-4 py-space-3 text-xs leading-5"
     >
       {facts.map(({ key, value }) => (
         <Fragment key={key}>
           <dt className="font-medium text-primary">{key}</dt>
-          <dd className="min-w-0 text-secondary [&_p]:m-0 [&_p]:truncate">
-            <Markdown content={value} />
+          <dd className="min-w-0">
+            <Markdown
+              content={value}
+              className="text-xs leading-5 text-secondary [&_p]:my-0!"
+            />
           </dd>
         </Fragment>
       ))}
