@@ -7,10 +7,11 @@ import re
 from typing import Any
 from uuid import UUID
 
+import yaml
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import ColumnElement, ForeignKey, delete, select, update
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import ColumnElement, ForeignKey, delete, func, literal_column, select, update
+from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
@@ -50,9 +51,109 @@ class SkillCreate(BaseModel):
         return value
 
 
+class SkillImport(BaseModel):
+    source_id: UUID
+    files: dict[str, str] = Field(min_length=1, max_length=100)
+
+    @field_validator("files")
+    @classmethod
+    def valid_files(cls, files: dict[str, str]) -> dict[str, str]:
+        if "SKILL.md" not in files or sum(len(text) for text in files.values()) > 1_000_000:
+            raise ValueError("A skill needs SKILL.md and at most 1 MB of UTF-8 resources")
+        for path, text in files.items():
+            if (
+                not path
+                or len(path) > 256
+                or "\\" in path
+                or any(part in {"", ".", ".."} or part.startswith(".") for part in path.split("/"))
+                or len(text) > 200_000
+                or "\x00" in text
+            ):
+                raise ValueError("Invalid skill resource path or content")
+        return files
+
+    def skill(self, name: str) -> SkillCreate:
+        content = self.files["SKILL.md"].replace("\r\n", "\n")
+        frontmatter = re.match(r"\A---\n(.*?)\n---[ \t]*(?:\n|$)(.*)\Z", content, re.DOTALL)
+        if frontmatter is None:
+            raise ValueError("SKILL.md needs YAML frontmatter")
+        try:
+            metadata = yaml.safe_load(frontmatter[1])
+        except yaml.YAMLError as error:
+            raise ValueError("Invalid SKILL.md YAML frontmatter") from error
+        if not isinstance(metadata, dict) or metadata.get("name") != name:
+            raise ValueError("Skill name must match its directory")
+        return SkillCreate(
+            name=name,
+            description=metadata.get("description"),
+            instructions=frontmatter[2].strip(),
+        )
+
+    async def save(self, login: str, name: str) -> dict[str, object]:
+        body = self.skill(name)
+        owner = await _person(login)
+        value = _record(body.name, body.description, body.instructions)
+        value.update(
+            content=self.files["SKILL.md"],
+            files=self.files,
+            source="desktop",
+            source_id=str(self.source_id),
+        )
+        statement = insert(Skill).values(user_id=owner, name=name, value=value)
+        statement = statement.on_conflict_do_update(
+            index_elements=[
+                func.coalesce(
+                    Skill.user_id, literal_column("'00000000-0000-0000-0000-000000000000'::uuid")
+                ),
+                Skill.name,
+            ],
+            set_={
+                "value": statement.excluded.value.op("||")(
+                    func.jsonb_build_object("created_at", Skill.value["created_at"])
+                )
+            },
+            where=(Skill.value["source"].astext == "desktop")
+            & (Skill.value["source_id"].astext == str(self.source_id)),
+        ).returning(Skill.id)
+        async with postgres.session() as session:
+            if await session.scalar(statement) is None:
+                raise HTTPException(409, "A cloud-managed skill already has this name")
+        return {"name": name}
+
+
+class SkillImportInventory(BaseModel):
+    source_id: UUID
+    names: list[str] = Field(max_length=1000)
+
+    async def reconcile(self, login: str) -> None:
+        owner = await _person(login)
+        async with postgres.session() as session:
+            await session.execute(
+                delete(Skill).where(
+                    Skill.user_id == owner,
+                    Skill.name.not_in(self.names),
+                    Skill.value["source"].astext == "desktop",
+                    Skill.value["source_id"].astext == str(self.source_id),
+                )
+            )
+
+
 class SkillUpdate(BaseModel):
+    detach: bool = False
     description: str = Field(min_length=1, max_length=MAX_SKILL_DESCRIPTION_CHARS)
     instructions: str = Field(default="", max_length=MAX_SKILL_INSTRUCTIONS_CHARS)
+
+    def content(self, original: str, name: str) -> str:
+        frontmatter = re.match(
+            r"\A---\n(.*?)\n---[ \t]*(?:\n|$)", original.replace("\r\n", "\n"), re.DOTALL
+        )
+        metadata = yaml.safe_load(frontmatter[1]) if frontmatter else {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        metadata.update(name=name, description=self.description)
+        return (
+            f"---\n{yaml.safe_dump(metadata, sort_keys=False)}---\n\n{self.instructions.strip()}\n"
+        )
 
     @field_validator("description")
     @classmethod
@@ -138,7 +239,10 @@ async def _get_skill(owner: Owner, name: str) -> dict[str, Any] | None:
 async def _list_skills(owner: Owner, *, limit: int, offset: int) -> dict[str, Any]:
     found = await _search(owner, limit=limit + 1, offset=offset)
     return {
-        "items": found[:limit],
+        "items": [
+            {key: value for key, value in skill.items() if key != "files"}
+            for skill in found[:limit]
+        ],
         "next_offset": offset + limit if len(found) > limit else None,
     }
 
@@ -157,7 +261,14 @@ async def _update_skill(owner: Owner, name: str, body: SkillUpdate) -> dict[str,
     existing = await _get_skill(owner, name)
     if not existing:
         raise HTTPException(404, "skill not found")
+    if existing.get("source") == "desktop" and not body.detach:
+        raise HTTPException(409, "Desktop-synced skills are read-only; explicitly detach to edit")
     value = _record(name, body.description, body.instructions, existing)
+    if existing.get("source") == "desktop":
+        value.update(source="desktop-detached", source_id=existing.get("source_id"))
+    if "files" in existing:
+        content = body.content(existing["content"], name)
+        value.update(content=content, files={**existing["files"], "SKILL.md": content})
     async with postgres.session() as session:
         await session.execute(
             update(Skill).where(_owned_by(owner), Skill.name == name).values(value=value)

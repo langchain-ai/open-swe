@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 
 from openswe.audit_logs.middleware import audit_endpoint
@@ -11,6 +11,8 @@ from openswe.skill_store.store import (
     DEFAULT_SKILLS_PAGE_SIZE,
     MAX_SKILLS_PAGE_SIZE,
     SkillCreate,
+    SkillImport,
+    SkillImportInventory,
     SkillUpdate,
     create_organization_skill,
     create_skill,
@@ -51,6 +53,29 @@ async def api_update_skill(
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     return await update_skill(session["sub"], name, body)
+
+
+@router.post("/skills/import-inventory")
+@audit_endpoint
+async def api_reconcile_imported_skills(
+    body: SkillImportInventory,
+    session: dict[str, Any] = SESSION_DEP,
+) -> Response:
+    await body.reconcile(session["sub"])
+    return Response(status_code=204)
+
+
+@router.put("/skills/{name}/import")
+@audit_endpoint
+async def api_import_skill(
+    name: str,
+    body: SkillImport,
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, object]:
+    try:
+        return await body.save(session["sub"], name)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
 
 
 @router.delete("/skills/{name}")

@@ -41,6 +41,40 @@ The side panel's **Changes** tab diffs the project against a git snapshot taken 
 It also shows the workspace's branch and discovers its pull request when the GitHub CLI is installed and authenticated.
 The **Terminal** and file browser open in the same checkout, on this Mac.
 
+## Personal skills
+
+While the app is open and signed in, it imports `$HOME/.agent/skills/<name>/SKILL.md` into that account's personal skills on the selected backend, checking for changes every 10 seconds.
+It also reads the standard `$HOME/.agents/skills` location; `.agent` wins for duplicate directory names.
+Project folders and other agents' private directories are not uploaded.
+
+Each skill needs YAML frontmatter with a matching `name` and a `description`.
+The app preserves the original `SKILL.md` and accompanying UTF-8 references, templates, and script text (up to 100 files, 200 KB per file and 1 MB per skill).
+Hidden files are excluded; binary resources, symlinked resources inside a skill, and oversized bundles are rejected with a diagnostic warning rather than partially imported.
+Skill directories themselves may be symlinks.
+Imported resources are readable skill files, not installed executables or dependencies in a remote sandbox.
+
+Uploads and removals are scoped to a persistent random ID for this desktop profile, stored in its user-data directory.
+A complete scan sends an inventory; the backend removes only absent skills still owned by that source and account.
+Unreadable directories abort reconciliation, and unreadable or invalid skill folders remain in the inventory, so scan failures do not look like deletions.
+Deleting a skill folder locally removes its remote copy on the next successful scan, including after restarting the app.
+Other computers cannot overwrite or delete that copy.
+
+Desktop-synced skills are read-only in the dashboard and agent tools by default.
+Use **Detach to edit** to make an independent cloud copy; this preserves provenance and resources but permanently disables desktop updates and automatic deletion for that copy.
+Cloud-authored skills and detached copies are never overwritten or removed by desktop sync.
+New agent runs see imported changes; an already-running agent retains its run's skill snapshot.
+Personal skills keep the existing private-thread credential restrictions and are not published to the organization.
+
+### Compatibility research
+
+- [Codex](https://learn.chatgpt.com/docs/build-skills) discovers user skills in `~/.agents/skills`, supports skill-directory symlinks, and automatically detects skill edits.
+- [Claude Code](https://code.claude.com/docs/en/skills) uses `~/.claude/skills`, detects `SKILL.md` edits during a session, and supports supporting files.
+  Its documented account sync downloads cloud skills; it does not upload local skills.
+- [Cursor](https://cursor.com/docs/skills) discovers `~/.agents/skills` and `~/.cursor/skills`, but local discovery is separate from Cloud Agent synchronization.
+
+Open SWE therefore uses the shared `SKILL.md` package format and automatic change detection, while making local-to-account upload an explicit desktop behavior rather than treating every agent's local files as cloud content.
+The singular `.agent` location is supported intentionally alongside the plural cross-agent convention.
+
 ## How it connects
 
 The UI runs at `open-swe://app`, with native IPC for local projects, threads, worktrees, terminals and files.

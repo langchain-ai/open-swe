@@ -24,6 +24,12 @@ class _SkillFiles(AgentStore):
             self._files = InMemoryStore()
             for skill in await agent_skills(self.login):
                 await self._files.aput(("skills",), skill_path(skill["name"]), skill)
+                for path, content in skill.get("files", {}).items():
+                    await self._files.aput(
+                        ("skills",),
+                        f"/{skill['name']}/{path}",
+                        {**skill, "content": content},
+                    )
         return await self._files.abatch(ops)
 
 
