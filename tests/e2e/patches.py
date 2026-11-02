@@ -376,34 +376,34 @@ def _answer_every_call_on_a_fresh_replica() -> None:
     starting = RunCatalog.of
 
     async def answer_call(
-        cls: type[TokenRun], parts: RunKind, run: RemoteRun, endpoint: str, raw: JsonValue
+        cls: type[TokenRun], kind: RunKind, run: RemoteRun, endpoint: str, raw: JsonValue
     ) -> JsonValue:
         calling = _calling.set(endpoint)
         try:
-            return await answer(parts, run, endpoint, raw)
+            return await answer(kind, run, endpoint, raw)
         finally:
             _calling.reset(calling)
 
-    async def start(cls: type[RunCatalog], parts: RunKind, run: RemoteRun) -> RunCatalog:
+    async def start(cls: type[RunCatalog], kind: RunKind, run: RemoteRun) -> RunCatalog:
         # A dispatch can run in the context of a call it was made from, such as an operation.
         calling = _calling.set("start")
         try:
-            return await starting(parts, run)
+            return await starting(kind, run)
         finally:
             _calling.reset(calling)
 
     def recording(
-        plan: Callable[[RunnableConfig, ToolSurface], Awaitable[None]],
+        catalog: Callable[[RunnableConfig, ToolSurface], Awaitable[None]],
     ) -> Callable[[RunnableConfig, ToolSurface], Awaitable[None]]:
         async def recorded(config: RunnableConfig, surface: ToolSurface) -> None:
             thread_id = RunConfig.from_config(config).thread_id or ""
             fakes.PLANS.append({"thread_id": thread_id, "call": _calling.get()})
-            await plan(config, surface)
+            await catalog(config, surface)
 
         return recorded
 
-    for parts in run_kinds().values():
-        parts.plan = recording(parts.plan)
+    for kind in run_kinds().values():
+        kind.catalog = recording(kind.catalog)
 
     TokenRun.answer = classmethod(answer_call)
     RunCatalog.of = classmethod(start)
