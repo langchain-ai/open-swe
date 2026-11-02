@@ -10,6 +10,8 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY ui/package.json ui/package.json
 COPY ui/vendor ui/vendor
+COPY ui/patches ui/patches
+COPY desktop/patches desktop/patches
 RUN pnpm install --frozen-lockfile --filter open-swe-dashboard...
 
 COPY ui ui
