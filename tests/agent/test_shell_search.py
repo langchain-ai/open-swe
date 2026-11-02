@@ -7,7 +7,7 @@ from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.review_scout import graph as scout
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
-from tests.agent.test_agent_assembly_context import _base_config, _agent_catalog
+from tests.agent.test_agent_assembly_context import _agent_catalog, _base_config
 from tests.agent.test_agent_assembly_context import saved_thread_scope as saved_thread_scope
 
 _PLANNERS = ["main", "reviewer", "review-scout"]
