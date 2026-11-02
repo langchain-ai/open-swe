@@ -38,7 +38,6 @@ from openswe.slack.dm import send_dm
 from openswe.slack.http import SlackRequestError
 from openswe.threads.runs import start_dashboard_thread
 from openswe.users import User
-from openswe.utils.multimodal import extract_image_urls
 from openswe.utils.preview import skip_on_preview
 
 logger = logging.getLogger(__name__)
@@ -66,20 +65,20 @@ class DesignOwners(BaseModel):
 class ReviewImages(HTMLParser):
     def __init__(self, body: str) -> None:
         super().__init__()
-        self.urls = extract_image_urls(body)
+        self.images: dict[str, str] = {}
         self.feed(MarkdownIt("commonmark", {"html": True}).render(body))
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag == "img":
-            src = dict(attrs).get("src")
-            if src and urlsplit(src).scheme == "https" and src not in self.urls:
-                self.urls.append(src)
+            attributes = dict(attrs)
+            src = attributes.get("src")
+            if src and urlsplit(src).scheme == "https" and src not in self.images:
+                self.images[src] = (attributes.get("alt") or "PR screenshot")[:2000]
 
     def blocks(self) -> list[dict[str, object]]:
         return [
-            {"type": "image", "image_url": url, "alt_text": "PR screenshot"}
-            for url in self.urls[:2]
-            if urlsplit(url).scheme == "https"
+            {"type": "image", "image_url": url, "alt_text": alt}
+            for url, alt in list(self.images.items())[:2]
         ]
 
 
@@ -168,6 +167,7 @@ class SupplementaryReview:
                 return "not_ready"
             if not self.state.reason:
                 return await self._assess()
+            pr.title = details.title
             pr.body = details.body or ""
             pr.changed_files = details.changed_files
             pr.additions = details.additions
@@ -359,11 +359,14 @@ class SupplementaryReview:
                 else f"{self.policy.team} specialist (team rotation)"
             )
             note = (
-                f"*{label}* · {slack_mention(user, state.github_login)} · "
+                f"*{label} requested* · {slack_mention(user, state.github_login)} · "
                 f"<{pr.url}|{pr.repo}#{pr.number}>\n"
+                f"{escape(' '.join(pr.title.split())[:160], quote=False)}\n"
                 f"*Impact:* {escape(' '.join(state.reason.split())[:320], quote=False)}\n"
                 f"*Scope:* {pr.changed_files} files · +{pr.additions}/−{pr.deletions}\n"
-                f"*Why you:* {why}"
+                f"*Why you:* {why}\n"
+                f"<{pr.url}/files|Review the changes> and leave feedback or approve on GitHub. "
+                "Engineering review remains separate."
             )
             failed = False
             try:

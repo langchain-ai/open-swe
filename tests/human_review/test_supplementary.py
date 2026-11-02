@@ -211,7 +211,17 @@ async def test_rejected_screenshot_retries_as_text_without_a_second_ping(
 ) -> None:
     user = _user("designer")
     review.run_config = _stored(reason="High impact: new navigation", github_login="designer")
-    review.pull_request.body = '<img src="https://example.com/screenshot.png" width="640">'
+    review.pull_request.body = """<!-- ![hidden](https://example.com/hidden.png) -->
+```md
+![example](https://example.com/example.png)
+```
+<img src="http://example.com/insecure.png">
+<img src="https://example.com/before.png?raw=1&amp;size=640" alt="Before" width="640">
+
+![Before again](https://example.com/before.png?raw=1&size=640)
+![After](https://example.com/after.png "Updated navigation")
+![Extra](https://example.com/extra.png)
+"""
     pull = MagicMock(spec=PullRequestClient)
     pull.request_reviewers = AsyncMock()
     with (
@@ -231,10 +241,14 @@ async def test_rejected_screenshot_retries_as_text_without_a_second_ping(
         assert await _review(review)._assign(pull) == "requested"
         assert await _review(review)._assign(pull) == "requested"
     assert post.await_count == 2
-    assert (
-        post.await_args_list[0].kwargs["blocks"][1]["image_url"]
-        == "https://example.com/screenshot.png"
-    )
+    assert post.await_args_list[0].kwargs["blocks"][1:] == [
+        {
+            "type": "image",
+            "image_url": "https://example.com/before.png?raw=1&size=640",
+            "alt_text": "Before",
+        },
+        {"type": "image", "image_url": "https://example.com/after.png", "alt_text": "After"},
+    ]
     assert "blocks" not in post.await_args_list[1].kwargs
     assert dm.await_count == int(text_fails)
 
@@ -433,7 +447,11 @@ async def test_request_reuses_open_review_without_replacing_engineering(
     review.tldr = "Original engineering summary"
     reason = "Redesigned experiment comparison workflow"
     pr = review.pull_request
+    settings = RepoSettings(
+        supplementaryReviews=[POLICY.model_copy(update={"team": "langchain-ai/product-design"})]
+    )
     with (
+        patch.object(supplementary.RepoSettings, "cached", AsyncMock(return_value=settings)),
         patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=review)),
         patch.object(standard, "_permalink", AsyncMock(return_value="https://slack.example/card")),
         patch.object(standard, "review_blockers", AsyncMock(return_value=[])),
@@ -457,11 +475,13 @@ async def test_request_reuses_open_review_without_replacing_engineering(
             inline_summary=None,
             supplementary_review="design",
             supplementary_review_reason=reason,
+            supplementary_review_area="engine-insights-chat",
         )
     assert result.reused and result.success
     assert review.kind == kind
     assert review.tldr == "Original engineering summary"
     assert _state(review).reason == reason
+    assert _state(review).area == "engine-insights-chat"
     assert review.participants == []
     post.assert_not_awaited()
 
