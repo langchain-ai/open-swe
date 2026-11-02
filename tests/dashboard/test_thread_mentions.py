@@ -1,9 +1,11 @@
 import asyncio
+from datetime import timedelta
 from unittest.mock import AsyncMock
 from uuid import uuid7
 
 import pytest
 
+from openswe.jobs import queue
 from openswe.notifications import service
 from openswe.notifications.service import AppNotification
 from openswe.slack.user_options import SlackUserOption
@@ -97,3 +99,24 @@ async def test_dispatch_does_not_wait_for_notification_delivery(monkeypatch) -> 
     assert notification._pending
     release.set()
     await asyncio.gather(*notification._pending)
+
+
+async def test_recent_desktop_users_get_a_longer_slack_fallback_delay(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bob")
+    alice = await User.sign_in("github", "1", login="alice")
+    bob = await User.sign_in("github", "2", login="bob")
+    await bob.note_desktop_use()
+    for user in (alice, await User.get(bob.id)):
+        assert user is not None
+        await AppNotification.send(
+            user, key="m1", title="Mention", body="", url="/agents", fallback_text="Mention"
+        )
+    delays = {}
+    for user in (alice, bob):
+        job = await queue.get(f"{service.JOB_KIND}:{user.id}:m1")
+        assert job is not None
+        delays[user.login_for("github")] = job.due_at - job.created_at
+    assert delays["alice"] < timedelta(minutes=2)
+    assert timedelta(hours=7, minutes=59) < delays["bob"] <= timedelta(hours=8, seconds=5)

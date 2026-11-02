@@ -22,6 +22,8 @@ from openswe.utils.dashboard_links import dashboard_base_url
 logger = logging.getLogger(__name__)
 JOB_KIND = "notification-fallback"
 FALLBACK_DELAY = timedelta(seconds=60)
+DESKTOP_FALLBACK_DELAY = timedelta(hours=8)
+DESKTOP_RECENT = timedelta(days=7)
 _PERMANENT_SLACK_ERRORS = frozenset(
     {"user_not_found", "account_inactive", "cannot_dm_bot", "user_disabled", "channel_not_found"}
 )
@@ -78,7 +80,12 @@ class AppNotification(BaseModel):
         await queue.schedule(
             JOB_KIND,
             {"recipient_id": str(recipient.id), "key": key},
-            due_at=datetime.now(UTC) + FALLBACK_DELAY,
+            due_at=datetime.now(UTC)
+            + (
+                DESKTOP_FALLBACK_DELAY
+                if recipient.used_desktop_within(DESKTOP_RECENT)
+                else FALLBACK_DELAY
+            ),
             key=f"{JOB_KIND}:{recipient.id}:{key}",
             by=by,
             replace=False,

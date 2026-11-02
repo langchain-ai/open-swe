@@ -10,7 +10,7 @@ reference ``users.id`` instead of a provider-specific handle.
 
 import logging
 from collections.abc import Collection, Iterable
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal, Self
 from uuid import UUID, uuid7
 
@@ -79,6 +79,7 @@ class User(Base):
     )
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    desktop_seen_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
 
     def login_for(self, provider: Provider) -> str:
         """This person's handle on ``provider``, for display; never an identity key."""
@@ -132,6 +133,26 @@ class User(Base):
         except ValueError:
             logger.debug("Ignoring an invalid canonical user key")
             return None
+
+    def used_desktop_within(self, window: timedelta) -> bool:
+        return (
+            self.desktop_seen_at is not None and self.desktop_seen_at > datetime.now(UTC) - window
+        )
+
+    async def note_desktop_use(self) -> None:
+        """Record that this person has the desktop app open, at most hourly."""
+        async with postgres.session() as session:
+            await session.execute(
+                update(User)
+                .where(
+                    User.id == self.id,
+                    or_(
+                        User.desktop_seen_at.is_(None),
+                        User.desktop_seen_at < func.clock_timestamp() - timedelta(hours=1),
+                    ),
+                )
+                .values(desktop_seen_at=func.clock_timestamp())
+            )
 
     @classmethod
     async def get(cls, user_id: UUID) -> Self | None:
