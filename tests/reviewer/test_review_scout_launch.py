@@ -48,6 +48,26 @@ async def test_scout_records_security_identity_before_starting_or_reusing_a_run(
     assert await target.start() == (active or "new-run")
 
 
+async def test_scout_refuses_a_repository_outside_the_allowed_orgs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.webhooks import common
+
+    monkeypatch.setattr(common, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    target = launch.ReviewScoutTarget(
+        owner="Joshluxr",
+        repo="tester",
+        pr_number=7,
+        pr_title="Change",
+        base_sha="base",
+        head_sha="head",
+        workspace_slug=None,
+    )
+
+    with pytest.raises(launch.RepositoryNotAllowed):
+        await target.start()
+
+
 async def test_scout_run_context_preserves_history_and_system_prefix(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
