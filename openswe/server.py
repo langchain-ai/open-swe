@@ -195,6 +195,7 @@ from openswe.tools import (
     get_human_review_status,
     get_thread,
     http_request,
+    jev_classify,
     link_pull_request,
     list_automations,
     list_event_types,
@@ -712,6 +713,7 @@ AGENT_TOOLS: Final = (
     http_request,
     fetch_url,
     web_search,
+    jev_classify,
     background_execute,
     background_task,
     monitor,
@@ -1992,6 +1994,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         *(() if cli_result_required else (cli_result,)),
         *(() if bridge_client == "desktop" else (worktree_handoff,)),
         *(() if _writes_database_rows() else (execute_database_sql, write_database_rows)),
+        *(() if ENV.TYPESAFE_API_KEY.optional() else (jev_classify,)),
     ]
     static_tools = [tool for tool in AGENT_TOOLS if not any(tool is w for w in withheld)]
     static_tools = permitted(static_tools, tool_access)

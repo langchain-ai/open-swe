@@ -22,6 +22,7 @@ _TOOL_MODULES = {
     "get_human_review_status": ".request_human_review",
     "get_thread": ".threads",
     "http_request": ".http_request",
+    "jev_classify": ".jev_classify",
     "list_automations": ".automations",
     "list_event_types": ".listen_events",
     "listen_events": ".listen_events",
@@ -113,6 +114,7 @@ __all__ = [
     "get_human_review_status",
     "get_thread",
     "http_request",
+    "jev_classify",
     "list_automations",
     "list_event_types",
     "listen_events",
@@ -226,6 +228,7 @@ if TYPE_CHECKING:
     from openswe.tools.fetch_review_diff import fetch_review_diff
     from openswe.tools.fetch_url import fetch_url
     from openswe.tools.http_request import http_request
+    from openswe.tools.jev_classify import jev_classify
     from openswe.tools.list_findings import list_findings
     from openswe.tools.list_review_findings import list_review_findings
     from openswe.tools.listen_events import list_event_types, listen_events

@@ -215,6 +215,7 @@ Model ids and their providers are described in [CUSTOMIZATION.md](CUSTOMIZATION.
 
 **Other API keys.**
 `EXA_API_KEY` (from [dashboard.exa.ai](https://dashboard.exa.ai)) enables the web search tool; with `MDA_EXA_CONNECTION`, runs read the key from the MDA deployment's connection instead ([mda/README.md](../mda/README.md#configure)).
+`TYPESAFE_API_KEY` (from [typesafe.ai](https://typesafe.ai)) enables the `jev_classify` tool, which code mode calls to classify with Jev.
 `REVIEWER_OUTCOMES_DATASET` names the LangSmith dataset the reviewer records finding outcomes in (default `openswe-reviewer-outcomes`).
 
 ## 5. Create the Slack app
