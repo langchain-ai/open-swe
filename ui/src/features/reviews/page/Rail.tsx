@@ -28,12 +28,12 @@ import {
   useReviewStatus,
   type PullRequestRef,
 } from "./queries"
-import { useReviewPage, type RailTab } from "./store"
+import { useReviewPage, type ChatTab, type RailTab } from "./store"
 import { ASK_SELECTION_SHORTCUT } from "./useDiffKeys"
 
-const TABS: ReadonlyArray<RailTab> = ["chat", "discussion"]
+const TABS: ReadonlyArray<RailTab> = ["chat", "ask", "discussion"]
 
-/** The right column: the agent you can talk to about this PR, and the people who already did. */
+/** The right column: the PR's agent, a private chat for questions about it, and the people who already reviewed it. */
 export function Rail({
   pr,
   onClose,
@@ -43,7 +43,7 @@ export function Rail({
 }) {
   const tab = useReviewPage((state) => state.railTab)
   const setRailTab = useReviewPage((state) => state.setRailTab)
-  const chat = useReviewChat(pr).data
+  const chat = useReviewChat(pr, tab === "ask").data
   const open = useOpenConversations(pr)?.threads.length ?? 0
 
   return (
@@ -52,12 +52,13 @@ export function Rail({
       selectedIndex={TABS.indexOf(tab)}
       onChange={(index: number) => setRailTab(TABS[index] ?? "chat")}
       data-review-rail
-      aria-label="Chat and discussion"
+      aria-label="Chat, ask and discussion"
       className="flex h-full min-h-0 flex-col bg-surface-level-1"
     >
       <div className="flex h-11 shrink-0 items-center gap-space-2 border-b border-default px-space-3">
         <TabList className="self-stretch border-0">
           <TabLabel label="Chat" icon={AgentMark} className="pb-0" />
+          <TabLabel label="Ask" className="pb-0" />
           <TabLabel
             label="Discussion"
             className="pb-0"
@@ -69,7 +70,7 @@ export function Rail({
           />
         </TabList>
         <span className="flex-1" />
-        {tab === "chat" && chat?.thread_id && (
+        {tab !== "discussion" && chat?.thread_id && (
           <Button
             size="xs"
             color="secondary"
@@ -97,10 +98,21 @@ export function Rail({
           />
         )}
       </div>
-      {/* Both stay mounted: the chat registers drafted comments the diff shows, and keeps its stream. */}
+      {/* All stay mounted: the chats register drafted comments the diff shows, and keep their streams. */}
       <TabPanels className="flex min-h-0 flex-1 flex-col">
-        <TabPanel unmount={false} className="min-h-0 flex-1">
-          <ReviewChatPanel pr={pr} />
+        <TabPanel
+          unmount={false}
+          data-rail-panel="chat"
+          className="min-h-0 flex-1"
+        >
+          <ReviewChatPanel pr={pr} tab="chat" />
+        </TabPanel>
+        <TabPanel
+          unmount={false}
+          data-rail-panel="ask"
+          className="min-h-0 flex-1"
+        >
+          <ReviewChatPanel pr={pr} tab="ask" />
         </TabPanel>
         <TabPanel unmount={false} className="min-h-0 flex-1">
           <Discussion pr={pr} />
@@ -163,9 +175,12 @@ function ChatStarters({ pr }: { pr: PullRequestRef }) {
   )
 }
 
-function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
-  const meta = useReviewChat(pr)
-  const chatDraft = useReviewPage((state) => state.chatDraft)
+/** The builder's thread takes work on the branch; Ask takes the page's questions, lines and starters. */
+function ReviewChatPanel({ pr, tab }: { pr: PullRequestRef; tab: ChatTab }) {
+  const asking = tab === "ask"
+  const meta = useReviewChat(pr, asking)
+  const draft = useReviewPage((state) => state.chatDraft)
+  const chatDraft = draft?.tab === tab ? draft : undefined
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const excerpts = useReviewPage((state) => state.chatExcerpts)
   const removeExcerpt = useReviewPage((state) => state.removeChatExcerpt)
@@ -184,15 +199,18 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
           line: range.endLine,
           side: range.side,
         }),
-      emptyState: <ChatStarters pr={pr} />,
-      excerpts,
-      removeExcerpt,
-      clearExcerpts,
-      question,
-      clearQuestion,
+      ...(asking && {
+        emptyState: <ChatStarters pr={pr} />,
+        excerpts,
+        removeExcerpt,
+        clearExcerpts,
+        question,
+        clearQuestion,
+      }),
     }),
     [
       pr,
+      asking,
       jumpTo,
       excerpts,
       removeExcerpt,

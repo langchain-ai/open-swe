@@ -11,7 +11,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ValidationError
 
-from openswe.thread_ids import review_chat_thread_id, review_scout_thread_id
+from openswe.thread_ids import review_ask_thread_id, review_chat_thread_id, review_scout_thread_id
 from openswe.threads.creation import create_thread
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import participant_metadata
@@ -79,6 +79,10 @@ class ReviewSession(BaseModel):
     @property
     def thread_id(self) -> str:
         return review_chat_thread_id(self.owner, self.repo, self.pr_number, self.login)
+
+    @property
+    def ask_thread_id(self) -> str:
+        return review_ask_thread_id(self.owner, self.repo, self.pr_number, self.login)
 
     async def open(
         self,

@@ -123,7 +123,7 @@ def thread_is_private(metadata: Mapping[str, Any]) -> bool:
 
 def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
     """Threads that remain accessible directly but stay out of thread lists."""
-    if metadata.get("unlisted") is True or metadata.get("review_chat") is True:
+    if any(metadata.get(key) is True for key in ("unlisted", "review_chat", "review_ask")):
         return True
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
     return slack_thread is not None and slack_thread.is_concierge

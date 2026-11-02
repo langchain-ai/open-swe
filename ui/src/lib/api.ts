@@ -2015,9 +2015,9 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/file-contents` +
         `?path=${encodeURIComponent(path)}&original_path=${encodeURIComponent(originalPath)}&base_sha=${encodeURIComponent(baseSha)}&head_sha=${encodeURIComponent(headSha)}`
     ),
-  getReviewChat: (owner: string, repo: string, number: number) =>
+  getReviewChat: (owner: string, repo: string, number: number, ask = false) =>
     request<ReviewChatMeta>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat${ask ? "?ask=true" : ""}`
     ),
   runReviewScout: (owner: string, repo: string, number: number) =>
     request<{ started: boolean; run_id: string | null }>(

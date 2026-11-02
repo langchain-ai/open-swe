@@ -58,8 +58,8 @@ export const reviewDetailQuery = (pr: PullRequestRef) =>
     ...sharedReviewOptions(pr),
   })
 
-/** The PR's chat. Reading it creates the thread, so it waits until the page has found the PR. */
-export function useReviewChat(pr: PullRequestRef) {
+/** The PR's chat, or its Ask chat. Reading it creates the thread, so it waits until the page has found the PR. */
+export function useReviewChat(pr: PullRequestRef, ask = false) {
   const found = useQuery(reviewDetailQuery(pr)).isSuccess
-  return useQuery({ ...reviewChatQuery(pr), enabled: found })
+  return useQuery({ ...reviewChatQuery(pr, ask), enabled: found })
 }

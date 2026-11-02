@@ -907,7 +907,7 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                     variant="plain"
                     color="secondary"
                     aria-label={`Ask Open SWE to fix: ${finding.title}`}
-                    onClick={() => askInChat(fixFinding(finding))}
+                    onClick={() => askInChat(fixFinding(finding), "chat")}
                   >
                     Fix it
                   </Button>

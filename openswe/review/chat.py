@@ -5,7 +5,9 @@ from collections.abc import AsyncIterator
 from typing import TypedDict
 
 from fastapi import HTTPException
+from langgraph_sdk.errors import NotFoundError
 
+from openswe.review.session import ReviewSession
 from openswe.threads import pr_fixes
 from openswe.threads.handlers import get_dashboard_thread_state
 from openswe.threads.proxy import (
@@ -14,6 +16,9 @@ from openswe.threads.proxy import (
     proxy_dashboard_thread_stream_events,
     require_json_content_type,
 )
+from openswe.threads.runs import create_dashboard_thread_record
+from openswe.utils.thread_ops import langgraph_client
+from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 
 
 class ReviewChat(TypedDict):
@@ -36,6 +41,27 @@ async def get_review_chat(
         ),
     )
     return {"available": True, "assistant_id": "agent", "thread_id": thread.thread_id}
+
+
+async def get_review_ask(review: ReviewSession, email: str | None = None) -> ReviewChat:
+    """The reviewer's private side chat about the PR, created on first use."""
+    thread_id = review.ask_thread_id
+    async with agent_thread_pr_state_lock(thread_id):
+        try:
+            await langgraph_client().threads.get(thread_id)
+        except NotFoundError:
+            title = f"Ask about {review.owner}/{review.repo}#{review.pr_number}"
+            await create_dashboard_thread_record(
+                thread_id,
+                login=review.login,
+                email=email,
+                repo_config={"owner": review.owner, "name": review.repo},
+                prompt=title,
+                title=title,
+                visibility="private",
+                extra_metadata={"review_ask": True},
+            )
+    return {"available": True, "assistant_id": "agent", "thread_id": thread_id}
 
 
 async def assert_chat_thread_access(
