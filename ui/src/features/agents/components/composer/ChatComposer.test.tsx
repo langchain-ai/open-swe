@@ -202,6 +202,60 @@ describe("ChatComposer stop button", () => {
   })
 })
 
+describe("ChatComposer drafts", () => {
+  it("restores independent mode drafts and attachments across remounts, but not after sending", async () => {
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(),
+    })
+    const image = {
+      kind: "image" as const,
+      base64: "aGVsbG8=",
+      mimeType: "image/png",
+      fileName: "draft.png",
+    }
+    renderComposer(
+      false,
+      {
+        draftKey: "draft-user:new:home",
+        restoreDraft: { key: 1, text: "Home draft", images: [image] },
+      },
+      true
+    )
+    await waitFor(() =>
+      expect(screen.getByRole("textbox").textContent).toContain("Home draft")
+    )
+    cleanup()
+    renderComposer(false, {
+      draftKey: "draft-user:new:code",
+      restoreDraft: { key: 2, text: "Code draft", images: [] },
+    })
+    await waitFor(() =>
+      expect(screen.getByRole("textbox").textContent).toContain("Code draft")
+    )
+    cleanup()
+    renderComposer(false, { draftKey: "other-user:new:home" }, true)
+    expect(screen.getByRole("textbox").textContent).toBe("")
+    cleanup()
+    const onSubmit = vi.fn()
+    renderComposer(false, { draftKey: "draft-user:new:home", onSubmit }, true)
+    expect(screen.getByRole("textbox").textContent).toContain("Home draft")
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" })
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        { text: "Home draft", images: [image], replies: [] },
+        expect.anything()
+      )
+    )
+    cleanup()
+    renderComposer(false, { draftKey: "draft-user:new:code" })
+    expect(screen.getByRole("textbox").textContent).toContain("Code draft")
+    cleanup()
+    renderComposer(false, { draftKey: "draft-user:new:home" }, true)
+    expect(screen.getByRole("textbox").textContent).toBe("")
+  })
+})
+
 describe("ChatComposer options", () => {
   it("keeps local setup reachable in workspace mode without taking Escape from the context popover", async () => {
     const onTargetChange = vi.fn()

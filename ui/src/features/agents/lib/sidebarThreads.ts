@@ -28,6 +28,7 @@ export interface SidebarThreadItem {
   /** Subagents the thread spawned, listed as sub-threads under its row. */
   subagents?: Array<AgentSubagentSummary>
   taskWorkers?: Array<AgentThread>
+  waitingForDelegatedWork?: boolean
   thread: AgentThread
 }
 
@@ -106,6 +107,7 @@ export function cloudSidebarThread(thread: AgentThread): SidebarThreadItem {
     reviewPage: thread.reviewPage,
     subagents: thread.subagents,
     taskWorkers: thread.taskWorkers,
+    waitingForDelegatedWork: thread.waitingForDelegatedWork,
     thread,
   }
 }

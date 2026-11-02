@@ -132,7 +132,41 @@ export interface RestoredDraft {
   replacesSuggestion?: boolean
 }
 
+class ComposerDrafts {
+  private drafts = new Map<
+    string,
+    {
+      text: string
+      images: Array<ImageChunk>
+      replies: Array<PendingReply>
+    }
+  >()
+
+  read(key?: string) {
+    return key ? this.drafts.get(key) : undefined
+  }
+
+  write(
+    key: string | undefined,
+    text: string,
+    images: Array<ImageChunk>,
+    replies: Array<PendingReply>
+  ) {
+    if (!key) return
+    this.drafts.delete(key)
+    if (!text && !images.length && !replies.length) return
+    this.drafts.set(key, { text, images, replies })
+    if (this.drafts.size > 50) {
+      const oldest = this.drafts.keys().next().value
+      if (oldest) this.drafts.delete(oldest)
+    }
+  }
+}
+
+const composerDrafts = new ComposerDrafts()
+
 export interface ChatComposerProps {
+  draftKey?: string
   placeholder?: string
   autoFocus?: boolean
   compact?: boolean
@@ -287,6 +321,7 @@ export function buildCommandItems(
 
 /** Prompt editor with autocomplete, model selection, attachments, and send/stop controls. */
 export const ChatComposer = memo(function ChatComposer({
+  draftKey,
   placeholder = "Ask Open SWE to build, fix bugs, explore",
   autoFocus = false,
   compact = false,
@@ -333,10 +368,19 @@ export const ChatComposer = memo(function ChatComposer({
 }: ChatComposerProps) {
   const agentWorkspace = useAgentWorkspace()
   const [contextOpen, setContextOpen] = useState(false)
-  const [value, setValue] = useState("")
-  const [cursor, setCursor] = useState(0)
-  const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
-  const [pendingReplies, setPendingReplies] = useState<Array<PendingReply>>([])
+  const [value, setValue] = useState(
+    () => composerDrafts.read(draftKey)?.text ?? ""
+  )
+  const [cursor, setCursor] = useState(value.length)
+  const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>(
+    () => composerDrafts.read(draftKey)?.images ?? []
+  )
+  const [pendingReplies, setPendingReplies] = useState<Array<PendingReply>>(
+    () => composerDrafts.read(draftKey)?.replies ?? []
+  )
+  useEffect(() => {
+    composerDrafts.write(draftKey, value, pendingImages, pendingReplies)
+  }, [draftKey, value, pendingImages, pendingReplies])
   const [appliedReply, setAppliedReply] = useState<typeof addedReply>(null)
   if (addedReply !== appliedReply) {
     setAppliedReply(addedReply)

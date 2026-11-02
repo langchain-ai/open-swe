@@ -1,6 +1,6 @@
 # Open SWE dashboard design
 
-Use the vendored `@langchain/macaw-components` and `@langchain/macaw-tokens` packages for shared UI.
+Use the published `@langchain/macaw-components` and `@langchain/macaw-tokens` packages for shared UI.
 Import components through their package subpaths.
 Use semantic tokens for colors, including CSS passed to third-party renderers.
 
@@ -16,7 +16,7 @@ pnpm --dir ui exec macaw inspect Button --json
 pnpm --dir ui exec macaw list --json
 ```
 
-The CLI reads the vendored component package’s catalog, so discovery matches the installed API.
+The CLI reads the installed component package’s catalog, so discovery matches the installed API.
 Read its [component guidance](node_modules/@langchain/macaw-components/docs/DESIGN.md) and [styling guidance](node_modules/@langchain/macaw-components/docs/STYLES.md) before implementing UI.
 
 ## Product layout and variants
