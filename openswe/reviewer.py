@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
-from runtime_api.catalog import InboxSpec, LoopRules
+from runtime_api.catalog import InboxSpec
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
@@ -70,7 +70,6 @@ from openswe.review.reconcile import reconcile_findings_with_review_threads
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
-    MODEL_CALL_RECURSION_LIMIT,
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
 )
@@ -1010,14 +1009,8 @@ async def reviewer_catalog(config: RunnableConfig, surface: ToolSurface) -> None
     use_gateway = models.use_gateway
 
     surface.base_tools = reviewer_tools()
-    surface.model_call_limit = MODEL_CALL_RECURSION_LIMIT
     surface.inbox = InboxSpec(surface=WEB_REPLY_SURFACE, model_id=cfg.agent_model_id)
     surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS
-    surface.loop = LoopRules(
-        hidden_tools=sorted(SHELL_SEARCH_EXCLUDED_TOOLS),
-        refresh_github_proxy=True,
-        at_end=["settle_review_check"],
-    )
     surface.models = SurfaceModels(
         main=ModelChoice(models.main.model_id, dict(models.main.kwargs)),
         subagent=ModelChoice(models.subagent.model_id, dict(models.subagent.kwargs)),

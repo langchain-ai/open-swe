@@ -32,7 +32,6 @@ from openswe.agent_api.operations import Injections
 from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.run_sandbox import RunSandbox
 from openswe.agent_api.runs import run_config
-from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import AGENT_TURN_KEY, AgentTurnSettings, RemoteRun, RunSettings
 from openswe.agent_api.tool_sets import ToolSet
 from openswe.dashboard.options import model_supports_images
@@ -229,7 +228,6 @@ class RunCatalog:
             files=FilesSpec(
                 backend_paths=list(surface.backend_paths),
                 artifacts_root=surface.artifacts_root,
-                guards=["shell_commands"] if ShellGuards(self.kind.shell_guards).active else [],
                 checks=list(surface.file_checks),
             ),
             incident_evidence=surface.loop.incident,
@@ -250,15 +248,10 @@ class RunCatalog:
             None if sandbox is None else SandboxSpec.model_validate(sandbox.model_dump(mode="json"))
         )
         catalog = self.build()
-        loop = catalog.loop
-        if spec is not None and spec.github_proxy is not None:
-            # MDA puts a fresh token in this sandbox's proxy config itself, before each command.
-            loop = loop.model_copy(update={"refresh_github_proxy": False})
         return catalog.model_copy(
             update={
                 "trace_metadata": {**trace_actor(self.config), **agent_version_metadata()},
                 "sandbox": spec,
-                "loop": loop,
                 "operations": [
                     operation.model_copy(update={"grant": self.run.grant(operation.name)})
                     for operation in catalog.operations

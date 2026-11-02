@@ -73,6 +73,7 @@ from rt.backend import (
 )
 from rt.file_tools import FileToolsMiddleware
 from rt.git_evidence import TurnGit, turn_git
+from rt.kinds import KINDS
 from rt.managed_sandbox import declared_sandbox
 from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware, turn_trace
 from rt.model_calls import model_call_guards
@@ -1983,7 +1984,7 @@ async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_toke
     assert launch["context"] == {
         "graph": "agent",
         "__worker_grant": "worker-grant",
-        "__catalog": COORDINATOR_CATALOG.model_dump(mode="json"),
+        "__catalog": KINDS["agent"].applied(COORDINATOR_CATALOG).model_dump(mode="json"),
     }
     assert launch["input"] == {
         "messages": [{"role": "user", "content": "Your assignment: Fix login"}]

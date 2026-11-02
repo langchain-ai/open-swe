@@ -21,7 +21,6 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
-from runtime_api.catalog import LoopRules
 
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -44,7 +43,6 @@ from openswe.runtime import (
 )
 from openswe.sandboxes.repo_prep import ReviewRepoPreparationError, prepare_review_repo_or_raise
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
-from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.tools.plan_walkthrough import (
     walkthrough_describe_other,
     walkthrough_move_to_other,
@@ -61,9 +59,7 @@ from openswe.walkthrough.record import PlanMovedError, Walkthrough
 
 logger = logging.getLogger(__name__)
 
-SCOUT_MODEL_CALL_LIMIT = 150
 _CLOSING_TITLE_TAG_RE = re.compile(r"</\s*pr_title\s*>", re.IGNORECASE)
-_HUMAN_INPUT_TOOL = record_human_input.__name__
 
 
 class ReviewScoutState(PrepareRunState):
@@ -312,15 +308,6 @@ async def review_scout_catalog(config: RunnableConfig, surface: ToolSurface) -> 
     models = await scout_models(cfg)
 
     surface.base_tools = scout_tools()
-    surface.model_call_limit = SCOUT_MODEL_CALL_LIMIT
-    surface.loop = LoopRules(
-        hidden_tools=sorted(SHELL_SEARCH_EXCLUDED_TOOLS),
-        # Without messages from the people who asked for the PR, the model would
-        # summarize its description instead.
-        hidden_unless={"has_human_input": [_HUMAN_INPUT_TOOL]},
-        stop_when=["scout_nothing_to_plan"],
-        at_end=["finish_scout_plan"],
-    )
     surface.models = models
     surface.subagents = [
         SurfaceSubagent(

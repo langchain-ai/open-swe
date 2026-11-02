@@ -28,12 +28,12 @@ async def _planned(kind: str) -> ToolSurface:
     return surface
 
 
-@pytest.mark.parametrize("kind", _PLANNERS)
-async def test_shell_agent_planners_apply_shared_search_policy(
-    kind: str, saved_thread_scope: dict[str, object]
+async def test_the_agent_applies_the_shared_search_policy(
+    saved_thread_scope: dict[str, object],
 ) -> None:
-    surface = await _planned(kind)
-    assert set(surface.loop.hidden_tools) == SHELL_SEARCH_EXCLUDED_TOOLS
+    # The reviewer's and the scout's are MDA's, the same for each of their runs (``rt/kinds.py``).
+    surface = await _planned("main")
+    assert set(surface.loop.hidden_tools) >= SHELL_SEARCH_EXCLUDED_TOOLS
 
 
 @pytest.mark.parametrize("kind", _PLANNERS)
