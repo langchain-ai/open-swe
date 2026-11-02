@@ -162,10 +162,11 @@ def _sync_thread_status(finding: Finding, states: Mapping[str, bool]) -> bool:
 
 
 async def reconcile_linked_findings(
-    reviewer_thread_id: str, pull: PullRequestClient
+    reviewer_thread_id: str, pull: PullRequestClient, *, findings: list[Finding] | None = None
 ) -> list[Finding]:
-    """Refresh linked findings without changing them when GitHub is unavailable."""
-    findings = await list_findings(reviewer_thread_id)
+    """Refresh linked findings, preserving the readable snapshot if reconciliation fails."""
+    if findings is None:
+        findings = await list_findings(reviewer_thread_id)
     if not any(thread_ids_for_finding(finding) for finding in findings):
         return findings
     try:
@@ -184,7 +185,14 @@ async def reconcile_linked_findings(
             updated = _sync_thread_status(finding, states) or updated
         return updated
 
-    return await mutate_findings(reviewer_thread_id, _sync)
+    try:
+        return await mutate_findings(reviewer_thread_id, _sync)
+    except Exception:
+        logger.exception(
+            "Could not persist reconciled findings",
+            extra={"reviewer_thread_id": reviewer_thread_id},
+        )
+        return findings
 
 
 def _sync_latest_human_reply(

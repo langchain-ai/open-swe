@@ -1,11 +1,12 @@
-from time import monotonic
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx2
 import pytest
+from sqlalchemy import text
 
+from openswe.database import postgres
 from openswe.github import app as github_app
 from openswe.github import http as github_http
 from openswe.github import routes as github_routes
@@ -17,7 +18,6 @@ from openswe.review import reviews as review_api
 from openswe.review.findings import REVIEWER_THREAD_KIND, new_finding
 from openswe.thread_ids import reviewer_thread_id
 from openswe.ui_invalidations import Topic
-from openswe.ui_invalidations.outbox import invalidated_since
 from openswe.webhooks import common as webhook_common
 from tests.conftest import post_signed_github_webhook
 
@@ -91,7 +91,10 @@ async def test_get_review_propagates_a_pull_request_missing_on_github(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_review_trace_uses_the_reviewer_thread(monkeypatch) -> None:
+@pytest.mark.parametrize("linked", [False, True])
+async def test_review_trace_and_metadata_findings_survive_failed_backfill(
+    monkeypatch: pytest.MonkeyPatch, linked: bool
+) -> None:
     trace_url = "https://smith.langchain.com/trace/reviewer"
     monkeypatch.setattr(
         github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
@@ -108,6 +111,29 @@ async def test_review_trace_uses_the_reviewer_thread(monkeypatch) -> None:
         ),
     )
     thread = _thread("acme", "app", 7, "alice")
+    finding = new_finding(
+        severity="medium",
+        category="bug",
+        file="a.py",
+        start_line=1,
+        end_line=1,
+        description="Legacy finding",
+        sha="old",
+    )
+    if linked:
+        finding["github_review_thread_ids"] = ["THREAD_1"]
+        finding["surface_state"] = "surfaced"
+    thread["metadata"]["findings"] = [finding]
+    monkeypatch.setattr(review_api, "findings_by_thread", findings_store.findings_by_thread)
+    monkeypatch.setattr(findings_store, "_stored_findings", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        findings_store,
+        "_ensure_finding_state",
+        AsyncMock(side_effect=RuntimeError("Backfill failed")),
+    )
+    monkeypatch.setattr(
+        PullRequestClient, "review_thread_states", AsyncMock(return_value={"THREAD_1": True})
+    )
     monkeypatch.setattr(review_api, "_reviewer_thread_for", AsyncMock(return_value=thread))
     monkeypatch.setattr(review_api, "_scout_target", AsyncMock(return_value=None))
     trace = AsyncMock(return_value=trace_url)
@@ -116,6 +142,9 @@ async def test_review_trace_uses_the_reviewer_thread(monkeypatch) -> None:
     detail = await review_api.get_review("acme", "app", 7)
 
     assert detail["trace_url"] == trace_url
+    assert detail["findings"][0]["id"] == finding["id"]
+    assert detail["findings"][0]["status"] == "open"
+    assert detail["counts"]["flags"] == 1
     trace.assert_awaited_once_with("acme/app/7")
 
 
@@ -124,6 +153,7 @@ async def test_review_trace_uses_the_reviewer_thread(monkeypatch) -> None:
 async def test_review_page_reconciles_stored_flags_and_invalidates_after_missed_webhook(
     monkeypatch: pytest.MonkeyPatch, github_failure: bool
 ) -> None:
+    monkeypatch.setattr(review_api, "findings_by_thread", findings_store.findings_by_thread)
     thread = _thread("acme", "app", 7, "octocat")
     thread["thread_id"] = reviewer_thread_id("acme", "app", 7)
     finding = new_finding(
@@ -159,7 +189,8 @@ async def test_review_page_reconciles_stored_flags_and_invalidates_after_missed_
         else AsyncMock(return_value={"THREAD_1": True}),
     )
     await findings_store.append_finding(thread["thread_id"], finding)
-    started = monotonic()
+    async with postgres.transaction() as conn:
+        await conn.execute(text("DELETE FROM ui_invalidation"))
     payload = await review_api.get_review("acme", "app", 7)
     persisted = await findings_store.list_findings(thread["thread_id"])
 
@@ -169,7 +200,9 @@ async def test_review_page_reconciles_stored_flags_and_invalidates_after_missed_
     assert payload["counts"]["flags"] == int(github_failure)
     assert payload["counts"]["open"] == int(github_failure)
     topic = f"{Topic.PULL_REQUESTS}/{PullRequestKey.of('acme', 'app', 7)}"
-    assert (topic in await invalidated_since({topic: monotonic() - started})) is not github_failure
+    async with postgres.connection() as conn:
+        topics = set((await conn.execute(text("SELECT topic FROM ui_invalidation"))).scalars())
+    assert (topic in topics) is not github_failure
 
     if not github_failure:
         monkeypatch.setattr(github_routes, "repo_is_routable", AsyncMock(return_value=True))

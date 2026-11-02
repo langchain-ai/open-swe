@@ -756,7 +756,7 @@ async def fetch_pr_review_threads(
     repo: str,
     pr_number: int,
     token: str,
-    max_threads: int = 100,
+    max_threads: int | None = None,
     max_comments_per_thread: int = 20,
 ) -> list[dict[str, Any]]:
     """Fetch all inline review threads on a PR (across reviewers, with replies).
@@ -808,7 +808,7 @@ async def fetch_pr_review_threads(
     cursor: str | None = None
     seen: set[str] = set()
     async with github_client(token=token) as client:
-        while len(out) < max_threads:
+        while max_threads is None or len(out) < max_threads:
             try:
                 response = await github_request(
                     client,

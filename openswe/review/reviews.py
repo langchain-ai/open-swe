@@ -676,11 +676,11 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         details = _serialize_pr_details(pr_payload)
 
         thread = await _reviewer_thread_for(owner, repo, pr_number)
-        stored = (
-            await reconcile_linked_findings(thread["thread_id"], repository.pull_request(pr_number))
-            if thread
-            else []
-        )
+        stored = (await _thread_findings([thread])).get(thread["thread_id"], []) if thread else []
+        if thread:
+            stored = await reconcile_linked_findings(
+                thread["thread_id"], repository.pull_request(pr_number), findings=stored
+            )
         summary = _thread_review_summary(thread, stored) if thread else None
         metadata = thread_metadata(thread) if thread else {}
         if not summary:

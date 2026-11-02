@@ -357,3 +357,32 @@ async def test_reviewer_thread_fetch_discards_incomplete_snapshots(failure: str)
             max_threads=1 if failure == "limit" else 100,
         )
     assert threads == []
+
+
+@pytest.mark.asyncio
+async def test_reviewer_thread_fetch_reads_beyond_one_hundred_threads() -> None:
+    responses = [
+        httpx2.Response(
+            200,
+            json={
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [
+                                    {"id": f"THREAD_{i}", "isResolved": True}
+                                    for i in range(start, end)
+                                ],
+                                "pageInfo": {"hasNextPage": end < 125, "endCursor": str(end)},
+                            }
+                        }
+                    }
+                }
+            },
+            request=httpx2.Request("POST", "https://api.github.com/graphql"),
+        )
+        for start, end in [(0, 50), (50, 100), (100, 125)]
+    ]
+    with patch("openswe.review.publish.github_request", AsyncMock(side_effect=responses)):
+        threads = await fetch_pr_review_threads(owner="acme", repo="app", pr_number=7, token="t")
+    assert [thread["id"] for thread in threads] == [f"THREAD_{i}" for i in range(125)]
