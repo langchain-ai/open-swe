@@ -464,6 +464,8 @@ def _turn(kind: str) -> list[BaseMessage]:
     ]
     if kind == "idle":
         return [*nudged, AIMessage(content="", id="ai-1")]
+    if kind == "talking":
+        return [*nudged, AIMessage(content="Waiting for CI to finish.", id="ai-1")]
     exit_code = 1 if kind == "failing" else 0
     status = "failed" if exit_code else "succeeded"
     return [
@@ -490,6 +492,14 @@ def _turn(kind: str) -> list[BaseMessage]:
         # As Codex blocks a goal: three idle turns in a row, or three running only failing
         # commands; anything the model gets done starts the count again.
         (Goal(state="working"), "idle", {"goal_empty_turns": 2}, False, ("paused", "no_progress")),
+        # Words are no progress: only a tool call is, until a token budget bounds the goal.
+        (
+            Goal(state="working"),
+            "talking",
+            {"goal_empty_turns": 2},
+            False,
+            ("paused", "no_progress"),
+        ),
         (
             Goal(state="working"),
             "failing",

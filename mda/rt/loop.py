@@ -197,7 +197,7 @@ def _latest(messages: Sequence[BaseMessage], prefix: str) -> str | None:
 class _GoalTurn:
     """What a Goal mode turn did, as Codex counts it toward blocking the goal."""
 
-    # Sent back by the guard, the model did nothing: no tool call and no words.
+    # Sent back by the guard, the model called no tool, whatever it said.
     empty: bool
     # It did something, which ends a run of empty turns.
     active: bool
@@ -788,16 +788,14 @@ class RunLoop:
             if isinstance(message, AIMessage)
             for call in message.tool_calls
         ]
-        said = any(
-            isinstance(message, AIMessage) and content_text(message.content).strip()
-            for message in after
-        )
         results = [message for message in after if isinstance(message, ToolMessage)]
         failed = [message for message in results if self._failed_command(message)]
         succeeded = any(
             not _reported_failure(message) and message not in failed for message in results
         )
-        active = bool(calls) or said
+        # Codex counts words as activity too, but its token budget ends a goal that only
+        # talks; until there is one, only a tool call is progress.
+        active = bool(calls)
         return _GoalTurn(
             empty=nudged and not active,
             active=active,
