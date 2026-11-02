@@ -281,6 +281,11 @@ async def trigger_pr_review_from_ref(
     sends the findings back to it instead of publishing them."""
     repo_config = {"owner": pr_ref.owner, "name": pr_ref.repo}
     allow_draft = allow_draft or goal_review is not None
+    if not common.is_repo_allowed(repo_config):
+        return {
+            "success": False,
+            "error": f"{pr_ref.owner}/{pr_ref.repo} is not in the repository allowlist",
+        }
 
     # Full token to read PR metadata (privacy/id aren't in the trigger ref);
     # re-scoped below once we know whether the repo is public.

@@ -30,6 +30,7 @@ The backend never runs middleware around a model call; the only middleware objec
 ## Conventions
 
 - Before changing the dashboard (`ui/`), read `ui/AGENTS.md` and `ui/DESIGN.md`.
+- Flag likely desktop-release requirements to the developer for native shell/preload, bundled bridge/CLI, packaging, or incompatible IPC changes; downloaded UI and backend-only changes need no desktop release.
 
 - Async-only.
   Add a sync method only when an interface requires it, and make it raise `NotImplementedError`.
