@@ -99,9 +99,16 @@ def _finished(script: Path, task_id: str) -> dict:
     ("callback", "codes", "calls"),
     [(True, ["503", "000", "204"], 3), (True, ["401"], 1), (False, [], 0)],
 )
+@pytest.mark.parametrize("query", ["", "?token=local-capability"])
 def test_runner_calls_back_on_completion_until_accepted(
-    fake_curl: Path, callback: bool, codes: list[str], calls: int
+    fake_curl: Path,
+    callback: bool,
+    codes: list[str],
+    calls: int,
+    query: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("OPEN_SWE_TOOLS_URL", TOOLS_URL + query)
     (fake_curl / "codes").write_text("\n".join(codes))
     script = _script(CALLBACK_RETRY_DELAYS="(0, 0, 0, 0)")
     task_id = f"test-{uuid.uuid4().hex}"
@@ -111,7 +118,7 @@ def test_runner_calls_back_on_completion_until_accepted(
 
         assert state["status"] == "completed"
         assert state["owner_thread_id"] == "thread-a"
-        url = f"{TOOLS_URL}/background-tasks/{task_id}/complete"
+        url = f"{TOOLS_URL}/background-tasks/{task_id}/complete{query}"
         calls_file = fake_curl / "calls"
         deadline = time.monotonic() + 5
         while (
@@ -728,7 +735,8 @@ async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
 
     with (
         patch(
-            "openswe.tools.background_execute.current_backend", return_value=("thread-1", object())
+            "openswe.tools.background_execute.current_backend",
+            return_value=("thread-1", AsyncMock()),
         ),
         patch("openswe.tools.background_execute.execute", side_effect=launch),
         patch("openswe.tools.background_execute.update_background_task_state", side_effect=update),

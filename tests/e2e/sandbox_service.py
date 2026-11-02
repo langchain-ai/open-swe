@@ -15,6 +15,7 @@ import hashlib
 import os
 import uuid
 from pathlib import Path
+from urllib.parse import urlencode
 
 from deepagents.backends import LocalShellBackend
 
@@ -53,6 +54,10 @@ class StandInSandbox(LocalShellBackend):
             },
         )
         self._stand_in_id = sandbox_id
+
+    def provision_callbacks(self, url: str, token: str) -> None:
+        """Give this local shell the sandbox-scoped capability a hosted proxy injects."""
+        self._env["OPEN_SWE_TOOLS_URL"] = url + "?" + urlencode({"token": token})
 
     def get_work_dir(self) -> str:
         return str(self.cwd)

@@ -63,6 +63,8 @@ def callback_url(config, task_id, event):
         return None
     base = os.environ.get(config["tools_url_env"])
     query = ""
+    if base:
+        base, _, query = base.partition("?")
     if not base:
         try:
             with open(config["tools_url_file"]) as handle:
@@ -302,10 +304,8 @@ def launch(request):
     if not valid_task_id(task.id):
         fail("invalid task_id")
     tools_url = request["tools_url_env"], request["tools_url_file"]
-    callback = (
-        bool(request.get("callback"))
-        and shutil.which("curl") is not None
-        and bool(os.environ.get(tools_url[0]) or nonempty(tools_url[1]))
+    callback = bool(request.get("callback")) and bool(
+        os.environ.get(tools_url[0]) or nonempty(tools_url[1])
     )
     os.makedirs(ROOT, exist_ok=True)
     for _ in range(10):

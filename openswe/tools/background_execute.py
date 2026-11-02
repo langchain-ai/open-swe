@@ -78,6 +78,7 @@ async def background_execute(
         return {"success": False, "error": f"timeout must be between 1 and {MAX_TIMEOUT_SECONDS}s"}
     try:
         thread_id, backend = current_backend()
+        await backend.ready()
         return await _launch_with_callback(thread_id, backend, command, timeout)
     except Exception as exc:
         logger.exception("Failed to start background command")
