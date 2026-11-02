@@ -183,8 +183,9 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
 async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_off_its_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Preparing a turn plans nothing, reaches no sandbox MDA keeps and records nothing:
-    what the turn's start records waits for its ``run_started`` report."""
+    """Preparing a turn plans nothing, routes nothing, reaches no sandbox MDA keeps and
+    records nothing: what the turn's start records waits for its ``run_started`` report,
+    which names the route MDA took."""
     from unittest.mock import AsyncMock, MagicMock
 
     from langchain_core.messages import HumanMessage, messages_to_dict
@@ -215,6 +216,10 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     monkeypatch.setattr(server, "record_agent_invocation_usage", usage)
     monkeypatch.setattr(server, "resolve_github_token", AsyncMock(return_value=("token", None)))
     monkeypatch.setattr(server, "schedule_thread_title_generation", lambda **kwargs: None)
+    monkeypatch.setattr(
+        "openswe.middleware.model_selection._select_jev_route",
+        AsyncMock(side_effect=AssertionError("Preparing a turn never routes it")),
+    )
 
     def render(**kwargs: object) -> SystemPrompt:
         prompts.append(kwargs)
@@ -230,7 +235,11 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     parts = _NeverPlanned()
     turn = AgentTurnSettings(
         title_model_id="openai:gpt-6-luna",
-        routing=RoutingRules(route_model_ids={"default": "openai:gpt-6.1-sol"}),
+        routing=RoutingRules(
+            mode="auto",
+            route_model_ids={"default": "openai:gpt-6.1-sol", "fast": "openai:gpt-6-luna"},
+        ),
+        route_models={"fast": ("openai:gpt-6-luna", "low")},
     )
     run = RUN.model_copy(
         update={
@@ -252,6 +261,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     assert isinstance(prepared, dict) and isinstance(update := prepared["update"], dict)
     assert update["work_dir"] == "/workspace"
     assert update["selected_model_id"] == "openai:gpt-6.1-sol"
+    assert "model_route" not in update
     assert len(prompts) == 1
     bound.assert_awaited_once_with("thread-1", "sandbox-1", open_error=None, workspace_slug=None)
     updated.assert_not_awaited()
@@ -270,17 +280,19 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
             "humans": asked,
             "model_id": "openai:gpt-6.1-sol",
             "effort": "high",
-            "model_route": "default",
+            "model_route": "fast",
             "notices": prepared["notices"],
             "sender": prepared["sender"],
         },
     )
 
     queued.assert_called_once_with("thread-1", "workspace_stale", {"workspace": "w"})
+    # The run runs as the model of the route MDA took, not the one preparation named.
     [metadata] = [call.kwargs["metadata"] for call in updated.await_args_list]
-    assert metadata["model"] == "openai:gpt-6.1-sol"
-    assert metadata["model_route"] == "default"
-    assert usage.await_args.kwargs["model_id"] == "openai:gpt-6.1-sol"
+    assert (metadata["model"], metadata["effort"]) == ("openai:gpt-6-luna", "low")
+    assert metadata["model_route"] == "fast"
+    assert usage.await_args.kwargs["model_id"] == "openai:gpt-6-luna"
+    assert usage.await_args.kwargs["effort"] == "low"
     assert usage.await_args.kwargs["invocation_id"] == "invocation-1"
 
     # An earlier run's start, sent by this one from the thread's checkpoint, is recorded

@@ -124,6 +124,7 @@ _TRACKED_BY_OPEN_SWE: Final = frozenset(
 WORKER_GRANT_KEY: Final = "__worker_grant"
 # The catalog a run's graph is built from, planned by the backend as the run starts.
 CATALOG_KEY: Final = "__catalog"
+_START_KEY: Final = "open_swe_start"
 # Waits before launching again a worker MDA failed to start for a reason that may pass.
 _LAUNCH_RETRY_SECONDS: Final = (4.0, 12.0)
 
@@ -167,6 +168,8 @@ class RunState(AgentState):
     open_swe_outbox: NotRequired[Annotated[dict[str, JsonValue], OmitFromOutput, carry]]
     open_swe_call: NotRequired[Annotated[dict[str, JsonValue], OmitFromOutput]]
     open_swe_prepared_for: NotRequired[Annotated[str, OmitFromOutput]]
+    # The run's start until it goes out: once its first model call is routed, or as it ends.
+    open_swe_start: NotRequired[Annotated[dict[str, JsonValue] | None, OmitFromOutput]]
 
 
 class _RunConfigurable(BaseModel):
@@ -405,6 +408,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if state.get("open_swe_prepared_for") == invocation:
             await self._backend.run.load_tool_specs(run_id())
             return None, True
+        # An earlier run that ended before its start went out sends it now.
+        self._send_start(state)
         # Asking for the sandbox takes a round trip; reading the tool specs needs none of it.
         opening = asyncio.create_task(self._opened(runtime))
         try:
@@ -430,8 +435,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         update = _apply(
             prepared.model_copy(update={"update": {**self._loop.starting(), **prepared.update}})
         )
-        self._backend.outbox.notify(RUN_STARTED, self._started(state, prepared))
-        update = {**update, "open_swe_prepared_for": invocation}
+        update = {
+            **update,
+            "open_swe_prepared_for": invocation,
+            _START_KEY: self._started(state, prepared).model_dump(mode="json"),
+        }
         if opened.workspace_lost:
             messages = update.get("messages", [])
             update["messages"] = [
@@ -450,7 +458,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return update, opened.error is None
 
     def _started(self, state: RunState, prepared: Prepared) -> RunStarted:
-        """The run's start, for the transcript to open its turn and the thread to record it."""
+        """The run's start, for the transcript to open its turn and the thread to record it;
+        the route goes in once the run's first model call is routed."""
         held = {**state.get(STATE_KEY, {}), **prepared.update}
 
         def chosen(key: str) -> str | None:
@@ -462,11 +471,21 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             humans=human_messages(_since_last_reply(state["messages"])),
             model_id=chosen("selected_model_id"),
             effort=chosen("selected_effort"),
-            model_route=chosen("model_route"),
             invocation_id=self._backend.invocation_id,
             notices=prepared.notices,
             sender=prepared.sender,
         )
+
+    def _send_start(self, state: Mapping[str, object], route: object = None) -> dict[str, object]:
+        """Send the held start with only a route chosen for this run's first model call."""
+        held = state.get(_START_KEY)
+        if not isinstance(held, Mapping):
+            return {}
+        started = RunStarted.model_validate(held).model_copy(
+            update={"model_route": route if isinstance(route, str) else None}
+        )
+        self._backend.outbox.notify(RUN_STARTED, started)
+        return {_START_KEY: None}
 
     async def _opened(self, runtime: Runtime) -> OpenedSandbox:
         if self._open_sandbox is None or not self._in_sandbox:
@@ -520,6 +539,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if planned.jump_to is not None:
             # No model call answers the inbox now: it stays for the run that comes next.
             return _apply(planned)
+        # Ahead of everything else the run reports, with the route its first call takes.
+        routed = {**state.get(STATE_KEY, {}), **inbox.update, **planned.update}
+        started = self._send_start(state, routed.get("model_route"))
         if inbox.items.queued or inbox.items.events:
             # Alongside the call it is answered by, as the transcript's reports go.
             self._backend.outbox.received(InboxReceipt(run_id=run_id(), items=inbox.items))
@@ -533,7 +555,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         )
         if planned.call is not None:
             update["open_swe_call"] = planned.call.model_dump()
-        return update
+        return {**update, **started}
 
     async def _read_inbox(self) -> Inbox:
         if self._inbox is None:
@@ -639,15 +661,17 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     async def _after_agent(self, state: RunState) -> dict[str, object] | None:
         run = self._backend.run
+        # A run that never called the model, such as one a rule stopped, starts as it ends.
+        started = self._send_start(state)
         try:
             self._loop.after_agent(state)
             # Not before the backend took the run's reports: once the run is done, its
             # completion closes the transcript turn, and a report after that is lost.
             await self._backend.outbox.drain()
-            return None
+            return started or None
         except BackendCallError:
             logger.warning("The backend's end-of-run hooks failed", exc_info=True)
-            return None
+            return started or None
         finally:
             turn_trace(run).end(self._trace_metadata(), turn_git(run).metadata)
 
