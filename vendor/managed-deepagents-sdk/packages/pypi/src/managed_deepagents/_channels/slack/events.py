@@ -202,8 +202,9 @@ class SlackActivityEvent:
     """The Slack event as Slack sent it, from the Events API, or a shortcut's
     interaction payload, without its verification ``token``."""
     user_id: str | None = None
-    """Who acted: the message's author for an edit or a deletion, the person who
-    reacted for a reaction or used a shortcut."""
+    """The message's author for an edit or a deletion, the person who reacted
+    for a reaction, the person who used it for a shortcut. On a deletion that
+    may not be who deleted it, such as an admin: Slack doesn't say."""
     action_id: str | None = None
     """A shortcut's ``callback_id``."""
     reaction: str | None = None
