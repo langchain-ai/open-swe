@@ -58,6 +58,55 @@ class ReviewGuideSeen(Base):
     def lines(self) -> LineSet:
         return LineSet.load(self.lines_json)
 
+    @classmethod
+    async def at_head(cls, pull_request_id: UUID, head_sha: str) -> list[Self]:
+        """Everyone's approved lines on this pull request that are numbered at ``head_sha``."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(cls).where(cls.pull_request_id == pull_request_id, cls.head_sha == head_sha)
+            )
+            return list(rows)
+
+    @classmethod
+    async def update(
+        cls,
+        user_id: UUID,
+        pull_request_id: UUID,
+        head_sha: str,
+        merge_base_sha: str,
+        change: Callable[[Self | None], LineSet | None],
+        *,
+        by: UUID | None,
+    ) -> None:
+        """Replace this person's lines with what ``change`` makes of them; ``None`` leaves them."""
+        async with postgres.session() as session:
+            await session.execute(
+                insert(cls)
+                .values(
+                    id=uuid7(),
+                    user_id=user_id,
+                    pull_request_id=pull_request_id,
+                    head_sha=head_sha,
+                    merge_base_sha=merge_base_sha,
+                    lines_json={},
+                    created_by=by,
+                    updated_by=by,
+                )
+                .on_conflict_do_nothing(index_elements=[cls.user_id, cls.pull_request_id])
+            )
+            row = await session.scalar(
+                select(cls)
+                .where(cls.user_id == user_id, cls.pull_request_id == pull_request_id)
+                .with_for_update()
+            )
+            lines = change(row)
+            if row is not None and lines is not None:
+                row.head_sha = head_sha
+                row.merge_base_sha = merge_base_sha
+                row.lines_json = lines.dump()
+                row.updated_by = by
+            await session.commit()
+
 
 class ReviewGuideSession(Base):
     __tablename__ = "review_guide_session"
@@ -269,47 +318,6 @@ class ReviewGuideSession(Base):
         seen = await self.seen()
         return seen.lines if seen is not None and seen.head_sha == head_sha else LineSet()
 
-    async def _update_seen(
-        self,
-        head_sha: str,
-        merge_base_sha: str,
-        change: Callable[[ReviewGuideSeen | None], LineSet | None],
-        *,
-        by: UUID | None,
-    ) -> None:
-        async with postgres.session() as session:
-            await session.execute(
-                insert(ReviewGuideSeen)
-                .values(
-                    id=uuid7(),
-                    user_id=self.user_id,
-                    pull_request_id=self.pull_request_id,
-                    head_sha=head_sha,
-                    merge_base_sha=merge_base_sha,
-                    lines_json={},
-                    created_by=by,
-                    updated_by=by,
-                )
-                .on_conflict_do_nothing(
-                    index_elements=[ReviewGuideSeen.user_id, ReviewGuideSeen.pull_request_id]
-                )
-            )
-            row = await session.scalar(
-                select(ReviewGuideSeen)
-                .where(
-                    ReviewGuideSeen.user_id == self.user_id,
-                    ReviewGuideSeen.pull_request_id == self.pull_request_id,
-                )
-                .with_for_update()
-            )
-            lines = change(row)
-            if row is not None and lines is not None:
-                row.head_sha = head_sha
-                row.merge_base_sha = merge_base_sha
-                row.lines_json = lines.dump()
-                row.updated_by = by
-            await session.commit()
-
     async def mark_seen(self, head_sha: str, merge_base_sha: str, lines: LineSet) -> None:
         """Add ``lines``, numbered at ``head_sha`` and ``merge_base_sha``, to what this person approved."""
         if not lines:
@@ -319,7 +327,9 @@ class ReviewGuideSession(Base):
             kept = row.lines if row is not None and row.head_sha == head_sha else LineSet()
             return kept | lines
 
-        await self._update_seen(head_sha, merge_base_sha, add, by=self.user_id)
+        await ReviewGuideSeen.update(
+            self.user_id, self.pull_request_id, head_sha, merge_base_sha, add, by=self.user_id
+        )
 
     async def carry_seen(
         self, head_sha: str, merge_base_sha: str, carry: Carry | None, from_sha: str
@@ -334,4 +344,6 @@ class ReviewGuideSession(Base):
                 return None
             return carry.lines(row.lines) if carry is not None else LineSet()
 
-        await self._update_seen(head_sha, merge_base_sha, moved, by=None)
+        await ReviewGuideSeen.update(
+            self.user_id, self.pull_request_id, head_sha, merge_base_sha, moved, by=None
+        )

@@ -1284,6 +1284,43 @@ export interface ReviewDiffFile {
   unrenderable?: boolean
 }
 
+export type ReviewCoverageState =
+  | "owner_reviewed"
+  | "reviewed"
+  | "partial"
+  | "unreviewed"
+
+/** Who reviewed one changed file's lines, and whether its code owners have. */
+export interface FileCoverage {
+  path: string
+  changed_lines: number
+  code_owners: Array<string>
+  /** Under a CODEOWNERS rule marked `@hard-required-review`: only its owners' review counts. */
+  hard: boolean
+  approved_by: Array<string>
+  reviewers: Array<{ login: string; lines: number }>
+  reviewed_lines: number
+  owner_reviewed_lines: number
+  state: ReviewCoverageState
+}
+
+export interface ReviewCoverage {
+  head_sha: string
+  files: Array<FileCoverage>
+  truncated: boolean
+}
+
+/** Changed lines someone marked reviewed: a whole file, or only some of its hunks. */
+export interface ReviewedFile {
+  path: string
+  hunks?: Array<{
+    addition_start: number
+    addition_count: number
+    deletion_start: number
+    deletion_count: number
+  }>
+}
+
 export interface ReviewFileContents {
   originalContent: string | null
   modifiedContent: string | null
@@ -2023,6 +2060,20 @@ export const api = {
     request<{ started: boolean; run_id: string | null }>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/scout`,
       { method: "POST" }
+    ),
+  getReviewCoverage: (owner: string, repo: string, number: number) =>
+    request<ReviewCoverage>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/coverage`
+    ),
+  markReviewedLines: (
+    owner: string,
+    repo: string,
+    number: number,
+    body: { head_sha: string; files: Array<ReviewedFile>; reviewed: boolean }
+  ) =>
+    request<void>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/reviewed-lines`,
+      { method: "PUT", body: JSON.stringify(body) }
     ),
   markReviewViewed: (owner: string, repo: string, number: number) =>
     request<void>(

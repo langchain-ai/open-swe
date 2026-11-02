@@ -46,6 +46,13 @@ export const reviewQueries = {
       queryFn: () => getReviewConversation(pr),
       ...sharedReviewOptions(pr),
     }),
+  /** Who reviewed which files' lines, and whether each file's code owners have. */
+  coverage: (pr: PullRequestRef) =>
+    queryOptions({
+      queryKey: reviewKeys.coverage(pr),
+      queryFn: () => api.getReviewCoverage(pr.owner, pr.repo, pr.number),
+      ...sharedReviewOptions(pr),
+    }),
 }
 
 /** The PR's live state on GitHub, from the same cache entry as the PR list. */

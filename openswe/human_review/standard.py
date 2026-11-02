@@ -897,6 +897,7 @@ class PendingPick(BaseModel):
 
 class AreaStatus(BaseModel):
     code_owners: list[str]
+    hard: bool
     changed_files: int
     approved_by: list[str]
     assigned: list[str]
@@ -942,6 +943,7 @@ class ReviewStatus(BaseModel):
             code_owner_areas=[
                 AreaStatus(
                     code_owners=list(area.handles),
+                    hard=area.hard,
                     changed_files=len(area.files),
                     approved_by=[login for login in approvers if login.lower() in area.owners],
                     assigned=[login for login in assigned if login.lower() in area.owners],
