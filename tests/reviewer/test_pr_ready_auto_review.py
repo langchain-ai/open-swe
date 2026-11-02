@@ -51,7 +51,7 @@ def _patch_dispatch_deps(monkeypatch: pytest.MonkeyPatch, fake_client: MagicMock
     monkeypatch.setattr(webhook_common, "cache_github_token_for_thread", MagicMock())
     set_metadata = AsyncMock()
     monkeypatch.setattr(webhook_common, "set_reviewer_thread_metadata", set_metadata)
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: fake_client)
+    monkeypatch.setattr("openswe.dispatch.dispatch_client", lambda: fake_client)
     return set_metadata
 
 
@@ -69,7 +69,7 @@ async def test_pr_ready_public_repo_uses_scoped_reviewer_token(
     cache_token = MagicMock()
     monkeypatch.setattr(webhook_common, "cache_github_token_for_thread", cache_token)
     monkeypatch.setattr(webhook_common, "set_reviewer_thread_metadata", AsyncMock())
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: fake_client)
+    monkeypatch.setattr("openswe.dispatch.dispatch_client", lambda: fake_client)
     monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
     monkeypatch.setattr(webhook_common, "get_workspace_settings", AsyncMock(return_value={}))
 
@@ -104,7 +104,7 @@ async def test_pr_ready_for_review_skips_when_head_already_reviewed(
             }
         ),
     )
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: fake_client)
+    monkeypatch.setattr("openswe.dispatch.dispatch_client", lambda: fake_client)
     monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
     monkeypatch.setattr(webhook_common, "get_workspace_settings", AsyncMock(return_value={}))
 

@@ -66,7 +66,7 @@ from openswe.github.thread_token import (
     invalidate_cached_github_token,
 )
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
-from openswe.input_messages import PersonIdentity
+from openswe.input_messages import PersonIdentity, RunInput
 from openswe.prompts import prompt
 from openswe.review.enabled_repos import is_review_repo_enabled
 from openswe.review.findings import (
@@ -81,6 +81,7 @@ from openswe.review.findings import (
 from openswe.review.publish import (  # noqa: F401
     fetch_pr_review_threads,
     post_review_started_comment,
+    settle_review_check_run,
 )
 from openswe.review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
 from openswe.rollout_events import (
@@ -230,6 +231,7 @@ __all__ = [
     "reviewer_token_for_repo",
     "run_id_for_logging",
     "store_current_reviewer_run_id",
+    "dispatch_checked_reviewer_run",
     "thread_exists",
     "track_review_check_run",
     "trigger_or_queue_run",
@@ -1267,6 +1269,51 @@ async def store_current_reviewer_run_id(thread_id: str, run: Any) -> None:
     run_id = run.get("run_id") if isinstance(run, dict) else None
     if isinstance(run_id, str) and run_id:
         await set_reviewer_thread_metadata(thread_id, extra={"current_reviewer_run_id": run_id})
+
+
+async def dispatch_checked_reviewer_run(
+    thread_id: str,
+    configurable: dict[str, object],
+    *,
+    source: str,
+    input: RunInput,
+    owner: str,
+    repo: str,
+    token: str,
+) -> None:
+    """Dispatch a reviewer run, settling its tracked check if dispatch fails."""
+    try:
+        run = await dispatch_agent_run(
+            thread_id,
+            None,
+            configurable,
+            source=source,
+            thread_title=None,
+            input=input,
+            assistant_id="reviewer",
+            metadata=AGENT_VERSION_METADATA,
+        )
+    except Exception:
+        try:
+            await settle_review_check_run(
+                thread_id=thread_id,
+                owner=owner,
+                repo=repo,
+                token=token,
+                conclusion="neutral",
+                title="Review did not start",
+                summary=(
+                    "Open SWE could not start the review run. "
+                    "Re-trigger the review by pushing a commit or re-requesting it."
+                ),
+            )
+        except Exception:
+            logger.exception(
+                "Could not settle the review check of a run that failed to dispatch",
+                extra={"thread_id": thread_id},
+            )
+        raise
+    await store_current_reviewer_run_id(thread_id, run)
 
 
 class _TrackedReviewCheck(BaseModel):
