@@ -57,6 +57,15 @@ it("restores multiple repositories and statuses, dropping invalid and duplicate 
   expect(result.status).toEqual(["Conflicted", "Failing"])
 })
 
+it("restores every expanded file in a large PR without truncating the saved state", () => {
+  const files = Array.from(
+    { length: 150 },
+    (_, index) => `src/file-${index}.ts`
+  )
+  const saved = JSON.parse(JSON.stringify({ files }))
+  expect(validateReviewsSearch(saved).files).toEqual(files)
+})
+
 it("finds the pull request in a pasted link with surrounding text", () => {
   const expected = { owner: "langchain-ai", repo: "open-swe", number: 3178 }
   expect(

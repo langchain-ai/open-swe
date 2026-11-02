@@ -96,12 +96,12 @@ export function validateReviewsSearch(
       )
     ),
   ]
-  const expandedFiles = (Array.isArray(search.files) ? search.files : [])
-    .filter(
-      (value): value is string =>
-        typeof value === "string" && value.length > 0 && value.length <= 500
-    )
-    .slice(0, 100)
+  const expandedFiles = (
+    Array.isArray(search.files) ? search.files : []
+  ).filter(
+    (value): value is string =>
+      typeof value === "string" && value.length > 0 && value.length <= 500
+  )
   return {
     tab:
       search.tab === "all" || search.tab === "to-review"
