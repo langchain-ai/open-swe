@@ -1107,7 +1107,25 @@ async def _send_message(
         return _failure(reply.detail or "Could not start thread run", status_code=status_code)
     result = reply.result
     mode = "steered" if result.steered else "queued" if result.queued else "started"
-    return {"success": True, "mode": mode, "run_id": result.run_id}
+    if isinstance(caller_thread_id, str) and caller_thread_id != thread_id:
+        from openswe.slack.routed_work import RoutedWork
+
+        work = RoutedWork(caller_thread_id)
+        try:
+            await work.track(thread_id)
+            await work.sync_slack_status()
+        except Exception:
+            logger.exception(
+                "Could not track routed thread progress",
+                extra={"origin_thread_id": caller_thread_id, "destination_thread_id": thread_id},
+            )
+    return {
+        "success": True,
+        "mode": mode,
+        "run_id": result.run_id,
+        "recipient_thread_id": thread_id,
+        "web_url": dashboard_thread_url(thread_id),
+    }
 
 
 class _CommandResult(BaseModel):

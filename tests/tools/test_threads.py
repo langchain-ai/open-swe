@@ -1080,7 +1080,10 @@ async def test_manage_thread_sends_to_busy_thread_like_the_dashboard(
 
     sent = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
 
-    assert sent == {"success": True, "mode": mode, "run_id": result["run_id"]}
+    assert sent["success"] is True
+    assert sent["mode"] == mode
+    assert sent["run_id"] == result["run_id"]
+    assert sent["recipient_thread_id"] == "thread-1"
 
 
 async def test_manage_thread_starts_idle_message_with_fixed_command(
@@ -1208,7 +1211,13 @@ async def test_public_worker_can_only_reply_to_its_owners_relaying_private_threa
     )
 
     if allowed:
-        assert result == {"success": True, "mode": "started", "run_id": "report-run"}
+        assert result == {
+            "success": True,
+            "mode": "started",
+            "run_id": "report-run",
+            "recipient_thread_id": "coordinator",
+            "web_url": None,
+        }
     else:
         assert result == {
             "success": False,

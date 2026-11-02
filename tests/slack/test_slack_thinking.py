@@ -1,18 +1,25 @@
 import asyncio
+from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, call
 from uuid import uuid4
 
 import httpx
 import pytest
 
+from openswe.slack import routed_work
 from openswe.slack import thinking as slack_thinking
+from openswe.slack.routed_work import RoutedWork
 from openswe.source_context import SourceContext
 from openswe.tasks.store import SidebarTaskMembership, Task, TaskContext, TaskMembership
+from openswe.threads.index import IndexedThread
+from openswe.threads.runtimes import MdaRun
 
 
 @pytest.fixture(autouse=True)
 def immediate_status_retries(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_thinking, "_STATUS_RETRY_DELAYS", (0.0, 0.0))
+    monkeypatch.setattr(routed_work.THREADS, "get", AsyncMock(return_value=None))
 
 
 def _event(method: str, data: dict, *, namespace: list[str] | None = None) -> dict:
@@ -236,6 +243,130 @@ def _status_client() -> AsyncMock:
     client.runs.list.return_value = []
     client.threads.get.return_value = {"metadata": {}}
     return client
+
+
+async def test_idle_origin_keeps_status_until_routed_destination_finishes(monkeypatch) -> None:
+    from contextlib import asynccontextmanager
+
+    metadata = {"origin": {}, "destination": {}, "other": {}}
+    client = _status_client()
+
+    now = datetime.now(UTC)
+    threads = {
+        thread_id: IndexedThread(
+            thread_id=thread_id,
+            runtime="mda",
+            metadata=values,
+            status="idle",
+            created_at=now,
+            updated_at=now,
+        )
+        for thread_id, values in metadata.items()
+    }
+
+    async def get_thread(thread_id):
+        return threads.get(thread_id)
+
+    async def update_thread(thread_id, *, metadata: dict):
+        threads[thread_id].metadata.update(metadata)
+
+    @asynccontextmanager
+    async def unlocked(*_args):
+        yield
+
+    monkeypatch.setattr(routed_work.THREADS, "get", get_thread)
+    monkeypatch.setattr(routed_work.THREADS, "update", update_thread)
+    client.threads.get.side_effect = lambda thread_id: {"metadata": threads[thread_id].metadata}
+    destination_busy = True
+    other_busy = True
+
+    async def latest_run(thread_id):
+        busy = (
+            destination_busy
+            if thread_id == "destination"
+            else other_busy
+            if thread_id == "other"
+            else False
+        )
+        return MdaRun(run_id="queued", status="pending", created_at=now) if busy else None
+
+    monkeypatch.setattr(
+        routed_work.RUNTIMES, "runs_on", lambda _runtime: SimpleNamespace(latest_run=latest_run)
+    )
+    monkeypatch.setattr(routed_work, "agent_thread_pr_state_lock", unlocked)
+    await RoutedWork("origin").track("destination")
+    await RoutedWork("origin").track("other")
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await slack_thinking.clear_slack_thinking_status_if_idle(client, "origin", "C1", "1.0")
+    assert set_status.await_args.args[-1] == "Thinking..."
+    destination_busy = False
+    await slack_thinking.clear_slack_thinking_status_if_idle(client, "origin", "C1", "1.0")
+    assert set_status.await_args.args[-1] == "Thinking..."
+    assert threads["origin"].metadata["routed_work_destinations"] == ["other"]
+    other_busy = False
+    await slack_thinking.clear_slack_thinking_status_if_idle(client, "origin", "C1", "1.0")
+    assert set_status.await_args.args[-1] == ""
+    assert threads["origin"].metadata["routed_work_destinations"] == []
+    assert threads["destination"].metadata["routed_work_origins"] == []
+
+
+async def test_delegated_lifecycle_keeps_waiting_through_launch_and_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(routed_work.THREADS, "get", AsyncMock(return_value=None))
+    worker = SidebarTaskMembership(
+        thread_id="worker", task_id="task", role="worker", coordinator_thread_id="origin"
+    )
+    memberships = AsyncMock(return_value={"worker": worker})
+    monkeypatch.setattr(routed_work, "sidebar_memberships", memberships)
+    pending = AsyncMock(return_value=set())
+    monkeypatch.setattr(routed_work.TaskMessage, "pending_threads", pending)
+    assert not await RoutedWork("origin").delegated_active()
+    pending.return_value = {"worker"}
+    assert await RoutedWork("origin").delegated_active()
+    pending.return_value = set()
+
+    assert not await RoutedWork("origin").delegated_active()
+    pending.return_value = {"origin"}
+    assert await RoutedWork("origin").delegated_active()
+    pending.return_value = set()
+    memberships.return_value = {
+        "worker": SidebarTaskMembership(
+            thread_id="worker",
+            task_id="task",
+            role="worker",
+            coordinator_thread_id="origin",
+            cancelled=True,
+        )
+    }
+    assert not await RoutedWork("origin").delegated_active()
+
+
+async def test_missing_worker_needs_retryable_delivery(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(routed_work.THREADS, "get", AsyncMock(return_value=None))
+    worker = SidebarTaskMembership(
+        thread_id="worker", task_id="task", role="worker", coordinator_thread_id="origin"
+    )
+    monkeypatch.setattr(
+        routed_work, "sidebar_memberships", AsyncMock(return_value={"worker": worker})
+    )
+    pending = AsyncMock(return_value=set())
+    monkeypatch.setattr(routed_work.TaskMessage, "pending_threads", pending)
+    assert not await RoutedWork("origin").delegated_active()
+    pending.return_value = {"worker"}
+    assert await RoutedWork("origin").delegated_active()
+
+
+async def test_routed_listing_does_not_prune_idle_links(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(routed_work.THREADS, "get", AsyncMock(return_value=None))
+    update = AsyncMock()
+    monkeypatch.setattr(routed_work.THREADS, "update", update)
+    monkeypatch.setattr(routed_work, "sidebar_memberships", AsyncMock(return_value={}))
+    assert not await RoutedWork("origin").delegated_active(
+        prune=False, metadata={"routed_work_destinations": ["destination"]}
+    )
+    update.assert_not_awaited()
 
 
 async def test_status_sync_does_not_clear_run_started_during_settlement(

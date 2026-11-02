@@ -1021,10 +1021,12 @@ export function useAgentThread(threadId: string) {
     // its stop button — believing the run already ended.
     refetchInterval: (current) =>
       current.state.data?.experience === "agent_workspace"
-        ? current.state.data.status === "running"
+        ? current.state.data.status === "running" ||
+          current.state.data.waitingForDelegatedWork
           ? 2000
           : 10_000
-        : current.state.data?.status === "running"
+        : current.state.data?.status === "running" ||
+            current.state.data?.waitingForDelegatedWork
           ? 3000
           : false,
     refetchOnWindowFocus: (current) =>
