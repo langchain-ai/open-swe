@@ -38,9 +38,11 @@ def _config() -> RunnableConfig:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("initial_plan_mode", [False, True])
 @pytest.mark.parametrize("github_login", ["octocat", None])
+@pytest.mark.parametrize("managed_gateway", [None, "configured-gateway"])
 async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
     initial_plan_mode: bool,
     github_login: str | None,
+    managed_gateway: str | None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
@@ -94,9 +96,9 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
         patch("openswe.users.User.email_for_login", new_callable=AsyncMock, return_value=None),
         patch(
-            "openswe.server._mcp_tools_for",
+            "openswe.server._run_mcp_tools",
             new_callable=AsyncMock,
-            return_value=MCPTools([mcp_tool]),
+            return_value=(managed_gateway, MCPTools([mcp_tool])),
         ),
     ):
         config = _config()
@@ -108,6 +110,8 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
     tool_names = {
         tool.name if hasattr(tool, "name") else tool.__name__ for tool in surface.base_tools
     }
+    for name in ("connect_managed_tools", "discover_managed_tools"):
+        assert (name in tool_names) is (managed_gateway is not None)
     assert not tool_names.intersection(
         {
             "linear_comment",

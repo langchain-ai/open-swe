@@ -14,6 +14,7 @@ _TOOL_MODULES = {
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "delete_automation": ".automations",
     "delete_workspace": ".workspaces",
+    "discover_managed_tools": ".discover_managed_tools",
     "dismiss_human_review_request": ".request_human_review",
     "expedite_pr_approval": ".expedite_pr_approval",
     "expose_port": ".expose_port",
@@ -107,6 +108,7 @@ __all__ = [
     "create_sandbox_file_download_url",
     "delete_automation",
     "delete_workspace",
+    "discover_managed_tools",
     "dismiss_human_review_request",
     "expedite_pr_approval",
     "expose_port",
@@ -226,6 +228,7 @@ if TYPE_CHECKING:
         publish_workspace_prompt,
         read_workspace_prompt,
     )
+    from openswe.tools.discover_managed_tools import discover_managed_tools
     from openswe.tools.expedite_pr_approval import expedite_pr_approval
     from openswe.tools.expose_port import expose_port
     from openswe.tools.fetch_review_diff import fetch_review_diff
