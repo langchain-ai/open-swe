@@ -72,14 +72,35 @@ describe("review session handoff", () => {
     expect(session()).toBeUndefined()
   })
 
+  it("never returns a scheduled batch to drafts just because the chat lost sight of it", () => {
+    const id = handOff()
+    store().dispatched(KEY, id)
+    store().observe(KEY, id, { kind: "queued" })
+    // Between leaving the queue and reaching the transcript, the agent may already have it.
+    expect(
+      store().observe(KEY, id, {
+        kind: "missing",
+        settled: true,
+        running: true,
+      })
+    ).toBeNull()
+    expect(session()?.handoff?.status).toBe("scheduled")
+    expect(
+      store().observe(KEY, id, {
+        kind: "missing",
+        settled: true,
+        running: false,
+      })
+    ).toBe("finished")
+    expect(session()).toBeUndefined()
+  })
+
   it("returns a withdrawn batch to drafts ahead of comments written since", () => {
     const id = handOff()
     store().dispatched(KEY, id)
     store().observe(KEY, id, { kind: "queued" })
     store().add(KEY, comment("three"))
-    expect(store().observe(KEY, id, { kind: "missing", settled: true })).toBe(
-      "returned"
-    )
+    store().restore(KEY, id, null)
     expect(session()?.handoff).toBeNull()
     expect(session()?.active).toBe(true)
     expect(session()?.comments.map((item) => item.id)).toEqual([
@@ -87,6 +108,15 @@ describe("review session handoff", () => {
       "two",
       "three",
     ])
+  })
+
+  it("keeps blank drafts behind instead of dropping them on send", () => {
+    store().add(KEY, comment("one"))
+    store().add(KEY, comment("blank", "  "))
+    store().send(KEY, "queue", null)
+    expect(session()?.handoff?.comments.map((item) => item.id)).toEqual(["one"])
+    expect(session()?.comments.map((item) => item.id)).toEqual(["blank"])
+    expect(session()?.active).toBe(true)
   })
 
   it("keeps the drafts when sending fails", () => {
@@ -103,16 +133,28 @@ describe("review session handoff", () => {
     const id = handOff()
     // Not dispatched yet: nothing the chat shows can move it.
     expect(
-      store().observe(KEY, id, { kind: "missing", settled: true })
+      store().observe(KEY, id, {
+        kind: "missing",
+        settled: true,
+        running: false,
+      })
     ).toBeNull()
     store().dispatched(KEY, id)
     expect(
-      store().observe(KEY, id, { kind: "missing", settled: false })
+      store().observe(KEY, id, {
+        kind: "missing",
+        settled: false,
+        running: false,
+      })
     ).toBeNull()
     expect(session()?.handoff?.status).toBe("sent")
-    expect(store().observe(KEY, id, { kind: "missing", settled: true })).toBe(
-      "lost"
-    )
+    expect(
+      store().observe(KEY, id, {
+        kind: "missing",
+        settled: true,
+        running: false,
+      })
+    ).toBe("lost")
     expect(session()?.comments).toHaveLength(2)
   })
 

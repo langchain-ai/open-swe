@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef } from "react"
 import { toast } from "sonner"
 
 import type { FollowUpBehavior } from "@/lib/api"
@@ -29,10 +29,20 @@ interface HandoffChat {
  * Carries a review session's finished batch into the chat, and follows it
  * there until the agent has it, so the review page can say whether it is on
  * its way, scheduled behind the current run, or being worked on. A batch that
- * can't be delivered goes back to the session's drafts.
+ * can't be delivered, or that the reviewer takes back, goes back to the
+ * session's drafts.
  */
 export function useReviewSessionHandoff(chat: HandoffChat): {
   owns: (messageId: string) => boolean
+  /**
+   * Cancels the batch with `cancel`, which says whether it went through, and
+   * returns its comments to the drafts if so. Only an explicit withdrawal
+   * returns them: a batch merely missing from the chat may still reach the agent.
+   */
+  takeBack: (
+    messageId: string,
+    cancel: () => Promise<boolean>
+  ) => Promise<boolean>
 } {
   const { pr, canPost, sighting, send, withdraw } = chat
   const key = pr ? reviewSessionKey(pr) : null
@@ -44,6 +54,25 @@ export function useReviewSessionHandoff(chat: HandoffChat): {
   const unseen = useRef(new Set<string>())
   const seen = handoff ? sighting(handoff.messageId) : null
 
+  const takeBack = useCallback(
+    async (id: string, cancel: () => Promise<boolean>) => {
+      if (!key) return cancel()
+      // Held while it cancels, so the batch leaving the queue isn't read as anything else.
+      busy.current.add(id)
+      let cancelled = false
+      try {
+        cancelled = await cancel()
+      } finally {
+        busy.current.delete(id)
+      }
+      if (!cancelled) return false
+      useReviewSessions.getState().restore(key, id, null)
+      toast("Your comments are back in your review session drafts")
+      return true
+    },
+    [key]
+  )
+
   useEffect(() => {
     if (!key || !handoff) return
     const store = useReviewSessions.getState()
@@ -51,7 +80,14 @@ export function useReviewSessionHandoff(chat: HandoffChat): {
     if (busy.current.has(id)) return
     // Each settles the store itself: the effect may not run again once it's done.
     if (handoff.status === "sending") {
-      if (!canPost) return
+      if (!canPost) {
+        store.restore(
+          key,
+          id,
+          "You can't post in this pull request's chat, so nothing was sent; your drafts are kept."
+        )
+        return
+      }
       busy.current.add(id)
       send(handoff.text, id, handoff.delivery).then(
         () => {
@@ -72,22 +108,16 @@ export function useReviewSessionHandoff(chat: HandoffChat): {
       return
     }
     if (handoff.withdrawing && handoff.status === "scheduled") {
-      busy.current.add(id)
-      withdraw(id).then(
-        () => {
-          busy.current.delete(id)
-          store.restore(key, id, null)
-          toast("Your comments are back in your review session drafts")
-        },
-        (error: unknown) => {
-          busy.current.delete(id)
-          console.error("Could not withdraw the review session", error)
-          store.keepScheduled(key, id)
-          toast.error(
-            "Couldn't take the comments back; they're still scheduled after the current run"
-          )
-        }
-      )
+      takeBack(id, async () => {
+        await withdraw(id)
+        return true
+      }).catch((error: unknown) => {
+        console.error("Could not withdraw the review session", error)
+        store.keepScheduled(key, id)
+        toast.error(
+          "Couldn't take the comments back; they're still scheduled after the current run"
+        )
+      })
       return
     }
     if (!seen) return
@@ -96,18 +126,17 @@ export function useReviewSessionHandoff(chat: HandoffChat): {
       key,
       id,
       seen.kind === "missing" && unseen.current.has(id)
-        ? { kind: "missing", settled: false }
+        ? { ...seen, settled: false }
         : seen
     )
-    if (outcome === "returned")
-      toast("Your comments are back in your review session drafts")
-    else if (outcome === "failed" || outcome === "lost")
+    if (outcome === "failed" || outcome === "lost")
       toast.error(
         "Your comments weren't delivered; they're back in your drafts"
       )
-  }, [key, handoff, seen, canPost, send, withdraw])
+  }, [key, handoff, seen, canPost, send, withdraw, takeBack])
 
   return {
     owns: (messageId) => handoff?.messageId === messageId,
+    takeBack,
   }
 }

@@ -531,7 +531,7 @@ export function AgentThreadView({
         return { kind: "delivered", running: isStreaming }
       if (pending) return { kind: "sending" }
       if (source.isHydrating || agentQueue === undefined) return null
-      return { kind: "missing", settled: true }
+      return { kind: "missing", settled: true, running: isStreaming }
     },
     send: (text, messageId, followUp) =>
       submitMessage(plainSubmission(text), { followUp, messageId }),
@@ -544,16 +544,23 @@ export function AgentThreadView({
     },
   })
   const ownsQueued = reviewHandoff.owns
+  const takeBackHandoff = reviewHandoff.takeBack
   const removeQueuedMessage = useCallback(
     (id: string) => {
       const entry = queued.find((candidate) => candidate.message.id === id)
       if (!entry || entry.runId === null) return
       void (async () => {
+        // A review session's batch goes back to its drafts instead.
+        if (ownsQueued(id)) {
+          await takeBackHandoff(id, async () => {
+            await withdrawQueued(entry)
+            return true
+          })
+          return
+        }
         const images = await materializeQueuedImages(entry)
         if (images === null) return
         await withdrawQueued(entry)
-        // A review session's batch goes back to its drafts instead.
-        if (ownsQueued(id)) return
         restoreQueuedToComposer(
           [queuedText(entry)],
           images,
@@ -568,6 +575,7 @@ export function AgentThreadView({
       ownsQueued,
       queued,
       restoreQueuedToComposer,
+      takeBackHandoff,
       withdrawQueued,
     ]
   )
@@ -588,7 +596,15 @@ export function AgentThreadView({
       ...pending.flatMap(queuedImages),
       ...unacknowledged.flatMap((message) => message.images ?? []),
     ])
-    if (!(await source.stop())) return
+    // A review session's batch among them goes back to its drafts.
+    const handoffId = [
+      ...known,
+      ...unacknowledged.map((message) => message.id),
+    ].find(ownsQueued)
+    const stopped = handoffId
+      ? await takeBackHandoff(handoffId, () => source.stop())
+      : await source.stop()
+    if (!stopped) return
     for (const entry of pending) restoreQueuedAutoSelection(entry.message.id)
     for (const message of unacknowledged) restoreQueuedAutoSelection(message.id)
     if (source.kind === "stream" && pending.length > 0) {
@@ -638,6 +654,7 @@ export function AgentThreadView({
     ownsQueued,
     queryClient,
     queued,
+    takeBackHandoff,
     restoreQueuedAutoSelection,
     restoreQueuedToComposer,
     source,

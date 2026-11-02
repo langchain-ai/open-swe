@@ -35,18 +35,27 @@ import { plural } from "./text"
  * on their way: what the agent has, what it doesn't, and the one way to send.
  */
 export function ReviewSessionBar({ pr }: { pr: PullRequestRef }) {
-  const threadId = useReviewChat(pr).data?.thread_id
+  const chat = useReviewChat(pr).data
   const session = useReviewSession(pr)
-  if (!threadId || (!session.active && !session.handoff)) return null
-  return <SessionStrips pr={pr} threadId={threadId} />
+  if (!chat?.thread_id || (!session.active && !session.handoff)) return null
+  return (
+    <SessionStrips
+      pr={pr}
+      threadId={chat.thread_id}
+      chatAvailable={chat.available}
+    />
+  )
 }
 
 function SessionStrips({
   pr,
   threadId,
+  chatAvailable,
 }: {
   pr: PullRequestRef
   threadId: string
+  /** Only the chat delivers a batch; without it, drafts wait. */
+  chatAvailable: boolean
 }) {
   const key = reviewSessionKey(pr)
   const session = useReviewSession(pr)
@@ -109,6 +118,7 @@ function SessionStrips({
         open={draftsOpen}
         onOpenChange={setDraftsOpen}
         running={running}
+        chatAvailable={chatAvailable}
       />
       <Dialog open={confirmAbandon} onOpenChange={setConfirmAbandon}>
         <DialogContent
@@ -214,11 +224,13 @@ function SessionDrafts({
   open,
   onOpenChange,
   running,
+  chatAvailable,
 }: {
   pr: PullRequestRef
   open: boolean
   onOpenChange: (open: boolean) => void
   running: boolean
+  chatAvailable: boolean
 }) {
   const key = reviewSessionKey(pr)
   const session = useReviewSession(pr)
@@ -228,7 +240,9 @@ function SessionDrafts({
   const focusChat = useReviewPage((state) => state.focusChat)
   const [delivery, setDelivery] = useState<FollowUpBehavior>("queue")
   const ready = session.comments.filter((comment) => comment.body.trim())
-  const blocked = session.handoff !== null
+  const blank = session.comments.length - ready.length
+  const blocked = session.handoff !== null || !chatAvailable
+  const canSend = !blocked && blank === 0 && ready.length > 0
   const redirect = running && delivery === "steer"
   const submitLabel = !running
     ? "Send & start agent"
@@ -236,7 +250,7 @@ function SessionDrafts({
       ? "Redirect current run"
       : "Send after current run"
   const submit = () => {
-    if (blocked || ready.length === 0) return
+    if (!canSend) return
     send(key, running ? delivery : "queue", headSha)
     onOpenChange(false)
     // The chat carries the batch, so it has to be on screen.
@@ -332,7 +346,20 @@ function SessionDrafts({
             This changes what the running agent is doing now.
           </Banner>
         )}
-        {blocked && (
+        {blank > 0 && (
+          <Banner intent="info">
+            {blank === 1
+              ? "One draft is empty. Write it or remove it before sending."
+              : `${blank} drafts are empty. Write them or remove them before sending.`}
+          </Banner>
+        )}
+        {!chatAvailable && (
+          <Banner intent="info">
+            Chat is unavailable right now, so nothing can be sent. Your drafts
+            are kept.
+          </Banner>
+        )}
+        {session.handoff && (
           <Banner intent="info">
             Your last batch is still on its way. Return it to drafts to send
             everything together, or send these once Open SWE has it.
@@ -351,11 +378,7 @@ function SessionDrafts({
           >
             Keep reviewing
           </Button>
-          <Button
-            size="sm"
-            disabled={blocked || ready.length === 0}
-            onClick={submit}
-          >
+          <Button size="sm" disabled={!canSend} onClick={submit}>
             <AgentMark />
             {submitLabel}
           </Button>

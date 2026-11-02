@@ -8,6 +8,7 @@ import {
   readableRangeLabel,
 } from "@/features/reviews/lib/lineRange"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
 import {
   reviewSessionKey,
   useReviewSession,
@@ -49,6 +50,8 @@ export function Composer({
   const draftAgentComment = useDraftAgentComment(pr)
   const drafting = useReviewSession(pr).active
   const startSession = useReviewSessions((state) => state.start)
+  // Only the chat delivers a session's drafts, as in the header.
+  const chatAvailable = useReviewChat(pr).data?.available === true
   const askKey = useShortcutLabel("mod+enter")
   const addKey = useShortcutLabel("mod+shift+enter")
   const close = () => setComposer(null)
@@ -110,26 +113,28 @@ export function Composer({
             }
           }}
         />
-        <p className="mt-space-1 text-secondary">
-          {drafting ? (
-            "For Open SWE only. A draft sends nothing; your drafts go together when you finish the session."
-          ) : (
-            <>
-              Ask Open SWE sends now.{" "}
-              <Button
-                type="button"
-                size="xs"
-                color="secondary"
-                variant="plain"
-                className="h-auto border-0 px-0 align-baseline text-brand-primary underline-offset-2 hover:underline"
-                onClick={() => startSession(reviewSessionKey(pr))}
-              >
-                Start a review session
-              </Button>{" "}
-              to collect comments and send them together.
-            </>
-          )}
-        </p>
+        {(drafting || chatAvailable) && (
+          <p className="mt-space-1 text-secondary">
+            {drafting ? (
+              "For Open SWE only. A draft sends nothing; your drafts go together when you finish the session."
+            ) : (
+              <>
+                Ask Open SWE sends now.{" "}
+                <Button
+                  type="button"
+                  size="xs"
+                  color="secondary"
+                  variant="plain"
+                  className="h-auto border-0 px-0 align-baseline text-brand-primary underline-offset-2 hover:underline"
+                  onClick={() => startSession(reviewSessionKey(pr))}
+                >
+                  Start a review session
+                </Button>{" "}
+                to collect comments and send them together.
+              </>
+            )}
+          </p>
+        )}
         {pending.add.error && (
           <p role="alert" className="mt-space-1 text-error-secondary">
             {pending.add.error.message}

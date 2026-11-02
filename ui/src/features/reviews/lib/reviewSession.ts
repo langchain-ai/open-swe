@@ -63,10 +63,10 @@ export type Sighting =
   | { kind: "delivered"; running: boolean }
   | { kind: "failed"; error: string }
   /** Nowhere in the chat; `settled` once it has loaded and this page didn't just send it. */
-  | { kind: "missing"; settled: boolean }
+  | { kind: "missing"; settled: boolean; running: boolean }
 
 /** What a sighting did to the session, for the page to tell the reviewer. */
-export type HandoffOutcome = "returned" | "lost" | "failed" | "finished" | null
+export type HandoffOutcome = "lost" | "failed" | "finished" | null
 
 interface ReviewSessionState {
   sessions: Record<string, ReviewSession>
@@ -82,7 +82,7 @@ interface ReviewSessionState {
     excerpts: ReadonlyArray<CodeExcerpt>
   ) => void
   remove: (key: string, id: string) => void
-  /** Hands every draft to the chat as one message; the session ends while it's on its way. */
+  /** Hands every written draft to the chat as one message; the session ends while it's on its way, unless blank drafts stay behind. */
   send: (
     key: string,
     delivery: FollowUpBehavior,
@@ -292,10 +292,13 @@ export const useReviewSessions = create<ReviewSessionState>()(
           const comments = session.comments.filter((comment) =>
             comment.body.trim()
           )
+          const blank = session.comments.filter(
+            (comment) => !comment.body.trim()
+          )
           if (session.handoff || comments.length === 0) return
           update(key, {
-            active: false,
-            comments: [],
+            active: blank.length > 0,
+            comments: blank,
             error: null,
             handoff: {
               messageId: crypto.randomUUID(),
@@ -353,10 +356,14 @@ export const useReviewSessions = create<ReviewSessionState>()(
               restore(key, messageId, seen.error)
               return "failed"
             case "missing":
-              // A scheduled batch that leaves the queue without running was withdrawn.
+              // Withdrawals restore the drafts themselves. A scheduled batch
+              // the chat can't see has left the queue for its run, or ran
+              // before the loaded part of the transcript; once nothing is
+              // running, it has been handled.
               if (handoff.status === "scheduled") {
-                restore(key, messageId, null)
-                return "returned"
+                if (seen.running) return null
+                update(key, { handoff: null })
+                return "finished"
               }
               if (handoff.status === "sent" && seen.settled) {
                 restore(
