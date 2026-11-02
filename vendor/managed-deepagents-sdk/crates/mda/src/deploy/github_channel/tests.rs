@@ -344,17 +344,42 @@ const TOKEN: &str = "info: The agent's GitHub token has:\n  issues  write  from 
 
 #[test]
 fn an_installed_app_syncs_and_reports_without_prompting() {
-    let mut env = FakeEnv::interactive();
-    env.connection = Some(connection(GitHubAppState::Created, true));
-    env.syncs
-        .push_back(GitHubSyncOutcome::Synced(Box::new(status(true))));
+    for interactive in [true, false] {
+        let mut env = FakeEnv {
+            interactive,
+            connection: Some(connection(GitHubAppState::Created, true)),
+            ..FakeEnv::default()
+        };
+        let mut synced = status(true);
+        synced.installation_requests = serde_json::from_value(
+            json!([{ "account": { "login": "other" }, "requester": { "login": "alice" } }]),
+        )
+        .unwrap();
+        synced
+            .app
+            .permissions
+            .insert("checks".into(), "read".into());
+        env.syncs
+            .push_back(GitHubSyncOutcome::Synced(Box::new(synced)));
 
-    run_setup(&mut env, &channel()).unwrap();
+        run_setup(&mut env, &channel()).unwrap();
 
-    assert_eq!(
-        env.log,
-        vec!["sync".to_string(), READY.to_string(), TOKEN.to_string()]
-    );
+        assert!(env.log.contains(&READY.to_string()));
+        assert!(env.log.contains(&TOKEN.to_string()));
+        assert!(env.log.iter().any(|line| line.contains("Remove or lower")));
+        assert_eq!(
+            env.log
+                .iter()
+                .any(|line| line.contains("Waiting for an owner")),
+            interactive
+        );
+        assert_eq!(
+            env.log
+                .iter()
+                .any(|line| line.contains("updated permissions")),
+            interactive
+        );
+    }
 }
 
 #[test]

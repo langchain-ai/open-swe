@@ -16,6 +16,7 @@ pub(crate) struct Report {
     pub(crate) ready: Option<String>,
     /// Things someone must fix on GitHub. Each names who acts and where.
     pub(crate) warnings: Vec<String>,
+    pub(crate) installation_warnings: Vec<String>,
     /// Harmless observations.
     pub(crate) notes: Vec<String>,
 }
@@ -49,7 +50,7 @@ pub(crate) fn build(channel: &GitHubChannel, status: &GitHubChannelStatus) -> Re
             .as_ref()
             .map(|requester| format!(" requested by {}", requester.login))
             .unwrap_or_default();
-        report.warnings.push(format!(
+        report.installation_warnings.push(format!(
             "Waiting for an owner of {} to approve the installation{requester}.",
             request.account.login
         ));
@@ -83,7 +84,7 @@ pub(crate) fn build(channel: &GitHubChannel, status: &GitHubChannelStatus) -> Re
         }
         let pending = missing(&parse_levels(&app.permissions), &installation.permissions);
         if !pending.is_empty() {
-            report.warnings.push(format!(
+            report.installation_warnings.push(format!(
                 "An owner of {} must accept the App's updated permissions ({}) at {settings}",
                 installation.account.login,
                 pending.join(", ")
@@ -696,6 +697,7 @@ mod tests {
                         .into()
                 ),
                 warnings: vec![],
+                installation_warnings: vec![],
                 notes: vec![],
             }
         );
@@ -743,6 +745,11 @@ mod tests {
                     "  checks  read  unused",
                 ]
                 .join("\n"),
+            ]
+        );
+        assert_eq!(
+            report.installation_warnings,
+            vec![
                 "An owner of acme must accept the App's updated permissions (checks: read) at https://github.com/organizations/acme/settings/installations/9"
                     .to_string(),
             ]
@@ -923,10 +930,12 @@ mod tests {
         let report = build(&channel(), &status(value));
         assert_eq!(report.ready, None);
         assert_eq!(
+            report.installation_warnings,
+            vec!["Waiting for an owner of acme to approve the installation requested by alice."]
+        );
+        assert_eq!(
             report.warnings,
             vec![
-                "Waiting for an owner of acme to approve the installation requested by alice."
-                    .to_string(),
                 "GitHub App acme-triage is not installed yet. Install it on your repositories at https://github.com/apps/acme-triage/installations/new"
                     .to_string(),
             ]
