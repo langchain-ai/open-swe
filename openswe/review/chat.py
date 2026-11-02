@@ -5,7 +5,6 @@ from collections.abc import AsyncIterator
 from typing import TypedDict
 
 from fastapi import HTTPException
-from langgraph_sdk.errors import NotFoundError
 
 from openswe.review.session import ReviewSession
 from openswe.threads import pr_fixes
@@ -17,7 +16,7 @@ from openswe.threads.proxy import (
     require_json_content_type,
 )
 from openswe.threads.runs import create_dashboard_thread_record
-from openswe.utils.thread_ops import langgraph_client
+from openswe.threads.store import THREADS
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 
 
@@ -47,9 +46,7 @@ async def get_review_ask(review: ReviewSession, email: str | None = None) -> Rev
     """The reviewer's private side chat about the PR, created on first use."""
     thread_id = review.ask_thread_id
     async with agent_thread_pr_state_lock(thread_id):
-        try:
-            await langgraph_client().threads.get(thread_id)
-        except NotFoundError:
+        if await THREADS.get(thread_id) is None:
             title = f"Ask about {review.owner}/{review.repo}#{review.pr_number}"
             await create_dashboard_thread_record(
                 thread_id,

@@ -104,18 +104,10 @@ export function Rail({
       </div>
       {/* Once mounted they stay: the chats register drafted comments the diff shows, and keep their streams. */}
       <TabPanels className="flex min-h-0 flex-1 flex-col">
-        <TabPanel
-          unmount={false}
-          data-rail-panel="chat"
-          className="min-h-0 flex-1"
-        >
+        <TabPanel unmount={false} className="min-h-0 flex-1">
           <ReviewChatPanel pr={pr} tab="chat" />
         </TabPanel>
-        <TabPanel
-          unmount={false}
-          data-rail-panel="ask"
-          className="min-h-0 flex-1"
-        >
+        <TabPanel unmount={false} className="min-h-0 flex-1">
           {askOpenedFor === prKey && <ReviewChatPanel pr={pr} tab="ask" />}
         </TabPanel>
         <TabPanel unmount={false} className="min-h-0 flex-1">
@@ -239,7 +231,10 @@ function ReviewChatPanel({ pr, tab }: { pr: PullRequestRef; tab: ChatTab }) {
     )
   return (
     <ReviewChatActionsContext.Provider value={actions}>
-      <div className="flex h-full min-h-0 flex-col [&>*]:min-h-0 [&>*]:flex-1">
+      <div
+        data-rail-panel={tab}
+        className="flex h-full min-h-0 flex-col [&>*]:min-h-0 [&>*]:flex-1"
+      >
         <AgentThreadPage
           threadId={meta.data.thread_id}
           composerDraft={chatDraft}
