@@ -80,10 +80,16 @@ Configure them on the default branch:
     {
       "id": "design",
       "label": "Design review",
-      "team": "langchain-ai/product-design",
-      "paths": ["smith-frontend/src/*"],
+      "team": "example/designers",
+      "paths": ["frontend/src/*"],
       "exclude": ["*.test.*", "*/__tests__/*"],
-      "criteria": "New or redesigned screens, flows, navigation, or substantial layout and interaction changes. Not tests, refactors, or tiny styling tweaks."
+      "criteria": "New or redesigned screens, flows, navigation, or substantial layout and interaction changes. Not tests, refactors, or tiny styling tweaks.",
+      "areas": {
+        "checkout": {
+          "label": "Checkout and payments, including components and styling specific to those flows",
+          "githubLogin": "checkout-designer"
+        }
+      }
     }
   ]
 }
@@ -93,9 +99,23 @@ Configure them on the default branch:
 - `team` is a GitHub `organization/team-slug`.
 - `paths` and `exclude` use the same glob matching as review channel rules; a file counts when it matches `paths` and no `exclude` pattern.
 - `criteria` is what the assessment judges the pull request against.
+- `areas` optionally maps lowercase area slugs to a classification `label` and the owner's `githubLogin`.
+  Area names, descriptions, and owners belong in this repository configuration; Open SWE has no built-in product or team map.
+  `unmapped` is reserved for team rotation and cannot be configured as an area.
+  A malformed area map is ignored with a warning; the review policy remains active using team rotation.
 
 When standard or posted review starts, each policy whose paths the pull request touches gets an isolated, unlisted assessment.
-If the criteria are met, an available team member is rotated in (least recently assigned for that policy, within working hours, honoring out-of-office and opt-outs) and notified through a GitHub review request and comment, the review's Slack thread, and a DM.
+If the criteria are met, an available team member is rotated in (least recently assigned for that policy, within working hours, honoring out-of-office and opt-outs).
+When a policy has `areas`, the assessment selects the main affected area from its configured descriptions and passes `supplementary_review_area`.
+The mapped owner must be a member of the policy's configured team and pass the same eligibility checks as team rotation.
+A mapped owner who is out of office, has unknown availability, or is outside working hours waits rather than falling back to an unrelated designer.
+Permanently ineligible owners (for example the PR author, an existing reviewer, an opted-out user, or someone no longer on the team) fall back to team rotation, with a warning logged.
+Unmapped areas retain team rotation.
+The reviewer receives a GitHub review request and one concise Slack ping: PR title, impact, diff size, why they were selected, and a direct link to review the changes on GitHub.
+Up to two images embedded in the PR description are attached in order with their image descriptions; hidden comments and code examples are ignored.
+If Slack rejects the images, delivery falls back to text.
+A DM is used if the review channel cannot be confirmed public or the thread ping was not delivered; retries preserve successful delivery flags.
+No extra GitHub comment is posted.
 Supplementary reviews never replace the engineering request's owning thread or summary, and a supplementary reviewer's approval does not count as engineering approval unless they also own the code or signed up as an engineering reviewer.
 Agents can also ask for one with `request_human_review`'s `supplementary_review` and `supplementary_review_reason`.
 Settings use the default branch's cached configuration; changes can take 30 minutes to refresh.
