@@ -269,6 +269,10 @@ def _should_refresh_latest_run(thread: ThreadLike) -> bool:
     thread_status = thread.get("status")
     return (
         thread_status == "busy"
+        or (
+            metadata.get("experience") == "agent_workspace"
+            and metadata.get("work_run_synced") is not True
+        )
         or metadata_status in _RUNNING_METADATA_STATUSES
         or not isinstance(metadata_status, str)
     )

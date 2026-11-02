@@ -12,6 +12,7 @@ from openswe.threads import index, succession
 from openswe.threads.creation import ensure_titled_thread
 from openswe.threads.status import thread_run_error
 from openswe.walkthrough.record import WalkthroughView
+from openswe.webhooks.common import is_repo_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,10 @@ ASSISTANT_ID = "review-scout"
 _FAILED_STATUSES = frozenset({"error", "timeout"})
 _SENDER_ID = "system:review-scout"
 _HEAD_METADATA_KEY = "scout_head_sha"
+
+
+class RepositoryNotAllowed(Exception):
+    """A scout asked for a repository outside Open SWE's allowlist."""
 
 
 class _ScoutRun(BaseModel):
@@ -186,6 +191,10 @@ class ReviewScoutTarget(BaseModel):
         A newer head interrupts a scout still working on an older one, so only
         the latest head's walkthrough is ever written.
         """
+        if not is_repo_allowed({"owner": self.owner, "name": self.repo}):
+            raise RepositoryNotAllowed(
+                f"{self.owner}/{self.repo} is not in the repository allowlist"
+            )
         client = dispatch_client()
         thread_id = await succession.succeed(
             review_scout_thread_id(self.owner, self.repo, self.pr_number)

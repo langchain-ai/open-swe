@@ -7,5 +7,5 @@ Whatever the other rules allow, always require human review when a pull request 
 - sandboxes, webhooks and their signature checks, or database migrations (`openswe/sandboxes/`, `openswe/webhooks/`, `openswe/database/migrations/`);
 - the reviewer or approval logic itself (`openswe/review/`, `openswe/tools/publish_review.py`);
 - instructions agents follow: anything under `.open-swe/` (including these rules, unless the stricter-approval-policy rule applies), `AGENTS.md`, `CLAUDE.md`, `.agents/`, `.claude/`, or `openswe/resources/prompts/`;
-- CI, build, or deployment files (`.github/`, `Dockerfile`, `compose.yaml`, `langgraph*.json`), or dependency manifests and lockfiles;
+- CI, build, or deployment files (`.github/`, `Dockerfile`, `compose.yaml`, `langgraph*.json`), or dependency manifests and lockfiles (unless the langchain-dependency-refreshes rule applies);
 - generated pages under `openwiki/`.

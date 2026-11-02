@@ -68,6 +68,7 @@ from openswe.review.styles import (
     ReviewStyleCreate,
     ReviewStylePromptUpdate,
 )
+from openswe.review_scout.launch import RepositoryNotAllowed
 from openswe.threads.handlers import mark_review_session_viewed
 from openswe.users.records import user_id_for_login
 from openswe.walkthrough.record import Walkthrough
@@ -338,7 +339,10 @@ async def api_run_review_scout(
     session: dict[str, Any] = SESSION_DEP,
 ) -> ReviewScoutTrigger:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await trigger_review_scout(owner, repo, pr_number, session["sub"])
+    try:
+        return await trigger_review_scout(owner, repo, pr_number, session["sub"])
+    except RepositoryNotAllowed as exc:
+        raise HTTPException(403, str(exc)) from exc
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/viewed", status_code=204)
