@@ -33,6 +33,7 @@ from openswe.human_review.requests import (
     slack_mention,
 )
 from openswe.prompts import prompt
+from openswe.slack.channels import SlackChannel
 from openswe.slack.client import post_slack_thread_reply_with_ts
 from openswe.slack.dm import send_dm
 from openswe.slack.http import SlackRequestError
@@ -282,6 +283,13 @@ class SupplementaryReview:
             *images.blocks(),
         ]
         try:
+            channel = await SlackChannel.load(row.slack_channel_id)
+            if channel is None or not channel.public:
+                logger.info(
+                    "Review channel is not confirmed public; falling back to DM",
+                    extra={"request_id": str(row.id), "policy": self.policy.id},
+                )
+                return False
             try:
                 return bool(
                     await post_slack_thread_reply_with_ts(
@@ -306,7 +314,7 @@ class SupplementaryReview:
                         unfurl_media=False,
                     )
                 )
-        except SlackRequestError:
+        except Exception:
             logger.exception(
                 "Could not post supplementary review ping; falling back to DM",
                 extra={"request_id": str(row.id), "policy": self.policy.id},

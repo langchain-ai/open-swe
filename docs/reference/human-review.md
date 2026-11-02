@@ -94,7 +94,7 @@ Unmapped areas retain team rotation.
 The reviewer receives a GitHub review request and one concise Slack ping: PR title, impact, diff size, why they were selected, and a direct link to review the changes on GitHub.
 Up to two images embedded in the PR description are attached in order with their image descriptions; hidden comments and code examples are ignored.
 If Slack rejects the images, delivery falls back to text.
-A DM is used only if the thread ping was not delivered; retries preserve successful delivery flags.
+A DM is used if the review channel cannot be confirmed public or the thread ping was not delivered; retries preserve successful delivery flags.
 No extra GitHub comment is posted.
 Supplementary reviews never replace the engineering request's owning thread or summary, and a supplementary reviewer's approval does not count as engineering approval unless they also own the code or signed up as an engineering reviewer.
 Agents can also ask for one with `request_human_review`'s `supplementary_review` and `supplementary_review_reason`.

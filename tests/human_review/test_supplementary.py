@@ -20,6 +20,7 @@ from openswe.human_review.supplementary import (
     SupplementaryReviews,
     SupplementaryState,
 )
+from openswe.slack.channels import SlackChannel
 from openswe.slack.client import GitHubPrRef
 from openswe.users import User, UserIdentity
 
@@ -84,6 +85,18 @@ def review(monkeypatch: pytest.MonkeyPatch) -> HumanReviewRequest:
             yield request, {}
 
     monkeypatch.setattr(HumanReviewRequest, "supplementary_rotation", rotation)
+    channel = SlackChannel(
+        id="C1",
+        payload={
+            "is_channel": True,
+            "is_private": False,
+            "is_im": False,
+            "is_mpim": False,
+            "is_ext_shared": False,
+            "is_pending_ext_shared": False,
+        },
+    )
+    monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=channel))
     return request
 
 
@@ -202,6 +215,36 @@ async def test_delivery_is_idempotent_and_retries_only_missing_notifications(
     assert thread_reply.await_args.args[:2] == ("C1", "1.0")
     assert dm.await_count == 1
     assert review.participants == []
+
+
+@pytest.mark.parametrize("channel_known", [False, True])
+async def test_unreadable_review_channel_uses_one_dm(
+    review: HumanReviewRequest, channel_known: bool
+) -> None:
+    user = _user("designer")
+    review.run_config = _stored(reason="New trace navigation flow", github_login="designer")
+    pull = MagicMock(spec=PullRequestClient)
+    pull.request_reviewers = AsyncMock()
+    with (
+        patch.object(User, "for_login", AsyncMock(return_value=user)),
+        patch.object(
+            SlackChannel,
+            "load",
+            AsyncMock(
+                return_value=SlackChannel(id="C1", payload={"is_private": True})
+                if channel_known
+                else None
+            ),
+        ),
+        patch.object(
+            supplementary, "post_slack_thread_reply_with_ts", AsyncMock(return_value="1.1")
+        ) as post,
+        patch.object(supplementary, "send_dm", AsyncMock(return_value=True)) as dm,
+    ):
+        assert await _review(review)._assign(pull) == "requested"
+        assert await _review(review)._assign(pull) == "requested"
+    post.assert_not_awaited()
+    dm.assert_awaited_once()
 
 
 @pytest.mark.parametrize("text_fails", [False, True])
