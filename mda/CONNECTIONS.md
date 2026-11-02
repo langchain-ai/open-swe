@@ -2,13 +2,13 @@
 
 The credentials this deployment reads from [MDA connections](https://docs.langchain.com/langsmith/managed-deep-agents-connections) (LangSmith Agent Auth), and how to create them.
 Run every step once for each environment: `staging`, `preview` and `prod`.
-Each backend setting is off until set, and unset keeps that credential on the backend, as before.
+Each backend setting is off until set, and unset keeps that credential on the backend, as before; `open-swe-exa` needs none.
 
 | Slug | Owner | Read by | Backend setting |
 |---|---|---|---|
 | none: a person's Agent Auth principal | user | The backend's runs for a person on a channel's thread | `MDA_WORKSPACE_ID`, when not the backend's workspace |
 | `mda/github-token` | agent | The GitHub proxy of the sandboxes MDA owns whose thread reaches the whole App installation | `MDA_GITHUB_PROXY_CONNECTION=mda/github-token` |
-| `open-swe-exa` | agent | `web_search` | `MDA_EXA_CONNECTION=open-swe-exa` |
+| `open-swe-exa` | agent | `web_search`, which the run calls Exa with itself | none: the run always reads it |
 | `open-swe-github-<env>` | user | `open_pull_request`, for the requester's own PR | `MDA_GITHUB_USER_CONNECTION=open-swe-github-<env>` |
 | `open-swe-mcp-<server>` | agent or user | An MCP server whose Open SWE record names the connection | `connection` on the server's record |
 
@@ -66,8 +66,8 @@ uv run --project mda --locked mda connections create open-swe-exa \
   --project mda --deployment-id "$DEPLOYMENT_ID" --secret-from-env EXA_API_KEY
 ```
 
-Then set `MDA_EXA_CONNECTION=open-swe-exa` on the backend.
-The backend keeps `EXA_API_KEY` for Open SWE's own MCP server.
+The run's `web_search` calls Exa itself with this key; without the connection it answers with an error naming this step.
+The backend keeps `EXA_API_KEY` for Open SWE's own MCP server; `MDA_EXA_CONNECTION` on the backend only names a different slug.
 
 ## 4. `open-swe-github-<env>`: each person's GitHub, for the PRs they open
 

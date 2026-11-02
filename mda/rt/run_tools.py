@@ -37,6 +37,7 @@ from rt.models import build_model
 from rt.search_tools import search_tools_tool
 from rt.tools import backend_tool, operation_tool, run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
+from rt.web_search import runs_here, web_search_tool
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +68,11 @@ class RunTools:
         self.catalog = catalog
         self._backend = backend
         self._files = files
+        # ``web_search`` calls Exa from here, with the key in the deployment's connection.
         self._operations = [
-            operation_tool(spec, backend, cites_evidence=catalog.incident_evidence)
+            (web_search_tool if runs_here(spec) else operation_tool)(
+                spec, backend, cites_evidence=catalog.incident_evidence
+            )
             for spec in catalog.operations
         ]
         # None until the run connects to the MCP servers its catalog names.

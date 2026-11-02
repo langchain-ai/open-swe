@@ -263,14 +263,14 @@ async def test_every_run_and_read_shares_one_graph_and_calls_the_backend_as_itse
         agent,
         "_DEFAULT_MODEL",
         _calling(
-            ToolCall(name="web_search", args={}, id="call-1"),
+            ToolCall(name="fetch_url", args={}, id="call-1"),
             ToolCall(name="list_findings", args={}, id="call-2"),
         ),
     )
     store = InMemoryStore()
 
     first = await _run(
-        store, "thread-1", _context("reviewer", "token-1", _catalog("web_search", "grant-1"))
+        store, "thread-1", _context("reviewer", "token-1", _catalog("fetch_url", "grant-1"))
     )
     second = await _run(
         store, "thread-2", _context("reviewer", "token-2", _catalog("list_findings", "grant-2"))
@@ -278,7 +278,7 @@ async def test_every_run_and_read_shares_one_graph_and_calls_the_backend_as_itse
 
     assert second.nodes["model"] is first.nodes["model"]
     assert [(bearer, operation) for _, bearer, operation in backend_calls if operation] == [
-        ("Bearer token-1", "web_search:grant-1"),
+        ("Bearer token-1", "fetch_url:grant-1"),
         ("Bearer token-2", "list_findings:grant-2"),
     ]
     assert {bearer for _, bearer, _ in backend_calls} == {"Bearer token-1", "Bearer token-2"}
@@ -332,10 +332,10 @@ async def test_each_run_on_the_shared_graph_works_in_its_own_threads_sandbox(
     store = InMemoryStore()
 
     first = await _run(
-        store, "thread-1", _context("agent", "token-1", _catalog("web_search", "g1", snapshot="a"))
+        store, "thread-1", _context("agent", "token-1", _catalog("fetch_url", "g1", snapshot="a"))
     )
     second = await _run(
-        store, "thread-2", _context("agent", "token-2", _catalog("web_search", "g2", snapshot="b"))
+        store, "thread-2", _context("agent", "token-2", _catalog("fetch_url", "g2", snapshot="b"))
     )
 
     assert second.nodes["model"] is first.nodes["model"]
@@ -375,7 +375,7 @@ async def test_a_run_retries_a_sandbox_the_sandbox_service_failed_to_open_and_re
     store = InMemoryStore()
 
     for thread_id, token in (("thread-1", "token-1"), ("thread-2", "token-2")):
-        catalog = _catalog("web_search", token, snapshot="a")
+        catalog = _catalog("fetch_url", token, snapshot="a")
         await _run(store, thread_id, _context("agent", token, catalog))
 
     assert attempts == ["thread-1", "thread-1", "thread-1", "thread-2"]
@@ -417,7 +417,7 @@ async def test_a_sandbox_that_never_boots_ends_the_run_at_its_first_shell_call_w
         await _run(
             InMemoryStore(),
             "thread-1",
-            _context("agent", "token-1", _catalog("web_search", "g1", snapshot="a")),
+            _context("agent", "token-1", _catalog("fetch_url", "g1", snapshot="a")),
         )
 
     assert prepared == [("sandbox-thread-1", None)]
@@ -701,7 +701,7 @@ async def test_mda_writes_the_whole_proxy_config_before_the_run_prepares(
         InMemoryStore(),
         "thread-1",
         _context(
-            "agent", "token-1", _catalog("web_search", "g1", snapshot="a", github_proxy=github)
+            "agent", "token-1", _catalog("fetch_url", "g1", snapshot="a", github_proxy=github)
         ),
     )
 
@@ -754,7 +754,7 @@ async def test_a_run_that_cannot_write_its_sandboxs_proxy_config_never_uses_the_
             InMemoryStore(),
             "thread-1",
             _context(
-                "agent", "token-1", _catalog("web_search", "g1", snapshot="a", github_proxy=github)
+                "agent", "token-1", _catalog("fetch_url", "g1", snapshot="a", github_proxy=github)
             ),
         )
 
@@ -794,7 +794,7 @@ async def test_a_run_writes_its_sandboxs_proxy_config_again_until_the_sandbox_ap
         InMemoryStore(),
         "thread-1",
         _context(
-            "agent", "token-1", _catalog("web_search", "g1", snapshot="a", github_proxy=github)
+            "agent", "token-1", _catalog("fetch_url", "g1", snapshot="a", github_proxy=github)
         ),
     )
 
@@ -1276,7 +1276,7 @@ async def test_each_run_compacts_a_long_conversation_with_its_own_model(
     history: list[tuple[str, str]] = [("user", "history " * 600) for _ in range(40)]
 
     def catalog(model_id: str) -> Catalog:
-        return _catalog("web_search", "grant").model_copy(
+        return _catalog("fetch_url", "grant").model_copy(
             update={
                 "models": RunModels(
                     model=ModelSpec(model_id=model_id, kwargs={}),

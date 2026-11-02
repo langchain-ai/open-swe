@@ -183,7 +183,7 @@ async def cited(
     return result.model_copy(update={"content": _content(reply.content)})
 
 
-async def _credentials(spec: ToolSpec) -> dict[str, str]:
+async def read_credentials(spec: ToolSpec) -> dict[str, str]:
     """What the run reads of each connection ``spec`` names, by slug.
 
     One of the deployment's it cannot read raises ``UnreadConnectionError``.
@@ -328,7 +328,7 @@ async def run_operation(
     # Read before code mode reports the call: a pause for a grant runs the code again,
     # which reports the call under a new id, so a report made first would never finish.
     try:
-        credentials = await _credentials(spec)
+        credentials = await read_credentials(spec)
     except UnreadConnectionError as exc:
         make = exc.result
     else:

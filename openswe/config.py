@@ -232,8 +232,8 @@ ENV.var(
 )
 ENV.var(
     "MDA_EXA_CONNECTION",
-    "Slug of the MDA deployment's agent connection holding the Exa API key, e.g. "
-    "open-swe-exa: runs' web_search reads its key there. Unset: EXA_API_KEY.",
+    "Slug of the MDA deployment's agent connection holding the Exa API key, which "
+    "MDA runs' web_search calls Exa with. Unset: open-swe-exa.",
 )
 ENV.var(
     "MDA_GITHUB_USER_CONNECTION",
