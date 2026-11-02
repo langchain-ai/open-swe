@@ -30,6 +30,8 @@ import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { parsePullRequestReference } from "@/features/reviews/search"
 import { useShortcutLabel } from "@/lib/hotkeys"
+import { useSession } from "@/lib/session"
+import { useRecentReviewPages } from "@/features/reviews/page/RecentReviewPagesMenu"
 
 interface CommandResult {
   id: string
@@ -47,7 +49,7 @@ interface CloudThreadResult {
 
 interface PullRequestResult {
   id: string
-  kind: "pull-request"
+  kind: "pull-request" | "recent-pull-request"
   label: string
   pr: Pick<PullRequestSearchResult, "repo" | "number"> &
     Partial<Pick<PullRequestSearchResult, "state">>
@@ -144,7 +146,24 @@ export function AppCommandPalette({
     query,
     open && !actionsOnly && !prReference && experience !== "agent_workspace"
   )
+  const login = useSession().data?.login?.toLowerCase() ?? ""
+  const recentReviews = (useRecentReviewPages(login).data ?? [])
+    .filter(
+      (review) =>
+        !actionsOnly &&
+        `${review.title} ${review.owner}/${review.repo}#${review.number}`
+          .toLowerCase()
+          .includes(query.trim().toLowerCase())
+    )
+    .slice(0, 5)
+    .map((review): PullRequestResult => ({
+      id: `recent-pr:${review.owner}/${review.repo}#${review.number}`,
+      kind: "recent-pull-request",
+      label: review.title || `${review.repo} #${review.number}`,
+      pr: { repo: `${review.owner}/${review.repo}`, number: review.number },
+    }))
   const results: Array<PaletteResult> = [
+    ...recentReviews,
     ...buildPaletteResults(
       commands,
       debouncedQuery === threadQuery
@@ -186,7 +205,9 @@ export function AppCommandPalette({
         ? result.command.group
         : result.kind === "cloud-thread"
           ? "Threads"
-          : "Pull requests"
+          : result.kind === "recent-pull-request"
+            ? "Recently reviewed"
+            : "Pull requests"
     resultGroups.set(group, [...(resultGroups.get(group) ?? []), result])
   }
   const runResult = (result: PaletteResult | undefined) => {
@@ -278,7 +299,7 @@ export function AppCommandPalette({
                       const Icon =
                         result.kind === "command"
                           ? CommandIcon
-                          : result.kind === "pull-request"
+                          : result.kind !== "cloud-thread"
                             ? GitPullRequestIcon
                             : ChatCircleIcon
                       return (
@@ -295,7 +316,8 @@ export function AppCommandPalette({
                           />
                           <span className="min-w-0 flex-1 truncate">
                             {result.label}
-                            {result.kind === "pull-request" && (
+                            {(result.kind === "pull-request" ||
+                              result.kind === "recent-pull-request") && (
                               <span className="ml-space-2 text-xs text-secondary">
                                 {result.pr.repo} #{result.pr.number}
                                 {result.pr.state && ` · ${result.pr.state}`}

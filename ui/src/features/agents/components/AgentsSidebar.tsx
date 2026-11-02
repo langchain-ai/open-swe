@@ -95,6 +95,7 @@ import {
 } from "@/features/agents/components/MenuCheckItem"
 import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
+import { RecentReviewsSidebarSection } from "@/features/reviews/page/RecentReviewPagesMenu"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import {
@@ -789,6 +790,7 @@ export function AgentsSidebar({
             className={isDesktop ? "pb-space-3" : "pb-space-4"}
             onNavigate={layout.closeOnMobile}
           />
+          <RecentReviewsSidebarSection onNavigate={layout.closeOnMobile} />
           {cloudPending && allItems.length === 0 && (
             <ThreadListSkeleton compact={prefs.compact} />
           )}
@@ -1515,6 +1517,7 @@ function AgentWorkspaceThreadList({
         <NotePencilIcon size={18} weight="regular" className="shrink-0" />
         New chat
       </Link>
+      <RecentReviewsSidebarSection onNavigate={onNavigate} />
       {error && (
         <ThreadSourceError label="Chats unavailable" onRetry={onRetry} />
       )}

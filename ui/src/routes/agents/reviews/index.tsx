@@ -12,6 +12,10 @@ import { ReviewedPullRequests } from "@/features/reviews/ReviewedPullRequests"
 import { OpenPullRequestInput } from "@/features/reviews/OpenPullRequestInput"
 import { ReviewBookmarklet } from "@/features/reviews/ReviewBookmarklet"
 import {
+  ContinueReviewingStrip,
+  RecentReviewPagesButton,
+} from "@/features/reviews/page/RecentReviewPagesMenu"
+import {
   parsePullRequestSelection,
   validateReviewsSearch,
   type ReviewsSearch,
@@ -121,11 +125,14 @@ function ReviewsPage() {
               ))}
             </div>
             <OpenPullRequestInput />
+            <RecentReviewPagesButton />
             <ReviewBookmarklet />
             <span className="hidden text-xs text-secondary lg:inline">
               Drag to your bookmarks bar
             </span>
           </div>
+
+          {!selection && <ContinueReviewingStrip />}
 
           {session.data &&
             (tab === "all" ? (
