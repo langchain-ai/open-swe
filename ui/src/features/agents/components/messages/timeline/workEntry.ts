@@ -145,8 +145,12 @@ export function latestDiff(chunk: ToolExecutionChunk) {
     : chunk.diffData
 }
 
-function destinationHref(chunk: ToolExecutionChunk): string | undefined {
-  const name = chunk.title.trim().split(/\s+/, 1)[0]?.toLowerCase()
+export function routedMessageHref(
+  chunk: ToolExecutionChunk
+): string | undefined {
+  const name = (
+    chunk.toolName ?? chunk.title.trim().split(/\s+/, 1)[0]
+  )?.toLowerCase()
   if (
     chunk.status !== "completed" ||
     !(
@@ -221,7 +225,7 @@ export function describeWorkEntry(
         ? resolvedPreview
         : null,
     previewTooltip,
-    destinationHref: destinationHref(chunk),
+    destinationHref: routedMessageHref(chunk),
     tone: toneForChunk(chunk),
     status: chunk.status,
     expandedText: expandedTextForChunk(chunk, repoPath),
