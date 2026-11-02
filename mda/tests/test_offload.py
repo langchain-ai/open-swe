@@ -6,6 +6,7 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware, AgentState, hook_config
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.runtime import Runtime
 from rt.offload import RequestedOffload
@@ -41,7 +42,7 @@ async def test_a_requested_offload_keeps_the_history_and_streams_only_its_status
         HumanMessage(content="What next?", id="human-2"),
         AIMessage(content="Run the smoke tests.", id="ai-2"),
     ]
-    config = {"configurable": {"thread_id": "offloading-test"}}
+    config: RunnableConfig = {"configurable": {"thread_id": "offloading-test"}}
 
     chunks = [
         chunk
@@ -51,7 +52,7 @@ async def test_a_requested_offload_keeps_the_history_and_streams_only_its_status
     ]
 
     assert not [data for mode, data in chunks if mode == "messages"]
-    statuses = [data for mode, data in chunks if mode == "custom"]
+    statuses = [data for mode, data in chunks if mode == "custom" and isinstance(data, dict)]
     assert [event["status"] for event in statuses] == ["started", "completed"]
     assert statuses[-1]["trigger"] == "manual"
     state = await graph.aget_state(config)
