@@ -435,7 +435,9 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
             ],
         }
     ]
-    _, (fetched,) = await review_links.pr_review_links("", rich_text)
+    _, fetched_blocks = await review_links.pr_review_links("", rich_text)
+    assert fetched_blocks is not None
+    (fetched,) = fetched_blocks
     assert fetched["elements"][0]["elements"] == [
         {"type": "link", "url": target, "text": "PR"},
         {"type": "link", "url": url, "text": "↗"},
