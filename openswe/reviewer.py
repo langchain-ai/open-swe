@@ -28,16 +28,13 @@ logger = logging.getLogger(__name__)
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
-from runtime_api.catalog import InboxSpec, LoopRules
+from runtime_api.catalog import InboxSpec
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
-from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
-from langchain.agents.middleware.types import AgentMiddleware
-from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
@@ -50,17 +47,10 @@ from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
-    ExcludeToolsMiddleware,
-    ModelErrorMiddleware,
-    RepairOrphanedToolCallsMiddleware,
-    refresh_github_proxy_before_model,
-    settle_review_check_on_exit,
 )
 from openswe.middleware.prepare_run import PrepareRunState
-from openswe.middleware.record_run_usage import record_run_usage
 from openswe.middleware.require_user_reply import WEB_REPLY_SURFACE
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.review.approvals import approval_policy_for_review
 from openswe.review.diff import (
@@ -77,11 +67,9 @@ from openswe.review.findings import (
 )
 from openswe.review.publish import fetch_pr_review_threads
 from openswe.review.reconcile import reconcile_findings_with_review_threads
-from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
-    MODEL_CALL_RECURSION_LIMIT,
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
 )
@@ -100,6 +88,7 @@ from openswe.tools import (
     publish_review,
     reply_to_finding_thread,
     resolve_finding_thread,
+    suggest_task,
     update_finding,
     web_search,
 )
@@ -114,7 +103,6 @@ from openswe.utils.model import (
     provider_model_kwargs,
 )
 from openswe.utils.startup_trace import aphase
-from openswe.walkthrough.record import WalkthroughView
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = prompt("reviewer/subagent")
 
@@ -188,45 +176,6 @@ def _format_pr_overview(pr_title: str, pr_body: str) -> str:
     safe_title = _escape_for_data_block(title)
     safe_body = _escape_for_data_block(body) if body else "_(no description provided)_"
     return prompt("reviewer/pr-overview", title=safe_title, body=safe_body)
-
-
-def _format_human_input(walkthrough: WalkthroughView | None) -> str:
-    """Render the scout's summary of what people asked for, or ``""`` without one."""
-    if walkthrough is None or not walkthrough.human_input:
-        return ""
-    return prompt("reviewer/human-input", summary=walkthrough.human_input)
-
-
-def _format_line_ranges(prefix: str, ranges: list[tuple[int, int]]) -> list[str]:
-    return [
-        f"{prefix}{start}" if start == end else f"{prefix}{start}-{end}" for start, end in ranges
-    ]
-
-
-def _format_walkthrough(walkthrough: WalkthroughView | None) -> str:
-    """Render the scout's steps as an untrusted-data block, or ``""`` without one."""
-    if walkthrough is None or not walkthrough.steps:
-        return ""
-    steps: list[str] = []
-    for step in walkthrough.steps:
-        files = "\n".join(
-            " ".join(
-                [
-                    _escape_for_data_block(file.path),
-                    *_format_line_ranges("+", file.added),
-                    *_format_line_ranges("-", file.deleted),
-                ]
-            )
-            for file in step.files
-        )
-        steps.append(
-            f'<step index="{step.index}">\n'
-            f"<title>{_escape_for_data_block(step.title)}</title>\n"
-            f"<summary>{_escape_for_data_block(step.summary)}</summary>\n"
-            f"<files>\n{files}\n</files>\n"
-            "</step>"
-        )
-    return prompt("reviewer/walkthrough", steps="\n".join(steps))
 
 
 def _build_first_review_context(
@@ -675,8 +624,6 @@ async def prepare_reviewer_run(
                     sandbox_backend, repo_dir=f"{work_dir}/{repo_name}", trusted_ref=base_sha
                 )
                 if skill_sources:
-                    # Reading every SKILL.md takes seconds on skill-heavy repos;
-                    # here it overlaps the walkthrough wait.
                     skills_prompt = await _trusted_skills_prompt(
                         sandbox_backend, skill_sources, runtime, config
                     )
@@ -776,26 +723,6 @@ async def prepare_reviewer_run(
             )
             return ""
 
-    async def _await_walkthrough() -> WalkthroughView | None:
-        if reviewer_event == "finding_reply" or reviewer_eval or not isinstance(pr_number, int):
-            return None
-        pr_title, _ = await pr_overview_task
-        target = ReviewScoutTarget(
-            owner=repo_owner,
-            repo=repo_name,
-            pr_number=pr_number,
-            pr_title=pr_title,
-            base_sha=base_sha,
-            head_sha=head_sha,
-            workspace_slug=cfg.workspace_slug,
-        )
-        try:
-            async with aphase(thread_id, "prepare.walkthrough"):
-                return await target.await_walkthrough()
-        except Exception:
-            logger.warning("Reviewing without a walkthrough", exc_info=True, extra=target.log_extra)
-            return None
-
     # Benchmark runs score the stock reviewer, without our workspace's
     # guidelines, per-repo style prompts, or API standards.
     async def _fetch_org_guidelines() -> str | None:
@@ -843,12 +770,10 @@ async def prepare_reviewer_run(
             return None
         return await approval_policy_for_review(repo_owner, repo_name, token=github_token)
 
-    # Only the diff waits on the checkout; the walkthrough above all, a whole
-    # scout run in its own sandbox, must not queue behind the clone.
+    # Only the diff waits on the checkout.
     checkout_task = asyncio.create_task(_check_out())
     diff_context_task = asyncio.create_task(_fetch_diff_context())
     pr_overview_task = asyncio.create_task(_fetch_pr_overview())
-    walkthrough_task = asyncio.create_task(_await_walkthrough())
     existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
     repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
     agents_md_task = asyncio.create_task(_fetch_agents_md_context())
@@ -860,7 +785,6 @@ async def prepare_reviewer_run(
         checkout_task,
         diff_context_task,
         pr_overview_task,
-        walkthrough_task,
         existing_threads_task,
         repo_style_task,
         agents_md_task,
@@ -880,9 +804,7 @@ async def prepare_reviewer_run(
         org_guidelines = await org_guidelines_task
         approval_policy = await approval_policy_task
         api_standards_skill = await api_standards_task
-        walkthrough = await walkthrough_task
     finally:
-        # A failed checkout must not leave the scout wait polling for minutes.
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -960,8 +882,6 @@ async def prepare_reviewer_run(
                     head_sha=head_sha,
                 ),
                 review_context,
-                _format_walkthrough(walkthrough),
-                _format_human_input(walkthrough),
             )
             if block
         ],
@@ -1064,68 +984,35 @@ def reviewer_tools() -> list[BaseTool]:
             web_search,
             fetch_url,
             http_request,
+            suggest_task,
         ]
     )
 
 
-async def _reconnect_reviewer_box(thread_id: str, cfg: RunConfig) -> SandboxBackendProtocol:
+async def _reconnect_reviewer_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBackendProtocol:
     await ensure_reviewer_github_token(thread_id, cfg)
     return await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
 
 
-def reviewer_box(thread_id: str, cfg: RunConfig) -> BackendProtocol:
-    """The review thread's box, connected again with a fresh token whenever it is gone."""
+def reviewer_sandbox(thread_id: str, cfg: RunConfig) -> BackendProtocol:
+    """The review thread's sandbox, connected again with a fresh token whenever it is gone."""
     return get_cached_sandbox_backend(
-        thread_id, reconnect=partial(_reconnect_reviewer_box, thread_id, cfg)
+        thread_id, reconnect=partial(_reconnect_reviewer_sandbox, thread_id, cfg)
     )
 
 
-async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
-    """Plan a review run into ``surface``: the tools, middleware, models and subagents its MDA run plays."""
-    config = config.copy()
-    configurable = dict(config.get("configurable") or {})
-    config["configurable"] = configurable
-    cfg = RunConfig.parse(configurable)
-    thread_id = cfg.thread_id
-    if thread_id is None:
+async def reviewer_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
+    """Work out a review run into ``surface``: its tools, models, subagents and loop rules."""
+    cfg = RunConfig.from_config(config)
+    if cfg.thread_id is None:
         raise ValueError("A review run needs a thread")
 
     models = await resolve_reviewer_models(cfg)
     use_gateway = models.use_gateway
 
-    backend = reviewer_box(thread_id, cfg)
-
-    middleware = cast(
-        list[AgentMiddleware[Any, Any, Any]],
-        [
-            PrepareReviewerRunMiddleware(
-                thread_id=thread_id,
-                config=config,
-                use_gateway=use_gateway,
-                model=models.main,
-            ),
-            TranscriptMiddleware(),
-            record_run_usage,
-            AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
-            ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
-            ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
-            refresh_github_proxy_before_model,
-            RepairOrphanedToolCallsMiddleware(),
-            ModelRetryMiddleware(retry_on=(TimeoutError,)),
-            ModelErrorMiddleware(),
-            settle_review_check_on_exit,
-        ],
-    )
     surface.base_tools = reviewer_tools()
-    surface.middleware = middleware
     surface.inbox = InboxSpec(surface=WEB_REPLY_SURFACE, model_id=cfg.agent_model_id)
-    surface.files = backend
     surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS
-    surface.loop = LoopRules(
-        hidden_tools=sorted(SHELL_SEARCH_EXCLUDED_TOOLS),
-        refresh_github_proxy=True,
-        at_end=["settle_review_check"],
-    )
     surface.models = SurfaceModels(
         main=ModelChoice(models.main.model_id, dict(models.main.kwargs)),
         subagent=ModelChoice(models.subagent.model_id, dict(models.subagent.kwargs)),

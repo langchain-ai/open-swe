@@ -8,7 +8,7 @@ import re
 import secrets
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, Self
 from urllib.parse import quote, urlparse
 from uuid import UUID
 
@@ -49,6 +49,8 @@ TERMINAL_TICKET_TTL_SECONDS = 60
 TERMINAL_TICKET_AUDIENCE = "open-swe-cloud-terminal"
 UPLOAD_TICKET_TTL_SECONDS = 60 * 60
 UPLOAD_TICKET_AUDIENCE = "open-swe-session-upload"
+CONNECT_CLAIM_TTL_SECONDS = 5 * 60
+CONNECT_CLAIM_AUDIENCE = "open-swe-claude-code-connect"
 JWT_ALG = "HS256"
 
 
@@ -123,6 +125,43 @@ def decode_upload_ticket(token: str) -> UploadTicket:
         return UploadTicket.model_validate(payload)
     except (jwt.PyJWTError, ValidationError) as exc:
         raise HTTPException(401, "invalid or expired upload code") from exc
+
+
+class ConnectClaim(BaseModel):
+    """A one-time claim on a new Claude Code sync token for ``user_id``'s machine ``name``.
+
+    It stands in for the token wherever an agent can read it: redeeming it mints the
+    token, and ``jti`` lets the token table refuse a second redemption.
+    """
+
+    sub: str = Field(min_length=1)
+    user_id: UUID
+    name: str = Field(min_length=1)
+    jti: UUID
+
+    def issue(self) -> str:
+        now = int(time.time())
+        payload = {
+            **self.model_dump(mode="json"),
+            "aud": CONNECT_CLAIM_AUDIENCE,
+            "iat": now,
+            "exp": now + CONNECT_CLAIM_TTL_SECONDS,
+        }
+        return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
+
+    @classmethod
+    def decode(cls, token: str) -> Self:
+        try:
+            payload = jwt.decode(
+                token,
+                _secret(),
+                algorithms=[JWT_ALG],
+                audience=CONNECT_CLAIM_AUDIENCE,
+                options={"require": ["aud", "sub", "user_id", "name", "jti", "iat", "exp"]},
+            )
+            return cls.model_validate(payload)
+        except (jwt.PyJWTError, ValidationError) as exc:
+            raise HTTPException(401, "invalid or expired claim") from exc
 
 
 GITHUB_APP_CLIENT_ID = ENV.GITHUB_APP_CLIENT_ID.get()
@@ -229,7 +268,15 @@ async def enforce_github_login_gate(login: str) -> None:
     raise HTTPException(403, "your GitHub account is not authorized")
 
 
-def issue_session(*, login: str, email: str | None, avatar_url: str | None, user_id: str) -> str:
+def issue_session(
+    *,
+    login: str,
+    email: str | None,
+    avatar_url: str | None,
+    user_id: str,
+    provider: Literal["github", "langsmith"] = "github",
+    langsmith_subject: str | None = None,
+) -> str:
     now = int(time.time())
     payload = {
         "sub": login,
@@ -238,7 +285,10 @@ def issue_session(*, login: str, email: str | None, avatar_url: str | None, user
         "user_id": user_id,
         "iat": now,
         "exp": now + SESSION_TTL_SECONDS,
+        "purpose": "session",
     }
+    if provider == "langsmith":
+        payload.update(provider=provider, langsmith_subject=langsmith_subject)
     return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
 
 
@@ -260,9 +310,12 @@ def session_user_id(session: dict[str, Any]) -> UUID | None:
 
 def decode_session(token: str) -> dict[str, Any]:
     try:
-        return jwt.decode(token, _secret(), algorithms=[JWT_ALG])
+        payload = jwt.decode(token, _secret(), algorithms=[JWT_ALG])
     except jwt.PyJWTError as e:
         raise HTTPException(401, f"invalid session: {e}") from e
+    if "challenge" in payload or payload.get("purpose", "session") != "session":
+        raise HTTPException(401, "invalid session purpose")
+    return payload
 
 
 def new_state_nonce() -> str:
@@ -287,6 +340,9 @@ def issue_state(
     nonce_hash: str,
     handoff_challenge: str | None = None,
     handoff_port: int | None = None,
+    provider: Literal["github", "langsmith"] = "github",
+    encrypted_code_verifier: str | None = None,
+    redirect_uri: str | None = None,
 ) -> str:
     now = int(time.time())
     payload: dict[str, Any] = {
@@ -295,6 +351,12 @@ def issue_state(
         "iat": now,
         "exp": now + STATE_TTL_SECONDS,
     }
+    if provider == "langsmith":
+        payload.update(
+            provider=provider,
+            encrypted_code_verifier=encrypted_code_verifier,
+            redirect_uri=redirect_uri,
+        )
     if handoff_challenge and handoff_port:
         payload["handoff_challenge"] = handoff_challenge
         payload["handoff_port"] = handoff_port
@@ -385,17 +447,30 @@ def issue_desktop_handoff(
     avatar_url: str | None,
     challenge: str,
     user_id: str,
+    provider: Literal["github", "langsmith"] = "github",
+    langsmith_subject: str | None = None,
 ) -> str:
     """Mint the code the browser hands back after a desktop login."""
-    return _mint_handoff(
-        challenge=challenge,
-        claims={"sub": login, "email": email, "avatar_url": avatar_url, "user_id": user_id},
-    )
+    claims: dict[str, object] = {
+        "sub": login,
+        "email": email,
+        "avatar_url": avatar_url,
+        "user_id": user_id,
+        "purpose": "login",
+    }
+    if provider == "langsmith":
+        claims.update(provider=provider, langsmith_subject=langsmith_subject)
+    return _mint_handoff(challenge=challenge, claims=claims)
 
 
 def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
     """Mint the session a desktop handoff code was issued for."""
     payload = _decode_handoff(code=code, verifier=verifier)
+    if payload.get("purpose") != "login":
+        raise HTTPException(400, "handoff purpose mismatch")
+    provider = payload.get("provider", "github")
+    if provider not in {"github", "langsmith"}:
+        raise HTTPException(400, "invalid handoff provider")
     login = payload.get("sub")
     user_id = payload.get("user_id")
     if not isinstance(login, str) or not login or not isinstance(user_id, str) or not user_id:
@@ -407,6 +482,8 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
         email=email if isinstance(email, str) else None,
         avatar_url=avatar_url if isinstance(avatar_url, str) else None,
         user_id=user_id,
+        provider=provider,
+        langsmith_subject=payload.get("langsmith_subject"),
     )
 
 
@@ -454,13 +531,18 @@ def build_settings_url() -> str | None:
     return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
 
 
-def require_session(
+async def require_session(
     request: HTTPConnection, _cookie: str | None = Depends(SESSION_COOKIE)
 ) -> dict[str, Any]:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise HTTPException(401, "not authenticated")
     session = decode_session(token)
+    from openswe.dashboard.principal import DashboardPrincipal
+
+    principal = DashboardPrincipal.from_session(session)
+    principal.authorize_path(request.url.path, request.scope.get("method", "GET"))
+    await principal.authorize()
     bind_audit_session(request, session)
     return session
 

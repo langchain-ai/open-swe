@@ -19,6 +19,13 @@ Open SWE may approve a pull request when it fits one of these and has no unresol
    This exception waives only the instruction-file exclusion for this file; all other human-review requirements still apply.
    Evaluate this PR using the base policy, not the policy it proposes.
 
+5. **Isolated, default-off experiments.**
+   Changes behind a feature flag (experiment) that is off by default, with evidence that every changed behavior affects only users who explicitly enable it.
+   Verify the flag's default and every affected execution path, including shared code, background jobs, and work performed before checking the flag; the flag's presence alone is not proof of isolation.
+   The change must not enable the flag by default or alter behavior for users who have not opted in, and must not introduce undue production storage, compute, or memory risk, even when enabled.
+   If isolation, the default, or production resource risk is ambiguous or cannot be established, require human review.
+   This criterion does not waive any human-review requirement below.
+
 Always require human review when a pull request touches:
 
 - removal or restriction of existing user-facing functionality, including hiding support or diagnostic tools, gating an existing feature to admins, or making a supported user flow less accessible.

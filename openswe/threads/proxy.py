@@ -5,7 +5,7 @@ import copy
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
 import httpx2
@@ -14,10 +14,12 @@ from langgraph_sdk.errors import NotFoundError
 
 from openswe.config import ENV
 from openswe.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
+from openswe.dispatch import channel_of
 from openswe.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
 )
+from openswe.threads.identity import ThreadIdentity
 from openswe.threads.machine_reads import machine_thread
 from openswe.threads.principals import Principal
 from openswe.threads.runs import (
@@ -26,12 +28,12 @@ from openswe.threads.runs import (
     _enrich_run_start_command,
     _enrich_system_run_start_command,
     _extract_run_id_from_command_response,
-    _notify_slack_web_handoff,
+    _SlackWebHandoff,
     offload_requested,
     queue_follow_up_run,
     steer_running_thread,
 )
-from openswe.threads.store import POSTING_COMMANDS, THREADS, CommandReply
+from openswe.threads.store import ACTING_COMMANDS, POSTING_COMMANDS, THREADS, CommandReply
 from openswe.threads.summary import (
     TRANSCRIPT_VERSION,
     _assert_thread_postable,
@@ -278,8 +280,13 @@ async def proxy_dashboard_thread_commands(
             run_metadata["dashboard_ttft_started_at_ms"] = received_at_ms
             outgoing = json.dumps(enriched).encode()
 
+    sender = (
+        await _sender_user_id(principal, login, metadata)
+        if method in ACTING_COMMANDS and not relayed_from
+        else None
+    )
     try:
-        reply = await THREADS.command(thread_id, outgoing)
+        reply = await THREADS.command(thread_id, outgoing, user_id=sender)
     except Exception:
         # Answered like the runtime's own failure, so a refused start still closes its turn.
         logger.exception("Delivering a thread command failed", extra={"thread_id": thread_id})
@@ -313,12 +320,7 @@ async def proxy_dashboard_thread_commands(
     if run_start_refused:
         await _fail_requested_turn(thread_id, enriched)
     if run_start_succeeded and not creating and not relayed_from:
-        try:
-            await _notify_slack_web_handoff(thread_id, metadata)
-        except Exception:
-            logger.exception(
-                "Failed to update Slack message for dashboard handoff on %s", thread_id
-            )
+        await _SlackWebHandoff(thread_id, metadata).notify()
 
     if run_start_succeeded and run_id is not None:
         task = asyncio.create_task(
@@ -347,6 +349,22 @@ async def proxy_dashboard_thread_commands(
                 exc_info=True,
             )
     return reply.status, reply.content, reply.media_type
+
+
+async def _sender_user_id(
+    principal: Principal, login: str, metadata: Mapping[str, object]
+) -> str | None:
+    """The Open SWE user a person's own command on a channel's thread acts as there.
+
+    The one ``_run_user_metadata`` attributes the person's dashboard runs to, so a
+    follow-up has the principal their channel runs have. ``None`` for a machine,
+    which is no person, and on any other thread. An agent's relayed message is not the
+    person's own, so its caller asks for none.
+    """
+    if principal.machine or channel_of(metadata) is None:
+        return None
+    user = await ThreadIdentity(login).user()
+    return None if user is None else str(user.id)
 
 
 async def _queue_if_thread_turned_busy(

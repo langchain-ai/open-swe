@@ -1,13 +1,15 @@
-"""GitHub webhook events are dropped for repos no workspace owns when policy says so."""
+"""GitHub webhook events are dropped for repos outside the allowlist or that no workspace owns."""
 
 from typing import Any
 
 import httpx
 import pytest
 
+from openswe.github import forwarding
 from openswe.github import routes as github_routes
-from openswe.github import webhook as github_webhooks
+from openswe.github import webhook as github_service
 from openswe.webhooks import common as webhook_common
+from openswe.webhooks.event_log import EventLog
 from openswe.workspaces.routing import WorkspaceLookupError
 from tests.conftest import post_signed_github_webhook, register_github_logins
 
@@ -28,6 +30,59 @@ def _unowned_repo_issue_comment_payload() -> dict[str, Any]:
     }
 
 
+async def test_repo_outside_allowed_orgs_is_dropped_before_logging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+
+    async def fail_if_called(*args: object, **kwargs: object) -> None:
+        raise AssertionError("an outside repository's delivery must not be processed")
+
+    monkeypatch.setattr(EventLog, "record", fail_if_called)
+    monkeypatch.setattr(github_routes, "repo_is_routable", fail_if_called)
+    monkeypatch.setattr(github_service, "process_github_pr_walkthrough", fail_if_called)
+
+    response = await _post_github_webhook(
+        "pull_request",
+        {
+            "action": "opened",
+            "pull_request": {"number": 7, "head": {"sha": "head"}, "base": {"sha": "base"}},
+            "repository": {"owner": {"login": "Joshluxr"}, "name": "tester"},
+            "sender": {"login": "octocat"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ignored", "reason": "Repository not in allowlist"}
+
+
+async def test_installation_event_for_an_allowed_repos_owner_clears_the_repo_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_REPOS", frozenset({"acme/widgets"}))
+    cleared: list[bool] = []
+
+    async def record(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def forget() -> None:
+        cleared.append(True)
+
+    monkeypatch.setattr(EventLog, "record", record)
+    monkeypatch.setattr(github_routes, "forget_cached_repos", forget)
+
+    response = await _post_github_webhook(
+        "installation_repositories",
+        {"action": "added", "installation": {"id": 1, "account": {"login": "Acme"}}},
+    )
+
+    assert response.status_code == 200
+    assert cleared == [True]
+
+
 async def test_unowned_repo_is_ignored_when_policy_is_ignore(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -35,9 +90,9 @@ async def test_unowned_repo_is_ignored_when_policy_is_ignore(
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
     async def fail_if_called(*args: object, **kwargs: object) -> None:
-        raise AssertionError("process_github_issue should not run for an unowned repository")
+        raise AssertionError("an unowned repository's issue run must not start")
 
-    monkeypatch.setattr(github_webhooks, "process_github_issue", fail_if_called)
+    monkeypatch.setattr(forwarding, "queue_forward", fail_if_called)
 
     response = await _post_github_webhook("issue_comment", _unowned_repo_issue_comment_payload())
 
@@ -55,10 +110,10 @@ async def test_unowned_repo_is_not_ignored_for_workspace_when_policy_unset(
 
     called: dict[str, object] = {}
 
-    async def fake_process_github_issue(payload: dict[str, object], event_type: str) -> None:
-        called["event_type"] = event_type
+    async def fake_forward(body: bytes, headers: dict[str, str]) -> None:
+        called["event_type"] = headers["X-GitHub-Event"]
 
-    monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
+    monkeypatch.setattr(forwarding, "queue_forward", fake_forward)
     register_github_logins(monkeypatch, "octocat")
 
     response = await _post_github_webhook("issue_comment", _unowned_repo_issue_comment_payload())
@@ -82,7 +137,7 @@ async def test_unreadable_workspace_list_asks_github_to_retry(
         raise AssertionError("no event may be processed while ownership is unknown")
 
     monkeypatch.setattr(github_routes, "repo_is_routable", unreadable)
-    monkeypatch.setattr(github_webhooks, "process_github_issue", fail_if_called)
+    monkeypatch.setattr(forwarding, "queue_forward", fail_if_called)
 
     response = await _post_github_webhook("issue_comment", _unowned_repo_issue_comment_payload())
 

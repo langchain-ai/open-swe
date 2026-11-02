@@ -8,6 +8,7 @@ import httpx
 import httpx2
 import openai
 import pytest
+from deepagents.middleware._utils import append_to_system_message
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import (
@@ -40,6 +41,7 @@ from rt.model_calls import (
 )
 from rt.model_retries import ModelRetriesMiddleware
 from rt.models import ModelSpec, build_model
+from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
 from runtime_api.catalog import Catalog
 
 _ANTHROPIC = ChatAnthropic(model_name="claude-opus-5-5", api_key=SecretStr("test"))
@@ -295,11 +297,39 @@ async def test_a_text_only_model_hands_images_to_the_vision_model(
     assert forwarded.model is (_OPENAI if with_image else _FIREWORKS)
 
 
-async def test_the_graphs_system_prompt_leads_each_runs_and_is_cached_on_its_own(
+class _Skills(AgentMiddleware):
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        system = append_to_system_message(request.system_message, "Skills")
+        return await handler(request.override(system_message=system))
+
+
+def _through(
+    layers: list[AgentMiddleware], handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
+) -> Callable[[ModelRequest], Awaitable[ModelResponse]]:
+    async def call(request: ModelRequest) -> ModelResponse:
+        response = await layers[0].awrap_model_call(request, _through(layers[1:], handler))
+        assert isinstance(response, ModelResponse)
+        return response
+
+    return call if layers else handler
+
+
+@tool
+def _search(query: str) -> str:
+    """Search."""
+    return query
+
+
+async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Every run's prompt follows the graph's own, which ends in an Anthropic cache
-    breakpoint that a fallback to another provider does not carry."""
+    """The run's shared prompt and the workspace's each end in an Anthropic cache
+    breakpoint ahead of the skills and the thread's own part, keeping a request within
+    four, the tools take none, and a fallback to another provider carries none."""
     built: dict[str, BaseChatModel] = {"anthropic:opus": _ANTHROPIC, "openai:gpt": _OPENAI}
     monkeypatch.setattr(
         "rt.middleware.build_model", lambda spec, *, use_gateway: built[spec.model_id]
@@ -315,9 +345,17 @@ async def test_the_graphs_system_prompt_leads_each_runs_and_is_cached_on_its_own
             raise RuntimeError("overloaded")
         return ModelResponse(result=[AIMessage(content="ok")])
 
-    for prompt in ("First run's prompt", "Next run's prompt"):
+    layers: list[AgentMiddleware] = [
+        RunPromptMiddleware(),
+        _Skills(),
+        ThreadPromptMiddleware(),
+        model_call_guards()[-1],
+    ]
+    for thread in ("First thread's part", "Next thread's part"):
         call = ModelCall(
-            system_prompt=prompt,
+            system_prompt="Every thread's prompt",
+            workspace_prompt="The workspace's prompt",
+            thread_prompt=thread,
             model=ModelSpec(model_id="anthropic:opus", kwargs={}),
             fallback=ModelSpec(model_id="openai:gpt", kwargs={}),
             use_gateway=False,
@@ -327,22 +365,37 @@ async def test_the_graphs_system_prompt_leads_each_runs_and_is_cached_on_its_own
             model=_ANTHROPIC,
             messages=messages,
             system_message=static,
+            tools=[_search],
             state=cast(AgentState, {"messages": messages, "open_swe_call": call.model_dump()}),
         )
-        await BackendRunMiddleware(run.backend).awrap_model_call(request, handler)
+        await BackendRunMiddleware(run.backend).awrap_model_call(request, _through(layers, handler))
 
     cached = {"type": "ephemeral", "ttl": "1h"}
-    first, first_fallback, second, _ = (cast(SystemMessage, r.system_message) for r in sent)
-    assert first.content == [
-        {"type": "text", "text": "The graph's own instructions", "cache_control": cached},
-        {"type": "text", "text": "First run's prompt"},
-    ]
-    assert second.content[0] == first.content[0]
-    assert second.content[1] == {"type": "text", "text": "Next run's prompt"}
-    assert first_fallback.content == [
+    first, first_fallback, second, _ = sent
+    assert cast(SystemMessage, first.system_message).content == [
         {"type": "text", "text": "The graph's own instructions"},
-        {"type": "text", "text": "First run's prompt"},
+        {"type": "text", "text": "Every thread's prompt", "cache_control": cached},
+        {"type": "text", "text": "The workspace's prompt", "cache_control": cached},
+        {"type": "text", "text": "\n\nSkills"},
+        {"type": "text", "text": "First thread's part", "cache_control": cached},
     ]
+    assert first.model_settings == {"cache_control": cached}
+    assert first.tools == [_search]
+    second_blocks = cast(SystemMessage, second.system_message).content
+    assert second_blocks[:4] == cast(SystemMessage, first.system_message).content[:4]
+    assert second_blocks[4] == {
+        "type": "text",
+        "text": "Next thread's part",
+        "cache_control": cached,
+    }
+    assert cast(SystemMessage, first_fallback.system_message).content == [
+        {"type": "text", "text": "The graph's own instructions"},
+        {"type": "text", "text": "Every thread's prompt"},
+        {"type": "text", "text": "The workspace's prompt"},
+        {"type": "text", "text": "\n\nSkills"},
+        {"type": "text", "text": "First thread's part"},
+    ]
+    assert first_fallback.model_settings == {}
     assert static.content == "The graph's own instructions"
 
 
@@ -523,7 +576,8 @@ async def test_streamed_partial_output_is_superseded_on_retry_or_fallback(
     backend_middleware = BackendRunMiddleware(
         run.backend, model_timeout_seconds=2.0 if outcome == "exhausted" else 0.15
     )
-    for name in ("_before_agent", "_before_model", "_after_model", "_after_agent"):
+    monkeypatch.setattr(backend_middleware, "_before_agent", AsyncMock(return_value=(None, False)))
+    for name in ("_before_model", "_after_model", "_after_agent"):
         monkeypatch.setattr(backend_middleware, name, AsyncMock(return_value=None))
     graph = create_agent(
         model=model,

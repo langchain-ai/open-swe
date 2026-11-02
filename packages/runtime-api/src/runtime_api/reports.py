@@ -1,7 +1,7 @@
 """What the runtime tells the backend happened, sent in batches the backend acknowledges.
 
-The runtime gathers its reports (each reply and tool call, each inbox receipt)
-and its notices (work the backend does for the run whose answer the run never
+The runtime gathers its reports (the run's start, each reply and tool call, each
+inbox receipt, the run's end) and its notices (work the backend does for the run whose answer the run never
 reads) and sends them in the order it made them, as many as are waiting in one
 ``reports`` call. Each item carries a key unique in its thread, and the backend
 records a key once, so a batch sent again after its answer was lost records
@@ -23,6 +23,8 @@ from runtime_api.loop import (
     FINISH_SCOUT_PLAN,
     INBOX_RECEIVED,
     MODEL_RESULT,
+    RUN_ENDED,
+    RUN_STARTED,
     SANDBOX_UNREACHABLE,
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
@@ -30,6 +32,8 @@ from runtime_api.loop import (
     TOOL_STARTED,
     InboxReceipt,
     ModelResult,
+    RunEnded,
+    RunStarted,
     SandboxGone,
     ScoutPlanEnd,
     ToolCallReport,
@@ -82,8 +86,26 @@ class ScoutPlanNoticed(Sent):
     request: ScoutPlanEnd
 
 
+class Started(Sent):
+    endpoint: Literal["run_started"]
+    request: RunStarted
+
+
+class Ended(Sent):
+    endpoint: Literal["run_ended"]
+    request: RunEnded
+
+
 type Item = Annotated[
-    ToolStarted | ToolFinished | Replied | Received | Noticed | SandboxNoticed | ScoutPlanNoticed,
+    ToolStarted
+    | ToolFinished
+    | Replied
+    | Received
+    | Noticed
+    | SandboxNoticed
+    | ScoutPlanNoticed
+    | Started
+    | Ended,
     Field(discriminator="endpoint"),
 ]
 _item: TypeAdapter[Item] = TypeAdapter(Item)
@@ -101,6 +123,8 @@ REPORTED: Final[Mapping[str, Delivery]] = {
         STEP_LIMIT_REACHED,
         SETTLE_REVIEW_CHECK,
         FINISH_SCOUT_PLAN,
+        RUN_STARTED,
+        RUN_ENDED,
     )
 }
 
@@ -127,7 +151,7 @@ class ReportsTaken(BaseModel):
     """What the backend took: the first items sent, one reply each, in order. The rest
     are the runtime's to send again."""
 
-    # What each taken item's endpoint answered, such as a tool result's git evidence.
+    # What each taken item's endpoint answered.
     replies: list[dict[str, JsonValue]] = []
     # Why the backend could not record the first item it did not take, when it tried
     # it and failed; nothing after it was tried.

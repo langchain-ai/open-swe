@@ -71,7 +71,6 @@ const settings = {
     enabled_at: 0,
   },
   connection: {
-    slack_configured: true,
     workspace_id: "T123",
     slack_app_id: "A123",
     verified_at: null,

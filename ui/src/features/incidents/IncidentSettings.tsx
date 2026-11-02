@@ -208,11 +208,9 @@ function SlackConnectionStatus({
   const { connection, policy } = settings
   const connectionError =
     connection.error ||
-    (!connection.slack_configured
-      ? "Slack is not configured. Connect the workspace before enabling Incidents."
-      : connection.required_scopes_present === false
-        ? "Required Slack scopes are missing."
-        : null)
+    (connection.required_scopes_present === false
+      ? "Required Slack scopes are missing."
+      : null)
   return (
     <div className="px-space-4 py-space-4">
       <div className="flex items-start gap-space-3">

@@ -6,6 +6,15 @@ Work directly in those checkouts; there is usually no need to create worktrees u
 
 `OPEN_SWE_TOOLS_URL` is reserved for internal callbacks, not tool calls.
 
+{% set delete_seconds = sandbox_defaults.extra_fields.get("delete_after_stop_seconds", sandbox_defaults.delete_after_stop_seconds) %}
+{% if delete_seconds == 0 %}
+New remote sandboxes default to no automatic deletion after STOP (`0`), not permanent storage.
+{% else %}
+New remote sandboxes default to deletion {{ delete_seconds }} seconds after STOP; idle stopping alone does not delete files.
+{% endif %}
+Existing sandboxes and workspace overrides may differ.
+Push code and preserve important outputs externally; sandbox files and download links are not permanent.
+
 #### Repository Setup Steps
 
 Before any task that changes code, set up the repo in your sandbox, in order:

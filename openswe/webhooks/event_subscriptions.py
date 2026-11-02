@@ -31,12 +31,11 @@ from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
 from openswe.input_messages import Fields
 from openswe.prompts import prompt
-from openswe.webhooks.event_log import LoggedEvent, WebhookSource
+from openswe.webhooks.event_log import ADMIN_ONLY_SOURCES, LoggedEvent, WebhookSource
 from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
 
 logger = logging.getLogger(__name__)
 
-_TRUSTED_GITHUB_BOTS = frozenset(login.lower() for login in INTERNAL_BOT_LOGINS)
 # CI results describe a commit, so they matter even when Open SWE pushed it.
 _CI_EVENT_TYPES = frozenset({"check_run", "check_suite", "workflow_run"})
 _MAX_BODY_CHARS = 8_000
@@ -168,6 +167,17 @@ class EventSummary(BaseModel):
             return cls._slack(event, _SlackDelivery.model_validate(payload))
         if event.source == "deployment":
             return cls._deployment(event, payload)
+        if event.source in ("human_review", "reviewer"):
+            link = payload.get("pull_request_url")
+            return cls(
+                source=event.source,
+                event_type=event.event_type,
+                target=link if isinstance(link, str) else "",
+                status=event.event_type,
+                trusted=True,
+            )
+        if event.source == "workspace":
+            return cls._workspace(event, payload)
         return cls._linear(event, _LinearDelivery.model_validate(payload))
 
     @classmethod
@@ -194,7 +204,7 @@ class EventSummary(BaseModel):
             link=link,
             status=status,
             body=body or "",
-            trusted=event.user_id is not None or sender in _TRUSTED_GITHUB_BOTS,
+            trusted=event.user_id is not None or sender in INTERNAL_BOT_LOGINS,
             from_open_swe=(
                 sender in OPEN_SWE_GITHUB_LOGINS
                 or (commented is not None and commented.authored_by_app(ENV.GITHUB_APP_ID.get()))
@@ -245,6 +255,18 @@ class EventSummary(BaseModel):
                 "This deploy includes the merge commit the thread subscribed for "
                 f"({count} commits)."
             ),
+            trusted=True,
+        )
+
+    @classmethod
+    def _workspace(cls, event: LoggedEvent, payload: dict[str, JsonValue]) -> Self:
+        """Open SWE's own workspace activity, e.g. a snapshot refresh settling."""
+        slug = payload.get("workspace_slug")
+        return cls(
+            source="workspace",
+            event_type=event.event_type,
+            target=slug if isinstance(slug, str) else "",
+            status=event.event_type.partition(".")[2],
             trusted=True,
         )
 
@@ -354,7 +376,7 @@ class EventSubscription(Base):
         strategies: dict[str, MultitaskStrategy] = {}
         for subscription in subscriptions:
             try:
-                if not await subscription.sees(summary):
+                if not await subscription.sees(event, summary):
                     continue
                 if not await subscription.match(event, summary):
                     continue
@@ -417,7 +439,11 @@ class EventSubscription(Base):
                 select(cls).where(
                     cls.workspace_id == event.workspace_id,
                     ~cls._expired(),
-                    or_(func.cardinality(cls.sources) == 0, cls.sources.contains([event.source])),
+                    cls.sources.contains([event.source])
+                    if event.source in ADMIN_ONLY_SOURCES
+                    else or_(
+                        func.cardinality(cls.sources) == 0, cls.sources.contains([event.source])
+                    ),
                     or_(cls.repository_id.is_(None), cls.repository_id == event.repository_id),
                     or_(
                         cls.pull_request_id.is_(None),
@@ -433,8 +459,28 @@ class EventSubscription(Base):
             )
             return list(rows.unique())
 
-    async def sees(self, summary: EventSummary) -> bool:
-        """Only joined non-DM Slack channels reach subscriptions."""
+    async def sees(self, event: LoggedEvent, summary: EventSummary) -> bool:
+        """Check restricted audiences against the thread's current access before delivery."""
+        if event.visibility != "public":
+            from openswe.run_config import RunConfig
+            from openswe.threads.identity import ThreadIdentity
+            from openswe.tools.access import resolve_access
+
+            cfg = RunConfig.from_config({"configurable": self.run_config})
+            access = await resolve_access(cfg)
+            if event.visibility == "admin":
+                if not access.admin_thread or self.workspace_id != event.workspace_id:
+                    return False
+            else:
+                if not access.private or not access.owner:
+                    return False
+                user = await ThreadIdentity(
+                    f"user:{cfg.user_id}" if cfg.user_id else cfg.github_login or ""
+                ).user()
+                if user is None or user.id != event.visible_to_user_id:
+                    return False
+        if summary.source in ADMIN_ONLY_SOURCES:
+            return self.run_config.get("admin_thread") is True
         if summary.source != "slack":
             return True
         from openswe.slack.channels import SlackChannel

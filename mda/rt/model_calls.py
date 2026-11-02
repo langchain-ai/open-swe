@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from typing import Final
 
 from langchain.agents.middleware import AgentMiddleware
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
@@ -194,6 +194,29 @@ class SubagentTimeoutReplyMiddleware(_ModelCallGuard):
             )
 
 
+class _RunPromptCaching(AnthropicPromptCachingMiddleware):
+    """Anthropic's prompt cache, less its breakpoint on the last tool.
+
+    The tools come before the system prompt, so ``RunPromptMiddleware``'s breakpoints
+    already cache them; the request's four go to the system prompt and conversation.
+    """
+
+    @property
+    def name(self) -> str:
+        """deepagents replaces its own prompt cache with the one of the same name."""
+        return AnthropicPromptCachingMiddleware.__name__
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelCallResult:
+        async def untagged_tools(tagged: ModelRequest) -> ModelResponse:
+            return await handler(tagged.override(tools=request.tools))
+
+        return await super().awrap_model_call(request, untagged_tools)
+
+
 def model_call_guards(
     timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS, *, subagent: bool = False
 ) -> list[AgentMiddleware]:
@@ -209,8 +232,7 @@ def model_call_guards(
         ReplayableHistoryMiddleware(),
         ModelCallTimeoutMiddleware(timeout_seconds),
         ModelRetriesMiddleware(),
-        # With BackendRunMiddleware's static-prompt breakpoint this fills all four of a
-        # request's cache breakpoints (static prompt, last system block, last tool, automatic);
-        # Anthropic rejects a fifth, so anything adding one must give one up.
-        AnthropicPromptCachingMiddleware(ttl=PROMPT_CACHE_TTL, unsupported_model_behavior="ignore"),
+        (AnthropicPromptCachingMiddleware if subagent else _RunPromptCaching)(
+            ttl=PROMPT_CACHE_TTL, unsupported_model_behavior="ignore"
+        ),
     ]

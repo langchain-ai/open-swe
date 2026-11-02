@@ -4,7 +4,6 @@ Every Slack write here edits or posts the one card, and only because someone
 just acted, a GitHub event arrived, or one of the request's deadlines passed.
 """
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -21,7 +20,6 @@ from openswe.expedited_review.channels import (
     sendable_channel,
     still_internal,
 )
-from openswe.expedited_review.diff_image import render_diff_png
 from openswe.expedited_review.eligibility import ChangedFile, ExpeditedDiff
 from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
@@ -54,9 +52,8 @@ from openswe.slack.client import (
     post_slack_thread_reply_with_ts,
     remove_slack_reaction,
     update_slack_message,
-    upload_slack_thread_file,
-    wait_for_slack_file,
 )
+from openswe.slack.diff_image import SlackDiffImage
 from openswe.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thread_owner import wake_thread_owner
@@ -157,35 +154,7 @@ class ReviewCard:
     async def _diff_image_id(self, files: list[ChangedFile]) -> str | None:
         """A hosted-but-unposted PNG of the diff, which the card renders inline."""
         shown = ExpeditedDiff(files, self.request.excluded_hunks).shown
-        if not shown:
-            return None
-        approval_id = str(self.request.id)
-        try:
-            png = await asyncio.to_thread(render_diff_png, shown)
-        except Exception:
-            logger.warning(
-                "Failed to render expedited review diff image; posting the text diff",
-                extra={"approval_id": approval_id},
-                exc_info=True,
-            )
-            return None
-        try:
-            file_id = await upload_slack_thread_file(
-                None, None, f"diff-{self.request.head_sha[:12]}.png", png, title="Diff"
-            )
-        except SlackRequestError as exc:
-            logger.warning(
-                "Failed to upload expedited review diff image",
-                extra={"approval_id": approval_id, "slack_error": exc.code},
-            )
-            return None
-        if not await wait_for_slack_file(file_id):
-            logger.warning(
-                "Slack did not finish processing the expedited review diff image",
-                extra={"approval_id": approval_id, "slack_file_id": file_id},
-            )
-            return None
-        return file_id
+        return await SlackDiffImage(shown, f"diff-{self.request.head_sha[:12]}.png").upload()
 
     async def _warn_target(self, card: tuple[str, list[Block]]) -> tuple[str, list[Block]]:
         pr = self.request.pull_request
@@ -224,9 +193,7 @@ class ReviewCard:
             channel = await SlackChannel.load(approval.slack_channel_id)
             if channel is None:
                 raise SlackRequestError("channel_not_found")
-            approval.slack_thread_ts = await channel.post(
-                text, blocks=block_payload(blocks), login=self.request.requester_login
-            )
+            approval.slack_thread_ts = await channel.post(text, blocks=block_payload(blocks))
             return approval.slack_thread_ts
         return await post_slack_thread_reply_with_ts(
             approval.slack_channel_id,
@@ -234,7 +201,6 @@ class ReviewCard:
             text,
             blocks=block_payload(blocks),
             agent_thread_id=approval.thread_id or None,
-            login=self.request.requester_login,
         )
 
     async def prompt_author_ready(self) -> str | None:
@@ -298,14 +264,11 @@ class ReviewCard:
                 blocks=block_payload(blocks),
                 agent_thread_id=request.thread_id or None,
                 reply_broadcast=True,
-                login=self.request.requester_login,
             )
         channel = await SlackChannel.load(request.slack_channel_id)
         if channel is None:
             raise SlackRequestError("channel_not_found")
-        return await channel.post(
-            text, blocks=block_payload(blocks), login=self.request.requester_login
-        )
+        return await channel.post(text, blocks=block_payload(blocks))
 
     async def _channel_choices(self) -> list[ChannelChoice]:
         pr = self.request.pull_request
@@ -338,7 +301,9 @@ class ReviewCard:
                 request, title=pr.title, author=author, outcome=outcome, review_states=states
             )
         from openswe.human_review.standard import merge_wait
+        from openswe.human_review.supplementary import SupplementaryReviews
 
+        states = await SupplementaryReviews(request).engineering_states(states)
         if (
             "CHANGES_REQUESTED" not in states.values()
             and merge_wait(
@@ -456,7 +421,6 @@ class ReviewCard:
                     current.slack_dm_message_ts,
                     text,
                     blocks=block_payload(blocks),
-                    login=current.requester_login,
                 )
             except SlackRequestError:
                 logger.warning(
@@ -543,7 +507,6 @@ class ReviewCard:
                 request.slack_message_ts,
                 text,
                 blocks=block_payload(blocks),
-                login=self.request.requester_login,
             )
         except SlackRequestError as exc:
             logger.warning(
@@ -557,9 +520,7 @@ class ReviewCard:
         if outcome is None and (copy := request.slack_copy) is not None:
             text, blocks = await self.render(None, copy=True)
             try:
-                await update_slack_message(
-                    *copy, text, blocks=block_payload(blocks), login=self.request.requester_login
-                )
+                await update_slack_message(*copy, text, blocks=block_payload(blocks))
             except SlackRequestError as exc:
                 logger.warning(
                     "Failed to update the copy of a human review card",
@@ -604,7 +565,6 @@ class ReviewCard:
             broadcast=broadcast,
             agent_thread_id=request.thread_id or None,
             adopt=adopt,
-            login=self.request.requester_login,
         )
 
     async def broadcast(self) -> bool:
@@ -618,9 +578,7 @@ class ReviewCard:
         approval = self.request
         text, blocks = await self.render(None, copy=True)
         try:
-            message_ts = await channel.post(
-                text, blocks=block_payload(blocks), login=self.request.requester_login
-            )
+            message_ts = await channel.post(text, blocks=block_payload(blocks))
         except SlackRequestError as exc:
             logger.warning(
                 "Could not copy an expedited review card to another channel",

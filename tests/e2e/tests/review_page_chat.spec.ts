@@ -141,41 +141,49 @@ test.describe("review page", () => {
     const target = new RegExp(`/agents/reviews/${OWNER}/${REPO}/${pr.number}$`);
     const link = `https://github.com/${OWNER}/${REPO}/pull/${pr.number}/files?w=1`;
 
-    await page.goto("/agents/reviews");
     const input = page.getByLabel("Open a pull request review");
-    await expect(input).toBeVisible();
-    await input.fill(`see ${link} thx`);
-    await input.press("Enter");
-    await expect(page).toHaveURL(target);
+    // The server-rendered input shows before the client handles it; retry until it does.
+    await page.goto("/agents/reviews");
+    await expect(async () => {
+      await input.fill(`see ${link} thx`);
+      await input.press("Enter");
+      await expect(page).toHaveURL(target, { timeout: 5_000 });
+    }).toPass();
 
     await page.goto("/agents/reviews");
-    await expect(input).toBeVisible();
-    await input.focus();
-    await input.evaluate((element, text) => {
-      const data = new DataTransfer();
-      data.setData("text/plain", text);
-      element.dispatchEvent(
-        new ClipboardEvent("paste", {
-          clipboardData: data,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-    }, `see ${link} thx`);
-    await expect(page).toHaveURL(target);
+    await expect(async () => {
+      await input.focus();
+      await input.evaluate((element, text) => {
+        const data = new DataTransfer();
+        data.setData("text/plain", text);
+        element.dispatchEvent(
+          new ClipboardEvent("paste", {
+            clipboardData: data,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }, `see ${link} thx`);
+      await expect(page).toHaveURL(target, { timeout: 5_000 });
+    }).toPass();
   });
 
-  test("puts the state pill on the title line and links the title to GitHub", async ({
+  test("keeps the state pill beside the title menu and a separate GitHub link", async ({
     page,
   }) => {
     await openReview(page, pr);
     const title = page
       .locator("h1")
-      .filter({ has: page.locator('svg[aria-label="GitHub"]') });
-    const link = title.getByRole("link");
-    await expect(link).toContainText("Add constant modules");
-    await expect(link).toContainText(`#${pr.number}`);
-    await expect(link.locator('svg[aria-label="GitHub"]')).toBeVisible();
+      .filter({ hasText: "Add constant modules" });
+    const menu = title.getByRole("link", { name: /Add constant modules/ });
+    await expect(menu).toContainText("Add constant modules");
+    await expect(menu).toContainText(`#${pr.number}`);
+    const link = title.getByRole("link", { name: "Open on GitHub" });
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute(
+      "href",
+      `https://github.com/${OWNER}/${REPO}/pull/${pr.number}`,
+    );
 
     const pill = title.locator("xpath=preceding-sibling::span[1]");
     await expect(pill).toHaveText("Reviewable");

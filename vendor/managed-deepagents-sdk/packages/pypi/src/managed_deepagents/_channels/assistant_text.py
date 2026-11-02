@@ -142,6 +142,8 @@ def _answers(run: object, after_id: str | None) -> list[object]:
 
 #: Content block types that make a reply on their own, without text.
 _MEDIA_BLOCKS = frozenset({"image", "image_url", "file", "audio", "video"})
+#: Content block types a channel can show; others, such as reasoning, stay in the thread.
+_SHOWN_BLOCKS = _MEDIA_BLOCKS | {"text"}
 
 
 def _has_media(message: object) -> bool:
@@ -213,7 +215,8 @@ def _message_content(message: object) -> MessageContent | None:
         if isinstance(block, str):
             blocks.append({"type": "text", "text": block})
         elif isinstance(block, dict):
-            blocks.append(block)
+            if block.get("type") in _SHOWN_BLOCKS:
+                blocks.append(block)
         else:
             return None
-    return cast("MessageContent", blocks)
+    return cast("MessageContent", blocks) if blocks else None

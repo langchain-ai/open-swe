@@ -72,6 +72,9 @@ function deferred() {
 async function loginAs(page: Page) {
   const response = await page.request.post("/control/login", { data: USER });
   expect(response.ok()).toBeTruthy();
+  await page.addInitScript((login) => {
+    localStorage.setItem(`open-swe.desktop.experience:${login}`, "coding");
+  }, USER.login);
 }
 
 function baseMetadata(
@@ -390,6 +393,83 @@ test.afterEach(async ({ request }) => {
 });
 
 test.describe("threads workspace", () => {
+  test("LangSmith Agent Workspace uses Open SWE threads without a mode switch", async ({
+    page,
+    request,
+  }) => {
+    await seedThreads(
+      request,
+      workspaceThreads().map((thread) => ({
+        ...thread,
+        metadata: { ...thread.metadata, experience: "agent_workspace" },
+      })),
+    );
+    await loginAs(page);
+    await page.addInitScript((login) => {
+      localStorage.setItem(
+        `open-swe.desktop.experience:${login}`,
+        "agent_workspace",
+      );
+      Object.defineProperty(window, "openSweDesktop", {
+        value: {
+          isDesktop: true,
+          setAppearance: () => Promise.resolve(),
+          onCommand: () => () => {},
+          setCommands: () => Promise.resolve(),
+          getUpdateState: () => Promise.resolve({ status: "idle" }),
+          onUpdateState: () => () => {},
+          listProjects: () => Promise.resolve([]),
+          onProjectsChanged: () => () => {},
+          listLocalThreads: () => Promise.resolve([]),
+          onLocalThreadsChanged: () => () => {},
+        },
+      });
+    }, USER.login);
+    await page.goto("/agents");
+    await dismissOnboardingIfShown(page);
+    const sidebar = page.locator("[data-sidebar-frame]");
+    await expect(sidebar.getByRole("tab")).toHaveCount(0);
+    await expect(
+      sidebar.getByRole("link", { name: "New chat", exact: true }),
+    ).toBeVisible();
+    const row = sidebar.getByRole("link", {
+      name: TITLES.ready,
+      exact: true,
+    });
+    await expect(row).toHaveAttribute("href", `/agents/${THREAD_IDS.ready}`);
+    await row.hover();
+    await row
+      .locator("..")
+      .getByRole("button", { name: "Pin chat", exact: true })
+      .click();
+    await expect(
+      row
+        .locator("..")
+        .getByRole("button", { name: "Unpin chat", exact: true }),
+    ).toBeVisible();
+    await row.hover();
+    await row
+      .locator("..")
+      .getByRole("button", { name: "Archive chat", exact: true })
+      .click();
+    await expect(row).toBeHidden();
+    await sidebar
+      .getByRole("button", { name: "Archived", exact: true })
+      .click();
+    await expect(row).toBeVisible();
+    await row.hover();
+    await row
+      .locator("..")
+      .getByRole("button", { name: "Unarchive chat", exact: true })
+      .click();
+    await expect(row).toBeVisible();
+    await page.reload();
+    await expect(row).toBeVisible();
+    await expect(sidebar.getByRole("tab")).toHaveCount(0);
+    await page.goto(`/agents/chat?chat=${THREAD_IDS.ready}`);
+    await expect(page).toHaveURL(/\/agents\/?$/);
+  });
+
   test("pins and unpins a non-owned thread across sidebar views", async ({
     page,
     request,
@@ -642,6 +722,9 @@ test.describe("threads workspace", () => {
       data: ADMIN_USER,
     });
     expect(loginResponse.ok()).toBeTruthy();
+    await page.addInitScript((login) => {
+      localStorage.setItem(`open-swe.desktop.experience:${login}`, "coding");
+    }, ADMIN_USER.login);
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/agents");
     await dismissOnboardingIfShown(page);

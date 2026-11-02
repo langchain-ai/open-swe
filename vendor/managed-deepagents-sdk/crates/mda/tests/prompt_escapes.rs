@@ -13,6 +13,13 @@ use std::path::Path;
 /// `(file, prompts in it, how a non-interactive caller answers them)`.
 const PROMPTS: &[(&str, usize, &str)] = &[
     (
+        "channel/setup.rs",
+        1,
+        "choosing which channels to set up is only asked in a terminal, and not when a \
+         channel is named (`mda channels setup slack`); without a terminal, or with --json, \
+         the command only reports each channel's status",
+    ),
+    (
         "chat/mod.rs",
         6,
         "interactive-only command: message, tool-review, per-call tool-approval, \

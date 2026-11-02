@@ -98,12 +98,8 @@ struct AppPermission {
 }
 
 /// Find the GitHub channel, if the project declares one.
-///
-/// `wait` is false for `mda deploy --no-wait`: App setup needs the live Agent
-/// Server URL, so that combination is rejected before anything is uploaded.
 pub(crate) fn prepare(
     requirements: &ChannelRequirements,
-    wait: bool,
     assistant_id: &str,
 ) -> Result<Option<GitHubChannel>> {
     let Some(AppChannelManifest {
@@ -120,10 +116,6 @@ pub(crate) fn prepare(
         bail!(
             "GitHub channels do not reply automatically; give the agent a GitHub MCP server to act on GitHub."
         );
-    }
-
-    if !wait {
-        bail!("An agent with a GitHub channel cannot be deployed with --no-wait.");
     }
 
     let event_permissions = config
@@ -197,7 +189,7 @@ mod tests {
     fn returns_none_without_a_github_channel() {
         let slack = json!({ "name": "slack", "provider": "slack", "transport": "trigger_server" });
         assert_eq!(
-            prepare(&requirements(vec![("slack", slack)]), false, "agent").unwrap(),
+            prepare(&requirements(vec![("slack", slack)]), "agent").unwrap(),
             None
         );
     }
@@ -209,7 +201,6 @@ mod tests {
         github["providerConfig"]["repositories"] = json!(["acme/api", "acme/web"]);
         let channel = prepare(
             &requirements(vec![("github", github), ("slack", slack)]),
-            true,
             "a-very-long-assistant-name-that-exceeds-the-limit",
         )
         .unwrap()
@@ -257,7 +248,6 @@ mod tests {
     fn rejects_two_github_channels() {
         let error = prepare(
             &requirements(vec![("github", manifest("github")), ("gh", manifest("gh"))]),
-            true,
             "agent",
         )
         .unwrap_err()
@@ -265,21 +255,6 @@ mod tests {
         assert_eq!(
             error,
             "An agent can have only one GitHub channel (found: gh, github)."
-        );
-    }
-
-    #[test]
-    fn rejects_no_wait() {
-        let error = prepare(
-            &requirements(vec![("github", manifest("github"))]),
-            false,
-            "agent",
-        )
-        .unwrap_err()
-        .to_string();
-        assert_eq!(
-            error,
-            "An agent with a GitHub channel cannot be deployed with --no-wait."
         );
     }
 
@@ -331,7 +306,7 @@ mod tests {
         for (label, mutate, expected) in cases {
             let mut value = manifest("github");
             mutate(&mut value);
-            let error = prepare(&requirements(vec![("github", value)]), true, "agent").unwrap_err();
+            let error = prepare(&requirements(vec![("github", value)]), "agent").unwrap_err();
             let message = format!("{error:#}");
             assert!(message.contains(expected), "{label}: {message}");
         }

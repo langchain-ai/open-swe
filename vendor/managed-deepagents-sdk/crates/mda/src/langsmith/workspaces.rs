@@ -8,11 +8,11 @@
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use reqwest::Method;
+use reqwest::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::Client;
+use super::{ApiError, Client};
 
 /// Timeout for the optional workspace lookup.
 ///
@@ -74,7 +74,48 @@ pub(crate) struct AuthIdentity {
     pub workspace_id: Option<String>,
 }
 
+/// What LangSmith said when asked whether it accepts a key.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum KeyCheck {
+    /// The key authenticated.
+    Accepted,
+    /// The key was refused with this status (401 or 403).
+    Rejected(StatusCode),
+    /// No answer either way: the request failed, timed out, hit an endpoint
+    /// this installation does not serve, or was skipped because the key would
+    /// cross the network in cleartext.
+    Unverified,
+}
+
 impl Client {
+    /// Ask LangSmith whether it accepts this client's key, via the same
+    /// `GET /auth/public` identity lookup as [`Self::auth_identity`].
+    ///
+    /// Only a 401 or 403 is a verdict on the key; every other failure is
+    /// [`KeyCheck::Unverified`], so a flaky or unusual installation never
+    /// blocks a command that might still work. Bounded by [`LOOKUP_TIMEOUT`].
+    pub(crate) fn check_api_key(&self) -> KeyCheck {
+        if !self.sends_key_securely() {
+            return KeyCheck::Unverified;
+        }
+        match self.request_with_timeout(
+            &self.platform_api_url,
+            Method::GET,
+            "/auth/public",
+            &[],
+            None,
+            LOOKUP_TIMEOUT,
+        ) {
+            Ok(_) => KeyCheck::Accepted,
+            Err(err) => match err.downcast_ref::<ApiError>().map(|api| api.status) {
+                Some(status @ (StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)) => {
+                    KeyCheck::Rejected(status)
+                }
+                _ => KeyCheck::Unverified,
+            },
+        }
+    }
+
     /// [`Self::auth_identity`], giving up after `timeout`. Skipped when the key
     /// would cross the network in cleartext, since nothing the user asked for
     /// depends on it.
@@ -83,6 +124,12 @@ impl Client {
             return None;
         }
         self.clone().with_timeout(timeout).ok()?.auth_identity()
+    }
+
+    /// The key's identity for a preflight, bounded by [`LOOKUP_TIMEOUT`] like
+    /// [`Self::check_api_key`].
+    pub(crate) fn preflight_identity(&self) -> Option<AuthIdentity> {
+        self.auth_identity_within(LOOKUP_TIMEOUT)
     }
 
     /// Best-effort identity lookup; errors leave optional metadata unknown.
@@ -389,6 +436,52 @@ mod tests {
 
         assert_eq!(target.label_for("ws-1"), "Production");
         assert_eq!(target.label_for("ws-unlisted"), "ws-unlisted");
+    }
+
+    #[test]
+    fn a_refused_key_is_rejected_with_the_status() {
+        for (status, expected) in [
+            ("403 Forbidden", StatusCode::FORBIDDEN),
+            ("401 Unauthorized", StatusCode::UNAUTHORIZED),
+        ] {
+            let base = serve_paths(vec![(
+                "/auth/public",
+                status,
+                json!({ "error": "Forbidden" }).to_string(),
+            )]);
+
+            assert_eq!(
+                client_for(base, None).check_api_key(),
+                KeyCheck::Rejected(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn an_accepted_key_passes_the_check() {
+        let base = serve_paths(vec![(
+            "/auth/public",
+            "200 OK",
+            json!({ "tenant_id": "ws-1" }).to_string(),
+        )]);
+
+        assert_eq!(client_for(base, None).check_api_key(), KeyCheck::Accepted);
+    }
+
+    #[test]
+    fn a_failing_identity_endpoint_is_not_a_verdict_on_the_key() {
+        for status in ["404 Not Found", "500 Internal Server Error"] {
+            let base = serve_paths(vec![("/auth/public", status, "{}".to_string())]);
+
+            assert_eq!(client_for(base, None).check_api_key(), KeyCheck::Unverified);
+        }
+    }
+
+    #[test]
+    fn a_key_bound_for_a_cleartext_remote_host_is_not_sent() {
+        let client = client_for("http://langsmith.example.com".to_string(), None);
+
+        assert_eq!(client.check_api_key(), KeyCheck::Unverified);
     }
 
     #[test]

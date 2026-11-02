@@ -138,6 +138,10 @@ struct SlackManagerResponse {
 pub(crate) struct TriggerChannel {
     pub(crate) provider: String,
     pub(crate) channel_name: String,
+    /// `active` once Slack delivers the channel's events; absent from older
+    /// Trigger Servers.
+    #[serde(default)]
+    pub(crate) status: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,7 +166,7 @@ pub(crate) struct SlackChannelOptions {
     pub(crate) trigger_on_all_messages: bool,
     /// Only sent when the channel sets it, so default payloads stay identical
     /// for consumers that predate the option. Unset lets Trigger Server keep an
-    /// existing app's mode or default a new one to `thread`.
+    /// existing app's mode or default a new one to `mention`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) trigger_mode: Option<SlackTriggerMode>,
     pub(crate) allow_bot_triggers: bool,
@@ -372,16 +376,34 @@ impl Client {
             if let Some(in_use) = slack_app_in_use(status, &text) {
                 return Err(in_use.into());
             }
-            let mut message = setup_failure_message(status, &text, api_key.as_str());
-            if let Some(customer_app) = &payload.slack.customer_app {
-                // The server never echoes them, but its detail is untrusted.
-                for secret in [&customer_app.bot_token, &customer_app.signing_secret] {
-                    if !secret.is_empty() {
-                        message = message.replace(secret.as_str(), "[REDACTED]");
-                    }
+            let code = status.as_u16();
+            let transient = status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS;
+            if payload.slack.customer_app.is_some() {
+                // The body is untrusted and may echo the app's credentials, so
+                // none of it is shown.
+                if transient {
+                    return Err(TransientSetupError(format!(
+                        "Channel setup failed (HTTP {code})."
+                    ))
+                    .into());
                 }
+                if status == StatusCode::CONFLICT {
+                    bail!(
+                        "Slack channel setup conflicts with the existing registration. Check the app setup, or delete and recreate the channel."
+                    );
+                }
+                if matches!(
+                    status,
+                    StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY
+                ) {
+                    bail!(
+                        "Channel setup failed (HTTP {code}). Check the Slack app's bot token and signing secret."
+                    );
+                }
+                bail!("Channel setup failed (HTTP {code}).");
             }
-            if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS {
+            let message = setup_failure_message(status, &text, api_key.as_str());
+            if transient {
                 return Err(TransientSetupError(message).into());
             }
             bail!("{message}");
@@ -391,6 +413,11 @@ impl Client {
             .context("Failed to read channel setup response.")?;
         let mut response: ChannelSetupResponse = serde_json::from_str(&text)
             .map_err(|_| anyhow!("Channel setup returned an invalid response."))?;
+        if payload.slack.customer_app.is_some() {
+            response.message = None;
+            response.authorization_url = None;
+            return Ok(response);
+        }
         if let Some(message) = &mut response.message {
             *message = message.replace(api_key.as_str(), "[REDACTED]");
         }
@@ -577,6 +604,64 @@ mod tests {
     }
 
     #[test]
+    fn slack_manifest_requests_the_server_manifest_with_auth() {
+        let manifest = json!({"display_information": {"name": "Support Bot"}});
+        let (origin, receiver) = serve_once("200 OK", &[], &manifest.to_string());
+
+        let result = client(Some("tenant-id".into()), &origin)
+            .slack_app_manifest(
+                &SlackChannelApp {
+                    name: "Support Bot".into(),
+                    description: "Helpful & safe".into(),
+                    image: String::new(),
+                    background_color: "#09090f".into(),
+                },
+                &SlackChannelOptions {
+                    trigger_on_all_messages: true,
+                    ..request().slack.options
+                },
+            )
+            .unwrap();
+        let raw = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+        let path = raw
+            .lines()
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .nth(1)
+            .unwrap();
+        let url = Url::parse(&format!("https://example.test{path}")).unwrap();
+        let query: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+
+        assert_eq!(result, manifest);
+        assert_eq!(url.path(), "/v1/triggers/slack-custom-app/manifest");
+        assert_eq!(
+            query.get("description").map(String::as_str),
+            Some("Helpful & safe")
+        );
+        assert_eq!(
+            query.get("trigger_on_all_messages").map(String::as_str),
+            Some("true")
+        );
+        assert!(raw
+            .to_ascii_lowercase()
+            .contains("x-api-key: resolved-login-key"));
+        assert!(raw.to_ascii_lowercase().contains("x-tenant-id: tenant-id"));
+    }
+
+    #[test]
+    fn slack_manifest_does_not_echo_an_error_body() {
+        let (origin, _) = serve_once("500 Internal Server Error", &[], "private response");
+
+        let error = client(None, &origin)
+            .slack_app_manifest(&request().slack.app, &request().slack.options)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(error, "Slack manifest request failed (HTTP 500).");
+    }
+
+    #[test]
     fn setup_channel_posts_exact_path_body_and_auth_headers() {
         let response = json!({
             "status": "active",
@@ -715,6 +800,80 @@ mod tests {
         assert_eq!(rendered, "Channel setup failed (HTTP 401).");
     }
 
+    #[test]
+    fn customer_setup_never_echoes_response_text_or_credentials() {
+        let (origin, _) = serve_once(
+            "400 Bad Request",
+            &[],
+            r#"{"detail":"test-bot-token signing-private"}"#,
+        );
+        let mut payload = request();
+        payload.slack.customer_app = Some(SlackCustomerApp {
+            bot_token: "test-bot-token".to_string(),
+            signing_secret: "signing-private".to_string(),
+            move_from_deployment: None,
+        });
+
+        let error = client(None, &origin)
+            .setup_trigger_channel(&payload)
+            .err()
+            .unwrap()
+            .to_string();
+
+        assert_eq!(
+            error,
+            "Channel setup failed (HTTP 400). Check the Slack app's bot token and signing secret."
+        );
+    }
+
+    #[test]
+    fn customer_setup_outage_does_not_blame_credentials() {
+        let (origin, _) = serve_once(
+            "503 Service Unavailable",
+            &[],
+            r#"{"detail":"test-bot-token signing-private"}"#,
+        );
+        let mut payload = request();
+        payload.slack.customer_app = Some(SlackCustomerApp {
+            bot_token: "test-bot-token".to_string(),
+            signing_secret: "signing-private".to_string(),
+            move_from_deployment: None,
+        });
+
+        let error = client(None, &origin)
+            .setup_trigger_channel(&payload)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(error, "Channel setup failed (HTTP 503).");
+    }
+
+    #[test]
+    fn customer_setup_conflict_does_not_echo_secrets() {
+        let (origin, _) = serve_once(
+            "409 Conflict",
+            &[],
+            r#"{"detail":"test-bot-token signing-private"}"#,
+        );
+        let mut payload = request();
+        payload.slack.customer_app = Some(SlackCustomerApp {
+            bot_token: "test-bot-token".to_string(),
+            signing_secret: "signing-private".to_string(),
+            move_from_deployment: None,
+        });
+
+        let error = client(None, &origin)
+            .setup_trigger_channel(&payload)
+            .err()
+            .unwrap()
+            .to_string();
+
+        assert_eq!(
+            error,
+            "Slack channel setup conflicts with the existing registration. Check the app setup, or delete and recreate the channel."
+        );
+    }
+
     fn setup_error(status: &str, body: &Value) -> String {
         let (origin, _) = serve_once(status, &[], &body.to_string());
         client(None, &origin)
@@ -851,7 +1010,7 @@ mod tests {
             .to_string();
 
         assert!(!error.contains("xoxb-secret"));
-        assert!(error.contains("[REDACTED]"));
+        assert!(!error.contains("is invalid"));
     }
 
     #[test]
@@ -999,6 +1158,7 @@ mod tests {
         assert_eq!(channels.len(), 1);
         assert_eq!(channels[0].provider, "slack");
         assert_eq!(channels[0].channel_name, "support");
+        assert_eq!(channels[0].status.as_deref(), Some("active"));
     }
 
     #[test]

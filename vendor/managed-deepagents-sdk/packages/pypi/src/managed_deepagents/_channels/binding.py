@@ -57,10 +57,7 @@ def binding_with_messages(
 
     It replaces the delivery's messages, such as with a handler's.
     """
-    return cast(
-        "ChannelBinding",
-        {**binding, "event": {"type": "message", "messages": [dict(m) for m in messages]}},
-    )
+    return {**binding, "event": {"type": "message", "messages": [dict(m) for m in messages]}}
 
 
 _current_channel: ContextVar[ChannelBinding | None] = ContextVar("mda_channel", default=None)

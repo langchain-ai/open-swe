@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 
 use anyhow::Result;
 
+use super::api_key_check::{verify_api_key, ResolvedApiKey};
 use super::helpers::{
     resolve_context_hub_base_url, resolve_langsmith_api_bases, resolve_platform_api_url,
     REMOVED_WORKSPACE_ID_ENVS, WORKSPACE_ID_ENV,
@@ -89,6 +90,25 @@ impl LangSmithContext {
         let api_key = api_key(&endpoints.platform_api_url)?;
         let workspace_id = resolve_workspace_id(env_vars, workspace_flag, workspace_hint)?;
         Ok(endpoints.with_auth(api_key, workspace_id))
+    }
+
+    /// [`Self::resolve`] for a key whose source is known, then fail as
+    /// [`verify_api_key`] does when LangSmith refuses it. For commands whose
+    /// first LangSmith call would otherwise turn a bad key into a misleading
+    /// 403.
+    pub(crate) fn resolve_verified(
+        env_vars: &BTreeMap<String, String>,
+        host_override: Option<&str>,
+        workspace_flag: Option<&str>,
+        workspace_hint: &str,
+        api_key: impl FnOnce(&str) -> Result<ResolvedApiKey>,
+    ) -> Result<Self> {
+        let endpoints = LangSmithEndpoints::resolve(env_vars, host_override);
+        let ResolvedApiKey { api_key, source } = api_key(&endpoints.platform_api_url)?;
+        let workspace_id = resolve_workspace_id(env_vars, workspace_flag, workspace_hint)?;
+        let ctx = endpoints.with_auth(api_key, workspace_id);
+        verify_api_key(&ctx.client()?, &source, ctx.workspace_id.as_deref())?;
+        Ok(ctx)
     }
 
     pub(crate) fn host_url(&self) -> &str {

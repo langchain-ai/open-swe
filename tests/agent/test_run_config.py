@@ -1,4 +1,31 @@
+import pytest
+
 from openswe.run_config import RunConfig
+
+
+@pytest.mark.parametrize("experience", ["coding", "agent_workspace"])
+def test_langsmith_experience_cannot_enable_github_credentials(experience):
+    cfg = RunConfig.parse(
+        {
+            "auth_provider": "langsmith",
+            "experience": experience,
+            "github_login": "admin",
+            "github_user_id": 123,
+            "repo": {"owner": "private", "name": "repo"},
+        }
+    )
+    assert cfg.experience == experience
+    assert cfg.github_login is None
+    assert cfg.github_user_id is None
+    assert cfg.repo is None
+    assert cfg.repo_explicitly_none is True
+
+
+@pytest.mark.parametrize("experience", ["coding", "agent_workspace"])
+def test_github_experience_preserves_authenticated_login(experience):
+    cfg = RunConfig.parse({"github_login": "octocat", "experience": experience})
+    assert cfg.experience == experience
+    assert cfg.github_login == "octocat"
 
 
 def test_parse_drops_only_the_malformed_field():

@@ -28,6 +28,9 @@ export async function loginAs(
 ) {
   const res = await page.request.post("/control/login", { data: user });
   expect(res.ok()).toBeTruthy();
+  await page.addInitScript((login) => {
+    localStorage.setItem(`open-swe.desktop.experience:${login}`, "coding");
+  }, user.login);
 }
 
 // What a message sent while a run is live does. It is the person's saved
@@ -47,17 +50,6 @@ export async function setFollowUpBehavior(
 
 export async function optIntoQueue(page: Page) {
   await setFollowUpBehavior(page, "queue");
-}
-
-// `monitor` is off by default; the sender opts in on their profile.
-export async function enableMonitors(page: Page) {
-  const saved = await page.request.get("/dashboard/api/profile");
-  expect(saved.ok()).toBeTruthy();
-  const response = await page.request.put("/dashboard/api/profile", {
-    headers: { origin: new URL(saved.url()).origin },
-    data: { ...(await saved.json()), experimental_monitor: true },
-  });
-  expect(response.ok(), await response.text()).toBeTruthy();
 }
 
 // The composer is a rich-text editor, not a <textarea>: it carries the prompt
@@ -261,7 +253,14 @@ export async function readPullRequest(
 // follow-up. It may finish while the UI observes the next server refresh.
 export async function openRunningThreadViaSlackLink(page: Page) {
   await page.goto("/mock/slack");
-  await page.locator("#reset").click();
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/control/reset") &&
+        response.request().method() === "POST",
+    ),
+    page.locator("#reset").click(),
+  ]);
   await expect(page.locator("#thread")).toContainText("No messages yet");
   await page
     .locator("#text")
@@ -281,7 +280,14 @@ export async function openThreadViaSlackLink(
   options: { repoPrivate?: boolean; message?: string } = {},
 ) {
   await page.goto("/mock/slack");
-  await page.locator("#reset").click();
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/control/reset") &&
+        response.request().method() === "POST",
+    ),
+    page.locator("#reset").click(),
+  ]);
   if (options.repoPrivate) {
     await setRepoPrivate(page, true);
   }
@@ -306,7 +312,14 @@ export async function openThreadViaSlackLink(
 // briefly lag; a reload re-fetches it. Retry until the PR link renders.
 export async function openMultiRepoPrThreadViaSlackLink(page: Page) {
   await page.goto("/mock/slack");
-  await page.locator("#reset").click();
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/control/reset") &&
+        response.request().method() === "POST",
+    ),
+    page.locator("#reset").click(),
+  ]);
   await page
     .locator("#text")
     .fill(

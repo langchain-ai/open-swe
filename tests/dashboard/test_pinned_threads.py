@@ -99,8 +99,15 @@ async def test_deleted_unreadable_and_private_pins_are_checked_for_each_viewer_a
     thread_api.add("shared", source="slack", github_login="someone-else")
     thread_api.add("private", visibility="private", owner_login="alice")
     thread_api.add("internal", source="reviewer")
+    thread_api.add(
+        "concierge",
+        source="slack",
+        visibility="private",
+        owner_login="alice",
+        source_context={"slack_thread": {"thread_ts": "0", "channel_context": {"is_im": True}}},
+    )
     for login in ("alice", "bob", "admin"):
-        for thread_id in ("shared", "private", "internal", "deleted"):
+        for thread_id in ("shared", "private", "internal", "deleted", "concierge"):
             await pins.pin_thread(login, thread_id)
     for login, email, expected in (
         ("alice", None, ["shared", "private"]),
@@ -112,7 +119,13 @@ async def test_deleted_unreadable_and_private_pins_are_checked_for_each_viewer_a
     thread_api.add("shared", visibility="private", owner_login="someone-else")
     del thread_api.threads["private"]
     assert await listing.list_dashboard_pinned_threads("alice") == []
-    assert await pins.list_thread_pin_ids("alice") == ["shared", "private", "internal", "deleted"]
+    assert await pins.list_thread_pin_ids("alice") == [
+        "shared",
+        "private",
+        "internal",
+        "deleted",
+        "concierge",
+    ]
 
 
 async def test_search_failure_propagates_instead_of_returning_an_empty_pin_list(
@@ -137,3 +150,29 @@ async def test_latest_run_requests_are_bounded_and_legacy_idle_status_is_refresh
     assert thread_api.count("POST", "/search") == 1
     assert thread_api.count("GET", "/runs") == 20
     assert 1 < thread_api.peak_runs <= 8
+
+
+@pytest.mark.parametrize("experience", [None, "coding", "agent_workspace"])
+async def test_pins_filter_experience_without_bypassing_readability(
+    thread_api: ThreadAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    experience: listing.DashboardThreadExperience | None,
+) -> None:
+    thread_api.add("legacy")
+    thread_api.add("coding", experience="coding")
+    thread_api.add(
+        "workspace", experience="agent_workspace", visibility="private", owner_login="alice"
+    )
+    thread_api.add("hidden", experience="agent_workspace", visibility="private", owner_login="bob")
+    monkeypatch.setattr(
+        listing,
+        "list_thread_pin_ids",
+        AsyncMock(return_value=["legacy", "coding", "workspace", "hidden"]),
+    )
+    result = await listing.list_dashboard_pinned_threads("alice", experience=experience)
+    expected = {
+        None: ["legacy", "coding", "workspace"],
+        "coding": ["legacy", "coding"],
+        "agent_workspace": ["workspace"],
+    }
+    assert [item["id"] for item in result] == expected[experience]
