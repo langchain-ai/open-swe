@@ -4,6 +4,7 @@ const DESKTOP_COMMAND_IDS = [
   "open-settings",
   "show-keyboard-shortcuts",
   "toggle-sidebar",
+  "copy-page-link",
 ] as const;
 
 const desktopCommandIds = new Set<string>(DESKTOP_COMMAND_IDS);

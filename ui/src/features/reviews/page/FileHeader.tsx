@@ -7,7 +7,7 @@ import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 
 import { cn } from "@/lib/utils"
-import { copyText } from "@/features/reviews/lib/copyText"
+import { copyText } from "@/lib/copyText"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
 import { AgentMark } from "./AgentMark"

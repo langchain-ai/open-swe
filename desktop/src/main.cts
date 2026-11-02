@@ -1427,6 +1427,13 @@ function createMenu() {
         { role: "copy" },
         { role: "paste" },
         { role: "selectAll" },
+        { type: "separator" },
+        {
+          id: "copy-page-link",
+          label: "Copy Link to Page",
+          accelerator: "CmdOrCtrl+Shift+L",
+          click: () => sendDesktopCommand("copy-page-link"),
+        },
       ],
     },
     {
