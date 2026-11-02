@@ -13,6 +13,36 @@ How you review is up to you.
 {% include "reviewer/historical-guidance.md" +%}
 
 {% endif %}
+{% if description_review_enabled and not reviewer_eval %}
+# Description review
+
+Before publishing every review, including re-reviews, check the current PR title and body yourself against the complete base-to-head diff, reading relevant implementation when needed.
+Do not delegate this check or start another reviewer thread.
+Do not limit yourself to the incremental re-review diff.
+Fetch current PR text with `gh pr view` when needed.
+Identify only materially false claims or important omissions that would mislead a reviewer about behavior, scope, compatibility, security, data/schema changes, migrations or required rollout steps.
+An empty description of a substantive change is an important omission.
+Concise but accurate descriptions are fine; do not demand an exhaustive file list, boilerplate, test sections, formatting or stylistic changes.
+Detect unnecessary verbosity separately: repeated summaries, duplicated points, boilerplate or implementation narration that adds no useful context.
+When there is a concrete simplification, include a short, actionable `verbosity_suggestions` entry identifying what to cut or combine while preserving important details.
+These suggestions are advisory only: never put verbosity or stylistic preferences in `issues`, request changes for them, or leave the description block standing because of them.
+Length alone is not a problem; omit suggestions when the detail helps reviewers understand the change.
+Do not infer unverified test results or invent requirements.
+Pass `description_review` to `publish_review` with the exact reviewed `head_sha`, `title`, `body` (empty string when absent), and `issues` (empty when clean).
+Each issue must explain the incorrect claim or omission, cite concrete code evidence (file and lines), and say what the description needs to communicate.
+If you cannot inspect the full change, report that limitation rather than declaring it clean.
+Do not publish an incomplete description check.
+
+A GitHub REQUEST_CHANGES review is already standing from startup and stays in place if this review fails or is incomplete.
+Clear it only after verifying the description; unresolved code findings do not control this description block.
+Materially incorrect claims or important omissions must cause a real GitHub **REQUEST_CHANGES** review, even with no inline findings or approval policy.
+These are top-level description issues, not fabricated code-line findings.
+Do not block on style, boilerplate or an accurate concise description.
+A corrected description clears only this reviewer's description-related change requests; never approve merely to clear a block.
+If GitHub refuses publication or dismissal, report that the block could not be set or cleared.
+Repository branch protection must enforce change requests for them to prevent merges; never claim a universal merge block or change repository rules.
+
+{% endif %}
 # Submitting the review
 
 - Record each finding with `add_finding`.

@@ -24,7 +24,7 @@ from html import escape
 from typing import Any, Literal, TypedDict
 
 import httpx2
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from openswe.github.checks import CheckConclusion, complete_review_check_run
 from openswe.github.http import (
@@ -282,6 +282,26 @@ class ReviewAssessment(BaseModel):
     explanation: str = Field(min_length=1, max_length=1500)
 
 
+DESCRIPTION_REVIEW_MARKER = "<!-- open-swe-description-review -->"
+
+
+class DescriptionReview(BaseModel):
+    """Description verdict bound to the exact PR text and commit inspected."""
+
+    head_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+    title: str
+    body: str
+    issues: list[str] = Field(max_length=20)
+    verbosity_suggestions: list[str] = Field(default_factory=list, max_length=5)
+
+    @field_validator("issues")
+    @classmethod
+    def nonempty_issues(cls, issues: list[str]) -> list[str]:
+        if any(not issue.strip() for issue in issues):
+            raise ValueError("Description issues must explain a material problem")
+        return issues
+
+
 def render_review_body(
     *,
     pr_number: int,
@@ -293,6 +313,7 @@ def render_review_body(
     assessment: ReviewAssessment | None = None,
     approved: bool = False,
     dry_run: bool = False,
+    description_review: DescriptionReview | None = None,
 ) -> str:
     """Compose the top-level review body.
 
@@ -302,7 +323,9 @@ def render_review_body(
     """
     out_of_diff_findings = out_of_diff_findings or []
     has_additional = additional_findings_count > 0
-    if surfaced_count == 0 and not out_of_diff_findings:
+    if description_review is not None and description_review.issues:
+        headline = "**Open SWE Review: Changes requested — PR description**"
+    elif surfaced_count == 0 and not out_of_diff_findings:
         headline = (
             "## ✅ Open SWE Review: No issues found\n\n"
             "Open SWE reviewed this PR and found no potential bugs to report."
@@ -314,6 +337,19 @@ def render_review_body(
         headline = f"**Open SWE Review** found {surfaced_count} potential {issue_word}."
 
     parts = [headline]
+    if description_review is not None and description_review.issues:
+        parts.extend(
+            [
+                DESCRIPTION_REVIEW_MARKER,
+                "Correct these material inaccuracies or omissions in the PR description:",
+                *[f"- {escape(issue)}" for issue in description_review.issues],
+            ]
+        )
+    if description_review is not None and description_review.verbosity_suggestions:
+        parts.append("**Description brevity suggestions (advisory only)**")
+        parts.extend(
+            f"- {escape(suggestion)}" for suggestion in description_review.verbosity_suggestions
+        )
     if has_additional:
         noun = "finding" if additional_findings_count == 1 else "findings"
         parts.append(f"{additional_findings_count} additional {noun} can be viewed in the web app.")
@@ -626,7 +662,7 @@ async def post_pull_request_review(
     body: str,
     inline_comments: list[dict[str, Any]],
     token: str,
-    event: Literal["COMMENT", "APPROVE"] = "COMMENT",
+    event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT",
 ) -> dict[str, Any] | None:
     """POST one GitHub PR Review with inline comments. Returns the API response or None."""
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"

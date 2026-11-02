@@ -41,8 +41,10 @@ from langchain_core.tools import BaseTool
 
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.dashboard.options import gate_fable_model
+from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
+from openswe.github.http import GitHubClient
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
@@ -134,6 +136,7 @@ def _reviewer_system_prompt(
     repo_name: str,
     pr_number: int | str,
     reviewer_eval: bool = False,
+    description_review_enabled: bool = False,
     org_guidelines: str | None = None,
     approval_policy: str | None = None,
     repo_style_prompt: str | None = None,
@@ -147,6 +150,7 @@ def _reviewer_system_prompt(
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
         reviewer_eval=reviewer_eval,
+        description_review_enabled=description_review_enabled,
         approval_policy=approval_policy or "",
         org_guidelines=org_guidelines or "",
         repo_style_prompt=repo_style_prompt or "",
@@ -433,6 +437,7 @@ class PrepareReviewerRunState(PrepareRunState):
     diff_text: NotRequired[str]
     diff_line_set: NotRequired[dict[str, dict[str, set[int]]] | None]
     review_approval_policy: NotRequired[str | None]
+    description_review_enabled: NotRequired[bool]
 
 
 async def _cached_org_guidelines(workspace: str | None) -> str | None:
@@ -593,6 +598,25 @@ async def prepare_reviewer_run(
     pr_number = cfg.pr_number
 
     github_token = await ensure_reviewer_github_token(thread_id, cfg)
+
+    description_review_enabled = False
+    if not cfg.is_eval and github_token and isinstance(pr_number, int):
+        async with GitHubClient.connect(token=github_token) as github:
+            pull = github.repo(repo_owner, repo_name).pull_request(pr_number)
+            try:
+                live = await pull.pull()
+            except Exception:
+                logger.warning(
+                    "Could not identify PR author for description experiment", exc_info=True
+                )
+            else:
+                author = live.get("user")
+                login = author.get("login") if isinstance(author, dict) else None
+                description_review_enabled = await PROFILES.description_review_enabled(
+                    login if isinstance(login, str) else ""
+                )
+            if description_review_enabled:
+                await pull.start_description_review(head_sha)
 
     async def _check_out() -> _ReviewCheckout:
         async with aphase(thread_id, "prepare.checkout"):
@@ -861,6 +885,7 @@ async def prepare_reviewer_run(
         pr_number=pr_number if isinstance(pr_number, int) else "",
         reviewer_eval=reviewer_eval,
         org_guidelines=org_guidelines,
+        description_review_enabled=description_review_enabled,
         approval_policy=approval_policy,
         repo_style_prompt=repo_style_prompt,
         agents_md_content=agents_md_content,
@@ -893,6 +918,7 @@ async def prepare_reviewer_run(
         "rendered_system_prompt": system_prompt,
         "messages": [HumanMessage(content=run_context, id=f"run-context:{uuid.uuid4()}")],
         "review_approval_policy": approval_policy,
+        "description_review_enabled": description_review_enabled,
         "diff_text": pr_diff_text,
         "diff_line_set": pr_diff_line_set,
     }

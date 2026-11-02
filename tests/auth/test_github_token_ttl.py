@@ -293,7 +293,12 @@ async def test_publish_review_invalidates_cached_token_on_401(
     monkeypatch.setattr(publish_review_module, "get_thread_id_from_runtime", lambda: "thread-xyz")
     monkeypatch.setattr(publish_review_module, "_record_ranking", AsyncMock(return_value=None))
 
-    result = await publish_review_module.publish_review(ranking=[])
+    from openswe.review.publish import DescriptionReview
+
+    result = await publish_review_module.publish_review(
+        ranking=[],
+        description_review=DescriptionReview(head_sha="a" * 40, title="T", body="B", issues=[]),
+    )
     assert result["success"] is False
     assert "401" in result["error"]
     assert invalidated["calls"] == 1
