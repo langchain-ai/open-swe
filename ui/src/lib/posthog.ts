@@ -21,7 +21,7 @@ const pages = new Set([
 
 /**
  * PostHog in the browser, so dashboard visits group into sessions. Events
- * carry templated paths and a page name, never ids, titles or page content.
+ * carry the page title and templated paths, never ids, query strings or page content.
  */
 class ProductAnalytics {
   #client: PostHog | undefined
@@ -71,6 +71,9 @@ class ProductAnalytics {
       enable_heatmaps: false,
       disable_session_recording: true,
       disable_surveys: true,
+      // Exception messages and web-vitals attribution nest page content and URLs before_send cannot scrub.
+      capture_exceptions: false,
+      capture_performance: false,
       before_send: (event) => event && this.#redact(event),
     })
     this.#client = client
@@ -114,11 +117,7 @@ class ProductAnalytics {
 
   #redactProperties(properties: Properties, origin: string): void {
     for (const [key, value] of Object.entries(properties)) {
-      if (/title$/i.test(key)) delete properties[key]
-      else if (
-        typeof value === "string" &&
-        /(url|pathname|referrer)$/i.test(key)
-      )
+      if (typeof value === "string" && /(url|pathname|referrer)$/i.test(key))
         properties[key] = stripUrlDetails(value, origin)
     }
   }

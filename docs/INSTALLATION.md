@@ -53,7 +53,7 @@ Set `POSTHOG_API_KEY` to your PostHog project API key.
 Without a key, capture is disabled.
 The dashboard reads the same key from `/dashboard/api/analytics/config` and captures in the browser with posthog-js, so no frontend build setting is needed.
 
-The dashboard sends `$pageview` and `$pageleave` events grouped into PostHog sessions, with a normalized `page_name` and URLs whose ids are replaced by placeholders (`/agents/:threadId`); page titles, autocapture, heatmaps and session recording are off.
+The dashboard sends `$pageview` and `$pageleave` events grouped into PostHog sessions, with the page title, a normalized `page_name` and URLs whose ids and query strings are replaced by placeholders (`/agents/:threadId`); autocapture, heatmaps, session recording, exception capture and web vitals are off.
 `platform` is `web` or `desktop` (with `desktop_version`), so desktop app usage can be told apart.
 MCP executions send `MCP Tool Called` with tool name, `is_error`, and the run repository name; persisted webhook deliveries send `Webhook Received` with source, event type, action, resolved workspace/repository/PR IDs, and the repository name on GitHub events.
 `DD_ENV` identifies the deployment.

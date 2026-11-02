@@ -35,7 +35,7 @@ describe("productAnalytics", () => {
     expect(client.init).not.toHaveBeenCalled()
   })
 
-  it("identifies by user id and strips ids and titles from events", async () => {
+  it("identifies by user id and strips ids from event URLs", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -83,6 +83,7 @@ describe("productAnalytics", () => {
       $current_url: `${origin}/agents/:threadId`,
       $pathname: "/agents/:threadId",
       $referrer: "https://github.com/acme/widgets/pull/7",
+      title: "Fix the private billing bug",
       product: "open-swe",
       environment: "staging",
       surface: "dashboard",
