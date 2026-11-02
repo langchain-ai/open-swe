@@ -11,8 +11,10 @@ from openswe.dashboard.repo_access import require_repo_access_for_user
 
 
 def session_is_admin(session: dict[str, Any]) -> bool:
-    login = DashboardPrincipal.from_session(session).github_login
-    return login is not None and is_admin(session.get("email"), login=login)
+    principal = DashboardPrincipal.from_session(session)
+    # A LangSmith session's email is the LangSmith account's, which never grants admin.
+    email = session.get("email") if principal.provider == "github" else None
+    return principal.github_login is not None and is_admin(email, login=principal.github_login)
 
 
 def require_admin(session: dict[str, Any]) -> dict[str, Any]:
