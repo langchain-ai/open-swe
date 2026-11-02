@@ -15,6 +15,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 
 import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
+import { useIsHydrated } from "@/lib/hydration"
 import { useRepos } from "@/lib/profile"
 import { expiresInBrowser } from "@/lib/query"
 import {
@@ -82,6 +83,7 @@ export function OpenPullRequests({
   const savedSort = readPreference(preferenceKey)?.split(":")
   const defaultSort = savedSort?.[0] === "updatedAt" ? "updatedAt" : "createdAt"
   const defaultDirection = savedSort?.[1] === "asc" ? "asc" : "desc"
+  const hydrated = useIsHydrated()
   const {
     repo = [],
     q: search = "",
@@ -356,6 +358,7 @@ export function OpenPullRequests({
               size="sm"
               className="min-w-40 flex-1 [&_input:placeholder-shown]:text-ellipsis"
               leftIcon={MagnifyingGlassRegularIcon}
+              disabled={!hydrated}
               aria-label="Search pull requests"
               title="Search title, description, or PR number"
               placeholder="Search title, description, or PR number…"

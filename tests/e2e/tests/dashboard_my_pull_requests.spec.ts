@@ -70,6 +70,9 @@ test.describe("my pull requests", () => {
     await page
       .getByRole("textbox", { name: "Search pull requests" })
       .fill("Unified");
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("q"))
+      .toBe("Unified");
     await card(page, pr)
       .getByRole("button", { name: "Unified review layout", exact: true })
       .click();
