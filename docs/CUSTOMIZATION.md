@@ -264,6 +264,9 @@ It opens each connection for review without saving automatically.
 Existing connections keep their enabled state and selected tools.
 Local `command` servers and environment-variable expansion are not supported.
 
+For Linear on an MDA deployment with the Linear channel, use the channel's app token instead of the example below; see [Linear's MCP server on the Linear channel's token](#linears-mcp-server-on-the-linear-channels-token).
+Linear holds one app token per app: a client-credentials token for the channel's app revokes the channel's, and its Linear grant then needs an admin's approval again.
+
 For a Linear OAuth application, enable **Client credentials tokens** in the application's settings, then import this configuration.
 The `oauth` object is an Open SWE extension to the remote MCP JSON format:
 
@@ -372,12 +375,33 @@ Create the connection from `mda/` after the deployment's first `mda deploy`, for
 ```
 
 The slug must be `open-swe-mcp-<server>`: a server never gets a credential Open SWE or a channel reads for itself, such as `mda/github-token` or `open-swe-exa`.
+The one exception is Linear's MCP server, below.
 Instance and workspace servers read the deployment's connection (`"owner": "agent"`); personal servers read their owner's own (`"owner": "user"`), and only in runs that act for their owner, so not in a background task's completion.
 The credential goes as `Authorization: Bearer <credential>`, or as it is in the header `connection_header` names, such as `DD_API_KEY`.
 A server with a connection takes no headers or OAuth, and saving it drops those the record had.
 An update that sends no `connection`, headers or OAuth, such as the dashboard's enable toggle, keeps the connection; changing the URL needs `connection` sent again.
 Open SWE cannot list its tools, so name them in `allowed_tools`; each run lists the server's tools once and offers those, under the same names and tier rules as other MCP tools.
 A person who has not granted a personal server's connection is asked to through MDA's credential interrupt; a run that acts for no person, or whose agent connection is missing, goes without the server.
+
+#### Linear's MCP server on the Linear channel's token
+
+With the Linear channel on the MDA deployment, Linear's MCP server can read the channel's own app token, `mda/linear-token`, which the channel's `mda deploy` keeps and Agent Auth renews.
+Linear's MCP server takes an existing OAuth token as `Authorization: Bearer` ([Linear's MCP docs](https://linear.app/docs/mcp)), and its tools then act as the Open SWE app, as with client credentials.
+Prefer this over the client-credentials example above: Linear holds one app token per app, so a server requesting its own for the channel's app revokes the channel's.
+Save an instance or workspace server with no `oauth` or headers:
+
+```json
+{
+  "name": "linear",
+  "url": "https://mcp.linear.app/mcp",
+  "allowed_tools": ["list_issues", "get_issue"],
+  "connection": {"slug": "mda/linear-token", "owner": "agent"}
+}
+```
+
+The URL must be on `https://mcp.linear.app` (`/mcp`, `/mcp/readonly` or `/sse`), with no port or credentials; the backend refuses the token for any other server, and the MDA run refuses to send it anywhere else.
+Personal servers cannot name it.
+Once the server reads the channel's token, turn off **Client credentials tokens** on the Linear app.
 The dashboard's forms do not set `connection` yet, and the inbound MCP server and Linear notices leave these servers out.
 
 ### Adding a Python tool

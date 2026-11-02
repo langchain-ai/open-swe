@@ -7,7 +7,14 @@ from typing import Any, Final, Literal, Self
 from urllib.parse import parse_qsl, urlsplit
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 from runtime_api.connections import ConnectionRef
 
 from openswe.encryption import decrypt_token, encrypt_token
@@ -144,9 +151,13 @@ class MCPConnectionUpdate(BaseModel):
 
     @field_validator("connection")
     @classmethod
-    def _connection(cls, value: ConnectionRef | None) -> ConnectionRef | None:
-        if value is not None and not value.for_mcp_server:
-            raise ValueError("Name an MDA connection made for MCP servers: open-swe-mcp-<server>")
+    def _connection(cls, value: ConnectionRef | None, info: ValidationInfo) -> ConnectionRef | None:
+        # ``url`` is validated first; an invalid one is left out, and fails on its own.
+        if value is not None and not value.for_mcp_server(info.data.get("url", "")):
+            raise ValueError(
+                "Name an MDA connection made for MCP servers, open-swe-mcp-<server>, or the "
+                "Linear channel's mda/linear-token (owner agent) for https://mcp.linear.app"
+            )
         return value
 
     @field_validator("connection_header")

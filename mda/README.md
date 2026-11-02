@@ -48,6 +48,7 @@ Every call is authenticated with the run token.
   The catalog names those (`mcp_servers`), and `rt/mcp.py` connects to them before the run's first model call, in a node of its own: it reads each credential with `managed_deepagents.connections`, the deployment's for an instance or workspace server and the person's own for a personal one, lists the server's tools, and offers those the catalog allows under the backend's names to each model call, since `search_tools` finds only the backend's tools.
   Each call reads the credential again and sends it only to the server's HTTPS origin, at a public address.
   Only `open-swe-mcp-<server>` connections qualify, so no server gets a credential Open SWE or a channel reads for itself, such as `mda/github-token`.
+  The one exception is the Linear channel's app token, `mda/linear-token`, and only for an instance or workspace server on Linear's MCP origin, `https://mcp.linear.app`.
   A person who has not granted a connection is asked to (MDA's credential interrupt); a run that acts for no one, or whose agent connection is missing, goes without that server.
   The backend names a personal server only to a run that acts for its owner, never to one for no person, such as a background task's completion.
 - **File and shell tools:** this runtime's own (`ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`), run by `FileToolsMiddleware` (`rt/file_tools.py`).

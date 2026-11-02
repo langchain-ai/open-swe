@@ -383,7 +383,7 @@ def _runtime_server(
     connection = record.connection
     if (
         connection is None
-        or not connection.for_mcp_server
+        or not connection.for_mcp_server(record.url)
         or connection.owner != CONNECTION_OWNERS.get(source.scope)
     ):
         logger.warning(

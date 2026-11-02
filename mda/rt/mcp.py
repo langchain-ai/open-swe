@@ -107,10 +107,11 @@ class McpServer:
     async def credential(self) -> str:
         """The connection's credential now; a person who has not granted it is asked to."""
         connection = self.spec.connection
-        if not connection.for_mcp_server:
+        if not connection.for_mcp_server(self.spec.url):
             # The backend names none other; this keeps a credential Open SWE or a channel
-            # reads for itself from a URL an admin or a person picked, if it ever did.
-            raise McpServerError("not a connection made for MCP servers")
+            # reads for itself from a URL an admin or a person picked, if it ever did. The
+            # Linear channel's app token goes only to Linear's own MCP server.
+            raise McpServerError("not a connection this MCP server may send")
         return await connections.get(connection.slug, {"type": connection.owner})
 
     def _client(self, credential: str) -> Client[SSETransport | StreamableHttpTransport]:
