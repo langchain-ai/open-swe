@@ -1,22 +1,7 @@
-"""What Open SWE's Slack channel does with a click on one of the agent's buttons.
+"""Clicks on the agent's buttons in this deployment's Slack conversations.
 
-In the conversations this deployment owns, the backend forwards the clicks on the
-agent's own buttons to Trigger Server as Slack sent them, which verifies Slack's
-signature and who clicked (``event.actor``). The handler decides who may click
-and updates the clicked message through Slack's ``response_url``; the backend
-builds and signs the run a click starts (``plan_slack_click``), once per clicked
-message:
-
-- An option button (``open_swe_option``) answers for the person it was for: its
-  label becomes their message, and the buttons give way to "Selected: <label>".
-- A workflow push approval (``workflow_push_approval``) is recorded on the
-  thread, where the backend's lock serializes two clicks; an approval starts a run
-  that retries the blocked push.
-- Retry (``slack_retry``) sends a failed request again, for the person who sent it.
-  Its button goes first, so a second click finds nothing to click.
-
-A click by someone else starts nothing and tells them so, only them. The runs
-redirect or wait behind the thread's work as messages do.
+The handler checks who may click and updates the message through ``response_url``;
+the backend builds the run (``plan_slack_click``), once per clicked message.
 """
 
 import json
@@ -48,7 +33,6 @@ from rt.slack import run_result
 logger = logging.getLogger(__name__)
 
 _OPTION_ACTION_ID: Final = "open_swe_option_select"
-#: The only host Slack's ``response_url`` points at.
 _RESPONSE_URL_HOST: Final = "hooks.slack.com"
 _TIMEOUT: Final = httpx2.Timeout(10.0, connect=5.0)
 _LABEL_LIMIT: Final = 150
@@ -71,12 +55,13 @@ _WORKFLOW_PUSH_DECIDED: Final = {
 async def start_click(
     event: SlackInteractionEvent, thread: SlackChannelThread
 ) -> ChannelRunResult | None:
-    """The run a click on one of the agent's buttons starts, or ``None``."""
     actor = event.actor
     value = _button(event.value)
-    if actor is None or event.message_ts is None or value is None:
+    # The agent's buttons sit on a message in a Slack thread; a click in a code
+    # channel's view has neither.
+    if actor is None or event.message_ts is None or event.thread_ts is None or value is None:
         return None
-    click = _Click(event, thread, actor.id, value)
+    click = _Click(event, thread, actor.id, value, (event.thread_ts, event.message_ts))
     match value.get("type"):
         case "open_swe_option":
             return await click.option()
@@ -94,11 +79,13 @@ class _Click:
         thread: SlackChannelThread,
         clicker: str,
         value: dict[str, JsonValue],
+        message: tuple[str, str],
     ) -> None:
         self.event = event
         self.thread = thread
         self.clicker = clicker
         self.value = value
+        self.thread_ts, self.message_ts = message
         self.message = _mapping(event.payload.get("message"))
         self.action = _first_option_action(event.payload.get("actions"))
         self.response_url = _response_url(event.payload.get("response_url"))
@@ -146,7 +133,7 @@ class _Click:
         if not isinstance(thread_ts, str) or not thread_ts or _expired(expires_at):
             await self._tell_clicker(_RETRY_EXPIRED)
             return None
-        # The button goes before anything runs, so a second click finds nothing to click.
+        # Before anything runs, so a second click finds no button.
         await self._replace_buttons("Retrying…")
         try:
             start = await self._plan(
@@ -168,9 +155,9 @@ class _Click:
             PlanSlackClick(
                 thread_id=self.thread.id,
                 channel_id=self.event.channel_id,
-                thread_ts=self.event.thread_ts,
-                message_ts=cast(str, self.event.message_ts),
-                action_ts=_text(self.action.get("action_ts")) or cast(str, self.event.message_ts),
+                thread_ts=self.thread_ts,
+                message_ts=self.message_ts,
+                action_ts=_text(self.action.get("action_ts")) or self.message_ts,
                 user_id=self.clicker,
                 team_id=_text(team.get("id")),
                 click=click,
@@ -208,7 +195,6 @@ class _Click:
             )
 
     async def _respond(self, body: dict[str, JsonValue]) -> None:
-        """Post to the click's ``response_url``; a failure only costs the message update."""
         if self.response_url is None:
             return
         try:
@@ -220,10 +206,7 @@ class _Click:
 
 
 def replaced_buttons(blocks: object, text: str) -> list[dict[str, JsonValue]]:
-    """The message's blocks with its option buttons replaced by ``text``; empty when it has none.
-
-    The first block holding them becomes a context line, and the buttons go from the rest.
-    """
+    """The message's blocks with its option buttons replaced by ``text``; empty when it has none."""
     if not isinstance(blocks, list):
         return []
     line: dict[str, JsonValue] = {
@@ -251,7 +234,6 @@ def replaced_buttons(blocks: object, text: str) -> list[dict[str, JsonValue]]:
 
 
 def _button(value: JsonValue) -> dict[str, JsonValue] | None:
-    """The JSON Open SWE packs into a button's ``value``."""
     if isinstance(value, str):
         try:
             value = json.loads(value)
@@ -280,7 +262,6 @@ def _has_option(elements: object) -> bool:
 
 
 def _response_url(value: JsonValue) -> str | None:
-    """Slack's ``response_url``, only where it points at Slack."""
     if not isinstance(value, str):
         return None
     url = urlsplit(value)

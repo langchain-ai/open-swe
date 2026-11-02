@@ -36,12 +36,9 @@ _RETRY_LIFETIME = timedelta(days=7)
 
 
 class SlackRetry(BaseModel):
-    """A failed request's Retry button: who may click it, and what it sends again.
+    """A failed request's Retry button, its fields in the button's ``value``.
 
-    Its fields ride in the button's ``value`` as they are. Slack signs the click's
-    payload, and only Open SWE's own message carries the value, so neither the
-    backend nor MDA's Slack channel, which acts on clicks in its conversations,
-    needs a token to trust them.
+    Slack signs the click and only Open SWE's message carries the value, so no token.
     """
 
     channel_id: str
@@ -50,7 +47,7 @@ class SlackRetry(BaseModel):
     message_ts: str = ""
     reply_thread_ts: str = ""
     nonce: str
-    # Seconds since the epoch after which the button sends nothing; 0 for a token's.
+    # Epoch seconds; 0 for a token's.
     expires_at: float = 0
 
     def blocks(self, text: str) -> list[JsonObject] | None:
@@ -89,7 +86,7 @@ class SlackRetry(BaseModel):
 
     @classmethod
     def parse(cls, token: str) -> SlackRetry | None:
-        """The retry a token from before the buttons carried their fields names."""
+        """The retry an older, token button names."""
         secret = ENV.SLACK_SIGNING_SECRET.get()
         if not secret:
             return None

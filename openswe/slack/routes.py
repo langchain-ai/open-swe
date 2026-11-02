@@ -97,7 +97,7 @@ _THREAD_CONFLICT = (
     "which agent thread to use."
 )
 _OPTION_ACTION_ID = "open_swe_option_select"
-#: The agent's buttons whose clicks MDA's Slack channel acts on in its own conversations.
+#: Button types MDA's Slack channel acts on in its conversations.
 _MDA_CLICKS = frozenset({"open_swe_option", "workflow_push_approval", retry.BUTTON_TYPE})
 
 
@@ -137,7 +137,6 @@ def _hand_to_mda(
 
     ``message_ts`` names the message remembered for the channel, which a lost forward
     hands back to the backend or reports (:func:`mda_forwarding.forward_to_trigger_server`).
-    ``url`` is Trigger Server's events URL, or its interactivity URL for a click.
     """
     background_tasks.add_task(
         mda_forwarding.forward_to_trigger_server,
@@ -787,7 +786,6 @@ async def slack_webhook(
         return ignored("By-the-way questions are answered once")
 
     if is_message_update:
-        # In a concierge DM ``thread_ts`` names the DM's one conversation.
         if not in_code_channel and (
             edited_thread := await mda_forwarding.owned_thread(channel_id, thread_ts)
         ):
@@ -866,13 +864,10 @@ async def slack_webhook(
             return accepted("Slack by-the-way question queued")
 
         # A conversation MDA owns, or a new one MDA's Slack channel can start, goes there.
-        # A code channel is one backend conversation whichever Slack thread a message is
-        # in, so even a reply in a thread MDA held before stays with it. A concierge DM
-        # is one conversation too, MDA's or the backend's as a whole (``thread_ts``).
+        # A code channel stays on the backend; a concierge DM moves as a whole (``thread_ts``).
         root_ts = reply_thread_ts or original_message_ts
         can_start = mda_forwarding.mda_can_start(
             subtype=event.subtype,
-            from_bot=allowed_bot is not None,
             code_channel=in_code_channel,
             breakout=message.action in {SlackAction.BREAKOUT, SlackAction.BREAKOUT_WEB},
         )
@@ -900,9 +895,10 @@ async def slack_webhook(
                 root_ts=root_ts,
                 can_start=can_start,
             )
-        if new_mda_thread_id is not None:
+        if new_mda_thread_id is not None and allowed_bot is None:
             # Gated before it's claimed: a person who can't run gets the prompt here, and
-            # the conversation stays unclaimed for whoever can.
+            # the conversation stays unclaimed for whoever can. An allowed bot links no
+            # account, as on the backend's own path.
             link_needed = await service.account_link_needed(user_id)
             if link_needed is not None:
                 if not await common.claim_slack_event(event_id, channel_id, event_ts):
@@ -963,7 +959,8 @@ async def slack_webhook(
                 # Claimed only now, so nothing that fails before the hand-off strands the
                 # conversation on MDA with no message for its channel.
                 try:
-                    owner_login = await service.slack_login(user_id)
+                    # A conversation an allowed bot started has no person to own it.
+                    owner_login = None if allowed_bot else await service.slack_login(user_id)
                     mda_thread_id = (
                         await mda_forwarding.claim_concierge(
                             envelope.api_app_id, team_id or "", channel_id, owner_login=owner_login
@@ -981,7 +978,6 @@ async def slack_webhook(
                     raise SlackRequestError(_THREAD_CONFLICT) from exc
             if mda_thread_id is not None:
                 if in_concierge_mode:
-                    # The run goes on the DM's thread; Stop in this Slack thread finds it.
                     await mda_forwarding.join_concierge(channel_id, root_ts, mda_thread_id)
                 await mda_forwarding.remember(request, repo, original_message_ts)
                 return _hand_to_mda(
@@ -1240,7 +1236,7 @@ async def slack_interactivity(
     if (
         interaction.type == "block_actions"
         and button.type in _MDA_CLICKS
-        # A Retry button from before MDA's channel took them carries a token it can't read.
+        # A token Retry button stays on the backend.
         and not (button.type == retry.BUTTON_TYPE and button.response)
         and interaction.channel_id
         and interaction.thread_ts
@@ -1250,7 +1246,6 @@ async def slack_interactivity(
             )
         )
     ):
-        # MDA's conversation: its channel decides who may click and what the click starts.
         return _hand_to_mda(
             background_tasks,
             body,

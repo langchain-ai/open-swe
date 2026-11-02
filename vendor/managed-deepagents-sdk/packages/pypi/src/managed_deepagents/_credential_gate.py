@@ -12,10 +12,12 @@ Required integrations without a caller end with sign-in guidance.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import threading
 import time
 import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypedDict
 
@@ -39,9 +41,11 @@ from managed_deepagents._agent_auth import (
     AgentAuthContext,
 )
 from managed_deepagents._connection_authorization import (
+    CredentialAuthorizationDeferredError,
     CredentialAuthorizationRequiredInterrupt,
     PendingCredential,
     collect_pending_user_connection_credentials,
+    defer_credential_interrupts,
     raise_credential_authorization_required,
     resolve_user_connection_grants,
 )
@@ -260,10 +264,33 @@ def _load_all(
     consumers: Sequence[CredentialConsumer],
     context: AgentAuthContext,
 ) -> list[BaseTool]:
-    tools: list[BaseTool] = []
-    for consumer in consumers:
-        tools.extend(_cached_tools(consumer, context))
-    return tools
+    if len(consumers) <= 1:
+        return [tool for consumer in consumers for tool in _cached_tools(consumer, context)]
+    with ThreadPoolExecutor(max_workers=len(consumers)) as pool:
+        futures: list[Future[list[BaseTool]]] = [
+            pool.submit(contextvars.copy_context().run, _deferred_tools, consumer, context)
+            for consumer in consumers
+        ]
+    errors = [future.exception() for future in futures]
+    pending = [
+        credential
+        for error in errors
+        if isinstance(error, CredentialAuthorizationDeferredError)
+        for credential in error.credentials
+    ]
+    if pending:
+        raise_credential_authorization_required(
+            _dedupe_pending_credentials(pending), interrupt=_interrupt
+        )
+    for error in errors:
+        if error is not None:
+            raise error
+    return [tool for future in futures for tool in future.result()]
+
+
+def _deferred_tools(consumer: CredentialConsumer, context: AgentAuthContext) -> list[BaseTool]:
+    defer_credential_interrupts()
+    return _cached_tools(consumer, context)
 
 
 def _cached_tools(

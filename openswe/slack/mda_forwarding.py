@@ -8,9 +8,8 @@ gated, and forwards Slack's request to LangSmith Trigger Server exactly as Slack
 Trigger Server verifies Slack's signature as if Slack had called it and hands the
 message to the deployment's Slack channel, which asks ``plan_slack_turn`` what to
 start (:mod:`openswe.slack.channel`). Later messages in that Slack thread, Slack's
-Stop, and clicks on the agent's buttons there follow it. A concierge DM is one
-conversation for the whole DM (:func:`startable_concierge`). Every other
-conversation stays on today's intake.
+Stop, and clicks on the agent's buttons there follow it. Every other conversation
+stays on today's intake.
 
 Every environment forwards: where MDA isn't set up, Trigger Server refuses the request
 (an unregistered Slack app gets a 401), and the backend takes a conversation the channel
@@ -84,7 +83,7 @@ FORWARDED_SUBTYPES: Final = frozenset({"", "file_share"})
 TRIGGER_EVENTS_URL: Final = (
     "https://api.smith.langchain.com/v1/triggers/webhooks/d809e66e-0000-4000-8000-000000000003"
 )
-#: Trigger Server's Slack interactivity URL, which finds the app by the signed payload.
+#: Trigger Server's Slack interactivity URL.
 TRIGGER_INTERACTIVITY_URL: Final = (
     "https://api.smith.langchain.com/v1/triggers/webhooks/slack-custom-app/interactivity"
 )
@@ -95,22 +94,18 @@ def trigger_server_takes(subtype: str) -> bool:
     return subtype in FORWARDED_SUBTYPES
 
 
-def mda_can_start(*, subtype: str, from_bot: bool, code_channel: bool, breakout: bool) -> bool:
+def mda_can_start(*, subtype: str, code_channel: bool, breakout: bool) -> bool:
     """Whether MDA's Slack channel can start a new conversation with this message.
 
-    It can for a person's mention of Open SWE in a channel, an untagged message in a
-    kitchen channel, and a message in their DM with it: Trigger Server delivers those
-    as ``mention``, ``message`` and ``directMessage``, and the backend builds the run
-    it would have started itself, routed to a kitchen channel's workspace. In a
-    concierge DM it starts the DM's one conversation (:func:`startable_concierge`).
-    The rest needs the backend:
+    It can for a mention of Open SWE by a person or a bot on Open SWE's allow-list, a
+    kitchen channel's untagged message and a DM (a concierge DM as a whole,
+    :func:`startable_concierge`). The rest needs the backend:
 
     - A code channel is one session for the whole channel, which MDA can't hold yet.
-    - Bots' messages carry the triggering bot through the backend's own intake.
     - Breakouts open flows of their own.
     - Trigger Server ignores subtypes outside :data:`FORWARDED_SUBTYPES`.
     """
-    return trigger_server_takes(subtype) and not (from_bot or code_channel or breakout)
+    return trigger_server_takes(subtype) and not (code_channel or breakout)
 
 
 def mda_thread_id(app_id: str, team_id: str, channel_id: str, root_ts: str) -> str:
@@ -132,8 +127,7 @@ async def owned_thread(channel_id: str, root_ts: str) -> str | None:
 async def owned_conversation(channel_id: str, thread_ts: str) -> str | None:
     """The MDA channel's thread a click in this Slack thread belongs to, or ``None``.
 
-    A concierge DM's buttons hang off unthreaded messages no binding names, so a
-    click there belongs to the DM's one conversation.
+    A concierge DM's unthreaded buttons belong to the DM's one thread.
     """
     if thread_id := await owned_thread(channel_id, thread_ts):
         return thread_id
@@ -181,19 +175,14 @@ async def _adopt(thread_id: str, owner_login: str | None) -> None:
 
 
 def concierge_thread_id(app_id: str, team_id: str, channel_id: str) -> str:
-    """The one thread a concierge DM MDA holds runs on, whichever Slack thread a message is in."""
+    """The one thread an MDA concierge DM runs on."""
     return mda_thread_id(app_id, team_id, channel_id, CONCIERGE_TS)
 
 
 async def startable_concierge(
     *, app_id: str, team_id: str, channel_id: str, can_start: bool
 ) -> str | None:
-    """The thread MDA would claim for a concierge DM, or ``None`` to keep it on the backend.
-
-    A concierge DM is one conversation: MDA takes it while no thread holds it yet, and
-    one the backend already holds never moves. Nothing is claimed yet
-    (:func:`claim_concierge`).
-    """
+    """The thread MDA would claim for a concierge DM no thread holds yet, or ``None``."""
     if not (can_start and app_id and team_id and channel_id):
         return None
     if await lookup_slack_thread_id(channel_id, CONCIERGE_TS) is not None:
@@ -204,7 +193,7 @@ async def startable_concierge(
 async def claim_concierge(
     app_id: str, team_id: str, channel_id: str, *, owner_login: str | None = None
 ) -> str:
-    """Make a concierge DM MDA's, as :func:`startable_concierge` named it: its thread id."""
+    """Make a concierge DM MDA's: its thread id."""
     thread_id = concierge_thread_id(app_id, team_id, channel_id)
     await bind_slack_thread_id(channel_id, CONCIERGE_TS, thread_id)
     await _adopt(thread_id, owner_login)
@@ -212,11 +201,7 @@ async def claim_concierge(
 
 
 async def join_concierge(channel_id: str, root_ts: str, thread_id: str) -> None:
-    """Name an MDA concierge DM's thread for the Slack thread a message is in.
-
-    So Slack's Stop there, and the channel asking about the message, find the DM's
-    conversation. A Slack thread another thread holds keeps it.
-    """
+    """Bind a Slack thread in an MDA concierge DM to the DM's thread, so Stop finds it."""
     if root_ts == CONCIERGE_TS:
         return
     try:
