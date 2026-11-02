@@ -176,7 +176,6 @@ class _Harness:
             return {"graph": assistant_id, "__run_token": sign_runtime_token(run)}
 
         monkeypatch.setattr(runtimes, "remote_run_context", context)
-        monkeypatch.setattr(runtimes, "get_tracer_project", lambda: "open-swe-test")
 
         async def app(scope: Scope, receive: Receive, send: Send) -> None:
             self.reached_here.append(scope["path"])
