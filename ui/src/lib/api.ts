@@ -15,6 +15,15 @@ import {
   newRequestId,
 } from "./dashboard-fetch"
 
+export interface AppNotification {
+  id: string
+  title: string
+  body: string
+  url: string
+  /** The in-app route for `url`, or null when it points outside the dashboard. */
+  path: string | null
+}
+
 export interface AuditLogFilters {
   start_time: string
   end_time: string
@@ -840,6 +849,14 @@ export interface WorkspaceOption {
   refresh_error?: string | null
   refresh_log_excerpt?: string | null
   refresh_steps?: Array<WorkspaceRefreshStep>
+}
+
+/** A person in the Slack workspace, offered when mentioning someone in a composer. */
+export interface SlackUserOption {
+  id: string
+  name: string
+  display_name: string
+  real_name: string
 }
 
 /** A channel the Slack bot can see, offered when binding channels to a workspace. */
@@ -1680,6 +1697,13 @@ export const api = {
       `/workspaces/${encodeURIComponent(slug)}/settings`,
       { method: "PUT", body: JSON.stringify(overrides) }
     ),
+  pendingNotifications: () => request<AppNotification[]>("/notifications"),
+  acknowledgeNotification: (id: string) =>
+    request<{ ok: boolean }>(
+      `/notifications/${encodeURIComponent(id)}/delivered`,
+      { method: "POST" }
+    ),
+  listSlackUsers: () => request<{ users: SlackUserOption[] }>("/slack/users"),
   slackUserName: (userId: string) =>
     request<{ name: string }>(
       `/slack/users/${encodeURIComponent(userId)}/name`
