@@ -398,7 +398,11 @@ function ThreadRow({
   )
 }
 
-function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
+export function CommitsBlock({
+  commits,
+}: {
+  commits: Array<ConversationCommit>
+}) {
   const [open, setOpen] = useState(commits.length <= 2)
   const authors = [
     ...new Set(commits.map((commit) => commit.author?.login ?? "someone")),

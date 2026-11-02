@@ -128,6 +128,67 @@ query PullRequestThreadCount($owner: String!, $repo: String!, $number: Int!, $cu
 }
 """
 
+_HISTORY_QUERY = """
+query PullRequestHistory($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      timelineItems(
+        first: 100
+        after: $cursor
+        itemTypes: [
+          PULL_REQUEST_COMMIT
+          HEAD_REF_FORCE_PUSHED_EVENT
+          BASE_REF_FORCE_PUSHED_EVENT
+          BASE_REF_CHANGED_EVENT
+          CONVERT_TO_DRAFT_EVENT
+          READY_FOR_REVIEW_EVENT
+          CLOSED_EVENT
+          REOPENED_EVENT
+          MERGED_EVENT
+        ]
+      ) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          __typename
+          ... on PullRequestCommit {
+            commit {
+              oid
+              message
+              committedDate
+              url
+              author { user { __typename login avatarUrl } }
+            }
+          }
+          ... on HeadRefForcePushedEvent {
+            createdAt
+            actor { __typename login avatarUrl }
+            beforeCommit { oid }
+            afterCommit { oid }
+          }
+          ... on BaseRefForcePushedEvent {
+            createdAt
+            actor { __typename login avatarUrl }
+            beforeCommit { oid }
+            afterCommit { oid }
+          }
+          ... on BaseRefChangedEvent {
+            createdAt
+            actor { __typename login avatarUrl }
+            previousRefName
+            currentRefName
+          }
+          ... on ConvertToDraftEvent { createdAt actor { __typename login avatarUrl } }
+          ... on ReadyForReviewEvent { createdAt actor { __typename login avatarUrl } }
+          ... on ClosedEvent { createdAt actor { __typename login avatarUrl } }
+          ... on ReopenedEvent { createdAt actor { __typename login avatarUrl } }
+          ... on MergedEvent { createdAt actor { __typename login avatarUrl } }
+        }
+      }
+    }
+  }
+}
+"""
+
 
 CheckState = Literal["passing", "failing", "pending", "unknown", "none"]
 ReviewDecision = Literal["approved", "changes_requested", "none"]
@@ -586,6 +647,23 @@ class PullRequestClient:
             cursor = _next_cursor(connection, seen)
             if cursor is None:
                 return threads
+
+    async def history(self) -> list[dict[str, Any]]:
+        """Every push, force push, base change and state change on the timeline, oldest first."""
+        nodes: list[dict[str, Any]] = []
+        cursor: str | None = None
+        seen: set[str] = set()
+        while True:
+            pull = _graphql_pull(
+                await self.repo.graphql(_HISTORY_QUERY, {"number": self.number, "cursor": cursor})
+            )
+            connection = pull.get("timelineItems") if pull is not None else None
+            if not isinstance(connection, Mapping) or not isinstance(connection.get("nodes"), list):
+                raise ValueError("GitHub answered the timeline without a list")
+            nodes.extend(node for node in connection["nodes"] if isinstance(node, dict))
+            cursor = _next_cursor(connection, seen)
+            if cursor is None:
+                return nodes
 
     async def review_thread_states(self) -> dict[str, bool]:
         """Explicit resolution states, returned only after every page was read."""

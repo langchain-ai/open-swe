@@ -111,7 +111,7 @@ _THREAD_STATES = TypeAdapter(list[_ThreadState])
 
 
 @contextmanager
-def _expected_shape(pull: PullRequestClient) -> Iterator[None]:
+def expected_shape(pull: PullRequestClient) -> Iterator[None]:
     """GitHub answering with an unexpected shape is a 502, logged with the pull request."""
     try:
         yield
@@ -166,7 +166,7 @@ class ConversationComment(BaseModel):
     @classmethod
     async def post(cls, pull: PullRequestClient, body: str) -> Self:
         created = await pull.comment(body)
-        with _expected_shape(pull):
+        with expected_shape(pull):
             return cls.of(_GitHubIssueComment.model_validate(created))
 
 
@@ -217,7 +217,7 @@ class ThreadComment(BaseModel):
     @classmethod
     async def reply(cls, pull: PullRequestClient, comment_id: int, body: str) -> Self:
         created = await pull.reply_to_review_comment(comment_id, body)
-        with _expected_shape(pull):
+        with expected_shape(pull):
             return cls.of(_GitHubReviewComment.model_validate(created))
 
 
@@ -331,7 +331,7 @@ class Conversation(BaseModel):
 
     @classmethod
     async def load(cls, pull: PullRequestClient) -> Self:
-        with _expected_shape(pull):
+        with expected_shape(pull):
             (
                 raw_comments,
                 raw_reviews,

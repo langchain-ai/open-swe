@@ -2588,6 +2588,192 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "History": {
+        "properties": {
+          "events": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "base_change": "#/components/schemas/HistoryBaseChange",
+                  "commit": "#/components/schemas/ConversationCommit",
+                  "force_push": "#/components/schemas/HistoryForcePush",
+                  "state": "#/components/schemas/HistoryStateChange"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ConversationCommit"
+                },
+                {
+                  "$ref": "#/components/schemas/HistoryForcePush"
+                },
+                {
+                  "$ref": "#/components/schemas/HistoryBaseChange"
+                },
+                {
+                  "$ref": "#/components/schemas/HistoryStateChange"
+                }
+              ]
+            },
+            "title": "Events",
+            "type": "array"
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "title": "History",
+        "type": "object"
+      },
+      "HistoryBaseChange": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationAuthor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current": {
+            "title": "Current",
+            "type": "string"
+          },
+          "kind": {
+            "const": "base_change",
+            "default": "base_change",
+            "title": "Kind",
+            "type": "string"
+          },
+          "previous": {
+            "title": "Previous",
+            "type": "string"
+          }
+        },
+        "required": [
+          "author",
+          "created_at",
+          "previous",
+          "current"
+        ],
+        "title": "HistoryBaseChange",
+        "type": "object"
+      },
+      "HistoryForcePush": {
+        "properties": {
+          "after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationAuthor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "force_push",
+            "default": "force_push",
+            "title": "Kind",
+            "type": "string"
+          },
+          "ref": {
+            "enum": [
+              "head",
+              "base"
+            ],
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "author",
+          "created_at",
+          "before",
+          "after"
+        ],
+        "title": "HistoryForcePush",
+        "type": "object"
+      },
+      "HistoryStateChange": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationAuthor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "state",
+            "default": "state",
+            "title": "Kind",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "draft",
+              "ready",
+              "closed",
+              "reopened",
+              "merged"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "author",
+          "created_at",
+          "state"
+        ],
+        "title": "HistoryStateChange",
+        "type": "object"
+      },
       "HumanReviewAvailability": {
         "properties": {
           "active": {
@@ -17105,6 +17291,72 @@
           }
         ],
         "summary": "Api Get Review File Contents",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/history": {
+      "get": {
+        "operationId": "api_get_review_history_dashboard_api_reviews__owner___repo___pr_number__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/History"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Review History",
         "tags": [
           "dashboard",
           "review"
