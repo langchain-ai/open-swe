@@ -45,14 +45,22 @@ it("defaults desktop to Work, persists a switch locally, and isolates users", ()
 })
 
 it("opens the selected home and exposes the selected label in browser and desktop", () => {
-  render(<ExperienceSelector />)
+  const onNavigate = vi.fn()
+  render(<ExperienceSelector onNavigate={onNavigate} />)
   expect(
-    screen.getByRole("button", { name: "Work" }).getAttribute("aria-pressed")
+    screen.getByRole("button", { name: "Home" }).getAttribute("aria-pressed")
   ).toBe("true")
-  fireEvent.click(screen.getByRole("button", { name: "Coding" }))
   expect(
-    screen.getByRole("button", { name: "Coding" }).getAttribute("aria-pressed")
+    screen.getByRole("button", { name: "Code" }).getAttribute("aria-pressed")
+  ).toBe("false")
+  fireEvent.click(screen.getByRole("button", { name: "Code" }))
+  expect(
+    screen.getByRole("button", { name: "Code" }).getAttribute("aria-pressed")
   ).toBe("true")
+  expect(
+    screen.getByRole("button", { name: "Home" }).getAttribute("aria-pressed")
+  ).toBe("false")
+  expect(onNavigate).toHaveBeenCalledOnce()
   expect(state.navigate).toHaveBeenCalledWith({ to: "/agents", search: {} })
   Reflect.deleteProperty(window, "openSweDesktop")
   const browser = renderHook(() => useDesktopExperience())

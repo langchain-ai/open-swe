@@ -456,6 +456,15 @@ export const agentsApi = {
         options?.markViewed === false ? "?mark_viewed=false" : ""
       }`
     ),
+  markThreadViewed: (threadId: string, runId: string) =>
+    agentsRequest<{
+      runId: string | null
+      viewed: boolean
+      viewedAt: number | null
+    }>(`/threads/${encodeURIComponent(threadId)}/viewed`, {
+      method: "POST",
+      body: JSON.stringify({ run_id: runId }),
+    }),
   getPullRequestChecks: (
     pullRequests: Array<{ repoFullName: string; number: number }>
   ) =>

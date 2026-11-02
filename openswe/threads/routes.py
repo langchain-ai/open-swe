@@ -80,6 +80,9 @@ from openswe.threads.runs import (
     create_dashboard_session,
 )
 from openswe.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
+from openswe.threads.status import WorkRunState, WorkRunView
+from openswe.threads.store import THREADS
+from openswe.threads.summary import assert_thread_readable
 from openswe.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
@@ -333,6 +336,33 @@ async def api_get_thread_pull_request_context(
         scope=scope,
         email=session.get("email"),
     )
+
+
+class ThreadViewedBody(BaseModel):
+    run_id: str = Field(min_length=1)
+
+
+@router.post("/threads/{thread_id}/viewed")
+async def api_mark_thread_viewed(
+    thread_id: str,
+    body: ThreadViewedBody,
+    session: dict[str, str] = SESSION_DEP,
+) -> WorkRunView:
+    thread = await THREADS.get(thread_id)
+    if thread is None:
+        raise HTTPException(404, "thread not found")
+    assert_thread_readable(thread.metadata, session["sub"], session.get("email"))
+    if thread.metadata.get("experience") != "agent_workspace":
+        raise HTTPException(409, "explicit read receipts are only supported for Work threads")
+    state = WorkRunState(thread)
+    try:
+        await state.refresh(viewed_run_id=body.run_id)
+    except Exception as exc:
+        logger.warning(
+            "Could not acknowledge Work run", extra={"thread_id": thread_id}, exc_info=True
+        )
+        raise HTTPException(503, "could not refresh the latest run") from exc
+    return await state.receipt()
 
 
 @router.get("/threads/{thread_id}")

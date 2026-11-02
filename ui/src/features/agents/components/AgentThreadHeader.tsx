@@ -218,7 +218,7 @@ export function AgentThreadHeader({
       data-desktop-drag-region=""
       className={cn(
         "relative z-pane-header h-11 shrink-0 border-b border-subtle bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent",
-        agentWorkspace && "h-14 border-transparent bg-transparent after:hidden"
+        agentWorkspace && "border-b-0 bg-transparent after:hidden"
       )}
     >
       <div

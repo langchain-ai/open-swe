@@ -6,6 +6,7 @@ import { useAgentStreamSource } from "./useAgentStreamSource"
 import { useTranscriptSource } from "./useTranscriptSource"
 import type { ReactNode } from "react"
 import type { ThreadSource } from "./types"
+import type { AgentThread } from "@/features/agents/lib/types"
 
 const ThreadSourceContext = createContext<ThreadSource | null>(null)
 
@@ -65,15 +66,17 @@ function TranscriptSource({
 export function ThreadSourceProvider({
   threadId,
   transcript,
+  experience,
   children,
 }: {
   threadId: string
   /** True for threads whose metadata says the event log serves them. */
   transcript: boolean
+  experience?: AgentThread["experience"]
   children: ReactNode
 }) {
   const preferStream = useStreamPreference()
-  return transcript && !preferStream ? (
+  return transcript && (experience === "agent_workspace" || !preferStream) ? (
     <TranscriptSource threadId={threadId}>{children}</TranscriptSource>
   ) : (
     <StreamSource threadId={threadId}>{children}</StreamSource>
