@@ -1986,7 +1986,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         *(() if goal_mode else (report_work_state,)),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
-        *(() if managed_gateway else (connect_managed_tools,)),
+        *(() if managed_gateway else (connect_managed_tools, discover_managed_tools)),
         *(
             ()
             if sandbox_file_downloads
