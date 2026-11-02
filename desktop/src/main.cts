@@ -148,6 +148,7 @@ let localThreadStore = null;
 let localBridges = null;
 const skillSync = new SkillSync({
   home: require("node:os").homedir(),
+  statePath: path.join(app.getPath("userData"), "skill-sync-source-id"),
   target: async () => {
     const url = backendUrl;
     if (!url) return null;

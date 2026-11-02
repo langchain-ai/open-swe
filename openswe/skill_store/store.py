@@ -52,6 +52,7 @@ class SkillCreate(BaseModel):
 
 
 class SkillImport(BaseModel):
+    source_id: UUID
     files: dict[str, str] = Field(min_length=1, max_length=100)
 
     @field_validator("files")
@@ -92,7 +93,12 @@ class SkillImport(BaseModel):
         body = self.skill(name)
         owner = await _person(login)
         value = _record(body.name, body.description, body.instructions)
-        value.update(content=self.files["SKILL.md"], files=self.files, source="desktop")
+        value.update(
+            content=self.files["SKILL.md"],
+            files=self.files,
+            source="desktop",
+            source_id=str(self.source_id),
+        )
         statement = insert(Skill).values(user_id=owner, name=name, value=value)
         statement = statement.on_conflict_do_update(
             index_elements=[
@@ -106,7 +112,8 @@ class SkillImport(BaseModel):
                     func.jsonb_build_object("created_at", Skill.value["created_at"])
                 )
             },
-            where=Skill.value["source"].astext == "desktop",
+            where=(Skill.value["source"].astext == "desktop")
+            & (Skill.value["source_id"].astext == str(self.source_id)),
         ).returning(Skill.id)
         async with postgres.session() as session:
             if await session.scalar(statement) is None:
@@ -114,7 +121,25 @@ class SkillImport(BaseModel):
         return {"name": name}
 
 
+class SkillImportInventory(BaseModel):
+    source_id: UUID
+    names: list[str] = Field(max_length=1000)
+
+    async def reconcile(self, login: str) -> None:
+        owner = await _person(login)
+        async with postgres.session() as session:
+            await session.execute(
+                delete(Skill).where(
+                    Skill.user_id == owner,
+                    Skill.name.not_in(self.names),
+                    Skill.value["source"].astext == "desktop",
+                    Skill.value["source_id"].astext == str(self.source_id),
+                )
+            )
+
+
 class SkillUpdate(BaseModel):
+    detach: bool = False
     description: str = Field(min_length=1, max_length=MAX_SKILL_DESCRIPTION_CHARS)
     instructions: str = Field(default="", max_length=MAX_SKILL_INSTRUCTIONS_CHARS)
 
@@ -236,7 +261,11 @@ async def _update_skill(owner: Owner, name: str, body: SkillUpdate) -> dict[str,
     existing = await _get_skill(owner, name)
     if not existing:
         raise HTTPException(404, "skill not found")
+    if existing.get("source") == "desktop" and not body.detach:
+        raise HTTPException(409, "Desktop-synced skills are read-only; explicitly detach to edit")
     value = _record(name, body.description, body.instructions, existing)
+    if existing.get("source") == "desktop":
+        value.update(source="desktop-detached", source_id=existing.get("source_id"))
     if "files" in existing:
         content = body.content(existing["content"], name)
         value.update(content=content, files={**existing["files"], "SKILL.md": content})

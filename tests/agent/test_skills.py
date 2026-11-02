@@ -1,4 +1,5 @@
 from unittest.mock import patch
+from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
@@ -7,6 +8,7 @@ from openswe.skill_store.backend import skills_backend
 from openswe.skill_store.store import (
     SkillCreate,
     SkillImport,
+    SkillImportInventory,
     create_skill,
     get_skill,
     list_skills,
@@ -59,7 +61,9 @@ async def test_desktop_import_preserves_resources_and_cloud_edits(
     await User.sign_in("github", "1", login="octocat")
     await User.sign_in("github", "2", login="other")
     content = "---\nname: review\ndescription: >-\n  Review code safely\nlicense: MIT\n---\nCheck references/checklist.md\n"
-    bundle = SkillImport(files={"SKILL.md": content, "references/checklist.md": "Check auth"})
+    bundle = SkillImport(
+        source_id=UUID(int=1), files={"SKILL.md": content, "references/checklist.md": "Check auth"}
+    )
     await bundle.save("octocat", "review")
     bundle.files["references/checklist.md"] = "Check permissions"
     await bundle.save("octocat", "review")
@@ -70,8 +74,12 @@ async def test_desktop_import_preserves_resources_and_cloud_edits(
     assert await get_skill("other", "review") is None
     page = await list_skills("octocat", limit=100, offset=0)
     assert "files" not in page["items"][0]
+    with pytest.raises(HTTPException):
+        await update_skill("octocat", "review", SkillUpdate(description="Blocked"))
     await update_skill(
-        "octocat", "review", SkillUpdate(description="Cloud edit", instructions="Keep me")
+        "octocat",
+        "review",
+        SkillUpdate(description="Cloud edit", instructions="Keep me", detach=True),
     )
     with pytest.raises(HTTPException) as conflict:
         await bundle.save("octocat", "review")
@@ -81,7 +89,9 @@ async def test_desktop_import_preserves_resources_and_cloud_edits(
     assert saved["files"]["references/checklist.md"] == "Check permissions"
     assert "license: MIT" in saved["content"]
     assert saved["files"]["SKILL.md"] == saved["content"]
-    assert "source" not in saved
+    assert saved["source"] == "desktop-detached"
+    await SkillImportInventory(source_id=UUID(int=1), names=[]).reconcile("octocat")
+    assert await get_skill("octocat", "review") is not None
 
 
 @pytest.mark.parametrize(
@@ -89,7 +99,7 @@ async def test_desktop_import_preserves_resources_and_cloud_edits(
 )
 def test_desktop_import_rejects_unsafe_paths(path: str) -> None:
     with pytest.raises(ValidationError):
-        SkillImport(files={"SKILL.md": "content", path: "secret"})
+        SkillImport(source_id=UUID(int=1), files={"SKILL.md": "content", path: "secret"})
 
 
 async def test_save_organization_skill_requires_admin(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -101,3 +111,20 @@ async def test_save_organization_skill_requires_admin(monkeypatch: pytest.Monkey
         result = await save_organization_skill("deslop", "Minimize diffs")
 
     assert result["ok"] is False
+
+
+async def test_desktop_inventory_only_removes_own_unedited_imports(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "octocat")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
+    await User.sign_in("github", "1", login="octocat")
+    bundle = SkillImport(
+        source_id=UUID(int=1),
+        files={"SKILL.md": "---\nname: review\ndescription: Review\n---\nInstructions"},
+    )
+    await bundle.save("octocat", "review")
+    await SkillImportInventory(source_id=UUID(int=2), names=[]).reconcile("octocat")
+    assert await get_skill("octocat", "review") is not None
+    await SkillImportInventory(source_id=UUID(int=1), names=[]).reconcile("octocat")
+    assert await get_skill("octocat", "review") is None

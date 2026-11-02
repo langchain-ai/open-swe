@@ -1,6 +1,6 @@
 import fs = require("node:fs/promises");
 import path = require("node:path");
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 const { SESSION_COOKIE_NAME } = require("./config.cjs");
 
 type SkillTarget = {
@@ -10,6 +10,7 @@ type SkillTarget = {
 
 type SkillSyncOptions = {
   home: string;
+  statePath: string;
   target: () => Promise<SkillTarget | null>;
   request: (url: string, init: RequestInit) => Promise<Response>;
   log: (message: string, error: unknown) => void;
@@ -18,6 +19,7 @@ type SkillSyncOptions = {
 class SkillSync {
   private readonly uploaded = new Map<string, string>();
   private readonly readErrors = new Map<string, string>();
+  private readonly inventories = new Map<string, string>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private running: Promise<void> | null = null;
   private stopped = false;
@@ -82,9 +84,28 @@ class SkillSync {
     return files;
   }
 
+  private async sourceId(): Promise<string> {
+    try {
+      const id = (await fs.readFile(this.options.statePath, "utf8")).trim();
+      if (!/^[0-9a-f-]{36}$/.test(id))
+        throw new Error("Invalid skill sync source ID");
+      return id;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const id = randomUUID();
+      await fs.mkdir(path.dirname(this.options.statePath), { recursive: true });
+      await fs.writeFile(this.options.statePath, id, {
+        flag: "wx",
+        mode: 0o600,
+      });
+      return id;
+    }
+  }
+
   private async upload(): Promise<void> {
     const target = await this.options.target();
     if (!target || this.stopped) return;
+    const sourceId = await this.sourceId();
     const seen = new Set<string>();
     for (const folder of [".agent", ".agents"]) {
       const root = path.join(this.options.home, folder, "skills");
@@ -97,14 +118,17 @@ class SkillSync {
       }
       for (const name of entries.sort()) {
         if (name.startsWith(".") || seen.has(name)) continue;
+        seen.add(name);
         const directory = path.join(root, name);
         try {
           if (!(await fs.stat(directory)).isDirectory()) continue;
           const files = await this.readFiles(directory);
           this.readErrors.delete(directory);
-          if (!files["SKILL.md"]) continue;
-          seen.add(name);
-          const body = JSON.stringify({ files });
+          if (!Object.hasOwn(files, "SKILL.md")) {
+            seen.delete(name);
+            continue;
+          }
+          const body = JSON.stringify({ files, source_id: sourceId });
           const key = `${target.url}\n${target.session}\n${name}`;
           const hash = createHash("sha256").update(body).digest("hex");
           if (this.uploaded.get(key) === hash) continue;
@@ -155,6 +179,32 @@ class SkillSync {
         }
       }
     }
+    const current = await this.options.target();
+    if (
+      this.stopped ||
+      current?.url !== target.url ||
+      current.session !== target.session
+    )
+      return;
+    const inventory = JSON.stringify({ source_id: sourceId, names: [...seen] });
+    const inventoryKey = `${target.url}\n${target.session}`;
+    if (this.inventories.get(inventoryKey) === inventory) return;
+    const response = await this.options.request(
+      `${target.url}/dashboard/api/skills/import-inventory`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: `${SESSION_COOKIE_NAME}=${target.session}`,
+        },
+        body: inventory,
+        redirect: "error",
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+    if (!response.ok)
+      throw new Error(`Skill inventory rejected (${response.status})`);
+    this.inventories.set(inventoryKey, inventory);
   }
 }
 

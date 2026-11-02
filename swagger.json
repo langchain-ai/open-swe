@@ -7482,12 +7482,41 @@
             "minProperties": 1,
             "title": "Files",
             "type": "object"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
           }
         },
         "required": [
+          "source_id",
           "files"
         ],
         "title": "SkillImport",
+        "type": "object"
+      },
+      "SkillImportInventory": {
+        "properties": {
+          "names": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Names",
+            "type": "array"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "names"
+        ],
+        "title": "SkillImportInventory",
         "type": "object"
       },
       "SkillUpdate": {
@@ -7497,6 +7526,11 @@
             "minLength": 1,
             "title": "Description",
             "type": "string"
+          },
+          "detach": {
+            "default": false,
+            "title": "Detach",
+            "type": "boolean"
           },
           "instructions": {
             "default": "",
@@ -18908,6 +18942,50 @@
           }
         ],
         "summary": "Api Create Skill",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/skills/import-inventory": {
+      "post": {
+        "operationId": "api_reconcile_imported_skills_dashboard_api_skills_import_inventory_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillImportInventory"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Reconcile Imported Skills",
         "tags": [
           "dashboard"
         ]

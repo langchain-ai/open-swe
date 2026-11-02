@@ -12,6 +12,7 @@ from openswe.skill_store.store import (
     MAX_SKILLS_PAGE_SIZE,
     SkillCreate,
     SkillImport,
+    SkillImportInventory,
     SkillUpdate,
     create_organization_skill,
     create_skill,
@@ -52,6 +53,16 @@ async def api_update_skill(
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     return await update_skill(session["sub"], name, body)
+
+
+@router.post("/skills/import-inventory")
+@audit_endpoint
+async def api_reconcile_imported_skills(
+    body: SkillImportInventory,
+    session: dict[str, Any] = SESSION_DEP,
+) -> Response:
+    await body.reconcile(session["sub"])
+    return Response(status_code=204)
 
 
 @router.put("/skills/{name}/import")

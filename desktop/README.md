@@ -53,10 +53,15 @@ Hidden files are excluded; binary resources, symlinked resources inside a skill,
 Skill directories themselves may be symlinks.
 Imported resources are readable skill files, not installed executables or dependencies in a remote sandbox.
 
-Uploads are one-way: local changes update desktop-imported skills, but never overwrite a same-named cloud-authored skill.
-Editing an imported skill in the dashboard makes it cloud-managed and stops subsequent desktop overwrites.
-Removing a local folder does not delete the uploaded skill, because another computer or a cloud conversation may still use it.
-Delete unwanted personal skills in the dashboard; a still-present local folder can import them again after the app restarts or the file changes.
+Uploads and removals are scoped to a persistent random ID for this desktop profile, stored in its user-data directory.
+A complete scan sends an inventory; the backend removes only absent skills still owned by that source and account.
+Unreadable directories abort reconciliation, and unreadable or invalid skill folders remain in the inventory, so scan failures do not look like deletions.
+Deleting a skill folder locally removes its remote copy on the next successful scan, including after restarting the app.
+Other computers cannot overwrite or delete that copy.
+
+Desktop-synced skills are read-only in the dashboard and agent tools by default.
+Use **Detach to edit** to make an independent cloud copy; this preserves provenance and resources but permanently disables desktop updates and automatic deletion for that copy.
+Cloud-authored skills and detached copies are never overwritten or removed by desktop sync.
 New agent runs see imported changes; an already-running agent retains its run's skill snapshot.
 Personal skills keep the existing private-thread credential restrictions and are not published to the organization.
 

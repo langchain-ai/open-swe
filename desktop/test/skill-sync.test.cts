@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { SkillSync } = require("../build/skill-sync.cjs");
 
-test("syncs changed bundles to the current account, retries failures, and preserves cloud deletions", async (t) => {
+test("syncs changed bundles to the current account, retries failures, and reconciles removals after restart", async (t) => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "skill-sync-"));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   const directory = path.join(home, ".agent/skills/review");
@@ -18,14 +18,20 @@ test("syncs changed bundles to the current account, retries failures, and preser
     path.join(directory, "references/checklist.md"),
     "Check auth.",
   );
+  const inventories: { source_id: string; names: string[] }[] = [];
   const requests: { url: string; body: string; cookie: string }[] = [];
   let session = "alice";
   let status = 503;
   const sync = new SkillSync({
     home,
+    statePath: path.join(home, "sync-id"),
     target: async () =>
       session ? { url: "https://example.com", session } : null,
     request: async (url: string, init: RequestInit) => {
+      if (url.endsWith("import-inventory")) {
+        inventories.push(JSON.parse(String(init.body)));
+        return new Response(null, { status: 204 });
+      }
       requests.push({
         url,
         body: String(init.body),
@@ -69,6 +75,8 @@ test("syncs changed bundles to the current account, retries failures, and preser
   await fs.rm(directory, { recursive: true });
   await sync.sync();
   assert.equal(requests.length, 6);
+  assert.deepEqual(inventories.at(-1)!.names, []);
+  assert.equal(inventories[0].source_id, inventories.at(-1)!.source_id);
 });
 
 test("discovers standard .agents skills but gives the requested .agent root priority", async (t) => {
@@ -82,8 +90,11 @@ test("discovers standard .agents skills but gives the requested .agent root prio
   const uploaded: string[] = [];
   const sync = new SkillSync({
     home,
+    statePath: path.join(home, "sync-id"),
     target: async () => ({ url: "https://example.com", session: "alice" }),
     request: async (_url: string, init: RequestInit) => {
+      if (_url.endsWith("import-inventory"))
+        return new Response(null, { status: 204 });
       uploaded.push(JSON.parse(String(init.body)).files["SKILL.md"]);
       return new Response();
     },
