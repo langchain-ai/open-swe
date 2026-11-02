@@ -58,6 +58,12 @@ interface HeadState {
   collapsed: ReadonlySet<string>
 }
 
+/** Saves marks to the server, so others see what this person reviewed. */
+export type ReadRecorder = (
+  entries: ReadonlyArray<DiffEntry>,
+  read: boolean
+) => void
+
 /** What the viewer started or opened on this pull request, kept until they open another one. */
 interface PullRequestState {
   pr: PullRequestRef | null
@@ -112,7 +118,13 @@ interface VisitState {
   lastStop: string | null
 }
 
-type ReviewPageState = Preferences & HeadState & PullRequestState & VisitState
+type ReviewPageState = Preferences &
+  HeadState &
+  PullRequestState &
+  VisitState & {
+    /** Registered by the mounted page, whichever pull request it shows. */
+    recordRead: ReadRecorder | null
+  }
 
 interface ReviewPageActions {
   /** Shows a pull request at a head; drafts survive only on the same pull request, marks only on the same head. */
@@ -170,6 +182,11 @@ interface ReviewPageActions {
   markStepRead: (index: number) => void
   /** The next file not yet viewed, in reading order, after the one being read. */
   jumpToUnviewed: () => void
+  setReadRecorder: (recorder: ReadRecorder | null) => void
+  /** Sets entries' marks without saving them, to undo a mark the server refused. */
+  restoreRead: (entries: ReadonlyArray<DiffEntry>, read: boolean) => void
+  /** Marks files viewed that the server says this person already reviewed at this head. */
+  adoptViewed: (paths: ReadonlyArray<string>) => void
 }
 
 const ORDER_KEY = "open-swe.review.view"
@@ -333,8 +350,12 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
   get
 ) => {
   // A file split across steps is viewed once every slice is; until then each slice is read alone.
-  const setRead = (targets: ReadonlyArray<DiffEntry>, read: boolean) => {
-    const { pr, viewed, viewedSha, collapsed, entryOrder } = get()
+  const setRead = (
+    targets: ReadonlyArray<DiffEntry>,
+    read: boolean,
+    record = true
+  ) => {
+    const { pr, viewed, viewedSha, collapsed, entryOrder, recordRead } = get()
     const next = new Set(viewed)
     const flips = new Set(collapsed)
     const slicesOf = new Map<string, Array<DiffEntry>>()
@@ -364,6 +385,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
     }
     if (pr) writePreference(viewedKey(pr, viewedSha), JSON.stringify([...next]))
     set({ viewed: next, collapsed: flips })
+    if (record && targets.length > 0) recordRead?.(targets, read)
   }
 
   const emit = (event: PageEvent) =>
@@ -376,6 +398,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
     ...freshHead(null, null),
     ...freshPullRequest(null),
     ...freshVisit(),
+    recordRead: null,
 
     open: (pr, headSha) => {
       const samePr = samePullRequest(get().pr, pr)
@@ -553,6 +576,16 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       const { entryOrder, viewed } = get()
       const entries = entryOrder.filter((entry) => entry.step?.index === index)
       setRead(entries, !entries.every((entry) => isRead(viewed, entry)))
+    },
+    setReadRecorder: (recordRead) => set({ recordRead }),
+    restoreRead: (entries, read) => setRead(entries, read, false),
+    adoptViewed: (paths) => {
+      const { pr, viewed, viewedSha } = get()
+      if (paths.every((path) => viewed.has(path))) return
+      const next = new Set([...viewed, ...paths])
+      if (pr)
+        writePreference(viewedKey(pr, viewedSha), JSON.stringify([...next]))
+      set({ viewed: next })
     },
     jumpToUnviewed: () => {
       const { entryOrder, activeEntry, viewed, jumpTo } = get()

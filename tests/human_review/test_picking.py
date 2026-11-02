@@ -20,7 +20,12 @@ _CODEOWNERS = CodeOwners.parse(
 /docs/ @docs  # nested docs
 docs/* @flat
 apps/ @apps
+# @hard-required-review-start
 /smith-frontend/src/design-system/ @langchain-ai/design-system
+# @hard-required-review-end
+# @hard-required-review
+/API.md @ingestion
+/API.md.bak @ingestion
 /unowned.txt
 """
 )
@@ -42,7 +47,21 @@ def test_the_last_matching_codeowners_rule_owns_a_path(path: str, owners: tuple[
     assert _CODEOWNERS.owners_for(path) == owners
 
 
-async def test_the_largest_code_owner_area_comes_first_and_an_approval_leaves_the_rest(
+@pytest.mark.parametrize(
+    ("path", "hard"),
+    [
+        ("smith-frontend/src/design-system/Button.tsx", True),
+        ("API.md", True),
+        ("API.md.bak", False),
+        ("docs/intro.md", False),
+    ],
+)
+def test_hard_required_review_markers_make_a_rule_hard(path: str, hard: bool) -> None:
+    rule = _CODEOWNERS.rule_for(path)
+    assert rule is not None and rule.hard is hard
+
+
+async def test_hard_areas_then_the_largest_come_first_and_an_approval_leaves_the_rest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from openswe.human_review import picking
@@ -54,12 +73,14 @@ async def test_the_largest_code_owner_area_comes_first_and_an_approval_leaves_th
             "smith-frontend/src/design-system/Button.tsx",
             "smith-frontend/src/design-system/Card.tsx",
             "README.md",
+            "CONTRIBUTING.md",
+            "LICENSE",
             "unowned.txt",
         ],
     )
-    assert [area.handles for area in coverage.areas] == [
-        ("@langchain-ai/design-system",),
-        ("@default",),
+    assert [(area.handles, area.hard) for area in coverage.areas] == [
+        (("@langchain-ai/design-system",), True),
+        (("@default",), False),
     ]
     assert coverage.areas[0].owners == {"grace", "ada"}
     assert coverage.uncovered(["Grace"]) == [coverage.areas[1]]

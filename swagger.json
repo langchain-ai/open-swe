@@ -2328,6 +2328,74 @@
         ],
         "type": "string"
       },
+      "FileCoverage": {
+        "properties": {
+          "approved_by": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Approved By",
+            "type": "array"
+          },
+          "changed_lines": {
+            "title": "Changed Lines",
+            "type": "integer"
+          },
+          "code_owners": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Code Owners",
+            "type": "array"
+          },
+          "hard": {
+            "title": "Hard",
+            "type": "boolean"
+          },
+          "owner_reviewed_lines": {
+            "title": "Owner Reviewed Lines",
+            "type": "integer"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "reviewed_lines": {
+            "title": "Reviewed Lines",
+            "type": "integer"
+          },
+          "reviewers": {
+            "items": {
+              "$ref": "#/components/schemas/LineReviewer"
+            },
+            "title": "Reviewers",
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "owner_reviewed",
+              "reviewed",
+              "partial",
+              "unreviewed"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "changed_lines",
+          "code_owners",
+          "hard",
+          "approved_by",
+          "reviewers",
+          "reviewed_lines",
+          "owner_reviewed_lines",
+          "state"
+        ],
+        "title": "FileCoverage",
+        "type": "object"
+      },
       "FixIntent": {
         "properties": {
           "context": {
@@ -2665,6 +2733,35 @@
         "title": "HumanReviewRequestBody",
         "type": "object"
       },
+      "HunkRange": {
+        "description": "One hunk as the review page draws it, context lines included.",
+        "properties": {
+          "addition_count": {
+            "title": "Addition Count",
+            "type": "integer"
+          },
+          "addition_start": {
+            "title": "Addition Start",
+            "type": "integer"
+          },
+          "deletion_count": {
+            "title": "Deletion Count",
+            "type": "integer"
+          },
+          "deletion_start": {
+            "title": "Deletion Start",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "addition_start",
+          "addition_count",
+          "deletion_start",
+          "deletion_count"
+        ],
+        "title": "HunkRange",
+        "type": "object"
+      },
       "IncidentCommandBody": {
         "additionalProperties": false,
         "properties": {
@@ -2933,6 +3030,24 @@
           "body"
         ],
         "title": "LineComment",
+        "type": "object"
+      },
+      "LineReviewer": {
+        "properties": {
+          "lines": {
+            "title": "Lines",
+            "type": "integer"
+          },
+          "login": {
+            "title": "Login",
+            "type": "string"
+          }
+        },
+        "required": [
+          "login",
+          "lines"
+        ],
+        "title": "LineReviewer",
         "type": "object"
       },
       "LinearChannelCall": {
@@ -6368,6 +6483,32 @@
         "title": "ReviewCounts",
         "type": "object"
       },
+      "ReviewCoverage": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/FileCoverage"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "head_sha": {
+            "title": "Head Sha",
+            "type": "string"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "head_sha",
+          "files",
+          "truncated"
+        ],
+        "title": "ReviewCoverage",
+        "type": "object"
+      },
       "ReviewScoutTrigger": {
         "properties": {
           "run_id": {
@@ -6732,6 +6873,61 @@
           "comments"
         ],
         "title": "ReviewThread",
+        "type": "object"
+      },
+      "ReviewedFile": {
+        "properties": {
+          "hunks": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/HunkRange"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hunks"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "ReviewedFile",
+        "type": "object"
+      },
+      "ReviewedLines": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewedFile"
+            },
+            "maxItems": 3000,
+            "minItems": 1,
+            "title": "Files",
+            "type": "array"
+          },
+          "head_sha": {
+            "title": "Head Sha",
+            "type": "string"
+          },
+          "reviewed": {
+            "title": "Reviewed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "head_sha",
+          "files",
+          "reviewed"
+        ],
+        "title": "ReviewedLines",
         "type": "object"
       },
       "ReviewerEvalConfig": {
@@ -16747,6 +16943,73 @@
         ]
       }
     },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/coverage": {
+      "get": {
+        "description": "Who has reviewed which changed lines, and whether each file's code owners have.",
+        "operationId": "api_get_review_coverage_dashboard_api_reviews__owner___repo___pr_number__coverage_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewCoverage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Review Coverage",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
     "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/diff": {
       "get": {
         "operationId": "api_get_review_diff_dashboard_api_reviews__owner___repo___pr_number__diff_get",
@@ -17809,6 +18072,76 @@
           }
         ],
         "summary": "Api Re Review",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/reviewed-lines": {
+      "put": {
+        "description": "Record that the signed-in person reviewed these files or hunks, or take it back.",
+        "operationId": "api_mark_reviewed_lines_dashboard_api_reviews__owner___repo___pr_number__reviewed_lines_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewedLines"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Mark Reviewed Lines",
         "tags": [
           "dashboard",
           "review"

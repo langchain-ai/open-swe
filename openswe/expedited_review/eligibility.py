@@ -19,6 +19,7 @@ import httpx2
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from openswe.github.pull_request_status import PullRequestClient
+from openswe.walkthrough.lines import LineRange, LineSet, Ranges
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ _TEST_PATH = re.compile(
 # Declarative output derived from the PR's source, so it never decides anything on its own.
 # Generated code (bundles, protobuf stubs) can run, so it is drawn like any other code.
 _GENERATED_PATH = re.compile(r"(?:^|/)(?:swagger|openapi)\.(?:json|ya?ml)$|\.snap$")
-_HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+_HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,7 +63,27 @@ class Hunk:
     @property
     def new_start(self) -> int:
         match = _HUNK_HEADER.match(self.header)
-        return int(match[1]) if match else 0
+        return int(match[2]) if match else 0
+
+    def changed(self, path: str) -> LineSet:
+        """The hunk's added lines at their head numbers and deleted lines at their base numbers."""
+        match = _HUNK_HEADER.match(self.header)
+        if match is None:
+            return LineSet()
+        old, new = int(match[1]), int(match[2])
+        added: list[LineRange] = []
+        deleted: list[LineRange] = []
+        for line in self.body:
+            if line.startswith("+"):
+                added.append((new, new))
+                new += 1
+            elif line.startswith("-"):
+                deleted.append((old, old))
+                old += 1
+            elif not line.startswith("\\"):
+                old += 1
+                new += 1
+        return LineSet({path: {"+": Ranges.of(added), "-": Ranges.of(deleted)}})
 
     @property
     def additions(self) -> int:
@@ -109,6 +130,11 @@ class ChangedFile(BaseModel):
         if header:
             hunks.append(Hunk(header, tuple(body)))
         return hunks
+
+    @property
+    def lines(self) -> LineSet:
+        """Every changed line, numbered as the walkthrough numbers them."""
+        return LineSet.union(hunk.changed(self.filename) for hunk in self.hunks)
 
     def keeping(self, hunks: list[Hunk]) -> ChangedFile:
         return self.model_copy(

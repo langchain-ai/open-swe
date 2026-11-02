@@ -11,6 +11,7 @@ import { copyText } from "@/features/reviews/lib/copyText"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
 import { AgentMark } from "./AgentMark"
+import { CoverageTag } from "./CoverageTag"
 import { isRenderable } from "./diffEntries"
 import { useEntry, useMarkers } from "./entries"
 import { findingGroupColor, findingTarget, threadTarget } from "./findings"
@@ -168,6 +169,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
           {threads.length}
         </Button>
       )}
+      <CoverageTag pr={pr} path={path} className="shrink-0 max-sm:hidden" />
       {!renderable && (
         <span className="truncate text-secondary">
           Binary or too large to show

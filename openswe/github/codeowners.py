@@ -9,6 +9,11 @@ from openswe.github.org_membership import team_members
 
 CODEOWNERS_PATHS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
 CODEOWNERS_MAX_CHARS = 3_000_000
+# Comment markers, as langchainplus's `langdev pr hard-codeowners` reads them, for owners whose
+# review is required rather than suggested.
+HARD_START = "@hard-required-review-start"
+HARD_END = "@hard-required-review-end"
+HARD_NEXT = "@hard-required-review"
 
 
 def _segment(segment: str) -> str:
@@ -39,6 +44,8 @@ def _compile(pattern: str) -> re.Pattern[str]:
 class CodeOwnersRule:
     pattern: re.Pattern[str]
     owners: tuple[str, ...]
+    # Inside a ``# @hard-required-review-start``/``-end`` block, or right after ``# @hard-required-review``.
+    hard: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,24 +55,43 @@ class CodeOwners:
     @classmethod
     def parse(cls, text: str) -> Self:
         rules: list[CodeOwnersRule] = []
+        in_block = hard_next = False
         for raw in text.splitlines():
+            stripped = raw.strip()
+            if stripped.startswith("#"):
+                comment = stripped.removeprefix("#")
+                if HARD_START in comment:
+                    in_block = True
+                elif HARD_END in comment:
+                    in_block = False
+                elif HARD_NEXT in comment:
+                    hard_next = True
+                continue
             line = raw.split(" #", 1)[0].strip()
-            if not line or line.startswith("#"):
+            if not line:
                 continue
             pattern, *owners = line.split()
             rules.append(
                 CodeOwnersRule(
-                    _compile(pattern), tuple(owner for owner in owners if owner.startswith("@"))
+                    _compile(pattern),
+                    tuple(owner for owner in owners if owner.startswith("@")),
+                    hard=in_block or hard_next,
                 )
             )
+            hard_next = False
         return cls(tuple(rules))
+
+    def rule_for(self, path: str) -> CodeOwnersRule | None:
+        """The last rule matching ``path``, which GitHub applies; ``None`` when none does."""
+        for rule in reversed(self.rules):
+            if rule.pattern.fullmatch(path):
+                return rule
+        return None
 
     def owners_for(self, path: str) -> tuple[str, ...]:
         """``@user`` and ``@org/team`` handles owning ``path``; empty when it is unowned."""
-        for rule in reversed(self.rules):
-            if rule.pattern.fullmatch(path):
-                return rule.owners
-        return ()
+        rule = self.rule_for(path)
+        return rule.owners if rule is not None else ()
 
     async def approved_by(self, paths: list[str], approvers: set[str]) -> bool:
         """Whether each owned path has an approval from one of its owners."""

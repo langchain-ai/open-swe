@@ -32,6 +32,12 @@ from openswe.review.chat import (
     proxy_review_chat_state,
     proxy_review_chat_stream_events,
 )
+from openswe.review.coverage import (
+    PullRequestLines,
+    ReviewCoverage,
+    ReviewedFile,
+    StaleHeadError,
+)
 from openswe.review.enabled_repos import list_enabled_review_repos, set_review_repo_enabled
 from openswe.review.eval_jobs import (
     ReviewerEvalStatus,
@@ -70,6 +76,7 @@ from openswe.review.styles import (
 )
 from openswe.review_scout.launch import RepositoryNotAllowed
 from openswe.threads.handlers import mark_review_session_viewed
+from openswe.users.models import User
 from openswe.users.records import user_id_for_login
 from openswe.walkthrough.record import Walkthrough
 
@@ -287,6 +294,45 @@ async def api_get_review_diff(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await get_review_diff(owner, repo, pr_number)
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/coverage")
+async def api_get_review_coverage(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = SESSION_DEP,
+) -> ReviewCoverage:
+    """Who has reviewed which changed lines, and whether each file's code owners have."""
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await (await PullRequestLines.fetch(owner, repo, pr_number)).coverage()
+
+
+class ReviewedLines(BaseModel):
+    head_sha: str
+    files: list[ReviewedFile] = Field(min_length=1, max_length=3000)
+    reviewed: bool
+
+
+@router.put("/reviews/{owner}/{repo}/{pr_number}/reviewed-lines", status_code=204)
+async def api_mark_reviewed_lines(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    body: ReviewedLines,
+    session: dict[str, Any] = SESSION_DEP,
+) -> Response:
+    """Record that the signed-in person reviewed these files or hunks, or take it back."""
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    user = await User.for_session(session_user_id(session), session["sub"])
+    if user is None:
+        raise HTTPException(403, "Sign in with a linked GitHub account to record reviews")
+    lines = await PullRequestLines.fetch(owner, repo, pr_number)
+    try:
+        await lines.mark(user.id, body.head_sha, body.files, done=body.reviewed)
+    except StaleHeadError as exc:
+        raise HTTPException(409, "The pull request changed; reload to review its new head") from exc
+    return Response(status_code=204)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/file-contents")

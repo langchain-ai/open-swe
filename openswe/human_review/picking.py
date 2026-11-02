@@ -171,13 +171,15 @@ class Area:
     handles: tuple[str, ...]
     owners: frozenset[str]
     files: tuple[str, ...]
+    # Its CODEOWNERS rule is marked ``@hard-required-review``, so only these owners' review counts.
+    hard: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class Coverage:
-    """A pull request's owned changed files split by owners, the largest area first.
+    """A pull request's owned changed files split by owners, hard areas then the largest first.
 
-    The first reviewer comes from the largest area; the rest get one reviewer each after an approval.
+    The first reviewer comes from the first area; the rest get one reviewer each after an approval.
     """
 
     areas: tuple[Area, ...]
@@ -200,13 +202,13 @@ class Coverage:
 
     @classmethod
     async def build(cls, codeowners: CodeOwners, paths: list[str]) -> Self:
-        grouped: dict[tuple[str, ...], list[str]] = {}
+        grouped: dict[tuple[tuple[str, ...], bool], list[str]] = {}
         for path in paths:
-            if handles := codeowners.owners_for(path):
-                grouped.setdefault(handles, []).append(path)
+            if (rule := codeowners.rule_for(path)) is not None and rule.owners:
+                grouped.setdefault((rule.owners, rule.hard), []).append(path)
         teams: dict[str, list[str]] = {}
         areas: list[Area] = []
-        for handles, files in grouped.items():
+        for (handles, hard), files in grouped.items():
             owners: set[str] = set()
             for owner in handles:
                 handle = owner.removeprefix("@")
@@ -221,8 +223,10 @@ class Coverage:
                         extra={"github_team": handle, "members": len(teams[handle])},
                     )
                 owners.update(login.lower() for login in teams[handle])
-            areas.append(Area(handles, frozenset(owners), tuple(files)))
-        return cls(tuple(sorted(areas, key=lambda area: (-len(area.files), area.handles))))
+            areas.append(Area(handles, frozenset(owners), tuple(files), hard))
+        return cls(
+            tuple(sorted(areas, key=lambda area: (not area.hard, -len(area.files), area.handles)))
+        )
 
     @classmethod
     async def load(cls, request: HumanReviewRequest) -> Self | None:

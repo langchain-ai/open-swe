@@ -17,6 +17,8 @@ export const reviewKeys = {
     ["reviewDiff", owner, repo, number] as const,
   conversation: ({ owner, repo, number }: PullRequestRef) =>
     ["review-conversation", owner, repo, number] as const,
+  coverage: ({ owner, repo, number }: PullRequestRef) =>
+    ["review-coverage", owner, repo, number] as const,
 }
 
 /** The PR as the status cache and its topic name it: `repo` is `owner/name`. */

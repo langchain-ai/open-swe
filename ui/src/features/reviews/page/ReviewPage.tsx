@@ -20,6 +20,7 @@ import { Header } from "./Header"
 import { Navigator } from "./Navigator"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { Rail } from "./Rail"
+import { useReviewMarks } from "./reviewMarks"
 import { NAVIGATOR_INLINE_QUERY, useReviewPage } from "./store"
 
 /** The pull request page: files on the left, the PR and its code in the middle, the agent on the right. */
@@ -46,6 +47,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
 
   useLayoutEffect(() => open(pr, headSha), [open, pr, headSha])
   useLayoutEffect(() => leave, [leave])
+  useReviewMarks(pr)
 
   // A new head or base means a new diff, and nothing else reloads it; the
   // page stays mounted so nothing else resets.
