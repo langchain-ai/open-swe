@@ -1543,6 +1543,8 @@ function AgentWorkspaceThreadList({
                     key={item.id}
                     title={item.title}
                     threadId={item.id}
+                    status={item.status}
+                    viewed={item.viewed}
                     active={item.id === activeThreadId}
                     compact={compact}
                     onNavigate={onNavigate}

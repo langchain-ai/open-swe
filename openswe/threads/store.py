@@ -26,7 +26,7 @@ from openswe.agent_api.client import (
 )
 from openswe.dispatch import channel_of
 from openswe.threads import index
-from openswe.threads.index import IndexedThread
+from openswe.threads.index import IndexedThread, ThreadStatus
 from openswe.threads.runtimes import RUNTIMES, ChannelThreadError, ChannelWrite
 
 logger = logging.getLogger(__name__)
@@ -181,6 +181,19 @@ class ThreadStore:
         self, thread_id: str, metadata: Mapping[str, JsonValue]
     ) -> IndexedThread | None:
         updated = await index.update(thread_id, metadata)
+        if updated is not None and metadata:
+            self.copies.start(updated, metadata)
+        return updated
+
+    async def update_if_current(
+        self,
+        thread: IndexedThread,
+        *,
+        metadata: Mapping[str, JsonValue],
+        status: ThreadStatus,
+    ) -> IndexedThread | None:
+        """Merge a runtime observation without replacing a concurrent writer's newer state."""
+        updated = await thread.update_if_current(metadata, status)
         if updated is not None and metadata:
             self.copies.start(updated, metadata)
         return updated

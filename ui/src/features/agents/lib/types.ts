@@ -598,6 +598,7 @@ export interface AgentThread {
   status: AgentStatus
   viewed: boolean
   viewedAt?: number | null
+  latestRunId?: string | null
   resolved?: boolean
   resolvedAt?: number | null
   attentionReason?: string | null
