@@ -336,7 +336,7 @@ async def trigger_pr_review_from_ref(
         "base_ref": base_ref,
         "author": (pr_metadata.get("user") or {}).get("login", ""),
     }
-    slack_thread_meta: ReviewerSlackThread | None = None
+    slack_thread_meta: ReviewerSlackThread = {}
     if slack_channel_id and slack_thread_ts:
         slack_thread_meta = {
             "channel_id": slack_channel_id,
