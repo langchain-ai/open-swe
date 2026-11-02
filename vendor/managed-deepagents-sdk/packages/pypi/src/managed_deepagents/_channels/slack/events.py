@@ -621,7 +621,8 @@ def slack_activity_event(
     """The edit, deletion or reaction a forwarded provider event carries, as a
     handler reads it.
 
-    ``None`` for one no key reads, or without the message it is about.
+    ``None`` for one no key reads, without the message it is about, or without
+    a reaction's emoji or a shortcut's ``callback_id``.
     """
     kind = event["provider_event"]
     key = _ACTIVITY_KEYS.get(kind.get("subtype") or kind["type"])
@@ -632,6 +633,10 @@ def slack_activity_event(
     message_ts = _text(message.get("id")) if message else None
     thread_ts = _text(address.get("thread_id")) or message_ts
     if key is None or channel_id is None or message_ts is None or thread_ts is None:
+        return None
+    reaction = _text(raw.get("reaction")) if key == "reaction" else None
+    action_id = _text(raw.get("callback_id")) if key == "shortcut" else None
+    if (key == "reaction" and reaction is None) or (key == "shortcut" and action_id is None):
         return None
     if key == "reaction":
         user_id = _text(raw.get("user"))
@@ -650,9 +655,9 @@ def slack_activity_event(
         text=message["text"] if message else "",
         payload=cast("dict[str, JsonValue]", copy.deepcopy(dict(raw))),
         user_id=user_id,
-        reaction=_text(raw.get("reaction")) if key == "reaction" else None,
+        reaction=reaction,
         removed=kind["type"] == "reaction_removed",
-        action_id=_text(raw.get("callback_id")) if key == "shortcut" else None,
+        action_id=action_id,
         actor=actor if isinstance(actor, SlackActor) else None,
     )
 
