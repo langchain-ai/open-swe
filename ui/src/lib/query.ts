@@ -11,8 +11,13 @@ type DashboardMutationMeta = {
 }
 
 type DashboardQueryMeta = Record<string, unknown> & {
-  /** Topics whose invalidation refetches this query; see `lib/invalidations/topics.ts`. */
-  invalidatedBy?: readonly InvalidationTopic[]
+  /**
+   * Topics whose invalidation refetches this query; see `lib/invalidations/topics.ts`.
+   * A function reads them from the query's current data, for topics keyed by what it lists.
+   */
+  invalidatedBy?:
+    | readonly InvalidationTopic[]
+    | ((data: unknown) => readonly InvalidationTopic[])
 }
 
 declare module "@tanstack/react-query" {

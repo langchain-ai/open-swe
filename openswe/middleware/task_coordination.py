@@ -41,7 +41,7 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
         enabled = await Thread.model_validate(
             await read_thread(thread_id)
         ).metadata.delegation_supported()
-        context = await TaskMembership.context_for_thread(thread_id)
+        context = await TaskMembership.delegation_for_thread(thread_id)
         if context is not None and context.membership.role == "worker":
             delegation = await TaskDelegation.get(thread_id)
             if delegation is not None and delegation.cancelled:
@@ -82,7 +82,7 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
         self, state: AgentState, runtime: Runtime
     ) -> dict[str, list[RunMessage]] | None:
         if self.context is None:
-            self.context = await TaskMembership.context_for_thread(self.thread_id)
+            self.context = await TaskMembership.delegation_for_thread(self.thread_id)
         visible = visible_dynamic_context_hashes(state)
         added: list[RunMessage] = [
             {"role": "user", "id": f"{prefix}{uuid4()}", "content": content}

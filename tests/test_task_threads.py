@@ -593,6 +593,32 @@ async def test_concurrent_first_launches_and_replay_share_one_task(
 
 
 @pytest.mark.usefixtures("registry_db")
+async def test_a_threads_own_task_shows_as_one_only_once_it_delegates(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
+) -> None:
+    """Every agent thread coordinates a task from its first run; working alone, it is
+    not a task family to the model or the sidebar, and its first delegation reuses it,
+    settling the workspace it took by default."""
+    elsewhere = WorkspaceRow(slug="before-delegation", name="Before delegation")
+    async with postgres.session() as session:
+        session.add(elsewhere)
+    own = await store.Task.for_thread(COORDINATOR, title="Fix login", workspace=elsewhere.slug)
+
+    assert await store.TaskMembership.delegation_for_thread(COORDINATOR) is None
+    assert await store.sidebar_memberships([COORDINATOR]) == {}
+
+    actor = service.Actor(COORDINATOR, OWNER)
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    result = await launch(actor, "call", "Implement")
+
+    assert result["success"] and result["task_id"] == str(own.id)
+    delegating = await store.TaskMembership.delegation_for_thread(COORDINATOR)
+    assert delegating is not None
+    assert delegating.task.workspace.slug != elsewhere.slug
+    assert (await store.sidebar_memberships([COORDINATOR]))[COORDINATOR].role == "coordinator"
+
+
+@pytest.mark.usefixtures("registry_db")
 async def test_cancel_discards_owed_events_without_reviving_worker(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
 ) -> None:

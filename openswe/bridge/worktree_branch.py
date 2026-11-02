@@ -13,14 +13,18 @@ import logging
 import re
 import shlex
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
-from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from openswe.input_messages import dynamic_context_hash, input_message_text
 from openswe.prompts import prompt
+
+if TYPE_CHECKING:
+    # The webhook reads the branch prefix and must not load the agent stack.
+    from deepagents.backends.protocol import SandboxBackendProtocol
 
 logger = logging.getLogger(__name__)
 

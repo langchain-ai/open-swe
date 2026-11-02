@@ -36,6 +36,7 @@ from openswe.threads.status import refresh_thread_status
 from openswe.threads.summary import assert_thread_postable, assert_thread_readable
 from openswe.tools.schedule_thread_wakeup import cancel_thread_wakeups
 from openswe.tools.threads import resolve_thread_actor
+from openswe.ui_invalidations.topics import Topic
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import (
@@ -167,7 +168,8 @@ async def authorized_context(
         # Participants steer only from the coordinator; a worker thread stays owner-only.
         await authorized_metadata(actor)
     workspace = metadata.workspace or metadata.environment
-    if workspace and workspace != context.task.workspace.slug:
+    # A task its thread worked alone takes its first delegation's workspace.
+    if workspace and workspace != context.task.workspace.slug and context.task.delegated:
         raise PermissionError("The thread no longer belongs to the task's workspace")
     if coordinator and (
         context.membership.role != "coordinator"
@@ -520,8 +522,11 @@ class Delegation:
             raise ValueError("The coordinator needs an attached sandbox before delegation")
         workspace_value = metadata.workspace or metadata.environment
         workspace = await resolve_workspace(
+            # A task its thread worked alone takes the workspace its first delegation resolves.
             thread_workspace=(
-                context.task.workspace.slug if context is not None else workspace_value
+                context.task.workspace.slug
+                if context is not None and context.task.delegated
+                else workspace_value
             ),
             login=actor.login,
         )
@@ -534,7 +539,7 @@ class Delegation:
         self, worker_thread_id: str, instructions: str, request_id: str
     ) -> tuple[store.Task, store.TaskDelegation]:
         title = self.metadata.title
-        return await store.Task.reserve_worker(
+        reserved = await store.Task.reserve_worker(
             self.actor.thread_id,
             worker_thread_id,
             title=title.strip() if title and title.strip() else "Delegated work",
@@ -544,6 +549,8 @@ class Delegation:
             effort=self.effort,
             launch_request_id=request_id,
         )
+        await Topic.TASK_WORKERS.invalidate(key=self.actor.thread_id)
+        return reserved
 
     async def launched_by(self, request_id: str) -> tuple[store.Task, store.TaskDelegation] | None:
         """The async worker this coordinator's tool call ``request_id`` already launched."""
@@ -759,6 +766,8 @@ async def cancel_worker(worker_thread_id: str, *, silently: bool = False) -> Non
         await TaskMessage.withdraw(coordinator_thread_id, sender_thread_id=worker_thread_id)
     await interrupt_transcript_turns(worker_thread_id, run_ids)
     await cancel_thread_wakeups(worker_thread_id)
+    if coordinator_thread_id is not None:
+        await Topic.TASK_WORKERS.invalidate(key=coordinator_thread_id)
 
 
 async def control_worker(

@@ -2,7 +2,7 @@ import type { QueryClient } from "@tanstack/react-query"
 
 import { dashboardApiUrl } from "@/lib/dashboard-fetch"
 
-import type { InvalidationTopic } from "./topics"
+import { queryTopics, type InvalidationTopic } from "./topics"
 
 /** Per topic, the epoch ms from which this browser does not know what changed. */
 type Since = Map<InvalidationTopic, number>
@@ -65,7 +65,11 @@ export class InvalidationTab {
           event.type === "added" ||
           event.type === "removed" ||
           event.type === "observerAdded" ||
-          event.type === "observerRemoved"
+          event.type === "observerRemoved" ||
+          // Topics read from a query's data change with it.
+          (event.type === "updated" &&
+            event.action.type === "success" &&
+            typeof event.query.meta?.invalidatedBy === "function")
         ) {
           this.scheduleReport()
         }
@@ -190,8 +194,8 @@ export class InvalidationTab {
     const now = Date.now()
     const since: Since = new Map()
     for (const query of this.queryClient.getQueryCache().getAll()) {
-      const topics = query.meta?.invalidatedBy
-      if (!topics?.length || query.getObserversCount() === 0) continue
+      const topics = queryTopics(query)
+      if (!topics.length || query.getObserversCount() === 0) continue
       const fetched = query.state.dataUpdatedAt || now
       for (const topic of topics) {
         const known = Math.max(fetched, this.covered.get(topic) ?? 0)
@@ -206,8 +210,7 @@ export class InvalidationTab {
     const invalidated = new Set(topics)
     void this.queryClient.invalidateQueries({
       predicate: (query) =>
-        query.meta?.invalidatedBy?.some((topic) => invalidated.has(topic)) ??
-        false,
+        queryTopics(query).some((topic) => invalidated.has(topic)),
     })
   }
 

@@ -1,0 +1,20 @@
+{% if findings %}
+The automated Open SWE review of {{ pr_url }} at `{{ head_sha[:12] }}` left {{ findings | length }} open finding{{ "" if findings | length == 1 else "s" }}.
+Nothing was posted to GitHub or Slack: these are yours to address before the person hears about the PR.
+
+{% for finding in findings %}
+{{ loop.index }}. **{{ finding.title }}** ({{ finding.severity }}, `{{ finding.location }}`, id `{{ finding.id }}`)
+   {{ finding.description | indent(3) }}
+{% if finding.suggestion %}
+   Suggestion: {{ finding.suggestion | indent(3) }}
+{% endif %}
+{% endfor %}
+
+Fix the clear and valid ones, push, and call `request_pr_review` for another round; the reviewer marks fixed findings resolved on that round.
+Leave findings that need the person's judgment unfixed, and list them when you report the work complete.
+{% else %}
+The automated Open SWE review of {{ pr_url }} at `{{ head_sha[:12] }}` left no open findings, so its `Open SWE Review` check passed and the draft counts as reviewed.
+{% endif %}
+{% if review_url %}
+Review page with the walkthrough: {{ review_url }}
+{% endif %}

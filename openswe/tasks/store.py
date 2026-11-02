@@ -1,10 +1,13 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Final, Literal
 from uuid import UUID, uuid7
 
-from sqlalchemy import ForeignKey, Text, select, text, update
+from pydantic import JsonValue
+from runtime_api.loop import GoalState
+from sqlalchemy import ForeignKey, Text, func, select, text, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,6 +16,16 @@ from openswe.database.orm import NOW, Base
 from openswe.workspaces.rows import WorkspaceRow
 
 type TaskRole = Literal["coordinator", "worker"]
+# Why a goal waits on its person: the agent needs something only they can give, or
+# the work is ready for them, such as a reviewed draft to mark ready.
+type UserWaitReason = Literal["blocked", "ready"]
+# Why a goal paused: the person stopped the run or asked the agent to pause; or, as
+# Codex blocks a goal, three automatic turns in a row did nothing, three in a row ran
+# only failing commands, or a run failed.
+type PauseReason = Literal["stopped", "requested", "no_progress", "failing_commands", "error"]
+type GoalReason = UserWaitReason | PauseReason
+# Pauses only the person lifts, by writing again: their stop, or one they asked for.
+_PERSON_PAUSES: Final = ("stopped", "requested")
 
 
 class WorkerAlreadyLaunchedError(PermissionError):
@@ -25,6 +38,15 @@ class WorkerAlreadyLaunchedError(PermissionError):
 
 
 class Task(Base):
+    """The work a person hands over: its coordinating thread, and any workers it
+    delegates to. Every agent thread coordinates one from its first run; ``delegated``
+    says whether it went on to delegate.
+
+    In Goal mode the task keeps where its work stands (``goal_state``): working,
+    resting on what will wake it (``goal_waits``), waiting on its person for
+    ``goal_ask``, or paused, with why (``goal_reason``) and who moved it last.
+    """
+
     __tablename__ = "task"
 
     title: Mapped[str]
@@ -33,6 +55,16 @@ class Task(Base):
     coordinator_thread_id: Mapped[str | None] = mapped_column(default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     delegated: Mapped[bool] = mapped_column(default=False)
+    # What the goal is for: the person's request, in the shape the work should take.
+    goal_objective: Mapped[str | None] = mapped_column(Text, default=None)
+    goal_state: Mapped[GoalState | None] = mapped_column(Text, default=None)
+    goal_reason: Mapped[GoalReason | None] = mapped_column(Text, default=None)
+    goal_ask: Mapped[str | None] = mapped_column(Text, default=None)
+    goal_waits: Mapped[list[dict[str, JsonValue]] | None] = mapped_column(JSONB, default=None)
+    goal_updated_at: Mapped[datetime | None] = mapped_column(default=None)
+    goal_updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
     def require_coordinator(self) -> str:
         if self.coordinator_thread_id is None:
@@ -71,7 +103,14 @@ class Task(Base):
                 ):
                     raise PermissionError("Only the coordinator can delegate")
                 if task.workspace_id != workspace_row.id:
-                    raise PermissionError("The thread no longer belongs to the task's workspace")
+                    if task.delegated:
+                        raise PermissionError(
+                            "The thread no longer belongs to the task's workspace"
+                        )
+                    # A task its thread has worked alone took the workspace it ran in, or
+                    # the default one; its first delegation settles where it works.
+                    task.workspace_id = workspace_row.id
+                    task.workspace = workspace_row
             existing = await session.get(TaskDelegation, worker_thread_id)
             if existing is not None:
                 if (
@@ -100,6 +139,58 @@ class Task(Base):
             )
             session.add(delegation)
             return task, delegation
+
+    @classmethod
+    async def of_thread(cls, thread_id: str) -> Task | None:
+        """The task ``thread_id`` works on, as coordinator or worker."""
+        if not postgres.configured():
+            return None
+        async with postgres.session() as session:
+            membership = await session.get(TaskMembership, thread_id)
+            return None if membership is None else await session.get(cls, membership.task_id)
+
+    @classmethod
+    async def move_goal(
+        cls,
+        task_id: UUID,
+        *,
+        state: GoalState | None,
+        reason: GoalReason | None = None,
+        ask: str | None = None,
+        objective: str | None = None,
+        waits: list[dict[str, JsonValue]] | None = None,
+        by: UUID | None = None,
+        over_stop: bool = True,
+    ) -> bool:
+        """Set the task's goal, or clear it with no ``state``; whether it moved. Its
+        ``objective`` stays unless given, and goes with the goal.
+
+        Without ``over_stop`` a goal its person paused stays paused: only they resume it.
+        """
+        kept_objective = {"goal_objective": objective} if objective is not None else {}
+        if state is None:
+            kept_objective = {"goal_objective": None}
+        statement = (
+            update(cls)
+            .where(cls.id == task_id)
+            .values(
+                **kept_objective,
+                goal_state=state,
+                goal_reason=reason,
+                goal_ask=ask,
+                goal_waits=waits,
+                goal_updated_at=None if state is None else func.clock_timestamp(),
+                goal_updated_by=by,
+            )
+        )
+        if not over_stop:
+            statement = statement.where(
+                (cls.goal_state.is_distinct_from("paused"))
+                | (cls.goal_reason.not_in(_PERSON_PAUSES))
+                | cls.goal_reason.is_(None)
+            )
+        async with postgres.session() as session:
+            return await session.scalar(statement.returning(cls.id)) is not None
 
     @classmethod
     async def for_thread(cls, thread_id: str, *, title: str, workspace: str) -> Task:
@@ -163,6 +254,17 @@ class TaskMembership(Base):
                 raise RuntimeError("Task membership has no task")
             return TaskContext(task, membership)
 
+    @classmethod
+    async def delegation_for_thread(cls, thread_id: str) -> TaskContext | None:
+        """The thread's place in a task that delegates: a worker's, or the coordinator's
+        of a task with workers. A thread working alone on its own task has none."""
+        context = await cls.context_for_thread(thread_id)
+        if context is None or (
+            context.membership.role == "coordinator" and not context.task.delegated
+        ):
+            return None
+        return context
+
 
 class TaskDelegation(Base):
     __tablename__ = "task_delegation"
@@ -216,12 +318,17 @@ class TaskDelegation(Base):
 
     @classmethod
     async def set_launch_error(cls, worker_thread_id: str, error: str | None) -> None:
+        from openswe.ui_invalidations.topics import Topic
+
         async with postgres.session() as session:
-            await session.execute(
+            coordinator_thread_id = await session.scalar(
                 update(cls)
                 .where(cls.worker_thread_id == worker_thread_id)
                 .values(launch_error=error)
+                .returning(cls.coordinator_thread_id)
             )
+        if coordinator_thread_id is not None:
+            await Topic.TASK_WORKERS.invalidate(key=coordinator_thread_id)
 
 
 @dataclass(frozen=True)
@@ -271,7 +378,7 @@ async def sidebar_memberships(
             for membership, task, delegation in await session.execute(statement):
                 if task.coordinator_thread_id is None or (
                     membership.role == "coordinator"
-                    and membership.thread_id != task.coordinator_thread_id
+                    and (membership.thread_id != task.coordinator_thread_id or not task.delegated)
                 ):
                     continue
                 memberships[membership.thread_id] = SidebarTaskMembership(

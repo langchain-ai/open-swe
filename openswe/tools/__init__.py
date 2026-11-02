@@ -68,6 +68,8 @@ _TOOL_MODULES = {
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
     "report_work_state": ".report_work_state",
+    "get_goal": ".goal",
+    "update_goal": ".goal",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_pull_requests": ".search_pull_requests",
     "snapshotctl": ".workspaces",
@@ -159,6 +161,8 @@ __all__ = [
     "save_user_skill",
     "delete_user_skill",
     "report_work_state",
+    "get_goal",
+    "update_goal",
     "schedule_thread_wakeup",
     "search_pull_requests",
     "snapshotctl",
@@ -225,6 +229,7 @@ if TYPE_CHECKING:
     from openswe.tools.expose_port import expose_port
     from openswe.tools.fetch_review_diff import fetch_review_diff
     from openswe.tools.fetch_url import fetch_url
+    from openswe.tools.goal import get_goal, update_goal
     from openswe.tools.http_request import http_request
     from openswe.tools.list_findings import list_findings
     from openswe.tools.list_review_findings import list_review_findings

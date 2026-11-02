@@ -11,6 +11,7 @@ from langgraph.prebuilt import InjectedState
 from openswe.middleware.require_user_reply import SLACK_REPLY_SURFACE, current_reply_surface
 from openswe.prompts import prompt
 from openswe.slack.tools.reply import send_slack_reply
+from openswe.threads.goal import ThreadGoal
 
 
 async def report_work_state(
@@ -21,6 +22,8 @@ async def report_work_state(
     """Implement the `report_work_state` tool."""
     if not message.strip():
         return {"success": False, "error": "message is required: it is the reply the person gets"}
+    # Recorded first: a failure after the reply posts would have the agent post it again.
+    await ThreadGoal.of_run().reported(state, message)
     if current_reply_surface(run_state or {}) == SLACK_REPLY_SURFACE:
         result = await send_slack_reply(message, "final", state=run_state)
         return {**result, "work_state": state} if result.get("success") else result
