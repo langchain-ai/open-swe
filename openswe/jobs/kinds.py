@@ -42,6 +42,8 @@ from openswe.monitors.delivery import poll_monitors
 
 __all__ = ["WORKER"]
 from openswe.reconcile import reconcile_stale_runs
+from openswe.review_guide.sessions import ARCHIVE_JOB as REVIEW_GUIDE_ARCHIVE
+from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.sandboxes.retry import (
     SANDBOX_ATTACH_MAX_ELAPSED,
     is_transient_sandbox_error,
@@ -188,6 +190,16 @@ async def _thread_status_reconcile(_job: Job) -> object:
         "threads_settled": await reconcile_busy_threads(),
         "stalled_runs_failed": await fail_stalled_runs(),
     }
+
+
+@WORKER.register(REVIEW_GUIDE_ARCHIVE)
+async def _review_guide_archive(job: Job) -> None:
+    thread_id, head_sha = _text(job, "thread_id"), _text(job, "head_sha")
+    if thread_id is None or head_sha is None:
+        return
+    session = await ReviewGuideSession.get(thread_id)
+    if session is not None:
+        await session.archive_finished(head_sha)
 
 
 @WORKER.register(SLACK_CHANNEL_DIRECTORY)

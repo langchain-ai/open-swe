@@ -128,7 +128,7 @@ async def test_rollout_request_destination_survives_web_follow_up(
         ),
         patch("openswe.tools.request_rollout_check.index.get", AsyncMock(return_value=True)),
         patch("openswe.tools.request_rollout_check.index.update", update),
-        patch("openswe.tools.request_rollout_check.RUNTIMES.copies", return_value=[]),
+        patch("openswe.tools.request_rollout_check.RUNTIMES.runs_on", return_value=AsyncMock()),
     ):
         await request_rollout_check()
     metadata["source"] = "dashboard"

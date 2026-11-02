@@ -953,8 +953,12 @@ async def mutate_findings(
         if (scoped := _RUN_SCOPED_FINDINGS.get(thread_id)) is not None:
             mutator(scoped)
             return copy.deepcopy(scoped)
+    from openswe.github.pull_requests import PullRequest
+    from openswe.review.events import ReviewEvents
+
     pull_request_id = await _ensure_finding_state(thread_id)
     async with postgres.session() as session:
+        pull = await session.get(PullRequest, pull_request_id)
         await session.execute(
             select(FindingState)
             .where(FindingState.pull_request_id == pull_request_id)
@@ -985,6 +989,10 @@ async def mutate_findings(
             await session.delete(removed)
         await _link_interaction_authors(session, written)
         await _invalidate_review_page(session, pull_request_id)
+    if pull is not None:
+        await ReviewEvents(
+            thread_id, PullRequestKey.of(pull.owner, pull.repo, pull.number)
+        ).finding_changes(before, changed)
     await _record_finding_telemetry(thread_id, changed)
     return findings
 

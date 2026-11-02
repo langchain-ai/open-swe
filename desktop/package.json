@@ -1,15 +1,15 @@
 {
   "name": "open-swe-desktop",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "private": true,
   "description": "Experimental Open SWE desktop client",
   "main": "build/main.cjs",
   "scripts": {
-    "build": "node scripts/build-main.cjs",
+    "build": "node scripts/build-main.cts",
     "build:ui": "pnpm --filter open-swe-dashboard run build",
     "dev": "pnpm run build && electron . --dev",
     "start": "pnpm run build && electron .",
-    "test:run": "node --test test/*.test.cjs test/*.test.ts",
+    "test:run": "node --test test/*.test.cts test/*.test.ts",
     "test": "pnpm run build && pnpm run test:run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check": "pnpm run typecheck && pnpm run test",

@@ -20,6 +20,7 @@ from openswe.human_review.supplementary import (
     SupplementaryReviews,
     SupplementaryState,
 )
+from openswe.slack.channels import SlackChannel
 from openswe.slack.client import GitHubPrRef
 from openswe.users import User, UserIdentity
 
@@ -84,6 +85,18 @@ def review(monkeypatch: pytest.MonkeyPatch) -> HumanReviewRequest:
             yield request, {}
 
     monkeypatch.setattr(HumanReviewRequest, "supplementary_rotation", rotation)
+    channel = SlackChannel(
+        id="C1",
+        payload={
+            "is_channel": True,
+            "is_private": False,
+            "is_im": False,
+            "is_mpim": False,
+            "is_ext_shared": False,
+            "is_pending_ext_shared": False,
+        },
+    )
+    monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=channel))
     return request
 
 
@@ -166,8 +179,10 @@ async def test_stranded_assessment_claim_retries_after_expiring(review: HumanRev
     assert _state(review).assessment_requested
 
 
+@pytest.mark.parametrize("dm_succeeds", [False, True])
 async def test_delivery_is_idempotent_and_retries_only_missing_notifications(
     review: HumanReviewRequest,
+    dm_succeeds: bool,
 ) -> None:
     user = _user("designer")
     review.run_config = _stored(reason="New trace navigation flow")
@@ -182,22 +197,171 @@ async def test_delivery_is_idempotent_and_retries_only_missing_notifications(
         ) as choose,
         patch.object(User, "for_login", AsyncMock(return_value=user)),
         patch.object(
-            supplementary, "post_slack_thread_reply_with_ts", AsyncMock(side_effect=["", "1.1"])
+            supplementary,
+            "post_slack_thread_reply_with_ts",
+            AsyncMock(side_effect=[supplementary.SlackRequestError("not_in_channel"), "1.1"]),
         ) as thread_reply,
-        patch.object(supplementary, "send_dm", AsyncMock(side_effect=[False, True])) as dm,
+        patch.object(supplementary, "send_dm", AsyncMock(return_value=dm_succeeds)) as dm,
         patch.object(deadlines.queue, "schedule", AsyncMock()),
     ):
-        assert await _review(review)._assign(pull) == "retrying"
+        assert await _review(review)._assign(pull) == ("requested" if dm_succeeds else "retrying")
         assert await _review(review)._assign(pull) == "requested"
         assert await _review(review)._assign(pull) == "requested"
     assert choose.await_count == 1
     assert pull.request_reviewers.await_count == 1
-    assert pull.comment.await_count == 1
-    assert thread_reply.await_count == 2
+    pull.comment.assert_not_awaited()
+    assert thread_reply.await_count == (1 if dm_succeeds else 2)
     assert thread_reply.await_args is not None
     assert thread_reply.await_args.args[:2] == ("C1", "1.0")
-    assert dm.await_count == 2
+    assert dm.await_count == 1
     assert review.participants == []
+
+
+@pytest.mark.parametrize("channel_known", [False, True])
+async def test_unreadable_review_channel_uses_one_dm(
+    review: HumanReviewRequest, channel_known: bool
+) -> None:
+    user = _user("designer")
+    review.run_config = _stored(reason="New trace navigation flow", github_login="designer")
+    pull = MagicMock(spec=PullRequestClient)
+    pull.request_reviewers = AsyncMock()
+    with (
+        patch.object(User, "for_login", AsyncMock(return_value=user)),
+        patch.object(
+            SlackChannel,
+            "load",
+            AsyncMock(
+                return_value=SlackChannel(id="C1", payload={"is_private": True})
+                if channel_known
+                else None
+            ),
+        ),
+        patch.object(
+            supplementary, "post_slack_thread_reply_with_ts", AsyncMock(return_value="1.1")
+        ) as post,
+        patch.object(supplementary, "send_dm", AsyncMock(return_value=True)) as dm,
+    ):
+        assert await _review(review)._assign(pull) == "requested"
+        assert await _review(review)._assign(pull) == "requested"
+    post.assert_not_awaited()
+    dm.assert_awaited_once()
+
+
+@pytest.mark.parametrize("text_fails", [False, True])
+async def test_rejected_screenshot_retries_as_text_without_a_second_ping(
+    review: HumanReviewRequest,
+    text_fails: bool,
+) -> None:
+    user = _user("designer")
+    review.run_config = _stored(reason="High impact: new navigation", github_login="designer")
+    review.pull_request.body = """<!-- ![hidden](https://example.com/hidden.png) -->
+```md
+![example](https://example.com/example.png)
+```
+<img src="http://example.com/insecure.png">
+<img src="https://example.com/before.png?raw=1&amp;size=640" alt="Before" width="640">
+
+![Before again](https://example.com/before.png?raw=1&size=640)
+![After](https://example.com/after.png "Updated navigation")
+![Extra](https://example.com/extra.png)
+"""
+    pull = MagicMock(spec=PullRequestClient)
+    pull.request_reviewers = AsyncMock()
+    with (
+        patch.object(User, "for_login", AsyncMock(return_value=user)),
+        patch.object(
+            supplementary,
+            "post_slack_thread_reply_with_ts",
+            AsyncMock(
+                side_effect=[
+                    supplementary.SlackRequestError("invalid_blocks"),
+                    supplementary.SlackRequestError("channel_not_found") if text_fails else "1.1",
+                ]
+            ),
+        ) as post,
+        patch.object(supplementary, "send_dm", AsyncMock(return_value=True)) as dm,
+    ):
+        assert await _review(review)._assign(pull) == "requested"
+        assert await _review(review)._assign(pull) == "requested"
+    assert post.await_count == 2
+    assert post.await_args_list[0].kwargs["blocks"][1:] == [
+        {
+            "type": "image",
+            "image_url": "https://example.com/before.png?raw=1&size=640",
+            "alt_text": "Before",
+        },
+        {"type": "image", "image_url": "https://example.com/after.png", "alt_text": "After"},
+    ]
+    assert "blocks" not in post.await_args_list[1].kwargs
+    assert dm.await_count == int(text_fails)
+
+
+@pytest.mark.parametrize(
+    "ineligible", ["", "author", "reviewed", "optedout", "missing", "no-write", "no-slack"]
+)
+async def test_mapped_owner_waits_only_for_temporary_unavailability(
+    review: HumanReviewRequest,
+    ineligible: str,
+) -> None:
+    policy = SupplementaryReviewPolicy.model_validate(
+        {
+            **POLICY.model_dump(),
+            "id": "experience",
+            "areas": {"checkout": {"label": "Checkout and payments", "githubLogin": "area-owner"}},
+        }
+    )
+    review.run_config = {
+        "supplementary_reviews": {
+            policy.id: {"reason": "Medium impact: new checkout flow", "area": "checkout"}
+        }
+    }
+    owner, other = _user("area-owner"), _user("other")
+    pull = MagicMock(spec=PullRequestClient)
+    pull.repo = MagicMock()
+    pull.repo.can_write = AsyncMock(return_value=True)
+    users = {user.github_login: user for user in (other, owner)}
+    if ineligible == "missing":
+        del users[owner.github_login]
+    if ineligible == "author":
+        review.pull_request.author = owner.github_login
+    if ineligible == "no-slack":
+        owner.identities = [
+            identity for identity in owner.identities if identity.provider != "slack"
+        ]
+    reviews = {owner.github_login: "APPROVED"} if ineligible == "reviewed" else {}
+
+    async def can_write(login: str) -> bool:
+        return login != owner.github_login or ineligible != "no-write"
+
+    async def opted_in(login: str) -> bool:
+        return login != owner.github_login or ineligible != "optedout"
+
+    pull.repo.can_write = can_write
+
+    async def find_user(provider: str, login: str) -> User:
+        return users[login]
+
+    with (
+        patch.object(supplementary, "team_members", AsyncMock(return_value=list(users))),
+        patch.object(User, "for_login", find_user),
+        patch.object(supplementary, "latest_review_states", AsyncMock(return_value=reviews)),
+        patch.object(supplementary.PROFILES, "allows_auto_human_review", opted_in),
+        patch.object(
+            ReviewerAvailability,
+            "for_user",
+            AsyncMock(return_value=ReviewerAvailability(None, False)),
+        ),
+    ):
+        candidates = await SupplementaryReview(review, policy)._candidates(pull)
+        assert [user.github_login for user, _ in candidates] == [
+            other.github_login if ineligible else owner.github_login
+        ]
+        with patch.object(
+            ReviewerAvailability,
+            "for_user",
+            AsyncMock(return_value=ReviewerAvailability(None, True)),
+        ):
+            assert await SupplementaryReview(review, policy)._candidates(pull) == []
 
 
 @pytest.mark.parametrize("hour", [3, 12])
@@ -336,7 +500,20 @@ async def test_request_reuses_open_review_without_replacing_engineering(
     review.tldr = "Original engineering summary"
     reason = "Redesigned experiment comparison workflow"
     pr = review.pull_request
+    settings = RepoSettings.model_validate(
+        {
+            "supplementaryReviews": [
+                {
+                    **POLICY.model_dump(),
+                    "areas": {
+                        "comparison": {"label": "Comparison flows", "githubLogin": "area-owner"}
+                    },
+                }
+            ]
+        }
+    )
     with (
+        patch.object(supplementary.RepoSettings, "cached", AsyncMock(return_value=settings)),
         patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=review)),
         patch.object(standard, "_permalink", AsyncMock(return_value="https://slack.example/card")),
         patch.object(standard, "review_blockers", AsyncMock(return_value=[])),
@@ -360,11 +537,13 @@ async def test_request_reuses_open_review_without_replacing_engineering(
             inline_summary=None,
             supplementary_review="design",
             supplementary_review_reason=reason,
+            supplementary_review_area="comparison",
         )
     assert result.reused and result.success
     assert review.kind == kind
     assert review.tldr == "Original engineering summary"
     assert _state(review).reason == reason
+    assert _state(review).area == "comparison"
     assert review.participants == []
     post.assert_not_awaited()
 
@@ -402,29 +581,65 @@ async def test_unconfigured_repository_does_not_start_supplementary_reviews(
 
 
 @pytest.mark.parametrize(
-    ("policy_id", "path", "refusal"),
+    ("policy_id", "path", "mapped", "area", "refusal"),
     [
-        ("design", "smith-frontend/src/Flow.tsx", ""),
-        ("security", "smith-frontend/src/Flow.tsx", "configures no `security`"),
-        ("design", "smith-frontend/src/Flow.test.tsx", "match the Design review paths"),
+        ("design", "smith-frontend/src/Flow.tsx", False, "", ""),
+        ("security", "smith-frontend/src/Flow.tsx", False, "", "configures no `security`"),
+        ("design", "smith-frontend/src/Flow.test.tsx", False, "", "match the Design review paths"),
+        ("design", "smith-frontend/src/Flow.tsx", True, "checkout", ""),
+        ("design", "smith-frontend/src/Flow.tsx", True, "unmapped", ""),
+        ("design", "smith-frontend/src/Flow.tsx", True, "", "Choose a configured area"),
+        (
+            "design",
+            "smith-frontend/src/Flow.tsx",
+            True,
+            "other",
+            "Unknown supplementary review area",
+        ),
     ],
 )
 async def test_agent_request_is_refused_when_its_policy_cannot_apply(
-    review: HumanReviewRequest, policy_id: str, path: str, refusal: str
+    review: HumanReviewRequest, policy_id: str, path: str, mapped: bool, area: str, refusal: str
 ) -> None:
+    settings = RepoSettings.model_validate(
+        {
+            "supplementaryReviews": [
+                {
+                    **POLICY.model_dump(),
+                    "areas": (
+                        {"checkout": {"label": "Checkout", "githubLogin": "area-owner"}}
+                        if mapped
+                        else {}
+                    ),
+                }
+            ]
+        }
+    )
     with (
+        patch.object(supplementary.RepoSettings, "cached", AsyncMock(return_value=settings)),
         patch.object(ChangedFile, "of_pull", AsyncMock(return_value=[ChangedFile(filename=path)])),
         patch.object(deadlines.queue, "schedule", AsyncMock()),
     ):
         if refusal:
             with pytest.raises(supplementary.SupplementaryReviewRefused, match=refusal):
-                await SupplementaryReviews(review).ask(MagicMock(), policy_id, "New flow")
+                await SupplementaryReviews(review).ask(MagicMock(), policy_id, "New flow", area)
         else:
-            await SupplementaryReviews(review).ask(MagicMock(), policy_id, "New flow")
+            await SupplementaryReviews(review).ask(MagicMock(), policy_id, "New flow", area)
     assert _state(review).reason == ("" if refusal else "New flow")
+    assert _state(review).area == ("" if refusal else area)
 
 
-def test_invalid_policies_are_dropped_without_discarding_other_settings() -> None:
+@pytest.mark.parametrize(
+    "invalid_areas",
+    [
+        {"checkout": {"label": "Checkout"}},
+        {"unmapped": {"label": "Checkout", "githubLogin": "owner"}},
+        [],
+    ],
+)
+def test_invalid_policies_are_dropped_without_discarding_other_settings(
+    invalid_areas: object,
+) -> None:
     settings = RepoSettings.model_validate_json(
         """{
             "reviewChannel": "#eng-reviews",
@@ -443,3 +658,18 @@ def test_invalid_policies_are_dropped_without_discarding_other_settings() -> Non
     assert settings.review_channel == "#eng-reviews"
     assert settings.review_allowed_authors == ["langsmith-engine[bot]"]
     assert [(p.id, p.criteria) for p in settings.supplementary_reviews] == [("design", "first")]
+    configured = RepoSettings.model_validate(
+        {
+            **settings.model_dump(by_alias=True),
+            "supplementaryReviews": [
+                {**POLICY.model_dump(), "areas": invalid_areas},
+                {**POLICY.model_dump(), "id": "security"},
+            ],
+        }
+    )
+    assert configured.review_channel == settings.review_channel
+    assert configured.review_allowed_authors == settings.review_allowed_authors
+    assert configured.supplementary_reviews == [
+        POLICY,
+        POLICY.model_copy(update={"id": "security"}),
+    ]

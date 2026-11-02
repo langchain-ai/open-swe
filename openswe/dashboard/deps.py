@@ -10,6 +10,8 @@ from openswe.dashboard.repo_access import require_repo_access_for_user
 
 
 def session_is_admin(session: dict[str, Any]) -> bool:
+    if session.get("provider", "github") != "github":
+        return False
     return is_admin(session.get("email"), login=session.get("sub"))
 
 

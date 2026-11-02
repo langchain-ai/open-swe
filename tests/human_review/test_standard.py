@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import httpx2
@@ -12,6 +13,7 @@ import pytest
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.expedited_review.readiness import PullRequestSnapshot
 from openswe.github.http import GitHubClient, GitHubError, RepoClient
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, ThreadLink
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
@@ -795,6 +797,9 @@ async def test_missing_or_invalid_settings_have_no_review_channel(status: int, t
 async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_reviews(
     monkeypatch,
 ):
+    from sqlalchemy import func, update
+
+    from openswe.database import postgres
     from openswe.github.pull_requests import PullRequest
     from openswe.human_review.requests import (
         HumanReviewParticipant,
@@ -803,22 +808,35 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         RequestState,
     )
     from openswe.human_review.routes import api_review_assignments
+    from openswe.human_review.tentative import TentativeReviewers
+    from openswe.slack.payloads import SlackEventEnvelope
+    from openswe.slack.pr_links import SlackPullRequestLink
+    from openswe.slack.thread_mentions import SlackThreadMention
     from openswe.users import User
 
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "ada,grace")
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
     ada = await User.sign_in("github", "1", login="ada")
+    await ada.link("slack", "UADA")
     grace = await User.sign_in("github", "2", login="grace")
-    cases: list[tuple[int, User, bool, RequestState, RequestKind]] = [
+    cases: list[tuple[int, User | None, bool, RequestState, RequestKind]] = [
         (1, ada, True, "open", "standard"),
         (2, ada, False, "open", "standard"),
         (3, grace, True, "open", "standard"),
         (4, ada, True, "cancelled", "standard"),
         (5, ada, True, "open", "posted"),
         (6, ada, True, "open", "standard"),
+        (7, None, False, "open", "standard"),
+        (8, None, False, "open", "standard"),
+        (14, None, False, "open", "standard"),
     ]
     for number, user, assigned, state, kind in cases:
         pr = await PullRequest(
-            owner="o", repo="hidden" if number == 6 else "r", number=number, title=f"PR {number}"
+            owner="o",
+            repo={6: "hidden", 14: "unreadable"}.get(number, "r"),
+            number=number,
+            title=f"PR {number}",
+            author="grace",
         ).save()
         await HumanReviewRequest(
             pull_request_id=pr.id,
@@ -829,8 +847,40 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
                 HumanReviewParticipant(
                     user_id=user.id, decision="review", assigned_by_agent=assigned
                 )
-            ],
+            ]
+            if user is not None
+            else [],
         ).save()
+    for ts, text in [
+        ("1.0", "<@UADA> https://openswe.example.com/agents/reviews/o/r/9"),
+        ("2.0", "<@UADA> https://github.com/o/r/pull/10"),
+        ("3.0", "https://github.com/o/r/pull/11"),
+        ("4.0", "<@UADA> https://github.com/o/r/pull/1"),
+        ("5.0", "<@UADA> https://github.com/o/r/pull/12"),
+        ("7.0", "<@UADA> https://github.com/o/r/pull/13"),
+        ("6.0", "<@UADA> still need you here"),
+    ]:
+        if ts == "6.0":
+            async with postgres.session() as session:
+                await session.execute(
+                    update(SlackThreadMention).values(updated_at=func.now() - timedelta(days=40))
+                )
+        envelope = SlackEventEnvelope.model_validate(
+            {
+                "type": "event_callback",
+                "team_id": "T1",
+                "event": {
+                    "type": "message",
+                    "channel": "C1",
+                    "ts": ts,
+                    "thread_ts": "5.0" if ts == "6.0" else "",
+                    "user": "UG",
+                    "text": text,
+                },
+            }
+        )
+        await SlackPullRequestLink.record(envelope)
+        await SlackThreadMention.record(envelope)
 
     @asynccontextmanager
     async def as_user(login: str) -> AsyncIterator[GitHubClient]:
@@ -841,16 +891,33 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
             raise GitHubError(_response(404))
         return {}
 
+    async def pull(self) -> dict[str, object]:
+        author = "ada" if self.number == 10 else "grace"
+        return {"state": "open", "user": {"login": author}, "title": f"PR {self.number}"}
+
     async def states(pull, author):
         return {"ada": "APPROVED"} if pull.number == 5 else {}
+
+    async def tentative(self) -> frozenset[UUID]:
+        return frozenset({ada.id} if self.request.pull_request.number in {7, 14} else {grace.id})
 
     with (
         patch("openswe.human_review.routes.GitHubClient.as_user", as_user),
         patch.object(RepoClient, "info", info),
-        patch("openswe.human_review.routes.latest_review_states", states),
+        patch.object(PullRequestClient, "pull", pull),
+        patch.object(TentativeReviewers, "user_ids", tentative),
+        patch(
+            "openswe.human_review.review_queue.accessible_repo_full_names",
+            AsyncMock(return_value=frozenset({"o/r"})),
+        ),
+        patch("openswe.human_review.review_queue.latest_review_states", states),
     ):
         result = await api_review_assignments(page=1, session={"sub": "ada"})
-    assert [row.number for row in result.pull_requests] == [1]
+    assert [(row.number, row.assignment) for row in result.pull_requests] == [
+        (1, "assigned"),
+        (7, "tentative"),
+        (12, "mentioned"),
+    ]
 
 
 @asynccontextmanager
@@ -882,13 +949,22 @@ async def _review_github_app(owner: str, repo: str) -> AsyncIterator[GitHubClien
 async def test_review_blockers_require_an_account_or_an_allowed_author(
     author: str, user: User | None, draft: bool, allowed: list[str], expected: list[str]
 ) -> None:
-    from openswe.expedited_review.readiness import Readiness
     from openswe.human_review.standard import review_blockers
 
-    readiness = Readiness(snapshot=_snapshot(author=author, draft=draft), blockers=[])
     settings = RepoSettings(review_allowed_authors=allowed).model_dump_json(by_alias=True)
     with (
-        patch.object(Readiness, "assess", AsyncMock(return_value=readiness)),
+        patch.object(
+            PullRequestClient,
+            "pull",
+            AsyncMock(
+                return_value={
+                    "state": "open",
+                    "head": {"sha": "abc"},
+                    "user": {"login": author},
+                    "draft": draft,
+                }
+            ),
+        ),
         patch.object(User, "for_login", AsyncMock(return_value=user)),
         patch.object(GitHubClient, "as_app", _review_github_app),
         patch.object(RepoClient, "read_file", AsyncMock(return_value=settings)),
@@ -903,10 +979,7 @@ async def test_review_blockers_require_an_account_or_an_allowed_author(
 async def test_review_author_allowlist_requires_valid_default_branch_settings(
     settings: str | None,
 ) -> None:
-    from openswe.expedited_review.readiness import Readiness
     from openswe.human_review.standard import review_blockers
-
-    readiness = Readiness(snapshot=_snapshot(author="ada"), blockers=[])
 
     async def read_file(
         repo: RepoClient, path: str, ref: str | None, *, max_chars: int, strict: bool = False
@@ -920,7 +993,17 @@ async def test_review_author_allowlist_requires_valid_default_branch_settings(
         return settings
 
     with (
-        patch.object(Readiness, "assess", AsyncMock(return_value=readiness)),
+        patch.object(
+            PullRequestClient,
+            "pull",
+            AsyncMock(
+                return_value={
+                    "state": "open",
+                    "head": {"sha": "abc"},
+                    "user": {"login": "ada"},
+                }
+            ),
+        ),
         patch.object(User, "for_login", AsyncMock(return_value=None)),
         patch.object(GitHubClient, "as_app", _review_github_app),
         patch.object(RepoClient, "read_file", read_file),

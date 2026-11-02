@@ -2,13 +2,13 @@
 
 Open SWE is designed to be forked and customized for your org.
 Every run's model loop runs on Managed Deep Agents (`mda/`).
-What the run gets from the backend is decided in one function, `plan_agent()` in `openswe/server.py` (`plan_reviewer()` and `plan_review_scout()` for the reviewer and the review scout).
-It records the run's tools, middleware, models and subagents in a `ToolSurface` (`openswe/sandboxes/tool_runtime.py`), and that is where you swap out the model, tools and middleware.
+What the run gets from the backend is resolved in one function as the run starts, `agent_catalog()` in `openswe/server.py` (`reviewer_catalog()` and `review_scout_catalog()` for the reviewer and the review scout).
+It records the run's tools, models, subagents and loop rules in a `ToolSurface` (`openswe/sandboxes/tool_runtime.py`), and that is where you swap out the model and tools.
 
 ```python
-# openswe/server.py — the end of plan_agent()
+# openswe/server.py — the end of agent_catalog()
 surface.base_tools = main_tools  # tools the run can call
-surface.middleware = middleware  # hooks the run's loop hands each phase to
+surface.loop = LoopRules(...)  # what MDA's middleware does around each model call
 surface.models = SurfaceModels(
     main=ModelChoice(model_id, dict(model_kwargs)),
     subagent=ModelChoice(subagent_model_id, dict(subagent_model_kwargs)),
@@ -91,7 +91,7 @@ For OpenAI reasoning models, this budget can include both internal reasoning tok
 ### Switching models
 
 Models are named in the `provider:model` format, with their provider settings, as a `ModelChoice`.
-The MDA run builds the chat model from it (`mda/rt/models.py`), so a model object built in `plan_agent()` never reaches the run:
+The MDA run builds the chat model from it (`mda/rt/models.py`), so a model object built in `agent_catalog()` never reaches the run:
 
 ```python
 # Anthropic
@@ -109,7 +109,7 @@ To change how a provider's chat model is built (its client, retries or gateway r
 
 ### Using different models per context
 
-You can route to different models based on task complexity, repo, or trigger source, in `plan_agent()`:
+You can route to different models based on task complexity, repo, or trigger source, in `agent_catalog()`:
 
 ```python
 if cfg.source == "slack":
@@ -406,7 +406,7 @@ def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
     ...
 ```
 
-Then register it in `plan_agent()` in `openswe/server.py`, where the run's tools are listed:
+Then register it in `agent_catalog()` in `openswe/server.py`, where the run's tools are listed:
 
 ```python
 from openswe.tools.datadog_search import datadog_search
@@ -635,22 +635,16 @@ This is the easiest way to encode conventions per-repo without modifying Open SW
 
 ## 6. Middleware
 
-Middleware hooks run around the agent loop.
+Middleware hooks run around the agent loop, in the Managed Deep Agents run (`mda/`).
 Follow-ups and events that arrive mid-run are not middleware: the MDA run takes them from the thread's inbox (`openswe/threads/inbox.py`) before each model call.
-Open SWE includes:
-
-| Middleware | Type | Purpose |
-|---|---|---|
-| `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors |
-| `notify_step_limit_reached` | After agent | Posts a Slack reply when the agent hits the model-call limit |
+What the loop does around each model call (reply and CLI-result nudges, routing, the step limit, what the run's end records) follows the `LoopRules` the backend puts in each run's catalog (`agent_catalog()` in `openswe/server.py`), and MDA's own middleware carries them out (`mda/rt/loop.py`).
 
 There is intentionally no after-agent middleware that opens a PR for the agent.
 The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel.
-If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
 
-Add custom middleware by appending to the middleware list in `plan_agent()`.
-The MDA run hands each phase of its loop to it (`openswe/agent_api/graph.py`), so `before_agent`, `before_model`, `after_model` and `after_agent` hooks run on the backend as they would in a graph.
-Tool calls are the MDA run's: a check around them goes in `mda/rt` (`rt/file_tools.py` for the file and shell tools), or behind an endpoint of the typed API in `packages/runtime-api` where it needs the backend, as the shell-command guards do.
+Add custom middleware to the graph's middleware in `mda/agent.py` (`_parts`).
+Tool calls are the MDA run's: a check around them goes in `mda/rt` (`rt/file_tools.py` for the file and shell tools).
+Work that needs the backend's credentials or data goes behind a named endpoint of the typed API in `packages/runtime-api`, as the shell-command guards (`check_shell`) and the task context (`task_context`) do.
 See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
 
 **Example — adding a CI check after agent completion:**
@@ -667,12 +661,12 @@ async def run_ci_check(state: AgentState, runtime: Runtime):
     ...
 ```
 
-Then add it to the middleware list:
+Then add it to the graph's middleware in `mda/agent.py`:
 
 ```python
 middleware = [
-    ToolErrorMiddleware(),
-    notify_step_limit_reached,
+    BackendRunMiddleware(backend, opened_sandbox, booted_sandbox, read_ahead=[...]),
+    ...,
     run_ci_check,  # new middleware
 ]
 ```

@@ -9,6 +9,7 @@ import {
   formatToolDisplayParts,
 } from "@/features/agents/components/chat/toolExecutionDisplay"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
+import { Thought } from "@/features/agents/components/messages/thought"
 
 export type WorkEntryIconName =
   | "bot"
@@ -239,7 +240,10 @@ export function liveActivityLabel(
     let chunk = chunks[index]
     if (!chunk) continue
 
-    if (chunk.kind === "reasoning") return "Thinking…"
+    if (chunk.kind === "reasoning") {
+      const heading = new Thought(chunk.text).heading
+      return heading ? `${heading}…` : "Thinking…"
+    }
     if (chunk.kind === "text") {
       if (chunk.text.trim()) return "Writing response…"
       continue

@@ -38,6 +38,7 @@ type ToolKind = ToolExecutionChunk["toolKind"]
 
 export function toolKind(name: string): ToolKind {
   const lowered = name.toLowerCase()
+  if (lowered.startsWith("mcp_")) return "other"
   if (lowered === "task") return "task"
   if (lowered === "eval") return "code"
   if (lowered === "read_only_sql") return "sql"
@@ -59,6 +60,7 @@ export function toolKind(name: string): ToolKind {
 }
 
 export function toolTitle(name: string, args: Record<string, unknown>): string {
+  if (name.toLowerCase().startsWith("mcp_")) return humanizeToolName(name)
   const path = args.path ?? args.file_path ?? args.target_file
   if (typeof path === "string" && path.trim()) return `${name} ${path.trim()}`
   const command = args.command
@@ -369,6 +371,7 @@ export function streamMessagesToUi(
     }
 
     if (AIMessage.isInstance(raw)) {
+      if (raw.response_metadata?.open_swe_superseded === true) return
       if (raw.additional_kwargs.lc_source === "summarization") return
       const chunks: Array<Chunk> = []
       const reasoning = reasoningText(raw)

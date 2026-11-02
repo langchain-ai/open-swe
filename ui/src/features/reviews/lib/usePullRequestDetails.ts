@@ -43,6 +43,7 @@ export function usePullRequestDetails(
           title: detail.data.title || pr.title,
           createdAt: detail.data.createdAt || pr.createdAt,
           updatedAt: detail.data.updatedAt || pr.updatedAt,
+          assignment: pr.assignment,
         },
       ]
     return [

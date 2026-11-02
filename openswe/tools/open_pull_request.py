@@ -1141,6 +1141,21 @@ async def _open_pull_request(
             "body": body,
             "draft": draft,
         }
+        from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+        from openswe.threads.store import THREADS
+
+        cfg = _configurable()
+        if (
+            cfg.thread_id
+            and (await cached_workspace_settings(cfg.workspace_slug)).get(
+                "implementation_walkthrough_enabled"
+            )
+            is True
+        ):
+            await THREADS.update(
+                cfg.thread_id,
+                {"implementation_pr_target": {"repository": f"{owner}/{repo}", "head": head}},
+            )
         resp = await client.post(
             f"{GITHUB_API}/repos/{owner}/{repo}/pulls",
             headers=_auth_headers(token),

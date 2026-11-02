@@ -52,6 +52,13 @@ async def github_webhook(
     event_type = request.headers.get("X-GitHub-Event", "")
     delivery_id = request.headers.get("X-GitHub-Delivery", "")
     refs = EventRefs.github(body)
+    named_repo = {"owner": refs.github_owner, "name": refs.github_repository.partition("/")[2]}
+    if refs.github_owner and not common.is_repo_allowed(named_repo):
+        common.logger.info(
+            "Dropping GitHub delivery for a repository outside the allowlist",
+            extra={"github_owner": refs.github_owner, "github_delivery": delivery_id},
+        )
+        return {"status": "ignored", "reason": "Repository not in allowlist"}
     await EventLog.record(
         request,
         body,
@@ -140,8 +147,12 @@ async def github_webhook(
                 "status": "ignored",
                 "reason": f"Unsupported GitHub pull_request action: {action}",
             }
-        # The same repository allowlist as issue automations, checked below for them.
-        if action in {"opened", "closed"} and common.is_repo_allowed(webhook_repo_config):
+        if action in {"opened", "reopened", "ready_for_review", "synchronize"}:
+            gate_rejection = await common.enforce_public_repo_org_gate(payload, "pull_request")
+            if gate_rejection is not None:
+                return gate_rejection
+            background_tasks.add_task(service.process_github_pr_walkthrough, payload)
+        if action in {"opened", "closed"}:
             background_tasks.add_task(_launch_automations, event_type, payload, delivery_id)
         if action in {"opened", "edited"} or action in common.GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(common.update_agent_thread_pr_state, payload)
@@ -188,14 +199,6 @@ async def github_webhook(
         common.logger.info("Accepted GitHub push webhook, scheduling reviewer watch evaluation")
         background_tasks.add_task(service.process_github_push_event, payload)
         return {"status": "accepted", "message": "Processing GitHub push for reviewer watch"}
-
-    if not common.is_repo_allowed(webhook_repo_config):
-        common.logger.debug(
-            "Rejecting GitHub webhook: repo '%s/%s' not in allowlist",
-            webhook_repo_config.get("owner"),
-            webhook_repo_config.get("name"),
-        )
-        return {"status": "ignored", "reason": "Repository not in allowlist"}
 
     if event_type in common.GITHUB_CI_EVENTS:
         background_tasks.add_task(

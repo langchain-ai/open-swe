@@ -1,6 +1,5 @@
 """Sandbox capability authorization and server-side tool execution."""
 
-from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -9,7 +8,6 @@ import httpx2
 import jwt
 import pytest
 from fastapi import HTTPException
-from langchain.agents.middleware import AgentMiddleware
 from langchain_core.tools import StructuredTool
 
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
@@ -79,7 +77,7 @@ def surface() -> ToolSurface:
             "MCP": [StructuredTool.from_function(coroutine=integration_echo)],
         }
     )
-    return ToolSurface(dynamic=dynamic, middleware=cast(list[AgentMiddleware], [dynamic]))
+    return ToolSurface(dynamic=dynamic)
 
 
 async def test_capability_carries_binding_and_is_revoked_on_rebinding(

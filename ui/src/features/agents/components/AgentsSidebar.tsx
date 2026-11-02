@@ -34,6 +34,8 @@ import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
 import type { DesktopUpdateState } from "@/desktop"
 import { api, type SessionUser } from "@/lib/api"
 import { useProfile } from "@/lib/profile"
+import { desktopExperience, useDesktopExperience } from "@/lib/experience"
+import { ExperienceSelector } from "@/components/ExperienceSelector"
 import { AgentWorkspaceProvider } from "@/features/agents/lib/agentWorkspace"
 import type {
   PullRequestSnapshot,
@@ -99,6 +101,7 @@ import {
   cloudSidebarThread,
   DEFAULT_SIDEBAR_WORKSPACE_SLUG,
   groupRepoGroupsByWorkspace,
+  groupSidebarThreadsByDay,
   sidebarRepoKey,
   sortSidebarThreads,
   sidebarItemContains,
@@ -190,7 +193,8 @@ export function AgentsSidebar({
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
   const profile = useProfile()
-  const agentWorkspaceEnabled = profile.data?.experimental_fleet === true
+  const { experience } = useDesktopExperience()
+  const agentWorkspaceEnabled = experience === "agent_workspace"
   const newThreadShortcut = useShortcutLabel("mod+n")
   const concierge = useQuery({
     queryKey: ["concierge", user?.login],
@@ -264,7 +268,7 @@ export function AgentsSidebar({
     includeResolved: agentWorkspaceEnabled || prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
     includeClaudeCode: prefs.filters.includeClaudeCode,
-    sort: agentWorkspaceEnabled ? "updated" : prefs.sortChats,
+    sort: repoMode ? prefs.sortChats : "updated",
     enabled: true,
   })
   const sidebarReposQuery = useSidebarRepos({
@@ -527,15 +531,17 @@ export function AgentsSidebar({
           { value: "list", label: "In one list" },
         ]}
       />
-      <MenuChoiceGroup<ChatSort>
-        label="Sort chats by"
-        value={prefs.sortChats}
-        onChange={(sortChats) => setView({ sortChats })}
-        options={[
-          { value: "created", label: "Created" },
-          { value: "updated", label: "Last updated" },
-        ]}
-      />
+      {repoMode && (
+        <MenuChoiceGroup<ChatSort>
+          label="Sort chats by"
+          value={prefs.sortChats}
+          onChange={(sortChats) => setView({ sortChats })}
+          options={[
+            { value: "created", label: "Created" },
+            { value: "updated", label: "Last updated" },
+          ]}
+        />
+      )}
       <DropdownMenuSeparator />
       <DropdownMenuGroup>
         <MenuCheckItem
@@ -658,19 +664,7 @@ export function AgentsSidebar({
           className="flex min-w-0 items-center gap-space-2 font-heading text-sm font-medium tracking-tight text-primary"
         >
           <LogoMark alt="" className="size-5 shrink-0" />
-          {agentWorkspaceEnabled ? (
-            <span
-              className="flex min-w-0 flex-col gap-0.5"
-              aria-label="LangSmith Agent Workspace"
-            >
-              <span className="text-sm font-semibold">LangSmith</span>
-              <span className="text-xxs font-normal tracking-normal text-tertiary">
-                Agent Workspace
-              </span>
-            </span>
-          ) : (
-            "Open SWE"
-          )}
+          Open SWE
         </Link>
         <div className="flex shrink-0 items-center gap-space-1">
           <IconButton
@@ -688,9 +682,14 @@ export function AgentsSidebar({
         </div>
       </div>
 
+      <ExperienceSelector onNavigate={layout.closeOnMobile} />
+
       {agentWorkspaceEnabled && (
         <AgentWorkspaceThreadList
-          items={allItems}
+          items={[
+            ...pinnedItems,
+            ...sortSidebarThreads(threadItems, "updated"),
+          ]}
           activeThreadId={activeThreadId}
           compact={prefs.compact}
           onNavigate={layout.closeOnMobile}
@@ -928,8 +927,15 @@ export function AgentsSidebar({
               />
               {!sectionCollapsed("recents") && (
                 <>
-                  {recents.map((item) => (
-                    <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                  {groupSidebarThreadsByDay(recents).map((day) => (
+                    <div key={day.key}>
+                      <div className="px-space-2 pt-space-2 pb-space-1 text-xxs font-medium text-tertiary">
+                        {day.label}
+                      </div>
+                      {day.threads.map((item) => (
+                        <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                      ))}
+                    </div>
                   ))}
                   {recentsQuery.hasMore && (
                     <LoadMoreThreadsOnScroll
@@ -1359,7 +1365,7 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
-  const agentWorkspaceEnabled = useProfile().data?.experimental_fleet === true
+  const { experience, select: selectExperience } = useDesktopExperience()
   // `useMutation` returns a fresh object every render; only `mutate` is stable,
   // and an unstable command array re-registers on every commit.
   const pinThread = usePinAgentThread().mutate
@@ -1370,6 +1376,15 @@ export function AgentsShell({
   const activeThread = useActiveAgentThread(activeThreadId, {
     enabled: Boolean(activeThreadId),
   })
+  const threadExperience = activeThread
+    ? desktopExperience.thread(activeThread)
+    : undefined
+  useEffect(() => {
+    if (threadExperience) selectExperience(threadExperience)
+  }, [selectExperience, threadExperience])
+  const agentWorkspaceEnabled = Boolean(
+    experience && (threadExperience ?? experience) === "agent_workspace"
+  )
   const sidebarCommands = useMemo(() => {
     const commands = [
       {
@@ -1449,7 +1464,10 @@ export function AgentsShell({
               activeThreadId={activeThreadId}
               layout={layout}
             />
-            <main className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1">
+            <main
+              key={experience}
+              className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1"
+            >
               {children}
             </main>
           </div>
@@ -1535,6 +1553,8 @@ function AgentWorkspaceThreadList({
                     key={item.id}
                     title={item.title}
                     threadId={item.id}
+                    status={item.status}
+                    viewed={item.viewed}
                     active={item.id === activeThreadId}
                     compact={compact}
                     onNavigate={onNavigate}
