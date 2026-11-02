@@ -66,9 +66,9 @@ Every call is authenticated with the run token.
   For Anthropic the first two each end in a cache breakpoint; with the system prompt's end and the conversation's they fill the four a request may have, and the tools, sent first, need none of their own.
 - **Incident evidence:** in an incident run, each tool result is recorded as evidence the report can cite (`record_evidence`), and carries the id it was recorded under.
 - **Loop:** `BackendRunMiddleware` (`rt/middleware.py`) prepares the run, reads its inbox and runs its loop:
-  - `prepare`: before the run, on the backend: the turn's prompt, model and route, from what the run token says starting the run decided, never planning the run again.
+  - `prepare`: before the run, on the backend: the turn's prompt and model, from what the run token says starting the run decided, never planning the run again; the loop alone picks a call's route.
     It writes the graph state the loop reads.
-    The run then reports its start (`run_started`), behind which the backend opens the transcript turn and records the thread's model and usage, none of which the first model call waits for.
+    The run reports its start (`run_started`) once its first model call is routed, ahead of anything else it reports, or as it ends when it never calls the model; behind it the backend opens the transcript turn and records the thread's model (the route's, for a routed run) and usage, none of which the model call waits for.
     The reviewer and the scout prepare from it too;
   - **Git evidence** (`rt/git_evidence.py`): the sandbox's checkouts are fingerprinted (`rt/sandbox_scripts/git_trace.py`) as the turn starts and before a model call that follows a file or shell tool, each in the background; a tool that may change a checkout waits only for the turn's first fingerprint.
     With the pull requests the run's operations open, they name the turn's `ls_git_repo` and `ls_git_branch` in its trace, reconciled after the run ends, so neither the run's end nor the thread's next message waits for the last fingerprint or the trace's update.

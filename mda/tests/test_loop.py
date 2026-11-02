@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 from langchain.agents import create_agent
@@ -36,6 +37,7 @@ from runtime_api.loop import (
     Prepared,
     Route,
     Routed,
+    RunStarted,
     TaskContext,
 )
 from runtime_api.reports import REPORTS, Reports, ReportsTaken
@@ -408,6 +410,110 @@ async def test_a_route_the_classifier_fell_back_to_is_not_kept(
     assert recovered.call is not None and recovered.call.model == _FAST
     assert recovered.update["model_route"] == "fast"
     assert [name for name, _ in calls] == ["route_model", "route_model"]
+
+
+@pytest.mark.parametrize("stops", [False, True])
+async def test_a_run_starts_once_with_the_route_its_first_call_takes(
+    monkeypatch: pytest.MonkeyPatch, stops: bool
+) -> None:
+    from langchain.agents.middleware import AgentMiddleware
+    from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+    from langchain_core.messages import ToolCall
+    from langchain_core.tools import tool
+    from rt.middleware import ReportRepliesMiddleware, RuntimeToolsMiddleware
+
+    backend, calls = _backend(
+        monkeypatch,
+        {
+            "prepare": Prepared(update={"stopped": stops}),
+            "route_model": Route(route="fast"),
+            "run_started": Done(),
+            "model_result": Done(),
+            "tool_started": Done(),
+            "tool_result": Done(),
+            "run_ended": Done(),
+        },
+        LoopRules(routing=RoutingRules(mode="auto"), stop_when=["stopped"]),
+    )
+    backend.run.invocation_id = "turn"
+    called = AIMessage(
+        content="", id="ai-1", tool_calls=[ToolCall(name="look", args={}, id="call-1")]
+    )
+    model = GenericFakeChatModel(messages=iter([called, AIMessage(content="done", id="ai-2")]))
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: model)
+
+    @tool
+    async def look() -> str:
+        """Look around."""
+        return "seen"
+
+    graph = create_agent(
+        model=model,
+        tools=[look],
+        middleware=cast(
+            "list[AgentMiddleware]",
+            [
+                BackendRunMiddleware(backend),
+                ReportRepliesMiddleware(backend),
+                RuntimeToolsMiddleware(backend, ()),
+            ],
+        ),
+    )
+
+    await graph.ainvoke({"messages": [HumanMessage(content="Fix the login", id="human-1")]})
+
+    # Ahead of everything else the run reports, once, as the route MDA picked; a run a
+    # rule stopped before any model call starts as it ends.
+    reported = [(name, body) for name, body in calls if name not in {"prepare", "route_model"}]
+    assert [name for name, _ in reported if name == "run_started"] == ["run_started"]
+    assert reported[0][0] == "run_started" and reported[-1][0] == "run_ended"
+    assert reported[0][1]["model_route"] == (None if stops else "fast")
+    assert [name for name, _ in calls].count("route_model") == (0 if stops else 1)
+
+
+@pytest.mark.parametrize("carried", [False, True])
+async def test_an_unrouted_start_keeps_the_requested_model_not_a_checkpoint_route(
+    monkeypatch: pytest.MonkeyPatch, carried: bool
+) -> None:
+    backend, calls = _backend(
+        monkeypatch,
+        {
+            "prepare": Prepared(
+                update={
+                    "stopped": True,
+                    "requested_model": _MAIN.model_id,
+                    "selected_model_id": _MAIN.model_id,
+                    "selected_effort": "high",
+                }
+            ),
+            "run_started": Done(),
+            "run_ended": Done(),
+        },
+        LoopRules(routing=RoutingRules(mode="auto"), stop_when=["stopped"]),
+    )
+    backend.run.invocation_id = "turn"
+    state = _state(HumanMessage(content="Use Opus", id="human-1"), model_route="fast")
+    if carried:
+        state["open_swe_start"] = RunStarted(
+            run_id="earlier-run",
+            invocation_id="earlier-turn",
+            model_id=_MAIN.model_id,
+            effort="high",
+        ).model_dump(mode="json")
+    graph = create_agent(
+        model=FakeListChatModel(responses=["unused"]),
+        middleware=[BackendRunMiddleware(backend)],
+    )
+
+    await graph.ainvoke(state)
+
+    starts = [RunStarted.model_validate(body) for name, body in calls if name == "run_started"]
+    assert [start.invocation_id for start in starts] == (
+        ["earlier-turn", "turn"] if carried else ["turn"]
+    )
+    assert all(start.model_route is None for start in starts)
+    assert all((start.model_id, start.effort) == (_MAIN.model_id, "high") for start in starts)
 
 
 @pytest.mark.parametrize(

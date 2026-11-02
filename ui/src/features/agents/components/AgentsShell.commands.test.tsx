@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
-import { cleanup, render, screen, fireEvent } from "@testing-library/react"
+import { act, cleanup, render, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
 
@@ -12,6 +12,7 @@ import type { AgentThread } from "../lib/types"
 import { AgentsShell } from "./AgentsSidebar"
 import { AppCommandProvider, useAppCommand } from "@/lib/appCommands"
 import type { SessionUser } from "@/lib/api"
+import { desktopExperience } from "@/lib/experience"
 
 // Every mocked hook must return a stable reference, the way the real hooks do.
 // A factory that rebuilds its result each render reintroduces the very churn
@@ -166,6 +167,32 @@ it("registers the active thread's commands once and then stops", async () => {
   )
 
   expect(probeRenders).toBeLessThanOrEqual(RENDER_BUDGET)
+})
+
+it("keeps page input when the saved experience changes", () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <AppCommandProvider>
+        <AgentsShell user={USER}>
+          <input aria-label="Review link" defaultValue="" />
+        </AgentsShell>
+      </AppCommandProvider>
+    </QueryClientProvider>
+  )
+  const input = screen.getByRole<HTMLInputElement>("textbox", {
+    name: "Review link",
+  })
+  fireEvent.change(input, {
+    target: { value: "https://github.com/acme/app/pull/1" },
+  })
+  act(() => desktopExperience.write("octocat", "agent_workspace"))
+  act(() => desktopExperience.write("octocat", "coding"))
+  expect(
+    screen.getByRole<HTMLInputElement>("textbox", { name: "Review link" }).value
+  ).toBe("https://github.com/acme/app/pull/1")
 })
 
 it("opens asynchronous workers as real conversations and expands the selected worker separately from synchronous subagents", () => {
