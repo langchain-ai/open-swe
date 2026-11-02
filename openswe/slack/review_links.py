@@ -69,22 +69,23 @@ class _PrLinks:
     def block(self, value: object) -> object:
         if isinstance(value, list):
             return [self.block(item) for item in value]
-        if not isinstance(value, dict) or value.get("type") in {
-            "plain_text",
-            "rich_text_preformatted",
-        }:
+        if (
+            not isinstance(value, dict)
+            or value.get("type") in {"plain_text", "rich_text_preformatted"}
+            or (value.get("type") == "link" and value.get("text") == _GITHUB_MARK)
+        ):
             return value
-        field = _PrLinks(mrkdwn=value.get("type") != "markdown")
+        nested = _PLAIN if value.get("type") == "rich_text" or not self.github_mark else self
+        field = nested if nested is _PLAIN else _PrLinks(mrkdwn=value.get("type") != "markdown")
         return {
-            key: (
-                field.text(item)
-                if key == "text"
-                else _PrLinks(mrkdwn=True, github_mark=False).text(item)
-            )
+            key: (field if key == "text" else _PLAIN).text(item)
             if key in {"text", "url"} and isinstance(item, str)
-            else self.block(item)
+            else nested.block(item)
             for key, item in value.items()
         }
+
+
+_PLAIN = _PrLinks(mrkdwn=True, github_mark=False)
 
 
 async def pr_review_links(

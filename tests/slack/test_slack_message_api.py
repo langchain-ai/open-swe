@@ -321,6 +321,27 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
     assert blocks[0]["text"] == text
     resent = await review_links.pr_review_links(payload["text"], sent_blocks)
     assert resent == (payload["text"], sent_blocks)
+    rich_text = [
+        {
+            "type": "rich_text",
+            "elements": [
+                {
+                    "type": "rich_text_section",
+                    "elements": [
+                        {"type": "link", "url": url, "text": "PR"},
+                        {"type": "link", "url": url, "text": "↗"},
+                        {"type": "text", "text": f"see {url}"},
+                    ],
+                }
+            ],
+        }
+    ]
+    _, (fetched,) = await review_links.pr_review_links("", rich_text)
+    assert fetched["elements"][0]["elements"] == [
+        {"type": "link", "url": target, "text": "PR"},
+        {"type": "link", "url": url, "text": "↗"},
+        {"type": "text", "text": f"see {target}"},
+    ]
 
 
 @pytest.mark.parametrize("fail", [False, True])
