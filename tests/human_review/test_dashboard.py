@@ -6,7 +6,8 @@ import pytest
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.expedited_review.eligibility import ChangedFile
-from openswe.github.http import GitHubClient
+from openswe.github.codeowners import CodeOwners
+from openswe.github.http import GitHubClient, RepoFileUnreadableError
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings
@@ -20,7 +21,18 @@ from openswe.users import User
 
 
 @pytest.mark.parametrize(
-    "case", ["eligible", "large", "unregistered", "disabled", "draft", "active"]
+    "case",
+    [
+        "eligible",
+        "large",
+        "unregistered",
+        "disabled",
+        "draft",
+        "active",
+        "reviews_unavailable",
+        "codeowners_unreadable",
+        "already_reviewed",
+    ],
 )
 async def test_dashboard_selects_review_workflow(
     case: str, monkeypatch: pytest.MonkeyPatch
@@ -37,6 +49,13 @@ async def test_dashboard_selects_review_workflow(
     for method in ("link_on_github", "broadcast_configured", "remove_superseded"):
         monkeypatch.setattr(ReviewCard, method, AsyncMock())
     monkeypatch.setattr(ReviewCard, "prompt_author_ready", AsyncMock(return_value=""))
+    monkeypatch.setattr(
+        CodeOwners,
+        "fetch",
+        AsyncMock(side_effect=RepoFileUnreadableError("unreadable"))
+        if case == "codeowners_unreadable"
+        else AsyncMock(return_value=None),
+    )
     with (
         patch(
             "openswe.human_review.dashboard.get_workspace_settings",
@@ -85,7 +104,14 @@ async def test_dashboard_selects_review_workflow(
             ),
         ),
         patch(
-            "openswe.expedited_review.nomination.latest_review_states", AsyncMock(return_value={})
+            "openswe.expedited_review.nomination.latest_review_states",
+            AsyncMock(
+                return_value=None
+                if case == "reviews_unavailable"
+                else {"bob": "APPROVED"}
+                if case in {"codeowners_unreadable", "already_reviewed"}
+                else {}
+            ),
         ),
         patch.object(
             User, "for_login", AsyncMock(return_value=None if case == "unregistered" else User())

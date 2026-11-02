@@ -1,5 +1,6 @@
 """Choose the review workflow for a dashboard request."""
 
+import logging
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -16,6 +17,8 @@ from openswe.human_review.standard import (
     target_channel,
 )
 from openswe.slack.client import GitHubPrRef, get_slack_permalink
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,11 +48,20 @@ class DashboardReviewRequest:
                                 inline_summary=inline_summary or "",
                                 replace_standard=False,
                             )
-                        except ExpeditedReviewIneligible:
-                            pass
+                        except ExpeditedReviewIneligible as exc:
+                            logger.info(
+                                "Dashboard review falling back to standard review",
+                                extra={"pr_url": pr.url, "reason": str(exc)},
+                            )
                         else:
                             if not result["success"]:
-                                return RequestResult(success=False, error=str(result["error"]))
+                                logger.warning(
+                                    "Expedited dashboard review failed; requesting standard review",
+                                    extra={"pr_url": pr.url, "reason": str(result["error"])},
+                                )
+                                return await request_review(
+                                    pr, self.origin, channel=channel, inline_summary=inline_summary
+                                )
                             approval = await HumanReviewRequest.get(UUID(result["approval_id"]))
                             return RequestResult(
                                 success=True,
