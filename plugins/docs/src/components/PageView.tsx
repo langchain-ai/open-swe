@@ -216,8 +216,8 @@ export function PageView({
 
   const putDraft = (next: Draft) => draftsIn(host, repository).put(path, next)
 
-  const ensureDraft = async (): Promise<Draft> => {
-    if (draft) return draft
+  const startingDraft = useRef<Promise<Draft> | null>(null)
+  const startDraft = async (): Promise<Draft> => {
     const base = await github.ref(space.defaultBranch)
     if (!base) throw new Error(`${space.defaultBranch} no longer exists`)
     const started: Draft = {
@@ -240,6 +240,21 @@ export function PageView({
     )
     await refreshDraft()
     return started
+  }
+
+  const ensureDraft = async (): Promise<Draft> => {
+    const active =
+      draft ??
+      queryClient
+        .getQueryData<Map<string, Draft>>(keys.drafts(repository))
+        ?.get(path)
+    if (active) return active
+    startingDraft.current ??= startDraft()
+    try {
+      return await startingDraft.current
+    } finally {
+      startingDraft.current = null
+    }
   }
 
   const save = async (message?: string) => {
@@ -370,11 +385,11 @@ export function PageView({
     void host.agent.open(draftText ? { draft: draftText } : {})
 
   /** The live editor, starting the draft first; tools that change the page wait for it. */
-  const liveEditor = async (): Promise<Editor> => {
-    await ensureDraft()
+  const liveEditor = async (): Promise<{ view: Editor; active: Draft }> => {
+    const active = await ensureDraft()
     for (let tries = 0; tries < 150; tries++) {
       const ready = mounted()
-      if (ready?.isEditable) return ready
+      if (ready?.isEditable) return { view: ready, active }
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
     throw new Error("The draft didn't open in time; try again.")
@@ -459,7 +474,7 @@ export function PageView({
       })),
     }),
     edit: async (find, replace) => {
-      const view = await liveEditor()
+      const { view, active } = await liveEditor()
       const range = resolveAnchor(view.state.doc, {
         quote: find,
         prefix: "",
@@ -475,7 +490,7 @@ export function PageView({
           ? (blocks[0].content ?? [])
           : blocks
       view.chain().insertContentAt(range, content).run()
-      return { edited: path, draft: (await ensureDraft()).branch }
+      return { edited: path, draft: active.branch }
     },
     comment: async (quote, body, suggestion) => {
       const view = mounted()

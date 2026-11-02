@@ -72,6 +72,7 @@ export function CommentsPanel({
     <div className="flex min-h-0 flex-1 flex-col gap-space-3 overflow-y-auto p-space-3">
       {composing && (
         <Composer
+          key={JSON.stringify(composing)}
           composing={composing}
           act={act}
           onSubmit={onCompose}

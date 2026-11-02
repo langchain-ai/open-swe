@@ -85,13 +85,17 @@ function PathSync({ host }: { host: PluginHost }) {
   const router = useRouter()
   useEffect(() => {
     router.history.replace(host.context.path)
+    let path = host.context.path
     const offHost = host.on((event) => {
-      if (event.type === "path" && event.path !== router.state.location.href)
-        router.history.push(event.path)
+      if (event.type !== "path") return
+      path = event.path
+      if (event.path !== router.state.location.href)
+        router.history.replace(event.path)
     })
-    const offRouter = router.subscribe("onResolved", ({ toLocation }) => {
-      if (toLocation.href !== host.context.path)
-        void host.nav.setPath(toLocation.href)
+    const offRouter = router.history.subscribe(({ location, action }) => {
+      if (location.href === path) return
+      path = location.href
+      void host.nav.setPath(path, { replace: action.type !== "PUSH" })
     })
     return () => {
       offHost()

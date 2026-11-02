@@ -8,6 +8,7 @@
 import type { PluginHost } from "@openswe/plugin-sdk"
 import { usePluginHost } from "@openswe/plugin-sdk/react"
 import { RoomProvider } from "@openswe/plugin-sdk/yjs"
+import { useQuery } from "@tanstack/react-query"
 import type { Editor } from "@tiptap/core"
 import {
   prosemirrorJSONToYXmlFragment,
@@ -16,7 +17,7 @@ import {
 import { useCallback, useEffect, useSyncExternalStore } from "react"
 import * as Y from "yjs"
 
-import { colorFor, presenceRoom } from "@/lib/model"
+import { colorFor, presenceRoom, roomName } from "@/lib/model"
 
 export const FIELD = "default"
 
@@ -135,12 +136,24 @@ function docsFor(host: PluginHost): Sessions<LiveState> {
   return sessions
 }
 
+function useRoomName(identity: string | null): string | null {
+  return (
+    useQuery({
+      queryKey: ["room-name", identity],
+      queryFn: () => roomName(identity!),
+      enabled: identity !== null,
+      staleTime: Infinity,
+    }).data ?? null
+  )
+}
+
 /** A Yjs document shared through `room`, synced with what the room has stored. */
 export function useLiveDoc(repository: string, room: string | null): LiveState {
   const host = usePluginHost()
+  const name = useRoomName(room)
   return useSession(
     docsFor(host),
-    room ? roomKey(repository, room) : null,
+    name ? roomKey(repository, name) : null,
     NO_DOC
   )
 }
@@ -242,9 +255,10 @@ export function usePresence(
   editing: boolean
 ): Viewer[] {
   const host = usePluginHost()
+  const name = useRoomName(presenceRoom(path))
   const { viewers, provider } = useSession(
     presenceFor(host),
-    roomKey(repository, presenceRoom(path)),
+    name ? roomKey(repository, name) : null,
     NO_ONE
   )
   useEffect(() => {

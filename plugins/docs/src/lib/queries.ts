@@ -82,12 +82,10 @@ export function useRepositoryWatch(repository: string) {
   const host = usePluginHost()
   const queryClient = useQueryClient()
   useEffect(() => {
-    const offDrafts = draftsIn(host, repository).watch(
-      () =>
-        void queryClient.invalidateQueries({
-          queryKey: keys.drafts(repository),
-        })
-    )
+    const offDrafts = draftsIn(host, repository).watch(() => {
+      void queryClient.invalidateQueries({ queryKey: keys.drafts(repository) })
+      void queryClient.invalidateQueries({ queryKey: ["head", repository] })
+    })
     const offComments = commentsIn(host, repository).watch(
       () =>
         void queryClient.invalidateQueries({

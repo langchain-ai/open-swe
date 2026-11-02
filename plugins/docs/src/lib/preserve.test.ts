@@ -23,6 +23,22 @@ const normalized = [
 ].join("\n")
 
 describe("preserveFormatting", () => {
+  it.each([
+    ["* x\n* y", "- x\n- y", "- z"],
+    ["1) x\n2) y", "1. x\n2. y", "3. z"],
+  ])(
+    "keeps an appended item in the same list",
+    (before, normalizedList, added) => {
+      expect(
+        preserveFormatting(
+          `${before}\n\npara`,
+          `${normalizedList}\n\npara`,
+          `${normalizedList}\n${added}\n\npara`
+        )
+      ).toBe(`${normalizedList}\n${added}\n\npara`)
+    }
+  )
+
   it("changes only the lines that were edited", () => {
     const current = normalized.replace("Welcome.", "Welcome, everyone.")
     expect(preserveFormatting(original, normalized, current)).toBe(

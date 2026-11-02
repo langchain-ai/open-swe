@@ -17,6 +17,15 @@ const GITHUB_FILE = [
 
 /** The repository file an image `src` names: a path relative to the page, or a GitHub file URL. */
 export function imageFile(src: string, page: string): ImageFile | null {
+  try {
+    return decodedImageFile(src, page)
+  } catch (error) {
+    if (error instanceof URIError) return null
+    throw error
+  }
+}
+
+function decodedImageFile(src: string, page: string): ImageFile | null {
   const url = src.replace(/[?#].*$/, "")
   for (const pattern of GITHUB_FILE) {
     const match = pattern.exec(url)

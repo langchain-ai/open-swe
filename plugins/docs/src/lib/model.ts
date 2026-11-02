@@ -84,6 +84,14 @@ export function draftBranch(path: string): string {
   return `docs/${slug || "page"}-${Date.now().toString(36)}`
 }
 
+export async function roomName(identity: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(identity)
+  )
+  return `room/${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")}`
+}
+
 export function draftRoom(draft: Draft, path: string): string {
   return `draft/${draft.branch}/${path}`
 }

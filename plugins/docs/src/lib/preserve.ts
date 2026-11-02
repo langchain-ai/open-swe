@@ -74,7 +74,13 @@ export function preserveFormatting(
     )
       end++
     const until = end < b.length ? (mapped[end] as number) : o.length
-    let touched = false
+    let touched =
+      (inserted.has(k) &&
+        Boolean(inserted.get(k)?.at(-1)?.trim()) &&
+        Boolean(b[k]?.trim())) ||
+      (inserted.has(end) &&
+        Boolean(b[end - 1]?.trim()) &&
+        Boolean(inserted.get(end)?.[0]?.trim()))
     for (let i = k; i < end; i++)
       if (removed.has(i) || (i > k && inserted.has(i))) touched = true
     if (touched) {
