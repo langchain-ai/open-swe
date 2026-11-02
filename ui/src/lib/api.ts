@@ -1921,7 +1921,7 @@ export const api = {
     pr: OpenPullRequest
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
-  humanReviewAvailability: (pr: OpenPullRequest) =>
+  humanReviewAvailability: (pr: Pick<OpenPullRequest, "repo" | "number">) =>
     request<{
       available: boolean
       active: boolean
