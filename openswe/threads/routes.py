@@ -54,6 +54,7 @@ from openswe.threads.handlers import (
     share_thread_with_workspace,
 )
 from openswe.threads.listing import (
+    DashboardThreadExperience,
     DashboardThreadScope,
     list_dashboard_pinned_threads,
     list_dashboard_thread_repos,
@@ -91,12 +92,17 @@ async def api_list_threads(
     principal: PrincipalDep,
     all: bool = False,
     limit: int = 25,
+    experience: DashboardThreadExperience | None = None,
 ) -> list[dict[str, Any]]:
     if principal.machine:
+        if experience is not None:
+            raise HTTPException(422, "experience filtering is only supported for people")
         return await machine_threads(principal, limit=limit)
     if all and not principal.admin:
         raise HTTPException(403, "admin only")
-    return await list_dashboard_threads(principal.person, email=principal.email, include_all=all)
+    return await list_dashboard_threads(
+        principal.person, email=principal.email, include_all=all, experience=experience
+    )
 
 
 @router.post("/threads", status_code=201)
@@ -169,6 +175,7 @@ async def api_list_thread_repos(
     owned: bool = False,
     all: bool = False,
     exclude_source: Annotated[list[str] | None, Query()] = None,
+    experience: DashboardThreadExperience | None = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> list[dict[str, Any]]:
     if all and not session_is_admin(session):
@@ -181,14 +188,18 @@ async def api_list_thread_repos(
         owned=owned,
         include_all=all,
         exclude_sources=frozenset(exclude_source or ()),
+        experience=experience,
     )
 
 
 @router.get("/threads/pinned")
 async def api_list_pinned_threads(
+    experience: DashboardThreadExperience | None = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> list[dict[str, Any]]:
-    return await list_dashboard_pinned_threads(session["sub"], email=session.get("email"))
+    return await list_dashboard_pinned_threads(
+        session["sub"], email=session.get("email"), experience=experience
+    )
 
 
 @router.post("/threads/{thread_id}/pin", status_code=204)
@@ -228,6 +239,7 @@ async def api_list_threads_page(
     ownerless: bool = False,
     owned: bool = False,
     exclude_source: Annotated[list[str] | None, Query()] = None,
+    experience: DashboardThreadExperience | None = None,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     hierarchy: bool = False,
     session: dict[str, Any] = SESSION_DEP,
@@ -259,6 +271,7 @@ async def api_list_threads_page(
         ownerless=ownerless,
         owned=owned,
         exclude_sources=frozenset(exclude_source or ()),
+        experience=experience,
         sort_by=sort_by,
         hierarchy=hierarchy,
     )

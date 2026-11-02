@@ -277,15 +277,47 @@ export function AgentThreadView({
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
   )
-  const baseMessages = source.messages
+  const login = session.data?.login
+  const displayName = session.data?.display_name || undefined
+  // A message sent from here keeps the label it showed while pending until the
+  // transcript names its sender, which waits on the run introducing them.
+  const [sentLabels, setSentLabels] = useState<ReadonlyMap<string, string>>(
+    () => new Map()
+  )
+  const senderName = pendingSenderName(source.messages, login, displayName)
+  const unlabeled = senderName
+    ? (thread.pendingMessages ?? []).filter(
+        (message) => !sentLabels.has(message.id)
+      )
+    : []
+  if (senderName && unlabeled.length > 0) {
+    setSentLabels(
+      new Map([
+        ...sentLabels,
+        ...unlabeled.map((message) => [message.id, senderName] as const),
+      ])
+    )
+  }
+  const baseMessages = useMemo(
+    () =>
+      source.messages.map((message) => {
+        const label =
+          message.author === "user" && !message.structuredSenderName
+            ? sentLabels.get(message.id)
+            : undefined
+        return label ? { ...message, structuredSenderName: label } : message
+      }),
+    [sentLabels, source.messages]
+  )
+  // Until the source has hydrated, only the thread record knows a run is live.
+  const sourceRunning =
+    source.isRunning || (source.isHydrating && thread.status === "running")
   const isStreaming =
     source.kind === "transcript"
-      ? source.isRunning
+      ? sourceRunning
       : thread.status === "running" || source.isRunning
   // Server truth: follow-ups queued behind the live run, from the transcript.
   const queued = source.queued
-  const login = session.data?.login
-  const displayName = session.data?.display_name || undefined
   // Only its sender may act on a queued follow-up; the server enforces it too.
   const isOwnQueued = useCallback(
     (entry: QueuedTurn) => login !== undefined && entry.senderLogin === login,
@@ -603,9 +635,9 @@ export function AgentThreadView({
       visiblePendingMessages(
         thread.pendingMessages?.filter((message) => !message.queued),
         [...baseMessages, ...queued.map((entry) => entry.message)],
-        pendingSenderName(baseMessages, login, displayName)
+        senderName
       ),
-    [baseMessages, displayName, login, queued, thread.pendingMessages]
+    [baseMessages, queued, senderName, thread.pendingMessages]
   )
   const visibleMessages = useMemo(
     () => [...baseMessages, ...pendingMessages],
@@ -687,8 +719,8 @@ export function AgentThreadView({
         : null,
     [source.hasOlder, source.isLoadingOlder, source.loadOlder]
   )
-  const isThinking = source.isRunning
-  const settingUpSandbox = isThinking && baseMessages.length === 0
+  const isThinking = sourceRunning
+  const settingUpSandbox = source.isRunning && baseMessages.length === 0
   const reconnect = useConnectionStatus(source.connection)
   // The transcript hydrates once: the SDK's state fetch, or the event log's
   // snapshot. Show a loading state during it instead of the empty state.

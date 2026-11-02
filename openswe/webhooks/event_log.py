@@ -24,9 +24,11 @@ from openswe.slack.pr_links import event_pull_requests
 
 logger = logging.getLogger(__name__)
 
-type WebhookSource = Literal["github", "slack", "linear", "deployment", "workspace"]
+type WebhookSource = Literal[
+    "github", "slack", "linear", "deployment", "workspace", "human_review", "reviewer"
+]
 
-ADMIN_ONLY_SOURCES: frozenset[WebhookSource] = frozenset({"workspace"})
+ADMIN_ONLY_SOURCES: frozenset[WebhookSource] = frozenset({"workspace", "human_review", "reviewer"})
 
 RETAINED_DAYS = 14
 _TABLE = "event_log"

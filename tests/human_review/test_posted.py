@@ -11,8 +11,8 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.human_review import lifecycle, posted, standard, supplementary
 from openswe.human_review.lifecycle import ReviewCard
-from openswe.human_review.posted import linked_pull_requests
 from openswe.human_review.requests import HumanReviewRequest
+from openswe.slack.pr_links import linked_pull_requests
 from openswe.users import User, UserIdentity, UserPreferences
 from tests.support.slack_api import SlackAPI
 

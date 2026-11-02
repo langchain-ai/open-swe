@@ -132,7 +132,7 @@ async def test_unset_mode_is_dry_run_and_off_skips_the_file(registry_db: None) -
     assert await approval_mode_for("o", "r") == "dry_run"
     fetch = AsyncMock(return_value=ApprovalPolicy(approvals_md="Docs only"))
     with patch.object(ApprovalPolicy, "fetch", fetch):
-        assert await approval_policy_for_review("o", "r", 1, token="t") == "Docs only"
+        assert await approval_policy_for_review("o", "r", 1, token="t") == fetch.return_value
         fetch.assert_awaited_once()
 
         await REVIEW_STYLES.update_prompts("o/r", ReviewStylePromptUpdate(approval_mode="off"))

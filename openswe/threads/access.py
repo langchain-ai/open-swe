@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from openswe.config import ENV
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.github.http import github_reauth_message
+from openswe.threads.identity import ThreadIdentity
 from openswe.threads.summary import assert_thread_readable
 from openswe.users import User
 from openswe.utils.json_types import ThreadLike, thread_metadata
@@ -25,11 +26,15 @@ async def resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:
     the org) over the OAuth profile email, which may be a personal account
     that isn't an org member.
     """
+    if ThreadIdentity(login).user_id is not None:
+        return profile.get("email")
     mapped = await User.email_for_login(login)
     return mapped or profile.get("email")
 
 
 async def _ensure_dashboard_github_token(login: str) -> None:
+    if ThreadIdentity(login).user_id is not None:
+        return
     token = await get_valid_access_token(login)
     if not token:
         raise HTTPException(401, github_reauth_message(login))

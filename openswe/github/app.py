@@ -17,6 +17,7 @@ from pydantic import TypeAdapter
 from openswe.config import ENV
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.sdk import GITHUB_API_VERSION, github_sdk
+from openswe.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +170,12 @@ async def get_github_app_installation_token_with_expiry(
     raise_errors: bool = False,
 ) -> tuple[str | None, str | None]:
     """Exchange the GitHub App JWT for an installation access token and its expiry."""
+    try:
+        cfg = RunConfig.from_runtime()
+    except RuntimeError:
+        cfg = None
+    if cfg is not None and cfg.auth_provider == "langsmith":
+        raise PermissionError("Agent Workspace cannot use GitHub App credentials")
     resolved_installation_id = str(
         GITHUB_APP_INSTALLATION_ID if installation_id is None else installation_id
     ).strip()

@@ -9,6 +9,8 @@ class UserPreferences(BaseModel):
     # The person's Slack DM with the bot is one conversation instead of a thread per message.
     concierge_mode: bool = False
     pr_failure_reactions: bool = False
+    # Stay silent until blocked on this person or a reviewed, green PR with a walkthrough is ready.
+    goal_mode: bool = False
     experimental_fleet: bool = False
     # Threads this person starts carry what their workspace's curator learned, and the
     # workspace memories they saved in their private threads reach their own runs there
@@ -21,6 +23,7 @@ class UserPreferencesPatch(BaseModel):
     pr_failure_reactions: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    goal_mode: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
     experimental_fleet: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )

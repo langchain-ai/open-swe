@@ -253,6 +253,40 @@ it.each(["loading", "error", "blocked", "approved"])(
   }
 )
 
+it("keeps the channel picker mounted when live PR status changes", async () => {
+  const availability = vi
+    .spyOn(api, "humanReviewAvailability")
+    .mockResolvedValueOnce({
+      available: false,
+      active: false,
+      permalink: "",
+      blockers: [],
+    })
+    .mockReturnValue(new Promise(() => {}))
+  const client = new QueryClient()
+  const view = render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <RequestHumanReview pr={pr} />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  const picker = await screen.findByRole("button", { name: "Choose channel" })
+  picker.focus()
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <RequestHumanReview
+          pr={{ ...pr, ci: "pending", updatedAt: "2026-11-01T12:00:00Z" }}
+        />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  expect(screen.queryByRole("button", { name: "Choose channel" })).toBe(picker)
+  expect(document.activeElement).toBe(picker)
+  expect(availability).toHaveBeenCalledTimes(1)
+})
+
 it("recovers channel selection after availability fails", async () => {
   const successToast = vi.spyOn(toast, "success")
   const availability = vi

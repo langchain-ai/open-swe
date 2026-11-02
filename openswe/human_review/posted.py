@@ -1,7 +1,6 @@
 """Watch pull requests people post in any Slack channel the bot listens in."""
 
 import logging
-import re
 
 from sqlalchemy.exc import IntegrityError
 
@@ -11,29 +10,12 @@ from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import record_pull_request, settle
 from openswe.human_review.supplementary import SupplementaryReviews
-from openswe.slack.client import GitHubPrRef, parse_github_pr_url
+from openswe.slack.client import GitHubPrRef
+from openswe.slack.pr_links import linked_pull_requests
 from openswe.users import User
-from openswe.utils.dashboard_links import dashboard_review_pr_url
 from openswe.utils.preview import skip_on_preview
 
 logger = logging.getLogger(__name__)
-
-_URL = re.compile(r"https?://[^\s|<>]+", re.I)
-
-
-def linked_pull_requests(text: str) -> list[GitHubPrRef]:
-    """Distinct GitHub PRs linked directly or through this deployment's review page."""
-    refs: dict[str, GitHubPrRef] = {}
-    for match in _URL.finditer(text):
-        url = match.group().rstrip(".,;:!?)]\"'")
-        try:
-            ref = parse_github_pr_url(dashboard_review_pr_url(url) or url)
-        except ValueError:
-            logger.debug("Ignoring malformed PR link", exc_info=True)
-            continue
-        if ref is not None and ref.number > 0:
-            refs[ref.url.lower()] = ref
-    return list(refs.values())
 
 
 async def watch_post(channel_id: str, message_ts: str, slack_user_id: str, text: str) -> None:

@@ -3498,6 +3498,11 @@
             "title": "Action",
             "type": "string"
           },
+          "auto_merge": {
+            "default": false,
+            "title": "Auto Merge",
+            "type": "boolean"
+          },
           "merge_method": {
             "enum": [
               "squash",
@@ -4103,6 +4108,11 @@
               }
             ],
             "title": "Additions"
+          },
+          "autoMerge": {
+            "default": false,
+            "title": "Automerge",
+            "type": "boolean"
           },
           "ci": {
             "default": "unknown",
@@ -5002,6 +5012,17 @@
               }
             ],
             "title": "Experimental Memory"
+          },
+          "goal_mode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Mode"
           },
           "pr_failure_reactions": {
             "anyOf": [
@@ -9368,6 +9389,18 @@
             ],
             "title": "Human Review Auto Merge Enabled"
           },
+          "implementation_walkthrough_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Implementation Walkthrough Enabled"
+          },
           "managed_tools_gateway_id": {
             "anyOf": [
               {
@@ -11003,6 +11036,155 @@
         ]
       }
     },
+    "/dashboard/api/auth/langsmith/callback": {
+      "get": {
+        "operationId": "auth_langsmith_callback_dashboard_api_auth_langsmith_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Langsmith Callback",
+        "tags": [
+          "dashboard",
+          "auth"
+        ]
+      }
+    },
+    "/dashboard/api/auth/langsmith/login": {
+      "get": {
+        "operationId": "auth_langsmith_login_dashboard_api_auth_langsmith_login_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "redirect_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Redirect To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Desktop",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop_handoff",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desktop Handoff"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop_port",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 1024,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desktop Port"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Langsmith Login",
+        "tags": [
+          "dashboard",
+          "auth"
+        ]
+      }
+    },
     "/dashboard/api/auth/login": {
       "get": {
         "operationId": "auth_login_dashboard_api_auth_login_get",
@@ -11349,6 +11531,29 @@
         "tags": [
           "dashboard",
           "sandbox-bridge"
+        ]
+      }
+    },
+    "/dashboard/api/claude-code/connections": {
+      "post": {
+        "description": "Mint the token a ``connect_claude_code`` claim stands for, once, for the script installing it.",
+        "operationId": "api_redeem_claude_code_claim_dashboard_api_claude_code_connections_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MintedSyncToken"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Redeem Claude Code Claim",
+        "tags": [
+          "dashboard",
+          "claude-code"
         ]
       }
     },
@@ -19355,6 +19560,26 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "experience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "coding",
+                    "agent_workspace"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Experience"
+            }
           }
         ],
         "responses": {
@@ -19660,6 +19885,26 @@
           },
           {
             "in": "query",
+            "name": "experience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "coding",
+                    "agent_workspace"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Experience"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
@@ -19722,6 +19967,28 @@
     "/dashboard/api/threads/pinned": {
       "get": {
         "operationId": "api_list_pinned_threads_dashboard_api_threads_pinned_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "experience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "coding",
+                    "agent_workspace"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Experience"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -19737,6 +20004,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -19863,6 +20140,26 @@
                 }
               ],
               "title": "Exclude Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "experience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "coding",
+                    "agent_workspace"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Experience"
             }
           }
         ],

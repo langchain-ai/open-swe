@@ -18,6 +18,10 @@ class UnauthorizedUser(Exception):
     """A provider account that may not be given a user record."""
 
 
+class AccountConflict(UnauthorizedUser):
+    """A sign in that would give one person both a GitHub and a LangSmith account."""
+
+
 def allowed_logins() -> tuple[str, ...]:
     return tuple(dict.fromkeys(user.lower() for user in ENV.ALLOWED_GITHUB_USERS.get_list()))
 

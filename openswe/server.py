@@ -35,6 +35,7 @@ from runtime_api.catalog import (
     McpServerSpec,
     ReplyRules,
     RoutingRules,
+    WorkStateRules,
 )
 from runtime_api.endpoint import QUICK_CALL_SECONDS
 from runtime_api.loop import RunSender, RunStarted
@@ -124,8 +125,10 @@ from openswe.middleware.require_user_reply import (
     REPLY_GUARD,
     SLACK_REPLY_SURFACE,
     WEB_REPLY_SURFACE,
+    WORK_STATE_GUARD,
     ReplySurface,
     reply_nudge,
+    work_state_nudge,
 )
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.middleware.stale_workspace import queue_stale_workspace_notice
@@ -223,6 +226,7 @@ from openswe.tools import (
     monitor,
     open_pull_request,
     output_iframe,
+    plan_walkthrough,
     publish_artifact,
     publish_workspace,
     publish_workspace_prompt,
@@ -232,6 +236,7 @@ from openswe.tools import (
     recreate_sandbox,
     remember,
     report_platform_issue,
+    report_work_state,
     request_human_review,
     request_pr_review,
     request_rollout_check,
@@ -434,7 +439,9 @@ async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIde
     try:
         thread = await read_thread(thread_id, client)
         logins = participant_logins(thread_metadata(thread).get(PARTICIPANT_LOGINS_KEY))
-        return await resolve_participant_identities(logins)
+        return await resolve_participant_identities(
+            login for login in logins if not login.startswith("user:")
+        )
     except Exception:
         logger.debug("Failed to resolve participant identities for %s", thread_id, exc_info=True)
         return []
@@ -473,9 +480,16 @@ async def _thread_participant(
     elif slack_user_id:
         timezone = await get_slack_user_timezone(slack_user_id)
     if not login:
+        instructions = await _resolve_user_custom_instructions(f"user:{user.id}") if user else None
         return ThreadParticipant(
-            identity=identity,
+            identity=replace(
+                identity, display_name=user.display_name, commit_name="", commit_email=""
+            )
+            if user
+            else identity,
             person_id=person_id or "",
+            instructions=instructions or "",
+            email=user.email if user else "",
             timezone=timezone,
             linked=user is not None,
             slack_user_id=slack_user_id,
@@ -487,7 +501,7 @@ async def _thread_participant(
         _resolve_user_custom_instructions(login),
         MEMORIES.personal(
             user.id if user else None,
-            unprocessed_in=(
+            curated_in=(
                 RunConfig.from_config(config).workspace_slug
                 if user is not None and user.typed_preferences.experimental_memory
                 else None
@@ -635,6 +649,8 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "background_execute",
         "background_task",
         "monitor",
+        # Only the parent's own turn can say where the work stands.
+        "report_work_state",
         "submit_thread_feedback",
         "submit_review_assessment_feedback",
         # The review page reads both from the parent's transcript.
@@ -753,6 +769,7 @@ AGENT_TOOLS: Final = (
     recreate_sandbox,
     report_platform_issue,
     schedule_thread_wakeup,
+    report_work_state,
     request_rollout_check,
     listen_events,
     list_event_types,
@@ -820,6 +837,14 @@ def agent_tools_by_name() -> Mapping[str, BaseTool]:
         ),
         *walkthrough_tools("reviewer"),
         *walkthrough_tools("author"),
+        *apply_tool_descriptions(
+            [
+                plan_walkthrough.walkthrough_plan_chunk,
+                plan_walkthrough.walkthrough_split_hunks,
+                plan_walkthrough.walkthrough_move_to_other,
+                plan_walkthrough.walkthrough_describe_other,
+            ]
+        ),
     ]
     built = (tool if isinstance(tool, BaseTool) else as_tool(tool) for tool in tools)
     return {tool.name: tool for tool in built}
@@ -1542,6 +1567,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 "slack_follow_up_suggestions"
             )
             is True,
+            goal_mode=bool(self._profile_login)
+            and (await User.preferences_for_login(self._profile_login)).goal_mode,
+            implementation_walkthrough_enabled=(
+                await cached_workspace_settings(workspace_slug(cfg))
+            ).get("implementation_walkthrough_enabled")
+            is True,
             sandbox_file_downloads=_sandbox_file_downloads_enabled(bridged=bridged),
             local_checkout=bridged,
             local_checkout_client=self._bridge_client or "cli",
@@ -1608,7 +1639,7 @@ def agent_sender(config: RunnableConfig, turn: AgentTurnSettings) -> RunSender:
     """Who an agent run's invocation is attributed to: whoever sent what started it."""
     cfg = RunConfig.from_config(config)
     return RunSender(
-        github_login=turn.profile_login,
+        github_login=cfg.github_login if cfg.auth_provider == "langsmith" else turn.profile_login,
         github_user_id=cfg.github_user_id,
         user_email=cfg.user_email,
         source=cfg.source or "dashboard",
@@ -1865,6 +1896,10 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
+    goal_mode = bool(profile_login) and (
+        (await User.preferences_for_login(profile_login)).goal_mode
+    )
+    work_state_tool = _registered_tool_name(report_work_state)
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs
     if isinstance(thread_settings.get("model_id"), str):
@@ -1973,6 +2008,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_start_review_channel,
     ]
     withheld = [
+        *(() if goal_mode else (report_work_state,)),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
         *(() if managed_gateway else (connect_managed_tools,)),
@@ -2008,6 +2044,14 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             tool
             for tool in static_tools
             if _registered_tool_name(tool) not in INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
+        ]
+    if guide is None and settings.get("implementation_walkthrough_enabled") is True:
+        static_tools = [
+            *static_tools,
+            plan_walkthrough.walkthrough_plan_chunk,
+            plan_walkthrough.walkthrough_split_hunks,
+            plan_walkthrough.walkthrough_move_to_other,
+            plan_walkthrough.walkthrough_describe_other,
         ]
     if guide is not None:
         static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
@@ -2145,7 +2189,12 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
                 _registered_tool_name(slack_reply),
                 _registered_tool_name(slack_no_reply_needed),
                 initial_surface=initial_surface,
-                replies=GUIDE_REPLY_TOOLS if guide is not None else frozenset(),
+                replies=frozenset(
+                    {
+                        *(GUIDE_REPLY_TOOLS if guide is not None else ()),
+                        *((work_state_tool,) if goal_mode else ()),
+                    }
+                ),
             ),
             *(
                 [RequireCliResultMiddleware(_registered_tool_name(cli_result))]
@@ -2177,12 +2226,29 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
                 tool=reply_tool,
                 no_reply_tool=no_reply_tool,
                 surface=initial_surface,
-                replies=sorted({*CARD_TOOLS, *(GUIDE_REPLY_TOOLS if guide is not None else ())}),
+                replies=sorted(
+                    {
+                        *CARD_TOOLS,
+                        *(GUIDE_REPLY_TOOLS if guide is not None else ()),
+                        *((work_state_tool,) if goal_mode else ()),
+                    }
+                ),
                 nudge=reply_nudge(reply_tool, no_reply_tool),
                 nudge_sender=REPLY_GUARD["id"],
             ),
             cli_result=CliResultRules(tool=cli_result_tool, nudge=cli_result_nudge(cli_result_tool))
             if cli_result_required
+            else None,
+            work_state=WorkStateRules(
+                tool=work_state_tool,
+                waits=[
+                    _registered_tool_name(tool)
+                    for tool in (schedule_thread_wakeup, background_execute, monitor)
+                ],
+                nudge=work_state_nudge(work_state_tool),
+                nudge_sender=WORK_STATE_GUARD["id"],
+            )
+            if goal_mode
             else None,
             task_coordination=task_coordination is not None,
             client_tools=client_tools is not None,

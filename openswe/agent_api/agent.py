@@ -18,7 +18,9 @@ from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddlew
 from openswe.middleware.record_run_usage import record_run_usage
 from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
+from openswe.prompts import apply_tool_descriptions
 from openswe.review_guide.middleware import ReviewGuideMiddleware
+from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import RunConfig
 from openswe.server import (
     PrepareAgentRunMiddleware,
@@ -31,6 +33,7 @@ from openswe.server import (
     record_agent_run,
 )
 from openswe.skill_store.run_skills import RunSkillStores
+from openswe.tools.review_walkthrough import walkthrough_tools
 from openswe.utils.thread_settings import load_thread_settings
 
 logger = logging.getLogger(__name__)
@@ -111,6 +114,12 @@ class AgentParts(RunParts):
         return (await ThreadFiles.for_run(config)).backend
 
     async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:
+        cfg = RunConfig.from_config(config)
+        if cfg.thread_id and name.startswith("walkthrough_"):
+            guide = await ReviewGuideSession.get(cfg.thread_id)
+            if guide is not None and not guide.closed:
+                tools = apply_tool_descriptions(walkthrough_tools(guide.mode))
+                return next((tool for tool in tools if tool.name == name), None)
         static = agent_tools_by_name().get(name)
         return static if static is not None else (await integration_tools(config)).get(name)
 

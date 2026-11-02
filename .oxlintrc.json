@@ -57,7 +57,7 @@
       "files": [
         "**/*.test.ts",
         "**/*.test.tsx",
-        "**/*.test.cjs"
+        "**/*.test.cts"
       ],
       "rules": {
         "react/globals": "off"

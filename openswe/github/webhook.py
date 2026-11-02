@@ -540,6 +540,58 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     common.logger.info("Reviewer run dispatched for thread %s (source=%s)", thread_id, source)
 
 
+async def process_github_pr_walkthrough(payload: dict[str, object]) -> None:
+    """Plan open PRs, including drafts, independently of automatic assessment."""
+    from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+    from openswe.review_scout.launch import ReviewScoutTarget
+    from openswe.workspaces.store import WORKSPACES
+
+    event = PullRequestEvent.parse(payload)
+    if event is None or event.identity is None or not postgres.configured():
+        return
+    owner, repo, number = event.identity
+    pull = event.pull_request
+    if pull.state == "closed" or not pull.head_sha or not pull.base_sha:
+        return
+    workspace = await WORKSPACES.owner_of_repo(f"{owner}/{repo}")
+    settings = await cached_workspace_settings(workspace)
+    if settings.get("implementation_walkthrough_enabled") is True:
+        stored = await PullRequest.get(owner, repo, number)
+        if stored is not None:
+            for thread_id in stored.thread_ids:
+                thread = await THREADS.get(thread_id)
+                if thread is not None and thread.status == "busy":
+                    return
+        if (
+            pull.head_ref
+            and await index.ThreadSearch(
+                metadata={
+                    "implementation_pr_target": {
+                        "repository": f"{owner}/{repo}",
+                        "head": pull.head_ref,
+                    }
+                },
+                status="busy",
+                limit=1,
+            ).run()
+        ):
+            return
+    target = ReviewScoutTarget(
+        owner=owner,
+        repo=repo,
+        pr_number=number,
+        pr_title=pull.title,
+        base_sha=pull.base_sha,
+        head_sha=pull.head_sha,
+        workspace_slug=workspace,
+    )
+    try:
+        if await target.walkthrough() is None:
+            await target.start()
+    except Exception:
+        common.logger.exception("Could not start the PR walkthrough", extra=target.log_extra)
+
+
 async def process_github_pr_ready(payload: dict[str, Any]) -> None:
     """Auto-review a PR that has just been opened or marked ready-for-review.
 

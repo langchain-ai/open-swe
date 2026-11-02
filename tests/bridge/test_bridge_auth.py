@@ -45,11 +45,11 @@ def _cookie(login: str = "test-user") -> str:
     return f"{oauth.COOKIE_NAME}={token}"
 
 
-def test_the_session_cookie_names_the_caller() -> None:
-    assert oauth.require_session(_request(cookie=_cookie()))["sub"] == "test-user"
+async def test_the_session_cookie_names_the_caller() -> None:
+    assert (await oauth.require_session(_request(cookie=_cookie())))["sub"] == "test-user"
 
 
-def test_a_mutation_from_the_backends_own_origin_is_allowed() -> None:
+async def test_a_mutation_from_the_backends_own_origin_is_allowed() -> None:
     """What the CLI sends: the cookie, and the origin of the API it is calling.
 
     The dashboard is not always served from the backend, so this origin is not
@@ -59,7 +59,7 @@ def test_a_mutation_from_the_backends_own_origin_is_allowed() -> None:
     oauth.require_same_origin_for_mutations(_request(cookie=_cookie(), origin=BACKEND))
 
 
-def test_a_mutation_from_somewhere_else_is_refused() -> None:
+async def test_a_mutation_from_somewhere_else_is_refused() -> None:
     with pytest.raises(HTTPException) as elsewhere:
         oauth.require_same_origin_for_mutations(
             _request(cookie=_cookie(), origin="https://attacker.example")
@@ -71,8 +71,8 @@ def test_a_mutation_from_somewhere_else_is_refused() -> None:
     assert nameless.value.status_code == 403
 
 
-def test_an_unauthenticated_request_is_refused() -> None:
+async def test_an_unauthenticated_request_is_refused() -> None:
     with pytest.raises(HTTPException) as absent:
-        oauth.require_session(_request())
+        await oauth.require_session(_request())
 
     assert absent.value.status_code == 401
