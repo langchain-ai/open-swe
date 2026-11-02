@@ -552,14 +552,25 @@ async def test_a_head_change_during_planning_ends_the_scout(
     session.commit.assert_not_awaited()
 
 
-async def test_implementation_tool_completes_the_shared_plan_in_its_own_checkout(
-    repo: Path, checkout: PinnedCheckout, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("scout", [False, True])
+async def test_planning_tool_completes_the_shared_plan_in_its_own_checkout(
+    repo: Path, checkout: PinnedCheckout, monkeypatch: pytest.MonkeyPatch, scout: bool
 ) -> None:
-    from openswe.run_config import RunConfig
+    from openswe.run_config import Repo, RunConfig
+    from openswe.tools import plan_walkthrough
     from openswe.tools.plan_walkthrough import walkthrough_plan_chunk
     from openswe.ui_invalidations import Topic
 
-    monkeypatch.setattr(RunConfig, "from_runtime", lambda: RunConfig(thread_id="implementation"))
+    cfg = RunConfig(
+        thread_id="planner",
+        repo=Repo(owner="lc", name="repo") if scout else None,
+        pr_number=7 if scout else None,
+    )
+    monkeypatch.setattr(RunConfig, "from_runtime", lambda: cfg)
+    monkeypatch.setattr(plan_walkthrough, "get_cached_sandbox_backend", lambda _: checkout.backend)
+    monkeypatch.setattr(
+        "openswe.walkthrough.planner.cached_workspace_settings", AsyncMock(return_value={})
+    )
     base = _git(repo, "rev-parse", "HEAD").strip()
     head = _commit(repo, {"core.py": BASE.replace("return 1", "return 2")}, "change behavior")
     index = await _pin(checkout, base, head)
@@ -570,18 +581,20 @@ async def test_implementation_tool_completes_the_shared_plan_in_its_own_checkout
     )
     monkeypatch.setattr(
         PlanWorkspace,
-        "for_implementation",
+        "locate" if scout else "for_implementation",
         AsyncMock(return_value=workspace),
     )
     monkeypatch.setattr(Topic, "invalidate", AsyncMock())
 
     initial = await walkthrough_plan_chunk(
-        scout=None, tool_call_id="first", pr_url="https://github.com/lc/repo/pull/7"
+        scout=False if scout else None,
+        tool_call_id="first",
+        pr_url="https://github.com/lc/repo/pull/7",
     )
     assert initial["complete"] is False
     assert workspace.status().unplanned_hunks
     result = await walkthrough_plan_chunk(
-        scout=None,
+        scout=False if scout else None,
         tool_call_id="second",
         pr_url="https://github.com/lc/repo/pull/7",
         title="Change the return value",
@@ -591,3 +604,32 @@ async def test_implementation_tool_completes_the_shared_plan_in_its_own_checkout
     assert result["complete"] is True
     assert len(plan.chunks) == 1
     assert "return 2" in plan.chunks[0].code
+
+
+class TestWorkspaceRouting:
+    @pytest.mark.parametrize(
+        "pr_url",
+        [
+            "https://github.com/lc/repo/pull/7",
+            "https://github.com/other/repo/pull/7",
+            "https://github.com/lc/other/pull/7",
+            "https://github.com/lc/repo/pull/8",
+        ],
+    )
+    async def test_implementation_gate_still_rejects_other_prs(
+        self, monkeypatch: pytest.MonkeyPatch, pr_url: str
+    ) -> None:
+        from openswe.run_config import Repo, RunConfig
+        from openswe.tools.plan_walkthrough import walkthrough_plan_chunk
+
+        cfg = RunConfig(thread_id="planner")
+        if pr_url != "https://github.com/lc/repo/pull/7":
+            cfg = RunConfig(thread_id="planner", repo=Repo(owner="lc", name="repo"), pr_number=7)
+        monkeypatch.setattr(RunConfig, "from_runtime", lambda: cfg)
+        monkeypatch.setattr(
+            "openswe.walkthrough.planner.cached_workspace_settings", AsyncMock(return_value={})
+        )
+
+        result = await walkthrough_plan_chunk(scout=None, tool_call_id="call", pr_url=pr_url)
+
+        assert result == {"success": False, "error": "implementation walkthroughs are disabled"}
