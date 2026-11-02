@@ -1,7 +1,7 @@
 """Unit tests for the publish_review rendering and orchestration helpers."""
 
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1069,6 +1069,7 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
         ("Docs only", "approve", True, "APPROVE", True, None),
         ("Docs only", "approve", True, "COMMENT", True, False),
         ("Docs only", "approve", True, "COMMENT", True, True),
+        ("Docs only", "approve", True, "COMMENT", True, "lookup-fails"),
     ],
     ids=[
         "no-policy",
@@ -1078,6 +1079,7 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
         "approve",
         "conditional-off",
         "conditional-on",
+        "conditional-author-unknown",
     ],
 )
 async def test_publication_respects_the_base_policy_and_current_mode(
@@ -1086,7 +1088,7 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     current_head: bool,
     expected_event: str,
     has_assessment: bool,
-    conditional_enabled: bool | None,
+    conditional_enabled: bool | Literal["lookup-fails"] | None,
     registry_db: None,
 ) -> None:
     from openswe.tools.publish_review import _publish_review_async
@@ -1100,9 +1102,12 @@ async def test_publication_respects_the_base_policy_and_current_mode(
         patch(
             "openswe.tools.publish_review.User.preferences_for_login",
             AsyncMock(
+                side_effect=RuntimeError("database unavailable")
+                if conditional_enabled == "lookup-fails"
+                else None,
                 return_value=UserPreferences(
-                    experimental_conditional_approval=bool(conditional_enabled)
-                )
+                    experimental_conditional_approval=conditional_enabled is True
+                ),
             ),
         ) as author_preferences,
         patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
@@ -1172,9 +1177,11 @@ async def test_publication_respects_the_base_policy_and_current_mode(
         if conditional_enabled is not None:
             author_preferences.assert_awaited_once_with("pr-author")
             assert saved.decision == (
-                "would_approve_conditionally" if conditional_enabled else "needs_human_review"
+                "would_approve_conditionally"
+                if conditional_enabled is True
+                else "needs_human_review"
             )
-            assert bool(saved.approval_condition) is conditional_enabled
+            assert bool(saved.approval_condition) is (conditional_enabled is True)
 
 
 @pytest.mark.parametrize(

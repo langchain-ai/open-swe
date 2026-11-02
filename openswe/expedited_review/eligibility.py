@@ -92,6 +92,7 @@ class ChangedFile(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     filename: str
+    sha: str = ""
     status: str = ""
     additions: int = 0
     deletions: int = 0
@@ -150,10 +151,14 @@ class ChangedFile(BaseModel):
 
     @property
     def digest(self) -> str:
-        """Stands in for a hunk digest when a whole file without a text diff is hidden."""
+        """Stands in for a hunk digest when a whole file without a text diff is hidden.
+
+        GitHub's blob ``sha`` binds the file's content, which the line counts alone do not.
+        """
         return hashlib.sha256(
             "\0".join(
                 (
+                    self.sha,
                     self.status,
                     self.previous_filename or "",
                     self.filename,

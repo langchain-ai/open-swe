@@ -139,7 +139,9 @@ def test_a_condition_hides_everything_but_paths_that_must_be_read() -> None:
         deletions=40,
         patch="@@ -1,40 +1,40 @@\n" + "\n".join(f"-a{i}\n+b{i}" for i in range(40)),
     )
-    gone = ChangedFile(filename="src/legacy.py", status="removed", deletions=900, patch=None)
+    gone = ChangedFile(
+        filename="src/legacy.py", sha="1" * 40, status="removed", deletions=900, patch=None
+    )
     lock = ChangedFile(filename="uv.lock", deletions=1, patch="@@ -1,1 +0,0 @@\n-x")
     files = [app, gone, lock]
     covered = ApprovalCondition("Rename a to b and remove legacy", "Nothing else", "f" * 40).cover(
@@ -152,3 +154,5 @@ def test_a_condition_hides_everything_but_paths_that_must_be_read() -> None:
     assert isinstance(verdict, EligibleDiff) and verdict.changed_lines == 1
     edited = gone.model_copy(update={"deletions": 901})
     assert isinstance(assess_eligibility([app, edited, lock], covered), Ineligible)
+    swapped = gone.model_copy(update={"sha": "2" * 40})
+    assert isinstance(assess_eligibility([app, swapped, lock], covered), Ineligible)

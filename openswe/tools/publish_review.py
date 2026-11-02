@@ -7,6 +7,7 @@ from typing import Annotated, Any
 import httpx2
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
+from pydantic import JsonValue, TypeAdapter
 
 from openswe.analytics.usage import record_reviewer_publication
 from openswe.audit_logs.tools import audit_tool
@@ -22,6 +23,7 @@ from openswe.github.thread_token import (
 from openswe.review.approvals import approval_mode_for
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
+from openswe.review.events import ReviewEvents
 from openswe.review.findings import (
     REVIEWER_EVAL_PUBLICATION_KEY,
     SEVERITY_ORDER,
@@ -137,7 +139,7 @@ async def publish_review(
         return {"success": False, "error": "No GitHub token available"}
 
     try:
-        return await _publish_review_async(
+        result = await _publish_review_async(
             owner=cfg.repo.owner,
             repo=cfg.repo.name,
             pr_number=pr_number,
@@ -150,6 +152,15 @@ async def publish_review(
             state=state,
             assessment=assessment,
         )
+        events = ReviewEvents.from_config(cfg)
+        if events is not None:
+            await events.append(
+                "review.published" if result.get("success") else "review.publish_failed",
+                run_id=cfg.invocation_id,
+                head_sha=head_sha,
+                result=TypeAdapter(dict[str, JsonValue]).validate_python(result),
+            )
+        return result
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
     except GitHubAuthError as exc:
@@ -312,18 +323,30 @@ async def _publish_review_async(
             assessment = None
         dry_run = mode != "approve"
     if assessment is not None and assessment.decision == "would_approve_conditionally":
-        async with GitHubClient.connect(token=token) as github:
-            payload = PullRequestPayload.model_validate(
-                await github.repo(owner, repo).pull_request(pr_number).pull()
+        try:
+            async with GitHubClient.connect(token=token) as github:
+                payload = PullRequestPayload.model_validate(
+                    await github.repo(owner, repo).pull_request(pr_number).pull()
+                )
+            opted_in: bool | None = (
+                await User.preferences_for_login(payload.author)
+            ).experimental_conditional_approval
+        except Exception:
+            logger.warning(
+                "Could not confirm the author opted in to conditional approval",
+                extra={"repository": f"{owner}/{repo}", "pr_number": pr_number},
+                exc_info=True,
             )
-        preferences = await User.preferences_for_login(payload.author)
-        if not preferences.experimental_conditional_approval:
+            opted_in = None
+        if not opted_in:
             assessment = assessment.model_copy(
                 update={
                     "decision": "needs_human_review",
                     "approval_condition": None,
                     "auto_approved": None,
-                    "explanation": "Conditional approval is not enabled for this PR's author.",
+                    "explanation": "Conditional approval is not enabled for this PR's author."
+                    if opted_in is False
+                    else "Could not confirm that this PR's author enabled conditional approval.",
                 }
             )
     # The run config's head_sha is frozen at run creation; a push that arrived
