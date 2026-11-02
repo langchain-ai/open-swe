@@ -340,7 +340,7 @@ function Row({
           iconWeight="regular"
           label="Toggle review status"
           tooltipProps={{ disabled: true }}
-          className="-my-space-1 self-stretch py-space-1"
+          className="-my-space-1 h-auto self-stretch py-space-1"
           iconClassName={cn("transition-transform", expanded && "rotate-90")}
           type="button"
           tabIndex={-1}
