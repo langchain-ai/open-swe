@@ -2,6 +2,7 @@
 
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 from uuid import uuid7
 
 import jwt
@@ -26,32 +27,37 @@ from openswe.utils.thread_ops import langgraph_client
 from openswe.webhooks import common
 from openswe.workspaces.routing import is_kitchen_channel
 
+if TYPE_CHECKING:
+    from openswe.slack.request import SlackRequest
+
 logger = logging.getLogger(__name__)
 BUTTON_TYPE = "slack_retry"
 _RETRY_LIFETIME = timedelta(days=7)
 
 
 class SlackRetry(BaseModel):
+    """A failed request's Retry button: who may click it, and what it sends again.
+
+    Its fields ride in the button's ``value`` as they are. Slack signs the click's
+    payload, and only Open SWE's own message carries the value, so neither the
+    backend nor MDA's Slack channel, which acts on clicks in its conversations,
+    needs a token to trust them.
+    """
+
     channel_id: str
     thread_ts: str
     user_id: str
     message_ts: str = ""
     reply_thread_ts: str = ""
     nonce: str
+    # Seconds since the epoch after which the button sends nothing; 0 for a token's.
+    expires_at: float = 0
 
     def blocks(self, text: str) -> list[JsonObject] | None:
-        secret = ENV.SLACK_SIGNING_SECRET.get()
-        if not secret or not self.user_id or not self.thread_ts:
+        if not self.user_id or not self.thread_ts:
             return None
-        token = jwt.encode(
-            {
-                **self.model_dump(),
-                "aud": BUTTON_TYPE,
-                "exp": datetime.now(UTC) + _RETRY_LIFETIME,
-            },
-            secret,
-            algorithm="HS256",
-        )
+        expires_at = (datetime.now(UTC) + _RETRY_LIFETIME).timestamp()
+        value = {"type": BUTTON_TYPE, **self.model_dump(), "expires_at": expires_at}
         return block_payload(
             [
                 section(text),
@@ -59,7 +65,7 @@ class SlackRetry(BaseModel):
                     button(
                         "Retry",
                         action_id="open_swe_option_select_retry",
-                        value=common.json.dumps({"type": BUTTON_TYPE, "response": token}),
+                        value=common.json.dumps(value),
                         style="primary",
                     )
                 ),
@@ -67,7 +73,23 @@ class SlackRetry(BaseModel):
         )
 
     @classmethod
+    def from_value(cls, value: JsonObject) -> SlackRetry | None:
+        """The retry a button's ``value`` names, or ``None`` when it is invalid or expired."""
+        token = value.get("response")
+        if isinstance(token, str) and token:
+            return cls.parse(token)
+        try:
+            retry = cls.model_validate({k: v for k, v in value.items() if k != "type"})
+        except ValidationError:
+            logger.warning("Invalid Slack retry button", exc_info=True)
+            return None
+        if retry.expires_at and retry.expires_at < datetime.now(UTC).timestamp():
+            return None
+        return retry
+
+    @classmethod
     def parse(cls, token: str) -> SlackRetry | None:
+        """The retry a token from before the buttons carried their fields names."""
         secret = ENV.SLACK_SIGNING_SECRET.get()
         if not secret:
             return None
@@ -86,7 +108,6 @@ class SlackRetry(BaseModel):
         background_tasks: BackgroundTasks,
     ) -> WebhookResponse:
         from openswe.slack import webhook as service
-        from openswe.slack.request import SlackRequest
 
         if self.channel_id != interaction.channel_id or self.user_id != interaction.user.id:
             await post_slack_ephemeral_message(
@@ -119,45 +140,8 @@ class SlackRetry(BaseModel):
                 channel_context=channel_context,
                 thread_id=thread_id,
             )
-            text = "Retry"
-            attachments = []
-            if self.message_ts:
-                raw = (
-                    await fetch_slack_message_by_ts(self.channel_id, self.message_ts)
-                    if self.thread_ts == CONCIERGE_TS and self.channel_id.startswith("D")
-                    else await fetch_slack_thread_message_by_ts(
-                        self.channel_id, self.thread_ts, self.message_ts
-                    )
-                )
-                message = SlackMessage.parse(raw)
-                if message is None or message.user != self.user_id or message.is_from_bot:
-                    raise SlackRequestError(
-                        "The original Slack request is no longer available. Send it again to retry."
-                    )
-                text = message.text or ""
-                attachments = message.attachments
-            code_channel = await common.is_code_channel(self.channel_id)
-            request = SlackRequest(
-                channel_id=self.channel_id,
-                thread_ts=self.thread_ts,
-                event_ts=f"{datetime.now(UTC).timestamp():.6f}",
-                event_id=f"slack-retry:{uuid7()}",
-                original_message_ts=self.message_ts,
-                retry_message_ts=self.message_ts,
-                user_id=self.user_id,
-                text=text,
-                turn_context=prompt("runs/slack-retry").strip() if not self.message_ts else "",
-                attachments=attachments,
-                bot_user_id=common.SLACK_BOT_USER_ID,
-                thread_id=thread_id,
-                channel_context=channel_context,
-                team_id=interaction.team.id,
-                reply_thread_ts=self.reply_thread_ts,
-                concierge_mode=self.thread_ts == CONCIERGE_TS and self.channel_id.startswith("D"),
-                code_channel=code_channel,
-                kitchen_channel=await is_kitchen_channel(self.channel_id),
-                treat_all_messages_as_mentions=True,
-                explicit_request=True,
+            request = await self.request(
+                thread_id=thread_id, channel_context=channel_context, team_id=interaction.team.id
             )
             background_tasks.add_task(service.process_slack_mention, request, repo)
         except Exception:
@@ -173,3 +157,50 @@ class SlackRetry(BaseModel):
                 logger.exception("Could not restore Slack retry button")
             raise
         return accepted("Retry queued")
+
+    async def request(
+        self, *, thread_id: str, channel_context: SlackChannelContext, team_id: str
+    ) -> SlackRequest:
+        """The failed request again, as its sender sent it, on ``thread_id``."""
+        from openswe.slack.request import SlackRequest
+
+        text = "Retry"
+        attachments = []
+        if self.message_ts:
+            raw = (
+                await fetch_slack_message_by_ts(self.channel_id, self.message_ts)
+                if self.thread_ts == CONCIERGE_TS and self.channel_id.startswith("D")
+                else await fetch_slack_thread_message_by_ts(
+                    self.channel_id, self.thread_ts, self.message_ts
+                )
+            )
+            message = SlackMessage.parse(raw)
+            if message is None or message.user != self.user_id or message.is_from_bot:
+                raise SlackRequestError(
+                    "The original Slack request is no longer available. Send it again to retry."
+                )
+            text = message.text or ""
+            attachments = message.attachments
+        code_channel = await common.is_code_channel(self.channel_id)
+        return SlackRequest(
+            channel_id=self.channel_id,
+            thread_ts=self.thread_ts,
+            event_ts=f"{datetime.now(UTC).timestamp():.6f}",
+            event_id=f"slack-retry:{uuid7()}",
+            original_message_ts=self.message_ts,
+            retry_message_ts=self.message_ts,
+            user_id=self.user_id,
+            text=text,
+            turn_context=prompt("runs/slack-retry").strip() if not self.message_ts else "",
+            attachments=attachments,
+            bot_user_id=common.SLACK_BOT_USER_ID,
+            thread_id=thread_id,
+            channel_context=channel_context,
+            team_id=team_id,
+            reply_thread_ts=self.reply_thread_ts,
+            concierge_mode=self.thread_ts == CONCIERGE_TS and self.channel_id.startswith("D"),
+            code_channel=code_channel,
+            kitchen_channel=await is_kitchen_channel(self.channel_id),
+            treat_all_messages_as_mentions=True,
+            explicit_request=True,
+        )

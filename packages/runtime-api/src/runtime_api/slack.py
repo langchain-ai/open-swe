@@ -1,4 +1,4 @@
-"""The call MDA's Slack channel makes on the backend, with no run yet.
+"""The calls MDA's Slack channel makes on the backend, with no run yet.
 
 The backend's ``/webhooks/slack`` gates each Slack message and forwards the ones
 MDA's conversations own to Trigger Server, remembering the request. The channel's
@@ -6,9 +6,15 @@ handler then asks here what the message starts (``plan_slack_turn``): the backen
 builds the run from the request it remembered, as for its own Slack runs, signs
 its context, and says whether the message redirects the thread's work in
 progress or waits its turn behind it, which the channel starts the run with.
+
+A click on one of the agent's buttons in those conversations reaches the
+channel's handler too, which decides who may click it and updates the message;
+``plan_slack_click`` builds the run the click starts, from what the backend
+keeps: the conversation's thread, a workflow push's approvals, the message a
+Retry sends again.
 """
 
-from typing import Final
+from typing import Annotated, Final, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, JsonValue
@@ -22,6 +28,11 @@ class PlanSlackTurn(BaseModel):
     thread_id: UUID
     # Slack's timestamp of the message, which names it in its channel.
     message_ts: str = Field(min_length=1, max_length=64)
+    # Where the message is in Slack: its conversation and its thread's first message.
+    # A concierge DM is one conversation for every Slack thread in it, so the backend
+    # finds the DM's thread from them. Empty from a deployment that predates them.
+    channel_id: str = Field(default="", max_length=64)
+    thread_ts: str = Field(default="", max_length=64)
 
 
 class SlackTurnRun(BaseModel):
@@ -40,6 +51,64 @@ class SlackTurnStart(BaseModel):
     # work in progress; any other follow-up waits for it, as on the backend's own
     # Slack threads.
     interrupts: bool = True
+    # The thread the run belongs on when it isn't the Slack thread's own: a
+    # concierge DM's, which every Slack thread in the DM shares.
+    thread_id: UUID | None = None
+
+
+class OptionClick(BaseModel):
+    """One of the agent's option buttons: its label is the person's answer."""
+
+    kind: Literal["option"] = "option"
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class WorkflowPushClick(BaseModel):
+    """Approve or reject a push of workflow files the push guard held back."""
+
+    kind: Literal["workflow_push"] = "workflow_push"
+    fingerprint: str = Field(min_length=1, max_length=256)
+    approved: bool
+
+
+class RetryClick(BaseModel):
+    """Send a failed request again: the message that failed, in its Slack thread."""
+
+    kind: Literal["retry"] = "retry"
+    # The failed request's thread and message; no message retries the thread.
+    thread_ts: str = Field(min_length=1, max_length=64)
+    message_ts: str = Field(default="", max_length=64)
+    reply_thread_ts: str = Field(default="", max_length=64)
+
+
+type SlackClick = Annotated[
+    OptionClick | WorkflowPushClick | RetryClick, Field(discriminator="kind")
+]
+
+
+class PlanSlackClick(BaseModel):
+    """A click the channel's handler let through, in one of its conversations."""
+
+    thread_id: UUID
+    channel_id: str = Field(min_length=1, max_length=64)
+    # The Slack thread the clicked message is in, as Trigger Server addressed it.
+    thread_ts: str = Field(min_length=1, max_length=64)
+    message_ts: str = Field(min_length=1, max_length=64)
+    action_ts: str = Field(min_length=1, max_length=64)
+    # The person who clicked, as Trigger Server verified them from Slack's request.
+    user_id: str = Field(min_length=1, max_length=64)
+    # The Slack workspace the app's message is in.
+    team_id: str = Field(default="", max_length=64)
+    click: SlackClick
+
+
+class SlackClickStart(SlackTurnStart):
+    # False when another click on the message was acted on already, so this one
+    # changes nothing and starts nothing.
+    acted: bool = True
+    # A workflow push's status once decided; ``None`` when the backend has no such
+    # request any more.
+    workflow_push: Literal["approved", "rejected"] | None = None
 
 
 PLAN_SLACK_TURN: Final = Endpoint(
@@ -51,5 +120,15 @@ PLAN_SLACK_TURN: Final = Endpoint(
     # Building the run takes the remembered request, so a call is sent again only
     # where the backend never got it; one sent again under the same webhook ID
     # builds the run again.
+    prefix=CHANNEL_API_PREFIX,
+)
+
+PLAN_SLACK_CLICK: Final = Endpoint(
+    "plan_slack_click",
+    PlanSlackClick,
+    SlackClickStart,
+    seconds=120.0,
+    # The first call for a clicked message claims it; one sent again under the same
+    # webhook ID builds the run again, any other starts nothing.
     prefix=CHANNEL_API_PREFIX,
 )

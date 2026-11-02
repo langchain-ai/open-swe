@@ -7,29 +7,48 @@ runs; its handler asks ``plan_slack_turn`` (``runtime_api.slack``) what each mes
 starts. The backend gated each message when Slack delivered it and remembered the
 request; here it builds the run from that request as it would for its own Slack
 runs, with the signed run token, and says whether the message redirects the
-thread's work in progress or waits its turn.
+thread's work in progress or waits its turn. A concierge DM's runs go on the DM's
+one thread, which the answer names.
+
+A click on one of the agent's buttons in those conversations reaches the handler,
+which decides who may click it; ``plan_slack_click`` builds the run it starts, once
+per clicked message.
 
 ``/slack/channel/events`` answers a deployment whose channel still names it as an
 endpoint, until every deployment runs the handler.
 """
 
 import logging
-from typing import Annotated, Final, cast
-from uuid import UUID
+from datetime import timedelta
+from typing import Annotated, Final, Literal, cast
+from uuid import UUID, uuid7
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from managed_deepagents import EndpointAnswer, EndpointThread
 from managed_deepagents import JsonValue as AnswerJson
 from pydantic import JsonValue
-from runtime_api.slack import PlanSlackTurn, SlackTurnRun, SlackTurnStart
+from runtime_api.slack import (
+    OptionClick,
+    PlanSlackClick,
+    PlanSlackTurn,
+    RetryClick,
+    SlackClickStart,
+    SlackTurnRun,
+    SlackTurnStart,
+    WorkflowPushClick,
+)
 from typing_extensions import TypedDict
 
+from openswe import event_claims
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.mda_channels.api import ChannelCall
 from openswe.mda_channels.auth import require_mda_channel
 from openswe.slack import mda_forwarding
 from openswe.slack import webhook as service
+from openswe.slack.dm import CONCIERGE_TS
+from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
+from openswe.slack.retry import SlackRetry
 from openswe.threads import index
 from openswe.threads.router import channel_run_metadata, channel_run_starting
 from openswe.threads.runtimes import RUNTIMES
@@ -38,6 +57,16 @@ from openswe.webhooks import common
 logger = logging.getLogger(__name__)
 
 _MESSAGE_KEYS: Final = frozenset({"mention", "directMessage", "message"})
+#: A clicked message is acted on once; the claim outlives its buttons.
+_CLICK_SCOPE: Final = "slack_click"
+_CLICK_TTL: Final = timedelta(days=7)
+#: The call that claimed a message, so the channel sending that call again gets its run.
+_CLICK_CALL_SCOPE: Final = "slack_click_call"
+_CLICK_CALL_TTL: Final = timedelta(minutes=10)
+_WORKFLOW_PUSH_RETRY: Final = (
+    "The workflow-file push approval was approved. Retry the blocked git push now; "
+    "do not alter workflow files before pushing."
+)
 
 router = APIRouter(prefix="/slack/channel", dependencies=[Depends(require_mda_channel)])
 
@@ -104,12 +133,24 @@ async def plan_slack_turn(call: ChannelCall, plan: PlanSlackTurn) -> SlackTurnSt
     ``webhook-id`` gets the run built again.
     """
     webhook_id = call.request.headers.get("webhook-id", "")
-    return await _turn(str(plan.thread_id), plan.message_ts, webhook_id)
+    return await _turn(
+        str(plan.thread_id),
+        plan.message_ts,
+        webhook_id,
+        channel_id=plan.channel_id,
+        thread_ts=plan.thread_ts,
+    )
 
 
-async def _turn(thread_id: str, message_ts: str, webhook_id: str) -> SlackTurnStart:
+async def _turn(
+    thread_id: str, message_ts: str, webhook_id: str, *, channel_id: str = "", thread_ts: str = ""
+) -> SlackTurnStart:
     fields = {"agent_thread_id": thread_id, "slack_message_ts": message_ts}
-    remembered = await mda_forwarding.recall(thread_id, message_ts, webhook_id)
+    remembered = None
+    for candidate in await _remembered_in(thread_id, channel_id, thread_ts):
+        remembered = await mda_forwarding.recall(candidate, message_ts, webhook_id)
+        if remembered is not None:
+            break
     if remembered is None:
         logger.warning(
             "MDA's Slack channel asked about a message the backend didn't hand over",
@@ -118,8 +159,9 @@ async def _turn(thread_id: str, message_ts: str, webhook_id: str) -> SlackTurnSt
         _no_run("not handed over", **fields)
         return SlackTurnStart()
     request, repo = remembered
+    run_thread = request.thread_id or thread_id
     try:
-        start = await _prepare_run(thread_id, request, repo)
+        start = await _prepare_run(run_thread, request, repo)
     except Exception as exc:  # noqa: BLE001 - the person hears about it instead
         # The request was taken: nothing else will tell the Slack thread.
         await service.notify_slack_processing_error(request, repo.repo if repo else None, exc)
@@ -127,7 +169,133 @@ async def _turn(thread_id: str, message_ts: str, webhook_id: str) -> SlackTurnSt
         return SlackTurnStart()
     if start.run is None:
         _no_run("no run prepared", **fields)
+    elif run_thread != thread_id:
+        start.thread_id = UUID(run_thread)
     return start
+
+
+async def _remembered_in(thread_id: str, channel_id: str, thread_ts: str) -> list[str]:
+    """The threads a forwarded message may be remembered on: the Slack thread's own, then
+    a concierge DM's, which the backend bound the Slack thread to."""
+    threads = [thread_id]
+    if channel_id and thread_ts:
+        owner = await mda_forwarding.owned_conversation(channel_id, thread_ts)
+        if owner is not None and owner not in threads:
+            threads.append(owner)
+    return threads
+
+
+async def plan_slack_click(call: ChannelCall, plan: PlanSlackClick) -> SlackClickStart:
+    """The run a click the channel's handler let through starts, once per clicked message.
+
+    The handler checked who clicked; here the backend finds the conversation the click
+    is in from its own bindings, decides a workflow push under its lock, finds the
+    request a Retry sends again, and builds and signs the run. A second click on the
+    message, or one outside the channel's conversations, starts nothing.
+    """
+    fields = {"slack_channel_id": plan.channel_id, "slack_message_ts": plan.message_ts}
+    run_thread = await mda_forwarding.owned_conversation(plan.channel_id, plan.thread_ts)
+    if run_thread is None:
+        logger.warning("MDA's Slack channel asked about a click outside its threads", extra=fields)
+        return SlackClickStart(acted=False)
+    channel_context = await common.resolve_slack_channel_context(plan.channel_id, use_cache=False)
+    if not channel_context.allows_operations:
+        return SlackClickStart(acted=False)
+    claimed = await _claim_click(plan, call.request.headers.get("webhook-id", ""))
+    if claimed is None:
+        _no_run("clicked before", **fields)
+        return SlackClickStart(acted=False)
+    concierge = plan.channel_id.startswith("D") and run_thread == (
+        await mda_forwarding.owned_thread(plan.channel_id, CONCIERGE_TS)
+    )
+    click = plan.click
+    status: str | None = None
+    if isinstance(click, WorkflowPushClick):
+        decision = await common.decide_workflow_push_approval(
+            run_thread, click.fingerprint, approved=click.approved, actor=plan.user_id
+        )
+        if decision is None:
+            return SlackClickStart(workflow_push=None)
+        record, changed = decision
+        status = str(record.get("status"))
+        if status not in {"approved", "rejected"}:
+            return SlackClickStart(workflow_push=None)
+        if not changed and claimed == "first":
+            # Decided before this message's buttons could: nothing to start again.
+            return SlackClickStart(acted=False, workflow_push=status)
+        if status == "rejected":
+            return SlackClickStart(workflow_push="rejected")
+    start = SlackClickStart(workflow_push="approved" if status == "approved" else None)
+    request = await _click_request(plan, click, run_thread, channel_context, concierge=concierge)
+    repo = await common.get_slack_repo_config(
+        plan.channel_id,
+        request.thread_ts,
+        slack_user_id=plan.user_id,
+        channel_context=channel_context,
+        thread_id=run_thread,
+    )
+    try:
+        turn = await _prepare_run(run_thread, request, repo)
+    except Exception as exc:  # noqa: BLE001 - the person hears about it instead
+        await service.notify_slack_processing_error(request, repo.repo if repo else None, exc)
+        _no_run("building the run failed", **fields)
+        return start
+    start.run, start.interrupts = turn.run, turn.interrupts
+    if turn.run is not None and run_thread != str(plan.thread_id):
+        start.thread_id = UUID(run_thread)
+    return start
+
+
+async def _claim_click(plan: PlanSlackClick, webhook_id: str) -> Literal["first", "again"] | None:
+    """Whether this call acts on the clicked message: the first call for it, or that
+    call sent again under its webhook ID; ``None`` for any other."""
+    message = f"{plan.channel_id}:{plan.message_ts}"
+    call = f"{webhook_id}:{message}"
+    if webhook_id and await event_claims.held(_CLICK_CALL_SCOPE, call):
+        return "again"
+    if not await event_claims.claim(_CLICK_SCOPE, message, ttl=_CLICK_TTL):
+        return None
+    if webhook_id:
+        await event_claims.claim(_CLICK_CALL_SCOPE, call, ttl=_CLICK_CALL_TTL)
+    return "first"
+
+
+async def _click_request(
+    plan: PlanSlackClick,
+    click: OptionClick | WorkflowPushClick | RetryClick,
+    run_thread: str,
+    channel_context: SlackChannelContext,
+    *,
+    concierge: bool,
+) -> SlackRequest:
+    """The request a click makes, as the backend made it when it took the click itself."""
+    if isinstance(click, RetryClick):
+        return await SlackRetry(
+            channel_id=plan.channel_id,
+            thread_ts=click.thread_ts,
+            # The clicker, whom the handler matched against the button's requester.
+            user_id=plan.user_id,
+            message_ts=click.message_ts,
+            reply_thread_ts=click.reply_thread_ts,
+            nonce="",
+        ).request(thread_id=run_thread, channel_context=channel_context, team_id=plan.team_id)
+    # A concierge DM's buttons hang off unthreaded messages: one clicked inside a Slack
+    # thread is answered there.
+    reply_thread_ts = plan.thread_ts if concierge and plan.thread_ts != plan.message_ts else ""
+    return SlackRequest(
+        channel_id=plan.channel_id,
+        channel_context=channel_context,
+        thread_ts=CONCIERGE_TS if concierge else plan.thread_ts,
+        event_ts=plan.action_ts,
+        event_id=f"slack-click:{uuid7()}",
+        user_id=plan.user_id,
+        text=click.text if isinstance(click, OptionClick) else _WORKFLOW_PUSH_RETRY,
+        bot_user_id=common.SLACK_BOT_USER_ID,
+        thread_id=run_thread,
+        concierge_mode=concierge,
+        reply_thread_ts=reply_thread_ts,
+        team_id=plan.team_id,
+    )
 
 
 async def _prepare_run(

@@ -61,8 +61,9 @@ async def test_failed_run_offers_a_requester_scoped_retry(monkeypatch: pytest.Mo
     notice = reply.await_args.kwargs["notice"]
     assert blocks[0]["block_id"] == notice.block_id
     assert notice.repeats({"blocks": blocks})
-    token = json.loads(blocks[1]["elements"][0]["value"])["response"]
-    assert SlackRetry.parse(token) == SlackRetry(
+    retry = SlackRetry.from_value(json.loads(blocks[1]["elements"][0]["value"]))
+    assert retry is not None
+    assert retry.model_copy(update={"expires_at": 0}) == SlackRetry(
         channel_id="C1", thread_ts="123.45", user_id="U1", nonce="run-1"
     )
 

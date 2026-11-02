@@ -20,3 +20,4 @@ def _backend_keeps_conversations(
         return
     monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=None))
     monkeypatch.setattr(mda_forwarding, "startable_thread", AsyncMock(return_value=None))
+    monkeypatch.setattr(mda_forwarding, "startable_concierge", AsyncMock(return_value=None))

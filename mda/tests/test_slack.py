@@ -57,7 +57,11 @@ def test_a_message_redirects_the_work_in_progress_or_waits_as_the_backend_says(
 
     result = asyncio.run(slack.start_turn(_EVENT, _THREAD))
 
-    assert asked == [PlanSlackTurn(thread_id=uuid.UUID(_THREAD.id), message_ts="171.2")]
+    assert asked == [
+        PlanSlackTurn(
+            thread_id=uuid.UUID(_THREAD.id), message_ts="171.2", channel_id="C1", thread_ts="171.1"
+        )
+    ]
     assert result == (
         _RUN.input,
         {
@@ -77,9 +81,28 @@ def test_a_message_the_backend_starts_nothing_for_starts_nothing(
     assert asyncio.run(slack.start_turn(_EVENT, _THREAD)) is None
 
 
-def test_the_channel_asks_its_handler_for_every_message() -> None:
-    from channels.slack import channel  # noqa: PLC0415
+def test_a_concierge_dms_turn_runs_on_the_dms_one_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dm_thread = uuid.uuid4()
+    _backend(monkeypatch, SlackTurnStart(run=_RUN, interrupts=True, thread_id=dm_thread))
 
+    result = asyncio.run(slack.start_turn(_EVENT, _THREAD))
+
+    assert isinstance(result, tuple)
+    options = cast(dict[str, object], result[1])
+    # The agent answers in Slack itself, so the run delivers nothing.
+    assert options["thread"] == {"mode": "persistent", "id": str(dm_thread)}
+    assert "deliver_to" not in options
+    assert options["multitask_strategy"] == "interrupt"
+
+
+def test_the_channel_asks_its_handlers_for_every_message_and_click() -> None:
+    from channels.slack import channel  # noqa: PLC0415
+    from rt.slack_clicks import start_click  # noqa: PLC0415
+
+    handlers = channel.on_event or {}
     assert channel.multitask_strategy == "interrupt"
-    assert set(channel.on_event or {}) == {"mention", "directMessage", "message"}
-    assert all(handler is slack.start_turn for handler in (channel.on_event or {}).values())
+    assert set(handlers) == {"mention", "directMessage", "message", "interaction"}
+    assert all(handlers[key] is slack.start_turn for key in ("mention", "directMessage", "message"))
+    assert handlers["interaction"] is start_click

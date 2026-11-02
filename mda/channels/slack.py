@@ -1,16 +1,19 @@
 """Slack, through Open SWE's own Slack app: the conversations the backend hands to MDA.
 
 The app keeps its URLs at the backend's ``/webhooks/slack``, which forwards the new
-conversations this channel can start (people's mentions and DMs), and everything later
-in them, to LangSmith Trigger Server exactly as Slack sent it. This channel owns those
+conversations this channel can start (people's mentions and DMs, kitchen channels'
+untagged messages, new concierge DMs), everything later in them, and the clicks on
+the agent's buttons there, to LangSmith Trigger Server exactly as Slack sent it. This channel owns those
 conversations' threads; its handler asks the backend what each message starts, and
-whether it redirects the work in progress or waits its turn (``rt.slack``). The backend
+whether it redirects the work in progress or waits its turn (``rt.slack``), and decides
+who may click a button and what the click starts (``rt.slack_clicks``). The backend
 gated the message already. The agent posts its own replies with Open SWE's Slack tools,
 so the channel posts nothing itself.
 """
 
 from managed_deepagents import channels
 from rt.slack import start_turn
+from rt.slack_clicks import start_click
 
 channel = channels.slack(
     # The backend decides what reaches the channel, so every forwarded message counts.
@@ -24,5 +27,6 @@ channel = channels.slack(
         "mention": start_turn,
         "directMessage": start_turn,
         "message": start_turn,
+        "interaction": start_click,
     },
 )
