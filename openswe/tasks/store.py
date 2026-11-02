@@ -5,6 +5,7 @@ from typing import Literal
 from uuid import UUID, uuid7
 
 from pydantic import JsonValue
+from runtime_api.loop import GoalState
 from sqlalchemy import ForeignKey, Text, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,13 @@ from openswe.database.orm import NOW, Base
 from openswe.workspaces.rows import WorkspaceRow
 
 type TaskRole = Literal["coordinator", "worker"]
+# Why a goal waits on its person: the agent needs something only they can give, or
+# the work is ready for them, such as a reviewed draft to mark ready.
+type UserWaitReason = Literal["blocked", "ready"]
+# Why a goal paused: the person stopped the run, or the agent kept ending turns without
+# saying where the work stands or waiting on anything.
+type PauseReason = Literal["stopped", "no_progress"]
+type GoalReason = UserWaitReason | PauseReason
 
 
 class WorkerAlreadyLaunchedError(PermissionError):
@@ -44,8 +52,8 @@ class Task(Base):
     coordinator_thread_id: Mapped[str | None] = mapped_column(default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     delegated: Mapped[bool] = mapped_column(default=False)
-    goal_state: Mapped[str | None] = mapped_column(Text, default=None)
-    goal_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    goal_state: Mapped[GoalState | None] = mapped_column(Text, default=None)
+    goal_reason: Mapped[GoalReason | None] = mapped_column(Text, default=None)
     goal_ask: Mapped[str | None] = mapped_column(Text, default=None)
     goal_waits: Mapped[list[dict[str, JsonValue]] | None] = mapped_column(JSONB, default=None)
     goal_updated_at: Mapped[datetime | None] = mapped_column(default=None)
@@ -141,8 +149,8 @@ class Task(Base):
         cls,
         task_id: UUID,
         *,
-        state: str | None,
-        reason: str | None = None,
+        state: GoalState | None,
+        reason: GoalReason | None = None,
         ask: str | None = None,
         waits: list[dict[str, JsonValue]] | None = None,
         by: UUID | None = None,

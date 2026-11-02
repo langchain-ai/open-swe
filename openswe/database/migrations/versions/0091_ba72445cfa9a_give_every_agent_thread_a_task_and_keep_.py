@@ -21,8 +21,7 @@ depends_on = None
 def upgrade() -> None:
     op.execute("""
         ALTER TABLE task
-            ADD COLUMN goal_state text
-                CHECK (goal_state IN ('working', 'waiting', 'waiting_on_user', 'paused')),
+            ADD COLUMN goal_state text,
             ADD COLUMN goal_reason text,
             ADD COLUMN goal_ask text,
             ADD COLUMN goal_waits jsonb,

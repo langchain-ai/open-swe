@@ -21,7 +21,7 @@ from runtime_api.loop import GoalState
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.jobs import queue
 from openswe.run_config import RunConfig
-from openswe.tasks.store import Task
+from openswe.tasks.store import PauseReason, Task, UserWaitReason
 from openswe.threads.access import _readable_thread_metadata
 from openswe.threads.store import THREADS
 from openswe.ui_invalidations.topics import Topic
@@ -34,13 +34,6 @@ router = APIRouter(tags=["threads"])
 # The draft PR whose Goal mode review this thread waits on, until its findings arrive.
 REVIEW_PENDING_KEY: Final = "goal_review_pending"
 _MAX_ASK_CHARS: Final = 1000
-
-# Why the goal waits on its person: the agent needs something only they can give,
-# or the work is ready for them, such as a reviewed draft to mark ready.
-UserWaitReason = Literal["blocked", "ready"]
-# Why a goal paused: the person stopped the run, or the agent kept ending turns
-# without saying where the work stands or waiting on anything.
-PauseReason = Literal["stopped", "no_progress"]
 
 
 class GoalWait(BaseModel):
