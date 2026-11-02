@@ -252,6 +252,7 @@ function StepList({
   walkthrough: ReviewWalkthrough
 }) {
   const jumpTo = useReviewPage((state) => state.jumpTo)
+  const order = useReviewPage((state) => state.order)
   const markStepRead = useReviewPage((state) => state.markStepRead)
   const current = useReviewPage(activeStep)
   const viewed = useReviewPage((state) => state.viewed)
@@ -307,7 +308,14 @@ function StepList({
               aria-label={`Step ${step.index}: ${step.title}, ${progress}, ${plural(additions, "addition")}, ${plural(deletions, "deletion")}`}
               type="button"
               aria-current={active ? "step" : undefined}
-              onClick={() => jumpTo({ kind: "entry", id: entries[0]!.id })}
+              onClick={() =>
+                // Stacked beside a diff in file order, guide entry ids aren't in the diff.
+                jumpTo(
+                  order === "guide"
+                    ? { kind: "entry", id: entries[0]!.id }
+                    : { kind: "file", path: entries[0]!.file.path }
+                )
+              }
               className="h-auto min-w-0 flex-1 items-start justify-start gap-space-2 px-space-2 py-space-1 text-left leading-5 whitespace-normal focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
             >
               <StepBadge
