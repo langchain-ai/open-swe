@@ -590,6 +590,7 @@ export function AgentsSidebar({
     updatedAt: recents[0]?.updatedAt ?? 0,
     threads: recents,
   }
+  const recentDays = groupSidebarThreadsByDay(recents)
   const noRepoAvailable = recents.length > 0 || recentsQuery.hasMore
   const noRepoPinned = pinnedRepoKeys.has(NO_REPO_GROUP_KEY)
 
@@ -905,47 +906,45 @@ export function AgentsSidebar({
 
           {!repoMode && (
             <section className="mb-space-3">
-              <SidebarSectionHeader
-                label="Recents"
-                collapsed={sectionCollapsed("recents")}
-                onToggleCollapsed={() => toggleSectionCollapsed("recents")}
-                menu={
-                  <SidebarSectionMenu label="Recents options">
-                    {viewMenuItems}
-                  </SidebarSectionMenu>
-                }
-                action={
-                  <SidebarSectionAction
-                    label="New thread"
-                    icon={PlusIcon}
-                    onClick={() => {
-                      layout.closeOnMobile()
-                      void navigate({ to: "/agents" })
-                    }}
+              {(recentDays.length
+                ? recentDays
+                : [{ key: "recents", label: "Recents", threads: [] }]
+              ).map((day, index) => (
+                <div key={day.key} className={cn(index > 0 && "mt-space-2")}>
+                  <SidebarSectionHeader
+                    label={day.label}
+                    menu={
+                      index === 0 && (
+                        <SidebarSectionMenu label="Recents options">
+                          {viewMenuItems}
+                        </SidebarSectionMenu>
+                      )
+                    }
+                    action={
+                      index === 0 && (
+                        <SidebarSectionAction
+                          label="New thread"
+                          icon={PlusIcon}
+                          onClick={() => {
+                            layout.closeOnMobile()
+                            void navigate({ to: "/agents" })
+                          }}
+                        />
+                      )
+                    }
                   />
-                }
-              />
-              {!sectionCollapsed("recents") && (
-                <>
-                  {groupSidebarThreadsByDay(recents).map((day) => (
-                    <div key={day.key}>
-                      <div className="px-space-2 pt-space-2 pb-space-1 text-xxs font-medium text-tertiary">
-                        {day.label}
-                      </div>
-                      {day.threads.map((item) => (
-                        <SidebarThreadRow key={item.key} {...rowProps(item)} />
-                      ))}
-                    </div>
+                  {day.threads.map((item) => (
+                    <SidebarThreadRow key={item.key} {...rowProps(item)} />
                   ))}
-                  {recentsQuery.hasMore && (
-                    <LoadMoreThreadsOnScroll
-                      label="Load more threads"
-                      root={scrollViewport}
-                      loading={recentsQuery.isFetchingNextPage}
-                      onLoadMore={recentsQuery.fetchNextPage}
-                    />
-                  )}
-                </>
+                </div>
+              ))}
+              {recentsQuery.hasMore && (
+                <LoadMoreThreadsOnScroll
+                  label="Load more threads"
+                  root={scrollViewport}
+                  loading={recentsQuery.isFetchingNextPage}
+                  onLoadMore={recentsQuery.fetchNextPage}
+                />
               )}
             </section>
           )}
