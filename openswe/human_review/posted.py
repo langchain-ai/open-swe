@@ -1,6 +1,7 @@
 """Watch pull requests people post in any Slack channel the bot listens in."""
 
 import logging
+from dataclasses import dataclass
 
 from sqlalchemy.exc import IntegrityError
 
@@ -10,12 +11,32 @@ from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import record_pull_request, settle
 from openswe.human_review.supplementary import SupplementaryReviews
+from openswe.prompts import prompt
 from openswe.slack.client import GitHubPrRef
 from openswe.slack.pr_links import linked_pull_requests
 from openswe.users import User
+from openswe.utils.jev import select_jev_choice
 from openswe.utils.preview import skip_on_preview
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PullRequestPost:
+    text: str
+
+    async def asks_for_review(self) -> bool:
+        """Whether the post shares its pull requests so people review them."""
+        choice = await select_jev_choice(
+            self.text,
+            question="pull_request_post_intent",
+            instructions=prompt("slack/pr-post-intent-instructions"),
+            criteria={
+                "review_request": prompt("slack/pr-post-review-request"),
+                "other": prompt("slack/pr-post-other"),
+            },
+        )
+        return choice == "review_request"
 
 
 async def watch_post(channel_id: str, message_ts: str, slack_user_id: str, text: str) -> None:
@@ -27,6 +48,12 @@ async def watch_post(channel_id: str, message_ts: str, slack_user_id: str, text:
         return
     user = await User.for_identity("slack", slack_user_id)
     if user is None:
+        return
+    if not await PullRequestPost(text).asks_for_review():
+        logger.info(
+            "Posted pull request link is not a review request",
+            extra={"slack_channel": channel_id, "slack_message_ts": message_ts},
+        )
         return
     requests: list[HumanReviewRequest] = []
     for ref in refs:

@@ -42,6 +42,7 @@ async def test_external_authors_are_not_watched(
 ) -> None:
     monkeypatch.setattr(posted, "skip_on_preview", lambda _: False)
     monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=User()))
+    monkeypatch.setattr(posted.PullRequestPost, "asks_for_review", AsyncMock(return_value=True))
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=None))
     monkeypatch.setattr(HumanReviewRequest, "active_for", AsyncMock(return_value=None))
     details = PullRequestPayload.model_validate({"user": {"login": "external"}, "state": "open"})
@@ -54,6 +55,21 @@ async def test_external_authors_are_not_watched(
     monkeypatch.setattr(HumanReviewRequest, "save", save)
     await posted.watch_post("C1", "1.0", "U1", "https://github.com/lc/repo/pull/7")
     save.assert_not_called()
+
+
+async def test_links_shared_for_another_reason_are_not_watched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(posted, "skip_on_preview", lambda _: False)
+    monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=User()))
+    classify = AsyncMock(return_value="other")
+    monkeypatch.setattr(posted, "select_jev_choice", classify)
+    record = AsyncMock()
+    monkeypatch.setattr(posted, "record_pull_request", record)
+    text = "Why can't 412 be declared? https://github.com/lc/repo/pull/7#discussion_r1"
+    await posted.watch_post("C1", "1.0", "U1", text)
+    assert classify.await_args.args == (text,)
+    record.assert_not_called()
 
 
 async def test_blocked_reactions_track_an_approved_posts_current_head(
@@ -286,6 +302,7 @@ async def test_skipped_links_do_not_block_registered_posts_positive_reactions(
             slack_message_ts="2.0",
         ).save()
     monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=user))
+    monkeypatch.setattr(posted.PullRequestPost, "asks_for_review", AsyncMock(return_value=True))
     monkeypatch.setattr(
         User, "for_login", AsyncMock(side_effect=lambda _, login: user if login == "ada" else None)
     )
