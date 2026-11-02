@@ -1,6 +1,7 @@
 """The viewer's prioritized, live queue of pull requests to work through."""
 
 import asyncio
+from collections.abc import Set
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -16,7 +17,7 @@ from openswe.users import User
 
 
 class ReviewQueue:
-    def __init__(self, github: GitHubClient, login: str, repositories: set[str]):
+    def __init__(self, github: GitHubClient, login: str, repositories: Set[str]):
         self.github = github
         self.login = login
         self.repositories = repositories

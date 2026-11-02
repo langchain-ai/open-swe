@@ -4109,6 +4109,17 @@
             ],
             "title": "Additions"
           },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
           "autoMerge": {
             "default": false,
             "title": "Automerge",

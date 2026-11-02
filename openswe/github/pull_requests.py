@@ -26,7 +26,7 @@ key callers address a PR by.
 """
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import Literal, Self, TypedDict
 from uuid import UUID, uuid7
@@ -217,7 +217,7 @@ class PullRequest(Base):
             return list(rows)
 
     @classmethod
-    async def review_candidates(cls, repositories: set[str], login: str) -> list[Self]:
+    async def review_candidates(cls, repositories: Collection[str], login: str) -> list[Self]:
         """Open, reviewed PRs in repositories the viewer can access."""
         async with postgres.session() as session:
             rows = await session.scalars(
