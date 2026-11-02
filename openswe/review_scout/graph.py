@@ -33,6 +33,7 @@ from runtime_api.catalog import LoopRules
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
+from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
@@ -96,14 +97,17 @@ async def _ensure_scout_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBacken
     repo_name = cfg.repo.name if cfg.repo else ""
     repositories = [repo_name] if repo_name else None
     token, expires_at = await get_github_app_installation_token_with_expiry(
-        repositories=repositories
+        installation_id=cfg.github_installation_id, repositories=repositories
     )
     if not token:
-        raise RuntimeError(
-            f"GitHub App installation token unavailable for scout thread {thread_id}"
-        )
+        raise GitHubAppUnavailable("GitHub App installation token unavailable for scout")
     cache_github_token_for_thread(
-        thread_id, token, expires_at=expires_at, is_bot_token=True, repositories=repositories
+        thread_id,
+        token,
+        expires_at=expires_at,
+        is_bot_token=True,
+        repositories=repositories,
+        installation_id=cfg.github_installation_id,
     )
     # Like the reviewer's, a scout sandbox holds only a checkout every run re-derives.
     return await ensure_sandbox_for_thread(
@@ -137,7 +141,18 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         cfg = RunConfig.from_config(self._config)
         if cfg.repo is None or cfg.pr_number is None or not cfg.base_sha or not cfg.head_sha:
             raise RuntimeError("review scout run is missing its pull request")
-        backend = await _ensure_scout_sandbox(self._thread_id, cfg)
+        try:
+            backend = await _ensure_scout_sandbox(self._thread_id, cfg)
+        except GitHubAppUnavailable:
+            logger.info(
+                "Skipping review scout because its GitHub token is unavailable",
+                extra={"thread_id": self._thread_id, "pr_repo_full_name": cfg.repo.full_name},
+            )
+            return {
+                "rendered_system_prompt": "",
+                "scout_nothing_to_plan": True,
+                "has_human_input": False,
+            }
         checkout = await PinnedCheckout.locate(backend, cfg.repo.name)
         work_dir = checkout.repo_dir.rpartition("/")[0]
         nothing_to_plan = {
@@ -255,7 +270,10 @@ class FinishPlanMiddleware(OpenSWEMiddleware[ReviewScoutState]):
         self._config = config
 
     async def aafter_agent(self, state: ReviewScoutState, runtime: Runtime) -> None:  # noqa: ARG002
-        await finish_scout_plan(self._thread_id, self._config, state.get("human_input_summary", ""))
+        if not state.get("scout_nothing_to_plan"):
+            await finish_scout_plan(
+                self._thread_id, self._config, state.get("human_input_summary", "")
+            )
 
 
 async def finish_scout_plan(

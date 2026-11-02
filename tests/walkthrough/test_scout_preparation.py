@@ -82,3 +82,38 @@ async def test_scout_preparation_retries_and_checks_head_without_a_pinned_checko
         assert workspace.await_count == (1 if expected in ("planned", "complete", "moved") else 0)
     assert prepare.await_count == len(heads)
     assert sleep.await_args_list == ([] if len(heads) == 1 else [((3,), {})])
+
+
+class TestScoutGitHubAccess:
+    @pytest.mark.parametrize("installation_id", [None, 456])
+    async def test_token_unavailable_skips_then_retries_without_creating_a_sandbox(
+        self, monkeypatch: pytest.MonkeyPatch, installation_id: int | None
+    ) -> None:
+        from openswe.github import thread_token
+
+        mint = AsyncMock(side_effect=[(None, None), ("scout-token", None)])
+        sandbox = AsyncMock(return_value=MagicMock())
+        monkeypatch.setattr(graph, "get_github_app_installation_token_with_expiry", mint)
+        monkeypatch.setattr(graph, "ensure_sandbox_for_thread", sandbox)
+        cfg = graph.RunConfig.parse(
+            {
+                "repo": {"owner": "acme", "name": "widgets"},
+                "pr_number": 7,
+                "base_sha": "base",
+                "head_sha": "head",
+                "github_installation_id": installation_id,
+            }
+        )
+        middleware = graph.PrepareReviewScoutRunMiddleware(
+            thread_id="scout", config={"configurable": cfg.dump()}
+        )
+        result = await middleware._prepare({"messages": []}, Runtime())
+        assert result["scout_nothing_to_plan"] is True
+        sandbox.assert_not_awaited()
+        assert await graph._ensure_scout_sandbox("scout", cfg) is sandbox.return_value
+        assert (
+            thread_token.get_github_token({"configurable": {"thread_id": "scout"}}) == "scout-token"
+        )
+        assert mint.await_count == 2
+        mint.assert_awaited_with(installation_id=installation_id, repositories=["widgets"])
+        await thread_token.invalidate_cached_github_token("scout")

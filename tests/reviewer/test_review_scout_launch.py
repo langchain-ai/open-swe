@@ -31,6 +31,7 @@ async def test_scout_records_security_identity_before_starting_or_reusing_a_run(
         base_sha="base",
         head_sha="head",
         workspace_slug="workspace",
+        installation_id=456,
     )
 
     async def active_run(self: launch.ReviewScoutTarget) -> str | None:
@@ -46,6 +47,9 @@ async def test_scout_records_security_identity_before_starting_or_reusing_a_run(
     monkeypatch.setattr(launch, "create_durable_run", AsyncMock(return_value={"run_id": "new-run"}))
 
     assert await target.start() == (active or "new-run")
+    if active is None:
+        run = launch.create_durable_run
+        assert run.await_args.kwargs["config"]["configurable"]["github_installation_id"] == 456
 
 
 async def test_scout_run_context_preserves_history_and_system_prefix(

@@ -112,6 +112,7 @@ class RunConfig(BaseModel):
     # Repository
     repo: Repo | None = None
     repo_private: bool | None = None
+    github_installation_id: Int | None = None
     repo_explicitly_none: bool | None = None
     branch_name: str | None = None
 

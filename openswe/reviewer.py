@@ -45,7 +45,10 @@ from langchain_core.tools import BaseTool
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
-from openswe.github.app import get_github_app_installation_token_with_expiry
+from openswe.github.app import (
+    get_github_app_installation_id_for_repo,
+    get_github_app_installation_token_with_expiry,
+)
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
@@ -456,8 +459,13 @@ async def ensure_reviewer_github_token(thread_id: str, cfg: RunConfig) -> str | 
         return None
     repo_name = cfg.repo.name if cfg.repo else ""
     repositories = [repo_name] if repo_name else None
+    installation_id = cfg.github_installation_id
+    if installation_id is None and cfg.repo:
+        installation_id = await get_github_app_installation_id_for_repo(
+            cfg.repo.owner, cfg.repo.name
+        )
     github_token, expires_at = await get_github_app_installation_token_with_expiry(
-        repositories=repositories
+        installation_id=installation_id, repositories=repositories
     )
     if not github_token:
         raise RuntimeError(
@@ -469,6 +477,7 @@ async def ensure_reviewer_github_token(thread_id: str, cfg: RunConfig) -> str | 
         expires_at=expires_at,
         is_bot_token=True,
         repositories=repositories,
+        installation_id=installation_id,
     )
     return github_token
 

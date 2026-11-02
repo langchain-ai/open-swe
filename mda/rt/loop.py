@@ -723,6 +723,8 @@ class RunLoop:
             if work == "settle_review_check":
                 outbox.notify(SETTLE_REVIEW_CHECK, RunRequest(run_id=current))
             else:
+                if _held(state).get("scout_nothing_to_plan"):
+                    continue
                 summary = _held(state).get("human_input_summary")
                 finished = ScoutPlanEnd(
                     run_id=current,

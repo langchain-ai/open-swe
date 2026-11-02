@@ -318,3 +318,36 @@ async def test_walkthrough_generation_includes_drafts_without_starting_an_assess
 
     assert start.await_count == (0 if inline and implementation_busy else 1)
     assessment.assert_not_awaited()
+
+
+class TestWalkthroughEligibility:
+    @pytest.mark.parametrize("allowed,workspace", [(False, None), (True, None), (False, "team")])
+    @pytest.mark.parametrize("installation_id", [None, 456])
+    async def test_repository_policy_applies_to_open_and_later_pushes(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        allowed: bool,
+        workspace: str | None,
+        installation_id: int | None,
+    ) -> None:
+        from openswe.dashboard import workspace_settings_cache
+        from openswe.review_scout.launch import ReviewScoutTarget
+
+        monkeypatch.setattr(github_webhooks.postgres, "configured", lambda: True)
+        monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", {"lc"} if allowed else {"other"})
+        monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_REPOS", set())
+        monkeypatch.setattr(WORKSPACES, "owner_of_repo", AsyncMock(return_value=workspace))
+        monkeypatch.setattr(
+            workspace_settings_cache, "cached_workspace_settings", AsyncMock(return_value={})
+        )
+        monkeypatch.setattr(ReviewScoutTarget, "walkthrough", AsyncMock(return_value=None))
+        with patch.object(ReviewScoutTarget, "start", autospec=True, return_value="run") as start:
+            for action in ("opened", "synchronize", "synchronize"):
+                payload = _pr_payload(action=action, draft=False)
+                payload["repository"]["full_name"] = "lc/repo"
+                if installation_id is not None:
+                    payload["installation"] = {"id": installation_id}
+                await github_webhooks.process_github_pr_walkthrough(payload)
+            assert start.await_count == (3 if allowed or workspace else 0)
+            for call in start.await_args_list:
+                assert call.args[0].installation_id == installation_id

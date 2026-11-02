@@ -278,7 +278,9 @@ async def trigger_pr_review_from_ref(
 
     # Full token to read PR metadata (privacy/id aren't in the trigger ref);
     # re-scoped below once we know whether the repo is public.
-    app_token, app_token_expires_at = await common.get_github_app_installation_token_with_expiry()
+    app_token, app_token_expires_at = await common.reviewer_token_for_repo(
+        repo_config, repo_private=None
+    )
     if not app_token:
         common.logger.warning("No GitHub App token available for PR reviewer request")
         return {"success": False, "error": "No GitHub App token available"}
@@ -550,6 +552,12 @@ async def process_github_pr_walkthrough(payload: dict[str, object]) -> None:
     if pull.state == "closed" or not pull.head_sha or not pull.base_sha:
         return
     workspace = await WORKSPACES.owner_of_repo(f"{owner}/{repo}")
+    if workspace is None and not common.is_repo_allowed({"owner": owner, "name": repo}):
+        common.logger.info(
+            "Skipping PR walkthrough for unsupported repository",
+            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
+        )
+        return
     settings = await cached_workspace_settings(workspace)
     if settings.get("implementation_walkthrough_enabled") is True:
         stored = await PullRequest.get(owner, repo, number)
@@ -580,6 +588,7 @@ async def process_github_pr_walkthrough(payload: dict[str, object]) -> None:
         base_sha=pull.base_sha,
         head_sha=pull.head_sha,
         workspace_slug=workspace,
+        installation_id=event.installation_id,
     )
     try:
         if await target.walkthrough() is None:

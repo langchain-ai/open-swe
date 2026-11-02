@@ -27,6 +27,7 @@ class _CachedToken(NamedTuple):
     cached_at: datetime
     # Bot tokens only; None means installation-wide.
     repositories: tuple[str, ...] | None = None
+    installation_id: int | None = None
 
 
 # (thread_id, principal) -> token. Expired bot entries stay until the 24h cap so they
@@ -55,11 +56,9 @@ def cache_github_token_for_thread(
     principal: str | None = None,
     is_bot_token: bool = False,
     repositories: Sequence[str] | None = None,
+    installation_id: int | None = None,
 ) -> None:
-    """Cache a GitHub token in process for the current thread and principal.
-
-    ``repositories`` is the scope a bot token was minted with (None: installation-wide).
-    """
+    """Cache a principal-bound token with its installation and repository scope for refresh."""
     if not thread_id or not token:
         return
     cache_principal = _BOT_PRINCIPAL if is_bot_token else principal
@@ -68,7 +67,11 @@ def cache_github_token_for_thread(
         return
     now = datetime.now(UTC)
     _GITHUB_TOKEN_CACHE[(thread_id, cache_principal)] = _CachedToken(
-        token, expires_at, now, tuple(repositories) if is_bot_token and repositories else None
+        token,
+        expires_at,
+        now,
+        tuple(repositories) if is_bot_token and repositories else None,
+        installation_id,
     )
     _evict_expired(now=now)
 
@@ -184,14 +187,19 @@ async def resolve_thread_github_token(run_config: Mapping[str, Any] | None = Non
         return None
     repositories = expired_bot.repositories
     token, expires_at = await get_github_app_installation_token_with_expiry(
-        repositories=repositories
+        installation_id=expired_bot.installation_id, repositories=repositories
     )
     if not token:
         logger.warning("Could not re-mint expired bot GitHub token", extra={"thread_id": thread_id})
         return None
     logger.info("Re-minted expired bot GitHub token", extra={"thread_id": thread_id})
     cache_github_token_for_thread(
-        thread_id, token, expires_at=expires_at, is_bot_token=True, repositories=repositories
+        thread_id,
+        token,
+        expires_at=expires_at,
+        is_bot_token=True,
+        repositories=repositories,
+        installation_id=expired_bot.installation_id,
     )
     return token
 

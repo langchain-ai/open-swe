@@ -588,6 +588,7 @@ class PullRequestEvent(BaseModel):
     pull_request: PullRequestPayload
     repo_full_name: str = Field("", validation_alias=AliasPath("repository", "full_name"))
     repo_private: bool | None = Field(None, validation_alias=AliasPath("repository", "private"))
+    installation_id: int | None = Field(None, validation_alias=AliasPath("installation", "id"))
 
     @classmethod
     def parse(cls, payload: object) -> Self | None:

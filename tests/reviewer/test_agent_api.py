@@ -677,13 +677,23 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
     )
     from openswe.sandboxes.tool_runtime import ToolSurface
 
-    async def mint(*, repositories: list[str] | None = None) -> tuple[str, str | None]:
+    async def mint(
+        *, installation_id: int | None = None, repositories: list[str] | None = None
+    ) -> tuple[str, str | None]:
+        assert installation_id == 456
         assert repositories == ["widgets"]
         return "ghs_reviewer", None
 
     monkeypatch.setattr(reviewer, "get_github_app_installation_token_with_expiry", mint)
     await invalidate_cached_github_token(RUN.thread_id)
-    config = {"configurable": {**RUN.configurable, "thread_id": RUN.thread_id, "source": "github"}}
+    config = {
+        "configurable": {
+            **RUN.configurable,
+            "thread_id": RUN.thread_id,
+            "source": "github",
+            "github_installation_id": 456,
+        }
+    }
     session = RunSession(
         ToolSurface(
             middleware=[
