@@ -1118,9 +1118,8 @@ class TranscriptMiddleware(OpenSWEMiddleware):
     def _record_offloading(self, state: RunState, request: ModelRequest) -> None:
         """Persist the offloading hint the summarizer already wrote into state.
 
-        ``ConversationOffloadingMiddleware`` streams its status through
-        ``get_stream_writer`` and mirrors it onto ``state``; reading it here
-        keeps that middleware untouched.
+        A requested offload streams its status and keeps it in the run's state, which
+        reaches here with the next model call.
         """
         status = request.state.get("conversation_offloading")
         if not isinstance(status, Mapping):

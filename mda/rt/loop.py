@@ -35,7 +35,6 @@ from langgraph.config import get_stream_writer
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
-    Catalog,
     CliResultRules,
     LoopRules,
     ModelSpec,
@@ -47,6 +46,7 @@ from runtime_api.endpoint import call
 from runtime_api.loop import (
     FINISH_SCOUT_PLAN,
     GOAL,
+    INCIDENT_CONTEXT,
     MODEL_CHOICE,
     REFRESH_GITHUB_PROXY,
     REPLY_ON_BEHALF,
@@ -75,7 +75,6 @@ from runtime_api.loop import (
 from runtime_api.operations import RunRequest
 
 from rt.backend import (
-    BackendCallError,
     OpenSweBackend,
     RunLocal,
     human_messages,
@@ -338,25 +337,15 @@ class RunLoop:
         self._chosen: RunLocal[dict[tuple[str, str | None], ModelSpec]] = RunLocal(dict)
         self._guidance = RunLocal(_RunGuidance)
 
-    @staticmethod
-    def runs(catalog: Catalog) -> bool:
-        """Whether a run planned with ``catalog`` runs its loop here, not in the backend's phases."""
-        return catalog.loop is not None and catalog.models is not None
-
     @property
     def rules(self) -> LoopRules:
         """The run's rules; a launched worker's own once it adopted its run, not its coordinator's."""
-        rules = self._backend.run.catalog.loop
-        if rules is None:
-            raise BackendCallError("The run's catalog names no loop rules")
-        return rules
+        return self._backend.run.catalog.loop
 
     @property
-    def _models(self) -> RunModels:
-        models = self._backend.run.catalog.models
-        if models is None:
-            raise BackendCallError("The run's catalog names no models")
-        return models
+    def _models(self) -> RunModels | None:
+        """The run's models; None calls the graph's own."""
+        return self._backend.run.catalog.models
 
     def starting(self) -> dict[str, JsonValue]:
         """The held state a turn starts from: nothing asked again yet, and answers going
@@ -450,6 +439,13 @@ class RunLoop:
         current = {**held, **update}
         model = await self._model_for(current)
         system_prompt, workspace_prompt, thread_prompt = self._system_prompt(current)
+        if self.rules.incident:
+            incident = await call(
+                self._backend,
+                INCIDENT_CONTEXT,
+                Routed(run_id=run_id(), humans=human_messages(messages)),
+            )
+            system_prompt = f"{system_prompt}\n\n{incident.instructions}"
         return BeforeModel(
             update=update,
             messages=_json_dicts.validate_python(messages_to_dict(added)),
@@ -459,9 +455,11 @@ class RunLoop:
                 thread_prompt=thread_prompt,
                 hidden_tools=self._hidden(current),
                 model=model,
-                vision=None if model.reads_images else self._models.vision,
-                fallback=model.fallback,
-                use_gateway=self._models.use_gateway,
+                vision=None
+                if self._models is None or (model is not None and model.reads_images)
+                else self._models.vision,
+                fallback=None if model is None else model.fallback,
+                use_gateway=self._models is not None and self._models.use_gateway,
                 reminder=reminder,
             ),
         )
@@ -546,19 +544,22 @@ class RunLoop:
             chosen[key] = await call(self._backend, MODEL_CHOICE, choice)
         return chosen[key]
 
-    async def _model_for(self, held: Mapping[str, object]) -> ModelSpec:
+    async def _model_for(self, held: Mapping[str, object]) -> ModelSpec | None:
         """The run's own model, a route's, or the one a person asked for."""
         requested = held.get("requested_model")
         if isinstance(requested, str) and requested:
             return await self._chosen_model(requested, held.get("requested_effort"))
+        models = self._models
+        if models is None:
+            return None
         route = held.get("model_route")
-        routed = self._models.routes.get(_normalized(route)) if isinstance(route, str) else None
+        routed = models.routes.get(_normalized(route)) if isinstance(route, str) else None
         if routed is not None and route != "default":
             return routed
         selected = held.get("selected_model_id")
-        if isinstance(selected, str) and selected and selected != self._models.model.model_id:
+        if isinstance(selected, str) and selected and selected != models.model.model_id:
             return await self._chosen_model(selected, held.get("selected_effort"))
-        return self._models.model
+        return models.model
 
     def _system_prompt(self, held: Mapping[str, object]) -> tuple[str, str, str]:
         """The prompt every thread shares, the part its workspace's threads share, and the

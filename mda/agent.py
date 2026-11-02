@@ -42,10 +42,11 @@ from managed_deepagents import (
 )
 from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import BaseModel, ConfigDict
-from rt.backend import Graph, OpenSweBackend, RunContext
+from rt.backend import OpenSweBackend, RunContext
 from rt.browser import ReportedBrowserMiddleware
 from rt.factory_timing import FactoryTiming
 from rt.file_tools import FileToolsMiddleware
+from rt.kinds import Graph
 from rt.managed_sandbox import (
     EXECUTE_TIMEOUT_SECONDS,
     ManagedSandboxMiddleware,

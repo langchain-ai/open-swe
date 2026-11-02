@@ -10,7 +10,6 @@ from langchain.agents.middleware.types import (
 )
 from langgraph.runtime import Runtime
 
-from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.utils.startup_trace import aphase, flush_phases
 from openswe.utils.thread_reads import shared_thread_reads
@@ -55,17 +54,7 @@ def _latest_message_fingerprint(state: Mapping[str, Any]) -> str | None:
     return hashlib.sha256(encoded).hexdigest()
 
 
-class RenderedSystemPromptMiddleware(OpenSWEMiddleware):
-    """Start each model call's system prompt with the one run preparation rendered."""
-
-    async def ashape_model_call(
-        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
-    ) -> CallShape:
-        rendered = state.get("rendered_system_prompt")
-        return call.prepending(rendered) if isinstance(rendered, str) else call
-
-
-class BasePrepareRunMiddleware(RenderedSystemPromptMiddleware):
+class BasePrepareRunMiddleware(OpenSWEMiddleware):
     """Checkpointed per-run setup.
 
     Subclasses must keep `_prepare` idempotent. LangGraph checkpoints the
