@@ -7,6 +7,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 
+from openswe.api.github_errors import add_github_error_handlers
 from openswe.dashboard.oauth import require_session
 from openswe.github import app as github_app
 from openswe.github import http as github_http
@@ -18,17 +19,23 @@ from openswe.review.findings import REVIEWER_THREAD_KIND
 pytestmark = pytest.mark.usefixtures("findings_from_metadata")
 
 
-@pytest.mark.parametrize("denied", [False, True])
-async def test_description_update_uses_viewer_permissions(monkeypatch, denied: bool) -> None:
+@pytest.mark.parametrize(
+    "denied, github_status, expected_status",
+    [(False, 200, 204), (True, 200, 403), (False, 422, 422), (False, 503, 502)],
+)
+async def test_description_update_uses_viewer_permissions(
+    monkeypatch, denied: bool, github_status: int, expected_status: int
+) -> None:
     app = FastAPI()
+    add_github_error_handlers(app)
     app.include_router(review_routes.router)
     app.dependency_overrides[require_session] = lambda: {"sub": "alice"}
     access = AsyncMock(side_effect=HTTPException(403, "No repository access") if denied else None)
     monkeypatch.setattr(review_routes, "require_repo_access_for_user", access)
     request = AsyncMock(
         return_value=httpx2.Response(
-            200,
-            json={"body": "Updated description"},
+            github_status,
+            json={"body": "Updated description", "message": "GitHub rejected this description"},
             request=httpx2.Request("PATCH", "https://api.github.com"),
         )
     )
@@ -42,7 +49,9 @@ async def test_description_update_uses_viewer_permissions(monkeypatch, denied: b
         response = await client.patch(
             "/reviews/acme/app/7/description", json={"body": "Updated description"}
         )
-    assert response.status_code == (403 if denied else 204)
+    assert response.status_code == expected_status
+    if github_status >= 400:
+        assert response.json() == {"detail": "GitHub rejected this description"}
     if denied:
         viewer.assert_not_called()
         request.assert_not_awaited()
