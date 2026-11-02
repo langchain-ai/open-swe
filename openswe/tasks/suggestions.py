@@ -15,9 +15,12 @@ from openswe.webhooks.event_log import EventLog, EventRefs
 logger = logging.getLogger(__name__)
 
 
-class SuggestedTask(BaseModel):
+class SuggestedTaskContent(BaseModel):
     summary: str = Field(min_length=1, max_length=500)
     details: str = Field(min_length=1, max_length=20000)
+
+
+class SuggestedTask(SuggestedTaskContent):
     workspace_id: UUID
     repository_id: UUID
     id: UUID = Field(default_factory=uuid7)

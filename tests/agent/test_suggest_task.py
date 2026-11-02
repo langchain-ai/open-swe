@@ -109,3 +109,85 @@ class TestSuggestedTasks:
         assert result == {"success": False, "error": "no access"}
         async with transaction() as conn:
             assert await conn.scalar(text("SELECT count(*) FROM suggested_task")) == 0
+
+    @pytest.mark.parametrize("repo", ["acme/origin", "acme/other"])
+    async def test_webhook_sender_without_oauth_can_only_suggest_for_current_repo(
+        self, monkeypatch: pytest.MonkeyPatch, repo: str
+    ) -> None:
+        await WORKSPACES.create(WorkspaceCreate(name="Origin", repos=["acme/origin"]), "alice")
+        await index.create("review-thread", runtime="mda")
+        monkeypatch.setattr(
+            RunConfig,
+            "from_runtime",
+            lambda: RunConfig.parse(
+                {
+                    "thread_id": "review-thread",
+                    "source": "github",
+                    "workspace": "origin",
+                    "github_login": "webhook-sender",
+                    "repo": {"owner": "acme", "name": "origin"},
+                    "pr_number": 7,
+                }
+            ),
+        )
+        module = import_module("openswe.tools.suggest_task")
+        monkeypatch.setattr(
+            module,
+            "require_repo_access_for_user",
+            AsyncMock(side_effect=HTTPException(401, "no OAuth")),
+        )
+        monkeypatch.setattr(module, "require_repo_access_for_workspace", AsyncMock())
+        result = await tool(summary="Old bug", details="Fix later", repo=repo)
+        async with transaction() as conn:
+            count = await conn.scalar(text("SELECT count(*) FROM suggested_task"))
+        if repo == "acme/origin":
+            assert result["success"] is True
+            assert count == 1
+        else:
+            assert result == {"success": False, "error": "no OAuth"}
+            assert count == 0
+
+    @pytest.mark.parametrize(
+        ("summary", "details", "repo", "links"),
+        [
+            ("   ", "Details", "acme/new-target", []),
+            ("x" * 501, "Details", "acme/new-target", []),
+            ("Bug", "   ", "acme/new-target", []),
+            ("Bug", "x" * 20001, "acme/new-target", []),
+            ("Bug", "Details", "not-a-repo", []),
+            ("Bug", "Details", "acme/new-target", ["not-a-url"]),
+        ],
+    )
+    async def test_invalid_input_returns_error_without_writing_context_rows(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        summary: str,
+        details: str,
+        repo: str,
+        links: list[str],
+    ) -> None:
+        await WORKSPACES.create(WorkspaceCreate(name="Origin"), "alice")
+        await index.create("review-thread", runtime="mda")
+        monkeypatch.setattr(
+            RunConfig,
+            "from_runtime",
+            lambda: RunConfig.parse(
+                {
+                    "thread_id": "review-thread",
+                    "source": "github",
+                    "workspace": "origin",
+                    "github_login": "sender",
+                    "pr_url": "https://github.com/acme/origin/pull/7",
+                }
+            ),
+        )
+        monkeypatch.setattr(
+            import_module("openswe.tools.suggest_task"), "require_repo_access_for_user", AsyncMock()
+        )
+        result = await tool(summary=summary, details=details, repo=repo, context_links=links)
+        assert result["success"] is False
+        assert result["error"]
+        async with transaction() as conn:
+            assert await conn.scalar(text("SELECT count(*) FROM suggested_task")) == 0
+            assert await conn.scalar(text("SELECT count(*) FROM repository")) == 0
+            assert await conn.scalar(text("SELECT count(*) FROM pull_request")) == 0

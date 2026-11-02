@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from fastapi import HTTPException
-from pydantic import HttpUrl, TypeAdapter
+from pydantic import HttpUrl, TypeAdapter, ValidationError
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.repo_access import (
@@ -17,7 +17,7 @@ from openswe.github.repositories import Repository
 from openswe.run_config import RunConfig
 from openswe.slack.client import parse_github_pr_url
 from openswe.tasks.store import TaskMembership
-from openswe.tasks.suggestions import SuggestedTask
+from openswe.tasks.suggestions import SuggestedTask, SuggestedTaskContent
 from openswe.tools.access import direct_user_run
 from openswe.users import User
 from openswe.workspaces.routing import workspace_for_repo
@@ -36,7 +36,12 @@ async def suggest_task(
     cfg = RunConfig.from_runtime()
     if not cfg.thread_id:
         return {"success": False, "error": "A suggestion needs an originating thread"}
-    full_name = normalize_repo_full_name(repo)
+    try:
+        full_name = normalize_repo_full_name(repo)
+        content = SuggestedTaskContent(summary=summary.strip(), details=details.strip())
+        links = [str(TypeAdapter(HttpUrl).validate_python(link)) for link in context_links or ()]
+    except (ValueError, ValidationError) as exc:
+        return {"success": False, "error": str(exc)}
     owner, name = full_name.split("/", 1)
     target_workspace = workspace or await workspace_for_repo(owner, name) or cfg.workspace_slug
     if not target_workspace:
@@ -45,14 +50,15 @@ async def suggest_task(
     if workspace_id is None:
         return {"success": False, "error": "The target workspace no longer exists"}
     try:
-        if cfg.github_login:
-            await require_repo_access_for_user(cfg.github_login, full_name)
-        elif (
+        if (
             cfg.repo
             and f"{cfg.repo.owner}/{cfg.repo.name}".lower() == full_name.lower()
             and cfg.workspace_slug == target_workspace
+            and (cfg.source == "github" or not cfg.github_login)
         ):
             await require_repo_access_for_workspace(full_name)
+        elif cfg.github_login:
+            await require_repo_access_for_user(cfg.github_login, full_name)
         else:
             return {
                 "success": False,
@@ -60,7 +66,6 @@ async def suggest_task(
             }
     except HTTPException as exc:
         return {"success": False, "error": str(exc.detail)}
-    links = [str(TypeAdapter(HttpUrl).validate_python(link)) for link in context_links or ()]
     user = (
         await User.get(UUID(cfg.user_id))
         if cfg.user_id
@@ -87,8 +92,8 @@ async def suggest_task(
         repository_id = await Repository.ensure_id(orm, full_name)
     actor_id = user.id if user and direct_user_run(cfg) else None
     suggestion = await SuggestedTask(
-        summary=summary.strip(),
-        details=details.strip(),
+        summary=content.summary,
+        details=content.details,
         workspace_id=workspace_id,
         repository_id=repository_id,
         thread_id=cfg.thread_id,
