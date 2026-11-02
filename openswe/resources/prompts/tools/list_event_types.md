@@ -1,5 +1,7 @@
 List every distinct inbound event type Open SWE received in the last 14 days, across GitHub, Slack, and Linear.
 
+Event visibility is enforced per item: public by default, private only in its user’s private thread, and admin-only only in an admin thread for its workspace.
+
 Admin threads also see `workspace` events: Open SWE's own workspace activity, such as `refresh.success` and `refresh.failed` when a workspace snapshot refresh settles, whose payload carries the refresh's steps, error, and log tail.
 
 Admin threads also see `reviewer` events: `run.started`, `run.completed`, `run.failed`, `run.canceled`, `finding.created`, `finding.updated`, `review.published`, and `review.publish_failed`.

@@ -16,7 +16,7 @@ from openswe.github.pull_requests import PullRequest
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.channels import SlackChannel
 from openswe.webhooks import event_log
-from openswe.webhooks.event_log import EventLog, EventRefs, WebhookSource
+from openswe.webhooks.event_log import EventLog, EventRefs, EventVisibility, WebhookSource
 from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
 from openswe.webhooks.event_subscriptions import EventSubscription
 from tests.support.slack_api import SlackAPI
@@ -412,3 +412,110 @@ async def test_workspace_events_reach_only_admin_threads_that_name_the_source(
     assert [(kind.source, kind.event_type) for kind in await EventLog.kinds(since, admin=True)] == [
         (source, "refresh.failed")
     ]
+
+
+@pytest.mark.parametrize("visibility", ["public", "private", "admin"])
+async def test_event_visibility_filters_delivery_counts_and_payload_shapes(
+    workspace: dict[str, UUID],
+    delivered: list[tuple[str, MultitaskStrategy]],
+    monkeypatch: pytest.MonkeyPatch,
+    visibility: EventVisibility,
+) -> None:
+    from openswe.tools.access import Access
+
+    user = uuid4()
+    other_user = uuid4()
+    async with transaction() as conn:
+        await conn.execute(text("INSERT INTO users (id) VALUES (:id)"), {"id": user})
+        await conn.execute(text("INSERT INTO users (id) VALUES (:id)"), {"id": other_user})
+
+    async def access(cfg: object) -> Access:
+        return Access(private=True, owner=True, admin_thread=True)
+
+    monkeypatch.setattr("openswe.tools.access.resolve_access", access)
+    for name, user_id in (("owner", user), ("other", other_user)):
+        await EventSubscription(
+            thread_id=name,
+            workspace_id=workspace["workspace"],
+            multitask_strategy="enqueue",
+            run_config={"thread_id": name, "user_id": str(user_id)},
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+            event_types=["push"],
+        ).create()
+
+    assert await EventLog.append(
+        "github",
+        {"public_key": "value"},
+        event_type="push",
+        delivery_id="public",
+        refs=EventRefs(workspace_id=workspace["workspace"]),
+    )
+    assert await EventLog.append(
+        "github",
+        {"restricted_key": "value"},
+        event_type="push",
+        delivery_id="restricted",
+        refs=EventRefs(workspace_id=workspace["workspace"]),
+        visibility=visibility,
+        visible_to_user_id=user if visibility == "private" else None,
+    )
+    assert len(await EventMatch.owed("owner")) == 2
+    assert len(await EventMatch.owed("other")) == (1 if visibility == "private" else 2)
+    since = datetime.now(UTC) - timedelta(hours=1)
+    for viewer, admin, workspace_id, allowed in (
+        (None, False, None, visibility == "public"),
+        (other_user, False, workspace["workspace"], visibility == "public"),
+        (user, False, workspace["workspace"], visibility != "admin"),
+        (None, True, uuid4(), visibility == "public"),
+        (None, True, workspace["workspace"], visibility != "private"),
+    ):
+        (kind,) = await EventLog.kinds(
+            since,
+            source="github",
+            event_type="push",
+            viewer_id=viewer,
+            admin=admin,
+            workspace_id=workspace_id,
+        )
+        assert kind.count == (2 if allowed else 1)
+        assert kind.payload_shape == {"restricted_key" if allowed else "public_key": "string"}
+
+    async def public_access(cfg: object) -> Access:
+        return Access(admin=True)
+
+    monkeypatch.setattr("openswe.tools.access.resolve_access", public_access)
+    assert await EventLog.append(
+        "github",
+        {},
+        event_type="push",
+        delivery_id="public-thread",
+        refs=EventRefs(workspace_id=workspace["workspace"]),
+        visibility=visibility,
+        visible_to_user_id=user if visibility == "private" else None,
+    )
+    assert len(await EventMatch.owed("owner")) == (3 if visibility == "public" else 2)
+
+
+async def test_restricted_event_requires_its_audience(workspace: dict[str, UUID]) -> None:
+    assert not await EventLog.append(
+        "github",
+        {},
+        event_type="push",
+        delivery_id="missing-user",
+        visibility="private",
+        refs=EventRefs(workspace_id=workspace["workspace"]),
+    )
+    assert not await EventLog.append(
+        "github",
+        {},
+        event_type="push",
+        delivery_id="missing-workspace",
+        visibility="admin",
+    )
+    assert not await EventLog.append(
+        "github",
+        {},
+        event_type="push",
+        delivery_id="public-user",
+        visible_to_user_id=uuid4(),
+    )

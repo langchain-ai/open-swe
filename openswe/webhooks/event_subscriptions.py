@@ -376,7 +376,7 @@ class EventSubscription(Base):
         strategies: dict[str, MultitaskStrategy] = {}
         for subscription in subscriptions:
             try:
-                if not await subscription.sees(summary):
+                if not await subscription.sees(event, summary):
                     continue
                 if not await subscription.match(event, summary):
                     continue
@@ -459,8 +459,26 @@ class EventSubscription(Base):
             )
             return list(rows.unique())
 
-    async def sees(self, summary: EventSummary) -> bool:
-        """Only admin threads see admin-only sources, and only joined non-DM Slack channels reach any."""
+    async def sees(self, event: LoggedEvent, summary: EventSummary) -> bool:
+        """Check restricted audiences against the thread's current access before delivery."""
+        if event.visibility != "public":
+            from openswe.run_config import RunConfig
+            from openswe.threads.identity import ThreadIdentity
+            from openswe.tools.access import resolve_access
+
+            cfg = RunConfig.from_config({"configurable": self.run_config})
+            access = await resolve_access(cfg)
+            if event.visibility == "admin":
+                if not access.admin_thread or self.workspace_id != event.workspace_id:
+                    return False
+            else:
+                if not access.private or not access.owner:
+                    return False
+                user = await ThreadIdentity(
+                    f"user:{cfg.user_id}" if cfg.user_id else cfg.github_login or ""
+                ).user()
+                if user is None or user.id != event.visible_to_user_id:
+                    return False
         if summary.source in ADMIN_ONLY_SOURCES:
             return self.run_config.get("admin_thread") is True
         if summary.source != "slack":
