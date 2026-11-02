@@ -51,12 +51,13 @@ Every variable Open SWE reads is declared in `openswe/config.py` with its descri
 Set `POSTHOG_API_KEY` to your PostHog project API key.
 `POSTHOG_HOST` defaults to `https://us.i.posthog.com`; use `https://eu.i.posthog.com` for EU projects or your self-hosted ingestion host.
 Without a key, capture is disabled.
-No frontend key or additional dependency is needed.
+The dashboard reads the same key from `/dashboard/api/analytics/config` and captures in the browser with posthog-js, so no frontend build setting is needed.
 
-Authenticated dashboard navigation sends `$pageview` events with normalized `page_name`; MCP executions send `MCP Tool Called` with tool name, `is_error`, and the run repository name; persisted webhook deliveries send `Webhook Received` with source, event type, action, resolved workspace/repository/PR IDs, and the repository name on GitHub events.
+The dashboard sends `$pageview` and `$pageleave` events grouped into PostHog sessions, with a normalized `page_name` and URLs whose ids are replaced by placeholders (`/agents/:threadId`); page titles, autocapture, heatmaps and session recording are off.
+MCP executions send `MCP Tool Called` with tool name, `is_error`, and the run repository name; persisted webhook deliveries send `Webhook Received` with source, event type, action, resolved workspace/repository/PR IDs, and the repository name on GitHub events.
 `DD_ENV` identifies the deployment.
 Resolved users share the internal user UUID, with email and GitHub login traits on usage events.
-Unresolved usage is skipped; unresolved webhooks use a source-specific ID without creating person profiles.
+Signed-out dashboard visits create no person profiles; unresolved MCP usage is skipped; unresolved webhooks use a source-specific ID without creating person profiles.
 
 Delivery is best effort, not a durable export or historical backfill.
 Tool arguments/results, page URLs/query strings/thread identifiers, and raw webhook payloads are excluded; only allowlisted metadata properties are exported; IP geolocation is disabled.

@@ -30,7 +30,6 @@ async def _capture(
                 in {
                     "distinct_id",
                     "$process_person_profile",
-                    "page_name",
                     "tool",
                     "is_error",
                     "surface",
@@ -74,7 +73,6 @@ async def record_usage(
     *,
     login: str,
     email: str | None,
-    event_type: str,
     name: str,
     properties: dict[str, str | bool],
 ) -> None:
@@ -86,7 +84,7 @@ async def record_usage(
             logger.warning("PostHog usage identity could not be resolved")
             return
         await _capture(
-            "$pageview" if event_type == "page" else name,
+            name,
             {
                 **properties,
                 "distinct_id": str(user.id),
@@ -134,7 +132,6 @@ async def record_mcp_tool(tool: str, is_error: bool) -> None:
         await record_usage(
             login=cfg.github_login or "",
             email=cfg.user_email,
-            event_type="track",
             name="MCP Tool Called",
             properties={
                 "tool": tool,

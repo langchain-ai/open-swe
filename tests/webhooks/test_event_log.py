@@ -65,12 +65,11 @@ async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
 
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=User(id=user_id)))
     await posthog.record_webhook(event.model_copy(update={"user_id": user_id}))
-    for event_type in ("page", "track"):
+    for name in ("usage", "MCP Tool Called"):
         await posthog.record_usage(
             login="alice",
             email="alice@example.com",
-            event_type=event_type,
-            name="usage",
+            name=name,
             properties={
                 "inputs": "private inputs",
                 "results": "private results",
@@ -84,15 +83,12 @@ async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
         "github_login": "alice",
     }
     for email in (None, ""):
-        await posthog.record_usage(
-            login="alice", email=email, event_type="page", name="usage", properties={}
-        )
+        await posthog.record_usage(login="alice", email=email, name="usage", properties={})
         assert requests[-1]["properties"]["$set"] == {"github_login": "alice"}
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=None))
     await posthog.record_usage(
         login="unknown",
         email=None,
-        event_type="page",
         name="usage",
         properties={},
     )
