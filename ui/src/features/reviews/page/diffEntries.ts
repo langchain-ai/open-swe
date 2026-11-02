@@ -6,6 +6,7 @@ import type {
   ReviewDiffFile,
   ReviewFinding,
   ReviewWalkthrough,
+  ReviewWalkthroughNote,
 } from "@/lib/api"
 import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
 import type {
@@ -27,6 +28,7 @@ export interface EntryStep {
   count: number
   title: string
   summary: string
+  notes: ReadonlyArray<ReviewWalkthroughNote>
 }
 
 /** One rendered slice of the diff: a whole file, or a guide step's part of one. */
@@ -55,6 +57,8 @@ export type Note =
   | { kind: "pending"; id: number }
   | { kind: "draft"; id: string }
   | { kind: "agent-note"; id: string }
+  /** The scout's note on a tricky line of the step showing it. */
+  | { kind: "step-note"; id: string; note: string }
   | { kind: "composer" }
 
 type NoteAnnotation = DiffLineAnnotation<Note>
@@ -134,6 +138,7 @@ export function buildEntries(
   const groups: Array<{
     title: string
     summary: string
+    notes: ReadonlyArray<ReviewWalkthroughNote>
     entries: EntryBody[]
   }> = []
   let other: (typeof groups)[number] | null = null
@@ -160,7 +165,12 @@ export function buildEntries(
       })
     }
     if (entries.length === 0) continue
-    const group = { title: step.title, summary: step.summary, entries }
+    const group = {
+      title: step.title,
+      summary: step.summary,
+      notes: step.notes,
+      entries,
+    }
     if (step.other) other = group
     groups.push(group)
   }
@@ -168,7 +178,12 @@ export function buildEntries(
   if (leftover.length > 0) {
     if (other) other.entries.push(...leftover)
     else
-      groups.push({ title: "Everything else", summary: "", entries: leftover })
+      groups.push({
+        title: "Everything else",
+        summary: "",
+        notes: [],
+        entries: leftover,
+      })
   }
   return groups.flatMap((group, groupIndex) => {
     const step = {
@@ -176,6 +191,7 @@ export function buildEntries(
       count: groups.length,
       title: group.title,
       summary: group.summary,
+      notes: group.notes,
     }
     return group.entries.map((entry) => ({
       ...entry,
@@ -263,6 +279,19 @@ export function entryNotes(
     entryShows(entry, path, line, side)
       ? { side: toPierreSide(side), lineNumber: line }
       : null
+  const step = entry.step
+  for (const note of step?.notes ?? []) {
+    const spot = note.path === path ? at(note.side, note.line) : null
+    if (step && spot)
+      notes.push({
+        ...spot,
+        metadata: {
+          kind: "step-note",
+          id: `${step.index}:${path}:${note.side}:${note.line}`,
+          note: note.note,
+        },
+      })
+  }
   const anchored = sources.findings.filter(
     (finding): finding is AnchoredFinding =>
       finding.file === path && isAnchored(finding)
@@ -315,7 +344,10 @@ export function noteKey(note: Note): string {
 
 export function notesSignature(notes: ReadonlyArray<NoteAnnotation>): string {
   return notes
-    .map((note) => `${noteKey(note.metadata)}:${note.side}:${note.lineNumber}`)
+    .map(
+      (note) =>
+        `${noteKey(note.metadata)}:${note.side}:${note.lineNumber}${note.metadata.kind === "step-note" ? `:${note.metadata.note}` : ""}`
+    )
     .join("|")
 }
 

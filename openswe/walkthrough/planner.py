@@ -35,8 +35,10 @@ from openswe.walkthrough.plan import (
     MAX_OTHER_SUMMARY_CHARS,
     MAX_TITLE_CHARS,
     FileHunks,
+    FileNote,
     FileSplits,
     Hunks,
+    LineNote,
     Plan,
     PlanChunk,
     PlannedChunk,
@@ -208,6 +210,7 @@ class PlanWorkspace:
         show: list[FileHunks],
         explanation: str,
         other: list[FileHunks] | None = None,
+        notes: list[FileNote] | None = None,
         after: int | None = None,
         replace: list[int] | None = None,
     ) -> int:
@@ -231,6 +234,7 @@ class PlanWorkspace:
             title=trimmed,
             explanation=explanation.strip()[:MAX_EXPLANATION_CHARS],
             lines=lines,
+            notes=LineNote.placed(notes or [], lines),
             code=await self.checkout.render(lines),
         )
         number = 0

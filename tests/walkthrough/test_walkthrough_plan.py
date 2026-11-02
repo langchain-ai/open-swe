@@ -18,8 +18,10 @@ from openswe.walkthrough.diff import Carry, DiffIndex
 from openswe.walkthrough.lines import LinePoint, LineSet
 from openswe.walkthrough.plan import (
     FileHunks,
+    FileNote,
     FileRanges,
     FileSplits,
+    LineNote,
     Plan,
     PlanChunk,
     RangeError,
@@ -224,8 +226,20 @@ async def test_a_push_keeps_planned_lines_git_kept_and_new_lines_join_their_hunk
     index = await _pin(checkout, base, head)
     plan = Plan.start(head, index)
     plan.add_other(claim([FileRanges(path="cli.py", added=[(1, 1)])], plan.unplanned(index)))
-    _place(plan, index, "Print one", FileHunks(path="cli.py", hunks=["+1"]))
-    _place(plan, index, "Return 10", FileHunks(path="core.py", hunks=["-4"]))
+    printed = _place(plan, index, "Print one", FileHunks(path="cli.py", hunks=["+1"]))
+    returned = _place(plan, index, "Return 10", FileHunks(path="core.py", hunks=["-4"]))
+    printed.notes = LineNote.placed(
+        [FileNote(path="cli.py", line="+2", note="Prints")], printed.lines
+    )
+    returned.notes = LineNote.placed(
+        [
+            FileNote(path="core.py", line="-4", note="Was 1"),
+            FileNote(path="core.py", line="+4", note="Now 10"),
+        ],
+        returned.lines,
+    )
+    with pytest.raises(RangeError, match="no available changed line"):
+        LineNote.placed([FileNote(path="core.py", line="+4", note="x")], printed.lines)
 
     new_head = _commit(
         repo,
@@ -234,6 +248,12 @@ async def test_a_push_keeps_planned_lines_git_kept_and_new_lines_join_their_hunk
     )
     new_index, carry = await _carry(checkout, head, base, new_head)
     moved = plan.carried_to(new_head, new_index, carry)
+
+    # A note follows its line as git moves it, and goes with a line git dropped.
+    assert [[(n.at.name, n.note) for n in c.notes] for c in moved.chunks] == [
+        [("+3", "Prints")],
+        [("-4", "Was 1")],
+    ]
 
     assert [(c.title, c.lines) for c in moved.chunks] == [
         ("Print one", _added("cli.py", (2, 3))),

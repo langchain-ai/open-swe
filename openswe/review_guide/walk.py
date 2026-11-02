@@ -270,11 +270,16 @@ class Reader:
         lines = self.remaining(chunk.lines)
         number = self.plan.number_of(chunk.id)
         header = f"*{number}/{len(self.plan.chunks)} · {chunk.title}*"
+        notes = "".join(
+            f"\n• `{note.at.path}` {note.at.name}: {note.note}"
+            for note in chunk.notes
+            if note.at in lines
+        )
         return OnScreen(
             chunk_id=chunk.id,
             title=chunk.title,
             lines=lines,
-            message_text=f"{header}\n{chunk.explanation}\n\n{chunk.code}".strip(),
+            message_text=f"{header}\n{chunk.explanation}{notes}\n\n{chunk.code}".strip(),
             code=chunk.code.strip(),
         )
 

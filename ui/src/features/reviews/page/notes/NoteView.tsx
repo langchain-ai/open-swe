@@ -14,6 +14,7 @@ import { useReviewPage } from "@/features/reviews/page/store"
 import { Composer } from "./Composer"
 import { FindingNote } from "./FindingNote"
 import { NoteFrame } from "./NoteFrame"
+import { StepNote } from "./StepNote"
 import { ThreadNote } from "./ThreadNote"
 
 /**
@@ -58,6 +59,12 @@ function NoteView({
       return (
         <NoteFrame>
           <AgentNoteCard id={note.id} />
+        </NoteFrame>
+      )
+    case "step-note":
+      return (
+        <NoteFrame>
+          <StepNote note={note.note} />
         </NoteFrame>
       )
     case "composer":

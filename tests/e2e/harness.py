@@ -363,7 +363,7 @@ async def control_seed_walkthrough(request: Request) -> JSONResponse:
     from openswe.github.pull_requests import PullRequest
     from openswe.sandbox_scripts.walkthrough import parse_index
     from openswe.walkthrough.diff import DiffIndex
-    from openswe.walkthrough.plan import Plan, PlanChunk
+    from openswe.walkthrough.plan import FileNote, LineNote, Plan, PlanChunk
     from openswe.walkthrough.record import Walkthrough
 
     body = await request.json()
@@ -374,10 +374,14 @@ async def control_seed_walkthrough(request: Request) -> JSONResponse:
         for file in pull["files"]
     )
     index = DiffIndex.model_validate({"files": parse_index(diff.splitlines())})
-    plan = Plan(
-        head_sha=pull["head_sha"],
-        chunks=[PlanChunk(title=str(body.get("title") or "Seeded chunk"), lines=index.lines)],
+    notes = [FileNote.model_validate(note) for note in body.get("notes") or []]
+    chunk = PlanChunk(
+        title=str(body.get("title") or "Seeded chunk"),
+        explanation=str(body.get("explanation") or ""),
+        lines=index.lines,
+        notes=LineNote.placed(notes, index.lines),
     )
+    plan = Plan(head_sha=pull["head_sha"], chunks=[chunk])
     pull_request = await PullRequest(
         owner=pull["owner"], repo=pull["repo"], number=pull["number"]
     ).ensure()
