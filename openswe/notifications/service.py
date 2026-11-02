@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from openswe import event_claims
 from openswe.database import postgres
+from openswe.jobs import queue
 from openswe.notifications.models import Notification
 from openswe.slack.dm import DmOrigin, post_dm
 from openswe.slack.http import SlackRequestError
@@ -20,6 +21,10 @@ from openswe.utils.dashboard_links import dashboard_base_url
 
 logger = logging.getLogger(__name__)
 JOB_KIND = "notification-fallback"
+FALLBACK_DELAY = timedelta(seconds=60)
+_PERMANENT_SLACK_ERRORS = frozenset(
+    {"user_not_found", "account_inactive", "cannot_dm_bot", "user_disabled", "channel_not_found"}
+)
 
 
 class AppNotification(BaseModel):
@@ -62,7 +67,6 @@ class AppNotification(BaseModel):
                     url=url,
                     fallback_text=fallback_text,
                     origin=origin.model_dump(mode="json") if origin else None,
-                    fallback_at=datetime.now(UTC) + timedelta(seconds=60),
                     created_by=by,
                     updated_by=by,
                 )
@@ -71,6 +75,14 @@ class AppNotification(BaseModel):
                 )
             )
             await Topic.NOTIFICATIONS.invalidate(session, key=str(recipient.id))
+        await queue.schedule(
+            JOB_KIND,
+            {"recipient_id": str(recipient.id), "key": key},
+            due_at=datetime.now(UTC) + FALLBACK_DELAY,
+            key=f"{JOB_KIND}:{recipient.id}:{key}",
+            by=by,
+            replace=False,
+        )
 
     @classmethod
     async def send_to_slack(
@@ -146,95 +158,44 @@ class AppNotification(BaseModel):
             return acknowledged_id is not None
 
     @classmethod
-    async def fallback(cls) -> None:
-        async with postgres.session() as session:
-            ids = list(
-                await session.scalars(
-                    select(Notification.id)
-                    .where(
-                        Notification.delivered_at.is_(None),
-                        Notification.fallback_sent_at.is_(None),
-                        Notification.fallback_failed_at.is_(None),
-                        Notification.fallback_at <= func.clock_timestamp(),
-                    )
-                    .order_by(Notification.fallback_at)
-                    .limit(100)
-                )
-            )
-        for notification_id in ids:
-            try:
-                await cls.deliver_fallback(notification_id)
-            except Exception:
-                logger.exception(
-                    "Notification fallback failed", extra={"notification_id": str(notification_id)}
-                )
-
-    @classmethod
-    async def deliver_fallback(cls, notification_id: UUID) -> None:
-        claim = uuid7()
+    async def deliver_fallback(cls, recipient_id: UUID, key: str) -> None:
+        """DM the recipient on Slack unless the app already confirmed delivery."""
         async with postgres.session() as session:
             row = await session.scalar(
-                update(Notification)
-                .where(
-                    Notification.id == notification_id,
+                select(Notification).where(
+                    Notification.recipient_id == recipient_id,
+                    Notification.dedupe_key == key,
                     Notification.delivered_at.is_(None),
                     Notification.fallback_sent_at.is_(None),
-                    Notification.fallback_failed_at.is_(None),
-                    Notification.fallback_at <= func.clock_timestamp(),
                 )
-                .values(
-                    fallback_claim=claim,
-                    fallback_attempts=Notification.fallback_attempts + 1,
-                    fallback_at=func.clock_timestamp() + timedelta(minutes=5),
-                    updated_at=func.clock_timestamp(),
-                    updated_by=None,
-                )
-                .returning(Notification)
             )
         if row is None:
             return
-        failed = False
-        sent = False
+        recipient = await User.get(recipient_id)
+        if recipient is None or not recipient.slack_user_id:
+            logger.info(
+                "Notification has no Slack fallback", extra={"notification_id": str(row.id)}
+            )
+            return
+        origin = DmOrigin.model_validate(row.origin) if row.origin else None
         try:
-            recipient = await User.get(row.recipient_id)
-            if recipient is None or not recipient.slack_user_id:
-                failed = True
-            else:
-                origin = DmOrigin.model_validate(row.origin) if row.origin else None
-                await post_dm(recipient.slack_user_id, row.fallback_text, origin=origin)
-                sent = True
-        except Exception as exc:
-            failed = row.fallback_attempts >= 5 or (
-                isinstance(exc, SlackRequestError)
-                and exc.code
-                in {
-                    "user_not_found",
-                    "account_inactive",
-                    "cannot_dm_bot",
-                    "user_disabled",
-                    "channel_not_found",
-                }
-            )
+            await post_dm(recipient.slack_user_id, row.fallback_text, origin=origin)
+        except SlackRequestError as exc:
+            if exc.code not in _PERMANENT_SLACK_ERRORS:
+                raise
             logger.warning(
-                "Notification fallback delivery failed",
-                extra={"notification_id": str(notification_id), "terminal": failed},
-                exc_info=True,
+                "Notification fallback cannot be delivered",
+                extra={"notification_id": str(row.id), "slack_error": exc.code},
             )
+            return
         async with postgres.session() as session:
             await session.execute(
                 update(Notification)
-                .where(Notification.id == notification_id, Notification.fallback_claim == claim)
+                .where(Notification.id == row.id)
                 .values(
-                    fallback_claim=None,
-                    fallback_sent_at=func.clock_timestamp()
-                    if sent
-                    else Notification.fallback_sent_at,
-                    fallback_failed_at=func.clock_timestamp()
-                    if failed
-                    else Notification.fallback_failed_at,
-                    fallback_at=func.clock_timestamp()
-                    + timedelta(seconds=min(3600, 60 * 2 ** min(row.fallback_attempts, 6))),
+                    fallback_sent_at=func.clock_timestamp(),
                     updated_at=func.clock_timestamp(),
                     updated_by=None,
                 )
             )
+            await Topic.NOTIFICATIONS.invalidate(session, key=str(recipient_id))

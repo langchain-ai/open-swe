@@ -891,14 +891,22 @@ async def control_notification(request: Request) -> JSONResponse:
 
 @app.post("/control/notifications/fallback")
 async def control_notification_fallback() -> JSONResponse:
+    from uuid import UUID
+
     from sqlalchemy import text
 
     from openswe.database import postgres
-    from openswe.notifications.service import AppNotification
+    from openswe.notifications.service import JOB_KIND, AppNotification
 
     async with postgres.transaction() as conn:
-        await conn.execute(text("UPDATE app_notification SET fallback_at = clock_timestamp()"))
-    await AppNotification.fallback()
+        due = (
+            await conn.execute(
+                text("DELETE FROM job WHERE kind = :kind RETURNING payload"), {"kind": JOB_KIND}
+            )
+        ).scalars()
+        payloads = list(due)
+    for payload in payloads:
+        await AppNotification.deliver_fallback(UUID(payload["recipient_id"]), payload["key"])
     return JSONResponse({"ok": True})
 
 

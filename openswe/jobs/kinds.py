@@ -8,6 +8,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Final
+from uuid import UUID
 
 from pydantic import JsonValue
 
@@ -253,8 +254,10 @@ async def _wake_thread(job: Job) -> None:
 
 
 @WORKER.register(NOTIFICATION_FALLBACK)
-async def notification_fallback(_job: Job) -> None:
-    await AppNotification.fallback()
+async def notification_fallback(job: Job) -> None:
+    await AppNotification.deliver_fallback(
+        UUID(str(job.payload["recipient_id"])), str(job.payload["key"])
+    )
 
 
 async def start_jobs() -> None:
@@ -264,7 +267,6 @@ async def start_jobs() -> None:
         import_agent_server_threads,
         start_queue,
         ensure_directory_sync,
-        lambda: queue.schedule(NOTIFICATION_FALLBACK, cron="* * * * *", key=NOTIFICATION_FALLBACK),
         schedule_slack_lost_requests,
         lambda: queue.schedule(
             THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE

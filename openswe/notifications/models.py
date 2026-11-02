@@ -20,7 +20,6 @@ class Notification(Base):
     body: Mapped[str]
     url: Mapped[str]
     fallback_text: Mapped[str]
-    fallback_at: Mapped[datetime]
     created_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     updated_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     origin: Mapped[JsonObject | None] = mapped_column(JSONB, default=None)
@@ -29,6 +28,3 @@ class Notification(Base):
     updated_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
     delivered_at: Mapped[datetime | None] = mapped_column(default=None)
     fallback_sent_at: Mapped[datetime | None] = mapped_column(default=None)
-    fallback_failed_at: Mapped[datetime | None] = mapped_column(default=None)
-    fallback_claim: Mapped[UUID | None] = mapped_column(default=None)
-    fallback_attempts: Mapped[int] = mapped_column(default=0)

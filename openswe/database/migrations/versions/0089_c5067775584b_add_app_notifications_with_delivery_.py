@@ -24,7 +24,6 @@ def upgrade() -> None:
             url text NOT NULL,
             fallback_text text NOT NULL,
             origin jsonb,
-            fallback_at timestamptz NOT NULL,
             delivered_at timestamptz,
             fallback_sent_at timestamptz
         )
@@ -33,7 +32,7 @@ def upgrade() -> None:
         "CREATE UNIQUE INDEX app_notification_dedupe ON app_notification (recipient_id, dedupe_key)"
     )
     op.execute(
-        "CREATE INDEX app_notification_pending ON app_notification (fallback_at) WHERE delivered_at IS NULL AND fallback_sent_at IS NULL"
+        "CREATE INDEX app_notification_pending ON app_notification (recipient_id, created_at) WHERE delivered_at IS NULL AND fallback_sent_at IS NULL"
     )
 
 
