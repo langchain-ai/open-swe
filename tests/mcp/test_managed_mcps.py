@@ -117,6 +117,7 @@ async def test_gateway_status_reads_missing_services_under_either_policy(monkeyp
 
 
 async def test_inventory_includes_later_pages_and_their_missing_connections(monkeypatch):
+    monkeypatch.setattr(managed, "_MAX_PAGES", 2)
     client = managed._gateway_client({}, GATEWAY_ID)
     pages = [
         ListToolsResult.model_validate(
@@ -153,6 +154,20 @@ async def test_inventory_includes_later_pages_and_their_missing_connections(monk
     inventory = await managed.gateway_inventory("alice", GATEWAY_ID)
     assert [tool.name for tool in inventory.tools] == ["notion_search", "calendar_list"]
     assert [item.slug for item in inventory.missing] == ["linear"]
+
+
+async def test_tool_listing_rejects_incomplete_results_at_the_page_limit(monkeypatch):
+    client = managed._gateway_client({}, GATEWAY_ID)
+    pages = [
+        ListToolsResult.model_validate(
+            {"tools": [{"name": f"tool_{index}", "inputSchema": {}}], "nextCursor": "next"}
+        )
+        for index in range(managed._MAX_PAGES)
+    ]
+    monkeypatch.setattr(client, "list_tools_mcp", AsyncMock(side_effect=pages))
+
+    with pytest.raises(managed.ManagedToolsError, match="page limit"):
+        await managed._list_tools(client)
 
 
 async def test_built_ins_sharing_a_langsmith_app_each_keep_their_own_consent_link(monkeypatch):

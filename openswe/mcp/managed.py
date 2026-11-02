@@ -501,7 +501,9 @@ async def _with_session[T](
 
 async def _list_tools(client: Client[StreamableHttpTransport]) -> ListToolsResult:
     result = await client.list_tools_mcp()
-    while result.next_cursor:
+    for _ in range(_MAX_PAGES - 1):
+        if not result.next_cursor:
+            return result
         page = await client.list_tools_mcp(cursor=result.next_cursor)
         result.tools.extend(page.tools)
         missing = [
@@ -512,6 +514,10 @@ async def _list_tools(client: Client[StreamableHttpTransport]) -> ListToolsResul
         ]
         result.meta = {_MISSING_CREDENTIALS_META: missing}
         result.next_cursor = page.next_cursor
+    if result.next_cursor:
+        raise ManagedToolsError(
+            "Managed tools listing exceeded the page limit; narrow the tool kit"
+        )
     return result
 
 
