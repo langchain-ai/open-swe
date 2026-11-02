@@ -1411,3 +1411,32 @@ async def test_a_slack_thread_another_thread_holds_keeps_it(
     await _JOIN_CONCIERGE("D1", CONCIERGE_TS, _DM_THREAD)
 
     bind.assert_awaited_once_with("D1", "171.1", _DM_THREAD)
+
+
+async def test_explain_this_through_trigger_server_is_answered_as_before(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = _click_app(monkeypatch)
+    ask = AsyncMock()
+    monkeypatch.setattr(slack_routes, "process_slack_ask", ask)
+    shortcut: dict[str, JsonValue] = {
+        "type": "message_action",
+        "callback_id": "open_swe_explain",
+        "trigger_id": "trigger-1",
+        "team": {"id": "T1"},
+        "user": {"id": "U9"},
+        "channel": {"id": "C1"},
+        "message": {"ts": "171.2", "thread_ts": "171.1", "text": "What does this do?"},
+        "response_url": "https://hooks.slack.com/app/T1/1/abc",
+    }
+
+    await _act(app, shortcut)
+
+    ask.assert_awaited_once()
+    [request] = ask.await_args.args
+    # As the person Trigger Server verified, answered through the shortcut's response_url.
+    assert (request.user_id, request.selected_message, request.response_url) == (
+        "U1",
+        "What does this do?",
+        "https://hooks.slack.com/app/T1/1/abc",
+    )

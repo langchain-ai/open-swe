@@ -103,6 +103,6 @@ def test_the_channel_asks_its_handlers_for_every_message_and_click() -> None:
 
     handlers = channel.on_event or {}
     assert channel.multitask_strategy == "interrupt"
-    assert set(handlers) == {"mention", "directMessage", "message", "interaction"}
+    assert set(handlers) == {"mention", "directMessage", "message", "interaction", "shortcut"}
     assert all(handlers[key] is slack.start_turn for key in ("mention", "directMessage", "message"))
     assert handlers["interaction"] is start_click

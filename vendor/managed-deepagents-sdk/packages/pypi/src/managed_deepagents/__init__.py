@@ -119,6 +119,9 @@ if TYPE_CHECKING:
     )
     from managed_deepagents._channels.runtime import RuntimeChannel
     from managed_deepagents._channels.slack.events import (
+        SlackActivityCallback,
+        SlackActivityEvent,
+        SlackActivityKey,
         SlackActor,
         SlackChannelThread,
         SlackEndpointRequest,
@@ -371,6 +374,9 @@ _EXPORTS: dict[str, str] = {
     "SlackEventKey": "managed_deepagents._channels.slack.events",
     "SlackFile": "managed_deepagents._channels.slack.events",
     "SlackHandlers": "managed_deepagents._channels.slack.events",
+    "SlackActivityCallback": "managed_deepagents._channels.slack.events",
+    "SlackActivityEvent": "managed_deepagents._channels.slack.events",
+    "SlackActivityKey": "managed_deepagents._channels.slack.events",
     "SlackInteractionCallback": "managed_deepagents._channels.slack.events",
     "SlackInteractionEvent": "managed_deepagents._channels.slack.events",
     "SlackMessageEvent": "managed_deepagents._channels.slack.events",
@@ -580,6 +586,9 @@ __all__ = [
     "SharedAgentFactory",
     "SharedInputs",
     "SkillSelection",
+    "SlackActivityCallback",
+    "SlackActivityEvent",
+    "SlackActivityKey",
     "SlackActor",
     "SlackChannelThread",
     "SlackEndpointRequest",

@@ -84,6 +84,7 @@ from managed_deepagents._channels.trigger.types import (
     TriggerChannelInterrupt,
     TriggerChannelInterruptResumeEvent,
     TriggerChannelMessageEvent,
+    TriggerChannelProviderEvent,
     TriggerChannelResume,
     TriggerChannelRunCancelEvent,
     TriggerChannelRunEvent,
@@ -183,6 +184,13 @@ DecideMessageFn = Callable[
 ]
 """Decide what a message event starts, before its run; ``None`` starts it with
 ``message_input``'s messages. Interrupt resumes never ask."""
+
+DecideProviderEventFn = Callable[
+    [TriggerChannelProviderEvent, TriggerChannelThread, "ChannelActor | None"],
+    Awaitable[TriggerMessageRoute | None],
+]
+"""Decide what a provider event the channel asked for starts, such as a Slack
+edit or reaction; ``None`` starts nothing."""
 
 DecideInteractionFn = Callable[
     [TriggerChannelUserPromptResponseEvent, TriggerChannelThread, "ChannelActor | None"],
@@ -478,13 +486,13 @@ async def _start_event_run(
             binding=binding,
         )
         return started, source_thread_key
-    if event["type"] == "message" or event["type"] == "user_prompt_response":
+    if event["type"] in ("message", "user_prompt_response", "provider_event"):
         start = start_agent or start_ingress_agent
         options: dict[str, object] = {}
         if multitask_strategy is not None:
             options["multitask_strategy"] = multitask_strategy
         if decided is None:
-            if event["type"] == "user_prompt_response":
+            if event["type"] != "message":
                 messages = []
             elif message_input is not None:
                 messages = message_input(event)
@@ -651,6 +659,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     only_continues_thread: OnlyContinuesThreadFn | None = None,
     decide_message: DecideMessageFn | None = None,
     decide_interaction: DecideInteractionFn | None = None,
+    decide_provider_event: DecideProviderEventFn | None = None,
     multitask_strategy: MultitaskStrategy | None = None,
     on_finish: HttpOnFinish | None = None,
     identity_context_key: IdentityContextKey | None = None,
@@ -827,7 +836,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             return _start_failed_response()
     # Whether the delivery starts a turn of its own, which finishes: a message,
     # or a prompt response that answers no interrupt. Resumes don't.
-    starts_turn = event["type"] == "message" or (
+    starts_turn = event["type"] in ("message", "provider_event") or (
         event["type"] == "user_prompt_response" and answered_interrupt is None
     )
 
@@ -1014,6 +1023,13 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         decision = await decide_message(event, thread, actor)
     elif starts_turn and event["type"] == "user_prompt_response" and decide_interaction is not None:
         decision = await decide_interaction(event, thread, actor)
+    elif event["type"] == "provider_event":
+        # Only a handler starts a run for a provider event.
+        decision = (
+            await decide_provider_event(event, thread, actor)
+            if decide_provider_event is not None
+            else None
+        ) or TriggerMessageDecision("skipped")
     if isinstance(decision, TriggerMessageBackground):
         decide = decision.decide
 

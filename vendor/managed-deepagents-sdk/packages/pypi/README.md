@@ -616,6 +616,38 @@ is answered from the Slack thread that started the run. Every thread a
 channel's handlers choose is owned by the channel, not by one Slack thread.
 An ephemeral thread is deleted once its run ends, unless it waits on a decision.
 
+An `edit`, `delete` or `reaction` handler takes what happened to a message: a
+`SlackActivityEvent` with `message_ts`, `thread_ts`, the message's `text` (as
+edited, as it was before it was deleted, or as reacted to), `user_id` (the
+author for an edit or deletion, the person who reacted for a reaction),
+`reaction` and `removed`, and Slack's event as `payload`. It starts only the
+run it returns:
+
+```python
+def on_reaction(event: SlackActivityEvent, thread: SlackChannelThread):
+    if event.reaction == "thumbsup" and not event.removed:
+        return (f"<@{event.user_id}> liked: {event.text}", {"multitask_strategy": "enqueue"})
+    return None
+
+
+channel = channels.slack(on_event={"mention": on_mention, "reaction": on_reaction})
+```
+
+The channel asks Trigger Server for these events only when it has a handler for
+their key, which needs an `mda` CLI that sends `forwardedEvents`. Trigger Server
+forwards one only for a thread the channel already took a message from, unless
+the channel takes every message (`trigger_mode="all"`) or it is in a direct
+message, and never your agent's own edits or reactions. Reactions need the Slack
+app's `reactions:read` scope: a LangSmith-managed app gets it at the next
+deploy, after a reinstall the workspace may have to approve; a customer-owned
+app's manifest has to add it.
+
+A `shortcut` handler takes one of your Slack app's message shortcuts, used on a
+message: `action_id` is the shortcut's `callback_id`, `user_id` the person who used it,
+and `payload` Slack's interaction payload, with its `response_url` to answer
+them. Trigger Server forwards it wherever a person used it, as a mention. Your
+app defines its shortcuts in its own settings; it needs the `commands` scope.
+
 `event.actor` is the Slack user who sent the message, as Trigger Server read
 it from Slack's signed request: a `SlackActor` with `id` and `team_id`.
 `team_id` is their own workspace: in a Slack Connect channel, someone from

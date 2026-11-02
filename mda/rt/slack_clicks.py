@@ -4,7 +4,8 @@ In this deployment's conversations, the handler checks who may click the agent's
 options, workflow push approvals and Retry, updates the message through
 ``response_url``, and the backend builds the run (``plan_slack_click``), once per
 clicked message. Every other click, and one in a conversation the backend holds, the
-backend acts on as it always has (``act_on_slack_click``).
+backend acts on as it always has (``act_on_slack_click``), and so is a message
+shortcut ("Explain this"), once Slack's Interactivity URL points at Trigger Server.
 """
 
 import json
@@ -17,6 +18,7 @@ import httpx2
 from managed_deepagents import (
     ChannelRunResult,
     JsonValue,
+    SlackActivityEvent,
     SlackChannelThread,
     SlackInteractionEvent,
 )
@@ -89,6 +91,22 @@ async def start_click(
         msg_id=f"msg_{event.delivery_id}",
     )
     return None
+
+
+async def start_shortcut(event: SlackActivityEvent, _thread: SlackChannelThread) -> None:
+    """A message shortcut a person used, which the backend answers through its ``response_url``."""
+    if event.actor is None:
+        return
+    await ask_backend(
+        ACT_ON_SLACK_CLICK,
+        ActOnSlackClick(
+            channel_id=event.channel_id,
+            thread_ts=event.thread_ts,
+            user_id=event.actor.id,
+            payload=event.payload,
+        ),
+        msg_id=f"msg_{event.delivery_id}",
+    )
 
 
 class _Click:

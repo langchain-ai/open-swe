@@ -13,7 +13,7 @@ so the channel posts nothing itself.
 
 from managed_deepagents import channels
 from rt.slack import start_turn
-from rt.slack_clicks import start_click
+from rt.slack_clicks import start_click, start_shortcut
 
 channel = channels.slack(
     # The backend decides what reaches the channel, so every forwarded message counts.
@@ -28,5 +28,7 @@ channel = channels.slack(
         "directMessage": start_turn,
         "message": start_turn,
         "interaction": start_click,
+        # Explain this: Trigger Server forwards message shortcuts as Slack sends them.
+        "shortcut": start_shortcut,
     },
 )

@@ -170,6 +170,11 @@ pub(crate) struct SlackChannelOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) trigger_mode: Option<SlackTriggerMode>,
     pub(crate) allow_bot_triggers: bool,
+    /// The Slack events besides messages the channel's handlers take, which
+    /// Trigger Server forwards. Always sent, so removing the handlers stops
+    /// them; Trigger Servers that predate it ignore it.
+    #[serde(default)]
+    pub(crate) forwarded_events: Vec<String>,
 }
 
 /// Which channel messages start a run; DMs always do.
@@ -275,6 +280,14 @@ impl Client {
         if let Some(mode) = options.trigger_mode {
             query.push(("trigger_mode", mode.as_str()));
         }
+        // Each forwarded event adds its event subscription and scopes to the
+        // app, one query parameter apiece.
+        query.extend(
+            options
+                .forwarded_events
+                .iter()
+                .map(|event| ("forwarded_events", event.as_str())),
+        );
         let response = self.trigger_get(
             &["v1", "triggers", "slack-custom-app", "manifest"],
             &query,
@@ -1167,6 +1180,7 @@ mod tests {
         let (origin, receiver) = serve_once("200 OK", &[], &manifest.to_string());
         let mut options = request().slack.options;
         options.trigger_mode = Some(SlackTriggerMode::Thread);
+        options.forwarded_events = vec!["message_changed".into(), "reaction_added".into()];
 
         let fetched = client(None, &origin)
             .slack_app_manifest(&request().slack.app, &options)
@@ -1179,5 +1193,6 @@ mod tests {
         assert!(path.contains("name=Managed+Deep+Agent"));
         assert!(path.contains("trigger_on_all_messages=false"));
         assert!(path.contains("trigger_mode=thread"));
+        assert!(path.contains("forwarded_events=message_changed&forwarded_events=reaction_added"));
     }
 }

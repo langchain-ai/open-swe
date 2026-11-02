@@ -302,6 +302,7 @@ The agent replies with Open SWE's Slack tools (`reply="none"`), and the channel 
 
 Every Slack click goes to the channel too: `/webhooks/slack/interactivity` forwards it unchanged to Trigger Server's interactivity URL (`TRIGGER_INTERACTIVITY_URL`), after answering Slack, so the Slack app's Interactivity URL can move to Trigger Server with no code change.
 Only "Explain this" (a message shortcut), code channel views and the options they load (`block_suggestion`), and modals the backend opened itself stay on the backend.
+Once the URL points at Trigger Server, "Explain this" comes to the channel's `shortcut` handler (MDA #1175 with LangSmith Trigger Server forwarding `message_action`), which hands it to `act_on_slack_click` too.
 Where Trigger Server refuses a click (an environment without MDA), the backend acts on it after all.
 The handler (`rt/slack_clicks.py`) takes the clicker Trigger Server verified, refuses an option meant for someone else and a Retry by anyone but its requester (an ephemeral reply, nothing started), and updates the clicked message through its `response_url`; Retry removes its button before anything runs.
 The backend's `plan_slack_click` finds the click's conversation from its own bindings, acts on each clicked message once (a call MDA sends again under its `webhook-id` gets its run again), decides a workflow push under its lock, finds the message a Retry sends again, and builds and signs the run, which redirects or waits as a message would.
@@ -332,7 +333,7 @@ Which conversations go where (`mda_can_start` in `openswe/slack/mda_forwarding.p
 | A person's @mention of Open SWE in a channel, as a new message or in a thread Open SWE isn't in yet | Code channels (one session per channel), which MDA can't hold yet |
 | A person's DM to Open SWE (a thread per message) | Bots' messages, breakouts, `/btw`, slash commands |
 | A kitchen channel's untagged messages, each Slack thread its own conversation, routed to the channel's workspace | Every conversation the backend already holds, a concierge DM included: one never moves |
-| A new concierge DM, as one conversation on one thread | "Explain this", code channel views and the options they load: Trigger Server takes none of them |
+| A new concierge DM, as one conversation on one thread | "Explain this" while Slack's URL points at the backend (MDA's `shortcut` handler takes it after the move); code channel views and the options they load |
 | Every later message in those conversations, and Slack's Stop | Reactions (`:x:` stop, feedback), edits and `thread_broadcast` replies: Trigger Server doesn't take them. In MDA's conversations these do nothing yet; Slack's Stop works |
 | Every click: the agent's options, workflow push approvals and Retry in those conversations start their run in MDA; the backend acts on every other one (`act_on_slack_click`) | Modals the backend opened itself, before their cards opened them through Trigger Server |
 

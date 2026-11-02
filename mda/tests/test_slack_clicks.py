@@ -8,7 +8,12 @@ from typing import Any, Literal, cast
 
 import pytest
 import rt.slack_clicks as clicks
-from managed_deepagents import SlackActor, SlackChannelThread, SlackInteractionEvent
+from managed_deepagents import (
+    SlackActivityEvent,
+    SlackActor,
+    SlackChannelThread,
+    SlackInteractionEvent,
+)
 from managed_deepagents._channels.http.types import ChannelName
 from pydantic import BaseModel
 from runtime_api.endpoint import Endpoint
@@ -352,3 +357,27 @@ def test_a_submitted_modal_is_the_backends(monkeypatch: pytest.MonkeyPatch) -> N
 
     [acted] = slack.acted
     assert (acted.channel_id, acted.thread_ts) == ("D1", "171.5")
+
+
+def test_a_message_shortcut_is_the_backends_as_the_person_who_used_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slack = _Slack(monkeypatch, SlackClickStart())
+    shortcut = SlackActivityEvent(
+        key="shortcut",
+        delivery_id="delivery-1",
+        channel_id="C1",
+        message_ts="171.2",
+        thread_ts="171.1",
+        text="What does this do?",
+        payload={"type": "message_action", "callback_id": "open_swe_explain"},
+        user_id="U3",
+        action_id="open_swe_explain",
+        actor=SlackActor(id="U3", team_id="T1"),
+    )
+
+    asyncio.run(clicks.start_shortcut(shortcut, _THREAD))
+
+    [acted] = slack.acted
+    assert (acted.user_id, acted.channel_id, acted.thread_ts) == ("U3", "C1", "171.1")
+    assert acted.payload["callback_id"] == "open_swe_explain"
