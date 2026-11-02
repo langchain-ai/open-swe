@@ -276,13 +276,15 @@ def render_out_of_diff_section(findings: list[Finding]) -> str:
 APPROVAL_CONDITION_MAX_CHARS = 200
 AUTO_APPROVED_MAX_CHARS = 500
 
+ReviewDecision = Literal["would_approve", "would_approve_conditionally", "needs_human_review"]
+
 
 class ReviewAssessment(BaseModel):
     """Advisory judgment for the exact commit the reviewer inspected."""
 
     head_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
     risk_score: int = Field(ge=1, le=5, strict=True)
-    decision: Literal["would_approve", "would_approve_conditionally", "needs_human_review"]
+    decision: ReviewDecision
     explanation: str = Field(min_length=1, max_length=1500)
     approval_condition: str | None = Field(
         default=None, min_length=1, max_length=APPROVAL_CONDITION_MAX_CHARS
