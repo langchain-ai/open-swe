@@ -57,9 +57,11 @@ async def start_click(
 ) -> ChannelRunResult | None:
     actor = event.actor
     value = _button(event.value)
-    if actor is None or event.message_ts is None or value is None:
+    # The agent's buttons sit on a message in a Slack thread; a click in a code
+    # channel's view has neither.
+    if actor is None or event.message_ts is None or event.thread_ts is None or value is None:
         return None
-    click = _Click(event, thread, actor.id, value)
+    click = _Click(event, thread, actor.id, value, (event.thread_ts, event.message_ts))
     match value.get("type"):
         case "open_swe_option":
             return await click.option()
@@ -77,11 +79,13 @@ class _Click:
         thread: SlackChannelThread,
         clicker: str,
         value: dict[str, JsonValue],
+        message: tuple[str, str],
     ) -> None:
         self.event = event
         self.thread = thread
         self.clicker = clicker
         self.value = value
+        self.thread_ts, self.message_ts = message
         self.message = _mapping(event.payload.get("message"))
         self.action = _first_option_action(event.payload.get("actions"))
         self.response_url = _response_url(event.payload.get("response_url"))
@@ -151,9 +155,9 @@ class _Click:
             PlanSlackClick(
                 thread_id=self.thread.id,
                 channel_id=self.event.channel_id,
-                thread_ts=self.event.thread_ts,
-                message_ts=cast(str, self.event.message_ts),
-                action_ts=_text(self.action.get("action_ts")) or cast(str, self.event.message_ts),
+                thread_ts=self.thread_ts,
+                message_ts=self.message_ts,
+                action_ts=_text(self.action.get("action_ts")) or self.message_ts,
                 user_id=self.clicker,
                 team_id=_text(team.get("id")),
                 click=click,
