@@ -26,7 +26,7 @@ dependencies = [
     "markdown-it-py==4.2.0",
     "langchain-anthropic>=1.7.7",
     "langgraph-cli[inmem]>=0.4.40",
-    "langsmith>=0.14.16",
+    "langsmith>=0.14.17",
     "langchain-openai>=1.7.3,<2.0.0",
     "openai>=3.10.0",
     "langchain-fireworks>=1.7.1",
