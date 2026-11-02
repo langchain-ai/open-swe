@@ -1,5 +1,6 @@
 import { Button } from "@langchain/macaw-components/Button"
-import { ButtonGroup } from "@langchain/macaw-components/ButtonGroup"
+import { CodeIcon } from "@phosphor-icons/react/dist/ssr/Code"
+import { HouseIcon } from "@phosphor-icons/react/dist/ssr/House"
 import { useNavigate } from "@tanstack/react-router"
 import { cn } from "@/lib/utils"
 import { useDesktopExperience } from "@/lib/experience"
@@ -13,26 +14,29 @@ export function ExperienceSelector({
   const navigate = useNavigate()
   if (!experience) return null
   return (
-    <div className="px-space-4 pb-space-4" role="group" aria-label="Experience">
-      <ButtonGroup
-        size="md"
-        color="secondary"
-        variant="outlined"
-        className="w-full [&>*:not(:first-child)]:border-l [&>*:not(:first-child)]:border-l-transparent"
+    <div className="px-space-2 pb-space-4">
+      <div
+        className="flex rounded-lg bg-surface-level-3"
+        role="group"
+        aria-label="Experience"
       >
         {(
           [
-            ["agent_workspace", "Work"],
-            ["coding", "Coding"],
+            ["agent_workspace", "Home", HouseIcon],
+            ["coding", "Code", CodeIcon],
           ] as const
-        ).map(([value, label]) => (
+        ).map(([value, label, Icon]) => (
           <Button
             key={value}
+            size="md"
+            color="secondary"
+            variant="plain"
+            leftDecorator={Icon}
             aria-pressed={experience === value}
             className={cn(
-              "min-w-0 flex-1 basis-0 justify-center text-center",
+              "min-w-0 flex-1 basis-0 rounded-lg text-center",
               experience === value &&
-                "bg-surface-level-4 font-semibold text-primary"
+                "border-strong bg-surface-level-4 text-primary hover:bg-surface-level-4 dark:hover:bg-surface-level-4"
             )}
             onClick={() => {
               select(value)
@@ -43,7 +47,7 @@ export function ExperienceSelector({
             {label}
           </Button>
         ))}
-      </ButtonGroup>
+      </div>
     </div>
   )
 }
