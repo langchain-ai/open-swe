@@ -342,7 +342,13 @@ describe("My PRs", () => {
   it("enables auto-merge for pending checks without marking the PR merged", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
-      pullRequests: [pull(1, { ci: "pending", pendingChecks: ["Tests"] })],
+      pullRequests: [
+        pull(1, {
+          ci: "pending",
+          pendingChecks: ["Tests"],
+          requiredChecksPassing: false,
+        }),
+      ],
     })
     vi.mocked(api.mergePullRequest).mockResolvedValue({
       action: "merge",
@@ -742,7 +748,9 @@ describe("My PRs", () => {
     async (ci, requiredChecksPassing) => {
       vi.mocked(api.openPullRequests).mockResolvedValue({
         ...payload,
-        pullRequests: [pull(1, { ci, requiredChecksPassing })],
+        pullRequests: [
+          pull(1, { ci, requiredChecksPassing, mergeState: "unstable" }),
+        ],
       })
       mount()
       await screen.findByText("Change 1")

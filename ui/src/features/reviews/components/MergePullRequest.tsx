@@ -78,7 +78,7 @@ export function MergePullRequest({
     <SplitButton
       disabled={
         !pr.headSha ||
-        pr.requiredChecksPassing !== true ||
+        (!autoMerge && pr.requiredChecksPassing !== true) ||
         busy ||
         allowed.isPending
       }
