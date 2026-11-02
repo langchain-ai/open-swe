@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import { loginUrl } from "./api"
 import {
@@ -20,7 +20,22 @@ beforeEach(() => {
   window.history.pushState({}, "", "/")
 })
 
+afterEach(() => {
+  Reflect.deleteProperty(window, "openSweDesktop")
+})
+
 describe("auth redirect helpers", () => {
+  it("keeps the selected login provider and redirect independent of desktop branding", () => {
+    expect(loginUrl("/agents")).toContain("/auth/login?")
+    expect(loginUrl("/agents", "langsmith")).toContain("/auth/langsmith/login?")
+    Object.defineProperty(window, "openSweDesktop", {
+      configurable: true,
+      value: { isDesktop: true },
+    })
+    expect(loginUrl("/agents", "github")).toContain("/auth/login?")
+    expect(loginUrl("/agents", "langsmith")).toContain("redirect_to=%2Fagents")
+  })
+
   it("captures protected route targets as relative paths", () => {
     const path = authRedirectPathFromLocation({
       pathname: "/agents/thread-1/plan",

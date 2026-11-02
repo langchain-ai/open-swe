@@ -1,4 +1,9 @@
 import {
+  desktopExperience,
+  useDesktopExperience,
+  type Experience,
+} from "@/lib/experience"
+import {
   mergeTaskFamily,
   sidebarRefreshInterval,
   threadFamily,
@@ -49,6 +54,7 @@ export const agentThreadKeys = {
   lists: ["agent-threads", "lists"] as const,
   pinned: ["agent-threads", "lists", "pinned"] as const,
   repos: (params: {
+    experience?: Experience
     includeResolved: boolean
     includeAutomations: boolean
     owned: boolean
@@ -98,8 +104,9 @@ function patchAgentThread(
     agentThreadKeys.detail(threadId),
     (prev) => (prev ? update(prev) : prev)
   )
-  queryClient.setQueryData<Array<AgentThread>>(agentThreadKeys.pinned, (prev) =>
-    prev?.map(update)
+  queryClient.setQueriesData<Array<AgentThread>>(
+    { queryKey: agentThreadKeys.pinned },
+    (prev) => prev?.map(update)
   )
   queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
     { queryKey: ["agent-threads", "lists", "infinite-pages"] },
@@ -149,8 +156,9 @@ function findCachedAgentThread(
       agentThreadKeys.sidebarActive(threadId)
     ) ??
     queryClient
-      .getQueryData<Array<AgentThread>>(agentThreadKeys.pinned)
-      ?.flatMap(threadFamily)
+      .getQueriesData<Array<AgentThread>>({ queryKey: agentThreadKeys.pinned })
+      .flatMap(([, threads]) => threads ?? [])
+      .flatMap(threadFamily)
       .find(matches) ??
     queryClient
       .getQueriesData<InfiniteData<ThreadsPage>>({
@@ -175,17 +183,24 @@ function setAgentThreadPinned(
   pinned: boolean
 ): void {
   const thread = findCachedAgentThread(queryClient, threadId)
-  queryClient.setQueryData<Array<AgentThread>>(
-    agentThreadKeys.pinned,
-    (prev) => {
+  for (const [key] of queryClient.getQueriesData<Array<AgentThread>>({
+    queryKey: agentThreadKeys.pinned,
+  })) {
+    const experience = key[3] as Experience | undefined
+    queryClient.setQueryData<Array<AgentThread>>(key, (prev) => {
       if (!prev) return prev
       const isPinned = prev.some((candidate) => candidate.id === threadId)
-      if (pinned) return isPinned || !thread ? prev : [thread, ...prev]
+      if (pinned)
+        return isPinned ||
+          !thread ||
+          !desktopExperience.includes(thread, experience)
+          ? prev
+          : [...prev, thread]
       return isPinned
         ? prev.filter((candidate) => candidate.id !== threadId)
         : prev
-    }
-  )
+    })
+  }
 }
 
 function updateThreadPageResolved(
@@ -278,7 +293,6 @@ export async function beginAgentThreadUpdate(
     }),
     queryClient.cancelQueries({
       queryKey: agentThreadKeys.pinned,
-      exact: true,
     }),
     queryClient.cancelQueries({
       queryKey: ["agent-threads", "lists", "infinite-pages"],
@@ -341,8 +355,8 @@ export function markAgentThreadViewed(
     agentThreadKeys.sidebarActive(threadId),
     (prev) => (prev ? view(prev) : prev)
   )
-  queryClient.setQueryData<Array<AgentThread>>(
-    agentThreadKeys.pinned,
+  queryClient.setQueriesData<Array<AgentThread>>(
+    { queryKey: agentThreadKeys.pinned },
     (prev) => (prev ? viewList(prev) : prev)
   )
   queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
@@ -400,8 +414,9 @@ export function setAgentThreadResolved(
     agentThreadKeys.detail(threadId),
     (prev) => (prev ? update(prev) : prev)
   )
-  queryClient.setQueryData<Array<AgentThread>>(agentThreadKeys.pinned, (prev) =>
-    prev?.map(update)
+  queryClient.setQueriesData<Array<AgentThread>>(
+    { queryKey: agentThreadKeys.pinned },
+    (prev) => prev?.map(update)
   )
   for (const [key] of queryClient.getQueriesData<InfiniteData<ThreadsPage>>({
     queryKey: ["agent-threads", "lists", "infinite-pages"],
@@ -668,9 +683,13 @@ function sidebarPageParams({
 }
 
 export function useSidebarPinnedThreads({ enabled = true } = {}) {
+  const { experience } = useDesktopExperience()
   return useQuery({
-    queryKey: agentThreadKeys.pinned,
-    queryFn: agentsApi.listPinnedThreads,
+    queryKey: experience
+      ? [...agentThreadKeys.pinned, experience]
+      : agentThreadKeys.pinned,
+    queryFn: () => agentsApi.listPinnedThreads(experience),
+    select: (threads) => desktopExperience.filter(threads, experience),
     enabled,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
@@ -691,7 +710,13 @@ export function useSidebarRepos({
   includeClaudeCode?: boolean
   enabled?: boolean
 }) {
-  const params = { includeAutomations, includeResolved, owned }
+  const { experience } = useDesktopExperience()
+  const params = {
+    includeAutomations,
+    includeResolved,
+    owned,
+    ...(experience ? { experience } : {}),
+  }
   const hydrated = useSidebarPrefsHydrated()
   return useQuery({
     queryKey: agentThreadKeys.repos({ ...params, includeClaudeCode }),
@@ -701,7 +726,12 @@ export function useSidebarRepos({
         ...excludedSources(includeClaudeCode),
       }),
     enabled: enabled && hydrated,
-    placeholderData: (previous) => previous,
+    placeholderData: (previous, query) =>
+      query?.queryKey[3] &&
+      (query.queryKey[3] as { experience?: Experience }).experience ===
+        experience
+        ? previous
+        : undefined,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
   })
@@ -755,6 +785,7 @@ export function useSidebarActiveThread({
   loadedThreads: Array<AgentThread>
   enabled?: boolean
 }): AgentThread | undefined {
+  const { experience } = useDesktopExperience()
   const active = useCachedAgentThread(activeThreadId)
   const rootId =
     (active?.taskMembership?.role === "worker"
@@ -771,15 +802,19 @@ export function useSidebarActiveThread({
     enabled && !listed && !rootDetail
   )
   const row = listed ?? rootDetail ?? fetched ?? active
-  return (
-    row &&
-    mergeTaskFamily(
-      row,
-      [rootDetail, fetched, active].flatMap((thread) =>
-        thread ? [thread] : []
-      )
-    )
-  )
+  return row && desktopExperience.includes(row, experience)
+    ? desktopExperience.filter(
+        [
+          mergeTaskFamily(
+            row,
+            [rootDetail, fetched, active].flatMap((thread) =>
+              thread ? [thread] : []
+            )
+          ),
+        ],
+        experience
+      )[0]
+    : undefined
 }
 
 function useSidebarThreadPages(
@@ -787,12 +822,19 @@ function useSidebarThreadPages(
   enabled: boolean
 ) {
   const hydrated = useSidebarPrefsHydrated()
-  const query = useInfiniteThreadsPages(params, {
-    enabled: enabled && hydrated,
-    pollWhileRunning: true,
-  })
+  const { experience } = useDesktopExperience()
+  const query = useInfiniteThreadsPages(
+    { ...params, ...(experience ? { experience } : {}) },
+    {
+      enabled: enabled && hydrated,
+      pollWhileRunning: true,
+    }
+  )
   return {
-    items: query.data?.pages.flatMap((page) => page.items) ?? [],
+    items: desktopExperience.filter(
+      query.data?.pages.flatMap((page) => page.items) ?? [],
+      experience
+    ),
     hasMore: query.hasNextPage,
     isFetchingNextPage: query.isFetchingNextPage,
     isPending: query.isPending,
@@ -1662,7 +1704,11 @@ export function useThreadsPage(
     queryKey: agentThreadKeys.page(params),
     queryFn: () => agentsApi.listThreadsPage(params),
     enabled: options.enabled,
-    placeholderData: (prev) => prev,
+    placeholderData: (prev, query) =>
+      (query?.queryKey[3] as ThreadsPageParams | undefined)?.experience ===
+      params.experience
+        ? prev
+        : undefined,
     refetchInterval: (query) =>
       options.pollWhileRunning
         ? sidebarRefreshInterval(query.state.data?.items)

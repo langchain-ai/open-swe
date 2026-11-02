@@ -93,7 +93,7 @@ export function useRepos() {
         throw e
       }
     },
-    enabled: !!session.data,
+    enabled: !!session.data && session.data.auth_provider !== "langsmith",
     initialData: cached?.payload,
     initialDataUpdatedAt: cached?.updatedAt,
     staleTime: REPOS_STALE_TIME_MS,

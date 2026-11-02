@@ -9,6 +9,7 @@ import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 
 import { LogoMark } from "@/components/Branding"
 import { loginUrl } from "@/lib/api"
+import { appDistribution } from "@/lib/pageTitle"
 import { pageTitle } from "@/lib/pageTitle"
 import {
   DEFAULT_AUTH_REDIRECT,
@@ -61,19 +62,35 @@ function Login() {
         className="flex w-full max-w-md flex-col gap-space-5 p-space-6 shadow-md"
       >
         <div className="flex flex-col items-center gap-space-3 text-center">
-          <LogoMark alt="Open SWE" className="size-8" />
+          <LogoMark alt={appDistribution.name} className="size-8" />
           <Text as="h1" variant="h3">
-            Sign in to Open SWE
+            {`Sign in to ${appDistribution.name}`}
           </Text>
         </div>
+        {appDistribution.isDesktop && (
+          <Button
+            as={<a href={loginUrl(intendedPath, "langsmith")} />}
+            size="md"
+            className="w-full"
+          >
+            Continue with LangSmith
+          </Button>
+        )}
         <Button
-          as={<a href={loginUrl(intendedPath)} />}
+          as={<a href={loginUrl(intendedPath, "github")} />}
           size="md"
+          color={appDistribution.isDesktop ? "secondary" : "primary"}
           leftDecorator={GithubLogoIcon}
           className="w-full"
         >
           Continue with GitHub
         </Button>
+        {appDistribution.isDesktop && (
+          <Text as="p" variant="sm" color="secondary">
+            LangSmith and GitHub sign-ins use separate accounts. Use the same
+            provider to return to your existing chats.
+          </Text>
+        )}
       </Card>
     </main>
   )
