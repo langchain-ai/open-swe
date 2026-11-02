@@ -1,0 +1,52 @@
+{
+  "name": "openswe-plugin-docs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Docs: pages over the Markdown in a repository, edited live together and published as pull requests",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev --port 3100",
+    "build": "vite build && node scripts/inline-bundle.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@langchain/macaw-components": "file:../../ui/vendor/macaw/langchain-macaw-components-2.0.0-alpha.0.tgz",
+    "@langchain/macaw-tokens": "file:../../ui/vendor/macaw/langchain-macaw-tokens-2.0.0-alpha.0.tgz",
+    "@openswe/plugin-sdk": "workspace:*",
+    "@phosphor-icons/react": "^2.1.10",
+    "@tanstack/react-query": "^5.102.8",
+    "@tanstack/react-router": "^1.170.41",
+    "@tanstack/react-start": "^1.168.60",
+    "@tiptap/core": "^3.32.0",
+    "@tiptap/extension-code-block": "^3.32.0",
+    "@tiptap/extension-collaboration": "^3.32.0",
+    "@tiptap/extension-collaboration-caret": "^3.32.0",
+    "@tiptap/extension-image": "^3.32.0",
+    "@tiptap/extension-list": "^3.32.0",
+    "@tiptap/extension-placeholder": "^3.32.0",
+    "@tiptap/extension-table": "^3.32.0",
+    "@tiptap/markdown": "^3.32.0",
+    "@tiptap/pm": "^3.32.0",
+    "@tiptap/react": "^3.32.0",
+    "@tiptap/starter-kit": "^3.32.0",
+    "@tiptap/suggestion": "^3.32.0",
+    "@tiptap/y-tiptap": "^3.0.10",
+    "diff": "^9.0.0",
+    "mermaid": "12.1.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.33"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
+  }
+}

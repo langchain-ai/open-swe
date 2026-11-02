@@ -4,7 +4,7 @@ An app (a plugin) is one self-contained HTML file published to Open SWE. People 
 
 Most apps are built by an agent, for one person and one purpose, in a thread's sandbox: the agent previews each build beside the thread, the person uses it and asks for changes there, and either of them keeps it once it's right. Nothing has to be committed anywhere.
 
-[`plugins/starter`](../plugins/starter) is a small working app to start from. Read it alongside this guide.
+[`plugins/starter`](../plugins/starter) is a small working app to start from, and [`plugins/docs`](../plugins/docs) a complete one: Markdown pages in a repository, edited together live and published as pull requests. Read them alongside this guide.
 
 ## How a plugin runs
 
@@ -152,7 +152,7 @@ await host.nav.setPath("/acme/app/docs/intro.md") // { replace: true } to replac
 host.on((event) => event.type === "path" && router.navigate(event.path))
 ```
 
-A memory-history router fits well. Other navigation:
+A memory-history router fits well; see `PathSync` in [`plugins/docs/src/routes/__root.tsx`](../plugins/docs/src/routes/__root.tsx). Other navigation:
 
 - `host.nav.openThread(threadId)` opens an agent thread in the web UI.
 - `host.nav.openExternal(url)` opens a web link in a new tab. github.com links open directly; anything else opens only after the person confirms it.
@@ -277,7 +277,7 @@ const doc = new Y.Doc()
 const live = new RoomProvider(host, { room: "draft/docs/intro.md", repository: "acme/app" }, doc)
 await live.whenSynced()
 live.awareness.setLocalStateField("user", { name: host.context.user.name, color: "#2563eb" })
-// …bind doc and live.awareness to your editor (Tiptap's Collaboration extensions, for one)
+// …bind doc and live.awareness to your editor (Docs uses Tiptap's Collaboration extensions)
 live.destroy() // when leaving
 ```
 
@@ -359,6 +359,12 @@ The bundle is one self-contained HTML file: every script, stylesheet and font in
 
 ```bash
 pnpm --filter openswe-app-starter run build
+```
+
+Docs builds a TanStack Start SPA with Vite instead, then [`scripts/inline-bundle.mjs`](../plugins/docs/scripts/inline-bundle.mjs) folds the output into `bundle/index.html`, keeping only the Latin font subsets, and embeds [`manifest.json`](../plugins/docs/manifest.json):
+
+```bash
+pnpm --filter openswe-plugin-docs run build
 ```
 
 ## Trying it
