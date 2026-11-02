@@ -216,6 +216,7 @@ from openswe.tools import (
     publish_artifact,
     publish_workspace,
     publish_workspace_prompt,
+    read_frontend_review,
     read_only_sql,
     read_user_settings,
     read_workspace_prompt,
@@ -226,6 +227,7 @@ from openswe.tools import (
     request_human_review,
     request_pr_review,
     request_rollout_check,
+    review_frontend,
     save_organization_skill,
     save_user_settings,
     save_user_skill,
@@ -246,6 +248,7 @@ from openswe.tools import (
     slack_start_review_channel,
     snapshotctl,
     start_thread,
+    submit_frontend_review,
     submit_thread_feedback,
     suggest_task,
     switch_to_performance_model,
@@ -720,6 +723,9 @@ AGENT_TOOLS: Final = (
     publish_artifact,
     preview_app,
     publish_app,
+    review_frontend,
+    read_frontend_review,
+    submit_frontend_review,
     remember,
     forget,
     list_memories,
@@ -1012,6 +1018,10 @@ _NOT_FROM_CODE = (
             "load_integration_tools",
             "control_worker",
             "message_task_thread",
+            # Their screenshots are for the model to look at, not for code to handle.
+            "review_frontend",
+            "read_frontend_review",
+            "submit_frontend_review",
         }
     )
 )
@@ -1996,6 +2006,13 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         *(() if cli_result_required else (cli_result,)),
         *(() if bridge_client == "desktop" else (worktree_handoff,)),
         *(() if _writes_database_rows() else (execute_database_sql, write_database_rows)),
+        # A frontend capture is of the run's own pull request; its assessment, of its exact head.
+        *(() if cfg.repo and cfg.pr_number else (review_frontend,)),
+        *(
+            ()
+            if cfg.repo and cfg.pr_number and cfg.head_sha
+            else (read_frontend_review, submit_frontend_review)
+        ),
     ]
     static_tools = [tool for tool in AGENT_TOOLS if not any(tool is w for w in withheld)]
     static_tools = permitted(static_tools, tool_access)

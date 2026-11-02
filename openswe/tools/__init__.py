@@ -58,6 +58,9 @@ _TOOL_MODULES = {
     "publish_workspace": ".workspaces",
     "save_organization_skill": ".organization_skills",
     "preview_app": ".apps",
+    "read_frontend_review": ".frontend_review",
+    "review_frontend": ".frontend_review",
+    "submit_frontend_review": ".frontend_review",
     "publish_app": ".apps",
     "publish_artifact": ".publish_artifact",
     "remember": ".remember",
@@ -151,6 +154,9 @@ __all__ = [
     "save_organization_skill",
     "delete_organization_skill",
     "preview_app",
+    "read_frontend_review",
+    "review_frontend",
+    "submit_frontend_review",
     "publish_app",
     "publish_artifact",
     "remember",
@@ -230,6 +236,11 @@ if TYPE_CHECKING:
     from openswe.tools.expose_port import expose_port
     from openswe.tools.fetch_review_diff import fetch_review_diff
     from openswe.tools.fetch_url import fetch_url
+    from openswe.tools.frontend_review import (
+        read_frontend_review,
+        review_frontend,
+        submit_frontend_review,
+    )
     from openswe.tools.http_request import http_request
     from openswe.tools.list_findings import list_findings
     from openswe.tools.list_review_findings import list_review_findings

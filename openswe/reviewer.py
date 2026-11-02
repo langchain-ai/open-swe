@@ -86,8 +86,11 @@ from openswe.tools import (
     http_request,
     list_findings,
     publish_review,
+    read_frontend_review,
     reply_to_finding_thread,
     resolve_finding_thread,
+    review_frontend,
+    submit_frontend_review,
     suggest_task,
     update_finding,
     web_search,
@@ -985,6 +988,9 @@ def reviewer_tools() -> list[BaseTool]:
             fetch_url,
             http_request,
             suggest_task,
+            review_frontend,
+            read_frontend_review,
+            submit_frontend_review,
         ]
     )
 

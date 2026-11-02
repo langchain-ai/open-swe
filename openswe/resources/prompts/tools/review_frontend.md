@@ -1,0 +1,48 @@
+Capture before and after screenshots of this pull request's frontend preview routes and publish a visual review report in Open SWE.
+The report includes exact changed-pixel highlights, region crops, screenshot pairs, and honest coverage status.
+Repository, pull request, and expected Git revisions come from this run; tool arguments cannot select a different PR.
+
+Use the exact base and head preview URLs supplied by the person or verified deployment metadata.
+Do not assume a generic development site matches the PR base commit.
+Supported anonymous targets are HTTPS LangSmith, Vercel, Netlify, and Cloudflare preview hosts.
+Paths must be local routes without query strings or fragments.
+A fresh disposable browser prevents using anyone's personal session.
+
+Authentication defaults to dummy, which records a blocked report without browsing.
+Set auth_mode to none only when anonymous navigation has been authorized.
+Never invent a working login, use personal credentials, or label a blocked login screen as completed QA.
+Disposable seeded QA authentication is not configured.
+
+Pixel highlights show change, not correctness.
+This capture returns actual before/after screenshot image blocks for every captured scenario so you can inspect them.
+After inspecting the supplied images, call submit_frontend_review to publish your grounded AI assessment when that tool is available.
+Capture alone leaves AI review marked not run.
+Video recording and preview build verification are unavailable.
+Distinguish observations from suggestions, report untested interactions, and return the report link and any login or capture blocker.
+
+
+Include interaction coverage when the PR changes interactive UI.
+Read the diff and affected components to choose up to three short journeys on the requested paths, with at most five checkpoints total.
+Use stable unique selectors from the code (prefer data-testid or accessible attributes); never guess selectors from screenshots.
+Replay the same journey on each revision.
+For a changed button, prefer hover, press (the transient :active state), then click and inspect its selected/expanded result.
+For an input, focus and type short synthetic text.
+For a dialog or menu, open it, wait for expected content with expect_visible, inspect boundaries/close controls and filled content, and dismiss it if relevant.
+Use setup steps without checkpoints and save only distinct consequential states.
+Choose coverage based on the change; do not enumerate every control or keystroke.
+
+Supply journeys as {title, path, steps}.
+Steps use action (hover, press, click, focus, type, escape), selector, optional text (required only for type), optional checkpoint (the saved state's short name), and optional expect_visible (a unique selector that must appear).
+Press requires a checkpoint and releases outside the control after capture, so it does not also click.
+Click then checkpoint captures the resulting selected/open state.
+Each journey begins in a fresh browser context on its route.
+Seeded test data only; never enter secrets, upload files, submit payments, delete records, send messages, or trigger consequential external changes.
+Do not use broad exploratory clicking.
+If the flow cannot be exercised safely with disposable data, report it as untested.
+
+Missing or changed targets stop that revision's journey and mark subsequent checkpoints incomplete.
+A control added only on the PR can have a PR screenshot without a base screenshot; that is unpaired evidence, not a regression or a pixel comparison.
+Interaction metadata includes planned action prefixes (only complete states establish coverage), per-side blockers, and potential dialog clipping warnings.
+Assess those warnings against the actual images rather than treating geometry as a confirmed defect.
+Static routes without journeys must remain labeled interactions not captured.
+Live capture, including interaction replay, remains blocked until provider network isolation is implemented.

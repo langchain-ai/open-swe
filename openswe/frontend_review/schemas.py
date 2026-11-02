@@ -1,9 +1,10 @@
 import re
 from datetime import datetime
 from typing import Literal, Self
+from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from openswe.github.pull_request_status import OpenPullRequest
 
@@ -19,6 +20,88 @@ MEDIA_FIELDS = (
     "before_video_url",
     "after_video_url",
 )
+
+
+class FrontendInteractionStep(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["hover", "press", "click", "focus", "type", "escape"]
+    selector: str = Field(min_length=1, max_length=300)
+    text: str | None = Field(default=None, max_length=200)
+    checkpoint: str | None = Field(default=None, min_length=1, max_length=100)
+    expect_visible: str | None = Field(default=None, min_length=1, max_length=300)
+
+    @model_validator(mode="after")
+    def typed_text(self) -> Self:
+        if (self.action == "type") != (self.text is not None):
+            raise ValueError("Only type steps require synthetic text")
+        if self.action == "press" and self.checkpoint is None:
+            raise ValueError("A press step must capture its transient active state")
+        return self
+
+
+class FrontendJourney(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=100)
+    path: str = Field(min_length=1, max_length=500)
+    steps: list[FrontendInteractionStep] = Field(min_length=1, max_length=8)
+
+
+class StartFrontendReview(BaseModel):
+    """What to capture: the base and PR previews, their routes, and interaction journeys."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_url: str = Field(max_length=2000)
+    head_url: str = Field(max_length=2000)
+    paths: list[str] = Field(default_factory=lambda: ["/"], min_length=1, max_length=5)
+    auth_mode: AuthMode = "dummy"
+    journeys: list[FrontendJourney] = Field(default_factory=list, max_length=3)
+
+    @field_validator("base_url", "head_url")
+    @classmethod
+    def public_https_url(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("Preview URLs must use HTTPS without credentials, query, or fragment")
+        return value.rstrip("/")
+
+    @field_validator("paths")
+    @classmethod
+    def route_paths(cls, paths: list[str]) -> list[str]:
+        for path in paths:
+            parsed = urlsplit(path)
+            if (
+                not path.startswith("/")
+                or path.startswith("//")
+                or "\\" in path
+                or parsed.query
+                or parsed.fragment
+                or len(path) > 500
+            ):
+                raise ValueError("Capture paths must be local routes without query or fragment")
+        if len(set(paths)) != len(paths):
+            raise ValueError("Capture paths must be unique")
+        return paths
+
+    @model_validator(mode="after")
+    def bounded_journeys(self) -> Self:
+        if any(journey.path not in self.paths for journey in self.journeys):
+            raise ValueError("Interaction journeys must use requested routes")
+        checkpoints = sum(step.checkpoint is not None for j in self.journeys for step in j.steps)
+        if self.journeys and not all(any(s.checkpoint for s in j.steps) for j in self.journeys):
+            raise ValueError("Each interaction journey needs a checkpoint")
+        if checkpoints > 5:
+            raise ValueError("Choose at most five meaningful interaction checkpoints per review")
+        return self
 
 
 class Rectangle(BaseModel):
@@ -119,3 +202,37 @@ class FrontendReviewInboxItem(BaseModel):
 class FrontendReviewInbox(BaseModel):
     items: list[FrontendReviewInboxItem]
     incomplete: bool
+
+
+class FrontendPageResult(BaseModel):
+    id: str
+    path: str
+    width: int
+    height: int
+    changed_pixels: int
+    total_pixels: int
+    changed_ratio: float
+
+
+class FrontendInteractionEvidence(BaseModel):
+    scenario_id: str
+    title: str
+    status: Literal["complete", "blocked", "failed"]
+    actions: list[str]
+    before_error: str | None = None
+    after_error: str | None = None
+    layout_warnings: list[str] = Field(default_factory=list)
+
+
+class CapturedFrontendReview(BaseModel):
+    """A capture as the agent reads it; its screenshots follow as images."""
+
+    review_id: str
+    status: RunStatus
+    report_url: str
+    error: str | None = None
+    summary: str | None = None
+    build_verification: Literal["unverified", "verified"] = "unverified"
+    ai_review_status: Literal["not_run", "running", "complete", "failed"] = "not_run"
+    pages: list[FrontendPageResult] = Field(default_factory=list)
+    interactions: list[FrontendInteractionEvidence] = Field(default_factory=list)
