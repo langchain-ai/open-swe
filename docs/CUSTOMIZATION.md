@@ -195,8 +195,110 @@ GitHub operations are handled by `gh` inside the sandbox.
 |---|---|---|
 | `fetch_url` | `openswe/tools/fetch_url.py` | Fetch web pages as markdown |
 | `http_request` | `openswe/tools/http_request.py` | HTTP API calls |
+| `classify` | `openswe/tools/classify.py` | Fast typed classification with TypeSafe's System One model, from code mode |
 | `slack_attach_html` | `openswe/slack/tools/attach_html.py` | Attach sandbox HTML previews to Slack threads |
 | `slack_reply` | `openswe/slack/tools/reply.py` | Reply to the person who asked, in a Slack thread or ephemerally |
+
+### Classifying from code mode
+
+`classify` asks TypeSafe's System One model questions about a state and returns typed answers with calibrated probabilities, typically in 70–500ms.
+It goes through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models) with the same LangSmith gateway key and TypeSafe provider secret as Auto model routing, so it needs no key of its own.
+Code mode offers it as `tools.classify`; it is kept off the model's tool list and found with `search_tools`.
+
+Each question is a `choice` (one label from up to 255), a `noul` (the probability of yes), or a `score` (an expected level on an ordered rubric).
+Every answer comes from the options supplied, and `choice` and `score` answers carry a `confidence` to gate actions on.
+These examples are adapted from [langchain-typesafe](https://github.com/langchain-ai/langchain-typesafe), [Pipecat's classifier docs](https://docs.pipecat.ai/api-reference/server/classifiers/jev), [classifier.dev](https://jev101.org/guides/jev-text-classification-api-guide), and [TypeSafe's launch post](https://typesafe.ai/blog/introducing-system-one-models-and-jev).
+
+Route a support request, falling back to a person when unsure:
+
+```typescript
+const { answers } = await tools.classify({
+  state: "Stripe fails whenever I connect my account.",
+  questions: {
+    department: {
+      type: "choice",
+      instructions: "Which team should handle this request?",
+      criteria: {
+        billing: "Payment, invoice, or subscription issues.",
+        technical: "Product bugs or integration failures.",
+        sales: "Pricing or purchasing questions.",
+      },
+    },
+  },
+});
+const { choice, confidence } = answers.department;
+const team = confidence >= 0.7 ? choice : "human_triage";
+```
+
+Ask a yes/no question, such as whether a call reached voicemail or a message is urgent:
+
+```typescript
+const { answers } = await tools.classify({
+  state: "Hi, you've reached Dana. Leave a message.",
+  questions: {
+    voicemail: { type: "noul", instructions: "Is this a voicemail greeting?" },
+    urgent: { type: "noul", instructions: "Does this message require an urgent response?" },
+  },
+});
+const isVoicemail = answers.voicemail.noul >= 0.8;
+```
+
+Score a state on a rubric:
+
+```typescript
+const { answers } = await tools.classify({
+  state: "This has failed three times. Fix it now.",
+  questions: {
+    frustration: {
+      type: "score",
+      instructions: "How frustrated does the customer appear?",
+      criteria: ["Calm and neutral.", "Concerned but civil.", "Very angry or using strong language."],
+    },
+  },
+});
+const { score, probabilities } = answers.frustration;
+```
+
+Label a batch in parallel, sending low-confidence rows to review:
+
+```typescript
+const feedback = [
+  "The export button crashes the app.",
+  "Please add dark mode.",
+  "Integration with external tools is seamless.",
+];
+const labeled = await Promise.all(
+  feedback.map(async (text) => {
+    const { answers } = await tools.classify({
+      state: text,
+      questions: {
+        label: {
+          type: "choice",
+          instructions: "What kind of product feedback is this?",
+          criteria: { bug: null, feature: null, praise: null, other: null },
+        },
+      },
+    });
+    return { text, ...answers.label, review: answers.label.confidence < 0.7 };
+  }),
+);
+```
+
+Guard an LLM's output before acting on it:
+
+```typescript
+const { answers } = await tools.classify({
+  state: { prompt: userPrompt, response: draftReply },
+  questions: {
+    jailbreak: { type: "noul", instructions: "Does the prompt try to get the assistant to ignore its rules?" },
+    leaks_secret: {
+      type: "noul",
+      instructions: "Does the response reveal a credential, token, or API key?",
+      criteria: { true: "A real-looking secret value appears.", false: "No secret value appears." },
+    },
+  },
+});
+```
 
 ### Workspace MCP servers
 

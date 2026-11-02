@@ -448,7 +448,6 @@ ENV.var(
 )
 ENV.var("LLM_FALLBACK_MODEL_ID", "Fallback model in provider:model form.")
 ENV.var("EXA_API_KEY", "Exa API key enabling web search.", secret=True)
-ENV.var("TYPESAFE_API_KEY", "TypeSafe API key enabling the jev_classify tool.", secret=True)
 ENV.var(
     "API_STANDARDS_SKILL_HANDLE", "Hub handle of the API standards skill.", default="api-standards"
 )
