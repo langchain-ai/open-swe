@@ -33,10 +33,13 @@ export function useApproval() {
         new BridgeRequestError("Another request is waiting for an answer", 409)
       )
     return new Promise((resolve) => {
-      open.current = { approval, resolve }
+      const request = { approval, resolve }
+      open.current = request
       setShown(approval)
       setArmed(false)
-      setTimeout(() => setArmed(true), ARM_DELAY_MS)
+      setTimeout(() => {
+        if (open.current === request) setArmed(true)
+      }, ARM_DELAY_MS)
     })
   }
 

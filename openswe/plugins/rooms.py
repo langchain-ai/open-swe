@@ -109,6 +109,7 @@ class Room:
 
     async def append(self, payload: bytes, *, by: UUID) -> int:
         async with postgres.session() as session:
+            await self._lock(session)
             seq = (
                 await session.execute(
                     insert(PluginRoomUpdateRow)
@@ -131,6 +132,7 @@ class Room:
     async def compact(self, snapshot: bytes, *, through: int, by: UUID) -> int:
         """Replace the log up to ``through`` with ``snapshot``, which must cover it."""
         async with postgres.session() as session:
+            await self._lock(session)
             await session.execute(
                 delete(PluginRoomUpdateRow).where(
                     *self._where(), PluginRoomUpdateRow.seq <= through
@@ -154,6 +156,13 @@ class Room:
             ).scalar_one()
             await self._notify(session, {"kind": "update"})
             return seq
+
+    async def _lock(self, session: AsyncSession) -> None:
+        # Sequence allocation and commit must have the same order within a room.
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"plugin-room:{self.key}"},
+        )
 
     async def announce(self, client: str, presence: str) -> None:
         """Hand one member's presence to everyone in the room, storing nothing."""

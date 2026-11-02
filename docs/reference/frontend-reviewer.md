@@ -25,25 +25,19 @@ Production, Preview and Base links keep each scenario's route and open in a new 
 **Ask about this change** opens the agent dock on the pull request's chat with the base and PR screenshots in the composer, labelled by side, and the scenario's route, replay steps and warnings shared with the agent.
 Nothing is sent until you press Send.
 
-## Agents
+## Capture availability
 
-Agent and reviewer runs on a pull request have three tools, bound to that run's repository, pull request and revisions; no argument can name another.
-
-- `review_frontend` captures the base and PR previews of up to five routes, with up to three short interaction journeys, and returns the screenshots for the agent to look at, with a link to the capture in Design QA.
-- `read_frontend_review` shows the agent a capture its thread made again, without recapturing.
-- `submit_frontend_review` publishes the thread's assessment of its own capture: a summary, and notes on areas of the screenshots.
-  It is published once, and only by the thread that made the capture at the pull request's current head.
-
-Dummy authentication, the default, saves a blocked capture without browsing.
-Pixel change is a measurement, not a verdict; the tools' descriptions ask the agent to separate observed regressions from design suggestions and to name what it did not test.
+Live capture stays disabled until the browser service enforces network isolation for every browser request.
+Agent and reviewer catalogs do not expose `review_frontend`, `read_frontend_review` or `submit_frontend_review` while that prerequisite is missing.
+The capture engine, evidence service and tool implementations remain available for enabling capture once that isolation is in place.
 
 ## Evidence
 
 Captures live in Open SWE's PostgreSQL: `frontend_review_run` holds a capture's frozen base and head SHAs, routes, interaction journeys, status and report, and `frontend_review_media` its screenshots and recordings, at most 8 MiB each.
-Only Open SWE writes them, through the agent tools below.
+Only Open SWE's evidence service writes them.
 Apps read them through `/plugins/{installation}/frontend-reviews/…`, which checks the installation's `frontend-reviews` permission, that the repository is shared with it, and the person's own GitHub read access on every call.
 Media is served `private, no-store`, with `nosniff` and `default-src 'none'`.
 
-Live capture stays off until the browser service enforces network isolation for all browser traffic, including loopback services, workers, popups and WebSockets: `review_frontend` saves a blocked capture without reaching the preview.
+Network isolation must cover loopback services, workers, popups and WebSockets before the capture tools can be offered to agents.
 Until then no new captures are made, and pull requests without one show that capture is unavailable.
 A capture is not proof that its deployment serves that commit: build verification stays "unverified" until served-build attestation exists.

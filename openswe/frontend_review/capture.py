@@ -25,7 +25,7 @@ from .interactions import InteractionCapture, InteractionReplay
 from .models import FrontendReviewRun
 from .pixels import compare
 from .schemas import FrontendJourney, FrontendReport, FrontendScenario
-from .service import EvidenceAsset, finish_review
+from .service import EvidenceAsset, FrontendReviews
 
 logger = logging.getLogger(__name__)
 _object = TypeAdapter(dict[str, JsonValue])
@@ -433,11 +433,8 @@ async def capture_run(run: FrontendReviewRun) -> None:
             "Frontend review capture failed", extra={"frontend_review_id": str(run.id)}
         )
         error = "Capture failed. Check browser availability and whether the preview is reachable."
-    await finish_review(
+    await FrontendReviews(run.owner, run.repo, run.pr_number).finish(
         run.id,
-        owner=run.owner,
-        repo=run.repo,
-        pr_number=run.pr_number,
         status=status,
         report=report,
         error=error,

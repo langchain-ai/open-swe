@@ -8,7 +8,7 @@ from openswe.github.http import GitHubClient
 from openswe.github.pull_request_status import OpenPullRequest, list_open_pull_requests
 
 from .schemas import FrontendReviewInbox, FrontendReviewInboxItem
-from .service import latest_reviews, review_view
+from .service import FrontendReviews
 
 
 class ReviewInbox:
@@ -28,7 +28,9 @@ class ReviewInbox:
             )
             runs = {
                 (run.owner.lower(), run.repo.lower(), run.pr_number): run
-                for run in await latest_reviews([self._identity(pr) for pr in listed.pull_requests])
+                for run in await FrontendReviews.latest(
+                    [self._identity(pr) for pr in listed.pull_requests]
+                )
             }
             semaphore = asyncio.Semaphore(4)
 
@@ -48,7 +50,7 @@ class ReviewInbox:
                 teams = pull.get("requested_teams")
                 return FrontendReviewInboxItem(
                     pr=pr,
-                    run=review_view(run),
+                    run=run.view(),
                     requested_reviewers=[
                         reviewer["login"]
                         for reviewer in reviewers

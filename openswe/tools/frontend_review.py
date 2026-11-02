@@ -25,13 +25,7 @@ from openswe.frontend_review.schemas import (
     ReviewAnnotation,
     StartFrontendReview,
 )
-from openswe.frontend_review.service import (
-    assess_review,
-    create_review,
-    get_review,
-    media_for_review,
-    set_assessment_state,
-)
+from openswe.frontend_review.service import FrontendReviews
 from openswe.run_config import RunConfig
 
 # What the model sees of each screenshot; annotations use the original page's size.
@@ -44,6 +38,7 @@ class _RunPullRequest:
     def __init__(self, cfg: RunConfig) -> None:
         if cfg.repo is None or cfg.pr_number is None or cfg.thread_id is None:
             raise ValueError("Frontend review needs a run bound to a repository and pull request")
+        self.evidence = FrontendReviews(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
         self.owner = cfg.repo.owner
         self.repo = cfg.repo.name
         self.number = cfg.pr_number
@@ -64,28 +59,25 @@ class _RunPullRequest:
     async def capture(self, request: StartFrontendReview) -> FrontendReviewRun:
         validate_preview_url(request.base_url)
         validate_preview_url(request.head_url)
-        review = await create_review(
-            self.owner,
-            self.repo,
-            self.number,
-            request,
-            expected_base_sha=self.base_sha,
-            expected_head_sha=self.head_sha,
+        review = await self.evidence.create(
+            request, expected_base_sha=self.base_sha, expected_head_sha=self.head_sha
         )
         if request.auth_mode != "none":
             return review
         await capture_run(review)
-        captured = await get_review(self.owner, self.repo, self.number, review.id)
+        captured = await self.evidence.get(review.id)
         if captured is None:
             raise RuntimeError("The captured frontend review could not be read")
         if captured.status == "complete" and captured.head_sha == self.head_sha:
             # This thread looked at the screenshots, so its assessment is the one to publish.
-            return await set_assessment_state(captured, "running", thread_id=self.thread_id)
+            return await self.evidence.set_assessment_state(
+                captured, "running", thread_id=self.thread_id
+            )
         return captured
 
     async def owned(self, review_id: UUID) -> FrontendReviewRun:
         """A capture of this PR head whose assessment this thread owns."""
-        review = await get_review(self.owner, self.repo, self.number, review_id)
+        review = await self.evidence.get(review_id)
         if review is None or review.head_sha != self.exact_head():
             raise ValueError("That capture does not belong to this pull request revision")
         report = FrontendReport.model_validate(review.report) if review.report else None
@@ -138,7 +130,7 @@ class _RunPullRequest:
             for role, name in (("before", scenario.before_url), ("after", scenario.after_url)):
                 if name is None:
                     continue
-                media = await media_for_review(self.owner, self.repo, self.number, review.id, name)
+                media = await self.evidence.media(review.id, name)
                 if media is None or media.content_type != "image/png":
                     raise RuntimeError("A captured frontend screenshot is unavailable")
                 png, width, height = await asyncio.to_thread(self._thumbnail, media.content)
@@ -200,10 +192,7 @@ async def submit_frontend_review(
 ) -> dict[str, JsonValue]:
     """Implement the `submit_frontend_review` tool."""
     pull = _RunPullRequest(RunConfig.from_runtime())
-    review = await assess_review(
-        pull.owner,
-        pull.repo,
-        pull.number,
+    review = await pull.evidence.assess(
         UUID(review_id),
         expected_head_sha=pull.exact_head(),
         assessment_thread_id=pull.thread_id,

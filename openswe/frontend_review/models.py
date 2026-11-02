@@ -10,7 +10,7 @@ from openswe.database.orm import NOW, Base
 from openswe.github.pull_requests import PullRequest
 from openswe.users.models import User
 
-from .schemas import AuthMode, MediaType, RunStatus
+from .schemas import AuthMode, FrontendReport, FrontendReviewView, MediaType, RunStatus
 
 
 class EvidenceRecord(Base, kw_only=True):
@@ -56,6 +56,24 @@ class FrontendReviewRun(EvidenceRecord):
     @property
     def pr_number(self) -> int:
         return self.pull_request.number
+
+    def view(self) -> FrontendReviewView:
+        """The stored capture as people read it."""
+        report = FrontendReport.model_validate(self.report) if self.report else None
+        return FrontendReviewView(
+            id=self.id,
+            status=self.status,
+            auth_mode=self.auth_mode,
+            base_url=self.base_url,
+            head_url=self.head_url,
+            paths=self.paths,
+            base_sha=self.base_sha,
+            head_sha=self.head_sha,
+            created_at=self.created_at,
+            updated_at=self.updated_at,
+            error=self.error,
+            report=report,
+        )
 
 
 class FrontendReviewMedia(EvidenceRecord):

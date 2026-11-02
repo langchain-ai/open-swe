@@ -38,12 +38,7 @@ from openswe.dashboard.deps import SESSION_DEP, session_is_admin
 from openswe.dashboard.oauth import session_user_id
 from openswe.frontend_review.inbox import ReviewInbox
 from openswe.frontend_review.schemas import FrontendReviewInbox, FrontendReviewView
-from openswe.frontend_review.service import (
-    get_review,
-    list_reviews,
-    media_for_review,
-    review_view,
-)
+from openswe.frontend_review.service import FrontendReviews
 from openswe.github.http import GitHubError, GitHubSignInRequired, GraphQLError
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.plugins.installed import (
@@ -1151,7 +1146,7 @@ async def api_plugin_frontend_reviews(
         plugin.require(PluginPermission.FRONTEND_REVIEWS)
         owner, repo = (await plugin.repository(_repository(owner, repo))).split("/")
     return FrontendReviewRuns(
-        runs=[review_view(run) for run in await list_reviews(owner, repo, number)]
+        runs=[run.view() for run in await FrontendReviews(owner, repo, number).list_runs()]
     )
 
 
@@ -1162,10 +1157,10 @@ async def api_plugin_frontend_review(
     with _as_http():
         plugin.require(PluginPermission.FRONTEND_REVIEWS)
         owner, repo = (await plugin.repository(_repository(owner, repo))).split("/")
-    run = await get_review(owner, repo, number, run_id)
+    run = await FrontendReviews(owner, repo, number).get(run_id)
     if run is None:
         raise HTTPException(404, "capture not found")
-    return review_view(run)
+    return run.view()
 
 
 @router.get(
@@ -1180,7 +1175,7 @@ async def api_plugin_frontend_review_media(
     with _as_http():
         plugin.require(PluginPermission.FRONTEND_REVIEWS)
         owner, repo = (await plugin.repository(_repository(owner, repo))).split("/")
-    asset = await media_for_review(owner, repo, number, run_id, name)
+    asset = await FrontendReviews(owner, repo, number).media(run_id, name)
     if asset is None:
         raise HTTPException(404, "media not found")
     return Response(
