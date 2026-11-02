@@ -1,9 +1,43 @@
-import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages"
+import {
+  AIMessage,
+  AIMessageChunk,
+  HumanMessage,
+  ToolMessage,
+} from "@langchain/core/messages"
 import { describe, expect, it } from "vitest"
 
 import { streamMessagesToUi } from "./streamMessagesToUi"
 
 describe("streamMessagesToUi", () => {
+  it("drops superseded partial replies and their unexecuted tools after a retry", () => {
+    const messages = streamMessagesToUi([
+      new AIMessageChunk({
+        id: "interrupted",
+        content: "Incomplete answer",
+        tool_call_chunks: [
+          {
+            name: "execute",
+            args: '{"command":"wrong"}',
+            id: "never-ran",
+            index: 0,
+          },
+        ],
+      }).concat(
+        new AIMessageChunk({
+          id: "interrupted",
+          content: "",
+          response_metadata: { open_swe_superseded: true },
+        })
+      ),
+      new AIMessage({ id: "replacement", content: "Recovered answer" }),
+    ])
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]?.chunks).toEqual([
+      expect.objectContaining({ kind: "text", text: "Recovered answer" }),
+    ])
+  })
+
   it("keeps platform turn metadata out of the transcript", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({
