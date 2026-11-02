@@ -35,6 +35,7 @@
     "mermaid": "12.0.0",
     "monaco-editor": "^0.56.0",
     "nitro": "3.0.260903-beta",
+    "posthog-js": "1.444.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "shiki": "^4.4.3",

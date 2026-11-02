@@ -6,6 +6,7 @@ packages:
   - tests/e2e
 
 allowBuilds:
+  core-js: false
   electron: true
   electron-winstaller: false
   esbuild: true
