@@ -97,6 +97,11 @@ async def _resolve_exclusions(
 ) -> list[ExcludedHunk]:
     """Resolve against the target repository's approval criteria on its default branch, and audit them."""
     policy = await ApprovalPolicy.load(pr_ref.owner, pr_ref.repo, token=token)
+    if policy.errors:
+        raise ValueError(
+            "Nothing can be excluded: the auto-approve rules on the default branch could not be "
+            "applied: " + "; ".join(policy.errors)
+        )
     changed = [path for file in files for path in file.paths] if len(files) < MAX_FILES else None
     approvals = policy.for_changes(changed).render()
     if approvals is None:

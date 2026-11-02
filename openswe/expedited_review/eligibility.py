@@ -181,6 +181,14 @@ class ChangedFile(BaseModel):
             )
             return None
 
+    @classmethod
+    async def touched_paths(cls, pull: PullRequestClient, *, max_pages: int) -> list[str] | None:
+        """Every path the PR touches, or ``None`` when its file list is unavailable or truncated."""
+        files = await cls.of_pull(pull, max_pages=max_pages)
+        if files is None or len(files) >= max_pages * 100:
+            return None
+        return [path for file in files for path in file.paths]
+
 
 _CHANGED_FILES = TypeAdapter(list[ChangedFile])
 

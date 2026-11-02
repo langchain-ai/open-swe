@@ -1,5 +1,5 @@
 ---
-paths:
+match-all-files:
   - docs/*.md
   - README.md
   - SECURITY.md

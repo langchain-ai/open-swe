@@ -18,7 +18,7 @@ from openswe.review.styles import REVIEW_STYLES, ReviewStylePromptUpdate
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
 
 
-def _github(status: int, text: str = "", rules: dict[str, str] | None = None) -> AsyncMock:
+def _github(status: int, text: str = "", rules: dict[str, str | None] | None = None) -> AsyncMock:
     async def respond(_client: object, method: str, url: str, **kwargs: object) -> httpx2.Response:
         request = httpx2.Request(method, url)
         if url.endswith("/graphql"):
@@ -47,11 +47,11 @@ async def test_fetch_reads_the_criteria_from_the_default_branch() -> None:
     assert graphql["expression"] == "HEAD:.open-swe/auto-approve-rules"
 
 
-async def test_scoped_rules_apply_only_when_every_changed_file_matches() -> None:
+async def test_rules_apply_by_their_file_scopes() -> None:
     rules = {
         ".open-swe/auto-approve-rules/any.md": "Typo fixes may be approved.",
-        ".open-swe/auto-approve-rules/docs.md": "---\npaths:\n  - docs/*\n  - '*.md'\n---\nDocs may be approved.\n",
-        ".open-swe/auto-approve-rules/invalid.md": "---\npaths: 3\n---\nEverything may be approved.",
+        ".open-swe/auto-approve-rules/docs.md": "---\nmatch-all-files:\n  - docs/*\n  - '*.md'\n---\nDocs may be approved.\n",
+        ".open-swe/auto-approve-rules/auth.md": "---\nmatch-any-files: [auth/*]\n---\nAuth needs human review.",
         ".open-swe/auto-approve-rules/notes.txt": "Not a rule.",
     }
     with patch("openswe.github.http.github_request", _github(404, rules=rules)):
@@ -62,26 +62,70 @@ async def test_scoped_rules_apply_only_when_every_changed_file_matches() -> None
 
     assert applied(["docs/guide/a.md", "README.md"]) == ["any.md", "docs.md"]
     assert applied(["docs/a.md", "src/app.py"]) == ["any.md"]
-    assert applied(None) == ["any.md"]
-    rendered = policy.for_changes(["docs/a.md"]).render()
-    assert rendered is not None and "Docs may be approved." in rendered
-    assert "Everything" not in rendered
+    assert applied(["auth/login.py", "src/app.py"]) == ["any.md", "auth.md"]
+    assert applied(None) == ["any.md", "auth.md"]
+
+
+async def test_one_unusable_rule_fails_the_whole_policy_closed() -> None:
+    # The dropped rule may be the one requiring human review, so nothing may apply without it.
+    rules = {
+        ".open-swe/auto-approve-rules/any.md": "Everything may be approved.",
+        ".open-swe/auto-approve-rules/restrict.md": "---\npaths: [auth/*]\n---\nAuth needs human review.",
+        ".open-swe/auto-approve-rules/binary.md": None,
+    }
+    with patch("openswe.github.http.github_request", _github(404, rules=rules)):
+        policy = await ApprovalPolicy.load("o", "r", token="t")
+    assert policy.configured and policy.render() is None
+    assert [error.split("`")[1].rsplit("/", 1)[-1] for error in policy.errors] == [
+        "binary.md",
+        "restrict.md",
+    ]
 
 
 @pytest.mark.parametrize(
-    ("status", "text"),
-    [(404, ""), (200, "   \n"), (200, "x" * (APPROVALS_MAX_CHARS + 1)), (500, "boom")],
+    ("status", "text", "broken"),
+    [
+        (404, "", False),
+        (200, "   \n", False),
+        (200, "x" * (APPROVALS_MAX_CHARS + 1), True),
+        (500, "boom", True),
+    ],
     ids=["missing", "empty", "oversized", "error"],
 )
-async def test_fetch_yields_no_policy_for_unusable_files(status: int, text: str) -> None:
+async def test_fetch_yields_no_policy_for_unusable_files(
+    status: int, text: str, broken: bool
+) -> None:
     with patch("openswe.github.http.github_request", _github(status, text)):
-        assert not (await ApprovalPolicy.load("o", "r", token="t")).configured
+        policy = await ApprovalPolicy.load("o", "r", token="t")
+    assert policy.render() is None
+    assert bool(policy.errors) is broken
 
 
 async def test_fetch_yields_no_policy_when_github_is_unreachable() -> None:
     failing = AsyncMock(side_effect=httpx2.ConnectError("down"))
     with patch("openswe.github.http.github_request", failing):
-        assert not (await ApprovalPolicy.load("o", "r", token="t")).configured
+        policy = await ApprovalPolicy.load("o", "r", token="t")
+    assert policy.render() is None and policy.errors
+
+
+async def test_config_errors_cover_changed_settings_and_rules_at_the_head() -> None:
+    head = "b" * 40
+    files = [
+        {"filename": ".open-swe/settings.json"},
+        {"filename": ".open-swe/auto-approve-rules/x.md"},
+    ]
+    repo = AsyncMock()
+    repo.pull_request = lambda number: AsyncMock(files=AsyncMock(return_value=files))
+    repo.read_file = AsyncMock(return_value='{"supplementaryReviews": [{"id": "Bad id"}]}')
+    repo.read_dir = AsyncMock(
+        return_value={".open-swe/auto-approve-rules/x.md": "---\n- a\n---\nBody"}
+    )
+    repo.full_name = "o/r"
+    errors = await ApprovalPolicy.config_errors(repo, 1, head)
+    assert len(errors) == 2
+    assert errors[0].startswith("`.open-swe/auto-approve-rules/x.md`: invalid frontmatter")
+    assert errors[1].startswith("`.open-swe/settings.json`: supplementaryReviews[0]")
+    repo.read_dir.assert_awaited_with(".open-swe/auto-approve-rules", head)
 
 
 async def test_unset_mode_is_dry_run_and_off_skips_the_file(registry_db: None) -> None:

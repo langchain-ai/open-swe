@@ -3,7 +3,7 @@ Requires a currently authorized workspace admin.
 `read` requires a private admin surface; `set` also works in a verified sole-writer shared thread, returning only an acknowledgement.
 Authorization is rechecked on every call.
 
-Approval criteria live in the repository's `.open-swe/auto-approve-rules/` (one rule per Markdown file, optionally scoped by `paths` globs in its frontmatter), read from the repository's default branch; this tool does not edit them.
+Approval criteria live in the repository's `.open-swe/auto-approve-rules/` (one rule per Markdown file, optionally scoped by `match-all-files` or `match-any-files` globs in its frontmatter), read from the repository's default branch; this tool does not edit them.
 Change the file through a pull request instead.
 
 - `action`: `read` or `set`.

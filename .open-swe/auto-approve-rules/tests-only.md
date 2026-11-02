@@ -1,5 +1,5 @@
 ---
-paths:
+match-all-files:
   - tests/*
   - "*/tests/*"
   - "*/test/*"

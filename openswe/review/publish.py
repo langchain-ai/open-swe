@@ -20,6 +20,7 @@ the GraphQL ``resolveReviewThread`` mutation (REST doesn't expose this).
 import json
 import logging
 import re
+from collections.abc import Sequence
 from html import escape
 from typing import Any, Literal, TypedDict
 
@@ -293,6 +294,8 @@ def render_review_body(
     assessment: ReviewAssessment | None = None,
     approved: bool = False,
     dry_run: bool = False,
+    approval_errors: Sequence[str] = (),
+    config_errors: Sequence[str] = (),
 ) -> str:
     """Compose the top-level review body.
 
@@ -314,6 +317,18 @@ def render_review_body(
         headline = f"**Open SWE Review** found {surfaced_count} potential {issue_word}."
 
     parts = [headline]
+    if config_errors:
+        parts.append(
+            "**Changes requested: invalid Open SWE configuration.** "
+            "This pull request changes Open SWE configuration that cannot be applied:\n\n"
+            + "\n".join(f"- {escape(error)}" for error in config_errors)
+        )
+    if approval_errors:
+        parts.append(
+            "**Auto approval did not run:** the auto-approve rules on the default branch "
+            "could not be applied:\n\n"
+            + "\n".join(f"- {escape(error)}" for error in approval_errors)
+        )
     if has_additional:
         noun = "finding" if additional_findings_count == 1 else "findings"
         parts.append(f"{additional_findings_count} additional {noun} can be viewed in the web app.")
@@ -626,7 +641,7 @@ async def post_pull_request_review(
     body: str,
     inline_comments: list[dict[str, Any]],
     token: str,
-    event: Literal["COMMENT", "APPROVE"] = "COMMENT",
+    event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT",
 ) -> dict[str, Any] | None:
     """POST one GitHub PR Review with inline comments. Returns the API response or None."""
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
@@ -682,11 +697,8 @@ async def post_pull_request_review(
                     error_kind = "unresolved_anchor"
                 for error in error_messages:
                     message = error.get("message") if isinstance(error, dict) else error
-                    if (
-                        isinstance(message, str)
-                        and "Can not approve your own pull request" in message
-                    ):
-                        error_kind = "self_approval"
+                    if isinstance(message, str) and "on your own pull request" in message:
+                        error_kind = "self_review"
                         break
             return {
                 "_error": f"HTTP {e.response.status_code}: {body}",

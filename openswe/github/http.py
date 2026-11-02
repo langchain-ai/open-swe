@@ -592,8 +592,11 @@ class RepoClient:
                     found[path] = blob["text"]
         return found
 
-    async def read_dir(self, path: str, ref: str | None) -> dict[str, str]:
-        """Text of each file directly in ``path`` at ``ref`` (the default branch when ``None``)."""
+    async def read_dir(self, path: str, ref: str | None) -> dict[str, str | None]:
+        """Text of each file directly in ``path`` at ``ref`` (the default branch when ``None``).
+
+        A file GitHub returns no text for (binary or too large) maps to ``None``.
+        """
         data = await self.graphql(
             "query($owner:String!,$repo:String!,$expression:String!)"
             "{repository(owner:$owner,name:$repo){object(expression:$expression)"
@@ -602,15 +605,13 @@ class RepoClient:
         )
         tree = (data.get("repository") or {}).get("object")
         entries = tree.get("entries") if isinstance(tree, Mapping) else None
-        found: dict[str, str] = {}
+        found: dict[str, str | None] = {}
         for entry in entries if isinstance(entries, list) else []:
-            blob = entry.get("object") if isinstance(entry, Mapping) else None
-            if (
-                entry.get("type") == "blob"
-                and isinstance(blob, Mapping)
-                and isinstance(blob.get("text"), str)
-            ):
-                found[entry["path"]] = blob["text"]
+            if not isinstance(entry, Mapping) or entry.get("type") != "blob":
+                continue
+            blob = entry.get("object")
+            text = blob.get("text") if isinstance(blob, Mapping) else None
+            found[entry["path"]] = text if isinstance(text, str) else None
         return found
 
     async def can_write(self, login: str) -> bool:

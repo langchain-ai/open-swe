@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
 
 from openswe.github import webhook as github_webhooks
+from openswe.review.approvals import ApprovalPolicy
 
 pytestmark = pytest.mark.usefixtures("no_local_threads")
 
@@ -118,7 +119,10 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
 
     with (
         patch("openswe.github.webhook.approval_mode_for", AsyncMock(return_value=approval_mode)),
-        patch("openswe.github.webhook.approval_policy_for_review", AsyncMock(return_value=policy)),
+        patch(
+            "openswe.github.webhook.approval_policy_for_review",
+            AsyncMock(return_value=ApprovalPolicy(approvals_md=policy) if policy else None),
+        ),
         patch(
             "openswe.github.webhook.PullRequest.link_review",
             AsyncMock(side_effect=RuntimeError("Storage unavailable") if storage_fails else None),
@@ -220,7 +224,8 @@ async def test_head_update_triggers_re_review_run_when_watching(
     with (
         patch("openswe.github.webhook.approval_mode_for", AsyncMock(return_value=approval_mode)),
         patch(
-            "openswe.github.webhook.approval_policy_for_review", AsyncMock(return_value="Policy")
+            "openswe.github.webhook.approval_policy_for_review",
+            AsyncMock(return_value=ApprovalPolicy(approvals_md="Policy")),
         ),
         patch("openswe.webhooks.common.enforce_public_repo_org_gate", AsyncMock(return_value=None)),
         patch(

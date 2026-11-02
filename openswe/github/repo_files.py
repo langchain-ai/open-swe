@@ -1,5 +1,6 @@
 """Small configuration files Open SWE reads from a repository's ``.open-swe`` directory."""
 
+import json
 import logging
 import random
 from collections import Counter
@@ -113,6 +114,44 @@ class RepoSettings(BaseModel):
                 continue
             policies.append(policy)
         return policies
+
+    @classmethod
+    def problems(cls, content: str) -> list[str]:
+        """Why ``content`` is not a valid settings file, including entries reading would drop."""
+        try:
+            raw = json.loads(content)
+        except ValueError as exc:
+            return [f"`{SETTINGS_PATH}` is not valid JSON: {exc}"]
+        try:
+            cls.model_validate(raw)
+        except ValidationError as exc:
+            return [f"`{SETTINGS_PATH}`: {cls.describe(exc)}"]
+        entries = raw.get("supplementaryReviews", []) if isinstance(raw, dict) else []
+        if not isinstance(entries, list):
+            return [f"`{SETTINGS_PATH}`: supplementaryReviews must be a list"]
+        problems: list[str] = []
+        seen: set[str] = set()
+        for index, entry in enumerate(entries):
+            try:
+                policy = SupplementaryReviewPolicy.model_validate(entry)
+            except ValidationError as exc:
+                problems.append(
+                    f"`{SETTINGS_PATH}`: supplementaryReviews[{index}]: {cls.describe(exc)}"
+                )
+                continue
+            if policy.id in seen:
+                problems.append(
+                    f"`{SETTINGS_PATH}`: supplementaryReviews[{index}]: duplicate id {policy.id!r}"
+                )
+            seen.add(policy.id)
+        return problems
+
+    @staticmethod
+    def describe(exc: ValidationError) -> str:
+        return "; ".join(
+            f"{'.'.join(str(part) for part in error['loc']) or 'value'}: {error['msg']}"
+            for error in exc.errors()
+        )
 
     @property
     def review_channels(self) -> set[str]:
