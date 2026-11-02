@@ -75,7 +75,7 @@ class Goal(BaseModel):
 
 
 class ThreadGoal:
-    """The goal of the task ``thread_id`` works on, as its run moves it and its person
+    """The goal of the task ``thread_id`` coordinates, as its run moves it and its person
     steps in."""
 
     def __init__(self, thread_id: str) -> None:
@@ -90,7 +90,7 @@ class ThreadGoal:
         return cls(thread_id)
 
     async def current(self) -> Goal | None:
-        task = await Task.of_thread(self.thread_id)
+        task = await self._task()
         return None if task is None else self._of(task)
 
     async def change(self, state: GoalState | None, reason: PauseReason | None = None) -> None:
@@ -99,9 +99,10 @@ class ThreadGoal:
 
         A rest never overrides a stop: the person who stopped the goal resumes it.
         """
-        task = await Task.of_thread(self.thread_id)
+        task = await self._task()
         if task is None:
-            logger.warning("A goal moved on a thread without a task", extra=self._log)
+            if state is not None:
+                logger.warning("A goal moved on a thread coordinating no task", extra=self._log)
             return
         if state is None:
             if task.goal_state is not None:
@@ -117,9 +118,9 @@ class ThreadGoal:
     async def reported(self, state: Literal["blocked", "complete"], message: str) -> None:
         """The agent said the work is blocked on the person, or complete: it waits on them
         for what ``message``, its reply to them, asks."""
-        task = await Task.of_thread(self.thread_id)
+        task = await self._task()
         if task is None:
-            logger.warning("Work reported on a thread without a task", extra=self._log)
+            logger.warning("Work reported on a thread coordinating no task", extra=self._log)
             return
         reason: UserWaitReason = "blocked" if state == "blocked" else "ready"
         ask = message.strip()
@@ -137,7 +138,7 @@ class ThreadGoal:
         from openswe.tasks.schemas import user_for_login
 
         try:
-            task = await Task.of_thread(self.thread_id)
+            task = await self._task()
             if task is not None and task.goal_state is not None:
                 person = await user_for_login(by) if by else None
                 await self._pause(task.id, "stopped", by=None if person is None else person.id)
@@ -192,6 +193,12 @@ class ThreadGoal:
             return goal.model_copy(update={"waits": waits})
         await self.change("paused", "no_progress")
         return await self.current()
+
+    async def _task(self) -> Task | None:
+        """The task whose goal this thread holds: the one it coordinates. A worker's runs
+        never move its coordinator's goal, nor does stopping a worker."""
+        task = await Task.of_thread(self.thread_id)
+        return task if task is not None and task.coordinator_thread_id == self.thread_id else None
 
     @property
     def _log(self) -> dict[str, str]:

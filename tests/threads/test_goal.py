@@ -7,7 +7,7 @@ import pytest
 from pydantic import JsonValue
 
 from openswe.database import postgres
-from openswe.tasks.store import Task
+from openswe.tasks.store import Task, TaskMembership
 from openswe.threads import goal as goal_module
 from openswe.threads import index
 from openswe.threads.goal import ThreadGoal
@@ -104,3 +104,23 @@ async def test_a_stop_holds_until_its_person_writes_and_drops_the_wakeups(
     )
     await goal.change(None)
     assert await goal.current() is None
+
+
+async def test_a_workers_runs_leave_its_coordinators_goal_alone(
+    goal: ThreadGoal, wakeups: list[SimpleNamespace]
+) -> None:
+    await goal.change("working")
+    await goal.stopped()
+    task = await Task.of_thread(_THREAD)
+    assert task is not None
+    async with postgres.session() as session:
+        session.add(TaskMembership(thread_id="worker-1", task_id=task.id, role="worker"))
+    worker = ThreadGoal("worker-1")
+
+    # A worker's run starts without Goal mode, which clears a goal left on its own task.
+    await worker.change(None)
+    await worker.stopped()
+
+    kept = await goal.current()
+    assert kept is not None and (kept.state, kept.reason) == ("paused", "stopped")
+    assert await worker.current() is None
