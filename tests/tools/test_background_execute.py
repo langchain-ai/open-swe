@@ -388,51 +388,20 @@ async def test_shared_sandbox_monitors_deliver_only_their_own_completions(
         assert task_id in call.args[1]
 
 
-@pytest.mark.parametrize(
-    ("login", "profile", "enabled"),
-    [
-        ("alice", {"experimental_background_callbacks": True}, True),
-        ("alice", {"experimental_background_callbacks": False}, False),
-        ("alice", {"experimental_background_callbacks": None}, True),
-        ("alice", {"default_model": "openai:test"}, True),
-        ("alice", None, True),
-        (None, None, True),
-    ],
-)
-async def test_callbacks_follow_the_triggering_persons_flag(
-    login: str | None, profile: dict[str, object] | None, enabled: bool
-) -> None:
-    module = importlib.import_module("openswe.tools.background_execute")
-    get_profile = AsyncMock(return_value=profile)
-    with (
-        patch.object(module, "get_profile", get_profile),
-        patch.object(
-            module.RunConfig, "from_runtime", return_value=SimpleNamespace(github_login=login)
-        ),
-    ):
-        assert await module.uses_completion_callback() is enabled
-    if login:
-        get_profile.assert_awaited_once_with(login)
-
-
-@pytest.mark.parametrize(("callback", "available"), [(False, False), (True, True), (True, False)])
+@pytest.mark.parametrize("available", [False, True])
 async def test_background_execute_schedules_a_cron_only_without_callbacks(
-    callback: bool, available: bool
+    available: bool,
 ) -> None:
     backend = AsyncMock()
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     launches = [{"task_id": "cmd-1", "status": "running", "callback": available}]
     with (
         patch(
-            "openswe.tools.background_execute.uses_completion_callback",
-            AsyncMock(return_value=callback),
-        ),
-        patch(
             "openswe.tools.background_execute.current_backend", return_value=("thread-1", backend)
         ),
         patch(
             "openswe.tools.background_execute.execute",
-            AsyncMock(side_effect=launches if callback else [{"tasks": []}, *launches]),
+            AsyncMock(side_effect=launches),
         ),
         patch("openswe.tools.background_execute.update_background_task_state", AsyncMock()),
         patch(
@@ -450,17 +419,13 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
 
     with (
-        patch(
-            "openswe.tools.background_execute.uses_completion_callback",
-            AsyncMock(return_value=False),
-        ),
         patch("openswe.tools.background_execute.update_background_task_state", AsyncMock()),
         patch(
             "openswe.tools.background_execute.current_backend", return_value=("thread-1", backend)
         ),
         patch(
             "openswe.tools.background_execute.execute",
-            AsyncMock(side_effect=[{"tasks": []}, {"task_id": "task-1", "status": "running"}]),
+            AsyncMock(return_value={"task_id": "task-1", "status": "running", "callback": False}),
         ),
         patch(
             "openswe.background_tasks.ensure_background_task_polling",
@@ -473,6 +438,7 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
         "success": False,
         "task_id": "task-1",
         "status": "running",
+        "callback": False,
         "error": "command started, but automatic completion monitoring could not be scheduled",
     }
 
@@ -762,10 +728,6 @@ async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
 
     with (
         patch(
-            "openswe.tools.background_execute.uses_completion_callback",
-            AsyncMock(return_value=True),
-        ),
-        patch(
             "openswe.tools.background_execute.current_backend", return_value=("thread-1", object())
         ),
         patch("openswe.tools.background_execute.execute", side_effect=launch),
@@ -848,7 +810,6 @@ async def test_background_execute_rejects_a_thread_without_sandbox_metadata(
     monkeypatch.setattr(
         module.RunConfig, "from_runtime", lambda: SimpleNamespace(thread_id="unprepared")
     )
-    monkeypatch.setattr(module, "uses_completion_callback", AsyncMock(return_value=False))
     monkeypatch.setattr(state, "get_sandbox_metadata", AsyncMock(return_value={}))
     connect = AsyncMock(side_effect=AssertionError("connected without a sandbox id"))
     monkeypatch.setattr("openswe.sandboxes.connect.connect_sandbox", connect)
