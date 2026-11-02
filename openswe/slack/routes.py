@@ -870,7 +870,6 @@ async def slack_webhook(
         root_ts = reply_thread_ts or original_message_ts
         can_start = mda_forwarding.mda_can_start(
             subtype=event.subtype,
-            from_bot=allowed_bot is not None,
             code_channel=in_code_channel,
             breakout=message.action in {SlackAction.BREAKOUT, SlackAction.BREAKOUT_WEB},
         )
@@ -898,9 +897,10 @@ async def slack_webhook(
                 root_ts=root_ts,
                 can_start=can_start,
             )
-        if new_mda_thread_id is not None:
+        if new_mda_thread_id is not None and allowed_bot is None:
             # Gated before it's claimed: a person who can't run gets the prompt here, and
-            # the conversation stays unclaimed for whoever can.
+            # the conversation stays unclaimed for whoever can. An allowed bot links no
+            # account, as on the backend's own path.
             link_needed = await service.account_link_needed(user_id)
             if link_needed is not None:
                 if not await common.claim_slack_event(event_id, channel_id, event_ts):
@@ -961,7 +961,8 @@ async def slack_webhook(
                 # Claimed only now, so nothing that fails before the hand-off strands the
                 # conversation on MDA with no message for its channel.
                 try:
-                    owner_login = await service.slack_login(user_id)
+                    # A conversation an allowed bot started has no person to own it.
+                    owner_login = None if allowed_bot else await service.slack_login(user_id)
                     mda_thread_id = (
                         await mda_forwarding.claim_concierge(
                             envelope.api_app_id, team_id or "", channel_id, owner_login=owner_login

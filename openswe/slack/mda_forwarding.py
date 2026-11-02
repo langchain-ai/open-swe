@@ -94,19 +94,18 @@ def trigger_server_takes(subtype: str) -> bool:
     return subtype in FORWARDED_SUBTYPES
 
 
-def mda_can_start(*, subtype: str, from_bot: bool, code_channel: bool, breakout: bool) -> bool:
+def mda_can_start(*, subtype: str, code_channel: bool, breakout: bool) -> bool:
     """Whether MDA's Slack channel can start a new conversation with this message.
 
-    It can for a person's mention of Open SWE, a kitchen channel's untagged message and
-    a DM (a concierge DM as a whole, :func:`startable_concierge`). The rest needs the
-    backend:
+    It can for a mention of Open SWE by a person or a bot on Open SWE's allow-list, a
+    kitchen channel's untagged message and a DM (a concierge DM as a whole,
+    :func:`startable_concierge`). The rest needs the backend:
 
     - A code channel is one session for the whole channel, which MDA can't hold yet.
-    - Bots' messages carry the triggering bot through the backend's own intake.
     - Breakouts open flows of their own.
     - Trigger Server ignores subtypes outside :data:`FORWARDED_SUBTYPES`.
     """
-    return trigger_server_takes(subtype) and not (from_bot or code_channel or breakout)
+    return trigger_server_takes(subtype) and not (code_channel or breakout)
 
 
 def mda_thread_id(app_id: str, team_id: str, channel_id: str, root_ts: str) -> str:

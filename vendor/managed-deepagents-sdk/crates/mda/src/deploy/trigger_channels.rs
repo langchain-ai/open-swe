@@ -15,10 +15,11 @@ use super::channel_setup::ChannelStatus;
 use super::slack_app::{self, SlackApp};
 use super::trigger_icon;
 use crate::compile::ChannelRequirements;
+use crate::error::{categorize_unclassified, ErrorCategory};
 use crate::langsmith::{
-    self, is_transient_setup_error, ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus,
-    ChannelSetupTarget, SlackAppInUse, SlackChannelApp, SlackChannelOptions, SlackChannelSetup,
-    SlackTriggerMode,
+    self, is_transient_setup_error, ChannelSetupNote, ChannelSetupRequest, ChannelSetupResponse,
+    ChannelSetupStatus, ChannelSetupTarget, SlackAppInUse, SlackChannelApp, SlackChannelOptions,
+    SlackChannelSetup, SlackTriggerMode,
 };
 use crate::project::Language;
 
@@ -131,6 +132,9 @@ struct SlackProviderConfig {
     // SDKs only emit this for a channel with handlers that take such events.
     #[serde(default)]
     forwarded_events: Vec<String>,
+    // SDKs only emit this when the channel turns code channels on.
+    #[serde(default)]
+    code_channels: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -158,6 +162,7 @@ pub(crate) struct PreparedTriggerChannel {
     trigger_mode: Option<SlackTriggerMode>,
     allow_bot_triggers: bool,
     forwarded_events: Vec<String>,
+    code_channels: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -320,6 +325,7 @@ pub(crate) fn prepare(
             .filter(|mode| *mode != SlackTriggerMode::All),
         allow_bot_triggers: provider_config.allow_bot_triggers,
         forwarded_events: provider_config.forwarded_events,
+        code_channels: provider_config.code_channels,
     }))
 }
 
@@ -375,6 +381,7 @@ fn slack_setup(prepared: &PreparedTriggerChannel) -> SlackChannelSetup {
             trigger_mode: prepared.trigger_mode,
             allow_bot_triggers: prepared.allow_bot_triggers,
             forwarded_events: prepared.forwarded_events.clone(),
+            code_channels: prepared.code_channels,
         },
         customer_app: None,
     }
@@ -532,11 +539,31 @@ pub(crate) fn register(
             )
         },
         |_| Ok(()),
-    )?;
-    if registered.is_some() {
-        ui.success(READY)?;
+    )
+    .map_err(transient_failure_category)?;
+    if let Some(notes) = registered {
+        show_registered(&mut ui, &notes)?;
     }
     Ok(())
+}
+
+/// A setup request that might have succeeded when made again, and was not:
+/// Trigger Server or Slack was busy (a 5xx or 429), which is the server's
+/// failure, or the request got no answer, which a timeout already says.
+/// Categorized only here, so retries can still tell it is transient.
+fn transient_failure_category(error: anyhow::Error) -> anyhow::Error {
+    if is_transient_setup_error(&error) {
+        categorize_unclassified(ErrorCategory::Remote, error)
+    } else {
+        error
+    }
+}
+
+/// What a registered channel shows: that it is ready (unless Trigger Server
+/// says so itself), then Trigger Server's setup notes, such as what the
+/// user's own Slack app still needs for a feature the channel turned on.
+fn show_registered(ui: &mut (impl SetupUi + ?Sized), notes: &[ChannelSetupNote]) -> Result<()> {
+    channel_app::show_active(ui, READY, notes)
 }
 
 const READY: &str =
@@ -570,7 +597,7 @@ impl SetupUi for LiveUi {
 }
 
 /// One attempt at registering the channel, choosing its app when Trigger
-/// Server has none for it yet.
+/// Server has none for it yet; the active answer's notes.
 fn register_once(
     client: &langsmith::Client,
     prepared: &PreparedTriggerChannel,
@@ -579,7 +606,7 @@ fn register_once(
     assistant_id: &str,
     env_vars: &BTreeMap<String, String>,
     interactive: bool,
-) -> Result<()> {
+) -> Result<Vec<ChannelSetupNote>> {
     let mut request = build_setup_request(prepared, agent_server_url, deployment_id, assistant_id)?;
     let registered = match registration(client, deployment_id, &prepared.name) {
         Ok(registered) => registered,
@@ -629,9 +656,14 @@ fn register_once(
     )
 }
 
-/// Register the user's own app, which Trigger Server activates at once. When
-/// another deployment in the workspace uses the app, offer to move it here.
-fn register_customer_app<S, C>(interactive: bool, mut setup: S, confirm_move: C) -> Result<()>
+/// Register the user's own app, which Trigger Server activates at once, and
+/// return the answer's notes. When another deployment in the workspace uses
+/// the app, offer to move it here.
+fn register_customer_app<S, C>(
+    interactive: bool,
+    mut setup: S,
+    confirm_move: C,
+) -> Result<Vec<ChannelSetupNote>>
 where
     S: FnMut(Option<&str>) -> Result<ChannelSetupResponse>,
     C: FnOnce(&str) -> Result<bool>,
@@ -661,8 +693,9 @@ where
         }
         response => response?,
     };
+    let notes = response.notes.clone();
     match classify_setup_response(response)? {
-        SetupState::Active => Ok(()),
+        SetupState::Active => Ok(notes),
         SetupState::ActionRequired(_) => {
             bail!("Slack channel setup did not finish with your Slack app. Check its bot token and signing secret, then rerun `mda deploy`.")
         }
@@ -773,8 +806,13 @@ const ACTION_WAIT_LIMIT: Duration = Duration::from_secs(60 * 60);
 /// after each `wait`. Once the user has been shown what to do, a request that
 /// may succeed when made again (a timeout, 5xx or 429) doesn't end the wait,
 /// as the GitHub installation check keeps going; any other error does. Ctrl-C
-/// stops waiting; so does the hour running out.
-fn run_registration<S, A, W>(mut setup: S, mut show: A, mut wait: W) -> Result<()>
+/// stops waiting; so does the hour running out. Returns the active answer's
+/// notes.
+fn run_registration<S, A, W>(
+    mut setup: S,
+    mut show: A,
+    mut wait: W,
+) -> Result<Vec<ChannelSetupNote>>
 where
     S: FnMut() -> Result<ChannelSetupResponse>,
     A: FnMut(&RequiredAction) -> Result<()>,
@@ -786,8 +824,9 @@ where
     loop {
         match setup() {
             Ok(response) => {
+                let notes = response.notes.clone();
                 let action = match classify_setup_response(response)? {
-                    SetupState::Active => return Ok(()),
+                    SetupState::Active => return Ok(notes),
                     SetupState::ActionRequired(action) => action,
                 };
                 // Every answer carries a fresh link, and the one shown still works.
@@ -937,6 +976,7 @@ mod tests {
             source_registration_id: None,
             authorization_url: None,
             message: None,
+            notes: Vec::new(),
         }
     }
 
@@ -947,6 +987,7 @@ mod tests {
             source_registration_id: None,
             authorization_url: Some("https://trigger.example/authorize".to_string()),
             message: None,
+            notes: Vec::new(),
         }
     }
 
@@ -957,6 +998,7 @@ mod tests {
             source_registration_id: None,
             authorization_url: None,
             message: None,
+            notes: Vec::new(),
         }
     }
 
@@ -993,6 +1035,73 @@ mod tests {
 
         assert_eq!(asked.as_deref(), Some(HOLDER));
         assert_eq!(moves, vec![None, Some(HOLDER.to_string())]);
+    }
+
+    fn code_channels_note() -> ChannelSetupNote {
+        ChannelSetupNote {
+            level: "warning".to_string(),
+            text: "Code channels: turn them on for your Slack app.".to_string(),
+        }
+    }
+
+    /// What a registration shows, as `level: text`.
+    #[derive(Default)]
+    struct RecordingUi(Vec<String>);
+
+    impl SetupUi for RecordingUi {
+        fn interactive(&self) -> bool {
+            true
+        }
+
+        fn retry_or_skip(&mut self, _: &anyhow::Error) -> Result<bool> {
+            Ok(false)
+        }
+
+        fn success(&mut self, message: &str) -> Result<()> {
+            self.0.push(format!("success: {message}"));
+            Ok(())
+        }
+
+        fn info(&mut self, message: &str) -> Result<()> {
+            self.0.push(format!("info: {message}"));
+            Ok(())
+        }
+
+        fn warning(&mut self, message: &str) -> Result<()> {
+            self.0.push(format!("warning: {message}"));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn slack_setup_notes_show_after_the_channel_is_ready() {
+        let with_note = || ChannelSetupResponse {
+            notes: vec![code_channels_note()],
+            ..active_setup_response()
+        };
+        // The user's own app.
+        let customer = register_customer_app(true, |_| Ok(with_note()), |_| Ok(true)).unwrap();
+        // An app LangSmith manages.
+        let (managed, _) = register_with(vec![with_note()], None);
+        let managed = managed.unwrap();
+
+        for notes in [customer, managed] {
+            assert_eq!(notes, vec![code_channels_note()]);
+            let mut ui = RecordingUi::default();
+            show_registered(&mut ui, &notes).unwrap();
+            assert_eq!(
+                ui.0,
+                vec![
+                    format!("success: {READY}"),
+                    "warning: Code channels: turn them on for your Slack app.".to_string(),
+                ]
+            );
+        }
+
+        // Without notes, only the ready line.
+        let mut ui = RecordingUi::default();
+        show_registered(&mut ui, &[]).unwrap();
+        assert_eq!(ui.0, vec![format!("success: {READY}")]);
     }
 
     #[test]
@@ -1086,6 +1195,15 @@ mod tests {
         assert!(!prepared.trigger_on_all_messages);
         assert_eq!(prepared.trigger_mode, None);
         assert!(!prepared.allow_bot_triggers);
+        assert!(!prepared.code_channels);
+    }
+
+    #[test]
+    fn prepare_rejects_a_code_channels_value_that_is_not_a_bool() {
+        let mut requirements = requirements();
+        requirements.get_mut("slack").unwrap()["providerConfig"]["codeChannels"] = json!("yes");
+
+        assert!(prepare(&requirements).is_err());
     }
 
     #[test]
@@ -1093,11 +1211,11 @@ mod tests {
         for (provider_config, options) in [
             (
                 json!({"triggerOnAllMessages": false}),
-                json!({"triggerOnAllMessages": false, "allowBotTriggers": false, "forwardedEvents": []}),
+                json!({"triggerOnAllMessages": false, "allowBotTriggers": false, "forwardedEvents": [], "codeChannels": false}),
             ),
             (
                 json!({"triggerOnAllMessages": true}),
-                json!({"triggerOnAllMessages": true, "allowBotTriggers": false, "forwardedEvents": []}),
+                json!({"triggerOnAllMessages": true, "allowBotTriggers": false, "forwardedEvents": [], "codeChannels": false}),
             ),
             (
                 json!({"triggerOnAllMessages": false, "triggerMode": "thread"}),
@@ -1105,7 +1223,8 @@ mod tests {
                     "triggerOnAllMessages": false,
                     "triggerMode": "thread",
                     "allowBotTriggers": false,
-                    "forwardedEvents": []
+                    "forwardedEvents": [],
+                    "codeChannels": false
                 }),
             ),
             (
@@ -1114,7 +1233,8 @@ mod tests {
                     "triggerOnAllMessages": false,
                     "triggerMode": "mention",
                     "allowBotTriggers": false,
-                    "forwardedEvents": []
+                    "forwardedEvents": [],
+                    "codeChannels": false
                 }),
             ),
             (
@@ -1125,12 +1245,22 @@ mod tests {
                 json!({
                     "triggerOnAllMessages": true,
                     "allowBotTriggers": false,
-                    "forwardedEvents": ["message_changed", "reaction_added"]
+                    "forwardedEvents": ["message_changed", "reaction_added"],
+                    "codeChannels": false
+                }),
+            ),
+            (
+                json!({"triggerOnAllMessages": false, "codeChannels": true}),
+                json!({
+                    "triggerOnAllMessages": false,
+                    "allowBotTriggers": false,
+                    "forwardedEvents": [],
+                    "codeChannels": true
                 }),
             ),
             (
                 json!({"triggerOnAllMessages": true, "triggerMode": "all"}),
-                json!({"triggerOnAllMessages": true, "allowBotTriggers": false, "forwardedEvents": []}),
+                json!({"triggerOnAllMessages": true, "allowBotTriggers": false, "forwardedEvents": [], "codeChannels": false}),
             ),
         ] {
             let mut requirements = requirements();
@@ -1552,7 +1682,8 @@ mod tests {
                     "options": {
                         "triggerOnAllMessages": false,
                         "allowBotTriggers": false,
-                        "forwardedEvents": []
+                        "forwardedEvents": [],
+                        "codeChannels": false
                     }
                 }
             })
@@ -1648,6 +1779,7 @@ mod tests {
             source_registration_id: None,
             authorization_url: None,
             message: None,
+            notes: Vec::new(),
         };
 
         assert_eq!(
@@ -1664,6 +1796,7 @@ mod tests {
             source_registration_id: None,
             authorization_url: None,
             message: None,
+            notes: Vec::new(),
         };
 
         assert_eq!(
@@ -1680,6 +1813,7 @@ mod tests {
             source_registration_id: None,
             authorization_url: None,
             message: None,
+            notes: Vec::new(),
         };
 
         assert_eq!(
@@ -1696,6 +1830,7 @@ mod tests {
             source_registration_id: None,
             authorization_url: None,
             message: None,
+            notes: Vec::new(),
         };
 
         assert!(classify_setup_response(response).is_err());
@@ -1711,6 +1846,7 @@ mod tests {
                 "https://trigger.example/authorize?state=resume-setup".to_string(),
             ),
             message: None,
+            notes: Vec::new(),
         };
 
         assert_eq!(
@@ -1730,6 +1866,7 @@ mod tests {
             source_registration_id: None,
             authorization_url: Some("http://unsafe.example/approve".to_string()),
             message: None,
+            notes: Vec::new(),
         };
 
         assert_eq!(
@@ -1749,6 +1886,7 @@ mod tests {
             source_registration_id: None,
             authorization_url: Some("http://unsafe.example/authorize".to_string()),
             message: None,
+            notes: Vec::new(),
         };
 
         let rendered = classify_setup_response(response).unwrap_err().to_string();
@@ -1767,6 +1905,7 @@ mod tests {
             source_registration_id: None,
             authorization_url: None,
             message: Some("Reconnect the existing Slack installation.".to_string()),
+            notes: Vec::new(),
         };
 
         assert_eq!(
@@ -1783,7 +1922,7 @@ mod tests {
     fn register_with(
         responses: Vec<ChannelSetupResponse>,
         interrupt_at: Option<usize>,
-    ) -> (Result<()>, Vec<String>) {
+    ) -> (Result<Vec<ChannelSetupNote>>, Vec<String>) {
         let mut responses = responses.into_iter();
         let log = std::cell::RefCell::new(Vec::new());
         let mut waits = 0;
@@ -1860,6 +1999,30 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("HTTP 400"), "{error}");
+    }
+
+    #[test]
+    fn a_setup_that_stayed_busy_is_the_servers_failure() {
+        let busy = transient_failure_category(anyhow::Error::new(
+            crate::langsmith::TransientSetupError("Channel setup failed (HTTP 503).".into()),
+        ));
+        let refused = transient_failure_category(crate::error::categorized(
+            ErrorCategory::Authentication,
+            "Channel setup failed (HTTP 401).",
+        ));
+        let other =
+            transient_failure_category(anyhow!("Channel setup returned an invalid response."));
+
+        assert_eq!(busy.to_string(), "Channel setup failed (HTTP 503).");
+        assert_eq!(crate::error::category_of(&busy), ErrorCategory::Remote);
+        assert_eq!(
+            crate::error::category_of(&refused),
+            ErrorCategory::Authentication
+        );
+        assert_eq!(
+            crate::error::category_of(&other),
+            ErrorCategory::Unclassified
+        );
     }
 
     #[test]

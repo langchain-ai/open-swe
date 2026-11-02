@@ -102,6 +102,7 @@ class TriggerSlackChannel(Channel):
         reply: ChannelReply = "auto",
         on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
         resolve_user: ChannelResolveUser | None = None,
+        code_channel: bool = False,
     ) -> None:
         self.app = app
         self.resolve_user = resolve_user
@@ -113,6 +114,7 @@ class TriggerSlackChannel(Channel):
         self.multitask_strategy = multitask_strategy
         self.reply = reply
         self.on_finish = on_finish
+        self.code_channel = code_channel
         self._decided: DecidedSlackEvents | None = None
 
     @property
@@ -205,6 +207,8 @@ class TriggerSlackChannel(Channel):
             decide_interaction=decide_interaction,
             decide_provider_event=decide_provider_event if self.forwarded_events else None,
             multitask_strategy=self.multitask_strategy,
+            # Each code channel is one conversation.
+            code_channels=self.code_channel,
             on_finish=on_finish,
             resolve_user=context.get("resolve_user"),
         )
@@ -251,6 +255,9 @@ class TriggerSlackChannel(Channel):
         # Only with a handler that needs it, so other channels deploy with any CLI.
         if forwarded := self.forwarded_events:
             provider_config["forwardedEvents"] = cast("JsonValue", list(forwarded))
+        # Only when on, as older CLIs reject unknown keys.
+        if self.code_channel:
+            provider_config["codeChannels"] = True
         return {
             "name": name,
             "provider": "slack",
@@ -279,10 +286,16 @@ def _warn_unreachable_handlers(
 
 async def _is_plain_message(event: TriggerChannelMessageEvent) -> bool:
     """Whether a delivery is surely neither a mention nor a direct message."""
+    from managed_deepagents._channels.slack.code_channel import (  # noqa: PLC0415
+        is_code_channel_address,
+    )
     from managed_deepagents._channels.slack.events import (  # noqa: PLC0415
         is_plain_slack_message,
     )
 
+    # Every message in a code channel reaches the agent, as a mention does.
+    if is_code_channel_address(event.get("address")):
+        return False
     raw_event = event.get("raw_event")
     return isinstance(raw_event, Mapping) and await is_plain_slack_message(raw_event)
 
@@ -407,6 +420,7 @@ class _TriggerSlackArgs(BaseModel):
     allow_bot_triggers: StrictBool = False
     reactions: StrictBool | str | Callable[..., object] = DEFAULT_REACTION_EMOJI
     status: object = None
+    code_channel: StrictBool = False
 
     @field_validator("reactions")
     @classmethod
@@ -483,6 +497,7 @@ def slack_channel(
     reply: ChannelReply = "auto",
     on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
     resolve_user: ResolveUser | EventEndpoint | None = None,
+    code_channel: bool = False,
 ) -> TriggerSlackChannel:
     """Declare a Trigger Server-backed Slack channel.
 
@@ -554,6 +569,16 @@ def slack_channel(
         resolve_user: Map the Slack user to one of your users, with a function
             or an endpoint MDA asks; overrides the identity's ``resolve_user``.
             Experimental: this may change in a minor release.
+        code_channel: Run Slack code channels: each code channel is one
+            conversation, and every message, click and reaction inside one
+            reaches the agent, where a handler's event has ``code_channel``
+            set. MDA sets the channel session's status, so Slack shows Stop
+            while a run works, and Stop cancels the conversation's runs, on a
+            handler's own thread too. The agent's own tools
+            make every other Slack call, such as the context bar, tabs, or
+            opening and archiving a channel. Needs Slack's code channels
+            feature on the app; ``mda deploy`` lists the steps for your own app.
+            Experimental: this may change in a minor release.
         on_finish: Called once when a message or interaction is done, with the
             ``SlackEvent`` (a ``SlackMessageEvent`` or ``SlackInteractionEvent``), its
             ``SlackChannelThread``, and how it finished: ``run`` (its run
@@ -602,6 +627,7 @@ def slack_channel(
                 "allow_bot_triggers": allow_bot_triggers,
                 "reactions": reactions,
                 "status": status,
+                "code_channel": code_channel,
             }
         )
     except ValueError as error:
@@ -629,6 +655,7 @@ def slack_channel(
         reply=reply,
         on_finish=on_finish,
         resolve_user=checked_resolve_user("channels.slack", resolve_user),
+        code_channel=parsed.code_channel,
     )
 
 

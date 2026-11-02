@@ -63,11 +63,18 @@ async def start_click(
     event: SlackInteractionEvent, thread: SlackChannelThread
 ) -> ChannelRunResult | None:
     actor = event.actor
-    if actor is None:
+    # The agent's buttons and the backend's cards sit on a message in a Slack
+    # thread; a click in a code channel's view has neither.
+    thread_ts, message_ts = event.thread_ts, event.message_ts
+    if actor is None or thread_ts is None:
         return None
-    value = _button(event.value) if event.message_ts is not None else None
-    if value is not None and not (value.get("type") == "slack_retry" and value.get("response")):
-        click = _Click(event, thread, actor.id, value)
+    value = _button(event.value) if message_ts is not None else None
+    if (
+        message_ts is not None
+        and value is not None
+        and not (value.get("type") == "slack_retry" and value.get("response"))
+    ):
+        click = _Click(event, thread, actor.id, value, (thread_ts, message_ts))
         match value.get("type"):
             case "open_swe_option":
                 result = await click.option()
@@ -84,7 +91,7 @@ async def start_click(
         ACT_ON_SLACK_CLICK,
         ActOnSlackClick(
             channel_id=event.channel_id,
-            thread_ts=event.thread_ts,
+            thread_ts=thread_ts,
             user_id=actor.id,
             payload=event.payload,
         ),
@@ -116,11 +123,13 @@ class _Click:
         thread: SlackChannelThread,
         clicker: str,
         value: dict[str, JsonValue],
+        message: tuple[str, str],
     ) -> None:
         self.event = event
         self.thread = thread
         self.clicker = clicker
         self.value = value
+        self.thread_ts, self.message_ts = message
         self.message = _mapping(event.payload.get("message"))
         self.action = _first_option_action(event.payload.get("actions"))
         self.response_url = _response_url(event.payload.get("response_url"))
@@ -199,9 +208,9 @@ class _Click:
             PlanSlackClick(
                 thread_id=self.thread.id,
                 channel_id=self.event.channel_id,
-                thread_ts=self.event.thread_ts,
-                message_ts=cast(str, self.event.message_ts),
-                action_ts=_text(self.action.get("action_ts")) or cast(str, self.event.message_ts),
+                thread_ts=self.thread_ts,
+                message_ts=self.message_ts,
+                action_ts=_text(self.action.get("action_ts")) or self.message_ts,
                 user_id=self.clicker,
                 team_id=_text(team.get("id")),
                 click=click,
