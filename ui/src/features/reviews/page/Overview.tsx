@@ -2,7 +2,7 @@ import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Button } from "@langchain/macaw-components/Button"
 import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { useQuery } from "@tanstack/react-query"
-import { useCallback, useLayoutEffect, useRef, useState } from "react"
+import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
 import { reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
@@ -17,6 +17,7 @@ import { AgentMark } from "./AgentMark"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { StandingPanel } from "./Standing"
 import { RelativeTimestamp } from "./RelativeTimestamp"
+import { commentFacts } from "./commentFacts"
 
 const CLAMP_PX = 320
 
@@ -72,6 +73,7 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
       <div style={{ viewTransitionName: "pr-standing" }}>
         <StandingPanel pr={pr} />
       </div>
+      <CommentFacts pr={pr} />
       {detail.walkthrough?.human_input && (
         <details
           aria-label="Requested behavior"
@@ -105,6 +107,31 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
         }
       />
     </div>
+  )
+}
+
+/** Bold-keyed table rows from the PR's comments, such as preview links a bot posts. */
+function CommentFacts({ pr }: { pr: PullRequestRef }) {
+  const items = useQuery(reviewQueries.conversation(pr)).data?.items
+  const facts = items ? commentFacts(items) : []
+  if (facts.length === 0) return null
+  return (
+    <dl
+      aria-label="Details from comments"
+      className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-space-4 gap-y-space-2 rounded-xl border border-default px-space-4 py-space-3 text-xs leading-5"
+    >
+      {facts.map(({ key, value }) => (
+        <Fragment key={key}>
+          <dt className="font-medium text-primary">{key}</dt>
+          <dd className="min-w-0">
+            <Markdown
+              content={value}
+              className="text-xs leading-5 text-secondary [&_p]:my-0!"
+            />
+          </dd>
+        </Fragment>
+      ))}
+    </dl>
   )
 }
 
