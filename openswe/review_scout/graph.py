@@ -50,6 +50,7 @@ from openswe.tools.plan_walkthrough import (
     walkthrough_split_hunks,
 )
 from openswe.tools.record_human_input import record_human_input
+from openswe.tools.suggest_task import suggest_task
 from openswe.ui_invalidations import Topic
 from openswe.utils.deferred_model import make_deferred_error_model
 from openswe.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
@@ -288,6 +289,7 @@ def scout_tools() -> list[BaseTool]:
             walkthrough_move_to_other,
             walkthrough_describe_other,
             record_human_input,
+            suggest_task,
         ]
     )
 
