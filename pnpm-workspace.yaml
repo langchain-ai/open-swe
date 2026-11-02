@@ -6,6 +6,7 @@ packages:
   - tests/e2e
 
 allowBuilds:
+  core-js: false
   electron: true
   electron-winstaller: false
   esbuild: true
@@ -29,7 +30,6 @@ minimumReleaseAgeExclude:
   - '@langchain/macaw-cli@1.2.1'
 
 overrides:
-  '@langchain/macaw-tokens': file:ui/vendor/macaw/langchain-macaw-tokens-2.0.0-alpha.0.tgz
   '@hono/node-server': 2.1.3
   '@pierre/trees>@pierre/theming': 1.0.1
   'brace-expansion@>=1.0.0 <2.0.0': 1.1.21

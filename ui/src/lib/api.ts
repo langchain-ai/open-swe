@@ -15,6 +15,15 @@ import {
   newRequestId,
 } from "./dashboard-fetch"
 
+export interface AppNotification {
+  id: string
+  title: string
+  body: string
+  url: string
+  /** The in-app route for `url`, or null when it points outside the dashboard. */
+  path: string | null
+}
+
 export interface AuditLogFilters {
   start_time: string
   end_time: string
@@ -410,6 +419,10 @@ export interface WorkspaceSettings {
   default_reviewer_subagent_reasoning_effort?: string | null
   default_thread_title_model?: string | null
   default_thread_title_reasoning_effort?: string | null
+  /** Share (0–100) of newly reviewed pull requests that also get a shadow review. */
+  review_shadow_percent?: number | null
+  review_shadow_model?: string | null
+  review_shadow_reasoning_effort?: string | null
   updated_at?: string | null
 }
 
@@ -838,6 +851,14 @@ export interface WorkspaceOption {
   refresh_steps?: Array<WorkspaceRefreshStep>
 }
 
+/** A person in the Slack workspace, offered when mentioning someone in a composer. */
+export interface SlackUserOption {
+  id: string
+  name: string
+  display_name: string
+  real_name: string
+}
+
 /** A channel the Slack bot can see, offered when binding channels to a workspace. */
 export interface SlackChannelOption {
   id: string
@@ -1177,6 +1198,7 @@ export interface ReviewPrDetails {
   state: string
   title: string
   body: string
+  description_pull_requests?: Array<number>
   additions: number
   deletions: number
   changed_files: number
@@ -1470,11 +1492,6 @@ function pullRequestThread(
 }
 
 export const api = {
-  recordPageView: (page_name: string) =>
-    request<void>("/analytics/page", {
-      method: "POST",
-      body: JSON.stringify({ page_name }),
-    }),
   me: () => request<SessionUser>("/me"),
   /** Model list and defaults for one workspace; model defaults are per workspace. */
   options: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>
@@ -1681,6 +1698,13 @@ export const api = {
       `/workspaces/${encodeURIComponent(slug)}/settings`,
       { method: "PUT", body: JSON.stringify(overrides) }
     ),
+  pendingNotifications: () => request<AppNotification[]>("/notifications"),
+  acknowledgeNotification: (id: string) =>
+    request<{ ok: boolean }>(
+      `/notifications/${encodeURIComponent(id)}/delivered`,
+      { method: "POST" }
+    ),
+  listSlackUsers: () => request<{ users: SlackUserOption[] }>("/slack/users"),
   slackUserName: (userId: string) =>
     request<{ name: string }>(
       `/slack/users/${encodeURIComponent(userId)}/name`

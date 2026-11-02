@@ -186,6 +186,7 @@ from openswe.tools import (
     delete_organization_skill,
     delete_user_skill,
     delete_workspace,
+    discover_managed_tools,
     dismiss_human_review_request,
     execute_database_sql,
     expedite_pr_approval,
@@ -261,6 +262,7 @@ from openswe.tools.admin_gate import (
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
 from openswe.tools.manage_review_repos import manage_review_repos
+from openswe.tools.manage_review_shadow import manage_review_shadow
 from openswe.tools.note_on_diff import note_on_diff
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
@@ -653,6 +655,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "execute_database_sql",
         "read_user_settings",
         "connect_managed_tools",
+        "discover_managed_tools",
         "save_user_settings",
         "remember",
         "forget",
@@ -750,6 +753,7 @@ AGENT_TOOLS: Final = (
     read_user_settings,
     request_pr_review,
     connect_managed_tools,
+    discover_managed_tools,
     recreate_sandbox,
     report_platform_issue,
     schedule_thread_wakeup,
@@ -787,6 +791,7 @@ AGENT_TOOLS: Final = (
     write_database_rows,
     manage_feature_flags,
     manage_review_approval_mode,
+    manage_review_shadow,
     manage_review_repos,
 )
 
@@ -1983,7 +1988,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         *(() if goal_mode else (report_work_state,)),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
-        *(() if managed_gateway else (connect_managed_tools,)),
+        *(() if managed_gateway else (connect_managed_tools, discover_managed_tools)),
         *(
             ()
             if sandbox_file_downloads

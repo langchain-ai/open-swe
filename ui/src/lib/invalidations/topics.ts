@@ -12,6 +12,7 @@ type Topic =
 /** Topics whose records each have one of their own, `<topic>/<key>`. */
 type KeyedTopic =
   | "required-checks"
+  | "notifications"
   | "review-styles"
   | "incidents"
   | "pull-requests"
