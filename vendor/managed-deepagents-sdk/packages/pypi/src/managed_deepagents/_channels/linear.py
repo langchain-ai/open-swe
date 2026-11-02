@@ -813,9 +813,9 @@ async def _notify_finished(target: JsonValue, delivery: HttpFinishedDelivery) ->
         return
     if _is_linear_target(target) and "sessionId" in target:
         _release_session(target["sessionId"])
-    # A session would keep "working" on a run that never started. An issue's
-    # event may be one its handler would have skipped, so its failure is only
-    # logged; one Linear retries (``retry``) may still start.
+    # A session would keep "working" on a run that never started; its runs
+    # start in the background, so nothing retries them. An issue's event may
+    # be one its handler would have skipped, so its failure is only logged.
     if delivery["type"] == "failed" and delivery["reason"] == "start":
         if _is_linear_target(target) and "sessionId" in target:
             await _report_error(RuntimeError("channel run could not be started"), target)

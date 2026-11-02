@@ -353,6 +353,7 @@ async def resume_ingress_run(
     context: Context | None = None,
     config: Config | None = None,
     thread_origin: IngressThreadOrigin | None = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> StartedIngressRun:
     """Enqueue a keyed interrupt response without creating a thread."""
     if thread_origin is not None:
@@ -363,7 +364,7 @@ async def resume_ingress_run(
         assistant_id,
         command=Command(resume=resume),
         multitask_strategy="enqueue",
-        **_run_options(context, config),
+        **_run_options(context, config, metadata),
     )
     return _started_run(thread_id, run)
 

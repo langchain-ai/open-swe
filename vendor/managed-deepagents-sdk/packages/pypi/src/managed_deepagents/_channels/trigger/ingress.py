@@ -35,6 +35,7 @@ from managed_deepagents._thread_record import THREAD_CONVERSATION_METADATA
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.binding import ChannelBinding
+    from managed_deepagents._channels.types import JsonValue
     from managed_deepagents._ingress_runs import MultitaskStrategy, StartedIngressRun
 
 
@@ -104,6 +105,27 @@ async def newer_ingress_run(
     )
     runs = await client.runs.list(thread_id, limit=1)
     return bool(runs) and runs[0]["run_id"] != run_id
+
+
+async def other_active_ingress_run(
+    *,
+    thread_id: str,
+    run_id: str,
+    source_provider: str,
+    source_thread_key: str,
+    user_id: str,
+) -> bool:
+    """Whether a run other than ``run_id`` is queued or running on the thread,
+    such as the next message's run under ``enqueue``."""
+    client = _create_trigger_ingress_loopback_client(
+        {
+            "provider": source_provider,
+            "thread_key": source_thread_key,
+            "user_id": user_id,
+        }
+    )
+    runs = await client.runs.list(thread_id, limit=20)
+    return any(run["run_id"] != run_id and run["status"] in ("pending", "running") for run in runs)
 
 
 async def ingress_thread_interrupts(
@@ -197,6 +219,9 @@ class HandlerThreadTarget(ResumeTarget):
     """The key that owns the thread, which every call on it names."""
     reply: Literal["auto", "none"]
     """Whether the resumed run answers the source thread, as its first did."""
+    run_metadata: dict[str, JsonValue]
+    """The parked run's ``mda_*`` keys, which the resumed run carries too: the
+    Agent Server keeps metadata per run, and Stop and the next answer read it."""
 
 
 #: Thread metadata deepagents sets on an async subagent's thread, naming its lead's thread.
@@ -311,6 +336,7 @@ async def resume_ingress_agent(
     user_id: str,
     context: Mapping[str, object] | None = None,
     binding: ChannelBinding,
+    metadata: Mapping[str, JsonValue] | None = None,
 ) -> StartedIngressRun:
     """Resume a Trigger run as its identity_context principal."""
     client = _create_trigger_ingress_loopback_client(
@@ -322,6 +348,7 @@ async def resume_ingress_agent(
         assistant_id=assistant_id,
         resume=resume,
         thread_origin={"binding": binding, "sender": user_id},
+        metadata=metadata,
         **build_ingress_run_context(binding=binding, context=context),
     )
 
@@ -461,11 +488,15 @@ async def handler_thread_resume_target(
         if isinstance(assistant, str) and assistant:
             metadata = runs[0].get("metadata")
             delivers = isinstance(metadata, Mapping) and metadata.get(DELIVERS_METADATA) is True
+            run_metadata: dict[str, JsonValue] = {STARTED_FROM_METADATA: started_from}
+            if delivers:
+                run_metadata[DELIVERS_METADATA] = True
             return {
                 "thread_id": thread_id,
                 "assistant_id": assistant,
                 "source_thread_key": owner,
                 "reply": "auto" if delivers else "none",
+                "run_metadata": run_metadata,
             }
     return None
 
