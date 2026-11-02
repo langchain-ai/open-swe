@@ -1,0 +1,199 @@
+name: Build preview branch
+
+on:
+  push:
+    branches: [main]
+  pull_request_target:
+    types: [labeled, unlabeled, synchronize, reopened, closed]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Republish even when the preview tree is unchanged
+        type: boolean
+        default: false
+  schedule:
+    - cron: "4,19,34,49 * * * *"
+
+permissions:
+  contents: write
+  id-token: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  build:
+    name: Rebuild preview from main and labeled PRs
+    if: >-
+      github.event_name != 'pull_request_target'
+      || contains(github.event.pull_request.labels.*.name, 'preview')
+      || github.event.label.name == 'preview'
+    runs-on: ubuntu-latest
+    # Only the build: a deploy in flight must not hold back the next tree, which
+    # supersedes it (deploy_preview.py stops waiting once the branch moves).
+    concurrency:
+      group: build-preview-branch
+      cancel-in-progress: false
+    outputs:
+      changed: ${{ steps.assemble.outputs.changed }}
+      sha: ${{ steps.assemble.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || 'main' }}
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Reset the preview to main when due
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: uv run scripts/build_preview_branch.py reset
+      - name: Install the latest oswe
+        if: vars.OPEN_SWE_BACKEND_URL != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="$(gh api "repos/${GH_REPO}/releases?per_page=30" --jq '[.[] | select(any(.assets[]; .name == "oswe-linux-x64.tar.gz"))][0].tag_name // ""')"
+          if [[ -z "$tag" ]]; then
+            echo "::warning::No release ships oswe yet; preview conflicts will not be resolved automatically."
+            exit 0
+          fi
+          dir="$RUNNER_TEMP/oswe"
+          gh release download "$tag" -p oswe-linux-x64.tar.gz -p oswe-SHA256SUMS -D "$dir"
+          (cd "$dir" && sha256sum --check --ignore-missing oswe-SHA256SUMS && tar -xzf oswe-linux-x64.tar.gz)
+          echo "$dir" >>"$GITHUB_PATH"
+          "$dir/oswe" --version
+      - name: Assemble and publish the preview tree
+        id: assemble
+        env:
+          FORCE: ${{ inputs.force }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          OPEN_SWE_BACKEND_URL: ${{ vars.OPEN_SWE_BACKEND_URL }}
+        run: uv run scripts/build_preview_branch.py build
+
+  deploy:
+    name: Deploy the preview tree
+    needs: build
+    if: needs.build.outputs.changed == 'true' && vars.PREVIEW_DEPLOYMENT_ID != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      mda_deployed: ${{ steps.mda-deploy.outcome == 'success' }}
+    concurrency:
+      group: deploy-preview
+      cancel-in-progress: false
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || 'main' }}
+          persist-credentials: false
+          sparse-checkout: scripts
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Roll out the preview revision
+        id: rollout
+        env:
+          DEPLOYMENT_ID: ${{ vars.PREVIEW_DEPLOYMENT_ID }}
+          EXPECTED_SHA: ${{ needs.build.outputs.sha }}
+          LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
+          LANGSMITH_WORKSPACE_ID: ${{ vars.PREVIEW_WORKSPACE_ID }}
+        run: uv run scripts/deploy_preview.py
+      # The Managed Deep Agents runtime the preview backend calls (open-swe-mda-preview),
+      # from the same tree. Last: `mda deploy` runs the tree's code, labeled PRs included.
+      - uses: actions/checkout@v7.0.1
+        if: steps.rollout.outputs.superseded != 'true'
+        with:
+          ref: ${{ needs.build.outputs.sha }}
+          path: preview-tree
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check whether the MDA preview is behind
+        id: mda-changed
+        if: steps.rollout.outputs.superseded != 'true'
+        working-directory: preview-tree
+        run: |
+          if [[ -f mda/agent.py ]] && ! git diff --quiet refs/tags/mda-deployed/preview HEAD -- mda packages/runtime-api vendor/managed-deepagents-sdk vendor/langchain-quickjs .github/workflows/build_preview_branch.yml; then
+            echo "deploy=true" >>"$GITHUB_OUTPUT"
+          fi
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        if: steps.mda-changed.outputs.deploy == 'true'
+      # The preview's own cache. Labeled PRs' code runs here and can write any cache entry
+      # in main's scope, so deploy_mda.yml, which staging and prod build with, restores none.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.mda-changed.outputs.deploy == 'true'
+        with:
+          workspaces: preview-tree/vendor/managed-deepagents-sdk
+          shared-key: mda-cli-preview
+      - name: Build the mda CLI
+        if: steps.mda-changed.outputs.deploy == 'true'
+        working-directory: preview-tree
+        # From the vendored SDK, into the runtime mda/ installs.
+        run: make mda-cli
+      - name: Deploy the MDA preview
+        id: mda-deploy
+        if: steps.mda-changed.outputs.deploy == 'true'
+        working-directory: preview-tree
+        env:
+          # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
+          LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
+          LANGSMITH_GATEWAY_API_KEY: ${{ secrets.LANGSMITH_GATEWAY_API_KEY_PREVIEW }}
+          # Shared with the preview backend: MDA signs each call its channels make to it.
+          MDA_SERVICE_SECRET: ${{ secrets.MDA_SERVICE_SECRET_PREVIEW }}
+          # The GitHub channel's App is Open SWE's own, whose webhook stays at the backend.
+          MDA_GITHUB_WEBHOOK_ELSEWHERE: https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/webhooks/github
+          # The Linear channel's app, which deploy cannot ask for without a terminal. Deploy hands
+          # it to Agent Auth and never to the deployment.
+          MDA_LINEAR_CLIENT_ID: ${{ secrets.MDA_LINEAR_CLIENT_ID_PREVIEW }}
+          MDA_LINEAR_CLIENT_SECRET: ${{ secrets.MDA_LINEAR_CLIENT_SECRET_PREVIEW }}
+          MDA_LINEAR_WEBHOOK_SECRET: ${{ secrets.MDA_LINEAR_WEBHOOK_SECRET_PREVIEW }}
+          # No GitHub App key and no Slack app token or signing secret: this deploy runs labeled PRs'
+          # code. open-swe-mda-preview already has the GitHub App in Agent Auth, and Trigger Server
+          # keeps its Slack channel's app once a trusted deploy registered it; both stay.
+          TREE_SHA: ${{ needs.build.outputs.sha }}
+        run: |
+          if [[ -z "$LANGSMITH_GATEWAY_API_KEY" ]]; then
+            echo "::error::Set the LANGSMITH_GATEWAY_API_KEY_PREVIEW secret to the preview backend's gateway key."
+            exit 1
+          fi
+          # The project .env is forwarded as the deployment's secrets: the backend it calls back,
+<<<<<<<
+          # its gateway key, and the secret they share.
+          # The backend acts on the channels' threads with the same secret, as MDA's ingress secret.
+          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\nMDA_INGRESS_SECRET=%s\n' "https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" "$MDA_SERVICE_SECRET" >mda/.env
+=======
+          # its gateway key, the secret they share, and the commit its traces name as their revision.
+          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\nLANGSMITH_REVISION_ID=%s\n' "https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" "$(git rev-parse HEAD)" >mda/.env
+>>>>>>>
+          uv run --project mda --locked mda deploy mda \
+            --name open-swe-mda-preview \
+            --deployment-type prod \
+            --workspace-id ebbaf2eb-769b-4505-aca2-d11de10372a4 \
+            --context-strategy overwrite \
+            --yes
+          {
+            echo "## MDA preview"
+            echo "- tree (backend, mda/ and the vendored SDK): \`${TREE_SHA}\`"
+            echo "- deployment: open-swe-mda-preview (its revision is in this step's log)"
+            echo "- recorded as \`mda-deployed/preview\` → \`${TREE_SHA}\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  # A job of its own: the deploy job ran the tree's code, so it never holds a token that can write.
+  record-mda:
+    name: Record what the MDA preview runs
+    needs: [build, deploy]
+    if: needs.deploy.outputs.mda_deployed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Move mda-deployed/preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.build.outputs.sha }}
+        run: |
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/mda-deployed/preview" \
+            -f sha="$SHA" -F force=true >/dev/null

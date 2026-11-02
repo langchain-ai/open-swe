@@ -1,0 +1,125 @@
+"""Browser use: Stagehand's Python facade tools on a LangSmith browser.
+
+A browser per key (``thread:<id>``, or ``user:<id>`` under user scope). A thread's
+own browser has one window, ``mda``; a user's has a window per thread, so their
+threads share logins but not tabs. Each
+browser has one Stagehand client in this process (the extension serves one at a
+time), released between runs and after a minute idle so the browser can idle out.
+
+``browser_handoff`` hands the window to the user and returns at once. A run of the
+watcher graph, which ``mda`` builds beside the agent, waits on its own thread for the
+user to hand it back, then enqueues a run on the agent's thread with a notification,
+as an async subagent tells the agent that started it that it finished.
+
+Only projects that declare ``browser.py`` import this module or install Stagehand.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import contextlib
+import hashlib
+import json
+import logging
+import os
+import posixpath
+import shlex
+import shutil
+import tempfile
+import time
+import uuid
+import weakref
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NotRequired, TypedDict, TypeVar, cast
+
+import httpx
+import websockets
+from deepagents.backends import CompositeBackend
+from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.middleware.async_subagents import (
+    AsyncSubAgent,
+    _forwarded_context,
+    _launching_agent,
+    _parent_reference,
+    _trace_headers,
+)
+from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware.types import AgentState, OmitFromInput
+from langchain.tools import BaseTool, tool
+from langchain_core.messages import BaseMessage, SystemMessage, ToolMessage
+from langchain_core.messages.content import create_text_block
+from langgraph.config import get_config
+from langgraph.graph import START, StateGraph
+from langgraph.runtime import Runtime
+from langgraph.types import Command
+from langgraph_sdk import get_client
+from langsmith.sandbox import AsyncSandbox, AsyncSandboxClient
+from langsmith.utils import get_env_var
+from stagehand import BrowserContext, Page, Stagehand, get_extension_archive, local_browser
+from stagehand.browser import _invalidate_browser  # no public way to drop the CDP connection
+from stagehand.rpc_client import RPCError
+from stagehand_middleware.facade import (
+    StagehandFacadeExecutionError,
+    StagehandFacadeInputError,
+    StagehandFacadeTools,
+    facade_instructions,
+    facade_tools,
+)
+from stagehand_middleware.facade.tools import sanitize_error_message
+
+from managed_deepagents._channels.assistant_text import MDA_NOTIFICATION_KEY
+from managed_deepagents._managed_tools import ManagedToolRuntime  # noqa: TC001 - tool annotations
+from managed_deepagents.identity import ManagedServerInfo
+from managed_deepagents.runtime import (
+    _LazyManagedSandboxBackend,
+    _managed_deployment_name,
+    _managed_sandbox_name,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Awaitable, Callable
+
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolCallRequest
+
+T = TypeVar("T")
+Scope = Literal["thread", "user"]
+
+#: The client and the browser's extension must match; ``mda`` pins this in deployments.
+STAGEHAND_VERSION = "4.3.0"
+_WORKSPACE = "/workspace"  # where run code's screenshots land in the sandbox
+_INSTRUCTIONS = (
+    # The facade's text and errors name its tools `run` and so on; ours gain `browser_`.
+    "These tools are named browser_run, browser_snapshot and browser_screenshot: "
+    "call those wherever this text or an error names run, snapshot or screenshot.\n"
+    f"Screenshots that run code saves go to {_WORKSPACE} in your sandbox: "
+    f"`await page.screenshot({{ path: 'shots/a.png' }})` saves {_WORKSPACE}/shots/a.png."
+)
+_SCREENSHOT_PATH = (
+    "Only if you have a sandbox: also save the image to this absolute path in it, "
+    "creating its folder, e.g. to publish it."
+)
+_LOCALHOST_NOTE = (  # a thread's browser shares its sandbox's localhost
+    "Servers running in your sandbox are reachable at http://localhost:<port> "
+    "(any port but 80 and 443)."
+)
+_RECORDINGS = f"{_WORKSPACE}/recordings"
+# The recorder's own limits, which `_browser_recording` sets: it runs in the browser's
+# sandbox, so this process never imports it.
+_RECORD_VIEWPORT = (1280, 800)
+_RECORD_MAX_HOLD_S = 1.5
+_RECORD_MAX_S = 300
+_RECORD_DESCRIPTION = f"""Record the browser tab as a video, to show a person what you did.
+
+`start`, act as usual, then `stop`: it saves an H.264 mp4 to the `path` you gave
+either, in your sandbox (default {_RECORDINGS}/<time>.mp4), with what happened when
+beside it as JSON (the same path, ending .json), and shows you its first and last
+frames. The video shows a cursor
+gliding to each click, the clicks, and what is typed (masked in password fields). While
+recording, the viewport is {_RECORD_VIEWPORT[0]}x{_RECORD_VIEWPORT[1]}, and each
+pause between your calls plays for at most {_RECORD_MAX_HOLD_S:g}s.
+A recording also ends, and is saved, when the run ends or you hand the browser to
+the user: it never shows what they do. It stops at
+{_RECORD_MAX_S // 60} minutes."""

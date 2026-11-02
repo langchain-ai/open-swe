@@ -1,0 +1,169 @@
+[build-system]
+requires = ["setuptools>=84.0.0", "wheel>=0.48.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "managed-deepagents"
+version = "0.9.5"
+description = "Managed Deep Agents — the define_deep_agent authoring interface plus the CLI that compiles and deploys a code-first Deep Agent repository to a managed LangGraph runtime."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "LangChain" }]
+keywords = ["langchain", "langgraph", "deepagents", "agents", "cli"]
+classifiers = [
+  "Programming Language :: Rust",
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+]
+# The authoring surface validates every primitive's arguments with pydantic, the
+# way the npm runtime uses Zod. Contributors may bring another library —
+# `define_extension(args=...)` only calls `model_validate` / `validate_python` —
+# but the first-party primitives ship their schemas as pydantic models.
+dependencies = [
+    "pydantic>=2.7.4,<2.15",
+    "httpx>=0.28.1,<1",
+    "typing-extensions>=4.12.2,<5",
+    "deepagents>=0.7.30,<1",
+    "langchain>=1.4.6,<2",
+    "langchain-core>=1.6.2,<2",
+    "langgraph>=1.2.15,<2",
+    "langgraph-prebuilt>=1.1.1,<2",
+    "langgraph-sdk>=0.4.6,<0.5",
+]
+
+[project.optional-dependencies]
+test = [
+    "cryptography>=50.0.1",
+    "langchain[mcp]>=1.4.6,<2",
+    "fastmcp>=4.0.10,<5",
+    "mcp>=2.2.0,<3",
+    "uvicorn>=0.54.0,<1",
+    "pyjwt[crypto]>=2.13.0",
+    "pytest>=9.1.1",
+    "starlette>=1.6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/langchain-ai/managed-deepagents-sdk"
+Repository = "https://github.com/langchain-ai/managed-deepagents-sdk"
+
+[project.scripts]
+mda = "managed_deepagents._cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+managed_deepagents = ["_binaries/*", "py.typed"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  "COM812",  # Messes with the formatter.
+  "CPY",     # No copyright headers.
+  "D",       # Public docs are maintained separately from lint.
+  "EM",      # Keep concise inline exception messages.
+  "FBT001",  # Boolean flags are part of the public authoring API.
+  "FBT002",  # Boolean flags are part of the public authoring API.
+  "FIX002",  # TODOs do not need linked issues yet.
+  "ISC001",  # Messes with the formatter.
+  "PERF203", # Rarely useful.
+  "PLR0913", # Public API and runtime glue can require several parameters.
+  "PLR0917", # Mirrored third-party signatures (PyJWT, urllib) stay positional.
+  "TC002",   # Type-checking import moves add noise for this small package.
+  "TC003",   # Type-checking import moves add noise for this small package.
+  "TD002",   # Missing TODO author.
+  "TD003",   # Missing TODO issue link.
+  "TRY003",  # Keep existing direct exception messages.
+  "TRY004",  # Existing ValueError contracts are tested/public.
+  "TRY300",  # Else blocks are not consistently clearer.
+
+  # Dynamic provider/runtime boundaries are part of the SDK contract.
+  "ANN401",
+]
+unfixable = [
+  "B028", # Stacklevel should be intentionally tuned by humans.
+]
+
+[tool.ruff.lint.flake8-annotations]
+allow-star-arg-any = true
+mypy-init-return = true
+
+[tool.ruff.lint.flake8-builtins]
+ignorelist = ["id", "input", "type"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+ignore-var-parameters = true
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+  "ARG",
+  "FBT",
+  "PLR2004",
+  "S",
+  "SLF",
+]
+"src/managed_deepagents/_cli.py" = [
+  "S603", # CLI wrapper executes the bundled, package-owned binary.
+  "S606", # POSIX exec preserves signal behavior for the CLI wrapper.
+]
+"src/managed_deepagents/runtime.py" = [
+  "PLW0603", # Module-level caches are intentional for runtime reuse.
+  "S108",    # Path is inside the managed sandbox, not the host filesystem.
+  "T201",    # Dev sandbox notice is user-facing CLI output.
+]
+"src/managed_deepagents/_connectors/mcp/load.py" = [
+  "PLW0603", # Module-level MCP tool cache is intentional for runtime reuse.
+]
+
+[tool.pytest.ini_options]
+# Import the package straight from `src` so unit tests run without building the
+# wheel (the wheel also bundles a platform binary under `_binaries/`).
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[dependency-groups]
+lint = [
+    "ruff>=0.16.7,<0.18.0",
+]
+typing = [
+    "ty>=0.0.80,<0.0.88",
+    "basedpyright>=1.40.1,<2.0.0",
+    "langchain[mcp]>=1.4.6,<2",
+    "fastmcp>=4.0.10,<5",
+    "mcp>=2.2.0,<3",
+    # Injected into deployments that use the browser; matches browser.STAGEHAND_VERSION.
+    "stagehand==4.3.0",
+    "stagehand-middleware==0.1.0",
+<<<<<<<
+=======
+    # The browser's `record` tool runs its recorder in the browser's sandbox and installs
+    # these there (browser._RECORDER_PACKAGES); here they type-check and test it.
+    "av>=15,<20",
+    "pillow>=11",
+>>>>>>>
+]
+
+# Dead-code pass. ``ruff`` (F841/F401) catches unused variables and imports and
+# ``ty`` handles type checking, but neither flags unused functions or classes —
+# e.g. a handler bound only via a decorator whose result is never referenced.
+# Keep type checking off (that is ``ty``'s job) so this pass is dead-code only.
+[tool.basedpyright]
+typeCheckingMode = "off"
+reportUnusedFunction = "error"
+reportUnusedClass = "error"

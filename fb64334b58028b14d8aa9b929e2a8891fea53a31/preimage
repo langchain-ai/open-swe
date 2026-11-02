@@ -1,0 +1,528 @@
+"""The managed ``identity.py`` declaration primitive.
+
+A project's root ``identity.py`` exports a named ``identity`` created with
+:func:`define_identity`. The compiler discovers it, generates the custom-auth
+handler, and wires thread ownership for authenticated callers. Durable memory is
+declared separately in ``memory.py`` (:func:`managed_deepagents.define_memory`).
+
+This module validates identity declarations and exports native server metadata
+with managed identity fields. The ``auth`` helpers return plain dictionaries.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal, Protocol, TypedDict, cast
+
+from langgraph.runtime import ServerInfo
+
+from managed_deepagents.identity.claims import user_claim_name
+
+if TYPE_CHECKING:
+    from managed_deepagents._channels.http.endpoint import EventEndpoint
+    from managed_deepagents._channels.resolve_user import ChannelResolveUser, ResolveUser
+from managed_deepagents.identity.options import (
+    IdentityAuth,
+    normalize_identity,
+)
+from managed_deepagents.identity.supabase import SupabaseRegion
+from managed_deepagents.identity.supabase import (
+    supabase as _supabase_provider,
+)
+
+__all__ = [
+    "ClaimMapping",
+    "CredentialScope",
+    "IdentityAuth",
+    "IdentityConfig",
+    "IdentityDefinition",
+    "IdentityDefinitionLike",
+    "IdentityIngress",
+    "JsonObject",
+    "LangSmithApiKeyIngress",
+    "Link",
+    "LinkStatus",
+    "LinkView",
+    "ManagedServerInfo",
+    "Principal",
+    "PrincipalEnvelope",
+    "PrincipalKind",
+    "PrincipalView",
+    "RuntimeIdentity",
+    "RuntimeUser",
+    "ScopeConfig",
+    "SourceView",
+    "Subject",
+    "SubjectAuthority",
+    "SubjectView",
+    "ValidatedTokenProvider",
+    "auth",
+    "define_identity",
+    "normalize_identity",
+    "validate_identity",
+]
+
+CredentialScope = Literal["user"]
+SourceProvider = str
+PrincipalKind = Literal["person", "service", "channel"]
+SubjectAuthority = Literal["agent", "user"]
+LinkStatus = Literal["not_required", "linked", "unlinked", "pending"]
+
+#: Opaque JSON object (IdP claims, free-form metadata). Prefer narrowing at use sites.
+JsonObject = dict[str, object]
+
+
+class ClaimMapping(TypedDict, total=False):
+    """Which verified token claim supplies each principal field.
+
+    ``user`` is required; :func:`define_identity` rejects a provider that omits it.
+    """
+
+    #: Claim used as ``server_info.principal.id`` (e.g. ``"sub"``, ``"email"``).
+    user: str
+    #: Claim carrying every group the caller belongs to. Folded into
+    #: ``principal.claims.groups``.
+    groups: str
+    #: Claim folded into ``principal.claims.email``.
+    email: str
+
+
+class IntrospectionRegionRequired(TypedDict):
+    url: str
+
+
+class IntrospectionRegion(IntrospectionRegionRequired, total=False):
+    headers: dict[str, str]
+
+
+IntrospectionRegionValue = str | IntrospectionRegion
+
+
+class TokenIntrospection(TypedDict, total=False):
+    url: str
+    region_header: str
+    regions: dict[str, IntrospectionRegionValue]
+    headers: dict[str, str]
+    token_in: Literal["authorization", "header"]
+    header: str
+
+
+class ValidatedTokenProviderRequired(TypedDict):
+    claims: ClaimMapping
+
+
+class ValidatedTokenProvider(ValidatedTokenProviderRequired, total=False):
+    id: str
+    issuer: str
+    # Additional accepted iss values (e.g. multi-region Supabase projects).
+    issuers: list[str]
+    # Required for local JWKS/OIDC verification; optional for introspection.
+    audience: str
+    algorithms: list[str]
+    jwks: str
+    discover: bool
+    # Auth API root for OIDC discovery of real issuer + jwks (custom domains).
+    discovery_url: str
+    introspect: TokenIntrospection
+
+
+class ValidatedTokenIngress(TypedDict):
+    mode: Literal["validated_token"]
+    providers: list[ValidatedTokenProvider]
+
+
+class LangSmithApiKeyIngress(TypedDict):
+    """LangSmith workspace API-key ingress verified by managed auth."""
+
+    mode: Literal["langsmith_api_key"]
+
+
+HttpIngress = Literal["backend"] | LangSmithApiKeyIngress | ValidatedTokenIngress
+
+
+class IdentityIngress(TypedDict):
+    http: HttpIngress
+
+
+class ScopeConfig(TypedDict, total=False):
+    """Resolved identity axes. Durable memory is declared in ``memory.py``.
+
+    ``credentials`` is always ``"user"`` on the resolved config — it is not an
+    authoring knob.
+    """
+
+    credentials: CredentialScope
+
+
+class RuntimeUserRequired(TypedDict):
+    #: ``"service"`` for machine callers (schedules, channels, Studio).
+    kind: Literal["person", "service"]
+    id: str
+
+
+class RuntimeUser(RuntimeUserRequired, total=False):
+    email: str
+
+
+class RuntimeSourceRequired(TypedDict):
+    provider: SourceProvider
+
+
+class RuntimeSource(RuntimeSourceRequired, total=False):
+    thread_id: str
+
+
+class RuntimeIdentityRequired(TypedDict):
+    #: The caller.
+    user: RuntimeUser
+    source: RuntimeSource
+
+
+class RuntimeIdentity(RuntimeIdentityRequired, total=False):
+    #: Every group the caller's token asserts, for authorization decisions in
+    #: tools and middleware.
+    groups: tuple[str, ...]
+    claims: JsonObject
+    #: Validated-token provider id for Agent Auth principal resolve.
+    identity_provider: str
+    #: Verified IdP issuer (``iss``) for Agent Auth principal resolve.
+    identity_issuer: str
+    #: Verified IdP subject (``sub``) for Agent Auth principal resolve.
+    #: Stamped so grants match other LangSmith clients even when ``claims.user``
+    #: maps to email. Thread ownership still uses ``user.id``.
+    identity_subject: str
+    #: Agent Auth principal UUID when channel ingress already resolved one.
+    agent_auth_principal_id: str
+
+
+class PrincipalRequired(TypedDict):
+    id: str
+    kind: PrincipalKind
+    claims: JsonObject
+
+
+#: Wire shape of the caller in a :class:`PrincipalEnvelope`. The runtime hands
+#: tools an attribute view instead — see :class:`PrincipalView`.
+Principal = PrincipalRequired
+
+
+class SubjectRequired(TypedDict):
+    authority: SubjectAuthority
+
+
+class Subject(SubjectRequired, total=False):
+    #: Deployment / agent id. Omitted when the platform supplied neither an
+    #: assistant nor a graph id, so an Agent Auth call fails on a missing field
+    #: rather than silently addressing the empty agent.
+    agent_id: str
+    user_id: str
+
+
+Link = TypedDict(
+    "Link",
+    {
+        "status": LinkStatus,
+        #: Wire key. The runtime view exposes this as ``link.from_`` because
+        #: ``from`` is a reserved word in Python.
+        "from": str,
+        "to": str,
+    },
+    total=False,
+)
+
+
+class PrincipalEnvelope(TypedDict):
+    """Agent Auth-aligned principal envelope for the current run.
+
+    The wire shape, as sent to Agent Auth resolve/mint. Authors read the same
+    data off ``server_info`` (``principal`` / ``subject`` / ``link``), which is
+    an attribute view rather than these mappings. Fields MDA cannot yet fill use
+    conservative defaults (``link.status: "not_required"``) or are omitted
+    (``subject.agent_id``).
+    """
+
+    principal: PrincipalRequired
+    subject: Subject
+    link: Link
+
+
+class PrincipalView(Protocol):
+    """The caller on ``runtime.server_info.principal``.
+
+    Attribute access mirrors the TypeScript runtime
+    (``runtime.serverInfo.principal.id``). ``claims`` stays a plain mapping so
+    namespaced IdP claims stay reachable::
+
+        tenant = principal.claims["https://acme.com/tenant"]
+
+    Mostly the verified token payload as the IdP sent it, but the two claims MDA
+    names are normalized before they land here, whether or not the deployment
+    mapped them in :class:`ClaimMapping`: ``claims["groups"]`` is always a
+    ``tuple[str, ...]`` (IdPs send arrays or delimited strings) and
+    ``claims["email"]`` is always a ``str``. An unmapped claim of either name
+    that cannot be normalized is dropped rather than passed through. The bag is
+    open, so those two guarantees are documented rather than declared — the
+    TypeScript ``PrincipalClaims`` states them in the type.
+    """
+
+    @property
+    def id(self) -> str: ...
+    @property
+    def kind(self) -> PrincipalKind: ...
+    @property
+    def claims(self) -> Mapping[str, object]: ...
+
+
+class SubjectView(Protocol):
+    """What the run acts as, on ``runtime.server_info.subject``."""
+
+    @property
+    def authority(self) -> SubjectAuthority: ...
+    @property
+    def agent_id(self) -> str | None: ...
+    @property
+    def user_id(self) -> str | None: ...
+
+
+class LinkView(Protocol):
+    """Account-link state on ``runtime.server_info.link``.
+
+    ``from_`` carries the envelope's ``from`` field, renamed because ``from`` is
+    a reserved word in Python.
+    """
+
+    @property
+    def status(self) -> LinkStatus: ...
+    @property
+    def from_(self) -> str | None: ...
+    @property
+    def to(self) -> str | None: ...
+
+
+class SourceView(Protocol):
+    """Where the run entered from, on ``runtime.server_info.source``.
+
+    MDA's own ingress record rather than part of the Agent Auth envelope, so it
+    sits beside ``principal`` instead of inside it.
+    """
+
+    @property
+    def provider(self) -> SourceProvider: ...
+    @property
+    def thread_id(self) -> str | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedServerInfo(ServerInfo):
+    """Native server metadata with trusted MDA identity and ingress fields."""
+
+    principal: PrincipalView | None = None
+    subject: SubjectView | None = None
+    link: LinkView | None = None
+    source: SourceView | None = None
+
+
+class IdentityConfigRequired(TypedDict):
+    ingress: IdentityIngress
+    scope: ScopeConfig
+
+
+class IdentityConfig(IdentityConfigRequired):
+    """The resolved identity contract the runtime reads."""
+
+
+class IdentityDefinitionLike(Protocol):
+    """Minimal surface of :class:`IdentityDefinition` for runtime consumers."""
+
+    @property
+    def config(self) -> IdentityConfig: ...
+
+
+class IdentityDefinition:
+    """The pre-runtime spec returned by :func:`define_identity`.
+
+    The CLI discovers the ``identity`` export, generates the custom-auth handler
+    from this config, and wires scope into the managed runtime.
+    """
+
+    kind = "identity"
+
+    def __init__(
+        self, config: IdentityConfig, resolve_user: ChannelResolveUser | None = None
+    ) -> None:
+        self.config = config
+        #: The channels' default from ``define_identity(resolve_user=...)``.
+        self.resolve_user = resolve_user
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        scope = self.config.get("scope", {})
+        return f"IdentityDefinition(scope={scope!r})"
+
+
+def define_identity(
+    *,
+    auth: IdentityAuth,
+    resolve_user: ResolveUser | EventEndpoint | None = None,
+) -> IdentityDefinition:
+    """Declare the identity contract for the deployment.
+
+    Managed identity always gives each caller private threads and downstream
+    credentials. Authentication must be declared explicitly::
+
+        identity = define_identity(auth=auth.langsmith_api_key())
+
+    Otherwise describe how callers authenticate::
+
+        identity = define_identity(
+            auth=auth.supabase(project_ref="abcdefgh"),
+        )
+
+    Args:
+        auth: ``"backend"`` or one or more ``auth.*`` entries.
+        resolve_user: Map a channel's verified sender to one of your users, for
+            every channel that does not set its own: a function, or an endpoint
+            MDA asks (a URL, or an ``httpx.Request`` that carries headers).
+<<<<<<<
+=======
+            Experimental: this may change in a minor release.
+>>>>>>>
+    """
+    from managed_deepagents._channels.resolve_user import checked_resolve_user  # noqa: PLC0415
+
+    config = normalize_identity(auth=auth)
+    validate_identity(config)
+    return IdentityDefinition(config, checked_resolve_user("define_identity", resolve_user))
+
+
+class _Auth:
+    """Authentication modes and validated-token provider integrations.
+
+    Every helper returns plain authoring-time configuration; the managed runtime
+    performs validation.
+    """
+
+    @staticmethod
+    def langsmith_api_key() -> LangSmithApiKeyIngress:
+        """Authenticate workspace/service callers with a LangSmith ``x-api-key``."""
+        return {"mode": "langsmith_api_key"}
+
+    @staticmethod
+    def supabase(
+        *,
+        project_ref: str | None = None,
+        url: str | None = None,
+        introspect: bool = False,
+        regions: dict[str, SupabaseRegion] | None = None,
+        region_header: str = "x-supabase-region",
+    ) -> ValidatedTokenProvider:
+        """Supabase provider. See :func:`managed_deepagents.identity.supabase.supabase`."""
+        return _supabase_provider(
+            project_ref=project_ref,
+            url=url,
+            introspect=introspect,
+            regions=regions,
+            region_header=region_header,
+        )
+
+
+#: The provider-integration namespace, e.g. ``auth.supabase(project_ref=...)``.
+auth = _Auth()
+
+
+def validate_identity(config: IdentityConfig) -> None:
+    """Eagerly reject illegal identity configs at authoring time."""
+    ingress = config.get("ingress")
+    if not isinstance(ingress, dict) or "http" not in ingress:
+        raise ValueError(
+            "define_identity(...) requires an `ingress.http` value "
+            "('backend' or a validated_token config)."
+        )
+
+    _require_scope(config)
+
+    http = ingress["http"]
+    if _is_validated_token(http):
+        _validate_validated_token(cast("ValidatedTokenIngress", http))
+    elif http != "backend" and not _is_langsmith_api_key(http):
+        raise ValueError(
+            'define_identity(...) `ingress.http` must be "backend", '
+            '{ "mode": "langsmith_api_key" }, or a '
+            '{ "mode": "validated_token", "providers": [...] } config.'
+        )
+
+
+def _require_scope(config: IdentityConfig) -> ScopeConfig:
+    scope = config.get("scope")
+    if not isinstance(scope, dict):
+        raise ValueError("define_identity(...) requires a `scope` object.")
+    if "threads" in scope:
+        raise ValueError(
+            "define_identity(...) `scope.threads` is not supported. "
+            "Threads are always user-owned — omit `threads`."
+        )
+    if "memory" in scope:
+        raise ValueError(
+            "define_identity(...) `scope.memory` is no longer supported. Durable "
+            "memory has its own root declaration: export `memory` from `memory.py` "
+            'with `define_memory(scope="agent")`, and drop `scope.memory` here.'
+        )
+    return scope
+
+
+def _is_validated_token(http: object) -> bool:
+    return isinstance(http, dict) and http.get("mode") == "validated_token"
+
+
+def _is_langsmith_api_key(http: object) -> bool:
+    return isinstance(http, dict) and http.get("mode") == "langsmith_api_key"
+
+
+def _validate_validated_token(http: ValidatedTokenIngress | Mapping[str, object]) -> None:
+    providers_list = http.get("providers")
+    if not isinstance(providers_list, list) or not providers_list:
+        raise ValueError(
+            "define_identity(...) validated_token ingress requires a non-empty `providers` list."
+        )
+
+    multiple = len(providers_list) > 1
+    for index, provider in enumerate(providers_list):
+        label = provider.get("id") if isinstance(provider, dict) else None
+        label = label or f"#{index}"
+        if not isinstance(provider, dict):
+            raise ValueError(
+                f"define_identity(...) validated_token provider {label} must be a mapping."
+            )
+        claims = provider.get("claims")
+        if not isinstance(claims, dict) or not user_claim_name(cast("ClaimMapping", claims)):
+            raise ValueError(
+                f"define_identity(...) validated_token provider {label} requires `claims.user`."
+            )
+        if multiple and not isinstance(provider.get("id"), str):
+            raise ValueError(
+                "define_identity(...) each validated_token provider requires an `id` "
+                "when more than one is configured."
+            )
+        has_verifier = (
+            isinstance(provider.get("jwks"), str)
+            or provider.get("discover") is True
+            or isinstance(provider.get("discovery_url"), str)
+            or provider.get("introspect") is not None
+        )
+        audience = provider.get("audience")
+        # Local JWKS/OIDC verification must reject tokens minted for another app.
+        # Introspection leaves audience checks to the IdP.
+        if (
+            has_verifier
+            and provider.get("introspect") is None
+            and (not isinstance(audience, str) or not audience)
+        ):
+            raise ValueError(
+                f"define_identity(...) validated_token provider {label} requires a "
+                "non-empty `audience` for JWKS verification."
+            )
+        if not has_verifier:
+            raise ValueError(
+                f"define_identity(...) validated_token provider {label} must declare one of "
+                "`jwks`, `discover`, `discovery_url`, or `introspect`."
+            )

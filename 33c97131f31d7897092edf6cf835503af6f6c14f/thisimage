@@ -1,0 +1,7 @@
+<<<<<<<
+1073 17c2e4c9deac10088c09d5cfd656c65ff43d56a6 feat(linear): let an endpoint tell a declined session why
+=======
+1085 1029f48c6132ed154de4ae5250e6bc8d1b0229ea fix(browser): clear a stale Stagehand claim by reloading the extension, not reinstalling it
+1088 0ebb7dccbeb56327634a321883be826e01ea7fa9 fix(browser): save screenshots without a sandbox
+1097 f94d7ef4f208beeb0e7878203e42701781f9f096 fix(browser): tell the model when its browser was replaced or a recording lost
+>>>>>>>
