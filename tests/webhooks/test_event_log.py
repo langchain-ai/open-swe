@@ -115,8 +115,15 @@ async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
         "github_login": "github-actions[bot]",
     }
     assert requests[-1]["properties"]["pull_request_author_id"] == str(author_id)
-    await posthog.record_webhook(bot_comment.model_copy(update={"visibility": "private"}))
-    assert len(requests) == 7
+    owner_id = uuid4()
+    await posthog.record_webhook(
+        bot_comment.model_copy(update={"visibility": "private", "visible_to_user_id": owner_id})
+    )
+    assert requests[-1]["properties"]["distinct_id"] == str(owner_id)
+    assert requests[-1]["properties"]["visibility"] == "private"
+    assert not {"repo", "repository_id", "pull_request_id", "pull_request_author_id"} & set(
+        requests[-1]["properties"]
+    )
     await posthog.record_webhook(
         event.model_copy(
             update={
@@ -130,7 +137,7 @@ async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
     assert requests[-1]["properties"]["sender_type"] == "bot"
     monkeypatch.delenv("POSTHOG_API_KEY")
     await posthog.record_webhook(event)
-    assert len(requests) == 8
+    assert len(requests) == 9
 
 
 async def _partitions() -> set[str]:

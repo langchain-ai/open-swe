@@ -61,7 +61,7 @@ Resolved users share the internal user UUID, with email and GitHub login traits 
 Signed-out dashboard visits create no person profiles; unresolved MCP usage is skipped.
 A webhook whose sender is no Open SWE user counts as that account (`github:<id>`, `slack:<id>`); bots get a person profile marked `is_bot`, people without an account get none, and events with no sender use `open-swe:webhook:<source>`.
 Webhooks on a pull request also carry `pull_request_author_id`, the author's user UUID, so bot activity on a PR can be credited to its author.
-Private events, such as a person's own threads, are never sent.
+Private events, such as a person's own threads, record only who acted, the source, event type and workspace, marked `visibility: private`; PRs they open are public and tracked in full.
 
 Delivery is best effort, not a durable export or historical backfill.
 Tool arguments/results, page URLs/query strings/thread identifiers, and raw webhook payloads are excluded; only allowlisted metadata properties are exported; IP geolocation is disabled.

@@ -45,6 +45,7 @@ async def _capture(
                     "pull_request_id",
                     "pull_request_author_id",
                     "sender_type",
+                    "visibility",
                 }
             },
             "product": "open-swe",
@@ -127,8 +128,11 @@ class WebhookSender(BaseModel):
 
     @classmethod
     def of(cls, event: LoggedEvent) -> Self:
-        if event.user_id:
-            return cls(distinct_id=str(event.user_id), type="user", is_person=True)
+        person = event.user_id or (
+            event.visible_to_user_id if event.visibility == "private" else None
+        )
+        if person:
+            return cls(distinct_id=str(person), type="user", is_person=True)
         try:
             if event.source == "github" and isinstance(event.payload, dict):
                 sender = _GitHubSender.model_validate(event.payload.get("sender"))
@@ -162,14 +166,15 @@ class WebhookSender(BaseModel):
 
 
 async def record_webhook(event: LoggedEvent) -> None:
-    # Private events (a person's own threads, DMs) stay out of analytics entirely.
-    if event.visibility == "private" or not ENV.POSTHOG_API_KEY.get():
+    if not ENV.POSTHOG_API_KEY.get():
         return
+    # A private event (a person's own thread, a DM) records only who acted and when.
+    private = event.visibility == "private"
     try:
         sender = WebhookSender.of(event)
         author_id = (
             await PullRequest.author_user_id_of(event.pull_request_id)
-            if event.pull_request_id
+            if event.pull_request_id and not private
             else None
         )
     except Exception:
@@ -189,16 +194,25 @@ async def record_webhook(event: LoggedEvent) -> None:
             "event_type": event.base_event_type,
             "action": action if isinstance(action, str) else "",
             "surface": "webhook",
-            **({"repo": repo} if event.source == "github" and isinstance(repo, str) else {}),
-            **{
-                field: str(value) if value else None
-                for field, value in {
-                    "workspace_id": event.workspace_id,
-                    "repository_id": event.repository_id,
-                    "pull_request_id": event.pull_request_id,
-                    "pull_request_author_id": author_id,
-                }.items()
-            },
+            "visibility": event.visibility,
+            "workspace_id": str(event.workspace_id) if event.workspace_id else None,
+            **(
+                {}
+                if private
+                else {
+                    **(
+                        {"repo": repo} if event.source == "github" and isinstance(repo, str) else {}
+                    ),
+                    **{
+                        field: str(value) if value else None
+                        for field, value in {
+                            "repository_id": event.repository_id,
+                            "pull_request_id": event.pull_request_id,
+                            "pull_request_author_id": author_id,
+                        }.items()
+                    },
+                }
+            ),
         },
         timestamp=event.received_at.isoformat(),
     )
