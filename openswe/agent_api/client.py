@@ -124,11 +124,11 @@ async def start_remote_run(
     thread_id: str,
     assistant_id: str,
 ) -> StartedRun:
-    """Work out the run's catalog and settings, once, and sign its token, before MDA starts it.
+    """Resolve the run's catalog and settings, once, and sign its token, before MDA starts it.
 
     The configurable and metadata ride inside the signed token; the deployment calls
-    back with the token rather than reading it. A run that cannot be planned is not
-    started: planning raises here, to whoever asked for the run.
+    back with the token rather than reading it. A run whose catalog cannot be resolved is
+    not started: resolving it raises here, to whoever asked for the run.
     """
     if configurable.get("auth_provider") == "langsmith":
         from openswe.threads.identity import ThreadIdentity
@@ -145,11 +145,12 @@ async def start_remote_run(
         assistant_id=assistant_id,
         configurable=_json_object.validate_python(configurable),
         metadata=_json_object.validate_python(metadata),
-    ).granting()
+    )
     # The webapp must not import the agent stack at startup.
-    from openswe.agent_api.hosted import hosted_graphs
+    from openswe.agent_api.hosted import run_kinds
+    from openswe.agent_api.run_catalog import RunCatalog
 
-    started = await hosted_graphs()[graph].start_run(run)
+    started = await (await RunCatalog.of(run_kinds()[graph], run)).start()
     # Signed, so every later call reads the settings the run started with.
     run = run.model_copy(update={"settings": started.settings})
     return StartedRun(

@@ -28,16 +28,13 @@ logger = logging.getLogger(__name__)
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
-from runtime_api.catalog import InboxSpec, LoopRules
+from runtime_api.catalog import InboxSpec
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
-from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
-from langchain.agents.middleware.types import AgentMiddleware
-from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
@@ -51,17 +48,10 @@ from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
-    ExcludeToolsMiddleware,
-    ModelErrorMiddleware,
-    RepairOrphanedToolCallsMiddleware,
-    refresh_github_proxy_before_model,
-    settle_review_check_on_exit,
 )
 from openswe.middleware.prepare_run import PrepareRunState
-from openswe.middleware.record_run_usage import record_run_usage
 from openswe.middleware.require_user_reply import WEB_REPLY_SURFACE
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.review.approvals import approval_policy_for_review
 from openswe.review.diff import (
@@ -81,7 +71,6 @@ from openswe.review.reconcile import reconcile_findings_with_review_threads
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
-    MODEL_CALL_RECURSION_LIMIT,
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
 )
@@ -1021,52 +1010,18 @@ def reviewer_sandbox(thread_id: str, cfg: RunConfig) -> BackendProtocol:
     )
 
 
-async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
-    """Plan a review run into ``surface``: the tools, middleware, models and subagents its MDA run plays."""
-    config = config.copy()
-    configurable = dict(config.get("configurable") or {})
-    config["configurable"] = configurable
-    cfg = RunConfig.parse(configurable)
-    thread_id = cfg.thread_id
-    if thread_id is None:
+async def reviewer_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
+    """Work out a review run into ``surface``: its tools, models, subagents and loop rules."""
+    cfg = RunConfig.from_config(config)
+    if cfg.thread_id is None:
         raise ValueError("A review run needs a thread")
 
     models = await resolve_reviewer_models(cfg)
     use_gateway = models.use_gateway
 
-    backend = reviewer_sandbox(thread_id, cfg)
-
-    middleware = cast(
-        list[AgentMiddleware[Any, Any, Any]],
-        [
-            PrepareReviewerRunMiddleware(
-                thread_id=thread_id,
-                config=config,
-                use_gateway=use_gateway,
-                model=models.main,
-            ),
-            TranscriptMiddleware(),
-            record_run_usage,
-            AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
-            ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
-            ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
-            refresh_github_proxy_before_model,
-            RepairOrphanedToolCallsMiddleware(),
-            ModelRetryMiddleware(retry_on=(TimeoutError,)),
-            ModelErrorMiddleware(),
-            settle_review_check_on_exit,
-        ],
-    )
     surface.base_tools = reviewer_tools()
-    surface.middleware = middleware
     surface.inbox = InboxSpec(surface=WEB_REPLY_SURFACE, model_id=cfg.agent_model_id)
-    surface.files = backend
     surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS
-    surface.loop = LoopRules(
-        hidden_tools=sorted(SHELL_SEARCH_EXCLUDED_TOOLS),
-        refresh_github_proxy=True,
-        at_end=["settle_review_check"],
-    )
     surface.models = SurfaceModels(
         main=ModelChoice(models.main.model_id, dict(models.main.kwargs)),
         subagent=ModelChoice(models.subagent.model_id, dict(models.subagent.kwargs)),

@@ -6,8 +6,10 @@ keeps working unchanged:
 
 - Creating, reading, updating, deleting, searching and counting threads is
   answered from the index; each change is copied, in the background, to the
-  runtimes that keep the thread, so its runs and traces see it.
-- A new thread is created on Managed Deep Agents (``mda``). A thread's runs,
+  runtime the thread runs on, so its runs and traces see it.
+- A new thread is created on Managed Deep Agents (``mda``) only; this deployment's
+  Agent Server never gets a copy, and refuses every create
+  (``openswe.threads.local_writes``). A thread's runs,
   state, history, commands and streams go to its runtime: MDA, or for ``local``
   threads made before that, this deployment's Agent Server, which logs a
   warning for each. Local threads are read-only: starting a run, cron or
@@ -24,7 +26,6 @@ keeps working unchanged:
   and served from then on.
 """
 
-import asyncio
 import json
 import logging
 import re
@@ -117,15 +118,15 @@ async def adopt_channel_run(
     """Index an MDA channel's thread for the run the channel is about to start on it.
 
     Call it before the thread's metadata is written. The channel creates the thread
-    on MDA as its conversation's own when it starts the run, so the backend indexes
-    it and keeps its own copy, but never creates it there, as it does a new thread
-    of its own; it marks it the channel's, so it stays read-only here. Mark it busy
+    on MDA as its conversation's own when it starts the run, so the backend only
+    indexes it, and never creates it there, as it does a new thread of its own; it
+    marks it the channel's, so it stays read-only here. Mark it busy
     with :func:`channel_run_starting` once the run is ready. ``metadata`` is what a
     new thread starts with until its metadata is written, such as its visibility.
     """
     thread = await index.get(thread_id)
     if thread is None:
-        thread = await index.create(
+        await index.create(
             thread_id,
             runtime="mda",
             metadata={
@@ -135,10 +136,8 @@ async def adopt_channel_run(
             },
             if_exists="do_nothing",
         )
-        await RUNTIMES.local.create(thread_id, thread.metadata)
     elif channel_of(thread.metadata) != channel:
         await index.update(thread_id, {CHANNEL_METADATA_KEY: channel})
-        await RUNTIMES.local.update(thread_id, {CHANNEL_METADATA_KEY: channel})
 
 
 async def channel_run_starting(thread_id: str) -> None:
@@ -277,7 +276,7 @@ class ThreadRouter:
 
     async def _route(self, scope: Scope, receive: Receive, send: Send) -> None:
         if not backend_call(scope):
-            # The Agent Server, which keeps a copy of every thread, applies its rules to others.
+            # The Agent Server applies its rules to others; it keeps only threads from before MDA.
             await self.app(scope, receive, send)
             return
         path: str = scope["path"]
@@ -341,13 +340,8 @@ class ThreadRouter:
             metadata={**metadata, RUNTIME_METADATA_KEY: MDA_RUNTIME},
             if_exists=if_exists,
         )
-        if channel_of(thread.metadata) is not None:
-            await RUNTIMES.local.create(thread_id, thread.metadata)
-            return thread
-        await asyncio.gather(
-            RUNTIMES.local.create(thread_id, thread.metadata),
-            RUNTIMES.mda.create(thread_id, for_mda(thread.metadata)),
-        )
+        if channel_of(thread.metadata) is None:
+            await RUNTIMES.mda.create(thread_id, for_mda(thread.metadata))
         return thread
 
     async def _thread_itself(
@@ -481,7 +475,6 @@ class ThreadRouter:
         copied = await index.create(
             copy_id, runtime=thread.runtime, metadata=metadata, if_exists="do_nothing"
         )
-        await RUNTIMES.local.create(copy_id, copied.metadata)
         await send_json(send, 200, copied.as_langgraph())
 
     async def _to_runtime(

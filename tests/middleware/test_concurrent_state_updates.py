@@ -1,12 +1,11 @@
 import pytest
 from langgraph.graph import END, START, StateGraph
 
-from openswe.middleware.conversation_offloading import OffloadingState
 from openswe.middleware.prepare_run import PrepareRunState
 
 
 async def _run_concurrent_updates(
-    state_type: type[PrepareRunState] | type[OffloadingState],
+    state_type: type[PrepareRunState],
     updates: dict[str, object],
 ) -> dict[str, object]:
     graph = StateGraph(state_type)
@@ -36,14 +35,10 @@ async def _run_concurrent_updates(
                 "rendered_system_prompt": "prompt",
             },
         ),
-        (
-            OffloadingState,
-            {"conversation_offloading": {"status": "completed"}},
-        ),
     ],
 )
 async def test_concurrent_subagent_updates_complete(
-    state_type: type[PrepareRunState] | type[OffloadingState],
+    state_type: type[PrepareRunState],
     updates: dict[str, object],
 ) -> None:
     result = await _run_concurrent_updates(state_type, updates)

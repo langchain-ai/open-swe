@@ -69,8 +69,9 @@ PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 PROXY_CONFIG_RETRY_WINDOW_SECONDS = 180.0
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
 SERVICE_URL_TIMEOUT_SECONDS = 15.0
-# The capture request itself sometimes takes longer than the SDK's 10s default to answer.
-SNAPSHOT_CAPTURE_REQUEST_TIMEOUT_SECONDS = 600.0
+# The capture request answers only once the capture lands, and squashing a large overlay
+# sandbox's layers can take up to the API's 20-minute capture budget; outlast it.
+SNAPSHOT_CAPTURE_REQUEST_TIMEOUT_SECONDS = 1260.0
 _KILL_TIMEOUT_SECONDS = 5.0
 # The most entries the sandbox file API returns for one listing.
 _LS_MAX_ENTRIES = 1000

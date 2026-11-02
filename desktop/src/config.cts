@@ -26,9 +26,10 @@ function resolveAppRuntime({ argv, isPackaged, appDataPath }) {
     appUserModelId: isDevelopment
       ? DEVELOPMENT_APP_USER_MODEL_ID
       : APP_USER_MODEL_ID,
-    userDataPath: isDevelopment
-      ? path.join(appDataPath, DEVELOPMENT_USER_DATA_DIRECTORY)
-      : null,
+    userDataPath: path.join(
+      appDataPath,
+      isDevelopment ? DEVELOPMENT_USER_DATA_DIRECTORY : "Open SWE",
+    ),
   };
 }
 
@@ -72,14 +73,25 @@ function isAppUrl(value) {
 
 function isAppLoginUrl(value) {
   try {
-    return isAppUrl(value) && new URL(value).pathname === LOGIN_PATH;
+    return (
+      isAppUrl(value) &&
+      [LOGIN_PATH, "/dashboard/api/auth/langsmith/login"].includes(
+        new URL(value).pathname,
+      )
+    );
   } catch {
     return false;
   }
 }
 
-function desktopLoginUrl(backendUrl, { challenge, port }) {
-  const target = new URL(LOGIN_PATH, backendUrl);
+function desktopLoginUrl(
+  backendUrl,
+  { challenge, port },
+  navigationUrl = `${APP_URL}${LOGIN_PATH.slice(1)}`,
+) {
+  if (!isAppLoginUrl(navigationUrl))
+    throw new Error("Invalid desktop login URL");
+  const target = new URL(new URL(navigationUrl).pathname, backendUrl);
   // Make OAuth redirect back through this backend's origin.
   target.searchParams.set("desktop", "true");
   target.searchParams.set("desktop_handoff", challenge);
@@ -167,7 +179,7 @@ function backendRequestUrl(backendUrl, appRequestUrl) {
   if (!isAppUrl(appRequestUrl)) throw new Error("Invalid desktop request URL");
   const source = new URL(appRequestUrl);
   const target = new URL(`${source.pathname}${source.search}`, backendUrl);
-  if (source.pathname === "/dashboard/api/auth/login") {
+  if (isAppLoginUrl(appRequestUrl)) {
     target.searchParams.set("desktop", "true");
   }
   return target.toString();
@@ -222,7 +234,7 @@ function staticFilePath(root, appRequestUrl) {
   return candidate;
 }
 
-module.exports = {
+export = {
   APP_ORIGIN,
   APP_URL,
   DEFAULT_DEVELOPMENT_BACKEND_URL,

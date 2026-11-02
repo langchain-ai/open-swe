@@ -99,8 +99,15 @@ async def test_deleted_unreadable_and_private_pins_are_checked_for_each_viewer_a
     thread_api.add("shared", source="slack", github_login="someone-else")
     thread_api.add("private", visibility="private", owner_login="alice")
     thread_api.add("internal", source="reviewer")
+    thread_api.add(
+        "concierge",
+        source="slack",
+        visibility="private",
+        owner_login="alice",
+        source_context={"slack_thread": {"thread_ts": "0", "channel_context": {"is_im": True}}},
+    )
     for login in ("alice", "bob", "admin"):
-        for thread_id in ("shared", "private", "internal", "deleted"):
+        for thread_id in ("shared", "private", "internal", "deleted", "concierge"):
             await pins.pin_thread(login, thread_id)
     for login, email, expected in (
         ("alice", None, ["shared", "private"]),
@@ -112,7 +119,13 @@ async def test_deleted_unreadable_and_private_pins_are_checked_for_each_viewer_a
     thread_api.add("shared", visibility="private", owner_login="someone-else")
     del thread_api.threads["private"]
     assert await listing.list_dashboard_pinned_threads("alice") == []
-    assert await pins.list_thread_pin_ids("alice") == ["shared", "private", "internal", "deleted"]
+    assert await pins.list_thread_pin_ids("alice") == [
+        "shared",
+        "private",
+        "internal",
+        "deleted",
+        "concierge",
+    ]
 
 
 async def test_search_failure_propagates_instead_of_returning_an_empty_pin_list(

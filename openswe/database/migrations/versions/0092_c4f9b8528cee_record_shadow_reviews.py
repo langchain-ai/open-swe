@@ -8,7 +8,7 @@ are kept here, to compare with the pull request's own findings offline.
 from alembic import op
 
 revision = "c4f9b8528cee"
-down_revision = ["1850da6129ee", "3c9e71d2a4b8"]
+down_revision = "4cbde59060e3"
 branch_labels = None
 depends_on = None
 

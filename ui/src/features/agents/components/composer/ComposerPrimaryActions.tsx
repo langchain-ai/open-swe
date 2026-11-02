@@ -5,6 +5,7 @@ import { StopIcon } from "@phosphor-icons/react/dist/ssr/Stop"
 
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
+import { useAgentWorkspace } from "@/features/agents/lib/agentWorkspace"
 
 export interface ActiveRun {
   threadId: string
@@ -66,9 +67,15 @@ function SendButton({
   onSubmit,
   label = "Send message",
 }: ComposerPrimaryActionsProps & { label?: string }) {
+  const agentWorkspace = useAgentWorkspace()
   return (
     <IconButton
-      className="shrink-0"
+      className={
+        agentWorkspace
+          ? "shrink-0 enabled:bg-text-primary/20 enabled:text-primary enabled:hover:bg-text-primary/30"
+          : "shrink-0"
+      }
+      color={agentWorkspace ? "secondary" : "primary"}
       disabled={!canSubmit}
       icon={ArrowUpIcon}
       iconWeight="bold"
@@ -91,10 +98,12 @@ function StopButton({
   onStop: () => void
 }) {
   useEscapeToStop(stopOnEscape && !disabled, onStop)
+  const agentWorkspace = useAgentWorkspace()
 
   return (
     <IconButton
       className="shrink-0"
+      color={agentWorkspace ? "secondary" : "primary"}
       disabled={disabled}
       icon={StopIcon}
       iconWeight="fill"

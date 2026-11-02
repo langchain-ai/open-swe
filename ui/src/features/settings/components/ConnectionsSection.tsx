@@ -111,7 +111,7 @@ export function ConnectLangSmithButton({
   )
 }
 
-function LangSmithRow() {
+function LangSmithRow({ user }: { user: SessionUser }) {
   const qc = useQueryClient()
   const status = useLangSmithConnection()
   const disconnect = useMutation({
@@ -136,14 +136,16 @@ function LangSmithRow() {
     <SettingsRow
       label="LangSmith"
       description={
-        connected
-          ? `Signed in${status.data.email ? ` as ${status.data.email}` : ""}. Open SWE can call LangSmith as you in your private threads.`
-          : "Sign in with LangSmith so Open SWE can call LangSmith as you in your private threads."
+        user.auth_provider === "langsmith"
+          ? `Your sign-in account${status.data.email ? `: ${status.data.email}` : ""}. Sign out to change accounts.`
+          : connected
+            ? `Signed in${status.data.email ? ` as ${status.data.email}` : ""}. Open SWE can call LangSmith as you in your private threads.`
+            : "Sign in with LangSmith so Open SWE can call LangSmith as you in your private threads."
       }
       control={
         <div className="flex items-center gap-space-2">
           <StatusPill connected={connected} />
-          {connected ? (
+          {user.auth_provider === "langsmith" ? null : connected ? (
             <Button
               color="secondary"
               variant="outlined"
@@ -165,8 +167,8 @@ function LangSmithRow() {
 export function ConnectionsSection({ user }: { user: SessionUser }) {
   return (
     <SettingsSection title="Accounts">
-      <SlackRow user={user} />
-      <LangSmithRow />
+      {user.auth_provider !== "langsmith" && <SlackRow user={user} />}
+      <LangSmithRow user={user} />
     </SettingsSection>
   )
 }

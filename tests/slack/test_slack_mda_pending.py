@@ -139,7 +139,7 @@ async def test_a_refused_new_conversation_goes_back_to_the_backend(
     # The thread is the backend's now, so the conversation's later messages stay here.
     thread = await index.get(thread_id)
     assert thread is not None and mda_forwarding.channel_of(thread.metadata) is None
-    local.update.assert_awaited_with(thread_id, {"channel": None})
+    assert local.mock_calls == []
     assert await mda_forwarding.owned_thread("C1", "1.0") is None
     # Its private stub is a placeholder still: the backend's first write sets who sees it.
     assert not visibility_is_settled(thread.metadata)
@@ -177,7 +177,7 @@ async def test_a_claimed_conversation_is_private_until_its_run_says_otherwise(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     local = AsyncMock()
-    # The Agent Server's own copy of the thread, as a stand-in.
+    # The local Agent Server, which takes no new thread.
     monkeypatch.setattr(type(router.RUNTIMES), "local", property(lambda _self: local))
     thread_id = await mda_forwarding.claim_conversation("A1", "T1", "C9", "9.1", owner_login="ada")
 
@@ -192,7 +192,7 @@ async def test_a_claimed_conversation_is_private_until_its_run_says_otherwise(
     with pytest.raises(HTTPException):
         ThreadRecord(exists=True, metadata=thread.metadata).authorize("someone-else")
     assert thread.metadata["channel"] == "slack"
-    local.create.assert_awaited_once_with(thread_id, thread.metadata)
+    assert local.mock_calls == []
     # Another app's conversation can't take the Slack thread now.
     with pytest.raises(SlackThreadMappingError):
         await mda_forwarding.claim_conversation("A2", "T1", "C9", "9.1")
