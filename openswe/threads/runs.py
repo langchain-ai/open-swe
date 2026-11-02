@@ -443,7 +443,8 @@ async def _build_dashboard_configurable(
         configurable["workspace"] = workspace
         configurable["environment"] = workspace
     if plugin_tools and chats_beside_plugin(metadata):
-        chat = await PluginChat.run_config(thread_id)
+        user = await User.for_person(ThreadIdentity(login).person)
+        chat = await PluginChat.run_config(thread_id, user.id) if user else None
         if chat is not None:
             configurable["plugin_chat"] = chat.model_dump(mode="json")
     if overrides:
@@ -1017,12 +1018,22 @@ async def _enrich_run_start_command(
             raise HTTPException(400, "offloading requires an existing conversation")
         # The person wrote, so the plugin's results may resume the chat again; any
         # that waited for them reach the agent with their message.
-        held_results: list[dict[str, str]] = (
-            await PluginChat.person_wrote(thread_id)
-            if chats_beside_plugin(metadata) and not offloading
+        plugin_user = (
+            await User.for_person(ThreadIdentity(login).person)
+            if chats_beside_plugin(metadata)
+            else None
+        )
+        plugin_chat = (
+            await PluginChat.run_config(thread_id, plugin_user.id) if plugin_user else None
+        )
+        held_results = (
+            await PluginChat.person_wrote(thread_id, plugin_user.id)
+            if plugin_user and plugin_chat and not offloading
             else []
         )
-        context_messages, context_attachments = _plugin_context(metadata, client_configurable)
+        context_messages, context_attachments = (
+            _plugin_context(metadata, client_configurable) if plugin_chat else ([], [])
+        )
         held_results.extend(context_messages)
         command_images = _dashboard_images_from_content(content)
         invocation_id = new_invocation_id()
@@ -1543,6 +1554,11 @@ async def queue_follow_up_run(
                     extra={"queue": {"thread_id": thread_id, "turn_id": str(turn_id)}},
                 )
         raise
+
+    if chats_beside_plugin(metadata):
+        user = await User.for_person(ThreadIdentity(login).person)
+        if user:
+            await PluginChat.deliver_input(thread_id, user.id, run_input)
 
     if turn_id is not None:
         # The run exists and will start on its own, so failing the request here

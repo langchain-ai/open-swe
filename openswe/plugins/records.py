@@ -22,6 +22,7 @@ from sqlalchemy import (
     literal,
     or_,
     select,
+    text,
     tuple_,
     update,
 )
@@ -555,13 +556,24 @@ class PluginInstallations:
         A build asking for permissions beyond the running preview's and
         ``approved`` waits for the person to approve them; false then.
         """
-        running = await cls.previewing(thread_id, user_id)
-        granted = {*approved, *(running.manifest.permissions if running else ())}
         async with postgres.session() as session:
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                {"key": f"plugin-preview:{thread_id}"},
+            )
+            running = await cls.previewing(thread_id, user_id)
+            granted = {
+                *approved,
+                *(
+                    running.manifest.permissions
+                    if running and running.plugin == version.app
+                    else ()
+                ),
+            }
             await Topic.APP_PREVIEWS.invalidate(session, key=thread_id)
             if not set(version.manifest.permissions) <= granted:
                 return False
-            await session.execute(
+            installed = await session.scalar(
                 insert(PluginInstallationRow)
                 .values(
                     id=uuid7(),
@@ -581,10 +593,19 @@ class PluginInstallations:
                         "updated_at": func.clock_timestamp(),
                         "updated_by": user_id,
                     },
+                    where=PluginInstallationRow.user_id == user_id,
                 )
+                .returning(PluginInstallationRow.id)
             )
+            if installed is None:
+                return False
             await _drop_unused(session, version.app)
             if running is not None and running.plugin != version.app:
+                await session.execute(
+                    delete(PluginRepositoryGrantRow).where(
+                        PluginRepositoryGrantRow.installation == installed
+                    )
+                )
                 await _drop_unused(session, running.plugin)
             return True
 
@@ -959,7 +980,7 @@ class PluginChat:
         )
 
     @staticmethod
-    async def run_config(thread_id: str) -> PluginChatConfig | None:
+    async def run_config(thread_id: str, user_id: UUID) -> PluginChatConfig | None:
         """What a run of ``thread_id`` gets from the plugin it chats beside, if it is a plugin chat."""
         async with postgres.session() as session:
             found = (
@@ -970,7 +991,7 @@ class PluginChat:
                         PluginInstallationRow.id == PluginChatRow.installation,
                     )
                     .join(PluginVersionRow, PluginVersionRow.id == PluginInstallationRow.version)
-                    .where(PluginChatRow.thread_id == thread_id)
+                    .where(PluginChatRow.thread_id == thread_id, PluginChatRow.user_id == user_id)
                 )
             ).one_or_none()
         if found is None:
@@ -991,35 +1012,63 @@ class PluginChat:
         return PluginChatCalls(self.id, self.thread_id)
 
     @staticmethod
-    async def person_wrote(thread_id: str) -> list[dict[str, str]]:
+    async def person_wrote(thread_id: str, user_id: UUID) -> list[dict[str, str]]:
         """The person wrote in the chat, so the plugin's results may resume it again.
 
         Returns the results no run took to the agent yet, for the person's
-        message to carry, and counts them delivered.
+        message to carry. They stay held until the run is accepted.
         """
         async with postgres.session() as session:
             chat = await session.scalar(
                 update(PluginChatRow)
-                .where(PluginChatRow.thread_id == thread_id)
+                .where(PluginChatRow.thread_id == thread_id, PluginChatRow.user_id == user_id)
                 .values(automatic_resumes=0)
                 .returning(PluginChatRow.id)
             )
             if chat is None:
                 return []
             held = await session.scalars(
-                update(PluginChatCallRow)
-                .where(
+                select(PluginChatCallRow).where(
                     PluginChatCallRow.chat == chat,
                     PluginChatCallRow.answered_at.is_not(None),
                     PluginChatCallRow.delivered_at.is_(None),
                 )
-                .values(delivered_at=func.clock_timestamp(), updated_at=func.clock_timestamp())
-                .returning(PluginChatCallRow)
             )
             return [
                 ClientToolSpec.result_message(row.call_id, row.output or "")
                 for row in sorted(held, key=lambda row: row.created_at or _EPOCH)
             ]
+
+    @staticmethod
+    async def deliver_input(thread_id: str, user_id: UUID, run_input: object) -> None:
+        """A successfully dispatched run took these held results to the agent."""
+        messages = run_input.get("messages") if isinstance(run_input, dict) else None
+        if not isinstance(messages, list):
+            return
+        call_ids = [
+            message["tool_call_id"]
+            for message in messages
+            if isinstance(message, dict)
+            and message.get("type") == "tool"
+            and isinstance(message.get("tool_call_id"), str)
+        ]
+        if not call_ids:
+            return
+        async with postgres.session() as session:
+            await session.execute(
+                update(PluginChatCallRow)
+                .where(
+                    PluginChatCallRow.chat.in_(
+                        select(PluginChatRow.id).where(
+                            PluginChatRow.thread_id == thread_id,
+                            PluginChatRow.user_id == user_id,
+                        )
+                    ),
+                    PluginChatCallRow.call_id.in_(call_ids),
+                    PluginChatCallRow.answered_at.is_not(None),
+                )
+                .values(delivered_at=func.clock_timestamp(), updated_at=func.clock_timestamp())
+            )
 
 
 class PluginChats:
