@@ -327,6 +327,7 @@ export interface Profile {
   pr_failure_reactions?: boolean
   goal_mode?: boolean
   experimental_fleet?: boolean
+  experimental_conditional_approval?: boolean
   experimental_memory?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -346,6 +347,7 @@ export interface ProfileUpdate {
   pr_failure_reactions?: boolean
   goal_mode?: boolean
   experimental_fleet?: boolean
+  experimental_conditional_approval?: boolean
   experimental_memory?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -1256,8 +1258,13 @@ export interface PublishedReviewAssessment {
   review_id: number
   head_sha: string
   risk_score: number
-  decision: "would_approve" | "needs_human_review"
+  decision:
+    | "would_approve"
+    | "would_approve_conditionally"
+    | "needs_human_review"
   explanation: string
+  approval_condition?: string | null
+  auto_approved?: string | null
 }
 
 export interface ReviewAssessmentFeedbackInput {

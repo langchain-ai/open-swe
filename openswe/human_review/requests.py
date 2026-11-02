@@ -217,6 +217,18 @@ class HumanReviewRequest(Base):
         """GitHub handles of the approvers, for display."""
         return [participant.github_login for participant in self.approvals]
 
+    @property
+    def approval_condition(self) -> str:
+        """What an expedited card asks voters to okay in place of the hunks it hides."""
+        return next(
+            (e["guideline"] for e in self.excluded_hunks if e.get("approval_condition")), ""
+        )
+
+    @property
+    def auto_approved(self) -> str:
+        """What Open SWE's review judged the approval criteria already cover besides the condition."""
+        return next((e["reason"] for e in self.excluded_hunks if e.get("approval_condition")), "")
+
     def participant(self, user_id: UUID) -> HumanReviewParticipant | None:
         return next((p for p in self.participants if p.user_id == user_id), None)
 

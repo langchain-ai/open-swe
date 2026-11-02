@@ -43,6 +43,11 @@ function ExperimentsPage() {
           description="Open SWE keeps working without messaging you until it is blocked on you, or its pull request has passing checks, a few rounds of Open SWE review with the obvious findings fixed, and a walkthrough of the latest version."
         />
         <ProfileSwitchRow
+          field="experimental_conditional_approval"
+          label="Conditional approval"
+          description="For pull requests you author, let Open SWE request approval of a succinct condition instead of showing the full diff when its review covers everything else. Off by default."
+        />
+        <ProfileSwitchRow
           field="experimental_memory"
           label="Memory"
           description="Threads you start include what your workspace's curator learned from everyone's memories, in place of your own memories it superseded."

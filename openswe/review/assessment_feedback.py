@@ -6,7 +6,7 @@ from typing import Literal, Self
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import BigInteger, select
+from sqlalchemy import BigInteger, func, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -62,6 +62,31 @@ class PublishedAssessment(ReviewAssessment):
                 )
             )
         return None if value is None else cls.model_validate(value)
+
+    @classmethod
+    async def latest(cls, owner: str, repo: str, pr_number: int) -> Self | None:
+        """The pull request's most recently published assessment."""
+        value = AssessmentRow.value
+        async with postgres.session() as session:
+            latest = await session.scalar(
+                select(value)
+                .where(
+                    func.lower(value["owner"].astext) == owner.lower(),
+                    func.lower(value["repo"].astext) == repo.lower(),
+                    value["pr_number"].astext == str(pr_number),
+                )
+                .order_by(AssessmentRow.published_at.desc())
+                .limit(1)
+            )
+        return None if latest is None else cls.model_validate(latest)
+
+    def conditional_for_head(self, head_sha: str) -> bool:
+        """Whether Open SWE would approve ``head_sha`` subject to human approval of the condition."""
+        return (
+            not self.dry_run
+            and self.head_sha == head_sha
+            and self.decision == "would_approve_conditionally"
+        )
 
     @classmethod
     async def for_viewer(

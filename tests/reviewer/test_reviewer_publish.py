@@ -1,7 +1,7 @@
 """Unit tests for the publish_review rendering and orchestration helpers."""
 
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1060,15 +1060,27 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
 
 
 @pytest.mark.parametrize(
-    "prepared_policy,mode,current_head,expected_event,has_assessment",
+    "prepared_policy,mode,current_head,expected_event,has_assessment,conditional_enabled",
     [
-        (None, "approve", True, "COMMENT", False),
-        ("Docs only", "off", True, "COMMENT", False),
-        ("Docs only", "dry_run", True, "COMMENT", True),
-        ("Docs only", "approve", False, "COMMENT", True),
-        ("Docs only", "approve", True, "APPROVE", True),
+        (None, "approve", True, "COMMENT", False, None),
+        ("Docs only", "off", True, "COMMENT", False, None),
+        ("Docs only", "dry_run", True, "COMMENT", True, None),
+        ("Docs only", "approve", False, "COMMENT", True, None),
+        ("Docs only", "approve", True, "APPROVE", True, None),
+        ("Docs only", "approve", True, "COMMENT", True, False),
+        ("Docs only", "approve", True, "COMMENT", True, True),
+        ("Docs only", "approve", True, "COMMENT", True, "lookup-fails"),
     ],
-    ids=["no-policy", "switched-off", "dry-run", "head-moved", "approve"],
+    ids=[
+        "no-policy",
+        "switched-off",
+        "dry-run",
+        "head-moved",
+        "approve",
+        "conditional-off",
+        "conditional-on",
+        "conditional-author-unknown",
+    ],
 )
 async def test_publication_respects_the_base_policy_and_current_mode(
     prepared_policy: str | None,
@@ -1076,11 +1088,28 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     current_head: bool,
     expected_event: str,
     has_assessment: bool,
+    conditional_enabled: bool | Literal["lookup-fails"] | None,
     registry_db: None,
 ) -> None:
     from openswe.tools.publish_review import _publish_review_async
+    from openswe.users import UserPreferences
 
     with (
+        patch(
+            "openswe.github.pull_request_status.PullRequestClient.pull",
+            AsyncMock(return_value={"user": {"login": "pr-author"}}),
+        ),
+        patch(
+            "openswe.tools.publish_review.User.preferences_for_login",
+            AsyncMock(
+                side_effect=RuntimeError("database unavailable")
+                if conditional_enabled == "lookup-fails"
+                else None,
+                return_value=UserPreferences(
+                    experimental_conditional_approval=conditional_enabled is True
+                ),
+            ),
+        ) as author_preferences,
         patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("openswe.tools.publish_review.approval_mode_for", AsyncMock(return_value=mode)),
         patch(
@@ -1112,7 +1141,18 @@ async def test_publication_respects_the_base_policy_and_current_mode(
             token="t",
             severity_threshold="medium",
             is_re_review=False,
-            assessment=_assessment(),
+            assessment=(
+                _assessment()
+                if conditional_enabled is None
+                else ReviewAssessment(
+                    head_sha="a" * 40,
+                    risk_score=1,
+                    decision="would_approve_conditionally",
+                    approval_condition="Remove the legacy exporter",
+                    auto_approved="Documentation changes covered by Docs only",
+                    explanation="Implementation is covered; human approval of the removal is needed.",
+                )
+            ),
             state={"review_approval_policy": prepared_policy},
         )
     assert result["success"] is True
@@ -1133,6 +1173,15 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     if saved is not None:
         assert saved.dry_run is (mode == "dry_run")
         assert saved.approved is (expected_event == "APPROVE")
+
+        if conditional_enabled is not None:
+            author_preferences.assert_awaited_once_with("pr-author")
+            assert saved.decision == (
+                "would_approve_conditionally"
+                if conditional_enabled is True
+                else "needs_human_review"
+            )
+            assert bool(saved.approval_condition) is (conditional_enabled is True)
 
 
 @pytest.mark.parametrize(

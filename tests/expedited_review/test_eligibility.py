@@ -3,6 +3,7 @@ import pytest
 from openswe.expedited_review.eligibility import (
     ACCEPTED_CHANGED_LINES,
     MAX_CHANGED_LINES,
+    ApprovalCondition,
     ChangedFile,
     EligibleDiff,
     Exclusion,
@@ -129,3 +130,29 @@ def test_generated_files_never_count_and_regenerating_them_keeps_the_votes() -> 
     assert fingerprint_matches([source, regenerated], card.fingerprint)
     assert not ChangedFile(filename=".github/openapi.yaml").is_generated
     assert not ChangedFile(filename="dist/app.min.js").is_generated
+
+
+def test_a_condition_hides_everything_but_paths_that_must_be_read() -> None:
+    app = ChangedFile(
+        filename="src/app.py",
+        additions=40,
+        deletions=40,
+        patch="@@ -1,40 +1,40 @@\n" + "\n".join(f"-a{i}\n+b{i}" for i in range(40)),
+    )
+    gone = ChangedFile(
+        filename="src/legacy.py", sha="1" * 40, status="removed", deletions=900, patch=None
+    )
+    lock = ChangedFile(filename="uv.lock", deletions=1, patch="@@ -1,1 +0,0 @@\n-x")
+    files = [app, gone, lock]
+    covered = ApprovalCondition("Rename a to b and remove legacy", "Nothing else", "f" * 40).cover(
+        files
+    )
+
+    assert isinstance(assess_eligibility(files), Ineligible)
+    assert [file.filename for file in ExpeditedDiff(files, covered).shown] == ["uv.lock"]
+    verdict = assess_eligibility(files, covered)
+    assert isinstance(verdict, EligibleDiff) and verdict.changed_lines == 1
+    edited = gone.model_copy(update={"deletions": 901})
+    assert isinstance(assess_eligibility([app, edited, lock], covered), Ineligible)
+    swapped = gone.model_copy(update={"sha": "2" * 40})
+    assert isinstance(assess_eligibility([app, swapped, lock], covered), Ineligible)
