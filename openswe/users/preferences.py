@@ -12,7 +12,6 @@ class UserPreferences(BaseModel):
     # Stay silent until blocked on this person or a reviewed, green PR with a walkthrough is ready.
     goal_mode: bool = False
     experimental_conditional_approval: bool = False
-    experimental_fleet: bool = False
     # Threads this person starts carry what their workspace's curator learned, and the
     # workspace memories they saved in their private threads reach their own runs there
     # until the curator processes them.
@@ -26,9 +25,6 @@ class UserPreferencesPatch(BaseModel):
     )
     goal_mode: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
     experimental_conditional_approval: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
-    experimental_fleet: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     experimental_memory: bool | None = Field(

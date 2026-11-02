@@ -143,7 +143,12 @@ async def test_capture_snapshot_request_outlasts_the_client_default_timeout() ->
         cast(AsyncSandboxClient, _FakeClient()), "sb-1", "acme", "latest", timeout=60
     )
 
-    assert sent == [{"json": {"name": "acme", "tag": "latest"}, "timeout": 600.0}]
+    assert sent == [
+        {
+            "json": {"name": "acme", "tag": "latest"},
+            "timeout": langsmith_provider.SNAPSHOT_CAPTURE_REQUEST_TIMEOUT_SECONDS,
+        }
+    ]
 
 
 @pytest.mark.asyncio

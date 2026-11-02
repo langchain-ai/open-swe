@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { desktopExperience } from "@/lib/experience"
 import { AppCommandPalette } from "./AppCommandPalette"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "@/lib/appCommands"
@@ -10,7 +11,15 @@ import type { AppCommand } from "@/lib/appCommands"
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   fetchNextPage: vi.fn(),
-  cloudThread: { id: "cloud-1", title: "Cloud result" } as AgentThread,
+  cloudThread: {
+    id: "cloud-1",
+    title: "Cloud result",
+    experience: "agent_workspace",
+  } as AgentThread,
+}))
+
+vi.mock("@/lib/session", () => ({
+  useSession: () => ({ data: { login: "alice" } }),
 }))
 
 vi.mock("@tanstack/react-router", () => ({
@@ -37,6 +46,7 @@ vi.mock("@/features/reviews/lib/usePullRequestSearch", () => ({
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  localStorage.clear()
 })
 
 const commands: Array<AppCommand> = [
@@ -89,6 +99,7 @@ describe("AppCommandPalette", () => {
       await screen.findByRole("option", { name: "Cloud result" })
     ).toBeTruthy()
 
+    desktopExperience.write("alice", "coding")
     fireEvent.change(input, {
       target: {
         value:

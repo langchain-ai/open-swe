@@ -2,15 +2,14 @@
 
 import logging
 from functools import cache
-from typing import Final
 
 from deepagents.backends.protocol import BackendProtocol
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from runtime_api.loop import RunStarted
 
-from openswe.agent_api.graph import RemoteGraph
-from openswe.agent_api.run_parts import RunParts
+from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.tokens import RunSettings
 from openswe.github.thread_token import get_github_token
 from openswe.middleware.record_run_usage import record_run_usage
@@ -18,16 +17,17 @@ from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.review.diff import compute_diff_line_set
 from openswe.review.events import ReviewEvents
 from openswe.reviewer import (
+    PrepareReviewerRunMiddleware,
     ensure_reviewer_github_token,
-    plan_reviewer,
+    resolve_reviewer_models,
+    reviewer_catalog,
     reviewer_sandbox,
     reviewer_tools,
 )
 from openswe.run_config import RunConfig
+from openswe.sandboxes.tool_runtime import ToolSurface
 
 logger = logging.getLogger(__name__)
-
-ASSISTANT_ID: Final = "reviewer"
 
 
 @cache
@@ -35,10 +35,32 @@ def _tools_by_name() -> dict[str, BaseTool]:
     return {tool.name: tool for tool in reviewer_tools()}
 
 
-class ReviewerParts(RunParts):
-    """The reviewer's pieces, as its plan builds them, for a call answered without it."""
+class ReviewerKind(RunKind):
+    """The pull request reviewer's pieces."""
 
+    assistant_id = "reviewer"
+    reviews = True
     reporters = (TranscriptMiddleware(), record_run_usage)
+
+    async def catalog(self, config: RunnableConfig, surface: ToolSurface) -> None:
+        await reviewer_catalog(config, surface)
+
+    async def preparation(
+        self, config: RunnableConfig, settings: RunSettings, *, sandbox_id: str | None
+    ) -> list[AgentMiddleware]:
+        del settings, sandbox_id
+        cfg = RunConfig.from_config(config)
+        if cfg.thread_id is None:
+            raise ValueError("A review run needs a thread")
+        models = await resolve_reviewer_models(cfg)
+        return [
+            PrepareReviewerRunMiddleware(
+                thread_id=cfg.thread_id,
+                config=config,
+                use_gateway=models.use_gateway,
+                model=models.main,
+            )
+        ]
 
     def restore(self, state: dict[str, object]) -> None:
         # Sets do not cross to MDA and back; the diff they index does.
@@ -80,6 +102,3 @@ class ReviewerParts(RunParts):
 
     async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:  # noqa: ARG002
         return _tools_by_name().get(name)
-
-
-REVIEWER: Final = RemoteGraph(ASSISTANT_ID, plan_reviewer, ReviewerParts())

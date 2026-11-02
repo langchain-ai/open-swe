@@ -211,7 +211,7 @@ async def test_review_run_events_are_linked_and_deduplicated(status: str, carrie
     from runtime_api.loop import RunStarted
     from sqlalchemy import text
 
-    from openswe.agent_api.reviewer import ReviewerParts
+    from openswe.agent_api.reviewer import ReviewerKind
     from openswe.agent_api.tokens import RunSettings
     from openswe.database import connection
     from openswe.review.events import ReviewEvents
@@ -224,7 +224,7 @@ async def test_review_run_events_are_linked_and_deduplicated(status: str, carrie
         runtime="mda",
         metadata={"kind": "reviewer", "pr": {"owner": "acme", "name": "app", "number": 1}},
     )
-    parts = ReviewerParts()
+    parts = ReviewerKind()
     for _ in range(2):
         await parts.started(
             {

@@ -875,9 +875,11 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     // The held request would block `load`, so stop waiting at the first byte.
     await page.goto("/agents", { waitUntil: "commit" });
 
-    const skeleton = page.getByTestId("sidebar-threads-skeleton");
+    const skeleton = page.locator(
+      "[data-testid=sidebar-threads-skeleton]:visible",
+    );
     await expect(skeleton).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole("status")).toContainText("Loading threads");
+    await expect(skeleton.getByRole("status")).toContainText("Loading threads");
 
     release();
     await expect(skeleton).toBeHidden({ timeout: 30_000 });
@@ -918,7 +920,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     });
     await page.goto("/agents", { waitUntil: "commit" });
 
-    const skeleton = page.getByTestId("sidebar-threads-skeleton");
+    const skeleton = page.locator(
+      "[data-testid=sidebar-threads-skeleton]:visible",
+    );
     await expect(skeleton).toBeVisible({ timeout: 30_000 });
 
     await sidebarRequest;

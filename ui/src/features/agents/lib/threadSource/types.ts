@@ -86,6 +86,7 @@ export interface StreamThreadSource extends ThreadSourceShared {
 /** The thread is served by the append-only transcript event log. */
 export interface TranscriptThreadSource extends ThreadSourceShared {
   kind: "transcript"
+  settledRunId: string | null
   /** Nested tool calls under a subagent namespace, for the subagent card. */
   subagentToolCalls: (
     namespace: ReadonlyArray<string>

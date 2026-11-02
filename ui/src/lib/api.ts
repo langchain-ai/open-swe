@@ -232,6 +232,8 @@ async function loadPrDetails(
 
 export interface SessionUser {
   login: string
+  auth_provider?: "github" | "langsmith"
+  github_login?: string | null
   /** How the server labels this user's messages; empty until they have a name. */
   display_name?: string
   email: string | null
@@ -326,7 +328,6 @@ export interface Profile {
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
   goal_mode?: boolean
-  experimental_fleet?: boolean
   experimental_conditional_approval?: boolean
   experimental_memory?: boolean
   draft_prs?: boolean
@@ -346,7 +347,6 @@ export interface ProfileUpdate {
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
   goal_mode?: boolean
-  experimental_fleet?: boolean
   experimental_conditional_approval?: boolean
   experimental_memory?: boolean
   draft_prs?: boolean
@@ -1076,6 +1076,9 @@ export interface OpenPullRequest {
   // null when the review threads could not be read, which is not the same
   // answer as none being unresolved.
   unresolvedThreads: number | null
+  // Why it is on the To Review list: Open SWE assigned it, may assign it once
+  // its review goes unclaimed, or it was linked in a Slack thread naming you.
+  assignment?: "assigned" | "tentative" | "mentioned" | null
 }
 
 export interface PullRequestReviewer {
@@ -2115,14 +2118,19 @@ export const api = {
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 }
 
-export function loginUrl(redirectTo?: string): string {
+export function loginUrl(
+  redirectTo?: string,
+  provider: "github" | "langsmith" = "github"
+): string {
   const target =
     redirectTo ??
     (typeof window !== "undefined"
       ? `${window.location.pathname}${window.location.search}${window.location.hash}`
       : "")
   const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : ""
-  return `${API_BASE}/dashboard/api/auth/login${qs}`
+  const path =
+    provider === "langsmith" ? "/auth/langsmith/login" : "/auth/login"
+  return `${API_BASE}/dashboard/api${path}${qs}`
 }
 
 /**

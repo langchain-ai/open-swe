@@ -59,7 +59,12 @@ from openswe.human_review.picking import (
     Wait,
     choose_reviewer,
 )
-from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
+from openswe.human_review.requests import (
+    AUTO_ASSIGN_ASKED,
+    HumanReviewParticipant,
+    HumanReviewRequest,
+    RequestKind,
+)
 from openswe.human_review.supplementary import (
     STEP_PREFIX as SUPPLEMENTARY_STEP,
 )
@@ -108,7 +113,6 @@ SNOOZE_DURATIONS = {
     "1 day": timedelta(days=1),
     "2 days": timedelta(days=2),
 }
-_AUTO_ASSIGN_ASKED = "auto_assign_asked"
 _REMAINING_OWNERS_ASKED = "remaining_owners_asked"
 
 
@@ -360,13 +364,14 @@ async def _request_supplementary(
     result: RequestResult,
     policy_id: str,
     reason: str,
+    area: str = "",
 ) -> RequestResult:
     """Add a supplementary review to an open request without touching its engineering card."""
     blockers = await review_blockers(pull)
     if blockers is None or blockers:
         return _failure("The pull request must be open and not a draft for a supplementary review.")
     try:
-        await SupplementaryReviews(active).ask(pull, policy_id.strip(), reason)
+        await SupplementaryReviews(active).ask(pull, policy_id.strip(), reason, area)
     except SupplementaryReviewRefused as refused:
         return _failure(str(refused))
     return result
@@ -402,6 +407,7 @@ async def request_review(
     auto_merge: bool | None = None,
     supplementary_review: str = "",
     supplementary_review_reason: str = "",
+    supplementary_review_area: str = "",
 ) -> RequestResult:
     """Post a standard review card for ``pr_ref``, or return the one already open.
 
@@ -418,6 +424,7 @@ async def request_review(
                 auto_merge=auto_merge,
                 supplementary_review=supplementary_review,
                 supplementary_review_reason=supplementary_review_reason,
+                supplementary_review_area=supplementary_review_area,
             )
     except GitHubAppUnavailable:
         result = _failure("Open SWE cannot reach this repository's GitHub App installation.")
@@ -452,6 +459,7 @@ async def _request_review(
     auto_merge: bool | None = None,
     supplementary_review: str = "",
     supplementary_review_reason: str = "",
+    supplementary_review_area: str = "",
 ) -> RequestResult:
     if bool(supplementary_review.strip()) != bool(supplementary_review_reason.strip()):
         return _failure("Pass supplementary_review and supplementary_review_reason together.")
@@ -463,7 +471,12 @@ async def _request_review(
             return result
         if supplementary_review:
             return await _request_supplementary(
-                active, pull, result, supplementary_review, supplementary_review_reason
+                active,
+                pull,
+                result,
+                supplementary_review,
+                supplementary_review_reason,
+                supplementary_review_area,
             )
         if active.kind == "standard" and channel.strip():
             target = await _target_channel(pr_ref, pull, channel)
@@ -554,7 +567,10 @@ async def _request_review(
     if supplementary_review:
         try:
             await SupplementaryReviews(request).ask(
-                pull, supplementary_review.strip(), supplementary_review_reason
+                pull,
+                supplementary_review.strip(),
+                supplementary_review_reason,
+                supplementary_review_area,
             )
         except SupplementaryReviewRefused as refused:
             refusal = str(refused)
@@ -840,7 +856,7 @@ async def assign(
     if replace:
         async with HumanReviewRequest.locked(added.id) as (_, row):
             if row is not None:
-                row.run_config = {**row.run_config, _AUTO_ASSIGN_ASKED: True}
+                row.run_config = {**row.run_config, AUTO_ASSIGN_ASKED: True}
     await _request_github_review(added, github_login)
     minutes = await _assignment_minutes(added)
     if not await _schedule(added, "pick_expiry", timedelta(minutes=minutes)):
@@ -1251,7 +1267,7 @@ async def start_auto_assign(
     if asked:
         async with HumanReviewRequest.locked(request.id) as (_, row):
             if row is not None:
-                row.run_config = {**row.run_config, _AUTO_ASSIGN_ASKED: True}
+                row.run_config = {**row.run_config, AUTO_ASSIGN_ASKED: True}
     result = (
         AutoAssignResult("disabled")
         if not asked and skip_on_preview("start_auto_assign")
@@ -1614,7 +1630,7 @@ async def _auto_assign_hold(request: HumanReviewRequest, step: str) -> str | Non
     A pull request merely linked outside a review channel only gets reactions, so
     its unaccepted picks are withdrawn.
     """
-    if request.kind != "posted" or _AUTO_ASSIGN_ASKED in request.run_config:
+    if request.kind != "posted" or request.auto_assign_asked:
         return None
     pr = request.pull_request
     try:

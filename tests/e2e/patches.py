@@ -15,7 +15,7 @@ import os
 import re
 import socket
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from urllib.parse import urlparse
@@ -354,55 +354,59 @@ _calling: ContextVar[str] = ContextVar("e2e_calling", default="")
 
 
 def _answer_every_call_on_a_fresh_replica() -> None:
-    """Answer each MDA call as a backend replica that never served the run would.
+    """Record each time the backend works out a run's plan, by the call that needed it.
 
-    Production runs three replicas, and a run's calls land on any of them; here one
-    process answers them all, so it forgets the plans it cached between calls. Each
-    time it plans a run is recorded, by the call that needed the plan, which
-    ``/control/plans`` reports.
+    Production runs three replicas, and a run's calls land on any of them, so only
+    starting a run may plan it: every other call is answered from the run's token
+    alone. ``/control/plans`` reports the calls that planned.
     """
     import fakes
+    from langchain_core.runnables import RunnableConfig
     from pydantic import JsonValue
 
-    from openswe.agent_api.graph import RemoteGraph, RunSession, RunStart
+    from openswe.agent_api.hosted import run_kinds
+    from openswe.agent_api.run_calls import TokenRun
+    from openswe.agent_api.run_catalog import RunCatalog
+    from openswe.agent_api.run_kinds import RunKind
     from openswe.agent_api.tokens import RemoteRun
+    from openswe.run_config import RunConfig
+    from openswe.sandboxes.tool_runtime import ToolSurface
 
-    answer = RemoteGraph.api
-    plan = RemoteGraph._planned
-    session = RemoteGraph.session
-    start = RemoteGraph.start_run
+    answer = TokenRun.answer
+    starting = RunCatalog.of
 
-    async def api(self: RemoteGraph, run: RemoteRun, endpoint: str, raw: JsonValue) -> JsonValue:
+    async def answer_call(
+        cls: type[TokenRun], kind: RunKind, run: RemoteRun, endpoint: str, raw: JsonValue
+    ) -> JsonValue:
         calling = _calling.set(endpoint)
         try:
-            return await answer(self, run, endpoint, raw)
+            return await answer(kind, run, endpoint, raw)
         finally:
             _calling.reset(calling)
 
-    async def start_run(self: RemoteGraph, run: RemoteRun) -> RunStart:
+    async def start(cls: type[RunCatalog], kind: RunKind, run: RemoteRun) -> RunCatalog:
         # A dispatch can run in the context of a call it was made from, such as an operation.
         calling = _calling.set("start")
         try:
-            return await start(self, run)
+            return await starting(kind, run)
         finally:
             _calling.reset(calling)
 
-    async def planned(
-        self: RemoteGraph, run: RemoteRun, run_id: str | None, *, fresh: bool
-    ) -> RunSession:
-        fakes.PLANS.append({"thread_id": run.thread_id, "call": _calling.get()})
-        return await plan(self, run, run_id, fresh=fresh)
+    def recording(
+        catalog: Callable[[RunnableConfig, ToolSurface], Awaitable[None]],
+    ) -> Callable[[RunnableConfig, ToolSurface], Awaitable[None]]:
+        async def recorded(config: RunnableConfig, surface: ToolSurface) -> None:
+            thread_id = RunConfig.from_config(config).thread_id or ""
+            fakes.PLANS.append({"thread_id": thread_id, "call": _calling.get()})
+            await catalog(config, surface)
 
-    async def forgetful_session(
-        self: RemoteGraph, run: RemoteRun, run_id: str | None, *, fresh: bool = False
-    ) -> RunSession:
-        self._sessions.clear()
-        return await session(self, run, run_id, fresh=fresh)
+        return recorded
 
-    RemoteGraph.api = api
-    RemoteGraph.start_run = start_run
-    RemoteGraph._planned = planned
-    RemoteGraph.session = forgetful_session
+    for kind in run_kinds().values():
+        kind.catalog = recording(kind.catalog)
+
+    TokenRun.answer = classmethod(answer_call)
+    RunCatalog.of = classmethod(start)
 
 
 async def _unavailable_scout_sandbox(_thread_id: str, _cfg: object) -> object:

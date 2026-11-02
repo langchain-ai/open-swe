@@ -87,6 +87,7 @@ async def request_human_review(
     auto_merge: bool | None = None,
     supplementary_review: str = "",
     supplementary_review_reason: str = "",
+    supplementary_review_area: str = "",
 ) -> dict[str, Any]:
     """Implement the `request_human_review` tool."""
     pr_ref = parse_github_pr_url(pr_url)
@@ -108,6 +109,7 @@ async def request_human_review(
             auto_merge,
             supplementary_review,
             supplementary_review_reason,
+            supplementary_review_area,
         )
     login = cfg.github_login or ""
     thread_id = cfg.thread_id or ""
@@ -127,6 +129,7 @@ async def request_human_review(
         auto_merge=auto_merge,
         supplementary_review=supplementary_review,
         supplementary_review_reason=supplementary_review_reason,
+        supplementary_review_area=supplementary_review_area,
     )
     if not result.success:
         return _failure(result.error)
@@ -173,6 +176,7 @@ async def _request_for_mcp_caller(
     auto_merge: bool | None = None,
     supplementary_review: str = "",
     supplementary_review_reason: str = "",
+    supplementary_review_area: str = "",
 ) -> dict[str, Any]:
     """Request review as a person calling over MCP, who has no thread to point at the card."""
     requester = await User.for_login("github", login)
@@ -186,6 +190,7 @@ async def _request_for_mcp_caller(
         auto_merge=auto_merge,
         supplementary_review=supplementary_review,
         supplementary_review_reason=supplementary_review_reason,
+        supplementary_review_area=supplementary_review_area,
     )
     if not result.success:
         return _failure(result.error)

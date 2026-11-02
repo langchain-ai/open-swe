@@ -17,6 +17,7 @@ from langgraph.config import get_config, get_stream_writer
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from pydantic import JsonValue
+from runtime_api.operations import ShellCheck, ShellVerdict
 
 from openswe.middleware.pr_creation_guard import SHELL_TOOL_ARGS
 
@@ -77,3 +78,14 @@ class ShellGuards:
             return ShellDecision(allowed[-1].tool_call["args"])
         refusal = answer.text if isinstance(answer, ToolMessage) else str(answer)
         return ShellDecision(None, refusal)
+
+    async def verdict(self, check: ShellCheck) -> ShellVerdict:
+        """Whether the guards let ``check``'s command run as it is, or as they rewrote it."""
+        decision = await self.decide(check.tool, {"command": check.command})
+        if decision.arguments is None:
+            return ShellVerdict(allowed=False, refusal=decision.refusal)
+        command = decision.arguments.get("command")
+        return ShellVerdict(
+            allowed=True,
+            command=command if isinstance(command, str) and command != check.command else None,
+        )
