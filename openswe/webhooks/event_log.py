@@ -24,6 +24,8 @@ from openswe.slack.pr_links import event_pull_requests
 
 logger = logging.getLogger(__name__)
 
+type EventVisibility = Literal["public", "private", "admin"]
+
 type WebhookSource = Literal[
     "github", "slack", "linear", "deployment", "workspace", "human_review", "reviewer"
 ]
@@ -44,7 +46,7 @@ _INSERT = text(
     f"""
     INSERT INTO {_TABLE} (
         source, endpoint, event_type, delivery_id, payload,
-        user_id, workspace_id, repository_id, pull_request_id
+        user_id, workspace_id, repository_id, pull_request_id, visibility, visible_to_user_id
     )
     SELECT
         :source, :endpoint, :event_type, :delivery_id, CAST(:payload AS jsonb),
@@ -64,20 +66,27 @@ _INSERT = text(
         ),
         repository.id,
         (SELECT id FROM pull_request
-         WHERE repository_id = repository.id AND number = :pull_request_number)
+         WHERE repository_id = repository.id AND number = :pull_request_number),
+        :visibility, CAST(:visible_to_user_id AS uuid)
     FROM (SELECT 1) AS delivery
     LEFT JOIN repository ON repository.key = lower(CAST(:github_repository AS text))
     LEFT JOIN workspace_repository ON workspace_repository.repository_id = repository.id
     RETURNING source, event_type, delivery_id, received_at,
-        user_id, workspace_id, repository_id, pull_request_id
+        user_id, workspace_id, repository_id, pull_request_id, visibility, visible_to_user_id
     """
 )
+
+_VISIBLE = """
+    (visibility = 'public'
+     OR (visibility = 'private' AND visible_to_user_id = CAST(:viewer_id AS uuid))
+     OR (visibility = 'admin' AND :admin AND workspace_id = CAST(:workspace_id AS uuid)))
+"""
 
 _EVENT_KINDS = text(
     f"""
     SELECT source, event_type, count(*) AS count, max(received_at) AS last_received_at
     FROM {_TABLE}
-    WHERE received_at >= :since
+    WHERE {_VISIBLE} AND received_at >= :since
       AND (CAST(:source AS text) IS NULL OR source = :source)
       AND NOT (source = ANY(CAST(:hidden_sources AS text[])))
       AND (CAST(:event_type AS text) = ''
@@ -92,7 +101,7 @@ _LATEST_PAYLOAD = text(
     f"""
     SELECT payload
     FROM {_TABLE}
-    WHERE source = :source AND event_type = :event_type AND received_at >= :since
+    WHERE {_VISIBLE} AND source = :source AND event_type = :event_type AND received_at >= :since
     ORDER BY received_at DESC
     LIMIT 1
     """
@@ -112,6 +121,8 @@ class LoggedEvent(BaseModel):
     repository_id: UUID | None
     pull_request_id: UUID | None
     payload: JsonValue
+    visibility: EventVisibility = "public"
+    visible_to_user_id: UUID | None = None
 
     @property
     def base_event_type(self) -> str:
@@ -257,6 +268,8 @@ class EventLog:
         event_type: str = "",
         delivery_id: str = "",
         refs: EventRefs | None = None,
+        visibility: EventVisibility = "public",
+        visible_to_user_id: UUID | None = None,
     ) -> bool:
         """Log, then wake subscribed threads.
 
@@ -289,6 +302,8 @@ class EventLog:
             event_type=event_type,
             delivery_id=delivery_id,
             refs=refs,
+            visibility=visibility,
+            visible_to_user_id=visible_to_user_id,
         )
 
     @classmethod
@@ -301,6 +316,8 @@ class EventLog:
         event_type: str,
         delivery_id: str,
         refs: EventRefs | None = None,
+        visibility: EventVisibility = "public",
+        visible_to_user_id: UUID | None = None,
     ) -> bool:
         """Store one event and wake subscribed threads; ``record`` for a webhook request.
 
@@ -324,6 +341,8 @@ class EventLog:
                         "event_type": event_type,
                         "delivery_id": delivery_id,
                         "payload": json.dumps(payload),
+                        "visibility": visibility,
+                        "visible_to_user_id": visible_to_user_id,
                         **(refs or EventRefs()).model_dump(),
                     },
                 )
@@ -354,6 +373,8 @@ class EventLog:
         event_type: str,
         delivery_id: str,
         refs: EventRefs | None = None,
+        visibility: EventVisibility = "public",
+        visible_to_user_id: UUID | None = None,
     ) -> bool:
         """``record`` a delivery the sender may send more than once, at most once.
 
@@ -377,7 +398,14 @@ class EventLog:
             if not claimed:
                 return True
         stored = await cls.record(
-            request, body, source, event_type=event_type, delivery_id=delivery_id, refs=refs
+            request,
+            body,
+            source,
+            event_type=event_type,
+            delivery_id=delivery_id,
+            refs=refs,
+            visibility=visibility,
+            visible_to_user_id=visible_to_user_id,
         )
         if not stored and claimed:
             try:
@@ -398,6 +426,8 @@ class EventLog:
         source: WebhookSource | None = None,
         event_type: str = "",
         admin: bool = False,
+        viewer_id: UUID | None = None,
+        workspace_id: UUID | None = None,
     ) -> list[EventKind]:
         """Every distinct source and event type received since ``since``.
 
@@ -407,6 +437,9 @@ class EventLog:
         """
         await cls.ensure_partitions()
         params = {
+            "viewer_id": viewer_id,
+            "workspace_id": workspace_id,
+            "admin": admin,
             "since": since,
             "source": source,
             "event_type": event_type,
