@@ -35,7 +35,7 @@ from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
 from openswe.linear.notifications import post_linear_notification
-from openswe.review.findings import REVIEWER_THREAD_KIND
+from openswe.review.findings import REVIEWER_SHADOW_THREAD_KIND, REVIEWER_THREAD_KIND
 from openswe.review.run_failure import ReviewRunFailure
 from openswe.session_cost import schedule_session_cost_refresh
 from openswe.slack.client import (
@@ -385,7 +385,7 @@ async def _handle_successful_run(
         from openswe.incidents import turns
 
         return await turns.handle_run_completion(thread_id, run_id, "success")
-    if metadata.get("kind") == REVIEWER_THREAD_KIND:
+    if metadata.get("kind") in {REVIEWER_THREAD_KIND, REVIEWER_SHADOW_THREAD_KIND}:
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
     await sync_slack_background_status(client, thread_id)

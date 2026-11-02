@@ -4,6 +4,7 @@ import { SettingsPage } from "@/components/AppShell"
 import { ExpeditedReviewSection } from "@/features/settings/components/ExpeditedReviewSection"
 import { ManagedToolsGatewaySection } from "@/features/settings/components/ManagedToolsGatewaySection"
 import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
+import { ShadowReviewSection } from "@/features/settings/components/ShadowReviewSection"
 import {
   DefaultRepoSection,
   LLMGatewaySection,
@@ -40,6 +41,12 @@ function AdminDefaultsPage() {
       <LLMGatewaySection scope={INSTANCE_SCOPE} />
       <ReviewSettings scope={INSTANCE_SCOPE} canEdit />
       <ExpeditedReviewSection scope={INSTANCE_SCOPE} />
+      <ShadowReviewSection
+        scope={INSTANCE_SCOPE}
+        models={(modelOptions.data?.models ?? []).filter(
+          (model) => model.can_be_default !== false
+        )}
+      />
       <ManagedToolsGatewaySection />
     </SettingsPage>
   )

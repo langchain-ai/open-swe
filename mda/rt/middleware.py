@@ -100,6 +100,8 @@ from rt.backend import (
 from rt.git_evidence import turn_git
 from rt.loop import RunLoop
 from rt.managed_sandbox import OpenedSandbox
+from rt.model_calls import MODEL_CALL_TIMEOUT_SECONDS, ModelCallTimeoutMiddleware
+from rt.model_retries import ModelOutput
 from rt.models import build_model
 from rt.offload import OFFLOADING_KEY, RequestedOffload
 from rt.outbox import OUTBOX_KEY, carry
@@ -301,8 +303,12 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         open_sandbox: Callable[[Runtime], Awaitable[OpenedSandbox]] | None = None,
         boot_sandbox: Callable[[SandboxBackendProtocol], Awaitable[OpenedSandbox]] | None = None,
         read_ahead: Sequence[Callable[[], None]] = (),
+        *,
+        model_timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS,
     ) -> None:
         self._backend = backend
+        self._model_timeout = ModelCallTimeoutMiddleware(model_timeout_seconds)
+        self._primary_timeout = ModelCallTimeoutMiddleware(model_timeout_seconds * 2 / 3)
         self._run_loop = RunLoop(backend)
         # Each run's own model, built from its catalog.
         self._models = RunLocal(self._build_model)
@@ -549,7 +555,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse | ExtendedModelResponse:
-        response = await self._call_model(request, handler)
+        async with self._model_timeout.deadline():
+            response = await self._call_model(request, handler)
         # The reply's report rides with the reply into the run's checkpoint.
         carried = self._backend.outbox.carried(request.state)
         if carried is None:
@@ -606,17 +613,26 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
             turn_trace(self._backend.run).record_model(model.model_id)
         try:
-            return await handler(request)
+            output = ModelOutput()
+            with output.tracking():
+                if planned.fallback is None:
+                    return await handler(request)
+                async with self._primary_timeout.deadline() as primary_deadline:
+                    output.deadline = primary_deadline
+                    return await handler(request)
         except GraphBubbleUp:
-            # Paused before the call for an MCP server's connection the person has not
-            # granted; another model would be paused alike.
             raise
         except Exception as exc:
-            if planned.fallback is None or _tool_pairing_error(exc):
+            if (
+                planned.fallback is None
+                or isinstance(exc, GraphBubbleUp)
+                or _tool_pairing_error(exc)
+            ):
                 raise
             # As the in-process graph does: another provider before failing the run.
             logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
             fallback = build_model(planned.fallback, use_gateway=planned.use_gateway)
+            output.supersede()
             turn_trace(self._backend.run).record_model(planned.fallback.model_id)
             return await handler(request.override(model=fallback))
 

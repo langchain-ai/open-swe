@@ -410,6 +410,10 @@ export interface WorkspaceSettings {
   default_reviewer_subagent_reasoning_effort?: string | null
   default_thread_title_model?: string | null
   default_thread_title_reasoning_effort?: string | null
+  /** Share (0–100) of newly reviewed pull requests that also get a shadow review. */
+  review_shadow_percent?: number | null
+  review_shadow_model?: string | null
+  review_shadow_reasoning_effort?: string | null
   updated_at?: string | null
 }
 
@@ -1074,6 +1078,9 @@ export interface OpenPullRequest {
   // null when the review threads could not be read, which is not the same
   // answer as none being unresolved.
   unresolvedThreads: number | null
+  // Why it is on the To Review list: Open SWE assigned it, may assign it once
+  // its review goes unclaimed, or it was linked in a Slack thread naming you.
+  assignment?: "assigned" | "tentative" | "mentioned" | null
 }
 
 export interface PullRequestReviewer {
@@ -1173,6 +1180,7 @@ export interface ReviewPrDetails {
   state: string
   title: string
   body: string
+  description_pull_requests?: Array<number>
   additions: number
   deletions: number
   changed_files: number

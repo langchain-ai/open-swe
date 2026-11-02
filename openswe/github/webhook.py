@@ -16,6 +16,7 @@ from openswe.database import postgres
 from openswe.dispatch import channel_of
 from openswe.expedited_review.reviews import REVIEW_BODY_PREFIX
 from openswe.github.comments import GitHubAuthError
+from openswe.github.http import GitHubClient
 from openswe.github.notifications import notify_slack_review
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestEvent, PullRequestPayload
@@ -41,7 +42,9 @@ from openswe.review.findings import (
     ReviewerSlackThread,
     reviewer_thread_title,
 )
-from openswe.run_config import Repo
+from openswe.review.reconcile import reconcile_linked_findings
+from openswe.review.shadow import ReviewShadow
+from openswe.run_config import Repo, RunConfig
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
 from openswe.thread_ids import (
@@ -403,6 +406,9 @@ async def trigger_pr_review_from_ref(
         client=langgraph_client,
     )
     await common.store_current_reviewer_run_id(thread_id, run)
+    await ReviewShadow.follow(
+        RunConfig.parse(configurable), kickoff=review_prompt, pr_title=pr_title
+    )
     return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}
 
 
@@ -539,6 +545,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     )
     await common.store_current_reviewer_run_id(thread_id, run)
     common.logger.info("Reviewer run dispatched for thread %s (source=%s)", thread_id, source)
+    await ReviewShadow.follow(RunConfig.parse(configurable), kickoff=prompt, pr_title=pr_title)
 
 
 async def process_github_pr_walkthrough(payload: dict[str, object]) -> None:
@@ -1050,6 +1057,9 @@ async def _process_github_head_update(
         client=langgraph_client,
     )
     await common.store_current_reviewer_run_id(thread_id, run)
+    await ReviewShadow.follow(
+        RunConfig.parse(configurable), kickoff=re_review_prompt, pr_title=pr_title
+    )
 
 
 async def process_github_ci_event(
@@ -1501,6 +1511,26 @@ async def process_github_pr_comment(
             edited_body=event_body if payload.get("action") == "edited" else None,
             edited_at=event_comment["event_at"],
         )
+
+
+async def process_github_review_thread(payload: dict[str, object]) -> None:
+    """Re-read thread states so delayed resolution events cannot overwrite newer ones."""
+    repository = payload.get("repository")
+    pull_request = payload.get("pull_request")
+    if not isinstance(repository, dict) or not isinstance(pull_request, dict):
+        return
+    owner_data = repository.get("owner")
+    owner = owner_data.get("login") if isinstance(owner_data, dict) else None
+    repo = repository.get("name")
+    number = pull_request.get("number")
+    if not isinstance(owner, str) or not isinstance(repo, str) or not isinstance(number, int):
+        return
+    thread_id = reviewer_thread_id(owner, repo, number)
+    metadata = await common.get_thread_metadata_safe(thread_id)
+    if metadata is None or metadata.get("kind") != common.REVIEWER_THREAD_KIND:
+        return
+    async with GitHubClient.as_app(owner, repo) as github:
+        await reconcile_linked_findings(thread_id, github.repo(owner, repo).pull_request(number))
 
 
 async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
