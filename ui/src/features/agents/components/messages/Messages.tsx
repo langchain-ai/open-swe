@@ -45,7 +45,7 @@ function QueuedMessages({
         return (
           <div
             key={message.id}
-            className="ml-auto max-w-[85%] rounded-xl border border-dashed border-default bg-surface-level-2 px-space-3 py-space-2 text-sm text-primary shadow-sm"
+            className="ml-auto max-w-[85%] rounded-xl border border-dashed border-default bg-user-message px-space-3 py-space-2 text-sm text-primary shadow-sm"
             data-testid="queued-message"
             data-queued-pending={message.pending ? "true" : "false"}
             data-waits-for-agent={message.waitsForAgent ? "true" : undefined}

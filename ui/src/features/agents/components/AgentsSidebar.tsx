@@ -648,10 +648,7 @@ export function AgentsSidebar({
   return (
     <SidebarFrame
       {...layout}
-      className={cn(
-        "border-r border-default bg-surface-level-2",
-        agentWorkspaceEnabled && "border-subtle"
-      )}
+      className="border-r border-default bg-surface-level-2"
     >
       <div
         className={cn(
