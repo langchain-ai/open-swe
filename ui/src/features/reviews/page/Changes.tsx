@@ -1,5 +1,13 @@
 import { useQuery } from "@tanstack/react-query"
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { CodeView, WorkerPoolContextProvider } from "@pierre/diffs/react"
 import type {
   CodeViewHandle,
@@ -360,12 +368,16 @@ export const Changes = memo(function Changes({
 
   const initialPosition = useRef(position)
   const positionRestored = useRef(false)
+  const writePositionTimer = useRef(0)
   const positionChange = useRef(onPositionChange)
-  useEffect(() => {
+  useLayoutEffect(() => {
     positionChange.current = onPositionChange
+    return () => {
+      positionChange.current = undefined
+      window.clearTimeout(writePositionTimer.current)
+    }
   }, [onPositionChange])
   const anchor = useRef(position?.at)
-  const writePositionTimer = useRef(0)
   const writePosition = useCallback(() => {
     window.clearTimeout(writePositionTimer.current)
     writePositionTimer.current = window.setTimeout(() => {
@@ -506,6 +518,7 @@ export const Changes = memo(function Changes({
   // stays right while items above are still being measured. A step's own item
   // stands for the step's first file.
   const spyFrame = useRef(0)
+  useEffect(() => () => cancelAnimationFrame(spyFrame.current), [])
   const onScroll = useCallback(
     (scrollTop: number, viewer: CoreCodeView<Note>) => {
       cancelAnimationFrame(spyFrame.current)
