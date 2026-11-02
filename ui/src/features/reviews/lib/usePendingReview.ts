@@ -19,7 +19,8 @@ export function usePendingReview(owner: string, repo: string, number: number) {
     queryKey: key,
     queryFn: () => api.getPendingReview(owner, repo, number),
     refetchOnWindowFocus: false,
-    // Only this viewer's own mutations change it, and they write the cache.
+    // Only this viewer's mutations change it, and they write the cache; the
+    // chat refreshes it after the agent adds a comment for them.
     refetchOnMount: false,
   })
   const setPending = (review: PendingReview | null) =>

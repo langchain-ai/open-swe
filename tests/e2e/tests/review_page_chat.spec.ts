@@ -141,41 +141,49 @@ test.describe("review page", () => {
     const target = new RegExp(`/agents/reviews/${OWNER}/${REPO}/${pr.number}$`);
     const link = `https://github.com/${OWNER}/${REPO}/pull/${pr.number}/files?w=1`;
 
-    await page.goto("/agents/reviews");
     const input = page.getByLabel("Open a pull request review");
-    await expect(input).toBeVisible();
-    await input.fill(`see ${link} thx`);
-    await input.press("Enter");
-    await expect(page).toHaveURL(target);
+    // The server-rendered input shows before the client handles it; retry until it does.
+    await page.goto("/agents/reviews");
+    await expect(async () => {
+      await input.fill(`see ${link} thx`);
+      await input.press("Enter");
+      await expect(page).toHaveURL(target, { timeout: 5_000 });
+    }).toPass();
 
     await page.goto("/agents/reviews");
-    await expect(input).toBeVisible();
-    await input.focus();
-    await input.evaluate((element, text) => {
-      const data = new DataTransfer();
-      data.setData("text/plain", text);
-      element.dispatchEvent(
-        new ClipboardEvent("paste", {
-          clipboardData: data,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-    }, `see ${link} thx`);
-    await expect(page).toHaveURL(target);
+    await expect(async () => {
+      await input.focus();
+      await input.evaluate((element, text) => {
+        const data = new DataTransfer();
+        data.setData("text/plain", text);
+        element.dispatchEvent(
+          new ClipboardEvent("paste", {
+            clipboardData: data,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }, `see ${link} thx`);
+      await expect(page).toHaveURL(target, { timeout: 5_000 });
+    }).toPass();
   });
 
-  test("puts the state pill on the title line and links the title to GitHub", async ({
+  test("keeps the state pill beside the title menu and a separate GitHub link", async ({
     page,
   }) => {
     await openReview(page, pr);
     const title = page
       .locator("h1")
-      .filter({ has: page.locator('svg[aria-label="GitHub"]') });
-    const link = title.getByRole("link");
-    await expect(link).toContainText("Add constant modules");
-    await expect(link).toContainText(`#${pr.number}`);
-    await expect(link.locator('svg[aria-label="GitHub"]')).toBeVisible();
+      .filter({ hasText: "Add constant modules" });
+    const menu = title.getByRole("link", { name: /Add constant modules/ });
+    await expect(menu).toContainText("Add constant modules");
+    await expect(menu).toContainText(`#${pr.number}`);
+    const link = title.getByRole("link", { name: "Open on GitHub" });
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute(
+      "href",
+      `https://github.com/${OWNER}/${REPO}/pull/${pr.number}`,
+    );
 
     const pill = title.locator("xpath=preceding-sibling::span[1]");
     await expect(pill).toHaveText("Reviewable");
@@ -187,6 +195,57 @@ test.describe("review page", () => {
     expect(pillMiddle).toBeGreaterThan(titleBox!.y);
     expect(pillMiddle).toBeLessThan(titleBox!.y + titleBox!.height);
     expect(pillBox!.x + pillBox!.width).toBeLessThanOrEqual(titleBox!.x);
+  });
+
+  test("links description references to GitHub without assuming they are pull requests", async ({
+    page,
+  }) => {
+    const linkedPr = await seedOpenPullRequest(page, {
+      repo: `${OWNER}/${REPO}`,
+      title: "Fix issue backlinks",
+      body: `Fixes #4879. See #${pr.number} and ${OWNER}/${REPO}#${pr.number}, plus langchain-ai/langgraph#9252. Leave \`#42\` alone.`,
+      author: "bob",
+      head: "issue-backlinks",
+      files: { "backlinks.py": "FIXED = True\n" },
+    });
+    await page.route(`**${reviewApi(linkedPr)}`, async (route) => {
+      const response = await route.fetch();
+      const detail = await response.json();
+      detail.pr.description_pull_requests = [pr.number];
+      await route.fulfill({ response, json: detail });
+    });
+    await openReview(page, linkedPr);
+    const description = page.getByRole("article", {
+      name: "Description",
+      exact: true,
+    });
+    await expect(
+      description.getByRole("link", { name: "#4879", exact: true }),
+    ).toHaveAttribute(
+      "href",
+      `https://github.com/${OWNER}/${REPO}/issues/4879`,
+    );
+    await expect(
+      description.getByRole("link", {
+        name: "langchain-ai/langgraph#9252",
+        exact: true,
+      }),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/langchain-ai/langgraph/issues/9252",
+    );
+    for (const name of [`#${pr.number}`, `${OWNER}/${REPO}#${pr.number}`]) {
+      await expect(
+        description.getByRole("link", { name, exact: true }),
+      ).toHaveAttribute(
+        "href",
+        `/agents/reviews/${OWNER}/${REPO}/${pr.number}`,
+      );
+    }
+    await expect(
+      description.getByRole("link", { name: "#42", exact: true }),
+    ).toHaveCount(0);
+    await expect(description.locator("code")).toHaveText("#42");
   });
 
   test("keeps description spacing stable when expanding and collapsing", async ({
@@ -454,8 +513,13 @@ test.describe("review page", () => {
       .getByTestId("pending-review-comment")
       .filter({ hasText: edited });
     await expect(pendingCard).toContainText("Pending");
-    const reviewButton = page.getByRole("button", { name: /Review changes/ });
-    await expect(reviewButton).toContainText("1");
+    // Approving is one click; the rest of the review form is behind its caret.
+    await expect(
+      page.getByRole("button", { name: "Approve, 1 pending comment" }),
+    ).toContainText("1");
+    const reviewButton = page.getByRole("button", {
+      name: "Comment or request changes",
+    });
 
     await chatCard(toDiscard).getByRole("button", { name: "Discard" }).click();
     await expect(chatCard(toDiscard)).toContainText("Comment discarded");
@@ -533,12 +597,17 @@ test.describe("review page", () => {
     });
     await card.getByRole("button", { name: "Add to review" }).click();
     await expect(card).toContainText("Added to your review");
-    const reviewButton = page.getByRole("button", { name: /Review changes/ });
-    await expect(reviewButton).toContainText("1");
+    await expect(
+      page.getByRole("button", { name: "Approve, 1 pending comment" }),
+    ).toContainText("1");
 
-    await reviewButton.click();
+    await page
+      .getByRole("button", { name: "Comment or request changes" })
+      .click();
     await page.getByRole("button", { name: "Discard review" }).click();
-    await expect(reviewButton).not.toContainText("1");
+    await expect(
+      page.getByRole("button", { name: "Approve", exact: true }),
+    ).toBeVisible();
     await expect(
       diffColumn(page).getByTestId("pending-review-comment"),
     ).toHaveCount(0);
@@ -566,7 +635,9 @@ test.describe("review page", () => {
       .click();
     await expect(conversation.getByText(comment)).toBeVisible();
 
-    await page.getByRole("button", { name: /Review changes/ }).click();
+    await page
+      .getByRole("button", { name: "Comment or request changes" })
+      .click();
     const verdict = "Approving the constant modules.";
     await page.getByLabel("Review summary").fill(verdict);
     await page.getByRole("radio", { name: /Approve/ }).check();
@@ -576,7 +647,9 @@ test.describe("review page", () => {
     await expect(page.getByLabel("Review summary")).toBeVisible();
     expect((await fakePull(page, pr)).reviews).toHaveLength(0);
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
-    await page.getByRole("button", { name: /Review changes/ }).click();
+    await page
+      .getByRole("button", { name: "Comment or request changes" })
+      .click();
     await page.getByRole("radio", { name: /Approve/ }).check();
     await page.getByRole("radio", { name: /Approve/ }).press("Meta+Enter");
     await expect(conversation.getByText(verdict)).toBeVisible();

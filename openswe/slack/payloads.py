@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 NOISE_SUBTYPES = frozenset(
     {"channel_join", "channel_leave", "channel_topic", "channel_purpose", "channel_name"}
 )
+_POSTED_SUBTYPES = frozenset(
+    {"", "file_share", "thread_broadcast", "bot_message", "message_changed", "me_message"}
+)
 
 
 class SlackPayload(BaseModel):
@@ -155,6 +158,18 @@ class SlackEventEnvelope(SlackPayload):
     def kind(self) -> str:
         """The inner event's type for a callback, else the envelope's own type."""
         return self.event.type if self.event and self.event.type else self.type
+
+    def posted_message(self) -> SlackEvent | SlackMessage | None:
+        """The message a callback posted or edited, the edit's new version for an edit."""
+        event = self.event
+        if (
+            self.type != "event_callback"
+            or event is None
+            or event.type not in {"message", "app_mention"}
+            or event.subtype not in _POSTED_SUBTYPES
+        ):
+            return None
+        return event.message if event.subtype == "message_changed" else event
 
     def bot_user_id(self, configured: str) -> str:
         """The app's own user id: configured, else whichever the delivery names."""
@@ -300,6 +315,7 @@ class SlackButtonValue(SlackPayload):
     thread_id: str = ""
     thread_ts: str = ""
     response: str = ""
+    user_id: str | None = None
     kind: str = ""
     subject: str = ""
 
@@ -402,6 +418,7 @@ class SlackChannelPayload(SlackPayload):
     is_mpim: bool | None = None
     is_ext_shared: bool | None = None
     is_pending_ext_shared: bool | None = None
+    is_archived: bool | None = None
 
     @classmethod
     def of(cls, raw: object) -> Self:
@@ -426,11 +443,22 @@ class SlackChannelPayload(SlackPayload):
         "is_mpim",
         "is_ext_shared",
         "is_pending_ext_shared",
+        "is_archived",
         mode="before",
     )
     @classmethod
     def _only_boolean(cls, raw: object) -> bool | None:
         return raw if isinstance(raw, bool) else None
+
+    @property
+    def listed(self) -> bool:
+        """Whether the channel belongs in the directory: a live, named channel, not a DM."""
+        return (
+            bool(self.name)
+            and self.is_archived is not True
+            and self.is_im is not True
+            and self.is_mpim is not True
+        )
 
     @property
     def publishes_events(self) -> bool:

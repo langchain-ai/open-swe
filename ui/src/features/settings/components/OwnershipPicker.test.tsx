@@ -8,7 +8,8 @@ import { OwnershipPicker, type PickerItem } from "./OwnershipPicker"
 import { useSlackChannelDirectory } from "@/lib/slack-channels"
 import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
 
-vi.mock("@/lib/slack-channels", () => ({
+vi.mock("@/lib/slack-channels", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/slack-channels")>()),
   useSlackChannelDirectory: vi.fn(),
 }))
 
@@ -87,7 +88,7 @@ describe("OwnershipPicker", () => {
       num_members: 10,
     }))
     const directory = {
-      data: { channels, partial: false },
+      data: { channels, refreshing: false },
       isLoading: false,
       isError: false,
       error: null,

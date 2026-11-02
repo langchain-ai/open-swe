@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from openswe.tools.propose_review_comment import MAX_BODY_CHARS
+from openswe.tools.diff_lines import MAX_BODY_CHARS
 
 ReviewEvent = Literal["APPROVE", "REQUEST_CHANGES", "COMMENT"]
 

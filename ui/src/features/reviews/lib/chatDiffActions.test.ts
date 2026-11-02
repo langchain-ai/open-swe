@@ -50,3 +50,22 @@ it("ignores rejected drafts and other tools", () => {
     })
   ).toBeNull()
 })
+
+it("keeps a viewer-only note apart from a comment that can reach GitHub", () => {
+  expect(
+    chatDiffAction({
+      type: "tool",
+      name: "note_on_diff",
+      tool_call_id: "n1",
+      content: JSON.stringify({ noted: true, range, body: "Read this" }),
+    })
+  ).toMatchObject({ kind: "note", id: "n1", body: "Read this" })
+  expect(
+    chatDiffAction({
+      type: "tool",
+      name: "note_on_diff",
+      tool_call_id: "n2",
+      content: JSON.stringify({ proposed: true, range, body: "Read this" }),
+    })
+  ).toBeNull()
+})

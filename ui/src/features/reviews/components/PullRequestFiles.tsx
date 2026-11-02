@@ -1,3 +1,4 @@
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { CaretRightIcon, XIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { IconButton } from "@langchain/macaw-components/IconButton"
@@ -47,7 +48,7 @@ import { pullRequestKey } from "@/features/reviews/lib/status"
 import { FILE_ANCHOR_ATTRIBUTE } from "@/features/reviews/lib/scrollAnchor"
 import { api } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 
 const fileMarks: Record<string, string> = {
   added: "A",
@@ -285,11 +286,15 @@ function FileRow({
 }) {
   const cut = file.path.lastIndexOf("/")
   return (
-    <button
+    <Button
+      color="secondary"
+      variant="plain"
+      size="sm"
+      aria-label={`${file.path} +${file.additions} −${file.deletions}`}
       type="button"
       aria-expanded={open}
       onClick={onToggle}
-      className="flex w-full items-baseline gap-space-3 rounded-sm px-space-1 py-space-1 text-left font-mono text-xs hover:bg-surface-level-2-hover"
+      className="h-auto w-full items-baseline justify-start gap-space-3 px-space-1 py-space-1 text-left font-mono whitespace-normal hover:bg-surface-level-2-hover"
     >
       <CaretRightIcon
         aria-hidden="true"
@@ -318,7 +323,7 @@ function FileRow({
       <span className="w-12 shrink-0 text-error-secondary tabular-nums">
         −{file.deletions}
       </span>
-    </button>
+    </Button>
   )
 }
 
@@ -567,14 +572,18 @@ function CommentCard({
       <div className="rounded-md border border-default bg-surface-level-1 px-space-2 py-space-2 text-xs">
         <div className="mb-space-1 flex items-center gap-space-2 text-xxs text-secondary">
           {href ? (
-            <a
+            <MacawLink
+              variant="xs"
               href={href}
               target="_blank"
               rel="noreferrer"
-              className="hover:text-primary hover:underline"
+              className={cn(
+                INHERITED_LINK,
+                "hover:text-primary hover:underline"
+              )}
             >
               {label}
-            </a>
+            </MacawLink>
           ) : (
             label
           )}

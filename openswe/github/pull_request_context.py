@@ -16,7 +16,7 @@ from openswe.github.pull_request_status import pull_request_identity
 from openswe.prompts import prompt
 from openswe.users import User
 
-PullRequestFixScope = Literal["conflicts", "checks", "comments"]
+PullRequestFixScope = Literal["repair", "comments"]
 
 _CONTEXT_LIMIT = 100
 _FIELD_LIMIT = 4_000
@@ -490,20 +490,19 @@ def build_fix_prompt(context: Mapping[str, Any], scope: PullRequestFixScope) -> 
     """Render the bounded PR context ``scope`` concerns into a model-ready request.
 
     Each scope carries only its own section, so the agent is never handed review
-    comments while it was asked to fix checks, or the other way round.
+    comments while it was asked to repair the PR, or the other way round.
     """
     lines = [
         "Fresh GitHub scan:",
         f"- Head SHA: {context.get('headSha') or 'unavailable'}",
         f"- Merge state: {context.get('mergeState') or 'unavailable'}",
     ]
-    if scope == "checks":
+    if scope == "repair":
         lines.extend(_check_lines(context))
-    if scope == "comments":
+        lines.extend(_stack_lines(context))
+    else:
         lines.append(f"- Review decision: {context.get('reviewDecision') or 'unavailable'}")
         lines.extend(_review_lines(context))
-    if scope != "comments":
-        lines.extend(_stack_lines(context))
     if context.get("truncated") is True:
         lines.extend(
             [

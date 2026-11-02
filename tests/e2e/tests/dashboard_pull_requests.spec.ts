@@ -64,6 +64,66 @@ test.describe("thread pull requests", () => {
       }),
     ).toBeVisible();
     await expect(companionLink).toBeVisible();
+
+    await companionLink.click();
+    await expect(page).toHaveURL(
+      /\/agents\/reviews\/anotherorg\/companion\/2$/,
+    );
+    await expect(
+      page.getByRole("heading", { name: /Add companion integration/ }),
+    ).toBeVisible();
+  });
+
+  test("shows pull request links as review cards and chips with GitHub links", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.goto("/mock/slack");
+    await page.locator("#reset").click();
+    await page
+      .locator("#text")
+      .fill(
+        "<@U0BOT> E2E_PR_MENTIONS please add a greet() helper and open a PR",
+      );
+    await page.locator("#send").click();
+    await expect(
+      page.locator(".msg.bot").filter({ hasText: "Opened the pull request" }),
+    ).toBeVisible({ timeout: 60_000 });
+    await page.locator('.msg.bot a[href*="/agents/"]').first().click();
+    await expect(page).toHaveURL(/\/agents\//);
+
+    const card = page.getByTestId("pr-card-fakeorg/demo-1");
+    await expect(async () => {
+      await page.reload();
+      await expect(card).toBeVisible({ timeout: 8000 });
+    }).toPass({ timeout: 60_000 });
+    await expect(card).toContainText("Add greet() helper");
+    await expect(card).toContainText("draft");
+    const github = "Open fakeorg/demo#1 on GitHub";
+    await expect(card.getByRole("link", { name: github })).toHaveAttribute(
+      "href",
+      /\/fakeorg\/demo\/pull\/1$/,
+    );
+
+    const chip = page.locator(".pr-link-chip");
+    await expect(chip).toHaveCount(1);
+    await expect(
+      chip.getByRole("link", { name: "the greet() PR" }),
+    ).toHaveAttribute("href", "/agents/reviews/fakeorg/demo/1");
+    await expect(chip.getByRole("link", { name: github })).toHaveAttribute(
+      "href",
+      /\/fakeorg\/demo\/pull\/1$/,
+    );
+    await page.emulateMedia({ colorScheme: "dark" });
+    await card.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: test.info().outputPath("pr-link-card.png") });
+
+    await card
+      .getByRole("link", {
+        name: "Review fakeorg/demo pull request #1 in Open SWE",
+      })
+      .click();
+    await expect(page).toHaveURL(/\/agents\/reviews\/fakeorg\/demo\/1$/);
   });
 
   test("shows live pull request health and submits actionable fixes", async ({
@@ -229,22 +289,20 @@ test.describe("thread pull requests", () => {
     );
 
     await page.keyboard.press("Escape");
-    // Conflicts come first, so they're the button; the caret holds the rest.
-    await expect(
-      page.getByRole("button", { name: "Fix conflicts", exact: true }),
-    ).toBeVisible();
+    // Conflicts and checks share the button; the caret holds the comments.
     await fixButton.click();
     await expect(
       page.getByRole("menuitem", { name: "Address comments on PR #1" }),
     ).toBeVisible();
-    await page.getByRole("menuitem", { name: "Fix checks on PR #1" }).click();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Fix", exact: true }).click();
     const fixPrompt = "Fresh GitHub scan:";
     await waitForStateToContain(page, threadId, fixPrompt);
     const state = await page.request.get(`/threads/${threadId}/state`);
     const stateText = JSON.stringify(await state.json());
     expect(stateText).toContain("[required] unit-tests: FAILURE");
     expect(stateText).toContain("[optional] browser-e2e: TIMED_OUT");
-    // A check fix is never handed the review comments to act on.
+    // A fix is never handed the review comments to act on.
     expect(stateText).not.toContain(
       "The fallback must preserve the original exception.",
     );

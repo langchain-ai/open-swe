@@ -8,6 +8,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from openswe import event_claims
 from openswe.slack import move as slack_move
+from openswe.slack import routed_work
 from openswe.slack import thinking as slack_thinking
 from openswe.slack.channels import SlackChannel
 from openswe.slack.records import lookup_slack_thread_id
@@ -87,6 +88,7 @@ def statuses(monkeypatch: pytest.MonkeyPatch) -> list[StatusCall]:
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 0.001)
     monkeypatch.setattr(slack_thinking, "_STATUS_RETRY_DELAYS", (0.0, 0.0))
+    monkeypatch.setattr(routed_work.THREADS, "get", AsyncMock(return_value=None))
     return calls
 
 
@@ -269,7 +271,9 @@ async def test_move_tool_uses_current_or_explicit_channel_without_moving_twice(
     monkeypatch.setattr(move_thread, "get_config", lambda: config)
     monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
     monkeypatch.setattr(move_thread, "langgraph_client", lambda: client)
-    monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=SimpleNamespace(public=True)))
+    monkeypatch.setattr(
+        SlackChannel, "load", AsyncMock(return_value=SimpleNamespace(public=target != "C1"))
+    )
     root = AsyncMock(return_value="2.0")
     monkeypatch.setattr(slack_move, "post_slack_top_level_message_with_ts", root)
     await slack_move.bind_slack_thread_id("C1", "1.0", "thread-1")

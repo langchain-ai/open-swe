@@ -3,8 +3,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
+from openswe.api.github_errors import add_github_error_handlers
+from openswe.dashboard import repo_access
 from openswe.github import dashboard_routes, repo_cache, repos
+from openswe.github.http import GitHubClient
 from openswe.users import User
 from tests.support.github_sdk import mock_github_sdk
 
@@ -41,6 +46,40 @@ async def test_list_repos_refreshes_expired_user_token(monkeypatch: pytest.Monke
 
     mock_github_sdk(monkeypatch, handle)
     assert await repos.fetch_user_installations_and_repos("octocat") == ([], [])
+
+
+@pytest.mark.parametrize("operation", ["list", "access", "client"])
+def test_missing_github_authorization_returns_direct_reconnect_without_clearing_session(
+    monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://api.example/prefix")
+    monkeypatch.setattr(repos, "get_valid_access_token", AsyncMock(return_value=None))
+    monkeypatch.setattr(repo_access, "get_valid_access_token", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "openswe.dashboard.profiles.get_valid_access_token", AsyncMock(return_value=None)
+    )
+    app = FastAPI()
+    add_github_error_handlers(app)
+
+    @app.get("/protected")
+    async def protected() -> None:
+        if operation == "list":
+            await repos.fetch_user_installations_and_repos("octocat")
+        elif operation == "access":
+            await repo_access.require_repo_access_for_user("octocat", "acme/api")
+        else:
+            async with GitHubClient.as_user("octocat"):
+                pytest.fail("Missing OAuth must not fall back to App credentials")
+
+    with TestClient(app) as client:
+        client.cookies.set("osw_session", "existing-session")
+        response = client.get("/protected")
+        assert response.status_code == 401
+        detail = response.json()["detail"]
+        assert "octocat" in detail
+        assert "https://api.example/prefix/dashboard/api/auth/login" in detail
+        assert client.cookies.get("osw_session") == "existing-session"
+        assert "set-cookie" not in response.headers
 
 
 async def test_list_repos_follows_installation_and_repository_next_links(

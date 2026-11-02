@@ -25,7 +25,7 @@ esac
 # gateway key (lsv2_*) stray in the shell won't authenticate — prefer .env's
 # OPENAI_API_KEY unless the shell already holds an OpenAI-looking key (sk-…).
 # Pulled line-by-line, not by sourcing .env, which would clobber the harness's
-# test env (SANDBOX_TYPE, DASHBOARD_*, …).
+# test env (E2E_SANDBOX_ROOT, DASHBOARD_*, …).
 case "${OPENAI_API_KEY:-}" in
   sk-*) : ;;
   *)

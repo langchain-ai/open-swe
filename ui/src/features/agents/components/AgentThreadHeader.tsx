@@ -1,3 +1,5 @@
+import { Input } from "@langchain/macaw-components/Input"
+import { Button } from "@langchain/macaw-components/Button"
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import { useRef, useState } from "react"
 import {
@@ -17,6 +19,7 @@ import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { TerminalIcon } from "@phosphor-icons/react/dist/ssr/Terminal"
 
 import { useLocalThread } from "@/features/agents/lib/desktopLocal"
+import { useAgentWorkspace } from "@/features/agents/lib/agentWorkspace"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
@@ -39,6 +42,7 @@ import {
 } from "@/features/agents/lib/queries"
 import type { ThreadVisibility } from "@/lib/api"
 import { useSession } from "@/lib/session"
+import { reportError } from "@/lib/errorReporting"
 import { cn } from "@/lib/utils"
 
 function ThreadRepoIndicator({ thread }: { thread: AgentThread }) {
@@ -58,21 +62,24 @@ function ThreadRepoIndicator({ thread }: { thread: AgentThread }) {
 
   return (
     <Tooltip title={repoName} side="bottom" open={open} onOpenChange={setOpen}>
-      <button
+      <IconButton
+        color="secondary"
+        variant="plain"
+        size="sm"
+        icon={FolderIcon}
+        iconWeight="regular"
+        label={`Repository: ${repoName}`}
+        tooltipProps={{ disabled: true }}
+        className="size-7 shrink-0"
         type="button"
-        // Default-prevented so the trigger's own click handler keeps it open.
         onClick={(event) => {
           event.preventDefault()
           setOpen(true)
         }}
         onPointerLeave={() => setOpen(false)}
         onBlur={() => setOpen(false)}
-        aria-label={`Repository: ${repoName}`}
         data-no-drag=""
-        className="flex size-7 shrink-0 items-center justify-center text-icon-secondary"
-      >
-        <FolderIcon size={16} weight="regular" />
-      </button>
+      />
     </Tooltip>
   )
 }
@@ -101,6 +108,7 @@ export function AgentThreadHeader({
   visibility?: ThreadVisibility
   onVisibilityChange?: (next: ThreadVisibility) => void
 }) {
+  const agentWorkspace = useAgentWorkspace()
   const worktreeThread = useLocalThread(thread?.id ?? "")
   const sidebarCollapsed = useSidebarCollapsed()
   const TargetIcon = TARGET_ICONS[target]
@@ -208,7 +216,10 @@ export function AgentThreadHeader({
   const header = (
     <header
       data-desktop-drag-region=""
-      className="relative z-pane-header h-11 shrink-0 border-b border-subtle bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent"
+      className={cn(
+        "relative z-pane-header h-11 shrink-0 border-b border-subtle bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent",
+        agentWorkspace && "border-b-0 bg-transparent after:hidden"
+      )}
     >
       <div
         className={cn(
@@ -221,30 +232,37 @@ export function AgentThreadHeader({
           <div className="flex min-w-0 items-center gap-space-1 text-sm font-medium">
             {thread && <ThreadRepoIndicator thread={thread} />}
             {draft !== null ? (
-              <input
-                autoFocus
-                onFocus={(event) => event.currentTarget.select()}
-                aria-label="Thread title"
-                data-no-drag=""
-                className="min-w-0 rounded-md bg-surface-level-2 px-space-2 py-space-1 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                style={{ width: editorWidth }}
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onBlur={() => void saveTitle()}
-                onKeyDown={(event) => {
-                  if (event.nativeEvent.isComposing) return
-                  if (event.key === "Enter") {
-                    event.preventDefault()
-                    void saveTitle()
-                  } else if (event.key === "Escape") {
-                    event.preventDefault()
-                    editingRef.current = false
-                    setDraft(null)
-                  }
-                }}
-              />
+              <div className="min-w-0" style={{ width: editorWidth }}>
+                <Input
+                  size="md"
+                  debounceMs={0}
+                  autoFocus
+                  onFocus={(event) => event.currentTarget.select()}
+                  aria-label="Thread title"
+                  data-no-drag=""
+                  className="min-w-0"
+                  inputContainerClassName="bg-surface-level-2 border-strong/70 [&:hover:not(:focus-within)]:border-strong"
+                  value={draft}
+                  onChange={setDraft}
+                  onBlur={() => void saveTitle()}
+                  onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing) return
+                    if (event.key === "Enter") {
+                      event.preventDefault()
+                      void saveTitle()
+                    } else if (event.key === "Escape") {
+                      event.preventDefault()
+                      editingRef.current = false
+                      setDraft(null)
+                    }
+                  }}
+                />
+              </div>
             ) : onRename ? (
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="md"
                 type="button"
                 aria-label="Rename thread"
                 ref={titleButtonRef}
@@ -252,11 +270,11 @@ export function AgentThreadHeader({
                 disabled={savingTitle !== null}
                 title={savingTitle ?? title}
                 data-no-drag=""
-                className="min-w-0 truncate rounded-md px-space-2 py-space-1 text-left transition-colors hover:bg-surface-level-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                className="h-auto min-w-0 shrink justify-start truncate px-space-2 py-space-1 text-left text-inherit hover:bg-surface-level-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:bg-transparent"
                 onClick={startRename}
               >
-                {savingTitle ?? title}
-              </button>
+                <span className="truncate">{savingTitle ?? title}</span>
+              </Button>
             ) : (
               <span className="min-w-0 truncate" title={title}>
                 {title}
@@ -288,6 +306,28 @@ export function AgentThreadHeader({
           </div>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-space-3">
+          {agentWorkspace &&
+            worktreeThread &&
+            window.openSweDesktop?.openTaskFolder && (
+              <IconButton
+                icon={FolderIcon}
+                label="Open task folder"
+                size="sm"
+                color="secondary"
+                variant="plain"
+                data-no-drag=""
+                onClick={() => {
+                  void window.openSweDesktop
+                    ?.openTaskFolder?.(worktreeThread.id)
+                    .catch((error: unknown) =>
+                      reportError({
+                        title: "Couldn't open the task folder",
+                        error,
+                      })
+                    )
+                }}
+              />
+            )}
           <span
             role="img"
             aria-label={`Runs on ${target}`}
@@ -335,9 +375,11 @@ export function AgentThreadHeader({
         onConfirm={confirmDelete}
         detail={
           worktreeThread
-            ? worktreeThread.ownedWorktrees.length
-              ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
-              : "This removes its history but does not revert changes made to your repository."
+            ? worktreeThread.managedTaskFolder
+              ? `This deletes the conversation. Its task files are kept at ${worktreeThread.cwd}.`
+              : worktreeThread.ownedWorktrees.length
+                ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
+                : "This removes its history but does not revert changes made to your repository."
             : undefined
         }
       />

@@ -1,3 +1,6 @@
-from openswe.server import get_agent, traced_agent
+from openswe.graphs.read_only import read_only_graph
 
-__all__ = ["get_agent", "traced_agent"]
+# langgraph.json entrypoint: reads of threads from before Managed Deep Agents.
+traced_agent = read_only_graph
+
+__all__ = ["traced_agent"]

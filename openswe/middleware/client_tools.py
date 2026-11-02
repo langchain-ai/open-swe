@@ -5,15 +5,13 @@ The client's real result arrives with the next run under the placeholder's
 message id, replacing it in place.
 """
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 from langchain.agents.middleware.types import AgentState, hook_config
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
-from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
-from langgraph.types import Command
 
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.openai_responses.client_tools import PENDING_ARTIFACT_KEY, ClientToolSpec
@@ -37,15 +35,10 @@ class ClientToolsMiddleware(OpenSWEMiddleware):
         ]
         self._names = frozenset(spec.name for spec in specs)
 
-    async def awrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
-    ) -> ToolMessage | Command:
-        name = request.tool_call["name"]
-        call_id = request.tool_call["id"]
-        if name not in self._names or not call_id:
-            return await handler(request)
+    def pending_result(self, name: str, call_id: str) -> ToolMessage | None:
+        """The placeholder a call of the client's tool ``name`` answers with, until the client does."""
+        if name not in self._names:
+            return None
         return ToolMessage(
             content=prompt("client-tools/pending-result"),
             tool_call_id=call_id,

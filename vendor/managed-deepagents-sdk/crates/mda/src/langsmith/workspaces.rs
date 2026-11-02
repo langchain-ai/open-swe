@@ -7,12 +7,12 @@
 
 use std::time::Duration;
 
-use anyhow::Result;
-use reqwest::Method;
+use anyhow::{bail, Context, Result};
+use reqwest::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::Client;
+use super::{ApiError, Client};
 
 /// Timeout for the optional workspace lookup.
 ///
@@ -63,6 +63,7 @@ impl DeployTarget {
     }
 }
 
+/// The user, organization and workspace LangSmith verifies behind a key.
 #[derive(Default, Deserialize, Serialize)]
 pub(crate) struct AuthIdentity {
     #[serde(rename(deserialize = "ls_user_id"))]
@@ -73,18 +74,69 @@ pub(crate) struct AuthIdentity {
     pub workspace_id: Option<String>,
 }
 
+/// What LangSmith said when asked whether it accepts a key.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum KeyCheck {
+    /// The key authenticated.
+    Accepted,
+    /// The key was refused with this status (401 or 403).
+    Rejected(StatusCode),
+    /// No answer either way: the request failed, timed out, hit an endpoint
+    /// this installation does not serve, or was skipped because the key would
+    /// cross the network in cleartext.
+    Unverified,
+}
+
 impl Client {
+    /// Ask LangSmith whether it accepts this client's key, via the same
+    /// `GET /auth/public` identity lookup as [`Self::auth_identity`].
+    ///
+    /// Only a 401 or 403 is a verdict on the key; every other failure is
+    /// [`KeyCheck::Unverified`], so a flaky or unusual installation never
+    /// blocks a command that might still work. Bounded by [`LOOKUP_TIMEOUT`].
+    pub(crate) fn check_api_key(&self) -> KeyCheck {
+        if !self.sends_key_securely() {
+            return KeyCheck::Unverified;
+        }
+        match self.request_with_timeout(
+            &self.platform_api_url,
+            Method::GET,
+            "/auth/public",
+            &[],
+            None,
+            LOOKUP_TIMEOUT,
+        ) {
+            Ok(_) => KeyCheck::Accepted,
+            Err(err) => match err.downcast_ref::<ApiError>().map(|api| api.status) {
+                Some(status @ (StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)) => {
+                    KeyCheck::Rejected(status)
+                }
+                _ => KeyCheck::Unverified,
+            },
+        }
+    }
+
+    /// [`Self::auth_identity`], giving up after `timeout`. Skipped when the key
+    /// would cross the network in cleartext, since nothing the user asked for
+    /// depends on it.
+    pub(crate) fn auth_identity_within(&self, timeout: Duration) -> Option<AuthIdentity> {
+        if !self.sends_key_securely() {
+            return None;
+        }
+        self.clone().with_timeout(timeout).ok()?.auth_identity()
+    }
+
+    /// The key's identity for a preflight, bounded by [`LOOKUP_TIMEOUT`] like
+    /// [`Self::check_api_key`].
+    pub(crate) fn preflight_identity(&self) -> Option<AuthIdentity> {
+        self.auth_identity_within(LOOKUP_TIMEOUT)
+    }
+
     /// Best-effort identity lookup; errors leave optional metadata unknown.
     pub(crate) fn auth_identity(&self) -> Option<AuthIdentity> {
         let mut metadata: AuthIdentity = serde_json::from_value(
-            self.request(
-                self.platform_api_url.as_deref()?,
-                Method::GET,
-                "/auth/public",
-                &[],
-                None,
-            )
-            .ok()?,
+            self.request(self.platform_base(), Method::GET, "/auth/public", &[], None)
+                .ok()?,
         )
         .ok()?;
         for id in [
@@ -105,11 +157,6 @@ impl Client {
             return None;
         }
         Some(metadata)
-    }
-
-    /// Host backend base URL this client talks to.
-    pub fn host_backend_url(&self) -> &str {
-        &self.host_backend_url
     }
 
     /// Resolve a workspace id for this client, for use in dashboard links.
@@ -180,6 +227,27 @@ impl Client {
             .unwrap_or_default())
     }
 
+    /// Whether the workspace uses the Agent platform, `false` when unknown.
+    pub(crate) fn agent_platform_ready(&self) -> bool {
+        self.lookup("/v1/platform/workspaces/current/info")
+            .ok()
+            .and_then(|info| {
+                info.pointer("/config/agent_platform_workspace_ready")?
+                    .as_bool()
+            })
+            .unwrap_or(false)
+    }
+
+    /// Authoritative dashboard base URL for this LangSmith installation.
+    pub(crate) fn dashboard_url(&self) -> Result<String> {
+        let info = self.lookup("/v1/platform/workspaces/current/info")?;
+        let value = info
+            .get("dashboard_url")
+            .and_then(Value::as_str)
+            .context("workspace info did not include dashboard_url")?;
+        normalize_dashboard_url(value)
+    }
+
     fn first_workspace_id(&self) -> Result<Option<String>> {
         Ok(self
             .list_workspaces()?
@@ -191,7 +259,7 @@ impl Client {
     /// A bounded, read-only GET against the platform API.
     fn lookup(&self, path: &str) -> Result<Value> {
         self.request_with_timeout(
-            self.platform_base()?,
+            self.platform_base(),
             Method::GET,
             path,
             &[],
@@ -216,6 +284,20 @@ fn non_empty_str(value: Option<&Value>) -> Option<String> {
         .map(str::to_string)
 }
 
+fn normalize_dashboard_url(value: &str) -> Result<String> {
+    let url = reqwest::Url::parse(value.trim()).context("dashboard_url is not a valid URL")?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        bail!("dashboard_url must be an absolute HTTP(S) URL without credentials or query data");
+    }
+    Ok(url.as_str().trim_end_matches('/').to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::{Read, Write};
@@ -225,7 +307,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::langsmith::{Client, Credential, REQUEST_TIMEOUT};
+    use crate::langsmith::Client;
 
     /// A platform API that answers a fixed body per path, one connection per
     /// request (the client's requests are sequential and `Connection: close`).
@@ -258,16 +340,8 @@ mod tests {
 
     fn client_for(platform_api_url: String, tenant_id: Option<&str>) -> Client {
         Client {
-            http: crate::http::client_builder()
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .unwrap(),
-            credential: Credential::ApiKey("key".into()),
             tenant_id: tenant_id.map(str::to_string),
-            // Every route here is a platform-API route; a request to the host
-            // backend should fail the test rather than reach the stub server.
-            host_backend_url: "http://unused.invalid".into(),
-            platform_api_url: Some(platform_api_url),
+            ..Client::for_test(&platform_api_url)
         }
     }
 
@@ -365,9 +439,54 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_key_is_rejected_with_the_status() {
+        for (status, expected) in [
+            ("403 Forbidden", StatusCode::FORBIDDEN),
+            ("401 Unauthorized", StatusCode::UNAUTHORIZED),
+        ] {
+            let base = serve_paths(vec![(
+                "/auth/public",
+                status,
+                json!({ "error": "Forbidden" }).to_string(),
+            )]);
+
+            assert_eq!(
+                client_for(base, None).check_api_key(),
+                KeyCheck::Rejected(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn an_accepted_key_passes_the_check() {
+        let base = serve_paths(vec![(
+            "/auth/public",
+            "200 OK",
+            json!({ "tenant_id": "ws-1" }).to_string(),
+        )]);
+
+        assert_eq!(client_for(base, None).check_api_key(), KeyCheck::Accepted);
+    }
+
+    #[test]
+    fn a_failing_identity_endpoint_is_not_a_verdict_on_the_key() {
+        for status in ["404 Not Found", "500 Internal Server Error"] {
+            let base = serve_paths(vec![("/auth/public", status, "{}".to_string())]);
+
+            assert_eq!(client_for(base, None).check_api_key(), KeyCheck::Unverified);
+        }
+    }
+
+    #[test]
+    fn a_key_bound_for_a_cleartext_remote_host_is_not_sent() {
+        let client = client_for("http://langsmith.example.com".to_string(), None);
+
+        assert_eq!(client.check_api_key(), KeyCheck::Unverified);
+    }
+
+    #[test]
     fn a_scoped_client_answers_with_its_own_workspace() {
-        let client = Client::new("https://api.host.langchain.com", "key", Some("ws-1".into()))
-            .expect("client");
+        let client = client_for("http://unused.invalid".into(), Some("ws-1"));
         assert_eq!(client.workspace_id_for_links().as_deref(), Some("ws-1"));
     }
 
@@ -386,5 +505,32 @@ mod tests {
             decode_workspace(&json!({ "display_name": "Production" })),
             None
         );
+    }
+
+    #[test]
+    fn dashboard_url_uses_the_authoritative_byoc_base() {
+        let base = serve_paths(vec![(
+            "/v1/platform/workspaces/current/info",
+            "200 OK",
+            json!({ "dashboard_url": "https://aws.smith.langchain.com/" }).to_string(),
+        )]);
+
+        assert_eq!(
+            client_for(base, Some("ws-1")).dashboard_url().unwrap(),
+            "https://aws.smith.langchain.com"
+        );
+    }
+
+    #[test]
+    fn dashboard_url_preserves_a_self_hosted_base_path() {
+        assert_eq!(
+            normalize_dashboard_url("https://corp.example.com/langsmith/").unwrap(),
+            "https://corp.example.com/langsmith"
+        );
+    }
+
+    #[test]
+    fn dashboard_url_rejects_query_data() {
+        assert!(normalize_dashboard_url("https://smith.example.com/?tenant=other").is_err());
     }
 }

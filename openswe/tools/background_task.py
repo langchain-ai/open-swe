@@ -3,7 +3,7 @@
 Two things run in the background and both take long enough that the model has to
 be able to ask "how far has it got": a command launched with
 ``background_execute``, and a workspace refresh started by
-``refresh_workspace_start`` or the nightly cron. They keep their state in
+``snapshotctl`` or the nightly cron. They keep their state in
 different places — a command's in the thread sandbox's own filesystem, a
 refresh's on the workspace record plus a live trace on its builder — so each
 kind owns a provider that knows how to read it, and this tool routes by the

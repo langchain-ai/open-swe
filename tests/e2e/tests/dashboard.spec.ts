@@ -26,41 +26,45 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       login: "workspace-default-onboarding-e2e",
       email: "workspace-default-onboarding-e2e@example.com",
     });
+    const initialProfile = await page.request.get("/dashboard/api/profile");
+    expect(initialProfile.ok()).toBeTruthy();
+    const reset = await page.request.put("/dashboard/api/profile", {
+      headers: { origin: new URL(initialProfile.url()).origin },
+      data: { slack_onboarding_dismissed: false },
+    });
+    expect(reset.ok()).toBeTruthy();
+    const sessionResponse = await page.request.get("/dashboard/api/me");
+    expect(sessionResponse.ok()).toBeTruthy();
+    const session = (await sessionResponse.json()) as Record<string, unknown>;
+    let slackEnabled = false;
     await page.route("**/dashboard/api/me", async (route) => {
-      const response = await route.fetch();
-      const session = (await response.json()) as Record<string, unknown>;
       await route.fulfill({
-        json: { ...session, slack_oauth_enabled: false },
+        json: {
+          ...session,
+          slack_oauth_enabled: slackEnabled,
+          slack_user_id: null,
+        },
       });
     });
+    await page.clock.setFixedTime(Date.now() + 61_000);
     const profileBefore = await page.request.get("/dashboard/api/profile");
     expect(profileBefore.ok()).toBeTruthy();
     expect(await profileBefore.json()).not.toHaveProperty("default_model");
 
     await page.goto("/agents");
-    await page.getByTestId("composer-editor").click();
+    await expect(page.getByTestId("composer-editor")).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.reload();
-    await page.getByTestId("composer-editor").click();
+    await expect(page.getByTestId("composer-editor")).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
 
     const profileAfter = await page.request.get("/dashboard/api/profile");
     expect(profileAfter.ok()).toBeTruthy();
     expect(await profileAfter.json()).not.toHaveProperty("default_model");
 
-    await page.unroute("**/dashboard/api/me");
-    await page.route("**/dashboard/api/me", async (route) => {
-      const response = await route.fetch();
-      const session = (await response.json()) as Record<string, unknown>;
-      await route.fulfill({
-        json: { ...session, slack_oauth_enabled: true, slack_user_id: null },
-      });
-    });
+    slackEnabled = true;
+    await page.clock.setFixedTime(Date.now() + 121_000);
     await page.reload();
-    await page.clock.setFixedTime(Date.now() + 61_000);
-    await page.evaluate(() =>
-      window.dispatchEvent(new Event("visibilitychange")),
-    );
     await expect(
       page.getByRole("button", { name: "Don't ask again" }),
     ).toBeVisible();
@@ -76,7 +80,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     expect(dismissed).not.toHaveProperty("default_model");
     expect(dismissed).not.toHaveProperty("reasoning_effort");
     await page.reload();
-    await page.getByTestId("composer-editor").click();
+    await expect(page.getByTestId("composer-editor")).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 
@@ -683,6 +687,46 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toBeVisible({ timeout: 30_000 });
   });
 
+  test("previews each collapsed reasoning block on its brain-icon toggle", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page, {
+      message: "<@U0BOT> E2E_THOUGHT please add a greet() helper and open a PR",
+    });
+    await expectTranscriptVisible(page);
+
+    for (const fold of await page
+      .getByRole("button", { name: /^Worked(?: for .+)? · \d+ actions?$/ })
+      .all()) {
+      await fold.click();
+    }
+
+    const toggle = page
+      .getByRole("button", { name: "Checking the snapshot status" })
+      .first();
+    await expect(toggle).toBeVisible();
+    await expect(
+      page.getByText(/compare it with the latest capture/),
+    ).toHaveCount(0);
+    await test.info().attach("collapsed-reasoning", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+
+    await toggle.click();
+    await expect(
+      page.getByText(/compare it with the latest capture/).first(),
+    ).toBeVisible();
+    await expect(
+      page.getByText("**Checking the snapshot status**"),
+    ).toHaveCount(0);
+    await test.info().attach("expanded-reasoning", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+  });
+
   test("stops a Slack-started run from the web app", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await page.goto("/mock/slack");
@@ -699,6 +743,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     };
 
     await page.goto(`/agents/${threadId}`);
+    await expect(page.getByText("On it!", { exact: true })).toBeVisible();
     const stopButton = page.getByRole("button", { name: "Stop run" });
     await expect(stopButton).toBeVisible();
 
@@ -741,6 +786,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     };
 
     await page.goto(`/agents/${threadId}`);
+    await expect(page.getByText("On it!", { exact: true })).toBeVisible();
     const stopButton = page.getByRole("button", { name: "Stop run" });
     await expect(stopButton).toBeVisible();
 
@@ -829,9 +875,11 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     // The held request would block `load`, so stop waiting at the first byte.
     await page.goto("/agents", { waitUntil: "commit" });
 
-    const skeleton = page.getByTestId("sidebar-threads-skeleton");
+    const skeleton = page.locator(
+      "[data-testid=sidebar-threads-skeleton]:visible",
+    );
     await expect(skeleton).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole("status")).toContainText("Loading threads");
+    await expect(skeleton.getByRole("status")).toContainText("Loading threads");
 
     release();
     await expect(skeleton).toBeHidden({ timeout: 30_000 });
@@ -872,7 +920,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     });
     await page.goto("/agents", { waitUntil: "commit" });
 
-    const skeleton = page.getByTestId("sidebar-threads-skeleton");
+    const skeleton = page.locator(
+      "[data-testid=sidebar-threads-skeleton]:visible",
+    );
     await expect(skeleton).toBeVisible({ timeout: 30_000 });
 
     await sidebarRequest;

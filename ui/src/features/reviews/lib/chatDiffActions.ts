@@ -23,7 +23,27 @@ export interface ProposedReview {
   body: string
 }
 
-export type ChatDiffAction = ProposedComment | ProposedReview
+/** A note the agent left on diff lines for the viewer alone; it never reaches GitHub. */
+export interface AgentNote {
+  kind: "note"
+  id: string
+  range: DiffRange
+  body: string
+}
+
+/** A comment the agent put in someone's pending GitHub review: whoever sent that message. */
+export interface AddedComment {
+  kind: "added"
+  id: string
+  range: DiffRange
+  login: string
+}
+
+export type ChatDiffAction =
+  | ProposedComment
+  | ProposedReview
+  | AgentNote
+  | AddedComment
 
 const REVIEW_EVENTS: ReadonlyArray<ReviewEvent> = [
   "APPROVE",
@@ -78,7 +98,17 @@ function contentObject(content: unknown): Record<string, unknown> | null {
   }
 }
 
-const ACTION_TOOLS = new Set(["propose_review_comment", "propose_pr_review"])
+const ACTION_TOOLS = new Set([
+  "propose_review_comment",
+  "propose_pr_review",
+  "note_on_diff",
+  "add_review_comment",
+])
+
+/** Whether a tool's result can carry a page action. */
+export function isChatDiffActionTool(name: string): boolean {
+  return ACTION_TOOLS.has(name)
+}
 
 /** The page action a successful chat tool result carries. */
 export function chatDiffAction(
@@ -101,9 +131,22 @@ export function chatDiffAction(
   }
   const range = parseRange(result.range)
   if (!range) return null
-  return result.proposed === true && typeof result.body === "string"
-    ? { kind: "comment", id: message.tool_call_id, range, body: result.body }
-    : null
+  const id = message.tool_call_id
+  const body = typeof result.body === "string" ? result.body : null
+  switch (message.name) {
+    case "note_on_diff":
+      return result.noted === true && body !== null
+        ? { kind: "note", id, range, body }
+        : null
+    case "add_review_comment":
+      return result.added === true && typeof result.login === "string"
+        ? { kind: "added", id, range, login: result.login }
+        : null
+    default:
+      return result.proposed === true && body !== null
+        ? { kind: "comment", id, range, body }
+        : null
+  }
 }
 
 export function rangeLabel(range: DiffRange): string {

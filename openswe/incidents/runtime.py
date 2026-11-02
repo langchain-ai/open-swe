@@ -1,17 +1,15 @@
-"""Incident context, access checks, and the report tool for the main agent graph."""
+"""Incident context, access checks, evidence, and the report tool for an incident run."""
 
 import json
 import logging
-from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import replace
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from typing import Any
 
 import langgraph_sdk
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.config import get_config
-from langgraph.types import Command
 
 from openswe.incidents import documents, service
 from openswe.incidents.evidence_tools import EvidenceCollector, source_url
@@ -25,7 +23,6 @@ from openswe.incidents.report import (
     finalize_report,
 )
 from openswe.incidents.turns import SESSION_TS
-from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.client import post_slack_thread_reply_with_ts
@@ -51,25 +48,30 @@ def current_run_id() -> str:
 
 
 class IncidentSession:
-    """What one incident run knows about its incident, shared by the middleware and tools."""
+    """What one incident run knows about its incident: its record, policy and evidence.
+
+    ``run_id`` names the run whose evidence its tools collect; None where the run has
+    not begun, as when starting it lists its tools.
+    """
 
     def __init__(
         self,
         record: Incident,
         policy: IncidentPolicy,
         *,
+        run_id: str | None,
         explicit_request: str | None = None,
         reply_thread_ts: str = "",
     ) -> None:
         self.record = record
         self.policy = policy
+        self.run_id = run_id
         self.explicit_request = explicit_request
         self.reply_thread_ts = reply_thread_ts
         destination: dict[str, Any] = {"channel_id": record.channel_id, "thread_ts": SESSION_TS}
         if reply_thread_ts:
             destination["reply_thread_ts"] = reply_thread_ts
         self.slack_thread = SlackThreadRef.model_validate(destination)
-        self.collector = EvidenceCollector()
         self.instructions = prompt(
             "incidents/system", explicit_request=json.dumps(explicit_request)
         )
@@ -113,14 +115,86 @@ class IncidentSession:
             raise PermissionError("Incident is not watching")
         self.record = record
 
+    @asynccontextmanager
+    async def _evidence(self) -> AsyncIterator[EvidenceCollector]:
+        """The run's evidence, kept with what the caller adds to it."""
+        if self.run_id is None:
+            raise RuntimeError("Only a run's incident session collects evidence")
+        async with service.RUN_EVIDENCE.collecting(self.record.id, self.run_id) as collector:
+            yield collector
+
+    async def context(self, humans: Sequence[str]) -> str:
+        """The run's instructions, once the incident still wants the run, with the evidence
+        the messages people sent carry recorded."""
+        await self.check()
+        async with self._evidence() as collector:
+            for text in humans:
+                context_evidence(text, collector)
+        return self.prompt
+
+    async def observe(self, message: ToolMessage, call: Mapping[str, Any]) -> ToolMessage:
+        """``message``, the result of ``call``, recorded as evidence the report can cite."""
+        artifact = message.artifact if isinstance(message.artifact, dict) else {}
+        content = artifact.get("structured_content")
+        if content is None:
+            content = message.content
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except ValueError:
+                pass
+        failed = (
+            message.status == "error"
+            or artifact.get("isError") is True
+            or (
+                isinstance(content, dict)
+                and (content.get("isError") is True or content.get("success") is False)
+            )
+        )
+        if failed:
+            async with self._evidence() as collector:
+                collector.gaps.append(f"Tool {call['name']} did not confirm a successful result.")
+            return message
+        # Incident tools already attach their own references.
+        if isinstance(content, dict) and ("evidence_id" in content or "recorded" in content):
+            return message
+        url = ""
+        if isinstance(content, dict):
+            url = next(
+                (
+                    source_url(content.get(key))
+                    for key in ("url", "html_url", "pr_url")
+                    if isinstance(content.get(key), str)
+                ),
+                "",
+            )
+        async with self._evidence() as collector:
+            observation = collector.record_observation(
+                source="tool",
+                url=url,
+                summary=f"Result from {call['name']}.",
+                query=json.dumps(call.get("args", {})),
+                content=content,
+            )
+        reference = "Incident evidence: " + observation["evidence_id"]
+        if not message.content or artifact.get("structured_content") is not None:
+            reference += "\n" + observation["observation"]
+        enriched = (
+            message.content + "\n\n" + reference
+            if isinstance(message.content, str)
+            else [*message.content, {"type": "text", "text": reference}]
+        )
+        return message.model_copy(update={"content": enriched})
+
     async def _record_incident_report(self, **kwargs: Any) -> dict[str, Any]:
         await self.check()
         draft = ReportDraft.model_validate(kwargs)
-        report = finalize_report(draft, self.collector)
+        async with self._evidence() as collector:
+            report = finalize_report(draft, collector)
         record = self.record
         digest = service.fingerprint(digest_fields(report))
         previous = await service.REPORTS.get(record.id)
-        run_id = current_run_id()
+        run_id = self.run_id or ""
         # The postmortem update runs first: if it fails, nothing is recorded and the agent
         # sees the error instead of a report that was never fully written.
         await documents.update_from_report(record, report)
@@ -195,16 +269,19 @@ class IncidentSession:
     async def _read_incident(self, incident_id: str) -> dict[str, Any]:
         await self.check()
         context = await documents.document_context(IncidentId(incident_id))
-        return self.collector.record_observation(
-            source="incident",
-            url="",
-            summary="Historical incident context; not proof of the current cause.",
-            query=incident_id,
-            content=context,
-        )
+        async with self._evidence() as collector:
+            return collector.record_observation(
+                source="incident",
+                url="",
+                summary="Historical incident context; not proof of the current cause.",
+                query=incident_id,
+                content=context,
+            )
 
 
-async def load_incident_session(config: Mapping[str, Any]) -> IncidentSession:
+async def load_incident_session(
+    config: Mapping[str, Any], *, run_id: str | None
+) -> IncidentSession:
     """Bind a run that claims to be an incident turn to its saved incident, or refuse."""
     cfg = config.get("configurable") or {}
     thread_id = cfg.get("thread_id")
@@ -230,108 +307,9 @@ async def load_incident_session(config: Mapping[str, Any]) -> IncidentSession:
     session = IncidentSession(
         record,
         policy,
+        run_id=run_id,
         explicit_request=request.strip() if isinstance(request, str) and request.strip() else None,
         reply_thread_ts=reply_thread_ts,
     )
     await session.check()
     return session
-
-
-class IncidentMiddleware(OpenSWEMiddleware):
-    """Add incident instructions, status checks, and evidence to the normal agent runtime."""
-
-    def __init__(self, session: IncidentSession) -> None:
-        self.session = session
-
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
-        await self.session.check()
-        for message in request.messages:
-            if isinstance(message, HumanMessage):
-                context_evidence(message.text, self.session.collector)
-        existing = request.system_message.text if request.system_message else ""
-        prompt = self.session.prompt
-        return await handler(
-            request.override(
-                system_message=SystemMessage(
-                    content=f"{existing}\n\n{prompt}" if existing else prompt
-                )
-            )
-        )
-
-    def _observe(self, message: ToolMessage, call: dict[str, Any]) -> ToolMessage:
-        artifact = message.artifact if isinstance(message.artifact, dict) else {}
-        content = artifact.get("structured_content")
-        if content is None:
-            content = message.content
-        if isinstance(content, str):
-            try:
-                content = json.loads(content)
-            except ValueError:
-                pass
-        failed = (
-            message.status == "error"
-            or artifact.get("isError") is True
-            or (
-                isinstance(content, dict)
-                and (content.get("isError") is True or content.get("success") is False)
-            )
-        )
-        if failed:
-            self.session.collector.gaps.append(
-                f"Tool {call['name']} did not confirm a successful result."
-            )
-            return message
-        # Incident tools already attach their own references.
-        if isinstance(content, dict) and ("evidence_id" in content or "recorded" in content):
-            return message
-        url = ""
-        if isinstance(content, dict):
-            url = next(
-                (
-                    source_url(content.get(key))
-                    for key in ("url", "html_url", "pr_url")
-                    if isinstance(content.get(key), str)
-                ),
-                "",
-            )
-        observation = self.session.collector.record_observation(
-            source="tool",
-            url=url,
-            summary=f"Result from {call['name']}.",
-            query=json.dumps(call.get("args", {})),
-            content=content,
-        )
-        reference = "Incident evidence: " + observation["evidence_id"]
-        if not message.content or artifact.get("structured_content") is not None:
-            reference += "\n" + observation["observation"]
-        enriched = (
-            message.content + "\n\n" + reference
-            if isinstance(message.content, str)
-            else [*message.content, {"type": "text", "text": reference}]
-        )
-        return message.model_copy(update={"content": enriched})
-
-    async def awrap_tool_call(self, request: Any, handler: Callable[..., Awaitable[Any]]) -> Any:
-        result = await handler(request)
-        if isinstance(result, ToolMessage):
-            return self._observe(result, request.tool_call)
-        if isinstance(result, Command) and isinstance(result.update, dict):
-            messages = result.update.get("messages")
-            if isinstance(messages, list):
-                return replace(
-                    result,
-                    update={
-                        **result.update,
-                        "messages": [
-                            self._observe(message, request.tool_call)
-                            if isinstance(message, ToolMessage)
-                            else message
-                            for message in messages
-                        ],
-                    },
-                )
-        return result

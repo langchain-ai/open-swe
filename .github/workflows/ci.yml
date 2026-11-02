@@ -14,6 +14,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  no-new-langgraph-client:
+    name: No new backend langgraph_client uses
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Require MDA for new backend code
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git diff --no-ext-diff --no-color --unified=0 "$BASE_SHA...HEAD" -- 'openswe/**/*.py' | python3 scripts/check_langgraph_client.py
+
   lint:
     name: Agent lint
     runs-on: ubuntu-latest
@@ -82,6 +97,26 @@ jobs:
       - name: Type-check the MDA project against its own environment
         run: make mda-typecheck
 
+  agent-server-image-deps:
+    name: Agent Server image dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      # Deployments build on the newest Agent Server image langgraph.json allows and install
+      # this project under that image's /api/constraints.txt. Resolve it the same way, so a pin
+      # that conflicts with the image fails here instead of at deploy. Runs on every PR because a
+      # new image release can break the build without any change here.
+      - name: Resolve the project in the Agent Server image
+        run: |
+          cli_version=$(sed -n '/^name = "langgraph-cli"$/{n;s/^version = "\(.*\)"$/\1/p;}' uv.lock)
+          uvx --from "langgraph-cli==$cli_version" langgraph dockerfile -c langgraph.json "$RUNNER_TEMP/Dockerfile"
+          image=$(sed -n 's/^FROM //p' "$RUNNER_TEMP/Dockerfile" | head -n 1)
+          echo "Resolving against $image"
+          docker run --rm --entrypoint uv -v "$PWD:/deps/open-swe:ro" -w /deps/open-swe "$image" \
+            pip install --system --dry-run -c /api/constraints.txt -e .
+
   unit-tests:
     name: Agent unit tests
     needs: e2e-changes
@@ -128,8 +163,8 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version: 24
-      - run: corepack enable
+          node-version: 26
+      - run: npm install --global pnpm@11.22.0
       # oxfmt reads the files straight off disk, so only the root package's own
       # devDependencies are needed here.
       - name: Install dependencies
@@ -146,8 +181,8 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version: 24
-      - run: corepack enable
+          node-version: 26
+      - run: npm install --global pnpm@11.22.0
       - name: Install dependencies
         timeout-minutes: 5
         run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
@@ -162,8 +197,8 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version: 24
-      - run: corepack enable
+          node-version: 26
+      - run: npm install --global pnpm@11.22.0
       - name: Install dependencies
         timeout-minutes: 5
         run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
@@ -178,8 +213,8 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version: 24
-      - run: corepack enable
+          node-version: 26
+      - run: npm install --global pnpm@11.22.0
       - uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f
         with:
           mode: firewall-free
@@ -203,8 +238,8 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version: 24
-      - run: corepack enable
+          node-version: 26
+      - run: npm install --global pnpm@11.22.0
       - uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f
         with:
           mode: firewall-free
@@ -228,8 +263,8 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version: 24
-      - run: corepack enable
+          node-version: 26
+      - run: npm install --global pnpm@11.22.0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -266,14 +301,14 @@ jobs:
             exit 0
           fi
 
-          agent_unit_test_paths=(openswe tests mda vendor/managed-deepagents-sdk pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml ":(exclude)tests/e2e")
+          agent_unit_test_paths=(openswe packages tests mda vendor/managed-deepagents-sdk vendor/langchain-quickjs pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml ":(exclude)tests/e2e")
           if git diff --quiet "$BASE_SHA" HEAD -- "${agent_unit_test_paths[@]}"; then
             echo "agent_unit_tests=false" >> "$GITHUB_OUTPUT"
           else
             echo "agent_unit_tests=true" >> "$GITHUB_OUTPUT"
           fi
 
-          paths=(openswe mda vendor/managed-deepagents-sdk ui tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml)
+          paths=(openswe packages mda vendor/managed-deepagents-sdk vendor/langchain-quickjs ui tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml)
           if git diff --quiet "$BASE_SHA" HEAD -- "${paths[@]}"; then
             echo "browser=false" >> "$GITHUB_OUTPUT"
           else
@@ -314,7 +349,7 @@ jobs:
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version: 24
+          node-version: 26
       - name: Install Python deps (langgraph dev runtime)
         timeout-minutes: 5
         run: uv sync --locked
@@ -329,7 +364,7 @@ jobs:
       - name: Build the mda CLI
         timeout-minutes: 15
         run: make mda-cli
-      - run: corepack enable
+      - run: npm install --global pnpm@11.22.0
       # Chromium and the dashboard build are identical across the three shards
       # and change only with their own inputs, so all three restore them rather
       # than each spending ~50s redoing the work. Both keys are computed before
@@ -351,7 +386,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ui/.output
-          key: ui-output-${{ runner.os }}-${{ hashFiles('ui/**', 'pnpm-lock.yaml') }}
+          key: ui-output-node26-${{ runner.os }}-${{ hashFiles('ui/**', 'pnpm-lock.yaml') }}
       - name: Install workspace dependencies
         timeout-minutes: 5
         env:
@@ -409,7 +444,7 @@ jobs:
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version: 24
+          node-version: 26
       - name: Install Python deps (langgraph dev runtime)
         timeout-minutes: 5
         run: uv sync --locked
@@ -424,7 +459,7 @@ jobs:
       - name: Build the mda CLI
         timeout-minutes: 15
         run: make mda-cli
-      - run: corepack enable
+      - run: npm install --global pnpm@11.22.0
       - name: Install workspace dependencies
         timeout-minutes: 5
         run: pnpm install --frozen-lockfile

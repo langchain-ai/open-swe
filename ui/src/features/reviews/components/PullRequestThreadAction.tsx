@@ -72,8 +72,7 @@ export function PullRequestThreadAction({
   })
   // A fixed set of hooks, whichever actions this PR needs.
   const runs: Record<PullRequestThreadActionName, ReturnType<typeof useRun>> = {
-    "fix-conflicts": useRun(pr, login, "fix-conflicts"),
-    "fix-checks": useRun(pr, login, "fix-checks"),
+    fix: useRun(pr, login, "fix"),
     "address-comments": useRun(pr, login, "address-comments"),
   }
   const [first, ...rest] = actions

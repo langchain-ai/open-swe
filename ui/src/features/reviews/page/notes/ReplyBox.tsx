@@ -37,16 +37,20 @@ export function ReplyBox({
   }
   if (body === undefined)
     return (
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label={placeholder}
         type="button"
         onClick={() => {
           focusNext.current = true
           setDraft(threadId, "")
         }}
-        className="w-full rounded-md border border-default bg-surface-level-1 px-space-2 py-space-1 text-left text-xs text-placeholder hover:border-strong"
+        className="w-full justify-start border border-default bg-surface-level-1 px-space-2 py-space-1 text-left text-secondary hover:border-strong"
       >
         {placeholder}
-      </button>
+      </Button>
     )
   return (
     <div className="flex flex-col gap-space-2">

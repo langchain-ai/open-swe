@@ -28,7 +28,9 @@ async def prepare_instance_mcp(name: str, update: MCPConnectionUpdate) -> MCPCon
     """Validate a draft, reusing saved authentication only from the instance record."""
     if name != update.name:
         raise ValueError("Connection name must match its URL path")
-    return await prepare_connection(update, await get_instance_mcp(name))
+    return await prepare_connection(
+        update, await get_instance_mcp(name), scope=INSTANCE_CONNECTIONS.scope
+    )
 
 
 async def save_instance_mcp(name: str, update: MCPConnectionUpdate) -> dict[str, Any]:

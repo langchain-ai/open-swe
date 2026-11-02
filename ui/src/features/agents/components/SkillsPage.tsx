@@ -167,14 +167,20 @@ export function SkillsPage() {
           <div className="space-y-space-1">
             {skills.isLoading && <Skeleton className="h-24" />}
             {(skills.data ?? []).map((skill) => (
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={`${skill.name} ${skill.description}`}
+                aria-pressed={selectedName === skill.name}
                 key={skill.name}
                 type="button"
                 onClick={() => select(skill)}
                 className={cn(
-                  "w-full rounded-md px-space-2 py-space-2 text-left transition-colors",
+                  "h-auto flex-col items-start justify-start gap-0 whitespace-normal [&>span]:max-w-full",
+                  "w-full px-space-2 py-space-2 text-left",
                   selectedName === skill.name
-                    ? "bg-selected"
+                    ? "bg-selected hover:bg-selected dark:hover:bg-selected"
                     : "hover:bg-surface-level-1-hover"
                 )}
               >
@@ -184,7 +190,7 @@ export function SkillsPage() {
                 <span className="mt-0.5 block truncate text-xxs text-secondary">
                   {skill.description}
                 </span>
-              </button>
+              </Button>
             ))}
             {skills.data?.length === 0 && (
               <p className="px-space-2 py-space-4 text-xs text-secondary">

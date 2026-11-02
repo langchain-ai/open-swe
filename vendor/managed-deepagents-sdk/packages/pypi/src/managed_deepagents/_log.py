@@ -1,9 +1,22 @@
-"""Safe, consistently namespaced runtime logging."""
+"""Safe, consistently namespaced runtime logging.
+
+Each line goes to two sinks. Stdout, which the deployment's owner reads, gets
+only the message. Inside a request or run log context, the line is also queued
+on the process-wide sink for the LangSmith log collection endpoint, with the raw
+error and attributes; that sink is ours, not the customer's.
+"""
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Final
+
+from managed_deepagents._telemetry.otel.context import (
+    LogAttributeValue,
+    current_log_context,
+    record_log,
+)
 
 _LOG_PREFIX: Final = "[mda]"
 _LOG_IDENTIFIER_MAX_CHARS: Final = 128
@@ -20,17 +33,47 @@ class _Logger:
     def __init__(self, logger: logging.Logger) -> None:
         self._logger = logger
 
-    def info(self, message: str, *args: object) -> None:
+    def info(
+        self,
+        message: str,
+        *args: object,
+        attributes: Mapping[str, LogAttributeValue] | None = None,
+    ) -> None:
         """Write an informational runtime event."""
-        self._logger.info("%s", _LazyLogMessage(message, args))
+        line = _LazyLogMessage(message, args)
+        self._logger.info("%s", line)
+        if current_log_context() is not None:
+            record_log("INFO", line.body(), attributes=attributes)
 
-    def warning(self, message: str, *args: object) -> None:
+    def warning(
+        self,
+        message: str,
+        *args: object,
+        attributes: Mapping[str, LogAttributeValue] | None = None,
+    ) -> None:
         """Write an expected but actionable runtime failure."""
-        self._logger.warning("%s", _LazyLogMessage(message, args))
+        line = _LazyLogMessage(message, args)
+        self._logger.warning("%s", line)
+        if current_log_context() is not None:
+            record_log("WARN", line.body(), attributes=attributes)
 
-    def error(self, message: str, *args: object) -> None:
-        """Write a runtime failure without accepting raw exception metadata."""
-        self._logger.error("%s", _LazyLogMessage(message, args))
+    def error(
+        self,
+        message: str,
+        *args: object,
+        error: BaseException | None = None,
+        attributes: Mapping[str, LogAttributeValue] | None = None,
+    ) -> None:
+        """Write a runtime failure.
+
+        ``error`` is sent as ``exception.type``, ``exception.message`` and
+        ``exception.stacktrace`` to the log collection sink only; stdout gets
+        the message alone.
+        """
+        line = _LazyLogMessage(message, args)
+        self._logger.error("%s", line)
+        if current_log_context() is not None:
+            record_log("ERROR", line.body(), error=error, attributes=attributes)
 
     def safe_error_label(self, error: object) -> str:
         """Return an exception type and bounded HTTP status, never its message."""
@@ -66,9 +109,12 @@ class _LazyLogMessage:
         self._message = message
         self._args = args
 
+    def body(self) -> str:
+        """The rendered message without the stdout prefix."""
+        return self._message % self._args if self._args else self._message
+
     def __str__(self) -> str:
-        rendered = self._message % self._args if self._args else self._message
-        return f"{_LOG_PREFIX} {rendered}"
+        return f"{_LOG_PREFIX} {self.body()}"
 
 
 logger = _Logger(logging.getLogger("mda"))

@@ -28,6 +28,7 @@ export interface SidebarThreadItem {
   /** Subagents the thread spawned, listed as sub-threads under its row. */
   subagents?: Array<AgentSubagentSummary>
   taskWorkers?: Array<AgentThread>
+  waitingForDelegatedWork?: boolean
   thread: AgentThread
 }
 
@@ -106,6 +107,7 @@ export function cloudSidebarThread(thread: AgentThread): SidebarThreadItem {
     reviewPage: thread.reviewPage,
     subagents: thread.subagents,
     taskWorkers: thread.taskWorkers,
+    waitingForDelegatedWork: thread.waitingForDelegatedWork,
     thread,
   }
 }
@@ -180,8 +182,72 @@ export function sortSidebarThreads(
   return [...threads].sort(mode === "created" ? byCreation : byRecency)
 }
 
+export interface SidebarDayGroup {
+  key: string
+  label: string
+  threads: Array<SidebarThreadItem>
+}
+
+function dayLabel(day: Date, now: Date): string {
+  const today = new Date(now).setHours(0, 0, 0, 0)
+  const yesterday = new Date(today).setDate(new Date(today).getDate() - 1)
+  if (day.getTime() === today) return "Today"
+  if (day.getTime() === yesterday) return "Yesterday"
+  return day.toLocaleDateString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: day.getFullYear() === now.getFullYear() ? undefined : "numeric",
+  })
+}
+
+/** Buckets threads by the local day they were last updated, newest first, each day ordered by creation. */
+export function groupSidebarThreadsByDay(
+  threads: ReadonlyArray<SidebarThreadItem>,
+  now: Date = new Date()
+): Array<SidebarDayGroup> {
+  const days = new Map<number, Array<SidebarThreadItem>>()
+  for (const thread of threads) {
+    const day = new Date(thread.updatedAt).setHours(0, 0, 0, 0)
+    days.set(day, [...(days.get(day) ?? []), thread])
+  }
+  return [...days.entries()]
+    .sort(([left], [right]) => right - left)
+    .map(([day, items]) => ({
+      key: String(day),
+      label: dayLabel(new Date(day), now),
+      threads: items.sort(byCreation),
+    }))
+}
+
 export function threadFamily(thread: AgentThread): Array<AgentThread> {
   return [thread, ...(thread.taskWorkers ?? [])]
+}
+
+/**
+ * One sidebar row for a task family seen through snapshots of differing age:
+ * `row` (usually the listed one, which honors the sidebar's filters) and
+ * `details` of the coordinator or an open worker, which poll on their own
+ * schedules. Each member keeps its newest copy, and a worker the row has not
+ * caught up with yet joins it unless it is archived.
+ */
+export function mergeTaskFamily(
+  row: AgentThread,
+  details: ReadonlyArray<AgentThread>
+): AgentThread {
+  const members = new Map(
+    threadFamily(row).map((member) => [member.id, member])
+  )
+  for (const member of details.flatMap(threadFamily)) {
+    const known = members.get(member.id)
+    if (known ? member.updatedAt >= known.updatedAt : !member.resolved) {
+      members.set(member.id, member)
+    }
+  }
+  const [root = row, ...workers] = members.values()
+  return root.taskWorkers || workers.length
+    ? { ...root, taskWorkers: workers }
+    : root
 }
 
 export function withoutNestedWorkers(

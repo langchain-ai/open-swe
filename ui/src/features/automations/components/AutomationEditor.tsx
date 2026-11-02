@@ -13,6 +13,7 @@ import { Switch } from "@langchain/macaw-components/Switch"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { KanbanIcon } from "@phosphor-icons/react/dist/ssr/Kanban"
+import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
@@ -48,6 +49,7 @@ import {
 import {
   useCreateAgentSchedule,
   useDeleteAgentSchedule,
+  useTriggerAgentSchedule,
   useUpdateAgentSchedule,
   useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
@@ -123,6 +125,7 @@ export function AutomationEditor({
   const createSchedule = useCreateAgentSchedule()
   const updateSchedule = useUpdateAgentSchedule()
   const deleteSchedule = useDeleteAgentSchedule()
+  const triggerSchedule = useTriggerAgentSchedule()
 
   const [initialDrafts] = useState(() =>
     draftsFor(schedule, template?.schedule)
@@ -301,6 +304,28 @@ export function AutomationEditor({
     )
   }
 
+  const canRun =
+    canManage &&
+    mode === "edit" &&
+    !!schedule &&
+    !isDirty &&
+    !isSaving &&
+    !deleteSchedule.isPending &&
+    !triggerSchedule.isPending &&
+    !savedWorkspaceMissing
+
+  const handleRun = () => {
+    if (!canRun || !schedule) return
+    triggerSchedule.mutate(schedule.id, {
+      onSuccess: (result) => {
+        void navigate({
+          to: "/agents/$threadId",
+          params: { threadId: result.thread_id },
+        })
+      },
+    })
+  }
+
   const handleDelete = () => {
     if (!schedule) return
     if (!window.confirm(`Delete "${schedule.name}"?`)) return
@@ -340,10 +365,23 @@ export function AutomationEditor({
                 disabled={deleteSchedule.isPending}
               />
             )}
+            {mode === "edit" && (
+              <Button
+                color="secondary"
+                variant="outlined"
+                size="md"
+                leftDecorator={LightningIcon}
+                onClick={handleRun}
+                disabled={!canRun}
+                title={isDirty ? "Save changes before running" : undefined}
+              >
+                {triggerSchedule.isPending ? "Starting…" : "Run now"}
+              </Button>
+            )}
             <Button
               size="md"
               onClick={handleSave}
-              disabled={!canSave || isSaving}
+              disabled={!canSave || isSaving || triggerSchedule.isPending}
             >
               {isSaving
                 ? "Saving…"
@@ -362,13 +400,16 @@ export function AutomationEditor({
             change it.
           </Banner>
         )}
-        <input
+        <Input
+          size="md"
+          debounceMs={0}
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={setName}
           disabled={!canManage}
           placeholder="Untitled automation"
           aria-label="Automation name"
-          className="w-full bg-transparent text-base font-medium text-primary outline-none placeholder:text-placeholder"
+          className="w-full [&_input]:text-base"
+          inputContainerClassName="font-medium border-strong/70 [&:hover:not(:focus-within)]:border-strong"
         />
 
         <div className="mt-space-3 flex items-center gap-space-3 text-xs">
@@ -438,13 +479,16 @@ export function AutomationEditor({
                   }
                 >
                   {draft.custom ? (
-                    <input
+                    <Input
+                      size="md"
+                      debounceMs={0}
                       value={draft.cron}
-                      onChange={(e) => set({ cron: e.target.value })}
+                      onChange={(cron) => set({ cron })}
                       disabled={!canManage}
                       placeholder="0 9 * * 1-5"
                       aria-label="Cron schedule"
-                      className="w-full bg-transparent font-mono text-sm text-primary outline-none placeholder:text-placeholder"
+                      className="w-full"
+                      inputContainerClassName="font-mono border-strong/70 [&:hover:not(:focus-within)]:border-strong"
                     />
                   ) : (
                     <p className="text-sm text-primary">
@@ -614,7 +658,8 @@ export function AutomationEditor({
               onLinear={() =>
                 setDrafts((current) => [...current, linearDraft()])
               }
-              className="flex items-center gap-space-2 self-start rounded-lg border border-dashed border-default px-space-3 py-space-2 text-xs text-secondary transition-colors hover:bg-surface-level-1-hover hover:text-primary"
+              aria-label="Add trigger"
+              className="flex h-auto items-center gap-space-2 self-start rounded-lg border border-dashed border-default px-space-3 py-space-2 text-xs text-secondary transition-colors hover:bg-surface-level-1-hover hover:text-primary dark:hover:bg-surface-level-1-hover"
             >
               <PlusIcon size={14} weight="regular" />
               Add trigger
@@ -694,24 +739,28 @@ function EventChips<E extends string>({
       {items.map((item) => {
         const on = selected.includes(item.value)
         return (
-          <button
+          <Button
+            color="secondary"
+            variant="plain"
+            size="sm"
+            aria-label={item.label}
             key={item.value}
             type="button"
             aria-pressed={on}
             onClick={() => onToggle(item.value)}
             disabled={disabled}
             className={cn(
-              "inline-flex items-center gap-space-1 rounded-full border px-space-2 py-space-1 text-xs transition-colors disabled:pointer-events-none",
+              "gap-space-1 rounded-full border px-space-2 py-space-1 disabled:pointer-events-none",
               on
-                ? "border-brand bg-brand-subtle text-primary"
-                : "border-default text-secondary hover:bg-surface-level-1-hover hover:text-primary"
+                ? "border-brand bg-brand-subtle text-primary hover:bg-brand-subtle disabled:bg-brand-subtle dark:hover:bg-brand-subtle"
+                : "border-default text-secondary hover:bg-surface-level-1-hover hover:text-primary disabled:bg-transparent"
             )}
           >
             {on && (
               <CheckIcon size={12} weight="bold" className="text-icon-brand" />
             )}
             {item.label}
-          </button>
+          </Button>
         )
       })}
     </div>

@@ -134,24 +134,6 @@ class ActionsBlock(TypedDict):
     block_id: NotRequired[str]
 
 
-class FeedbackButton(TypedDict):
-    text: PlainText
-    value: str
-    accessibility_label: str
-
-
-class FeedbackButtons(TypedDict):
-    type: Literal["feedback_buttons"]
-    action_id: str
-    positive_button: FeedbackButton
-    negative_button: FeedbackButton
-
-
-class ContextActionsBlock(TypedDict):
-    type: Literal["context_actions"]
-    elements: list[FeedbackButtons]
-
-
 class PlainTextInput(TypedDict):
     type: Literal["plain_text_input"]
     action_id: str
@@ -176,7 +158,6 @@ type Block = (
     | ImageBlock
     | RichTextBlock
     | ActionsBlock
-    | ContextActionsBlock
     | InputBlock
 )
 
@@ -397,7 +378,9 @@ def block_payload(blocks: Sequence[Block]) -> list[dict[str, Any]]:
     return [cast(dict[str, Any], block) for block in blocks]
 
 
-def option_actions(options: list[str] | None) -> list[dict[str, Any]]:
+def option_actions(
+    options: list[str] | None, *, user_id: str | None = None
+) -> list[dict[str, Any]]:
     """Up to five option buttons; a click arrives as a message carrying the option's text."""
     clean_options = [option.strip() for option in options or [] if option.strip()]
     if not clean_options:
@@ -409,7 +392,13 @@ def option_actions(options: list[str] | None) -> list[dict[str, Any]]:
                 {
                     "type": "button",
                     "text": {"type": "plain_text", "text": option[:75], "emoji": True},
-                    "value": json.dumps({"type": "open_swe_option", "response": option}),
+                    "value": json.dumps(
+                        {
+                            "type": "open_swe_option",
+                            "response": option,
+                            **({"user_id": user_id} if user_id is not None else {}),
+                        }
+                    ),
                     "action_id": f"open_swe_option_select_{index}",
                 }
                 for index, option in enumerate(clean_options[:5])

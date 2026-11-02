@@ -19,6 +19,7 @@ import { reviewKeys } from "@/features/reviews/lib/reviewKeys"
 import type { Note } from "@/features/reviews/page/diffEntries"
 import { useReviewPage } from "@/features/reviews/page/store"
 import { renderNote } from "./NoteView"
+import { ThreadSummary } from "./ThreadNote"
 
 const reply = vi.hoisted(() => vi.fn(() => new Promise<never>(() => {})))
 vi.mock("@/features/reviews/lib/conversationApi", async (original) => ({
@@ -66,6 +67,38 @@ function Slots({ notes }: { notes: Array<Exclude<Note, { kind: "step" }>> }) {
     </div>
   ))
 }
+
+it("announces a folded conversation's status and comment count", () => {
+  const conversation = thread(1, "Keep the selected state")
+  conversation.comments.push({ ...conversation.comments[0], id: 2 })
+  const onOpen = vi.fn()
+  const view = render(
+    <ThreadSummary
+      thread={{ ...conversation, resolved: true }}
+      onOpen={onOpen}
+    />
+  )
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "ana: Keep the selected state, 2 comments, Resolved",
+      expanded: false,
+    })
+  )
+  expect(onOpen).toHaveBeenCalledOnce()
+
+  view.rerender(
+    <ThreadSummary
+      thread={{ ...conversation, outdated: true }}
+      onOpen={onOpen}
+      location="src/a.ts:1"
+    />
+  )
+  expect(
+    screen.getByRole("button", {
+      name: "src/a.ts:1: ana: Keep the selected state, 2 comments, Outdated",
+    })
+  ).toBeTruthy()
+})
 
 it("keeps a half-written reply with its thread when a note is added above it", async () => {
   vi.spyOn(api, "me").mockRejectedValue(new Error("Signed out"))

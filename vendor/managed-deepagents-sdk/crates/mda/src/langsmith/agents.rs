@@ -1,8 +1,8 @@
-//! Agent Platform endpoints used during deploy.
+//! Agent Platform endpoints used by deploy and dev.
 
 use anyhow::{Context, Result};
 use reqwest::Method;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::Client;
 
@@ -17,7 +17,7 @@ impl Client {
         deployment_id: &str,
     ) -> Result<Option<String>> {
         let Some(page) = self.request_optional(
-            self.platform_base()?,
+            self.platform_base(),
             Method::GET,
             "/api/v1/agents",
             &[
@@ -45,6 +45,28 @@ impl Client {
             .context("Agent lookup response has an invalid tag_value_id")?;
         Ok(Some(tag.to_string()))
     }
+
+    /// Tracing project of `agent_id`'s LOCAL environment, creating the agent
+    /// or the environment when missing.
+    pub(crate) fn local_environment_project(&self, agent_id: &str) -> Result<String> {
+        let base = self.platform_base();
+        let path = format!("/api/v1/agents/{agent_id}/environments");
+        let local = json!({ "environment": "LOCAL" });
+        let environment =
+            match self.request_optional(base, Method::POST, &path, &[], Some(local.clone()))? {
+                Some(environment) => environment,
+                None => {
+                    let agent = json!({ "id": agent_id, "source_type": "MDA" });
+                    self.request(base, Method::POST, "/api/v1/agents", &[], Some(agent))?;
+                    self.request(base, Method::POST, &path, &[], Some(local))?
+                }
+            };
+        environment
+            .get("tracer_session_name")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .context("Agent environment response has no tracer_session_name")
+    }
 }
 
 #[cfg(test)]
@@ -58,20 +80,49 @@ mod tests {
     use crate::langsmith::Client;
 
     fn serve(status: &'static str, body: Value) -> (Client, JoinHandle<String>) {
+        let (client, requests) = serve_all(vec![(status, body)]);
+        (
+            client,
+            thread::spawn(move || requests.join().unwrap().remove(0)),
+        )
+    }
+
+    fn serve_all(responses: Vec<(&'static str, Value)>) -> (Client, JoinHandle<Vec<String>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let handle = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0; 4096];
-            let n = stream.read(&mut request).unwrap();
-            let body = body.to_string();
-            write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
-            String::from_utf8_lossy(&request[..n]).into_owned()
+            responses
+                .into_iter()
+                .map(|(status, body)| {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    let mut request = [0; 4096];
+                    let n = stream.read(&mut request).unwrap();
+                    let body = body.to_string();
+                    write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                    String::from_utf8_lossy(&request[..n]).into_owned()
+                })
+                .collect()
         });
-        (
-            Client::new_with_platform(&url, Some(&url), "key", Some("tenant".into())).unwrap(),
-            handle,
-        )
+        (Client::for_test(&url), handle)
+    }
+
+    #[test]
+    fn local_environment_project_creates_a_missing_agent() {
+        let local = json!({ "environment": "LOCAL", "tracer_session_name": "research-local" });
+        let (client, requests) = serve_all(vec![
+            ("404 Not Found", json!({ "detail": "not found" })),
+            ("201 Created", json!({ "id": "research" })),
+            ("200 OK", local),
+        ]);
+
+        assert_eq!(
+            client.local_environment_project("research").unwrap(),
+            "research-local"
+        );
+        let requests = requests.join().unwrap();
+        assert!(requests[0].starts_with("POST /api/v1/agents/research/environments "));
+        assert!(requests[1].starts_with("POST /api/v1/agents "));
+        assert!(requests[1].contains(r#""source_type":"MDA""#));
     }
 
     #[test]

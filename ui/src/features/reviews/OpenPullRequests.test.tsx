@@ -245,10 +245,10 @@ describe("My PRs", () => {
     vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: true })
     mount()
     const button = await screen.findByRole("button", {
-      name: "Fixing conflicts",
+      name: "Fixing",
     })
     expect((button as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.queryByRole("button", { name: "Fix checks" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Fix" })).toBeNull()
     fireEvent.click(button)
     expect(api.fixPullRequest).not.toHaveBeenCalled()
   })
@@ -338,6 +338,28 @@ describe("My PRs", () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
+  it("enables auto-merge for pending checks without marking the PR merged", async () => {
+    vi.mocked(api.openPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1, { ci: "pending", pendingChecks: ["Tests"] })],
+    })
+    vi.mocked(api.mergePullRequest).mockResolvedValue({
+      action: "merge",
+      done: true,
+    })
+    mount()
+    await screen.findByText("Change 1")
+    await chooseMergeMethod(1, "Squash merge")
+    fireEvent.click(screen.getByRole("button", { name: "Enable auto-merge" }))
+    expect(
+      await screen.findByRole("button", { name: "Auto-merge enabled" })
+    ).toBeTruthy()
+    expect(screen.queryByText(/^Merged ·/)).toBeNull()
+    expect(toast.success).toHaveBeenCalledWith(
+      "Auto-merge enabled for acme/app#1"
+    )
+  })
+
   it("rolls a rejected merge back to a retry action", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
@@ -424,10 +446,10 @@ describe("My PRs", () => {
     expect(within(shown[2]!).queryByText("Conflicted")).toBeNull()
     const fixes = (card: HTMLElement) =>
       within(card)
-        .queryAllByRole("button", { name: /^Fix / })
+        .queryAllByRole("button", { name: "Fix" })
         .map((button) => button.textContent)
-    expect(fixes(shown[0]!)).toEqual(["Fix conflicts"])
-    expect(fixes(shown[1]!)).toEqual(["Fix checks"])
+    expect(fixes(shown[0]!)).toEqual(["Fix"])
+    expect(fixes(shown[1]!)).toEqual(["Fix"])
     expect(fixes(shown[2]!)).toEqual([])
   })
 
@@ -455,7 +477,7 @@ describe("My PRs", () => {
     await screen.findByText("Change 1")
     expect(api.openPullRequests).toHaveBeenCalledWith(
       "",
-      "updatedAt",
+      "createdAt",
       "desc",
       1,
       "mine"
@@ -492,6 +514,32 @@ describe("My PRs", () => {
         1,
         "mine"
       )
+    )
+  })
+
+  it("restores the user's last sort when returning without URL filters", async () => {
+    const first = mount()
+    await screen.findByText("Change 1")
+    fireEvent.click(screen.getByRole("button", { name: /Last updated/ }))
+    await waitFor(() =>
+      expect(api.openPullRequests).toHaveBeenLastCalledWith(
+        "",
+        "updatedAt",
+        "asc",
+        1,
+        "mine"
+      )
+    )
+    first.unmount()
+    vi.mocked(api.openPullRequests).mockClear()
+    mount()
+    await screen.findByText("Change 1")
+    expect(api.openPullRequests).toHaveBeenLastCalledWith(
+      "",
+      "updatedAt",
+      "asc",
+      1,
+      "mine"
     )
   })
 
@@ -537,7 +585,7 @@ describe("My PRs", () => {
     await waitFor(() =>
       expect(api.openPullRequests).toHaveBeenLastCalledWith(
         "",
-        "updatedAt",
+        "createdAt",
         "desc",
         2,
         "mine"
@@ -644,9 +692,7 @@ describe("My PRs", () => {
     const card = (await screen.findByText("Change 1")).closest("li")!
     expect(within(card).getByText("Failing")).toBeTruthy()
     expect(within(card).getByText("Browser E2E")).toBeTruthy()
-    expect(
-      within(card).getByRole("button", { name: "Fix checks" })
-    ).toBeTruthy()
+    expect(within(card).getByRole("button", { name: "Fix" })).toBeTruthy()
     expect(within(card).getByRole("button", { name: MERGE })).toBeTruthy()
   })
 
@@ -873,7 +919,7 @@ describe("My PRs", () => {
     await waitFor(() =>
       expect(api.openPullRequests).toHaveBeenLastCalledWith(
         "acme/other",
-        "updatedAt",
+        "createdAt",
         "desc",
         1,
         "mine"
@@ -884,7 +930,7 @@ describe("My PRs", () => {
     await waitFor(() =>
       expect(api.openPullRequests).toHaveBeenLastCalledWith(
         "acme/other,acme/app",
-        "updatedAt",
+        "createdAt",
         "desc",
         1,
         "mine"
@@ -998,25 +1044,20 @@ describe("My PRs", () => {
         })
     )
     mount()
-    fireEvent.keyDown(
-      await screen.findByRole("button", { name: "More fixes for PR #2" }),
-      { key: "Enter" }
-    )
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Fix checks" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Fix" }))
     expect(
       (
         (await screen.findByRole("button", {
-          name: "Check fix queued",
+          name: "Fix queued",
         })) as HTMLButtonElement
       ).disabled
     ).toBe(true)
     expect(api.fixPullRequest).toHaveBeenCalledWith(
-      expect.objectContaining(payload.pullRequests[0]!),
-      "checks"
+      expect.objectContaining(payload.pullRequests[0]!)
     )
     resolve({ thread_id: "fix-thread", already_running: false })
     const queued = await screen.findByRole("button", {
-      name: "Check fix queued",
+      name: "Fix queued",
     })
     expect((queued as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(queued)

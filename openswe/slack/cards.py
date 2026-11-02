@@ -14,17 +14,25 @@ from openswe.slack.client import (
     post_slack_thread_reply_with_ts,
 )
 from openswe.slack.http import SlackRequestError
+from openswe.source_context import SlackThreadRef
 from openswe.utils.dashboard_links import dashboard_thread_url
 
 logger = logging.getLogger(__name__)
 
 
-async def origin_footer(thread_id: str, location: tuple[str, str] | None = None) -> list[Block]:
+async def origin_footer(
+    thread_id: str,
+    location: tuple[str, str] | None = None,
+    *,
+    fallback: SlackThreadRef | None = None,
+) -> list[Block]:
     links: list[str] = []
     if url := dashboard_thread_url(thread_id):
         links.append(f"<{url}|Web thread>")
-    if location is None and thread_id:
-        source = await get_active_slack_thread(get_client(), thread_id)
+    if location is None and (thread_id or fallback):
+        source = await get_active_slack_thread(
+            get_client(), thread_id, fallback.dump() if fallback else None
+        )
         if source and source.get("channel_id") and source.get("thread_ts"):
             location = (source["channel_id"], source["thread_ts"])
     if location and (url := await get_slack_permalink(*location)):
@@ -53,7 +61,6 @@ async def repost_thread_card(
     broadcast: bool,
     agent_thread_id: str | None,
     adopt: Callable[[str], Awaitable[bool]],
-    login: str | None = None,
 ) -> bool:
     """Replace a thread card with a fresh reply, sent to the channel too if ``broadcast``.
 
@@ -69,7 +76,6 @@ async def repost_thread_card(
             blocks=block_payload(blocks),
             agent_thread_id=agent_thread_id,
             reply_broadcast=broadcast,
-            login=login,
         )
     except SlackRequestError as exc:
         logger.warning(

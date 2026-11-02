@@ -6,6 +6,11 @@ import { StopIcon } from "@phosphor-icons/react/dist/ssr/Stop"
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 
+// A neutral, high-contrast disc instead of Macaw's brand fill, whose disabled
+// state is a pale outlined ring that reads as a focus state.
+const PRIMARY_ACTION_CLASS =
+  "shrink-0 enabled:border-transparent enabled:bg-text-primary enabled:text-(--bg-surface-level-1) enabled:hover:border-transparent enabled:hover:bg-text-primary/85 disabled:border-transparent disabled:bg-surface-level-4 disabled:text-(--icon-disabled)"
+
 export interface ActiveRun {
   threadId: string
   /** Server-reported run state, independent of this client's event stream. */
@@ -23,6 +28,8 @@ export interface ComposerPrimaryActionsProps {
    * LangGraph assigns a thread id); inside one it replaces the source's stop.
    */
   onStop?: () => void | Promise<void>
+  /** False when this viewer may not stop the live run, such as a mirrored Claude Code session. */
+  stoppable?: boolean
   /** Set false while the composer owns Escape (an open command menu or model picker). */
   stopOnEscape?: boolean
   /** Label of the send button while a run is live. */
@@ -66,7 +73,8 @@ function SendButton({
 }: ComposerPrimaryActionsProps & { label?: string }) {
   return (
     <IconButton
-      className="shrink-0"
+      className={PRIMARY_ACTION_CLASS}
+      color="secondary"
       disabled={!canSubmit}
       icon={ArrowUpIcon}
       iconWeight="bold"
@@ -92,7 +100,8 @@ function StopButton({
 
   return (
     <IconButton
-      className="shrink-0"
+      className={PRIMARY_ACTION_CLASS}
+      color="secondary"
       disabled={disabled}
       icon={StopIcon}
       iconWeight="fill"
@@ -123,7 +132,8 @@ function ThreadPrimaryActions(props: ComposerPrimaryActionsProps) {
   }
 
   const running =
-    props.submitting || source.isRunning || props.activeRun?.running
+    props.stoppable !== false &&
+    (props.submitting || source.isRunning || props.activeRun?.running)
   useEscapeToStop(
     Boolean(running && props.canSubmit && props.stopOnEscape !== false),
     () => void handleStop()

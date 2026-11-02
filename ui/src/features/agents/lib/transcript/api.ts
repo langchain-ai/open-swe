@@ -15,6 +15,7 @@ import {
   newRequestId,
 } from "@/lib/dashboard-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
+import { readPreference as prefersSdkStream } from "@/lib/streamPreference"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type {
   StoredEvent,
@@ -22,6 +23,7 @@ import type {
   TranscriptSnapshot,
   TranscriptTurnPage,
 } from "./types"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 const timedFetch = withRequestTiming((input, init) => fetch(input, init))
 
@@ -177,6 +179,7 @@ export interface RunStartMessage {
   id: string
   text: string
   images?: ReadonlyArray<ImageChunk>
+  replies?: ReadonlyArray<PassageReply>
 }
 
 export interface RunStartCommand {
@@ -187,6 +190,7 @@ export interface RunStartCommand {
     input: { messages: Array<Record<string, unknown>> } | null
     config: { configurable: Record<string, unknown> }
     assistant_id: string
+    stream_resumable?: false
   }
 }
 
@@ -219,7 +223,7 @@ export function runStartCommand({
         ? {
             messages: [
               {
-                ...promptMessage(message.text, message.images),
+                ...promptMessage(message.text, message.images, message.replies),
                 id: message.id,
               },
             ],
@@ -227,6 +231,9 @@ export function runStartCommand({
         : null,
       config: { configurable: { ...configurable, thread_id: threadId } },
       assistant_id: AGENT_ASSISTANT_ID,
+      // Unless this browser streams threads through the SDK, it reads the
+      // transcript, so the server need keep no replay of the run.
+      ...(prefersSdkStream() ? {} : { stream_resumable: false as const }),
     },
   }
 }

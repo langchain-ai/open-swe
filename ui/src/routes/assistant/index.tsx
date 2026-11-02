@@ -1,5 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { Conversation } from "@/features/assistant/Conversation"
+import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/assistant/")({
@@ -19,5 +18,5 @@ export const Route = createFileRoute("/assistant/")({
 
 function AssistantHome() {
   const { repo, noRepo } = Route.useSearch()
-  return <Conversation initialRepo={noRepo ? null : repo} />
+  return <Navigate to="/agents" search={{ repo, noRepo }} replace />
 }

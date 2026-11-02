@@ -9,6 +9,7 @@ import type {
 } from "@/lib/api"
 import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
 import type {
+  AgentNote,
   DiffSide,
   ProposedComment,
 } from "@/features/reviews/lib/chatDiffActions"
@@ -53,6 +54,7 @@ export type Note =
   | { kind: "thread"; id: number }
   | { kind: "pending"; id: number }
   | { kind: "draft"; id: string }
+  | { kind: "agent-note"; id: string }
   | { kind: "composer" }
 
 type NoteAnnotation = DiffLineAnnotation<Note>
@@ -245,6 +247,7 @@ export interface NoteSources {
   threads: ReadonlyArray<ReviewThread>
   pending: ReadonlyArray<PendingReviewComment>
   drafts: ReadonlyArray<ProposedComment>
+  agentNotes: ReadonlyArray<AgentNote>
   composer: CommentDraftTarget | null
 }
 
@@ -290,6 +293,12 @@ export function entryNotes(
         ? at(draft.range.side, draft.range.endLine)
         : null
     if (spot) notes.push({ ...spot, metadata: { kind: "draft", id: draft.id } })
+  }
+  for (const note of sources.agentNotes) {
+    const spot =
+      note.range.file === path ? at(note.range.side, note.range.endLine) : null
+    if (spot)
+      notes.push({ ...spot, metadata: { kind: "agent-note", id: note.id } })
   }
   if (sources.composer?.path === path) {
     const { hi, side } = rangeBounds(sources.composer.range)

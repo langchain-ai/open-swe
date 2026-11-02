@@ -18,6 +18,13 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* A passage being replied to keeps its selection look after focus moves to the
+   reply field (SelectionReply). */
+::highlight(selection-reply) {
+    background-color: Highlight;
+    color: HighlightText;
+}
+
 /* A class, not `body:has(.version-mismatch-banner)`: Chrome restyles the whole
    document for a `:has()` on `body` after every DOM change. */
 body.version-mismatch {
@@ -27,6 +34,13 @@ body.version-mismatch {
     @media (width < 48rem) {
         [data-sidebar-frame] { top: 2.5rem; }
     }
+}
+
+/* Macaw's stack plus `system-ui`. On Linux without any named family, generic
+   `sans-serif` can resolve to nothing, leaving Noto Color Emoji as the first
+   installed font, which then draws every space and digit. */
+@theme {
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
 
 @theme inline {
@@ -74,7 +88,25 @@ body.version-mismatch {
     --color-primary-foreground: var(--text-brand-on-fill);
 }
 
+@theme inline {
+    --color-user-message: var(--bg-user-message);
+}
+
+/* Macaw's dark canvas (neutral-25) is near-black and harsh behind long
+   transcripts. Lift it just above the sidebar so the rail reads as recessed,
+   and raise elevated surfaces with it so the composer still sits on top.
+   User bubbles sit a step above the composer so they read as raised too. */
+html.dark,
+.dark[data-theme-scope] {
+    --bg-surface-level-1: color-mix(in oklch, var(--neutral-50) 55%, var(--neutral-100));
+    --bg-surface-level-1-hover: var(--neutral-100);
+    --bg-elevated: var(--neutral-100);
+    --bg-elevated-hover: color-mix(in oklch, var(--neutral-100), var(--neutral-200));
+    --bg-user-message: color-mix(in oklch, var(--neutral-100), var(--neutral-200));
+}
+
 :root {
+    --bg-user-message: var(--bg-surface-level-2);
     /* Compact control geometry — keep semantic so chat controls, menus, and
        tooltips cannot quietly drift apart. */
     --control-radius: var(--radius-md);
@@ -84,6 +116,12 @@ body.version-mismatch {
 }
 
 @layer utilities {
+  /* Placeholder instructions need readable contrast on every field surface. */
+  input:placeholder-shown::placeholder,
+  textarea:placeholder-shown::placeholder {
+    color: var(--text-secondary);
+  }
+
   /* Menus are opaque: a translucent tint let page content bleed through. */
   .dropdown-glass {
     background: var(--dropdown-glass-background, var(--bg-elevated));

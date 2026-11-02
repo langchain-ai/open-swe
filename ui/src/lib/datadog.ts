@@ -1,6 +1,7 @@
 import type { RumInitConfiguration } from "@datadog/browser-rum"
 
-import { dashboardApiBase } from "./api-base"
+import { TelemetryConfig } from "./telemetry-config"
+import { stripUrlDetails } from "./telemetry-url"
 
 type PublicEnv = Record<string, string | boolean | undefined>
 type RumClient = {
@@ -73,54 +74,6 @@ export function subscribeToDatadogInitialization(
   return () => initializationListeners.delete(listener)
 }
 
-function templateDashboardPath(pathname: string): string {
-  if (/^\/agents\/reviews\/[^/]+\/[^/]+\/[^/]+\/?$/.test(pathname))
-    return "/agents/reviews/:owner/:repo/:number"
-  if (/^\/agents\/automations\/(?!new\/?$)[^/]+\/?$/.test(pathname))
-    return "/agents/automations/:scheduleId"
-  if (/^\/agents\/[^/]+\/plan\/?$/.test(pathname))
-    return "/agents/:threadId/plan"
-  if (
-    /^\/agents\/[^/]+\/?$/.test(pathname) &&
-    !/^\/agents\/(automations|instructions|reviews|sandbox|skills|threads|workspaces)\/?$/.test(
-      pathname
-    )
-  )
-    return "/agents/:threadId"
-  if (/^\/review\/repositories\/[^/]+\/?$/.test(pathname))
-    return "/review/repositories/:owner"
-  if (/^\/[^/]+\/[^/]+\/pull\/[^/]+\/?$/.test(pathname))
-    return "/:owner/:repo/pull/:number"
-  return pathname
-}
-
-function stripUrlDetails(url: string, dashboardOrigin?: string): string {
-  const withoutDetails = url.split(/[?#]/, 1)[0] ?? ""
-  if (withoutDetails.startsWith("/"))
-    return withoutDetails.startsWith("//")
-      ? stripAbsoluteUrlDetails(withoutDetails, dashboardOrigin)
-      : templateDashboardPath(withoutDetails)
-  if (!/^https?:\/\//i.test(withoutDetails)) return withoutDetails
-  return stripAbsoluteUrlDetails(withoutDetails, dashboardOrigin)
-}
-
-function stripAbsoluteUrlDetails(
-  url: string,
-  dashboardOrigin?: string
-): string {
-  try {
-    const parsed = new URL(url, dashboardOrigin)
-    const pathname =
-      parsed.origin === dashboardOrigin
-        ? templateDashboardPath(parsed.pathname)
-        : parsed.pathname
-    const prefix = url.startsWith("//") ? `//${parsed.host}` : parsed.origin
-    return `${prefix}${pathname}`
-  } catch {
-    return url
-  }
-}
-
 function stripEventUrlDetails(
   value: unknown,
   dashboardOrigin?: string,
@@ -170,24 +123,7 @@ export async function initializeDatadogRum(
   const version = envString(env, "VITE_DATADOG_VERSION")
   let environment: string
   try {
-    const response = await fetch(
-      `${dashboardApiBase()}/dashboard/api/analytics/config`,
-      { cache: "no-store", signal: AbortSignal.timeout(5000) }
-    )
-    if (!response.ok) {
-      throw new Error(`Telemetry configuration: ${response.status}`)
-    }
-    const config: unknown = await response.json()
-    if (
-      typeof config !== "object" ||
-      config === null ||
-      !("environment" in config) ||
-      typeof config.environment !== "string" ||
-      !config.environment.trim()
-    ) {
-      throw new Error("Telemetry environment is missing")
-    }
-    environment = config.environment
+    environment = (await TelemetryConfig.load()).environment
   } catch (error) {
     console.warn(
       "Datadog initialization skipped: telemetry configuration unavailable",

@@ -1,8 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { Conversation } from "@/features/assistant/Conversation"
-import { pageTitle } from "@/lib/pageTitle"
+import { Navigate, createFileRoute } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/assistant/$threadId")({
-  component: Conversation,
-  head: () => ({ meta: [{ title: pageTitle("Assistant") }] }),
+  component: AssistantThreadRedirect,
 })
+
+function AssistantThreadRedirect() {
+  const { threadId } = Route.useParams()
+  return <Navigate to="/agents/$threadId" params={{ threadId }} replace />
+}

@@ -1,15 +1,27 @@
+import { Checkbox } from "@langchain/macaw-components/Checkbox"
+import { Button } from "@langchain/macaw-components/Button"
 import {
   CaretDownIcon,
   CheckIcon,
   MagnifyingGlassRegularIcon,
 } from "@langchain/macaw-components/icons"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Input } from "@langchain/macaw-components/Input"
 import { ProgressBar } from "@langchain/macaw-components/ProgressBar"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useQuery } from "@tanstack/react-query"
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { FolderSimpleIcon } from "@phosphor-icons/react/dist/ssr/FolderSimple"
+import { SquareSplitVerticalIcon } from "@phosphor-icons/react/dist/ssr/SquareSplitVertical"
 
 import type { ReviewDiffFile, ReviewWalkthrough } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -100,11 +112,13 @@ function buildTree(files: ReadonlyArray<ReviewDiffFile>): Array<TreeNode> {
   return compacted.name ? [compacted] : compacted.children
 }
 
-/** The left rail: every file with what's been read and what needs attention, or the walkthrough's steps. */
+/** The left rail: the walkthrough's steps and every file with what's been read and what needs attention, behind tabs or stacked. */
 export function Navigator({ pr }: { pr: PullRequestRef }) {
   const files = useQuery(reviewQueries.diff(pr)).data?.files
   const walkthrough = useQuery(reviewQueries.detail(pr)).data?.walkthrough
   const order = useReviewPage((state) => state.order)
+  const stacked = useReviewPage((state) => state.navigatorLayout === "stacked")
+  const toggleLayout = useReviewPage((state) => state.toggleNavigatorLayout)
   const viewedCount = useReviewPage(
     (state) => files?.filter((file) => state.viewed.has(file.path)).length ?? 0
   )
@@ -115,11 +129,32 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
     <nav aria-label="Files" className="flex h-full min-h-0 flex-col">
       <div className="flex flex-col gap-space-2 px-space-3 pt-space-3 pb-space-2">
         {steps > 0 && (
-          <ReadingOrderTabs
-            steps={steps}
-            files={files?.length}
-            className="w-full [&>*]:flex-1"
-          />
+          <div className="flex items-center gap-space-2">
+            {stacked ? (
+              <span className="flex-1 text-xs text-secondary">
+                Walkthrough and files
+              </span>
+            ) : (
+              <ReadingOrderTabs
+                steps={steps}
+                files={files?.length}
+                className="flex-1 [&>*]:flex-1 [&>*]:whitespace-nowrap"
+              />
+            )}
+            <IconButton
+              icon={SquareSplitVerticalIcon}
+              label={
+                stacked
+                  ? "Show the walkthrough and files as tabs"
+                  : "Show the walkthrough and files together"
+              }
+              aria-pressed={stacked}
+              size="sm"
+              variant={stacked ? "outlined" : "plain"}
+              color={stacked ? "primary" : "secondary"}
+              onClick={toggleLayout}
+            />
+          </div>
         )}
         {files && (
           <>
@@ -147,12 +182,54 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
             />
           ))}
         </div>
+      ) : walkthrough && steps > 0 && stacked ? (
+        <>
+          <NavigatorSection
+            title="Walkthrough"
+            count={steps}
+            className="max-h-1/2"
+          >
+            <StepList files={files} walkthrough={walkthrough} />
+          </NavigatorSection>
+          <NavigatorSection
+            title="Files changed"
+            count={files.length}
+            className="flex-1"
+          >
+            <FileTree files={files} markers={markers} />
+          </NavigatorSection>
+        </>
       ) : order === "guide" && walkthrough && steps > 0 ? (
         <StepList files={files} walkthrough={walkthrough} />
       ) : (
         <FileTree files={files} markers={markers} />
       )}
     </nav>
+  )
+}
+
+function NavigatorSection({
+  title,
+  count,
+  className,
+  children,
+}: {
+  title: string
+  count: number
+  className: string
+  children: ReactNode
+}) {
+  return (
+    <section
+      aria-label={title}
+      className={cn("flex min-h-0 flex-col border-t border-default", className)}
+    >
+      <h3 className="flex items-center px-space-4 py-space-1 text-xxs font-medium text-tertiary uppercase">
+        {title}
+        <span className="ml-auto tabular-nums">{count}</span>
+      </h3>
+      {children}
+    </section>
   )
 }
 
@@ -175,6 +252,7 @@ function StepList({
   walkthrough: ReviewWalkthrough
 }) {
   const jumpTo = useReviewPage((state) => state.jumpTo)
+  const order = useReviewPage((state) => state.order)
   const markStepRead = useReviewPage((state) => state.markStepRead)
   const current = useReviewPage(activeStep)
   const viewed = useReviewPage((state) => state.viewed)
@@ -214,6 +292,7 @@ function StepList({
           (sum, entry) => sum + entry.deletions,
           0
         )
+        const progress = stepProgress(entries, viewed)
         return (
           <li
             key={step.index}
@@ -222,11 +301,22 @@ function StepList({
               active && "bg-selected"
             )}
           >
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label={`Step ${step.index}: ${step.title}, ${progress}, ${plural(additions, "addition")}, ${plural(deletions, "deletion")}`}
               type="button"
               aria-current={active ? "step" : undefined}
-              onClick={() => jumpTo({ kind: "entry", id: entries[0]!.id })}
-              className="flex min-w-0 flex-1 items-start gap-space-2 px-space-2 py-space-1 text-left text-xs leading-5"
+              onClick={() =>
+                // Stacked beside a diff in file order, guide entry ids aren't in the diff.
+                jumpTo(
+                  order === "guide"
+                    ? { kind: "entry", id: entries[0]!.id }
+                    : { kind: "file", path: entries[0]!.file.path }
+                )
+              }
+              className="h-auto min-w-0 flex-1 items-start justify-start gap-space-2 px-space-2 py-space-1 text-left leading-5 whitespace-normal focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
             >
               <StepBadge
                 index={step.index}
@@ -243,7 +333,7 @@ function StepList({
               >
                 <InlineCode text={step.title} />
                 <span className="flex flex-wrap gap-x-space-2 text-xxs text-secondary tabular-nums">
-                  {stepProgress(entries, viewed)}
+                  {progress}
                   <span className="font-mono">
                     {additions > 0 && (
                       <span className="text-success-secondary">
@@ -256,27 +346,30 @@ function StepList({
                   </span>
                 </span>
               </span>
-            </button>
-            <button
-              type="button"
-              role="checkbox"
-              aria-checked={read}
-              aria-label={`Mark step ${step.index} read`}
-              title={read ? "Mark step unread" : "Mark step read"}
-              onClick={() => markStepRead(step.index)}
-              className={cn(
-                "mt-1.5 mr-space-2 flex size-4 shrink-0 items-center justify-center rounded-full border transition-opacity focus-visible:opacity-100",
-                read
-                  ? "border-brand bg-brand text-brand-on-fill opacity-0 group-hover/step:opacity-100"
-                  : offered
-                    ? "border-brand text-brand-primary opacity-70 hover:bg-brand-subtle hover:opacity-100"
-                    : "border-strong text-secondary opacity-0 group-hover/step:opacity-100"
+            </Button>
+            <span className="relative mt-1.5 mr-space-2 flex shrink-0">
+              <Checkbox
+                checked={read}
+                aria-label={`Mark step ${step.index} read`}
+                title={read ? "Mark step unread" : "Mark step read"}
+                onCheckedChange={() => markStepRead(step.index)}
+                size="sm"
+                className={cn(
+                  "peer transition-opacity focus-visible:opacity-100",
+                  offered
+                    ? "border-brand opacity-70 hover:opacity-100"
+                    : "opacity-0 group-hover/step:opacity-100"
+                )}
+              />
+              {/* Radix draws no check while unchecked; the faint one suggests marking this step read. */}
+              {offered && !read && (
+                <CheckIcon
+                  aria-hidden="true"
+                  weight="bold"
+                  className="pointer-events-none absolute inset-0 m-auto size-3 text-brand-primary opacity-70 peer-hover:opacity-100"
+                />
               )}
-            >
-              {(read || offered) && (
-                <CheckIcon weight="bold" className="size-2.5" />
-              )}
-            </button>
+            </span>
           </li>
         )
       })}
@@ -383,12 +476,16 @@ const TreeRow = memo(function TreeRow({
     )
   return (
     <li>
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label={node.name}
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
         style={{ paddingLeft: 6 + depth * 12 }}
-        className="flex h-6 w-full items-center gap-space-1 rounded-md pr-space-2 text-left text-xs text-secondary hover:bg-surface-level-1-hover"
+        className="h-6 w-full justify-start gap-space-1 pr-space-2 text-left whitespace-normal text-secondary hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
       >
         <CaretDownIcon
           className={cn(
@@ -398,7 +495,7 @@ const TreeRow = memo(function TreeRow({
         />
         <FolderSimpleIcon className="size-3.5 shrink-0" weight="regular" />
         <span className="truncate">{node.name}</span>
-      </button>
+      </Button>
       {open && (
         <ul>
           {node.children.map((child) => (
@@ -450,7 +547,10 @@ function FileRow({
     .join(", ")
   return (
     <li ref={ref}>
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
         type="button"
         aria-current={active ? "location" : undefined}
         aria-label={description}
@@ -460,7 +560,9 @@ function FileRow({
         title={file.path}
         style={{ paddingLeft: 22 + depth * 12 }}
         className={cn(
-          "relative flex h-6 w-full items-center gap-space-2 rounded-md pr-space-2 text-left text-xs hover:bg-surface-level-1-hover",
+          "focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+          "justify-start",
+          "relative h-6 w-full gap-space-2 pr-space-2 text-left hover:bg-surface-level-1-hover",
           active
             ? "bg-selected text-primary"
             : viewed
@@ -511,7 +613,7 @@ function FileRow({
             className="size-3 shrink-0 text-brand-primary"
           />
         )}
-      </button>
+      </Button>
     </li>
   )
 }

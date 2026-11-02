@@ -7,6 +7,7 @@ import {
 } from "react"
 
 import type {
+  AgentNote,
   ProposedComment,
   ProposedReview,
   ReviewEvent,
@@ -30,10 +31,17 @@ export interface ReviewDraft {
   outcome: DraftOutcome | null
 }
 
+export interface NoteDraft {
+  note: AgentNote
+  /** Only "discarded": the viewer closed the note. */
+  outcome: DraftOutcome | null
+}
+
 interface ChatDrafts {
   comments: ReadonlyArray<CommentDraft>
   reviews: ReadonlyArray<ReviewDraft>
-  register: (proposal: ProposedComment | ProposedReview) => void
+  notes: ReadonlyArray<NoteDraft>
+  register: (proposal: ProposedComment | ProposedReview | AgentNote) => void
   edit: (id: string, change: { body?: string; event?: ReviewEvent }) => void
   settle: (id: string, outcome: DraftOutcome) => void
   /** Returns a comment draft to editable, e.g. after its pending comment was removed. */
@@ -72,7 +80,7 @@ function writeOutcome(id: string, outcome: DraftOutcome) {
   }
 }
 
-/** Chat-drafted comments and reviews, shared by the chat and the diff so both show one draft. */
+/** Chat-drafted comments and reviews, and the agent's notes, shared by the chat and the diff so both show one. */
 export function ChatDraftsProvider({
   children,
 }: {
@@ -80,37 +88,55 @@ export function ChatDraftsProvider({
 }) {
   const [comments, setComments] = useState<Record<string, CommentDraft>>({})
   const [reviews, setReviews] = useState<Record<string, ReviewDraft>>({})
+  const [notes, setNotes] = useState<Record<string, NoteDraft>>({})
 
-  const register = useCallback((proposal: ProposedComment | ProposedReview) => {
-    if (proposal.kind === "comment") {
-      setComments((prev) =>
+  const register = useCallback(
+    (proposal: ProposedComment | ProposedReview | AgentNote) => {
+      if (proposal.kind === "note") {
+        setNotes((prev) =>
+          prev[proposal.id]
+            ? prev
+            : {
+                ...prev,
+                [proposal.id]: {
+                  note: proposal,
+                  outcome: readOutcome(proposal.id),
+                },
+              }
+        )
+        return
+      }
+      if (proposal.kind === "comment") {
+        setComments((prev) =>
+          prev[proposal.id]
+            ? prev
+            : {
+                ...prev,
+                [proposal.id]: {
+                  proposal,
+                  body: proposal.body,
+                  outcome: readOutcome(proposal.id),
+                },
+              }
+        )
+        return
+      }
+      setReviews((prev) =>
         prev[proposal.id]
           ? prev
           : {
               ...prev,
               [proposal.id]: {
                 proposal,
+                event: proposal.event,
                 body: proposal.body,
                 outcome: readOutcome(proposal.id),
               },
             }
       )
-      return
-    }
-    setReviews((prev) =>
-      prev[proposal.id]
-        ? prev
-        : {
-            ...prev,
-            [proposal.id]: {
-              proposal,
-              event: proposal.event,
-              body: proposal.body,
-              outcome: readOutcome(proposal.id),
-            },
-          }
-    )
-  }, [])
+    },
+    []
+  )
 
   const edit = useCallback(
     (id: string, change: { body?: string; event?: ReviewEvent }) => {
@@ -134,6 +160,9 @@ export function ChatDraftsProvider({
     setReviews((prev) =>
       prev[id] ? { ...prev, [id]: { ...prev[id], outcome } } : prev
     )
+    setNotes((prev) =>
+      prev[id] ? { ...prev, [id]: { ...prev[id], outcome } } : prev
+    )
   }, [])
 
   const reopen = useCallback((id: string) => {
@@ -149,12 +178,13 @@ export function ChatDraftsProvider({
     () => ({
       comments: Object.values(comments),
       reviews: Object.values(reviews),
+      notes: Object.values(notes),
       register,
       edit,
       settle,
       reopen,
     }),
-    [comments, reviews, register, edit, settle, reopen]
+    [comments, reviews, notes, register, edit, settle, reopen]
   )
   return (
     <ChatDraftsContext.Provider value={value}>

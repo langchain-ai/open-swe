@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode, urlparse
 
 import httpx2
+from fastapi import HTTPException
 
 from openswe.config import ENV
 from openswe.dashboard.oauth import pkce_s256_challenge
@@ -259,7 +260,13 @@ async def complete_langsmith_oauth(login: str, nonce_hash: str, code: str) -> No
 
 async def langsmith_status(login: str) -> dict[str, object]:
     available = langsmith_oauth_configured()
-    credential = await load_credential(LANGSMITH_KEY, login) if available else None
+    if available and login.startswith("user:"):
+        from openswe.dashboard.langsmith_login import LangSmithLogin
+
+        await LangSmithLogin().access_token(login)
+        credential = await load_credential("langsmith_login", login)
+    else:
+        credential = await load_credential(LANGSMITH_KEY, login) if available else None
     return {
         "available": available,
         "connected": credential is not None,
@@ -271,6 +278,8 @@ async def langsmith_status(login: str) -> dict[str, object]:
 
 
 async def disconnect_langsmith(login: str) -> None:
+    if login.startswith("user:"):
+        raise HTTPException(400, "Sign out to disconnect your LangSmith login")
     await delete_credential(LANGSMITH_KEY, login)
 
 
@@ -282,6 +291,10 @@ async def langsmith_access_token(login: str) -> str | None:
     """The user's current LangSmith access token, refreshed when near expiry; None if unlinked."""
     if not langsmith_oauth_configured():
         return None
+    if login.startswith("user:"):
+        from openswe.dashboard.langsmith_login import LangSmithLogin
+
+        return await LangSmithLogin().access_token(login)
     credential = await load_credential(LANGSMITH_KEY, login)
     if credential is None:
         return None

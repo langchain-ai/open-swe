@@ -4,6 +4,7 @@ import pytest
 
 from openswe import tools
 from openswe.run_config import RunConfig
+from openswe.slack.channels import SlackChannel
 from openswe.users import User
 from tests.support.slack_api import SlackAPI
 
@@ -12,6 +13,16 @@ async def test_list_channels_keeps_cursor_on_empty_page(slack_api: SlackAPI) -> 
     slack_api.respond({"ok": True, "channels": [], "response_metadata": {"next_cursor": "more"}})
     result = await tools.slack_list_channels()
     assert result == {"success": True, "channels": [], "next_cursor": "more"}
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_list_channels_populates_display_name_directory(slack_api: SlackAPI) -> None:
+    slack_api.respond(
+        {"ok": True, "channels": [{"id": "C123", "name": "engineering", "is_private": False}]}
+    )
+    result = await tools.slack_list_channels()
+    assert result["success"] is True
+    assert await SlackChannel.name_for("C123") == "engineering"
 
 
 @pytest.fixture

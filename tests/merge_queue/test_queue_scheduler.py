@@ -24,7 +24,7 @@ async def test_stalled_admission_does_not_consume_reconciliation_window(
     request = Mock(
         spec=MergeRequest, state="queued", last_checked_at=None, created_at=datetime.now(UTC)
     )
-    queue = Mock(spec=MergeQueue, id=uuid7(), target_branch="main")
+    queue = Mock(spec=MergeQueue, id=uuid7(), target_branch="main", mode="custom")
     queue.repository_name = AsyncMock(return_value="acme/widgets")
     queue.renew = AsyncMock()
     queue.entries = AsyncMock(return_value=[QueueEntry(request, 1)])
@@ -64,7 +64,7 @@ async def test_cleanup_reuses_one_sandbox_and_preserves_unfinished_refs(scenario
     batches = [
         Mock(spec=Batch, id=uuid7(), candidate=candidate.model_dump(mode="json")) for _ in range(3)
     ]
-    queue = Mock(spec=MergeQueue, id=uuid7(), target_branch="main")
+    queue = Mock(spec=MergeQueue, id=uuid7(), target_branch="main", mode="custom")
     queue.repository_name = AsyncMock(return_value="acme/widgets")
     queue.renew = AsyncMock()
     queue.entries = AsyncMock(return_value=[])

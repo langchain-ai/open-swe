@@ -196,6 +196,64 @@ async def get_langsmith_trace_url(thread_id: str, project_name: str | None = Non
     return f"{project_url}/t/{thread_id}" if project_url else None
 
 
+async def get_langsmith_error_url(
+    thread_id: str, invocation_id: str | None, terminal_error: str | None = None
+) -> str | None:
+    """Follow the terminal error's unique parent chain, otherwise link to its root."""
+    thread_url = await get_langsmith_trace_url(thread_id)
+    client = _build_langsmith_client()
+    if not thread_url or not invocation_id or client is None:
+        return thread_url
+    try:
+        async with asyncio.timeout(5):
+            project_id = await _resolve_project_id_by_name(tracing_project())
+            if not project_id:
+                return thread_url
+            lookup_start = await _project_lookup_start(project_id)
+            for field in ("invocation_id", "prepare_run_id"):
+                runs = client.runs.query(
+                    project_ids=[project_id],
+                    has_error=True,
+                    filter=(
+                        f"and({_langsmith_metadata_filter('thread_id', thread_id)}, "
+                        f"{_langsmith_metadata_filter(field, invocation_id)})"
+                    ),
+                    selects=["ID", "DOTTED_ORDER", "ERROR"],
+                    min_start_time=lookup_start,
+                )
+                failed_runs = [run async for run in runs]
+                if not failed_runs:
+                    continue
+                roots = [
+                    run for run in failed_runs if run.dotted_order and "." not in run.dotted_order
+                ]
+                if len(roots) != 1:
+                    return thread_url
+                root = failed_run = roots[0]
+                if terminal_error and root.error and terminal_error in root.error:
+                    signature = root.error.splitlines()[0]
+                    while children := [
+                        run
+                        for run in failed_runs
+                        if run.dotted_order
+                        and run.dotted_order.rpartition(".")[0] == failed_run.dotted_order
+                        and run.error
+                        and run.error.splitlines()[0] == signature
+                    ]:
+                        if len(children) != 1:
+                            failed_run = root
+                            break
+                        failed_run = children[0]
+                return f"{thread_url.rsplit('/t/', 1)[0]}/r/{failed_run.id}"
+    except Exception:
+        logger.warning(
+            "Could not resolve the failing LangSmith span",
+            extra={"thread_id": thread_id, "invocation_id": invocation_id},
+            exc_info=True,
+        )
+    return thread_url
+
+
 def _langsmith_web_origins() -> set[str]:
     values = ["https://smith.langchain.com", langsmith_host_url()]
     origins: set[str] = set()

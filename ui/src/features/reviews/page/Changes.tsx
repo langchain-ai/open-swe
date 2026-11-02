@@ -61,6 +61,8 @@ import {
   stepItemId,
   WalkthroughEnd,
 } from "./StepSection"
+import { FindBar } from "./FindBar"
+import { FIND_HIGHLIGHT_CSS, useFindHighlights } from "./findHighlights"
 import { useDiffKeys } from "./useDiffKeys"
 
 type Item = CodeViewItem<Note>
@@ -157,6 +159,8 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       ? "wrap"
       : storedOverflow
   const handle = useRef<CodeViewHandle<Note>>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const paintFind = useFindHighlights(containerRef)
   const askAboutLines = useAskAboutLines(pr)
   const markers = useFileMarkers(pr)
 
@@ -185,6 +189,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   )
   useEffect(() => setEntryOrder(entries), [entries, setEntryOrder])
   const draftComments = drafts?.comments
+  const agentNotes = drafts?.notes
   const sources = useMemo<NoteSources>(
     () => ({
       findings: detail?.findings ?? [],
@@ -193,6 +198,9 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       drafts: (draftComments ?? [])
         .filter((draft) => !draft.outcome)
         .map((draft) => draft.proposal),
+      agentNotes: (agentNotes ?? [])
+        .filter((draft) => !draft.outcome)
+        .map((draft) => draft.note),
       composer,
     }),
     [
@@ -200,6 +208,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       conversation?.threads,
       pending.comments,
       draftComments,
+      agentNotes,
       composer,
     ]
   )
@@ -258,7 +267,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       ...base,
       // FileHeader draws its own rule; rows are pinned to the gutter's height so measured = laid out.
       // Step items are the only plain files: no gutter, no surface, their placeholder line unseen.
-      unsafeCSS: `${base.unsafeCSS}[data-diffs-header]{border-bottom:0 !important}pre[data-file],pre[data-file] :is([data-gutter],[data-content],[data-line-annotation],[data-line]){--diffs-line-bg:transparent;background:transparent !important}pre[data-file] [data-code]{grid-template-columns:0 minmax(0,1fr)}pre[data-file] [data-gutter]{visibility:hidden;overflow:hidden}pre[data-file] [data-line]{visibility:hidden}pre[data-file] [data-annotation-content]{left:0;width:auto}[data-line-annotation],[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-surface)}[data-gutter-buffer="annotation"]{border-right-color:transparent}[data-code],[data-diff-type=split]:is([data-overflow=wrap],[data-dehydrated]){padding-top:${DIFF_VIRTUAL_METRICS.spacing}px}${
+      unsafeCSS: `${base.unsafeCSS}${FIND_HIGHLIGHT_CSS}[data-diffs-header]{border-bottom:0 !important}pre[data-file],pre[data-file] :is([data-gutter],[data-content],[data-line-annotation],[data-line]){--diffs-line-bg:transparent;background:transparent !important}pre[data-file] [data-code]{grid-template-columns:0 minmax(0,1fr)}pre[data-file] [data-gutter]{visibility:hidden;overflow:hidden}pre[data-file] [data-line]{visibility:hidden}pre[data-file] [data-annotation-content]{left:0;width:auto}[data-line-annotation],[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-surface)}[data-gutter-buffer="annotation"]{border-right-color:transparent}[data-code],[data-diff-type=split]:is([data-overflow=wrap],[data-dehydrated]){padding-top:${DIFF_VIRTUAL_METRICS.spacing}px}${
         overflow === "scroll"
           ? `[data-line]{height:${DIFF_ROW_HEIGHT}px !important;min-height:${DIFF_ROW_HEIGHT}px !important;max-height:${DIFF_ROW_HEIGHT}px !important;line-height:${DIFF_ROW_HEIGHT}px !important}`
           : ""
@@ -278,6 +287,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       loadDiffFiles,
       // Hunks highlighted alone lose multi-line string state; hydrate once shown.
       onPostRender: (_node, instance, phase) => {
+        paintFind()
         if (phase === "unmount") return void hydrating.delete(instance)
         if (instance.options.collapsed || hydrating.has(instance)) return
         const loads = instance as unknown as Partial<LoadsFiles>
@@ -295,7 +305,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
           commentOn(context.item.id, range)
       },
     }
-  }, [diffStyle, overflow, theme, loadDiffFiles, commentOn])
+  }, [diffStyle, overflow, theme, loadDiffFiles, commentOn, paintFind])
 
   const renderHeader = useCallback(
     () => (
@@ -436,13 +446,13 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
           }
         }
         setActive(active, atEnd)
+        paintFind()
       })
     },
-    [entryMap, stepItems, setActive]
+    [entryMap, stepItems, setActive, paintFind]
   )
 
   const [selection, setSelection] = useState<TextSelection | null>(null)
-  const containerRef = useRef<HTMLDivElement | null>(null)
   // Notes size themselves to the visible pane, not to the widest code line.
   useEffect(() => {
     const node = containerRef.current
@@ -520,6 +530,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
                 onScroll={onScroll}
               />
               <ReadNudge groups={stepGroups} />
+              <FindBar />
               {diff.isError && (
                 <p
                   role="alert"

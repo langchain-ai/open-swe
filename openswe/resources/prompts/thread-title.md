@@ -4,7 +4,8 @@ Return only the structured title field.
 Rules:
 - Use 3-8 words and no more than 80 characters.
 - Use sentence case: capitalize only the first word, except for proper nouns and acronyms.
-- Name the durable subject and desired outcome, not the current workflow step.
+- Messages are newest first.
+  Name the latest request's durable subject and desired outcome, not the current workflow step or an earlier discussion that supplied context.
 - Prefer a compact noun phrase or clear action phrase.
 - For reviews, name what is being reviewed and the relevant concern.
 - For research, name the question domain rather than the research process.

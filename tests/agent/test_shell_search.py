@@ -1,50 +1,51 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
 from openswe import reviewer
 from openswe.dashboard.workspace_settings import WorkspaceSettings
-from openswe.middleware.exclude_tools import ExcludeToolsMiddleware
 from openswe.review_scout import graph as scout
-from openswe.reviewer import _reviewer_subagent
+from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
-from openswe.server import _general_purpose_subagent
-from tests.agent.test_agent_assembly_context import (
-    _base_config,
-    _capture_create_deep_agent_kwargs,
-)
+from tests.agent.test_agent_assembly_context import _agent_catalog, _base_config
 from tests.agent.test_agent_assembly_context import saved_thread_scope as saved_thread_scope
 
+_PLANNERS = ["main", "reviewer", "review-scout"]
 
-@pytest.mark.parametrize(
-    "kind", ["main", "reviewer", "main-subagent", "reviewer-subagent", "review-scout"]
-)
-async def test_shell_agent_factories_apply_shared_search_policy(
+
+async def _planned(kind: str) -> ToolSurface:
+    if kind == "main":
+        planned = (await _agent_catalog())["surface"]
+        assert isinstance(planned, ToolSurface)
+        return planned
+    module = reviewer if kind == "reviewer" else scout
+    plan = reviewer.reviewer_catalog if kind == "reviewer" else scout.review_scout_catalog
+    surface = ToolSurface()
+    with patch.object(
+        module, "cached_workspace_settings", AsyncMock(return_value=WorkspaceSettings({}))
+    ):
+        await plan(_base_config(), surface)
+    return surface
+
+
+async def test_the_agent_applies_the_shared_search_policy(
+    saved_thread_scope: dict[str, object],
+) -> None:
+    # The reviewer's and the scout's are MDA's, the same for each of their runs (``rt/kinds.py``).
+    surface = await _planned("main")
+    assert set(surface.loop.hidden_tools) >= SHELL_SEARCH_EXCLUDED_TOOLS
+
+
+@pytest.mark.parametrize("kind", _PLANNERS)
+async def test_a_planned_run_leaves_the_file_and_shell_tools_to_mda(
     kind: str, saved_thread_scope: dict[str, object]
 ) -> None:
-    model = FakeListChatModel(responses=["Done."])
-    if kind == "main":
-        assembled = await _capture_create_deep_agent_kwargs()
-    elif kind.endswith("subagent"):
-        assembled = (
-            _general_purpose_subagent(model, tools=[])
-            if kind == "main-subagent"
-            else _reviewer_subagent(model)
-        )
-    else:
-        module = reviewer if kind == "reviewer" else scout
-        factory = reviewer.get_reviewer_agent if kind == "reviewer" else scout.get_review_scout
-        with (
-            patch.object(module, "create_deep_agent", return_value=MagicMock()) as create,
-            patch.object(module, "_make_model_or_defer", return_value=model),
-            patch.object(
-                module, "cached_workspace_settings", AsyncMock(return_value=WorkspaceSettings({}))
-            ),
-        ):
-            await factory(_base_config())
-        assembled = create.call_args.kwargs
-    middleware = assembled["middleware"]
-    assert isinstance(middleware, list)
-    policies = [item._excluded for item in middleware if isinstance(item, ExcludeToolsMiddleware)]
-    assert policies == [SHELL_SEARCH_EXCLUDED_TOOLS]
+    surface = await _planned(kind)
+
+    await surface.prepare()
+
+    # The file and shell tools are MDA's own.
+    assert not {"ls", "read_file", "write_file", "edit_file", "execute"} & surface.tools.keys()
+    assert {
+        getattr(tool, "name", getattr(tool, "__name__", "")) for tool in surface.base_tools
+    } <= (surface.tools.keys() | SHELL_SEARCH_EXCLUDED_TOOLS)

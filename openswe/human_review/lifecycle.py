@@ -4,7 +4,6 @@ Every Slack write here edits or posts the one card, and only because someone
 just acted, a GitHub event arrived, or one of the request's deadlines passed.
 """
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -21,7 +20,6 @@ from openswe.expedited_review.channels import (
     sendable_channel,
     still_internal,
 )
-from openswe.expedited_review.diff_image import render_diff_png
 from openswe.expedited_review.eligibility import ChangedFile, ExpeditedDiff
 from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
@@ -29,7 +27,7 @@ from openswe.expedited_review.readiness import (
     review_authors,
 )
 from openswe.expedited_review.reviews import dismiss_approval
-from openswe.github.http import GitHubAppUnavailable, or_none
+from openswe.github.http import GitHubAppUnavailable, GitHubError, or_none
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
 from openswe.github.repo_files import RepoSettings
@@ -43,6 +41,7 @@ from openswe.human_review.requests import (
     RequestState,
 )
 from openswe.prompts import prompt
+from openswe.run_config import RunConfig
 from openswe.slack.blocks import Block, block_payload, context, escape, section
 from openswe.slack.cards import origin_footer, repost_thread_card
 from openswe.slack.channels import SlackChannel
@@ -53,9 +52,8 @@ from openswe.slack.client import (
     post_slack_thread_reply_with_ts,
     remove_slack_reaction,
     update_slack_message,
-    upload_slack_thread_file,
-    wait_for_slack_file,
 )
+from openswe.slack.diff_image import SlackDiffImage
 from openswe.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thread_owner import wake_thread_owner
@@ -98,12 +96,54 @@ class ReviewCard:
 
     request: HumanReviewRequest
 
+    async def link_on_github(self) -> None:
+        """Link the published Slack review request from its pull request."""
+        request = self.request
+        if request.awaiting_ready or not request.slack_message_ts:
+            return
+        anchor = request.slack_thread_ts or request.slack_message_ts
+        permalink = await get_slack_permalink(request.slack_channel_id, anchor)
+        if permalink is None and anchor != request.slack_message_ts:
+            permalink = await get_slack_permalink(
+                request.slack_channel_id, request.slack_message_ts
+            )
+        if permalink is None:
+            logger.warning(
+                "Could not link Slack review request without a permalink",
+                extra={"request_id": str(request.id)},
+            )
+            return
+        marker = f"<!-- open-swe-review-request:{request.id} -->"
+        pr = request.pull_request
+        try:
+            async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+                if any(
+                    marker in str(comment.get("body", ""))
+                    for comment in await pull.issue_comments()
+                ):
+                    return
+                await pull.comment(f"Review requested in [Slack]({permalink}).\n\n{marker}")
+        except GitHubAppUnavailable, GitHubError, httpx2.HTTPError:
+            logger.warning(
+                "Could not link Slack review request on GitHub",
+                extra={"request_id": str(request.id)},
+                exc_info=True,
+            )
+
     async def _files(self) -> list[ChangedFile] | None:
         """The PR's changed files; ``None`` when the App cannot read them."""
         pr = self.request.pull_request
         try:
             async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
-                return await ChangedFile.of_pull(pull)
+                standard = self.request.kind == "standard"
+                files = await ChangedFile.of_pull(
+                    pull,
+                    max_pages=30 if standard else 1,
+                    count=pr.changed_files if standard else None,
+                )
+                if standard and files is not None and pr.changed_files != len(files):
+                    return None
+                return files
         except GitHubAppUnavailable:
             logger.warning(
                 "No GitHub App token to read the changed files",
@@ -114,35 +154,7 @@ class ReviewCard:
     async def _diff_image_id(self, files: list[ChangedFile]) -> str | None:
         """A hosted-but-unposted PNG of the diff, which the card renders inline."""
         shown = ExpeditedDiff(files, self.request.excluded_hunks).shown
-        if not shown:
-            return None
-        approval_id = str(self.request.id)
-        try:
-            png = await asyncio.to_thread(render_diff_png, shown)
-        except Exception:
-            logger.warning(
-                "Failed to render expedited review diff image; posting the text diff",
-                extra={"approval_id": approval_id},
-                exc_info=True,
-            )
-            return None
-        try:
-            file_id = await upload_slack_thread_file(
-                None, None, f"diff-{self.request.head_sha[:12]}.png", png, title="Diff"
-            )
-        except SlackRequestError as exc:
-            logger.warning(
-                "Failed to upload expedited review diff image",
-                extra={"approval_id": approval_id, "slack_error": exc.code},
-            )
-            return None
-        if not await wait_for_slack_file(file_id):
-            logger.warning(
-                "Slack did not finish processing the expedited review diff image",
-                extra={"approval_id": approval_id, "slack_file_id": file_id},
-            )
-            return None
-        return file_id
+        return await SlackDiffImage(shown, f"diff-{self.request.head_sha[:12]}.png").upload()
 
     async def _warn_target(self, card: tuple[str, list[Block]]) -> tuple[str, list[Block]]:
         pr = self.request.pull_request
@@ -181,9 +193,7 @@ class ReviewCard:
             channel = await SlackChannel.load(approval.slack_channel_id)
             if channel is None:
                 raise SlackRequestError("channel_not_found")
-            approval.slack_thread_ts = await channel.post(
-                text, blocks=block_payload(blocks), login=self.request.requester_login
-            )
+            approval.slack_thread_ts = await channel.post(text, blocks=block_payload(blocks))
             return approval.slack_thread_ts
         return await post_slack_thread_reply_with_ts(
             approval.slack_channel_id,
@@ -191,7 +201,6 @@ class ReviewCard:
             text,
             blocks=block_payload(blocks),
             agent_thread_id=approval.thread_id or None,
-            login=self.request.requester_login,
         )
 
     async def prompt_author_ready(self) -> str | None:
@@ -255,14 +264,11 @@ class ReviewCard:
                 blocks=block_payload(blocks),
                 agent_thread_id=request.thread_id or None,
                 reply_broadcast=True,
-                login=self.request.requester_login,
             )
         channel = await SlackChannel.load(request.slack_channel_id)
         if channel is None:
             raise SlackRequestError("channel_not_found")
-        return await channel.post(
-            text, blocks=block_payload(blocks), login=self.request.requester_login
-        )
+        return await channel.post(text, blocks=block_payload(blocks))
 
     async def _channel_choices(self) -> list[ChannelChoice]:
         pr = self.request.pull_request
@@ -291,11 +297,13 @@ class ReviewCard:
         author = await request.author_mention()
         states = await self._review_states() if outcome in (None, "merged") else {}
         if outcome is not None:
-            return standard_card.closed_card(
+            return await standard_card.closed_card(
                 request, title=pr.title, author=author, outcome=outcome, review_states=states
             )
         from openswe.human_review.standard import merge_wait
+        from openswe.human_review.supplementary import SupplementaryReviews
 
+        states = await SupplementaryReviews(request).engineering_states(states)
         if (
             "CHANGES_REQUESTED" not in states.values()
             and merge_wait(
@@ -307,20 +315,21 @@ class ReviewCard:
             )
             is None
         ):
-            return standard_card.closed_card(
+            return await standard_card.closed_card(
                 request,
                 title=pr.title,
                 author=author,
-                outcome="approved" if request.auto_merge else "approved — awaiting manual merge",
+                outcome="approved",
                 review_states=states,
             )
         requester = request.requested_by
-        return standard_card.open_card(
+        return await standard_card.open_card(
             request,
             title=pr.title,
             author=author,
             requester=standard_card.mention(requester) if requester is not None else None,
             review_states=states,
+            files=await self._files(),
         )
 
     async def render(
@@ -328,8 +337,9 @@ class ReviewCard:
     ) -> tuple[str, list[Block]]:
         """The card's text and blocks; ``copy`` renders the open copy posted in another channel."""
         text, blocks = await self._warn_target(await self._render_card(outcome, copy=copy))
-        if copy or dm or (self.request.kind == "standard" and not self.request.slack_thread_ts):
-            blocks.extend(await origin_footer(self.request.thread_id))
+        if copy or dm or self.request.kind == "standard":
+            source = RunConfig.parse(self.request.run_config).slack_thread
+            blocks.extend(await origin_footer(self.request.thread_id, fallback=source))
         return text, blocks
 
     async def _render_card(self, outcome: str | None, *, copy: bool) -> tuple[str, list[Block]]:
@@ -411,7 +421,6 @@ class ReviewCard:
                     current.slack_dm_message_ts,
                     text,
                     blocks=block_payload(blocks),
-                    login=current.requester_login,
                 )
             except SlackRequestError:
                 logger.warning(
@@ -486,6 +495,7 @@ class ReviewCard:
             else:
                 request.slack_message_ts = message_ts
                 await request.save()
+                await self.link_on_github()
                 await self.broadcast_configured()
             return
         if not request.has_card or not request.slack_channel_id or not request.slack_message_ts:
@@ -497,7 +507,6 @@ class ReviewCard:
                 request.slack_message_ts,
                 text,
                 blocks=block_payload(blocks),
-                login=self.request.requester_login,
             )
         except SlackRequestError as exc:
             logger.warning(
@@ -511,9 +520,7 @@ class ReviewCard:
         if outcome is None and (copy := request.slack_copy) is not None:
             text, blocks = await self.render(None, copy=True)
             try:
-                await update_slack_message(
-                    *copy, text, blocks=block_payload(blocks), login=self.request.requester_login
-                )
+                await update_slack_message(*copy, text, blocks=block_payload(blocks))
             except SlackRequestError as exc:
                 logger.warning(
                     "Failed to update the copy of a human review card",
@@ -558,7 +565,6 @@ class ReviewCard:
             broadcast=broadcast,
             agent_thread_id=request.thread_id or None,
             adopt=adopt,
-            login=self.request.requester_login,
         )
 
     async def broadcast(self) -> bool:
@@ -572,9 +578,7 @@ class ReviewCard:
         approval = self.request
         text, blocks = await self.render(None, copy=True)
         try:
-            message_ts = await channel.post(
-                text, blocks=block_payload(blocks), login=self.request.requester_login
-            )
+            message_ts = await channel.post(text, blocks=block_payload(blocks))
         except SlackRequestError as exc:
             logger.warning(
                 "Could not copy an expedited review card to another channel",
@@ -740,19 +744,17 @@ class ReviewCard:
                     row.slack_message_ts = ""
 
     async def _react(self, emoji: str, fallback: str | None = None) -> None:
-        """React to the thread root, or to the message itself; ``fallback`` if the workspace lacks ``emoji``."""
+        """React to a separate thread root, or a watched post; never to our own status card."""
         if skip_on_preview("pr_reaction"):
             return
         request = self.request
         if request.kind == "posted":
             await self.update_post_reactions()
             return
-        location = request.slack_location or (
-            (request.slack_channel_id, request.slack_message_ts)
-            if request.slack_channel_id and request.slack_message_ts
-            else None
-        )
-        if location is None or await add_slack_reaction(location[0], location[1], emoji):
+        location = request.slack_location
+        if location is None or location == (request.slack_channel_id, request.slack_message_ts):
+            return
+        if await add_slack_reaction(location[0], location[1], emoji):
             return
         if fallback is not None:
             await add_slack_reaction(location[0], location[1], fallback)
@@ -914,8 +916,9 @@ class ReviewPicks:
             message = participant.pick_message
             if message is None:
                 continue
-            status = "Review submitted on GitHub. This assignment is no longer active."
-            if not await message.show(status):
+            pr = self.request.pull_request
+            status = f"Review submitted for <{pr.url}|{pr.label}>."
+            if not await message.replace(status):
                 continue
             if participant.user.slack_user_id:
                 await note_for_concierge(
@@ -923,7 +926,7 @@ class ReviewPicks:
                     message.channel_id,
                     prompt(
                         "slack/concierge-dm-edited",
-                        text=message.text,
+                        text=status,
                         status=status,
                     ),
                 )

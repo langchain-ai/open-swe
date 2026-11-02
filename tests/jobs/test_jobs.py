@@ -45,6 +45,33 @@ async def test_a_due_job_runs_once_however_many_workers_poll() -> None:
     assert await queue.find({}) == []
 
 
+async def test_a_reclaimed_wakeup_does_not_launch_a_second_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.jobs import kinds
+
+    launched: list[str] = []
+
+    async def wakeup(payload: dict[str, object], *, job_id: str, due_at: datetime) -> str:
+        launched.append(job_id)
+        return "run-1"
+
+    monkeypatch.setattr(kinds, "run_thread_wakeup", wakeup)
+    job = await queue.schedule("thread_wakeup", {"thread_id": "t1"}, due_at=_PAST)
+    [claimed] = await queue.claim_due(1)
+    await kinds._wake_thread(claimed)
+    async with transaction() as conn:
+        await conn.execute(
+            text("UPDATE job SET locked_until = :at WHERE id = :id"),
+            {"at": _PAST, "id": job.id},
+        )
+
+    assert await kinds.WORKER.run_due() == 1
+
+    assert launched == [str(job.id)]
+    assert await queue.find({}) == []
+
+
 async def test_a_cron_job_moves_to_its_next_fire_time_in_its_timezone() -> None:
     job = await queue.schedule("probe", cron="0 9 * * *", timezone="America/New_York")
     await _due_now(job)

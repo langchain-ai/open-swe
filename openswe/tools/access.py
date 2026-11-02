@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from openswe.config import ENV
 from openswe.credential_scope import private_owner_login
+from openswe.memories.store import CURATOR_SOURCE
 from openswe.run_config import RunConfig
 from openswe.slack.client import SLACK_THREAD_MAX_MESSAGES, fetch_slack_thread_messages
 from openswe.source_context import SourceContext
@@ -34,7 +35,15 @@ logger = logging.getLogger(__name__)
 P = ParamSpec("P")
 R = TypeVar("R", bound=Mapping[str, object])
 
-Place = Literal["anywhere", "private", "admin_thread", "admin_surface"]
+Place = Literal[
+    "anywhere",
+    "private",
+    "admin_thread",
+    "admin_surface",
+    "channel_history",
+    "thread_history",
+    "curator",
+]
 Actor = Literal["anyone", "owner", "admin"]
 Mode = Literal["full", "sole"]
 Projection = Callable[[Mapping[str, object]], Mapping[str, object]]
@@ -115,6 +124,16 @@ class Access:
     admin_surface: bool = False
     sole: bool = False
     direct: bool = False
+    slack_bot_channel: str | None = None
+    # The run was started from a Slack thread; the bot's own reach applies there.
+    slack_context: bool = False
+    # A workspace curator's own thread (``openswe.memories.curator``).
+    curator: bool = False
+
+    @property
+    def channel_history(self) -> bool:
+        """Whether public channels the bot is in may be read on the asker's behalf."""
+        return self.private or bool(self.slack_bot_channel)
 
     def mode(self, policy: Policy) -> Mode | None:
         if policy.direct and not self.direct:
@@ -124,6 +143,9 @@ class Access:
             "private": self.private,
             "admin_thread": self.admin_thread,
             "admin_surface": self.admin_surface,
+            "channel_history": self.channel_history,
+            "thread_history": self.slack_context or self.channel_history,
+            "curator": self.curator,
         }[policy.trusted]
         if trusted and self._actor(policy.actor, sole=False):
             return "full"
@@ -219,6 +241,7 @@ class _ThreadScope(BaseModel):
     visibility: Literal["public", "private"] = "public"
     owner_type: Literal["user", "system"] | None = None
     admin_thread: bool | None = None
+    curator: str | None = None
 
 
 async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = None) -> Access:
@@ -248,6 +271,24 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
         return Access()
     private = scope.visibility == "private"
     admin = await actor_is_admin(cfg, login=login)
+    slack = SourceContext.from_metadata(metadata).slack_thread
+    current_slack = cfg.slack_thread
+    slack_bot_channel = (
+        slack.channel_id
+        if (
+            scope.owner_type == "system"
+            and scope.visibility == "public"
+            and cfg.source == "slack"
+            and slack is not None
+            and slack.location is not None
+            and slack.triggering_bot_id
+            and current_slack is not None
+            and current_slack.location == slack.location
+            and current_slack.triggering_bot_id == slack.triggering_bot_id
+            and current_slack.team_id == slack.team_id
+        )
+        else None
+    )
     return Access(
         private=private,
         owner=private_owner_login(cfg, metadata) is not None,
@@ -256,6 +297,18 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
         admin_surface=admin and private and is_private_admin_surface(cfg),
         sole=await sole_writer(cfg, metadata, login),
         direct=direct_user_run(cfg),
+        slack_bot_channel=slack_bot_channel,
+        slack_context=cfg.slack_context,
+        # Only the run ``WorkspaceCurator.wake`` started: a person's message in the
+        # public thread starts a run that must not steer what every thread reads.
+        curator=(
+            scope.owner_type == "system"
+            and scope.curator is not None
+            and scope.curator == cfg.workspace_slug
+            and cfg.source == CURATOR_SOURCE
+            and not cfg.github_login
+            and not cfg.started_by_id
+        ),
     )
 
 

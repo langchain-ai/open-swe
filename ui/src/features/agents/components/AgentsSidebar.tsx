@@ -24,6 +24,7 @@ import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr/DownloadSimple"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/ssr/FolderOpen"
+import { NotePencilIcon } from "@phosphor-icons/react/dist/ssr/NotePencil"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -33,6 +34,9 @@ import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
 import type { DesktopUpdateState } from "@/desktop"
 import { api, type SessionUser } from "@/lib/api"
 import { useProfile } from "@/lib/profile"
+import { experienceStore, useExperience } from "@/lib/experience"
+import { ExperienceSelector } from "@/components/ExperienceSelector"
+import { AgentWorkspaceProvider } from "@/features/agents/lib/agentWorkspace"
 import type {
   PullRequestSnapshot,
   SidebarRepo,
@@ -46,7 +50,10 @@ import type {
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import { SidebarNav } from "@/features/agents/components/SidebarNav"
-import { SidebarThreadRow } from "@/features/agents/components/SidebarThreadRow"
+import {
+  SidebarThreadRow,
+  SidebarConversationRow,
+} from "@/features/agents/components/SidebarThreadRow"
 import {
   SidebarSectionAction,
   SidebarSectionHeader,
@@ -71,6 +78,7 @@ import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
   agentMutationKeys,
   agentThreadKeys,
+  useActiveAgentThread,
   usePinAgentThread,
   useResolveAgentThread,
   useSeedAgentThreadDetails,
@@ -93,6 +101,7 @@ import {
   cloudSidebarThread,
   DEFAULT_SIDEBAR_WORKSPACE_SLUG,
   groupRepoGroupsByWorkspace,
+  groupSidebarThreadsByDay,
   sidebarRepoKey,
   sortSidebarThreads,
   sidebarItemContains,
@@ -105,7 +114,6 @@ import {
 } from "@/lib/appCommands"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
-import { useChatRoutes } from "@/lib/chatRoutes"
 import { usePendingVariables } from "@/lib/optimistic"
 
 interface AgentsSidebarProps {
@@ -184,9 +192,10 @@ export function AgentsSidebar({
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
-  const newThreadShortcut = useShortcutLabel("mod+n")
-  const chat = useChatRoutes()
   const profile = useProfile()
+  const { experience } = useExperience()
+  const agentWorkspaceEnabled = experience === "agent_workspace"
+  const newThreadShortcut = useShortcutLabel("mod+n")
   const concierge = useQuery({
     queryKey: ["concierge", user?.login],
     queryFn: api.concierge,
@@ -206,9 +215,9 @@ export function AgentsSidebar({
         agentThreadKeys.detail(threadId)
       )?.reviewPage
       if (review) void navigate(reviewPageRoute(review))
-      else void navigate({ to: chat.thread, params: { threadId } })
+      else void navigate({ to: "/agents/$threadId", params: { threadId } })
     },
-    [navigate, chat.thread, queryClient]
+    [navigate, queryClient]
   )
   const {
     prefs,
@@ -247,7 +256,8 @@ export function AgentsSidebar({
   // only changes how the unpinned ones are laid out (nested under a workspace
   // header instead of a flat list), so every other repo-mode query and
   // computation below applies to both.
-  const repoMode = prefs.organize === "repo" || workspaceOrganize
+  const repoMode =
+    !agentWorkspaceEnabled && (prefs.organize === "repo" || workspaceOrganize)
   const includeAutomations =
     prefs.filters.includeAutomations ||
     prefs.filters.sources.includes("schedule")
@@ -255,15 +265,17 @@ export function AgentsSidebar({
   const recentsQuery = useSidebarRecents({
     repoMode,
     includeAutomations,
-    includeResolved: prefs.filters.includeResolved,
+    includeResolved: agentWorkspaceEnabled || prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
-    sort: prefs.sortChats,
+    includeClaudeCode: prefs.filters.includeClaudeCode,
+    sort: repoMode ? prefs.sortChats : "updated",
     enabled: true,
   })
   const sidebarReposQuery = useSidebarRepos({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
+    includeClaudeCode: prefs.filters.includeClaudeCode,
     enabled: repoMode,
   })
   const workspaceOptionsQuery = useWorkspaceOptions(workspaceOrganize)
@@ -519,15 +531,17 @@ export function AgentsSidebar({
           { value: "list", label: "In one list" },
         ]}
       />
-      <MenuChoiceGroup<ChatSort>
-        label="Sort chats by"
-        value={prefs.sortChats}
-        onChange={(sortChats) => setView({ sortChats })}
-        options={[
-          { value: "created", label: "Created" },
-          { value: "updated", label: "Last updated" },
-        ]}
-      />
+      {repoMode && (
+        <MenuChoiceGroup<ChatSort>
+          label="Sort chats by"
+          value={prefs.sortChats}
+          onChange={(sortChats) => setView({ sortChats })}
+          options={[
+            { value: "created", label: "Created" },
+            { value: "updated", label: "Last updated" },
+          ]}
+        />
+      )}
       <DropdownMenuSeparator />
       <DropdownMenuGroup>
         <MenuCheckItem
@@ -545,6 +559,14 @@ export function AgentsSidebar({
           }
         >
           Show automations
+        </MenuCheckItem>
+        <MenuCheckItem
+          checked={prefs.filters.includeClaudeCode}
+          onCheckedChange={(checked) =>
+            setFilters({ ...prefs.filters, includeClaudeCode: checked })
+          }
+        >
+          Show Claude Code
         </MenuCheckItem>
         <MenuCheckItem
           checked={prefs.filters.ownedOnly}
@@ -582,13 +604,14 @@ export function AgentsSidebar({
       includeResolved={prefs.filters.includeResolved}
       includeAutomations={includeAutomations}
       owned={prefs.filters.ownedOnly}
+      includeClaudeCode={prefs.filters.includeClaudeCode}
       sort={prefs.sortChats}
       activeThreadId={activeThreadId}
       openThread={openThread}
       hydrate={hydrateRepoThreads}
       onToggleCollapsed={() => toggleRepoCollapsed(group.key)}
       onExpand={() => expandRepo(group.key)}
-      composeTo={group.localRepoPath ? "/agents" : chat.home}
+      composeTo="/agents"
       onCompose={layout.closeOnMobile}
       onTogglePin={() => toggleRepoPin(group.key)}
       onLoadMore={
@@ -635,12 +658,12 @@ export function AgentsSidebar({
       >
         <Link
           to="/my-settings"
-          className="flex items-center gap-space-2 font-heading text-sm font-medium tracking-tight text-primary"
+          className="flex min-w-0 items-center gap-space-2 font-heading text-sm font-medium tracking-tight text-primary"
         >
-          <LogoMark alt="" className="size-5" />
+          <LogoMark alt="" className="size-5 shrink-0" />
           Open SWE
         </Link>
-        <div className="flex items-center gap-space-1">
+        <div className="flex shrink-0 items-center gap-space-1">
           <IconButton
             icon={MagnifyingGlassRegularIcon}
             label="Search"
@@ -656,9 +679,45 @@ export function AgentsSidebar({
         </div>
       </div>
 
-      <div className="flex flex-col gap-0.5 px-space-2 pb-space-1">
+      <ExperienceSelector onNavigate={layout.closeOnMobile} />
+
+      {agentWorkspaceEnabled && (
+        <AgentWorkspaceThreadList
+          items={[
+            ...pinnedItems,
+            ...sortSidebarThreads(threadItems, "updated"),
+          ]}
+          activeThreadId={activeThreadId}
+          compact={prefs.compact}
+          onNavigate={layout.closeOnMobile}
+          pinnedIds={cloudPinnedIds}
+          pendingIds={
+            new Set(
+              [...pendingPins, ...pendingResolves].map((vars) => vars.threadId)
+            )
+          }
+          onPin={togglePin}
+          onArchive={toggleArchived}
+          loading={cloudPending}
+          error={cloudError}
+          onRetry={() => {
+            void pinnedQuery.refetch()
+            void recentsQuery.refetch()
+          }}
+          hasMore={recentsQuery.hasMore}
+          loadingMore={recentsQuery.isFetchingNextPage}
+          onLoadMore={recentsQuery.fetchNextPage}
+        />
+      )}
+
+      <div
+        className={cn(
+          "flex flex-col gap-0.5 px-space-2 pb-space-1",
+          agentWorkspaceEnabled && "hidden"
+        )}
+      >
         <Link
-          to={chat.home}
+          to="/agents"
           onClick={layout.closeOnMobile}
           className={cn(
             NAV_ROW_CLASS,
@@ -678,7 +737,7 @@ export function AgentsSidebar({
           <a
             href={
               concierge.data?.thread_id
-                ? `${chat.home}/${concierge.data.thread_id}`
+                ? `/agents/${concierge.data.thread_id}`
                 : concierge.data?.channel_id
                   ? `slack://channel?id=${concierge.data.channel_id}`
                   : undefined
@@ -703,7 +762,12 @@ export function AgentsSidebar({
         )}
       </div>
 
-      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div
+        className={cn(
+          "relative flex min-h-0 flex-1 flex-col",
+          agentWorkspaceEnabled && "hidden"
+        )}
+      >
         {scrollEdges.top && (
           <>
             <div className="pointer-events-none absolute inset-x-0 top-0 z-floating-bar border-t border-default" />
@@ -853,15 +917,22 @@ export function AgentsSidebar({
                     icon={PlusIcon}
                     onClick={() => {
                       layout.closeOnMobile()
-                      void navigate({ to: chat.home })
+                      void navigate({ to: "/agents" })
                     }}
                   />
                 }
               />
               {!sectionCollapsed("recents") && (
                 <>
-                  {recents.map((item) => (
-                    <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                  {groupSidebarThreadsByDay(recents).map((day) => (
+                    <div key={day.key}>
+                      <div className="px-space-2 pt-space-2 pb-space-1 text-xxs font-medium text-tertiary">
+                        {day.label}
+                      </div>
+                      {day.threads.map((item) => (
+                        <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                      ))}
+                    </div>
                   ))}
                   {recentsQuery.hasMore && (
                     <LoadMoreThreadsOnScroll
@@ -884,7 +955,6 @@ export function AgentsSidebar({
           )}
         </div>
       </div>
-
       <div className="flex items-center gap-space-2 p-space-2">
         <div className="min-w-0 flex-1">
           {user ? (
@@ -944,11 +1014,15 @@ function WorkspaceGroupSection({
   const Caret = collapsed ? CaretRightIcon : CaretDownIcon
   return (
     <div className="mb-space-1">
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label={workspace.name}
         type="button"
         onClick={onToggleCollapsed}
         aria-expanded={!collapsed}
-        className="group/workspace flex w-full items-center gap-space-2 rounded-md px-space-2 py-space-1 text-left text-xs font-medium text-tertiary transition-colors hover:text-primary"
+        className="group/workspace h-auto w-full justify-start gap-space-2 px-space-2 py-space-1 text-left font-medium whitespace-normal text-tertiary hover:text-primary"
       >
         <StackRegularIcon size={14} className="shrink-0" />
         <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
@@ -959,7 +1033,7 @@ function WorkspaceGroupSection({
             collapsed ? "block" : "hidden group-hover/workspace:block"
           )}
         />
-      </button>
+      </Button>
       {!collapsed && (
         <div className="pl-space-2">{workspace.repos.map(renderRepoGroup)}</div>
       )}
@@ -976,6 +1050,7 @@ function RepoGroup({
   includeResolved,
   includeAutomations,
   owned,
+  includeClaudeCode,
   sort,
   activeThreadId,
   openThread,
@@ -998,13 +1073,14 @@ function RepoGroup({
   includeResolved: boolean
   includeAutomations: boolean
   owned: boolean
+  includeClaudeCode: boolean
   sort: ChatSort
   activeThreadId?: string
   openThread: (threadId: string) => void
   hydrate: (threads: Array<AgentThread>) => Array<SidebarThreadItem>
   onToggleCollapsed: () => void
   onExpand: () => void
-  composeTo: "/agents" | "/assistant"
+  composeTo: "/agents"
   onCompose: () => void
   onTogglePin: () => void
   onLoadMore?: () => void
@@ -1021,6 +1097,7 @@ function RepoGroup({
     includeResolved,
     includeAutomations,
     owned,
+    includeClaudeCode,
     sort,
     enabled: !collapsed,
   })
@@ -1058,15 +1135,19 @@ function RepoGroup({
   return (
     <div className="mb-space-1">
       <div className="group/folder flex items-center gap-space-2 rounded-md pr-space-1 pl-space-2 text-sm text-primary transition-colors hover:bg-surface-level-2-hover">
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="md"
+          aria-label={group.label}
           type="button"
           onClick={onToggleCollapsed}
           aria-expanded={!collapsed}
-          className="flex min-w-0 flex-1 items-center gap-space-2 py-space-1 text-left"
+          className="h-auto min-w-0 flex-1 justify-start gap-space-2 py-space-1 text-left whitespace-normal text-primary hover:bg-transparent dark:hover:bg-transparent"
         >
           <Folder size={16} weight="regular" className="shrink-0" />
           <span className="min-w-0 flex-1 truncate">{group.label}</span>
-        </button>
+        </Button>
         <IconButton
           icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
           label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
@@ -1117,16 +1198,24 @@ function RepoGroup({
             </p>
           )}
           {repo.isError && (
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label="Retry loading chats"
               type="button"
               onClick={() => void repo.refetch()}
-              className="w-full py-space-1 pr-space-2 pl-space-5 text-left text-xs text-error-secondary"
+              className="w-full justify-start py-space-1 pr-space-2 pl-space-5 text-left text-error-secondary"
             >
               Retry loading chats
-            </button>
+            </Button>
           )}
           {hasMore && (
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label={loading ? "Loading…" : "Show more"}
               type="button"
               onClick={() => {
                 if (!expanded) onExpand()
@@ -1134,11 +1223,11 @@ function RepoGroup({
                 else repo.fetchNextPage()
               }}
               disabled={loading}
-              className="flex w-full items-center gap-space-2 rounded-lg py-space-1 pr-space-2 pl-space-5 text-left text-xs text-tertiary transition-colors hover:text-primary disabled:cursor-wait disabled:opacity-60"
+              className="h-auto w-full justify-start gap-space-2 rounded-lg py-space-1 pr-space-2 pl-space-5 text-left whitespace-normal text-tertiary hover:text-primary disabled:cursor-wait disabled:bg-transparent disabled:opacity-60"
             >
               {loading && <Spinner size="xxs" />}
               {loading ? "Loading…" : "Show more"}
-            </button>
+            </Button>
           )}
         </>
       )}
@@ -1243,20 +1332,23 @@ function LoadMoreThreadsOnScroll({
   }, [loading, root])
 
   return (
-    <button
+    <Button
+      color="secondary"
+      variant="plain"
+      size="sm"
       ref={sentinel}
       type="button"
       onClick={() => load.current()}
       disabled={loading}
       aria-label={label}
-      className="flex w-full items-center justify-center gap-space-2 py-space-2 text-xs text-tertiary"
+      className="h-auto w-full justify-center gap-space-2 py-space-2 whitespace-normal text-tertiary disabled:bg-transparent"
     >
       {loading ? (
         <Spinner size="xxs" />
       ) : (
         <span className="sr-only">{label}</span>
       )}
-    </button>
+    </Button>
   )
 }
 
@@ -1270,6 +1362,7 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
+  const { experience, select: selectExperience } = useExperience()
   // `useMutation` returns a fresh object every render; only `mutate` is stable,
   // and an unstable command array re-registers on every commit.
   const pinThread = usePinAgentThread().mutate
@@ -1277,11 +1370,18 @@ export function AgentsShell({
   const pinnedThreads = useSidebarPinnedThreads({
     enabled: Boolean(activeThreadId),
   })
-  const activeThread = useSidebarActiveThread({
-    activeThreadId,
-    loadedThreads: [],
+  const activeThread = useActiveAgentThread(activeThreadId, {
     enabled: Boolean(activeThreadId),
   })
+  const threadExperience = activeThread
+    ? experienceStore.thread(activeThread)
+    : undefined
+  useEffect(() => {
+    if (threadExperience) selectExperience(threadExperience)
+  }, [selectExperience, threadExperience])
+  const agentWorkspaceEnabled = Boolean(
+    experience && (threadExperience ?? experience) === "agent_workspace"
+  )
   const sidebarCommands = useMemo(() => {
     const commands = [
       {
@@ -1352,19 +1452,133 @@ export function AgentsShell({
   useRegisterAppCommands(sidebarCommands)
 
   return (
-    <SidebarLayoutProvider value={layout}>
-      <TooltipProvider delayDuration={500} skipDelayDuration={100}>
-        <div className="agents-ui flex h-svh overflow-hidden bg-surface-level-1">
-          <AgentsSidebar
-            user={user}
-            activeThreadId={activeThreadId}
-            layout={layout}
+    <AgentWorkspaceProvider enabled={agentWorkspaceEnabled}>
+      <SidebarLayoutProvider value={layout}>
+        <TooltipProvider delayDuration={500} skipDelayDuration={100}>
+          <div className="agents-ui flex h-svh overflow-hidden bg-surface-level-1">
+            <AgentsSidebar
+              user={user}
+              activeThreadId={activeThreadId}
+              layout={layout}
+            />
+            <main
+              key={experience}
+              className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1"
+            >
+              {children}
+            </main>
+          </div>
+        </TooltipProvider>
+      </SidebarLayoutProvider>
+    </AgentWorkspaceProvider>
+  )
+}
+
+const CHAT_SECTIONS = ["Pinned", "Recents", "Archived"] as const
+
+function AgentWorkspaceThreadList({
+  items,
+  activeThreadId,
+  compact,
+  onNavigate,
+  pinnedIds,
+  pendingIds,
+  onPin,
+  onArchive,
+  loading,
+  error,
+  onRetry,
+  hasMore,
+  loadingMore,
+  onLoadMore,
+}: {
+  items: SidebarThreadItem[]
+  activeThreadId?: string
+  compact: boolean
+  onNavigate: () => void
+  pinnedIds: Set<string>
+  pendingIds: Set<string>
+  onPin: (item: SidebarThreadItem) => void
+  onArchive: (item: SidebarThreadItem) => void
+  loading: boolean
+  error: boolean
+  onRetry: () => void
+  hasMore: boolean
+  loadingMore: boolean
+  onLoadMore: () => void
+}) {
+  const [archivedOpen, setArchivedOpen] = useState(false)
+  const viewport = useRef<HTMLDivElement>(null)
+  const section = (item: SidebarThreadItem) =>
+    item.resolved ? "Archived" : pinnedIds.has(item.id) ? "Pinned" : "Recents"
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col px-space-2 pb-space-2">
+      <Link
+        to="/agents"
+        onClick={onNavigate}
+        className="mb-space-4 flex h-8 shrink-0 items-center gap-space-2 rounded-xl px-space-2 text-sm font-normal text-secondary transition-colors hover:bg-surface-level-3 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+      >
+        <NotePencilIcon size={18} weight="regular" className="shrink-0" />
+        New chat
+      </Link>
+      {error && (
+        <ThreadSourceError label="Chats unavailable" onRetry={onRetry} />
+      )}
+      <div
+        ref={viewport}
+        className="flex min-h-0 flex-1 flex-col gap-space-5 overflow-y-auto"
+      >
+        {loading && <ThreadListSkeleton compact={compact} />}
+        {CHAT_SECTIONS.map((label) => {
+          const rows = items.filter((item) => section(item) === label)
+          if (!rows.length) return null
+          const collapsible = label === "Archived"
+          return (
+            <div key={label} className="shrink-0">
+              <SidebarSectionHeader
+                label={label}
+                headingClassName="mb-space-2 py-space-1 text-xs font-medium text-tertiary hover:text-secondary"
+                collapsed={collapsible ? !archivedOpen : undefined}
+                onToggleCollapsed={
+                  collapsible ? () => setArchivedOpen(!archivedOpen) : undefined
+                }
+              />
+              {(!collapsible || archivedOpen) &&
+                rows.map((item) => (
+                  <SidebarConversationRow
+                    key={item.id}
+                    title={item.title}
+                    threadId={item.id}
+                    status={item.status}
+                    viewed={item.viewed}
+                    active={item.id === activeThreadId}
+                    compact={compact}
+                    onNavigate={onNavigate}
+                    pinned={pinnedIds.has(item.id)}
+                    archived={item.resolved === true}
+                    pending={pendingIds.has(item.id)}
+                    onPin={() => onPin(item)}
+                    onArchive={() => onArchive(item)}
+                  />
+                ))}
+            </div>
+          )
+        })}
+        {hasMore && (
+          <LoadMoreThreadsOnScroll
+            label="Load more chats"
+            root={viewport}
+            loading={loadingMore}
+            onLoadMore={onLoadMore}
           />
-          <main className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1">
-            {children}
-          </main>
-        </div>
-      </TooltipProvider>
-    </SidebarLayoutProvider>
+        )}
+        {!loading && !error && items.length === 0 && (
+          <p className="px-space-2 py-space-5 text-center text-xs text-tertiary">
+            No chats yet.
+          </p>
+        )}
+      </div>
+    </div>
   )
 }

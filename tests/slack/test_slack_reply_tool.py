@@ -136,6 +136,63 @@ async def test_kickoff_delete_failure_does_not_interrupt_update(
     assert thread is not None and thread.kickoff_recorded and thread.kickoff_ts is None
 
 
+@pytest.mark.parametrize("recipient", [None, "U2", "W123ABC"])
+async def test_slack_reply_preserves_option_recipient(
+    monkeypatch: pytest.MonkeyPatch, recipient: str | None
+) -> None:
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    post = AsyncMock(return_value="2.0")
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    result = await slack_reply_tool.slack_reply(
+        "<@U2>, choose", "final", options=["Keep fallback"], option_user_id=recipient
+    )
+
+    assert result["success"] is True
+    blocks = post.await_args.kwargs["blocks"]
+    actions = next(block for block in blocks if block["type"] == "actions")
+    value = json.loads(actions["elements"][0]["value"])
+    assert value == {
+        "type": "open_swe_option",
+        "response": "Keep fallback",
+        **({"user_id": recipient} if recipient is not None else {}),
+    }
+
+
+@pytest.mark.parametrize(
+    ("recipient", "options", "blocks"),
+    [
+        (recipient, ["Yes"], None)
+        for recipient in (
+            "",
+            " ",
+            "Ramon",
+            "<@U123ABC>",
+            " U123ABC",
+            "U123ABC ",
+            "u123abc",
+            "C123ABC",
+        )
+    ]
+    + [("U2", None, None), ("U2", ["Yes"], [])],
+)
+async def test_scoped_options_reject_inputs_that_cannot_carry_the_recipient(
+    monkeypatch: pytest.MonkeyPatch,
+    recipient: str,
+    options: list[str] | None,
+    blocks: list[dict[str, object]] | None,
+) -> None:
+    post = AsyncMock()
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    result = await slack_reply_tool.slack_reply(
+        "Choose", "final", options=options, blocks=blocks, option_user_id=recipient
+    )
+
+    assert result["success"] is False
+    post.assert_not_awaited()
+
+
 async def test_slack_reply_holds_mutation_lock_while_posting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -283,7 +340,7 @@ async def test_slack_reply_hints_not_to_retry_channel_errors(
 
 @pytest.mark.parametrize("response_type", ["progress", "final"])
 @pytest.mark.parametrize("options", [None, ["Yes", "No"]])
-async def test_only_final_reply_has_feedback_for_its_run(
+async def test_replies_have_no_feedback_buttons(
     monkeypatch: pytest.MonkeyPatch,
     response_type: Literal["progress", "final"],
     options: list[str] | None,
@@ -302,25 +359,13 @@ async def test_only_final_reply_has_feedback_for_its_run(
     assert post.await_args is not None
     blocks = post.await_args.kwargs["blocks"]
     feedback = [block for block in blocks if block["type"] == "context_actions"]
-    if response_type == "progress":
-        assert feedback == []
-    else:
-        buttons = feedback[0]["elements"][0]
-        assert buttons["type"] == "feedback_buttons"
-        assert json.loads(buttons["positive_button"]["value"]) == {
-            "run_id": "run-1",
-            "rating": "up",
-        }
-        assert json.loads(buttons["negative_button"]["value"]) == {
-            "run_id": "run-1",
-            "rating": "down",
-        }
+    assert feedback == []
     assert blocks[0] == {"type": "markdown", "text": "Answer"}
     if options:
         assert blocks[1]["type"] == "actions"
 
 
-async def test_long_reply_retains_all_text_alongside_feedback(
+async def test_long_reply_retains_all_text_without_feedback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config()
@@ -336,9 +381,8 @@ async def test_long_reply_retains_all_text_alongside_feedback(
     }
     assert post.await_args is not None
     blocks = post.await_args.kwargs["blocks"]
-    assert "".join(block["text"]["text"] for block in blocks[:-1]) == "x" * 12001
-    assert all(len(block["text"]["text"]) <= 3000 for block in blocks[:-1])
-    assert blocks[-1]["type"] == "context_actions"
+    assert "".join(block["text"]["text"] for block in blocks) == "x" * 12001
+    assert all(len(block["text"]["text"]) <= 3000 for block in blocks)
 
 
 async def test_slack_reply_keeps_code_highlighted_over_native_limit(
@@ -365,19 +409,51 @@ async def test_slack_reply_keeps_code_highlighted_over_native_limit(
     assert blocks[-1]["text"]["text"] == "after"
 
 
+@pytest.mark.parametrize("custom", [False, True])
 async def test_slack_reply_rejects_oversized_message_with_options(
     monkeypatch: pytest.MonkeyPatch,
+    custom: bool,
 ) -> None:
     post = AsyncMock()
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    result = await slack_reply_tool.slack_reply("x" * 12001, "final", options=["Yes"])
+    result = await slack_reply_tool.slack_reply(
+        "x" * 12001,
+        "final",
+        options=None if custom else ["Yes"],
+        blocks=[{"type": "actions", "elements": []}] if custom else None,
+    )
 
+    assert isinstance(result, dict)
     assert result["success"] is False
     assert result["retry"] is True
     assert "options" in result["error"]
     post.assert_not_awaited()
+
+
+@pytest.mark.parametrize("response_type", ["progress", "final"])
+@pytest.mark.parametrize("count,accepted", [(49, True), (50, False)])
+async def test_custom_blocks_reserve_room_for_the_dashboard_link(
+    monkeypatch: pytest.MonkeyPatch,
+    count: int,
+    accepted: bool,
+    response_type: Literal["progress", "final"],
+) -> None:
+    post = AsyncMock(return_value="2.0")
+    config = _config()
+    config["run_id"] = "run-1"
+    config["configurable"]["slack_thread"]["triggering_user_id"] = "U1"
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+    result = await slack_reply_tool.slack_reply(
+        "Chunk", response_type, blocks=[{"type": "markdown", "text": "code"}] * count
+    )
+    assert isinstance(result, dict)
+    assert result["success"] is accepted
+    if not accepted:
+        assert result["retry"] is True
+        post.assert_not_awaited()
 
 
 async def test_reply_moves_the_thread_to_the_dashboard_when_its_slack_thread_is_gone(

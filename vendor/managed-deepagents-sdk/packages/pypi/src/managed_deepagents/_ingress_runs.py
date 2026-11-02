@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping, Sequence
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict, cast, get_args
 
 from langgraph_sdk.schema import (
     Command,
@@ -21,14 +21,36 @@ from langgraph_sdk.schema import (
 )
 
 from managed_deepagents._channels.types import ChannelError
+from managed_deepagents._telemetry.otel import (
+    TRACE_ID_METADATA_KEY,
+    current_log_context,
+    record_log,
+    set_log_attributes,
+)
+from managed_deepagents._thread_record import (
+    next_thread_record,
+    parse_thread_record,
+    thread_record_metadata,
+)
 
 if TYPE_CHECKING:
     from langgraph_sdk.client import LangGraphClient
+
+    from managed_deepagents._channels.binding import ChannelBinding
+    from managed_deepagents._thread_record import ThreadRecord
 
 
 class StartedIngressRun(TypedDict):
     thread_id: str
     run_id: str
+
+
+class IngressThreadOrigin(TypedDict):
+    """The channel message a run starts from, for the thread record."""
+
+    binding: ChannelBinding
+    #: The sender's principal id, as the run's ``x-mda-user-id``.
+    sender: str
 
 
 class IngressRunObservation(TypedDict):
@@ -42,21 +64,60 @@ class _RunOptions(TypedDict, total=False):
 
     context: Context
     config: Config
-    metadata: Mapping[str, Any]
+    metadata: dict[str, Any]
+    webhook: str
+
+
+_PROVIDER_EVENT_TYPE_METADATA_KEY = "mda_provider_event_type"
+_USER_RESOLUTION_METADATA_KEY = "mda_user_resolution"
+
+
+class IngressRunOrigin(TypedDict):
+    provider_event_type: str | None
+    user_resolution: str | None
+
+
+def ingress_run_origin(metadata: object) -> IngressRunOrigin:
+    """What ingress recorded in a run's metadata about the delivery that started it."""
+    record = metadata if isinstance(metadata, Mapping) else {}
+    provider_event_type = record.get(_PROVIDER_EVENT_TYPE_METADATA_KEY)
+    user_resolution = record.get(_USER_RESOLUTION_METADATA_KEY)
+    return IngressRunOrigin(
+        provider_event_type=provider_event_type if isinstance(provider_event_type, str) else None,
+        user_resolution=user_resolution if isinstance(user_resolution, str) else None,
+    )
 
 
 def _run_options(
     context: Context | None,
     config: Config | None,
     metadata: Mapping[str, Any] | None = None,
+    *,
+    webhook: str | None = None,
 ) -> _RunOptions:
     options: _RunOptions = {}
+    if webhook is not None:
+        options["webhook"] = webhook
     if context is not None:
         options["context"] = context
     if config is not None:
         options["config"] = config
-    if metadata is not None:
-        options["metadata"] = metadata
+    run_metadata: dict[str, Any] = dict(metadata or {})
+    # Hand the current log context's trace id, provider event type and user
+    # resolution to the run, beside the run's own metadata, so the run's
+    # telemetry can report them. The Agent Server merges run metadata into the
+    # run's ``config["metadata"]``.
+    log_context = current_log_context()
+    if log_context is not None:
+        run_metadata[TRACE_ID_METADATA_KEY] = log_context.trace_id
+        provider_event_type = log_context.attributes.get("provider_event_type")
+        if isinstance(provider_event_type, str):
+            run_metadata[_PROVIDER_EVENT_TYPE_METADATA_KEY] = provider_event_type
+        user_resolution = log_context.attributes.get("user_resolution")
+        if isinstance(user_resolution, str):
+            run_metadata[_USER_RESOLUTION_METADATA_KEY] = user_resolution
+    if run_metadata:
+        options["metadata"] = run_metadata
     return options
 
 
@@ -199,7 +260,9 @@ async def cancel_ingress_runs(*, client: LangGraphClient, thread_id: str) -> lis
     cancelled = await asyncio.gather(
         *(_cancel_run(client, thread_id, run_id) for run_id in run_ids)
     )
-    return [run_id for run_id, done in zip(run_ids, cancelled, strict=True) if done]
+    cancelled_ids = [run_id for run_id, done in zip(run_ids, cancelled, strict=True) if done]
+    record_log("INFO", "channel runs cancelled", attributes={"runs_cancelled": len(cancelled_ids)})
+    return cancelled_ids
 
 
 async def _cancel_run(client: LangGraphClient, thread_id: str, run_id: str) -> bool:
@@ -211,6 +274,18 @@ async def _cancel_run(client: LangGraphClient, thread_id: str, run_id: str) -> b
             return False
         raise
     return True
+
+
+MULTITASK_STRATEGIES: frozenset[str] = frozenset(get_args(MultitaskStrategy))
+"""Every LangGraph ``MultitaskStrategy``, for channels that check one."""
+
+
+def rejected_as_busy(multitask_strategy: str | None, error: Exception) -> bool:
+    """Whether a run didn't start because a run started on its thread meanwhile.
+
+    ``reject`` then leaves the thread to that run.
+    """
+    return multitask_strategy == "reject" and lookup_status(error) == HTTPStatus.CONFLICT
 
 
 def lookup_status(error: Exception) -> int | None:
@@ -239,14 +314,23 @@ async def start_ingress_run(
     metadata: Mapping[str, Any] | None = None,
     webhook: str | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
+    thread_origin: IngressThreadOrigin | None = None,
 ) -> StartedIngressRun:
     """Create or reuse a thread and enqueue a run with an authenticated client.
 
     ``state`` holds other state keys to start with; ``multitask_strategy`` is
     what the run does to a run already active on the thread; the Agent Server
-    POSTs the finished run to ``webhook``.
+    POSTs the finished run to ``webhook``. ``thread_origin`` updates the thread
+    record before the run starts, so the run's metadata holds it.
     """
-    await client.threads.create(thread_id=thread_id, if_exists="do_nothing")
+    thread_options: dict[str, Any] = {}
+    if thread_origin is not None:
+        thread_options["metadata"] = thread_record_metadata(_next_record(None, thread_origin))
+    created = await client.threads.create(
+        thread_id=thread_id, if_exists="do_nothing", **thread_options
+    )
+    # An existing thread keeps its metadata: compare what came back.
+    await _write_thread_record(client, thread_id, created, thread_origin)
     # JSON message dicts; ``Input`` cannot express ``object``-valued entries.
     run_input: dict[str, Any] = {**(state or {}), "messages": messages}
     run = await client.runs.create(
@@ -254,8 +338,7 @@ async def start_ingress_run(
         assistant_id,
         input=run_input,
         multitask_strategy=multitask_strategy,
-        **_run_options(context, config, metadata),
-        **({"webhook": webhook} if webhook is not None else {}),
+        **_run_options(context, config, metadata, webhook=webhook),
     )
     return _started_run(thread_id, run)
 
@@ -268,8 +351,12 @@ async def resume_ingress_run(
     resume: dict[str, object],
     context: Context | None = None,
     config: Config | None = None,
+    thread_origin: IngressThreadOrigin | None = None,
 ) -> StartedIngressRun:
     """Enqueue a keyed interrupt response without creating a thread."""
+    if thread_origin is not None:
+        thread = await client.threads.get(thread_id)
+        await _write_thread_record(client, thread_id, thread, thread_origin)
     run = await client.runs.create(
         thread_id,
         assistant_id,
@@ -280,11 +367,35 @@ async def resume_ingress_run(
     return _started_run(thread_id, run)
 
 
+def _next_record(metadata: object, origin: IngressThreadOrigin) -> ThreadRecord:
+    return next_thread_record(parse_thread_record(metadata), origin["binding"], origin["sender"])
+
+
+async def _write_thread_record(
+    client: LangGraphClient,
+    thread_id: str,
+    thread: object,
+    origin: IngressThreadOrigin | None,
+) -> None:
+    """Record the message's origin and sender on the thread, when that changes it.
+
+    Two messages that read the record at once can drop the participant one of
+    them adds; that person's next message adds them again.
+    """
+    if origin is None:
+        return
+    metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
+    record = _next_record(metadata, origin)
+    if record != parse_thread_record(metadata):
+        await client.threads.update(thread_id, metadata=thread_record_metadata(record))
+
+
 def _started_run(thread_id: str, run: Mapping[str, object]) -> StartedIngressRun:
     # The server response is untrusted input even though the SDK types it as ``Run``.
     run_id = run.get("run_id") if isinstance(run, Mapping) else None
     if not isinstance(run_id, str) or not run_id.strip():
         raise ChannelError("channel_run_failed", "Agent Server did not return run_id")
+    set_log_attributes({"thread_id": thread_id, "run_id": run_id})
     return {"thread_id": thread_id, "run_id": run_id}
 
 
@@ -295,4 +406,6 @@ async def observe_ingress_run(
     values = await client.runs.join(thread_id, run_id)
     run = await client.runs.get(thread_id, run_id)
     status = run.get("status") if isinstance(run, Mapping) else None
+    if isinstance(status, str):
+        set_log_attributes({"run_status": status})
     return {"values": values, "status": status}

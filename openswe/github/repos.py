@@ -10,6 +10,7 @@ from githubkit.exception import RequestError, RequestFailed, RequestTimeout
 
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.github import repo_cache
+from openswe.github.http import github_reauth_message
 from openswe.github.sdk import GITHUB_API_VERSION, github_sdk
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ class RepositorySummary(TypedDict):
 
 def _github_api_http_exception(status_code: int) -> HTTPException:
     if status_code == 401:
-        return HTTPException(401, "github token expired, re-login required")
+        return HTTPException(401, github_reauth_message())
     if status_code == 403:
         return HTTPException(403, "github API forbidden")
     if status_code == 404:
@@ -77,7 +78,7 @@ async def fetch_user_installations_and_repos(
     """Resolve the installations and repos a user can access via the GitHub App."""
     token = await get_valid_access_token(login)
     if not token:
-        raise HTTPException(401, "github token unavailable, re-login required")
+        raise HTTPException(401, github_reauth_message(login))
     try:
         return await _fetch_with_token(token)
     except HTTPException as exc:
@@ -85,8 +86,13 @@ async def fetch_user_installations_and_repos(
             raise
         token = await get_valid_access_token(login, force_refresh=True)
         if not token:
-            raise HTTPException(401, "github token expired, re-login required") from exc
-        return await _fetch_with_token(token)
+            raise HTTPException(401, github_reauth_message(login)) from exc
+        try:
+            return await _fetch_with_token(token)
+        except HTTPException as refreshed_exc:
+            if refreshed_exc.status_code == 401:
+                raise HTTPException(401, github_reauth_message(login)) from refreshed_exc
+            raise
 
 
 async def _fetch_with_token(

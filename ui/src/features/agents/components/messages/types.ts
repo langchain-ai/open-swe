@@ -3,6 +3,7 @@ import type {
   LocalRepo,
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 export interface ApprovalCallbacks {
   onApprove?: (approvalRequestId: string) => void
@@ -19,6 +20,8 @@ export interface LoadEarlier {
 
 export type MessagesScrollControl = {
   scrollToBottom: () => void
+  /** Hold a message the user is sending at the top while the reply fills in. */
+  pinMessage: (messageId: string) => void
 }
 
 export interface MessagesProps extends ApprovalCallbacks {
@@ -36,11 +39,14 @@ export interface MessagesProps extends ApprovalCallbacks {
   queuedMessages?: Array<QueuedThreadMessage>
   /** Drop a queued message and hand it back to the composer. */
   onRemoveQueuedMessage?: (id: string) => void
+  /** Offers Reply on selected transcript text, attaching the reply to the next message. */
+  onReply?: (reply: PassageReply) => void
   isStreaming: boolean
   /** Live run signal from `useStream().isLoading` — drives Streamdown token animation. */
   streamIsLoading?: boolean
   /** When set, drives the thinking spinner (stream + pending). Falls back to streamIsLoading/isStreaming. */
   isThinking?: boolean
+  isWaitingForDelegatedWork?: boolean
   settingUpSandbox?: boolean
   isOffloading?: boolean
   /** Takes over the activity line while the event stream is reconnecting. */

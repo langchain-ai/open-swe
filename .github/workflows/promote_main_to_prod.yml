@@ -46,8 +46,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          PREVIOUS_SHA="$(git rev-parse origin/prod)"
+          PROMOTED_SHA="$(git rev-parse HEAD)"
           RELEASE_COMMITS="$(git log origin/prod..HEAD --format=%s)"
-          export RELEASE_COMMITS
+          export PREVIOUS_SHA PROMOTED_SHA RELEASE_COMMITS
           git push --force origin HEAD:refs/heads/prod
           python3 - <<'PY'
           import os
@@ -75,7 +77,16 @@ jobs:
               lines.append(f"- {title} — {url}")
           message = "\n".join(lines) or "No new PRs identified in the promoted commits."
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write(f"## Released PRs\n\n{message}\n")
+              repo_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+              previous = os.environ["PREVIOUS_SHA"]
+              promoted = os.environ["PROMOTED_SHA"]
+              summary.write(
+                  f"## Production promotion\n\n"
+                  f"- Promoted commit: [{promoted[:12]}]({repo_url}/commit/{promoted})\n"
+                  f"- [Changes since previous promotion]({repo_url}/compare/{previous}...{promoted})\n"
+                  f"- Python typecheck: passed for the promoted commit\n\n"
+                  f"## Released PRs\n\n{message}\n"
+              )
           PY
 
   deploy-mda:

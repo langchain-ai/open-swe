@@ -16,16 +16,28 @@ from openswe.slack.allowed_bots import (
     allowed_slack_bot_directory,
     list_slack_bots,
 )
-from openswe.slack.channel_options import SlackChannelDirectory, list_slack_channels
+from openswe.slack.channel_options import (
+    SlackChannelDirectory,
+    list_slack_channels,
+    refresh_directory,
+)
 from openswe.slack.client import get_slack_user_names
 from openswe.slack.connect import router as connect_router
 from openswe.slack.dm import concierge_thread_id, open_dm
+from openswe.slack.user_options import SlackUserDirectory, SlackUserOption
 from openswe.threads import index
 from openswe.threads.summary import assert_thread_readable
 from openswe.users import User
 
 router = APIRouter(tags=["slack"])
 router.include_router(connect_router)
+
+
+@router.get("/slack/users")
+async def api_slack_users(
+    _session: dict[str, object] = SESSION_DEP,
+) -> SlackUserDirectory:
+    return SlackUserDirectory(users=await SlackUserOption.all())
 
 
 @router.get("/slack/users/{user_id}/name")
@@ -65,13 +77,26 @@ async def api_list_slack_bots(
 @router.get("/slack/channels")
 async def api_list_slack_channels(
     session: dict[str, Any] = SESSION_DEP,
-    refresh: bool = False,
 ) -> SlackChannelDirectory:
     """Slack channels for the workspace channel picker and ``#`` autocomplete in agent inputs.
 
     Private channels are listed for admins only.
     """
-    directory = await list_slack_channels(refresh=refresh)
+    return _visible_channels(await list_slack_channels(), session)
+
+
+@router.post("/slack/channels/refresh")
+async def api_refresh_slack_channels(
+    session: dict[str, Any] = SESSION_DEP,
+) -> SlackChannelDirectory:
+    """Walk Slack's channels again now; the directory reloads when the walk ends."""
+    await refresh_directory(by=session_user_id(session))
+    return _visible_channels(await list_slack_channels(), session)
+
+
+def _visible_channels(
+    directory: SlackChannelDirectory, session: dict[str, Any]
+) -> SlackChannelDirectory:
     if session_is_admin(session):
         return directory
     return directory.model_copy(

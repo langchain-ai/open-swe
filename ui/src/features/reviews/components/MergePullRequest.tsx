@@ -53,18 +53,27 @@ export function MergePullRequest({
       (candidate): candidate is MergeMethod =>
         !!candidate && options.includes(candidate)
     ) ?? null
+  const autoMerge = pr.ci === "pending" && pr.mergeState === "blocked"
   const merge = usePullRequestAction({
     pr,
     action: "merge",
     method: method ?? undefined,
-    apply,
+    apply: autoMerge ? undefined : apply,
     onDone: () => {
       if (method) writePreferredMergeMethod(method)
-      onMerged?.()
+      if (!autoMerge) onMerged?.()
     },
   })
-  const busy = merge.isPending || merge.isSuccess
-  const state = actionLabel(githubActions.merge.labels, merge)
+  const busy = merge.isPending || merge.isSuccess || pr.autoMerge === true
+  const labels = autoMerge
+    ? {
+        idle: "Enable auto-merge",
+        pending: "Enabling auto-merge…",
+        done: "Auto-merge enabled",
+        retry: "Retry auto-merge",
+      }
+    : githubActions.merge.labels
+  const state = actionLabel(labels, merge)
   return (
     <SplitButton
       disabled={!pr.headSha || busy || allowed.isPending}
@@ -101,13 +110,15 @@ export function MergePullRequest({
         ))
       }
     >
-      {allowed.isPending
-        ? "Merge"
-        : !method
-          ? "Choose how to merge"
-          : state === githubActions.merge.labels.idle
-            ? mergeMethodCopy[method].button
-            : state}
+      {pr.autoMerge
+        ? "Auto-merge enabled"
+        : allowed.isPending
+          ? "Merge"
+          : !method
+            ? "Choose how to merge"
+            : !autoMerge && state === labels.idle
+              ? mergeMethodCopy[method].button
+              : state}
     </SplitButton>
   )
 }

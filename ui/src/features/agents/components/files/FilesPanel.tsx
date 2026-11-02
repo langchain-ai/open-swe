@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { TreeStructureIcon } from "@phosphor-icons/react/dist/ssr/TreeStructure"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import {
@@ -20,6 +20,11 @@ import {
   useDiffOverflow,
 } from "@/features/agents/utils/diffUtils"
 import { useWorkspaceFile } from "@/features/agents/lib/workspaceFiles"
+import {
+  SelectionReply,
+  codePassage,
+} from "@/features/agents/components/SelectionReply"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import { useResolvedTheme } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
@@ -29,6 +34,8 @@ interface FilesPanelProps {
   relativePath: string | null
   revealRequestId: number
   onOpenFile: (relativePath: string) => void
+  /** Offers Reply on text selected in the open file. */
+  onReply?: (reply: PassageReply) => void
 }
 
 function PreviewMessage(props: { children: string; error?: boolean }) {
@@ -44,8 +51,13 @@ function PreviewMessage(props: { children: string; error?: boolean }) {
   )
 }
 
-function SourcePreview(props: { name: string; contents: string }) {
+function SourcePreview(props: {
+  name: string
+  contents: string
+  onReply?: (reply: PassageReply) => void
+}) {
   const themeType = useResolvedTheme()
+  const paneRef = useRef<HTMLDivElement>(null)
   const [overflow] = useDiffOverflow()
   const file = useMemo(
     () => ({
@@ -60,21 +72,30 @@ function SourcePreview(props: { name: string; contents: string }) {
       poolOptions={DIFF_WORKER_POOL_OPTIONS}
       highlighterOptions={DIFF_WORKER_HIGHLIGHTER_OPTIONS}
     >
-      <Virtualizer
-        className="min-h-0 flex-1 overflow-auto"
-        config={DIFF_VIRTUALIZER_CONFIG}
-      >
-        <File
-          file={file}
-          options={{
-            theme: diffOptions.theme,
-            themeType,
-            overflow,
-            disableFileHeader: true,
-            unsafeCSS: DIFF_UNSAFE_CSS,
-          }}
+      <div ref={paneRef} className="flex min-h-0 flex-1 flex-col">
+        <Virtualizer
+          className="min-h-0 flex-1 overflow-auto"
+          config={DIFF_VIRTUALIZER_CONFIG}
+        >
+          <File
+            file={file}
+            options={{
+              theme: diffOptions.theme,
+              themeType,
+              overflow,
+              disableFileHeader: true,
+              unsafeCSS: DIFF_UNSAFE_CSS,
+            }}
+          />
+        </Virtualizer>
+      </div>
+      {props.onReply && (
+        <SelectionReply
+          containerRef={paneRef}
+          readPassage={codePassage(props.name, props.contents)}
+          onReply={props.onReply}
         />
-      </Virtualizer>
+      )}
     </WorkerPoolContextProvider>
   )
 }
@@ -82,6 +103,7 @@ function SourcePreview(props: { name: string; contents: string }) {
 function FilePreview(props: {
   file: ReturnType<typeof useWorkspaceFile>
   relativePath: string
+  onReply?: (reply: PassageReply) => void
 }) {
   const { data, error } = props.file
   if (error) return <PreviewMessage error>{error.message}</PreviewMessage>
@@ -97,7 +119,11 @@ function FilePreview(props: {
           byte file.
         </div>
       ) : null}
-      <SourcePreview name={props.relativePath} contents={data.contents} />
+      <SourcePreview
+        name={props.relativePath}
+        contents={data.contents}
+        onReply={props.onReply}
+      />
     </>
   )
 }
@@ -108,6 +134,7 @@ export function FilesPanel({
   relativePath,
   revealRequestId,
   onOpenFile,
+  onReply,
 }: FilesPanelProps) {
   const [explorerOpen, setExplorerOpen] = useState(true)
   const file = useWorkspaceFile(target, relativePath)
@@ -146,7 +173,11 @@ export function FilesPanel({
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {relativePath ? (
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            <FilePreview file={file} relativePath={relativePath} />
+            <FilePreview
+              file={file}
+              relativePath={relativePath}
+              onReply={onReply}
+            />
           </div>
         ) : null}
         {showExplorer ? (

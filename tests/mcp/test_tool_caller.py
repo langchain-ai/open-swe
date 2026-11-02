@@ -24,6 +24,7 @@ async def test_catalog_respects_admin_and_uses_python_schema(
     assert {access for _, access in (await USER.tools()).values()} == {"session"}
     tools = await ADMIN.tools()
     assert "read_only_sql" in tools
+    assert "execute_database_sql" in tools
     assert "upload_session" in tools
     assert "publish_workspace" not in tools
     parameters = tool_parameters(tools["manage_feature_flags"][0])
@@ -117,7 +118,7 @@ async def test_remote_mcp_tools_use_scoped_sources_and_recheck_allowed_tools(
     fake_mcp_server(monkeypatch, call=call)
     alice = ToolCaller(login="alice", email=None)
     bob = ToolCaller(login="bob", email=None)
-    name = next(name for name in await alice.tools() if name.startswith("mcp_linear_search_"))
+    name = next(name for name in await alice.tools() if name == "mcp_linear_search")
     assert tool_parameters((await alice.tools())[name][0])["type"] == "object"
     assert name in await bob.tools()
     assert "alice.example" in str((await alice.invoke(name, {})).content)

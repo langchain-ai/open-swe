@@ -32,9 +32,6 @@ pub struct InitSummary {
     pub project_root: PathBuf,
     pub language: Language,
     pub dataset_dir: PathBuf,
-    pub generated_dir: PathBuf,
-    pub adapter_dir: PathBuf,
-    pub runtime_settings_path: PathBuf,
     pub job_config_path: PathBuf,
 }
 
@@ -51,8 +48,6 @@ pub struct CompileOptions {
 #[derive(Debug)]
 pub struct CompileSummary {
     pub artifact_dir: PathBuf,
-    pub graph: String,
     pub model_name: Option<String>,
-    pub model_override: Option<String>,
     pub artifact_sha256: String,
 }

@@ -5,6 +5,8 @@ import { useEffect, useLayoutEffect, useRef } from "react"
 
 import { useIsHydrated } from "@/lib/hydration"
 import { useMediaQuery } from "@/lib/useIsMobile"
+import { useResizableWidth } from "@/lib/useResizableWidth"
+import { RightPanelResizeHandle } from "@/features/agents/components/panel/RightPanelResizeHandle"
 import { pageTitle } from "@/lib/pageTitle"
 import { SideSheet } from "@/components/SideSheet"
 import { useSidebarControls } from "@/components/sidebar-layout"
@@ -91,6 +93,13 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
     : "pl-space-3"
 
   const navigatorInline = navigatorOpen && roomForNavigator
+  const navigatorSize = useResizableWidth({
+    storageKey: "open-swe.review-navigator.width",
+    defaultWidth: 248,
+    minWidth: 200,
+    maxWidth: 480,
+    edge: "right",
+  })
 
   return (
     <ChatDraftsProvider>
@@ -106,8 +115,15 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
         ) : (
           <div className="flex min-h-0 flex-1">
             {navigatorInline && (
-              <div className="w-[248px] shrink-0 border-r border-default bg-surface-level-1">
+              <div
+                className="relative shrink-0 border-r border-default bg-surface-level-1"
+                style={{ width: navigatorSize.width }}
+              >
                 <Navigator pr={pr} />
+                <RightPanelResizeHandle
+                  handlers={navigatorSize.handlers}
+                  className="right-0 left-auto translate-x-1/2 touch-none"
+                />
               </div>
             )}
             <section aria-label="Changes" className="min-w-0 flex-1">
@@ -198,6 +214,10 @@ function PullRequestUnavailable({
   )
 }
 
+// Review pages currently holding the app's nav collapsed. Moving from one review
+// page straight to another hands the collapse over instead of reopening the nav.
+let pagesHoldingSidebar = 0
+
 /** Collapse the app's nav for room, unless the person came from it; restore it on the way out. */
 function useCollapseAppSidebar(pr: PullRequestRef) {
   const sidebar = useSidebarControls()
@@ -208,8 +228,14 @@ function useCollapseAppSidebar(pr: PullRequestRef) {
   }, [sidebar])
   useLayoutEffect(() => {
     const controls = sidebarRef.current
-    if (!controls || controls.collapsed || fromSidebar.current) return
+    if (!controls || fromSidebar.current) return
+    if (controls.collapsed && pagesHoldingSidebar === 0) return
+    pagesHoldingSidebar += 1
     controls.setCollapsedForPage(true)
-    return () => controls.setCollapsedForPage(false)
+    return () =>
+      queueMicrotask(() => {
+        pagesHoldingSidebar -= 1
+        if (pagesHoldingSidebar === 0) controls.setCollapsedForPage(false)
+      })
   }, [])
 }

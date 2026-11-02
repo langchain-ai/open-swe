@@ -1,8 +1,8 @@
-"""Tool errors from the calls this runtime runs in the box, as results the model can act on.
+"""Tool errors from the calls this runtime runs in the sandbox, as results the model can act on.
 
-A box that stopped answering is the exception: nothing the model does next can
-succeed, so the backend tells the person and the run ends. The backend handles
-the errors of the tools it runs itself the same way.
+A sandbox that stopped answering, or never booted, is the exception: nothing the model
+does next can succeed, so the backend tells the person, with why where known, and the
+run ends. The backend handles the errors of the tools it runs itself the same way.
 """
 
 import json
@@ -14,7 +14,7 @@ from typing import Final
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import ToolMessage
-from langgraph.errors import NodeCancelledError
+from langgraph.errors import GraphBubbleUp, NodeCancelledError
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langsmith.sandbox import (
@@ -23,9 +23,12 @@ from langsmith.sandbox import (
     SandboxRetryableConnectionError,
     SandboxServerReloadError,
 )
+from runtime_api.loop import SANDBOX_UNREACHABLE, SandboxGone
 
-from rt.backend import BackendCallError, OpenSweBackend, run_body
+from rt.backend import OpenSweBackend
+from rt.sandbox_setup import SandboxUnavailableError
 from rt.tools import run_id
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,8 @@ _SLOW_CALL_SECONDS: Final = 5
 
 
 class ToolErrorMiddleware(AgentMiddleware):
+    trace_policy = MIDDLEWARE_TRACE_POLICY
+
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
 
@@ -45,10 +50,11 @@ class ToolErrorMiddleware(AgentMiddleware):
         started = monotonic()
         try:
             return await handler(request)
-        except NodeCancelledError:
+        except NodeCancelledError, GraphBubbleUp:
+            # A connection the person has not granted pauses the run until they do.
             raise
         except SandboxRetryableConnectionError as exc:
-            # The command never started, so nothing is known to be wrong with the box.
+            # The command never started, so nothing is known to be wrong with the sandbox.
             logger.warning("The sandbox kept refusing a tool call before it started", exc_info=True)
             return _error(
                 request,
@@ -66,10 +72,10 @@ class ToolErrorMiddleware(AgentMiddleware):
             if not _sandbox_unreachable(exc):
                 logger.exception("Tool call failed", extra={"tool_name": request.tool_call["name"]})
                 return _error(request, {"error": str(exc), "error_type": type(exc).__name__})
-            # Every later call would meet the same dead box, so the run ends here once
+            # Every later call would meet the same dead sandbox, so the run ends here once
             # the person knows.
             logger.exception("The thread's sandbox stopped answering")
-            await self._report_unreachable(request, exc)
+            self._report_unreachable(request, exc)
             raise
         finally:
             seconds = monotonic() - started
@@ -83,23 +89,25 @@ class ToolErrorMiddleware(AgentMiddleware):
                     },
                 )
 
-    async def _report_unreachable(self, request: ToolCallRequest, exc: Exception) -> None:
+    def _report_unreachable(self, request: ToolCallRequest, exc: Exception) -> None:
         sandbox_id = _SANDBOX_ID.search(str(exc))
-        body = run_body(
-            run_id(), request.state, sandbox_id=sandbox_id.group(0) if sandbox_id else None
+        gone = SandboxGone(
+            run_id=run_id(),
+            sandbox_id=sandbox_id.group(0) if sandbox_id else None,
+            reason=str(exc) if isinstance(exc, SandboxUnavailableError) else None,
         )
-        try:
-            await self._backend.call("sandbox_unreachable", body)
-        except BackendCallError:
-            logger.warning("Could not tell the person the sandbox stopped answering", exc_info=True)
+        self._backend.outbox.notify(SANDBOX_UNREACHABLE, gone)
 
 
 def _sandbox_unreachable(exc: Exception) -> bool:
-    """Whether the box itself did not answer, as opposed to a call that failed in it.
+    """Whether the sandbox itself did not answer, or never booted, as opposed to a call that
+    failed in it.
 
-    A reload left the command running, and a missing resource that is not the box
+    A reload left the command running, and a missing resource that is not the sandbox
     is a missing file.
     """
+    if isinstance(exc, SandboxUnavailableError):
+        return True
     if isinstance(exc, SandboxConnectionError):
         return not isinstance(exc, SandboxServerReloadError)
     return isinstance(exc, ResourceNotFoundError) and exc.resource_type == "sandbox"

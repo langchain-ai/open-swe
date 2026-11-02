@@ -1,5 +1,12 @@
-Suggest a separate fix task for a concrete bug or obvious improvement spotted while working that is unrelated to the current request. Do not implement unrelated changes or expand the current task's scope.
+Record a suggested task for concrete future work without starting it, opening a ticket, or changing a repository.
+Available in agent, reviewer, and review-scout threads.
+Use this for pre-existing or out-of-scope bugs and improvements rather than expanding the current task.
 
-Pass `repo` as `owner/name`, `description` explaining the problem and proposed fix, and `directories` as your best guess of the repository-relative directories that need changes (use `.` for the repository root).
+Pass a short `summary`, actionable `details`, and the target `repo` as `owner/name`.
+Pass `workspace` to select the target workspace; otherwise use the repository's preferred workspace, falling back to this thread's workspace.
+The target may differ from this thread's workspace and repository, provided the triggering user has access to that repository.
+Pass additional evidence URLs in `context_links`, such as issues, code locations, or traces.
+The originating thread, task, pull request, and triggering user are linked automatically when available.
 
-This tool only logs the suggestion at INFO for now. It does not create a ticket, start work, or modify the repository. Do not include secrets or credentials.
+Suggestions are saved durably in PostgreSQL and publish a `workspace` event of type `task.suggested`.
+Do not include secrets or credentials.

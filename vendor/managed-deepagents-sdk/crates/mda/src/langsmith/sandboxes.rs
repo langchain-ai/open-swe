@@ -76,10 +76,7 @@ impl Client {
     /// sandbox API during deploy, so an entitlement failure would only surface
     /// later when the agent first uses a filesystem or execution tool.
     pub fn ensure_sandbox_access(&self) -> Result<()> {
-        let base = self
-            .platform_api_url
-            .as_deref()
-            .context("the LangSmith platform API is not available for this host")?;
+        let base = self.platform_base();
         self.request(
             base,
             Method::GET,
@@ -97,10 +94,7 @@ impl Client {
     /// narrowed server-side and then re-checked as a true prefix locally —
     /// otherwise a deployment would adopt sandboxes that merely mention its name.
     pub fn list_sandboxes_with_prefix(&self, prefix: &str) -> Result<Vec<SandboxSummary>> {
-        let base = self
-            .platform_api_url
-            .as_deref()
-            .context("the LangSmith platform API is not available for this host")?;
+        let base = self.platform_base();
 
         let mut found = Vec::new();
         let mut offset = 0usize;
@@ -147,10 +141,7 @@ impl Client {
         if names.is_empty() {
             return Ok(SandboxBatchDelete::default());
         }
-        let base = self
-            .platform_api_url
-            .as_deref()
-            .context("the LangSmith platform API is not available for this host")?;
+        let base = self.platform_base();
 
         let value = self.request(
             base,
@@ -171,10 +162,7 @@ impl Client {
         name: &str,
         options: CreateSandboxBoxOptions<'_>,
     ) -> Result<SandboxSummary> {
-        let base = self
-            .platform_api_url
-            .as_deref()
-            .context("the LangSmith platform API is not available for this host")?;
+        let base = self.platform_base();
 
         let mut payload = json!({
             "name": name,
@@ -207,10 +195,7 @@ impl Client {
 
     /// Delete one sandbox by name (best-effort; 404 is ok).
     pub fn delete_sandbox_box(&self, name: &str) -> Result<()> {
-        let base = self
-            .platform_api_url
-            .as_deref()
-            .context("the LangSmith platform API is not available for this host")?;
+        let base = self.platform_base();
         let path = format!("/v2/sandboxes/boxes/{name}");
         let _ = self.request_optional(base, Method::DELETE, &path, &[], None)?;
         Ok(())
@@ -224,7 +209,6 @@ impl Client {
         timeout_secs: u64,
     ) -> Result<SandboxCommandResult> {
         let url = format!("{}/execute", dataplane_url.trim_end_matches('/'));
-        let api_key = self.api_key()?;
         let payload = json!({
             "command": command,
             "timeout": timeout_secs,
@@ -236,7 +220,7 @@ impl Client {
             .context("failed to build execute HTTP client")?;
         let mut req = http
             .post(&url)
-            .header("X-Api-Key", &api_key)
+            .header("X-Api-Key", self.api_key())
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .json(&payload);
@@ -297,7 +281,6 @@ fn decode_batch_delete(value: Value) -> Result<SandboxBatchDelete> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::langsmith::{Credential, REQUEST_TIMEOUT};
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::sync::mpsc::{self, Receiver};
@@ -373,19 +356,6 @@ mod tests {
         String::from_utf8_lossy(&data).to_string()
     }
 
-    fn client_for_platform(platform_api_url: String) -> Client {
-        Client {
-            http: crate::http::client_builder()
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .unwrap(),
-            credential: Credential::ApiKey("key".into()),
-            tenant_id: Some("tenant".into()),
-            host_backend_url: "http://unused.invalid".into(),
-            platform_api_url: Some(platform_api_url),
-        }
-    }
-
     fn page(sandboxes: &[(&str, &str)]) -> String {
         let entries: Vec<Value> = sandboxes
             .iter()
@@ -405,7 +375,7 @@ mod tests {
             ("my-agent-staging--ddd", "ready"),
         ])]);
 
-        let found = client_for_platform(url)
+        let found = Client::for_test(&url)
             .list_sandboxes_with_prefix("my-agent--")
             .unwrap();
 
@@ -427,7 +397,7 @@ mod tests {
             ("my-agent--bbb", "deleting"),
         ])]);
 
-        let found = client_for_platform(url)
+        let found = Client::for_test(&url)
             .list_sandboxes_with_prefix("my-agent--")
             .unwrap();
 
@@ -447,7 +417,7 @@ mod tests {
             page(&[("my-agent--last", "ready")]),
         ]);
 
-        let found = client_for_platform(url)
+        let found = Client::for_test(&url)
             .list_sandboxes_with_prefix("my-agent--")
             .unwrap();
 
@@ -462,7 +432,7 @@ mod tests {
             json!({ "deleted": ["my-agent--aaa", "my-agent--bbb"], "skipped": [] }).to_string(),
         ]);
 
-        let outcome = client_for_platform(url)
+        let outcome = Client::for_test(&url)
             .batch_delete_sandboxes(&["my-agent--aaa".to_string(), "my-agent--bbb".to_string()])
             .unwrap();
 
@@ -481,7 +451,7 @@ mod tests {
     #[test]
     fn batch_delete_of_nothing_makes_no_request() {
         // No mock server: a request here would fail to connect.
-        let client = client_for_platform("http://unused.invalid".to_string());
+        let client = Client::for_test("http://unused.invalid");
         assert!(client
             .batch_delete_sandboxes(&[])
             .unwrap()
@@ -493,7 +463,7 @@ mod tests {
     fn sandbox_access_probe_makes_a_bounded_list_request() {
         let (url, rx) = serve(vec![page(&[])]);
 
-        client_for_platform(url).ensure_sandbox_access().unwrap();
+        Client::for_test(&url).ensure_sandbox_access().unwrap();
 
         let request = rx.recv().unwrap();
         assert!(
@@ -513,25 +483,11 @@ mod tests {
         .to_string();
         let (url, _rx) = serve_status(403, body);
 
-        let error = client_for_platform(url)
-            .ensure_sandbox_access()
-            .unwrap_err();
+        let error = Client::for_test(&url).ensure_sandbox_access().unwrap_err();
 
         assert_eq!(
             error.to_string(),
             "Sandbox feature is not enabled for this organization (HTTP 403)"
-        );
-    }
-
-    #[test]
-    fn sandbox_endpoints_require_the_platform_api() {
-        let mut client = client_for_platform("http://unused.invalid".to_string());
-        client.platform_api_url = None;
-
-        let err = client.list_sandboxes_with_prefix("my-agent--").unwrap_err();
-        assert!(
-            err.to_string().contains("platform API is not available"),
-            "unexpected error: {err:#}"
         );
     }
 

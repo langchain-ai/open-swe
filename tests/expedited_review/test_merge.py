@@ -382,10 +382,17 @@ async def test_a_head_that_moves_after_the_checks_writes_nothing(
     assert github.reviews == [] and github.merges == []
 
 
-async def test_someone_else_merging_on_github_only_marks_the_card_and_reacts(
-    github: _GitHub, open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("thread_ts", ["2.0", "1.0", ""])
+async def test_external_merge_only_reacts_to_a_separate_thread_root(
+    github: _GitHub,
+    open_approval: OpenApproval,
+    monkeypatch: pytest.MonkeyPatch,
+    thread_ts: str,
 ) -> None:
     approval = await _reviewed(await _approved(open_approval, "U_GRACE"), github)
+    async with HumanReviewRequest.locked(approval.id) as (_, row):
+        assert row is not None
+        row.slack_thread_ts = thread_ts
     reactions = AsyncMock(return_value=True)
     posts = AsyncMock()
     wakes = AsyncMock()
@@ -398,7 +405,10 @@ async def test_someone_else_merging_on_github_only_marks_the_card_and_reacts(
     await lifecycle.close_for_pull_request("lc", "repo", 7)
 
     assert (await _reload(approval)).state == "merged"
-    reactions.assert_awaited_once_with("C1", "1.0", "merged")
+    if thread_ts and thread_ts != approval.slack_message_ts:
+        reactions.assert_awaited_once_with("C1", thread_ts, "merged")
+    else:
+        reactions.assert_not_awaited()
     posts.assert_not_awaited()
     wakes.assert_not_awaited()
     assert github.dismissed == [] and github.merges == []

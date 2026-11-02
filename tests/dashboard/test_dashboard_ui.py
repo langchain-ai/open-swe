@@ -31,6 +31,20 @@ def _shell_route(app) -> DashboardShellRoute:
     return next(route for route in app.router.routes if isinstance(route, DashboardShellRoute))
 
 
+def test_desktop_ui_selects_the_backend_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openswe.utils import build_info
+
+    monkeypatch.setattr(build_info, "backend_build_info", lambda: {"commit": "a" * 40})
+    response = TestClient(app_module.create_app()).get("/desktop-ui.json", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == (
+        f"https://github.com/langchain-ai/open-swe/releases/download/desktop-ui-{'a' * 40}/descriptor.json"
+    )
+    assert response.headers["cache-control"] == "no-store"
+    monkeypatch.setattr(build_info, "backend_build_info", lambda: {"commit": "invalid"})
+    assert TestClient(app_module.create_app()).get("/desktop-ui.json").status_code == 503
+
+
 def test_desktop_api_preflight_without_extra_cors_origins(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

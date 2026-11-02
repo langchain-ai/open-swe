@@ -15,7 +15,7 @@ _WRITE = Policy(trusted="admin_surface", actor="admin", sole=ack("repository", "
 
 
 @expose_mcp(access="admin")
-@audit_tool(skip_read=True)
+@audit_tool(reads={"read"})
 @access(_WRITE, per_call=lambda args: _WRITE if args.get("action") == "set" else _READ)
 async def manage_review_repos(
     action: Literal["read", "set"],

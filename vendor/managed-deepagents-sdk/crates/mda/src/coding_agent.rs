@@ -5,8 +5,6 @@ use std::fs;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::thread::sleep;
-use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use cliclack::{note, reset_theme, select, set_theme, Theme, ThemeState};
@@ -374,8 +372,6 @@ pub enum HandoffOutcome {
     InstalledNeedsRestart,
     /// The exact onboarding prompt was printed to standard output.
     PromptShown,
-    /// Standard input or error is not attached to a terminal.
-    NotInteractive,
     /// The user selected Exit or cancelled the selection prompt.
     Cancelled,
 }
@@ -448,9 +444,6 @@ fn spawn_coding_agent_at(
     wait_for_coding_agent(child, agent, cwd, &interrupt)
 }
 
-/// How often a running coding agent is polled while we wait for it to exit.
-const AGENT_POLL_INTERVAL: Duration = Duration::from_millis(100);
-
 /// Wait for an agent that owns the terminal.
 ///
 /// Deliberately not an [`OwnedChild`](crate::child::OwnedChild): an interactive
@@ -463,15 +456,9 @@ fn wait_for_coding_agent(
     cwd: &Path,
     interrupt: &Interrupt,
 ) -> Result<()> {
-    let status = loop {
-        if let Some(status) = child
-            .try_wait()
-            .with_context(|| format!("failed while waiting for {}", agent.label()))?
-        {
-            break status;
-        }
-        sleep(AGENT_POLL_INTERVAL);
-    };
+    let status = child
+        .wait()
+        .with_context(|| format!("failed while waiting for {}", agent.label()))?;
     if status.success() || interrupt.is_requested() {
         return Ok(());
     }
@@ -561,12 +548,27 @@ fn write_raw_prompt(mut writer: impl Write, prompt: &str) -> std::io::Result<()>
     writer.flush()
 }
 
-/// Offer coding agents, or print the raw onboarding prompt instead.
-pub fn offer_handoff(cwd: &Path, prompt: &str, complete: bool) -> Result<HandoffOutcome> {
-    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
-        return Ok(HandoffOutcome::NotInteractive);
-    }
+/// Whether standard input and error are both terminals, as the handoff
+/// picker needs.
+pub(crate) fn has_terminal() -> bool {
+    std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
+}
 
+/// Reject `-i` without a terminal, before any work starts.
+pub(crate) fn require_terminal() -> Result<()> {
+    if has_terminal() {
+        return Ok(());
+    }
+    Err(categorized(
+        ErrorCategory::UserInput,
+        "coding-agent handoff requires a terminal; omit `-i` to disable it",
+    ))
+}
+
+/// Offer coding agents, or print the raw onboarding prompt instead.
+///
+/// Callers check [`require_terminal`] first, before doing any work.
+pub fn offer_handoff(cwd: &Path, prompt: &str, complete: bool) -> Result<HandoffOutcome> {
     loop {
         let mut choice = select(HANDOFF_HEADING);
         for item in handoff_choices(agent_options_in(std::env::var_os("PATH").as_deref())) {

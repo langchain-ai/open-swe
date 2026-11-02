@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
+import { fetchToolOutput } from "./api"
 import {
   applyEvent,
   applySnapshot,
@@ -27,8 +28,8 @@ import type {
   TranscriptTurnRow,
 } from "./types"
 
-// The reducer only reaches the network to lazily load a tool's full output,
-// which no test here expands; attachment URLs are built, never fetched.
+// The reducer only reaches the network to lazily load a tool's full output;
+// attachment URLs are built, never fetched.
 vi.mock(import("./api"), async (importOriginal) => ({
   ...(await importOriginal()),
   fetchToolOutput: vi.fn(),
@@ -80,6 +81,7 @@ function toolCall(
     status: "completed",
     output_preview: null,
     has_output: false,
+    attachments: null,
     namespace: [],
     ...row,
   }
@@ -216,6 +218,39 @@ describe("transcript snapshot", () => {
     ])
     expect(messages[1]?.startedAt).toBe("2026-01-01T00:00:01Z")
     expect(messages[1]?.timestamp).toBe("2026-01-01T00:00:02Z")
+  })
+
+  it("hides the context Claude Code adds to a mirrored prompt", () => {
+    const sender = { login: "octocat", kind: "claude_code" }
+    const messages = toMessages(
+      fromSnapshot(
+        snapshot({
+          turns: [turn("t1", "2026-01-01T00:00:00Z")],
+          messages: [
+            messageRow({
+              message_id: "human-1",
+              turn_id: "t1",
+              role: "human",
+              text: "<system-reminder>\nIn a worktree\n</system-reminder>\n\nFix it",
+              sender,
+              created_at: "2026-01-01T00:00:00Z",
+            }),
+            messageRow({
+              message_id: "human-2",
+              turn_id: "t1",
+              role: "human",
+              text: "<task-notification>\n<status>done</status>\n</task-notification>",
+              sender,
+              created_at: "2026-01-01T00:00:01Z",
+            }),
+          ],
+        })
+      )
+    )
+
+    expect(messages.map((entry) => [entry.id, entry.chunks])).toEqual([
+      ["human-1", [{ kind: "text", text: "Fix it" }]],
+    ])
   })
 
   it("keeps a subagent's nested work out of the root transcript, on its task call", () => {
@@ -390,6 +425,47 @@ describe("transcript events", () => {
     expect(requested.status).toBe("running")
   })
 
+  it("marks a persisted message failed when its turn never started", () => {
+    const row = {
+      ...turn("turn-1", "2026-01-01T00:00:00Z", "requested"),
+      error: "the message could not be started",
+    }
+    const data = snapshot({
+      turns: [row],
+      messages: [
+        messageRow({
+          message_id: "human-1",
+          turn_id: "turn-1",
+          role: "human",
+          text: "Please apply the patch",
+          created_at: row.requested_at,
+        }),
+      ],
+    })
+    const requested = fromSnapshot(data)
+    expect(toMessages(requested)[0]?.deliveryStatus).toBeUndefined()
+    const failed = applyEvent(requested, {
+      ...appended(11, {}),
+      event_type: "turn.failed",
+      payload: { turn_id: "turn-1", error: row.error },
+    })
+    expect(toMessages(failed)[0]).toMatchObject({
+      id: "human-1",
+      deliveryStatus: "failed",
+      deliveryError: row.error,
+    })
+    const reloaded = fromSnapshot({
+      ...data,
+      turns: [{ ...row, state: "failed" }],
+    })
+    expect(toMessages(reloaded)).toEqual(toMessages(failed))
+    const started = fromSnapshot({
+      ...data,
+      turns: [{ ...row, state: "failed", started_at: row.requested_at }],
+    })
+    expect(toMessages(started)[0]?.deliveryStatus).toBeUndefined()
+  })
+
   it("keeps a queued follow-up out of the record until its run starts", () => {
     const requested = applyEvent(fromSnapshot(twoTurnSnapshot()), {
       ...appended(11, {}),
@@ -433,6 +509,36 @@ describe("transcript events", () => {
     })
     expect(queuedTurns(started)).toEqual([])
     expect(inRecord(started)).toBe(true)
+  })
+
+  it("shows a steered turn's message once when the run that continues it reopens with it", () => {
+    // After a steer the server records the follow-on run as a new turn that
+    // opens with the steered turn's own message id; the message stays in the
+    // turn that first recorded it, as the server's projection keeps it.
+    const ended = applyEvent(fromSnapshot(twoTurnSnapshot()), {
+      ...appended(11, {}),
+      event_type: "turn.completed",
+      payload: { turn_id: "turn-2" },
+    })
+    const reopened = applyEvent(ended, {
+      ...appended(12, {}),
+      event_type: "turn.requested",
+      payload: {
+        turn_id: "turn-3",
+        message_id: "human-2",
+        text: "second ask",
+        attachments: [],
+      },
+    })
+    const continued = applyEvent(reopened, {
+      ...appended(13, {}),
+      event_type: "turn.started",
+      payload: { turn_id: "turn-3" },
+    })
+
+    expect(
+      toMessages(continued).filter((message) => message.id === "human-2")
+    ).toHaveLength(1)
   })
 
   it("stays running while a queued follow-up waits behind the turn that ended", () => {
@@ -485,6 +591,30 @@ describe("transcript events", () => {
       payload: { turn_id: "turn-2" },
     })
     expect(ended.status).toBe("idle")
+
+    // A later turn runs: the orphan never will, so it is not shown as queued
+    // behind it.
+    const later = applyEvent(
+      applyEvent(ended, {
+        ...appended(13, {}),
+        occurred_at: "2026-01-01T00:05:00Z",
+        event_type: "turn.requested",
+        payload: {
+          turn_id: "turn-4",
+          message_id: "human-4",
+          text: "a later ask",
+          attachments: [],
+        },
+      }),
+      {
+        ...appended(14, {}),
+        occurred_at: "2026-01-01T00:05:01Z",
+        event_type: "turn.started",
+        payload: { turn_id: "turn-4" },
+      }
+    )
+    expect(later.status).toBe("running")
+    expect(queuedTurns(later)).toEqual([])
   })
 })
 
@@ -766,6 +896,72 @@ describe("tool output", () => {
     )
 
     expect(readChunk(settled)?.loadOutput).toBeTypeOf("function")
+  })
+
+  it("fetches a call's output once while its turn keeps changing", async () => {
+    vi.mocked(fetchToolOutput).mockResolvedValue({ output: "full" })
+    const settled = applyEvent(
+      fromSnapshot(twoTurnSnapshot()),
+      toolCompleted(11, { output_preview: "x".repeat(2000) })
+    )
+    const streamed = applyEvent(settled, {
+      version: 12,
+      occurred_at: "2026-01-01T00:02:00Z",
+      event_type: "message.appended",
+      payload: {
+        turn_id: "turn-1",
+        message_id: "ai-1",
+        namespace: [],
+        text: " more",
+        reasoning: null,
+      },
+    })
+
+    expect(toMessages(streamed)).not.toBe(toMessages(settled))
+    const before = readChunk(settled)?.loadOutput
+    const after = readChunk(streamed)?.loadOutput
+    expect(after).toBe(before)
+    expect(await Promise.all([before?.(), after?.()])).toEqual(["full", "full"])
+    expect(fetchToolOutput).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("tool images", () => {
+  it("puts a tool result's images on its chunk, reloaded or live", () => {
+    const shot = attachment({
+      file_name: null,
+      attachment_id: "11111111-2222-3333-4444-555555555555",
+    })
+    const reloaded = fromSnapshot(
+      twoTurnSnapshot({
+        tool_calls: [
+          toolCall({
+            tool_call_id: "read-1",
+            turn_id: "turn-1",
+            name: "screenshot",
+            started_at: "2026-01-01T00:00:02Z",
+            attachments: [shot],
+          }),
+        ],
+      })
+    )
+    const live = applyEvent(
+      fromSnapshot(twoTurnSnapshot()),
+      toolCompleted(11, { attachments: [shot] })
+    )
+
+    const expected = [
+      {
+        kind: "image",
+        url: expect.stringContaining(
+          "/threads/thread-1/transcript/attachments/11111111-2222-3333-4444-555555555555"
+        ) as unknown as string,
+        credentials: "session",
+        mimeType: "image/png",
+      },
+    ]
+    expect(readChunk(reloaded)?.images).toEqual(expected)
+    expect(readChunk(live)?.images).toEqual(expected)
   })
 })
 

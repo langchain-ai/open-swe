@@ -316,17 +316,6 @@ fn is_regular_file(path: &Path) -> Result<bool> {
     }
 }
 
-pub(crate) fn artifact_graph(artifact_dir: &Path) -> Result<String> {
-    let manifest = read_artifact_manifest(artifact_dir)?;
-    let graph = manifest
-        .get("graph")
-        .and_then(|value| value.as_str())
-        .unwrap_or("agent")
-        .to_string();
-    crate::agent_config::validate_assistant_id(&graph, "eval artifact manifest")?;
-    Ok(graph)
-}
-
 pub(crate) fn read_artifact_manifest(artifact_dir: &Path) -> Result<serde_json::Value> {
     let manifest_path = artifact_dir.join("mda-eval-manifest.json");
     let manifest = serde_json::from_str(

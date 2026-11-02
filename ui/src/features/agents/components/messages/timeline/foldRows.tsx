@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -26,15 +27,20 @@ export function TurnFoldRow({
   return (
     <div
       className={cn(
-        "pt-space-1 pb-space-2",
-        !active && "border-b border-subtle"
+        // The border is there while live too, so settling doesn't nudge what follows.
+        "border-b pt-space-1 pb-space-2",
+        active ? "border-transparent" : "border-subtle"
       )}
     >
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label={label}
         type="button"
         aria-expanded={expanded}
         onClick={onToggle}
-        className="flex max-w-full cursor-pointer items-center gap-space-1 rounded-md px-space-1 text-left text-xs text-secondary tabular-nums transition-colors duration-normal select-none hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
+        className="h-auto max-w-full cursor-pointer justify-start gap-space-1 border-0 px-space-1 text-left text-secondary tabular-nums select-none hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
       >
         {active && <LoadingIndicator className="mr-space-1 size-3 shrink-0" />}
         <span className={cn("min-w-0 truncate", active && "shimmer-text")}>
@@ -42,7 +48,7 @@ export function TurnFoldRow({
         </span>
         {active && <ElapsedSeconds />}
         <Caret size={12} weight="bold" aria-hidden className="shrink-0" />
-      </button>
+      </Button>
     </div>
   )
 }
@@ -63,11 +69,17 @@ export function WorkGroupToggleRow({
   const noun = hiddenCount === 1 ? "tool call" : "tool calls"
 
   return (
-    <button
+    <Button
+      color="secondary"
+      variant="plain"
+      size="xs"
+      aria-label={
+        expanded ? `Show fewer ${noun}` : `+${hiddenCount} previous ${noun}`
+      }
       type="button"
       aria-expanded={expanded}
       onClick={onToggle}
-      className="flex w-full cursor-pointer items-center gap-space-2 rounded-md px-0.5 py-0.5 text-left text-xxs leading-5 transition-colors duration-normal hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
+      className="w-full cursor-pointer justify-start gap-space-2 px-0.5 py-0.5 text-left leading-5 hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
     >
       <span className="flex size-5 shrink-0 items-center justify-center text-icon-tertiary">
         <CaretDownIcon
@@ -83,6 +95,6 @@ export function WorkGroupToggleRow({
       <span className="font-medium text-primary">
         {expanded ? `Show fewer ${noun}` : `+${hiddenCount} previous ${noun}`}
       </span>
-    </button>
+    </Button>
   )
 }

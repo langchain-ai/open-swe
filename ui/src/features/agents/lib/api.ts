@@ -1,7 +1,9 @@
+import type { Experience } from "@/lib/experience"
 import type {
   AgentPullRequestContextResponse,
   ThreadFixScope,
   AgentPullRequestStatusResponse,
+  AgentBackgroundOutput,
   AgentBackgroundWork,
   AgentQueuedMessage,
   AgentSchedule,
@@ -150,6 +152,7 @@ export type ThreadScope = "all" | "interactive" | "automation" | "bot"
 export type ThreadSortBy = "created_at" | "updated_at"
 
 export interface ThreadsPageParams {
+  experience?: Experience
   hierarchy?: boolean
   limit?: number
   offset?: number
@@ -166,6 +169,8 @@ export interface ThreadsPageParams {
   repo?: string
   ownerless?: boolean
   owned?: boolean
+  /** Thread sources to leave out, such as `claude_code`. */
+  excludeSources?: Array<string>
   sortBy?: ThreadSortBy
 }
 
@@ -305,6 +310,7 @@ async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
 
 function buildThreadsPageQuery(params: ThreadsPageParams): string {
   const search = new URLSearchParams()
+  if (params.experience) search.set("experience", params.experience)
   if (params.hierarchy != null)
     search.set("hierarchy", String(params.hierarchy))
   if (params.limit != null) search.set("limit", String(params.limit))
@@ -322,23 +328,30 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.ownerless != null)
     search.set("ownerless", String(params.ownerless))
   if (params.owned) search.set("owned", "true")
+  for (const source of params.excludeSources ?? [])
+    search.append("exclude_source", source)
   if (params.sortBy) search.set("sort_by", params.sortBy)
   const query = search.toString()
   return query ? `?${query}` : ""
 }
 
 function buildReposQuery(params: {
+  experience?: Experience
   includeResolved?: boolean
   includeAutomations?: boolean
   owned?: boolean
+  excludeSources?: Array<string>
 }): string {
   const search = new URLSearchParams()
+  if (params.experience) search.set("experience", params.experience)
   if (params.includeResolved != null)
     search.set("include_resolved", String(params.includeResolved))
   if (params.includeAutomations != null) {
     search.set("include_automations", String(params.includeAutomations))
   }
   if (params.owned) search.set("owned", "true")
+  for (const source of params.excludeSources ?? [])
+    search.append("exclude_source", source)
   const query = search.toString()
   return query ? `?${query}` : ""
 }
@@ -361,15 +374,20 @@ export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
   listThreadRepos: (
     params: {
+      experience?: Experience
       includeResolved?: boolean
       includeAutomations?: boolean
       owned?: boolean
+      excludeSources?: Array<string>
     } = {}
   ) =>
     agentsRequest<Array<SidebarRepo>>(
       `/threads/repos${buildReposQuery(params)}`
     ),
-  listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
+  listPinnedThreads: (experience?: Experience) =>
+    agentsRequest<Array<AgentThread>>(
+      `/threads/pinned${experience ? `?experience=${experience}` : ""}`
+    ),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
   shareThreadWithWorkspace: (threadId: string) =>
@@ -437,6 +455,15 @@ export const agentsApi = {
         options?.markViewed === false ? "?mark_viewed=false" : ""
       }`
     ),
+  markThreadViewed: (threadId: string, runId: string) =>
+    agentsRequest<{
+      runId: string | null
+      viewed: boolean
+      viewedAt: number | null
+    }>(`/threads/${encodeURIComponent(threadId)}/viewed`, {
+      method: "POST",
+      body: JSON.stringify({ run_id: runId }),
+    }),
   getPullRequestChecks: (
     pullRequests: Array<{ repoFullName: string; number: number }>
   ) =>
@@ -451,6 +478,10 @@ export const agentsApi = {
   getThreadBackgroundWork: (threadId: string) =>
     agentsRequest<AgentBackgroundWork>(
       `/threads/${encodeURIComponent(threadId)}/background-work`
+    ),
+  getThreadBackgroundOutput: (threadId: string, taskId: string) =>
+    agentsRequest<AgentBackgroundOutput>(
+      `/threads/${encodeURIComponent(threadId)}/background-work/${encodeURIComponent(taskId)}/output`
     ),
   getThreadQueuedMessages: (threadId: string) =>
     agentsRequest<Array<AgentQueuedMessage>>(

@@ -25,6 +25,18 @@ from pydantic import (
 logger = logging.getLogger(__name__)
 
 _SYSTEM_REMINDER = re.compile(r"<system-reminder>.*?</system-reminder>\s*", re.DOTALL)
+# Context Claude Code and its desktop app wrap around a prompt or send as one; nobody typed it.
+_HARNESS_CONTEXT = re.compile(
+    r"<(system-reminder|local-command-caveat|local-command-stdout|local-command-stderr"
+    r"|task-notification|ci-monitor-event|side-sessions-event|agent-message"
+    r"|cross-session-message|artifact-view-context|ide_opened_file|ide_selection)\b[^>]*>"
+    r".*?</\1>\s*",
+    re.DOTALL,
+)
+_COMMAND_MESSAGE = re.compile(r"<command-message>.*?</command-message>\s*", re.DOTALL)
+_COMMAND = re.compile(
+    r"<command-name>(.*?)</command-name>\s*(?:<command-args>(.*?)</command-args>)?", re.DOTALL
+)
 IMAGE_PLACEHOLDER = "[image omitted]"
 MISSING_TOOL_RESULT = "No result was recorded before the session was uploaded."
 MAX_TITLE_CHARS = 80
@@ -117,6 +129,7 @@ class _Record(_Model):
     uuid: str
     parent_uuid: str | None = Field(default=None, alias="parentUuid")
     is_sidechain: bool = Field(default=False, alias="isSidechain")
+    session_id: str | None = Field(default=None, alias="sessionId")
 
 
 class UserMessage(_Model):
@@ -206,6 +219,8 @@ type ConversationRecord = UserRecord | AssistantRecord | AttachmentRecord | Link
 class ClaudeSession:
     title: str | None
     messages: list[BaseMessage]
+    # Claude Code's id for the session, which its hooks send too.
+    session_id: str | None = None
 
 
 def _parse_record(number: int, line: str) -> Record | LinkRecord | None:
@@ -261,6 +276,12 @@ def _active_branch(conversation: Sequence[ConversationRecord]) -> list[Conversat
 
 def _clean(text: str) -> str:
     return _SYSTEM_REMINDER.sub("", text).strip()
+
+
+def prompt_text(text: str) -> str:
+    """The prompt as the person typed it, for naming a session; messages keep the full text."""
+    text = _COMMAND_MESSAGE.sub("", _HARNESS_CONTEXT.sub("", text))
+    return _COMMAND.sub(lambda m: f"{m[1].strip()} {(m[2] or '').strip()}".strip(), text).strip()
 
 
 type Block = TextBlock | ImageBlock | ToolUseBlock | ToolResultBlock | OtherBlock
@@ -368,6 +389,7 @@ class ClaudeTranscript:
     def __init__(self) -> None:
         self._records: list[ConversationRecord] = []
         self._title: str | None = None
+        self._session_id: str | None = None
         self._line = 0
         self._parsed = 0
 
@@ -390,6 +412,8 @@ class ClaudeTranscript:
             self._title = record.custom_title.strip() or self._title
         elif not isinstance(record, OtherRecord) and not record.is_sidechain:
             self._records.append(record)
+            # A resumed session keeps writing under its new id, which is the one its hooks send.
+            self._session_id = record.session_id or self._session_id
 
     def session(self) -> ClaudeSession:
         """Fold the lines into messages; raises ``TranscriptError`` when none was a record."""
@@ -399,8 +423,8 @@ class ClaudeTranscript:
         first_human = next((m for m in messages if isinstance(m, HumanMessage)), None)
         title = self._title
         if title is None and first_human is not None:
-            title = str(first_human.content).strip()[:MAX_TITLE_CHARS] or None
-        return ClaudeSession(title=title, messages=messages)
+            title = prompt_text(str(first_human.content))[:MAX_TITLE_CHARS] or None
+        return ClaudeSession(title=title, messages=messages, session_id=self._session_id)
 
 
 def _messages(records: Sequence[ConversationRecord]) -> list[BaseMessage]:

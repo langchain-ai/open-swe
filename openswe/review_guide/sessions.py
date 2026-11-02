@@ -2,14 +2,14 @@
 
 A session is one code channel walking one person through one pull request,
 along with where the walkthrough of its current head stands. What they approved is kept per
-person and pull request, keyed by line content rather than commit, so a rebase
-or force-push never asks them to reread it.
+person and pull request as line ranges at one head, carried to each new head
+with the plan, so a rebase or force-push never asks them to reread it.
 """
 
-from collections import Counter
-from datetime import datetime
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Literal, Self
-from uuid import UUID
+from uuid import UUID, uuid7
 
 from sqlalchemy import ForeignKey, Text, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
@@ -19,28 +19,44 @@ from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
+from openswe.jobs import queue
+from openswe.review_guide.github import fetch_head
 from openswe.review_guide.walk import Reader, Walk
+from openswe.slack.code_channels import archive_code_channel, set_session_status
+from openswe.slack.http import SlackRequestError
 from openswe.users.models import User
 from openswe.utils.json_types import JsonObject
+from openswe.walkthrough.diff import Carry
+from openswe.walkthrough.lines import LineSet
 from openswe.walkthrough.record import Walkthrough
 
 # A reviewer ends by approving; the author, who cannot approve their own PR, ends by readying it.
 GuideMode = Literal["reviewer", "author"]
+ARCHIVE_JOB = "review_guide_archive"
 
 
-class ReviewGuideSeenLine(Base):
-    __tablename__ = "review_guide_seen_line"
+class ReviewGuideSeen(Base):
+    __tablename__ = "review_guide_seen"
 
-    user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    pull_request_id: Mapped[UUID] = mapped_column(ForeignKey("pull_request.id", ondelete="CASCADE"))
+    # The head and merge base ``lines`` are numbered at; another head carries them there first.
+    head_sha: Mapped[str]
+    merge_base_sha: Mapped[str]
+    lines_json: Mapped[JsonObject] = mapped_column("lines", JSONB)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
+    updated_at: Mapped[datetime] = mapped_column(server_default=NOW, onupdate=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
-    pull_request_id: Mapped[UUID] = mapped_column(
-        ForeignKey("pull_request.id", ondelete="CASCADE"), primary_key=True
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
-    # sha256 of (path, sign, text): the line by content, so it stays seen across rebases.
-    line_key: Mapped[str] = mapped_column(primary_key=True)
-    # Copies of that exact line approved; identical lines, such as a lone `}`, each count once.
-    seen_count: Mapped[int]
+
+    @property
+    def lines(self) -> LineSet:
+        return LineSet.load(self.lines_json)
 
 
 class ReviewGuideSession(Base):
@@ -127,9 +143,11 @@ class ReviewGuideSession(Base):
         stored = await Walkthrough.get(self.pull_request_id)
         if walk is None or stored is None or stored.head_sha != walk.head_sha:
             return None
-        return Reader.of(walk, stored.plan, await self.seen_lines())
+        return Reader.of(walk, stored.plan, await self.seen_at(walk.head_sha))
 
-    async def save_walk(self, walk: Walk | None) -> None:
+    async def save_walk(self, walk: Walk | None, *, finished: bool = False) -> None:
+        key = f"{ARCHIVE_JOB}:{self.thread_id}"
+        await queue.cancel_key(key)
         self.walk_json = walk.model_dump(mode="json") if walk else None
         async with postgres.session() as session:
             await session.execute(
@@ -138,6 +156,45 @@ class ReviewGuideSession(Base):
                 .values(walk_json=self.walk_json)
             )
             await session.commit()
+        if finished and walk is not None:
+            await queue.schedule(
+                ARCHIVE_JOB,
+                {"thread_id": self.thread_id, "head_sha": walk.head_sha},
+                due_at=datetime.now(UTC) + timedelta(days=1),
+                key=key,
+                by=self.user_id,
+            )
+
+    async def archive_finished(self, head_sha: str) -> None:
+        """Archive a completed walkthrough only if it is still at the reviewed head."""
+        walk = self.walk
+        if self.closed or self.paused_message_ts or walk is None or walk.head_sha != head_sha:
+            return
+        head = await fetch_head(
+            self.pull_request.owner, self.pull_request.repo, self.pull_request.number
+        )
+        if head is None:
+            raise RuntimeError("Could not verify the review guide head before archiving")
+        stored = await Walkthrough.get(self.pull_request_id)
+        if (
+            head.head.sha != head_sha
+            or stored is None
+            or stored.head_sha != head_sha
+            or not stored.complete
+        ):
+            return
+        reader = Reader.of(walk, stored.plan, await self.seen_at(head_sha))
+        if reader.unfinished(LineSet()):
+            return
+        try:
+            await archive_code_channel(
+                self.slack_channel_id, summary_message_ts=self.summary_message_ts
+            )
+        except SlackRequestError as exc:
+            if exc.code != "already_archived":
+                raise
+        await self.set_closed(True)
+        await set_session_status(self.slack_channel_id, "closed")
 
     @classmethod
     async def get(cls, thread_id: str) -> Self | None:
@@ -197,42 +254,84 @@ class ReviewGuideSession(Base):
             )
             await session.commit()
 
-    async def seen_lines(self) -> Counter[str]:
-        """How many times this person has approved each line key on this pull request."""
+    async def seen(self) -> ReviewGuideSeen | None:
+        """What this person has approved on this pull request, at the head it was last carried to."""
         async with postgres.session() as session:
-            rows = await session.execute(
-                select(ReviewGuideSeenLine.line_key, ReviewGuideSeenLine.seen_count).where(
-                    ReviewGuideSeenLine.user_id == self.user_id,
-                    ReviewGuideSeenLine.pull_request_id == self.pull_request_id,
+            return await session.scalar(
+                select(ReviewGuideSeen).where(
+                    ReviewGuideSeen.user_id == self.user_id,
+                    ReviewGuideSeen.pull_request_id == self.pull_request_id,
                 )
             )
-            return Counter(dict(rows.tuples().all()))
 
-    async def mark_seen(self, lines: Counter[str]) -> None:
-        if not lines:
-            return
-        upsert = insert(ReviewGuideSeenLine).values(
-            [
-                {
-                    "user_id": self.user_id,
-                    "pull_request_id": self.pull_request_id,
-                    "line_key": key,
-                    "seen_count": count,
-                }
-                for key, count in lines.items()
-            ]
-        )
+    async def seen_at(self, head_sha: str) -> LineSet:
+        """What this person has approved, if it is numbered at ``head_sha``; nothing otherwise."""
+        seen = await self.seen()
+        return seen.lines if seen is not None and seen.head_sha == head_sha else LineSet()
+
+    async def _update_seen(
+        self,
+        head_sha: str,
+        merge_base_sha: str,
+        change: Callable[[ReviewGuideSeen | None], LineSet | None],
+        *,
+        by: UUID | None,
+    ) -> None:
         async with postgres.session() as session:
             await session.execute(
-                upsert.on_conflict_do_update(
-                    index_elements=[
-                        ReviewGuideSeenLine.user_id,
-                        ReviewGuideSeenLine.pull_request_id,
-                        ReviewGuideSeenLine.line_key,
-                    ],
-                    set_={
-                        "seen_count": ReviewGuideSeenLine.seen_count + upsert.excluded.seen_count
-                    },
+                insert(ReviewGuideSeen)
+                .values(
+                    id=uuid7(),
+                    user_id=self.user_id,
+                    pull_request_id=self.pull_request_id,
+                    head_sha=head_sha,
+                    merge_base_sha=merge_base_sha,
+                    lines_json={},
+                    created_by=by,
+                    updated_by=by,
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[ReviewGuideSeen.user_id, ReviewGuideSeen.pull_request_id]
                 )
             )
+            row = await session.scalar(
+                select(ReviewGuideSeen)
+                .where(
+                    ReviewGuideSeen.user_id == self.user_id,
+                    ReviewGuideSeen.pull_request_id == self.pull_request_id,
+                )
+                .with_for_update()
+            )
+            lines = change(row)
+            if row is not None and lines is not None:
+                row.head_sha = head_sha
+                row.merge_base_sha = merge_base_sha
+                row.lines_json = lines.dump()
+                row.updated_by = by
             await session.commit()
+
+    async def mark_seen(self, head_sha: str, merge_base_sha: str, lines: LineSet) -> None:
+        """Add ``lines``, numbered at ``head_sha`` and ``merge_base_sha``, to what this person approved."""
+        if not lines:
+            return
+
+        def add(row: ReviewGuideSeen | None) -> LineSet:
+            kept = row.lines if row is not None and row.head_sha == head_sha else LineSet()
+            return kept | lines
+
+        await self._update_seen(head_sha, merge_base_sha, add, by=self.user_id)
+
+    async def carry_seen(
+        self, head_sha: str, merge_base_sha: str, carry: Carry | None, from_sha: str
+    ) -> None:
+        """Carry what this person approved at ``from_sha`` to ``head_sha``, if it is still there.
+
+        With no ``carry``, because ``from_sha`` can no longer be read, nothing carries over.
+        """
+
+        def moved(row: ReviewGuideSeen | None) -> LineSet | None:
+            if row is None or row.head_sha != from_sha:
+                return None
+            return carry.lines(row.lines) if carry is not None else LineSet()
+
+        await self._update_seen(head_sha, merge_base_sha, moved, by=None)

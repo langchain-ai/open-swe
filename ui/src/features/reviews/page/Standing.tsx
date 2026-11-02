@@ -1,3 +1,5 @@
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 import {
   CaretRightIcon,
   CheckCircleFillIcon,
@@ -7,7 +9,7 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/ssr/ChatCircleText"
@@ -24,7 +26,7 @@ import type {
 } from "@/lib/api"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 import { subtleLink } from "@/features/reviews/lib/styles"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { MarkPullRequestReady } from "@/features/reviews/components/MarkPullRequestReady"
@@ -37,6 +39,7 @@ import {
   reviewerRows,
 } from "@/features/reviews/components/ReviewerList"
 import { UpdatePullRequestBranch } from "@/features/reviews/components/UpdatePullRequestBranch"
+import { useIsPullRequestAuthor } from "@/features/reviews/lib/useIsPullRequestAuthor"
 import {
   canAttemptMerge,
   canUpdateBranch,
@@ -57,6 +60,7 @@ import {
   rankFindings,
 } from "./findings"
 import { InlineCode } from "./inlineCode"
+import { ProfileLink } from "./notes/Byline"
 import {
   reviewQueries,
   useOpenConversations,
@@ -131,7 +135,6 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
     (state) => state.showOpenConversations
   )
   const setStandingInView = useReviewPage((state) => state.setStandingInView)
-  const openReview = useReviewPage((state) => state.openReview)
   // Watching the card itself, so the header knows when to carry its sentence.
   const ref = useRef<HTMLElement>(null)
   const ready = current !== null
@@ -167,7 +170,11 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
             {standing.details.length > 0 && (
               <p className="mt-0.5 flex flex-wrap gap-x-space-3 text-xxs leading-5">
                 {standing.details.map((fact) => (
-                  <button
+                  <Button
+                    color="secondary"
+                    variant="plain"
+                    size="xs"
+                    aria-label={fact.text}
                     key={fact.text}
                     type="button"
                     onClick={
@@ -175,21 +182,19 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
                         ? showFindings
                         : showOpenConversations
                     }
-                    className={subtleLink}
+                    className={cn(
+                      "focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+                      "h-auto border-0 px-0",
+                      subtleLink
+                    )}
                   >
                     {fact.text}
-                  </button>
+                  </Button>
                 ))}
               </p>
             )}
           </div>
         </div>
-        {/* Every other next step is a button in its row below. */}
-        {standing.next?.kind === "review" && (
-          <Button size="md" onClick={() => openReview()}>
-            Review changes
-          </Button>
-        )}
       </div>
       {open && status && (
         <div className="divide-y border-t border-default">
@@ -204,6 +209,7 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
       )}
       {(!open || !status) && (
         <div className="divide-y border-t border-default">
+          {detail.pr.merged_at && <ApprovalsRow status={status} />}
           {open &&
             status === undefined &&
             ["Checks", "Reviews"].map((label) => (
@@ -224,7 +230,7 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
   )
 }
 
-/** The one thing to do next, carried in the header; its own Review button covers a review. */
+/** The one thing to do next, carried in the header; its Review button covers the author's way out of draft. */
 export function NextStepAction({
   pr,
   standing,
@@ -237,11 +243,10 @@ export function NextStepAction({
   login: string
 }) {
   const refresh = useRefreshPullRequest(pr)
+  const isAuthor = useIsPullRequestAuthor(pr.owner, pr.repo, pr.number)
   const next = standing.next
   if (!next) return null
   switch (next.kind) {
-    case "review":
-      return null
     case "agent":
       return (
         <PullRequestThreadAction
@@ -251,7 +256,9 @@ export function NextStepAction({
         />
       )
     case "mark-ready":
-      return <MarkPullRequestReady pr={status} onReady={refresh.status} />
+      return isAuthor ? null : (
+        <MarkPullRequestReady pr={status} onReady={refresh.status} />
+      )
     case "request-review":
       return <RequestHumanReview pr={status} />
     case "update-branch":
@@ -278,15 +285,23 @@ function Row({
   expanded?: boolean
   onToggle?: () => void
 }) {
+  const labelId = useId()
+  const summaryId = useId()
   const body = (
     <>
       <span className="flex size-4 shrink-0 items-center justify-center">
         {icon}
       </span>
-      <span className="w-[5.5rem] shrink-0 text-xs font-medium text-primary">
+      <span
+        id={labelId}
+        className="w-[5.5rem] shrink-0 text-xs font-medium text-primary"
+      >
         {label}
       </span>
-      <span className="min-w-0 flex-1 truncate text-xs text-secondary">
+      <span
+        id={summaryId}
+        className="min-w-0 flex-1 truncate text-xs text-secondary"
+      >
         {children}
       </span>
     </>
@@ -294,14 +309,18 @@ function Row({
   return (
     <div className="flex min-h-10 items-center gap-space-3 px-space-4 py-space-1">
       {expandable ? (
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="sm"
+          aria-labelledby={`${labelId} ${summaryId}`}
           type="button"
           aria-expanded={expanded}
           onClick={onToggle}
-          className="-my-space-1 flex min-w-0 flex-1 items-center gap-space-3 self-stretch py-space-1 text-left"
+          className="-my-space-1 h-auto min-w-0 flex-1 justify-start gap-space-3 self-stretch px-0 py-space-1 text-left whitespace-normal hover:bg-transparent focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none dark:hover:bg-transparent"
         >
           {body}
-        </button>
+        </Button>
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-space-3">
           {body}
@@ -313,20 +332,21 @@ function Row({
         </div>
       )}
       {expandable && (
-        <button
+        <IconButton
+          color="secondary"
+          variant="plain"
+          size="xs"
+          icon={CaretRightIcon}
+          iconWeight="regular"
+          label="Toggle review status"
+          tooltipProps={{ disabled: true }}
+          className="-my-space-1 h-auto self-stretch py-space-1"
+          iconClassName={cn("transition-transform", expanded && "rotate-90")}
           type="button"
           tabIndex={-1}
           aria-hidden
           onClick={onToggle}
-          className="-my-space-1 flex shrink-0 items-center self-stretch py-space-1"
-        >
-          <CaretRightIcon
-            className={cn(
-              "size-3 text-secondary transition-transform",
-              expanded && "rotate-90"
-            )}
-          />
-        </button>
+        />
       )}
     </div>
   )
@@ -421,7 +441,7 @@ function ChecksRow({
             <PullRequestThreadAction
               pr={status}
               login={login}
-              actions={["fix-checks"]}
+              actions={["fix"]}
             />
           ) : null
         }
@@ -433,7 +453,7 @@ function ChecksRow({
           {sorted.map(({ check, state }) => (
             <li
               key={check.name}
-              className="group flex h-7 items-center gap-space-2 text-xs"
+              className="group flex h-7 items-center gap-space-2 rounded-md text-xs focus-within:bg-surface-level-1-hover hover:bg-surface-level-1-hover"
             >
               {state === "fail" ? (
                 <XCircleIcon
@@ -458,29 +478,37 @@ function ChecksRow({
                 />
               )}
               {check.url ? (
-                <a
+                <MacawLink
+                  variant="xs"
                   href={check.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="min-w-0 truncate text-primary hover:underline"
+                  className={cn(
+                    INHERITED_LINK,
+                    "min-w-0 truncate text-primary hover:underline [&>span]:truncate"
+                  )}
                 >
                   {check.name}
-                </a>
+                </MacawLink>
               ) : (
                 <span className="min-w-0 truncate">{check.name}</span>
               )}
               {state === "fail" && (
-                <button
+                <Button
+                  color="secondary"
+                  variant="plain"
+                  size="sm"
+                  aria-label="Ask why"
                   type="button"
                   onClick={() =>
                     askInChat(
                       `Why is the \`${check.name}\` check failing on this pull request?`
                     )
                   }
-                  className="ml-auto text-secondary opacity-0 group-hover:opacity-100 hover:text-primary focus-visible:opacity-100"
+                  className="ml-auto h-auto border-0 px-0 text-secondary opacity-0 group-hover:opacity-100 hover:text-primary focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                 >
                   Ask why
-                </button>
+                </Button>
               )}
             </li>
           ))}
@@ -541,13 +569,21 @@ function ReviewsRow({
         action={
           <>
             {unresolved > 0 && (
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={`${unresolved} unresolved`}
                 type="button"
                 onClick={showOpenConversations}
-                className={cn("text-xs", subtleLink)}
+                className={cn(
+                  "focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+                  "h-auto border-0 px-0",
+                  subtleLink
+                )}
               >
                 {unresolved} unresolved
-              </button>
+              </Button>
             )}
             {hasUnresolvedConversations(status) &&
               (open ? open.current > 0 : unresolved > 0) && (
@@ -570,6 +606,46 @@ function ReviewsRow({
         />
       )}
     </div>
+  )
+}
+
+/** Who approved a merged pull request, which outlives its other rows. */
+function ApprovalsRow({
+  status,
+}: {
+  status: OpenPullRequest | null | undefined
+}) {
+  const approvers = (status?.reviewers ?? []).filter(
+    (reviewer) => reviewer.state === "approved"
+  )
+  return (
+    <Row
+      icon={
+        status === undefined ? (
+          <span className="size-3.5 rounded-full bg-surface-level-3" />
+        ) : approvers.length > 0 ? (
+          passIcon
+        ) : (
+          warnIcon
+        )
+      }
+      label="Approved by"
+    >
+      {status === undefined ? (
+        <Skeleton className="h-3 w-40" />
+      ) : !status?.reviewers ? (
+        "GitHub didn't say who approved it"
+      ) : approvers.length === 0 ? (
+        "Merged without an approving review"
+      ) : (
+        approvers.map((approver, index) => (
+          <span key={approver.login}>
+            {index > 0 && ", "}
+            <ProfileLink author={approver} className="font-medium" />
+          </span>
+        ))
+      )}
+    </Row>
   )
 }
 
@@ -596,7 +672,7 @@ function BranchRow({
             <PullRequestThreadAction
               pr={status}
               login={login}
-              actions={["fix-conflicts"]}
+              actions={["fix"]}
             />
           }
         >
@@ -815,30 +891,49 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
               >
                 {findingGroupLabel[finding.group]}
               </span>
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={finding.title}
                 type="button"
                 aria-expanded={open}
                 onClick={() => setOpenId(open ? null : finding.id)}
-                className={cn(
-                  "min-w-[16ch] flex-1 text-left leading-5 text-primary hover:underline",
-                  settled && "line-through decoration-text-tertiary"
-                )}
+                className="h-auto min-w-[16ch] flex-1 items-start justify-start gap-space-1 text-left leading-5 whitespace-normal text-primary hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
               >
-                <InlineCode text={finding.title} />
-              </button>
+                <CaretRightIcon
+                  aria-hidden
+                  className={cn(
+                    "mt-space-1 size-3 shrink-0 text-icon-secondary motion-safe:transition-transform",
+                    open && "rotate-90"
+                  )}
+                />
+                <span
+                  className={cn(
+                    "min-w-0",
+                    settled && "line-through decoration-text-tertiary"
+                  )}
+                >
+                  <InlineCode text={finding.title} />
+                </span>
+              </Button>
               <span className="ml-auto flex shrink-0 items-baseline gap-space-1 text-xxs text-secondary">
-                <button
+                <Button
+                  color="secondary"
+                  variant="plain"
+                  size="xs"
+                  aria-label={findingLocation(finding)}
                   type="button"
                   disabled={!isAnchored(finding)}
                   onClick={() => {
                     if (isAnchored(finding))
                       showFinding(finding.id, findingTarget(finding))
                   }}
-                  className="rounded-sm px-space-1 py-0.5 font-mono hover:bg-surface-level-1-hover hover:text-primary disabled:hover:bg-transparent disabled:hover:text-secondary"
+                  className="h-auto border-0 px-space-1 py-0.5 font-mono hover:bg-surface-level-1-hover hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:hover:bg-transparent disabled:hover:text-secondary"
                   title={finding.file}
                 >
                   {findingLocation(finding)}
-                </button>
+                </Button>
                 <Button
                   size="xs"
                   variant="plain"

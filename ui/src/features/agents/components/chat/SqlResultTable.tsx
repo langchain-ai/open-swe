@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils"
+import { TableScroll } from "./TableScroll"
 
 export interface SqlResult {
   ok: true
@@ -59,7 +60,7 @@ export function SqlResultTable({ output }: { output: string | undefined }) {
         </span>
         {result.truncated && <span>Results truncated</span>}
       </div>
-      <div className="max-h-[28rem] overflow-auto">
+      <TableScroll viewportClassName="max-h-[28rem]">
         <table className="min-w-max border-collapse text-left">
           <thead className="sticky top-0 z-sticky-header bg-surface-level-3">
             <tr>
@@ -102,7 +103,7 @@ export function SqlResultTable({ output }: { output: string | undefined }) {
             No rows
           </div>
         )}
-      </div>
+      </TableScroll>
     </div>
   )
 }

@@ -11,6 +11,7 @@ from fastapi import HTTPException, Request
 from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
+from openswe.claude_code.hooks import MIRROR_THREAD_KEY, SESSION_ID_KEY, mirror_of
 from openswe.claude_code.transcript import ClaudeTranscript, TranscriptError
 from openswe.dashboard.oauth import UPLOAD_TICKET_TTL_SECONDS, UploadTicket, issue_upload_ticket
 from openswe.dashboard.profiles import get_profile
@@ -400,6 +401,13 @@ async def upload_session(stream: UploadStream, ticket: UploadTicket) -> dict[str
     update: dict[str, Any] = {SESSION_UPLOAD_PENDING_KEY: False, "updated_at_ms": _now_ms()}
     if session.title:
         update["title"] = session.title
+    # Ties the upload to the session's mirror, so a later upload can build on what it holds.
+    if session.session_id:
+        update[SESSION_ID_KEY] = session.session_id
+        if ticket.user_id and (
+            mirror := await mirror_of(uuid.UUID(ticket.user_id), session.session_id)
+        ):
+            update[MIRROR_THREAD_KEY] = mirror
     await client.threads.update(thread_id=thread_id, metadata=update)
     await mirror_thread_metadata(thread_id, update)
     # Linked only once the thread holds the session, so an abandoned reservation stays off the PR.

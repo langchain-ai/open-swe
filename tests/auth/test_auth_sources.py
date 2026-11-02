@@ -57,7 +57,6 @@ def test_resolve_github_token_slack_uses_dashboard_store(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _stub_dashboard_store(monkeypatch, token="user-tok")
-    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: False)
 
     token, expires_at = asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
 
@@ -74,7 +73,6 @@ def test_resolve_github_token_slack_ignores_stale_thread_cache(
         token="bob-token",
         cached=("alice-token", "2099-01-01T00:00:00Z"),
     )
-    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: False)
 
     token, _ = asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
 
@@ -85,17 +83,15 @@ def test_resolve_github_token_slack_no_token_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _stub_dashboard_store(monkeypatch, token=None)
-    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: False)
 
     with pytest.raises(auth.GitHubUserAuthRequired):
         asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
 
 
-def test_resolve_github_token_per_user_wins_over_bot_only_mode(
+def test_resolve_github_token_per_user_wins_over_bot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _stub_dashboard_store(monkeypatch, token="user-tok")
-    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: True)
 
     async def fail_bot(thread_id: str):
         raise AssertionError("bot token must not be used when a user token exists")
@@ -106,11 +102,10 @@ def test_resolve_github_token_per_user_wins_over_bot_only_mode(
     assert token == "user-tok"
 
 
-def test_private_slack_no_token_requires_auth_in_bot_only_mode(
+def test_private_slack_no_token_requires_auth_without_bot_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _stub_dashboard_store(monkeypatch, token=None)
-    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: True)
 
     async def fake_bot(thread_id: str):
         return ("bot-tok", None)
@@ -136,7 +131,6 @@ def test_resolve_github_token_linear_uses_dashboard_store(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _stub_dashboard_store(monkeypatch, token="user-tok")
-    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: False)
 
     token, expires_at = asyncio.run(auth.resolve_github_token(_linear_config(), "t1"))
 
@@ -148,32 +142,15 @@ def test_resolve_github_token_linear_no_token_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _stub_dashboard_store(monkeypatch, token=None)
-    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: False)
-
-    with pytest.raises(auth.GitHubUserAuthRequired):
-        asyncio.run(auth.resolve_github_token(_linear_config(), "t1"))
-
-
-def test_private_linear_no_token_requires_auth_in_bot_only_mode(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _stub_dashboard_store(monkeypatch, token=None)
-    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: True)
-
-    async def fake_bot(thread_id: str):
-        return ("bot-tok", None)
-
-    monkeypatch.setattr(auth, "_resolve_bot_installation_token", fake_bot)
 
     with pytest.raises(auth.GitHubUserAuthRequired):
         asyncio.run(auth.resolve_github_token(_linear_config(), "t1"))
 
 
 @pytest.mark.parametrize("source", ["github"])
-def test_resolve_github_token_bot_only_mode_non_slack_uses_bot(
+def test_resolve_github_token_public_source_uses_bot(
     monkeypatch: pytest.MonkeyPatch, source: str
 ) -> None:
-    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: True)
 
     async def fake_bot(thread_id: str):
         return ("bot-tok", None)

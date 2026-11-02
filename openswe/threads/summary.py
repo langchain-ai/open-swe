@@ -12,6 +12,7 @@ from openswe.agent_cost import RUN_COST_KEY_PREFIX
 from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
+from openswe.memories.store import CURATOR_THREAD_KEY
 from openswe.review.findings import (
     REVIEWER_THREAD_KIND,
     REVIEWER_UNTITLED,
@@ -23,6 +24,9 @@ from openswe.slack.client import parse_github_pr_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.slack.oauth import SLACK_TEAM_ID
 from openswe.source_context import SourceContext
+from openswe.threads.identity import ThreadIdentity
+from openswe.threads.status import WorkRunState
+from openswe.threads.store import THREADS
 from openswe.utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -36,6 +40,8 @@ from openswe.utils.timing import phase
 logger = logging.getLogger(__name__)
 
 DASHBOARD_SOURCE = "dashboard"
+# A thread mirroring a person's local Claude Code session, which only its hooks write.
+CLAUDE_CODE_SOURCE = "claude_code"
 # Set on a thread the upload_session tool reserved until its transcript is posted.
 SESSION_UPLOAD_PENDING_KEY = "session_upload_pending"
 # Threads whose transcript is served from the append-only event log.
@@ -49,6 +55,7 @@ _SURFACED_SOURCES: tuple[str, ...] = (
     "linear",
     "schedule",
     "api",
+    CLAUDE_CODE_SOURCE,
 )
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
@@ -61,6 +68,9 @@ SLACK_BOT_TRIGGER_KIND = "slack_bot"
 TRIGGERING_BOT_KEY = "triggering_bot"
 """Metadata key holding the starting bot's ``{team_id}:{bot_id}`` allowlist key."""
 BOT_THREAD_READ_ONLY = "This thread was started by a Slack bot. Reply in Slack to steer it."
+MIRRORED_SESSION_READ_ONLY = (
+    "This thread mirrors a Claude Code session. Continue it in Claude Code."
+)
 
 
 def _now_ms() -> int:
@@ -113,7 +123,10 @@ def thread_is_private(metadata: Mapping[str, Any]) -> bool:
 
 def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
     """Threads that remain accessible directly but stay out of thread lists."""
-    return metadata.get("unlisted") is True or metadata.get("review_chat") is True
+    if metadata.get("unlisted") is True or metadata.get("review_chat") is True:
+        return True
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    return slack_thread is not None and slack_thread.is_concierge
 
 
 def thread_is_readable(
@@ -124,12 +137,22 @@ def thread_is_readable(
     A review chat is readable only by the user it belongs to, so its sidebar row
     can be pinned, archived and marked read.
     """
+    if login and ThreadIdentity(login).user_id is not None:
+        return (
+            metadata.get("experience", "coding") in ("coding", "agent_workspace")
+            and thread_is_private(metadata)
+            and thread_is_owner(metadata, login)
+        )
     if (review := ReviewSessionMetadata.parse(metadata)) is not None:
         return review.owned_by(login)
     return thread_source(metadata) in _SURFACED_SOURCES and (
         not thread_is_private(metadata)
         or thread_is_owner(metadata, login)
-        or is_admin(email, login=login)
+        or (
+            not login.startswith("user:") and is_admin(email, login=login)
+            if login
+            else is_admin(email)
+        )
     )
 
 
@@ -137,11 +160,19 @@ def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool
     """Only the owner may prompt, approve, or open a shell into a private thread.
 
     Nor may anyone else drive a thread that runs on its owner's machine, even one
-    shared before such threads were kept private.
+    shared before such threads were kept private. Nobody prompts a mirrored
+    Claude Code session here: it runs in Claude Code.
     """
-    return thread_source(metadata) in _SURFACED_SOURCES and (
-        not (thread_is_private(metadata) or SandboxBridgeBinding.reaches_a_machine(metadata))
-        or thread_is_owner(metadata, login)
+    if login and ThreadIdentity(login).user_id is not None:
+        return thread_is_readable(metadata, login)
+    source = thread_source(metadata)
+    return (
+        source in _SURFACED_SOURCES
+        and source != CLAUDE_CODE_SOURCE
+        and (
+            not (thread_is_private(metadata) or SandboxBridgeBinding.reaches_a_machine(metadata))
+            or thread_is_owner(metadata, login)
+        )
     )
 
 
@@ -160,12 +191,18 @@ def _assert_thread_promptable(metadata: Mapping[str, Any], login: str | None) ->
     """Dashboard actions on a thread: prompting, approvals, plan edits, shell and files.
 
     A thread a Slack bot started is steered from its Slack thread only, so the
-    dashboard keeps it read-only for everyone, admins included.
+    dashboard keeps it read-only for everyone, admins included, and so does a
+    mirrored Claude Code session.
     """
+    if thread_source(metadata) == CLAUDE_CODE_SOURCE and thread_is_readable(metadata, login):
+        raise HTTPException(403, MIRRORED_SESSION_READ_ONLY)
     if not thread_is_promptable(metadata, login):
         raise HTTPException(404, "thread not found")
     if thread_is_bot_triggered(metadata):
         raise HTTPException(403, BOT_THREAD_READ_ONLY)
+    # Its wake run must take direction from nobody, and a message would join that run.
+    if metadata.get(CURATOR_THREAD_KEY):
+        raise HTTPException(403, "The memory curator's thread is read-only.")
 
 
 def _assert_thread_postable(
@@ -175,8 +212,8 @@ def _assert_thread_postable(
     # A run here would start without the history the upload is about to seed.
     if metadata.get(SESSION_UPLOAD_PENDING_KEY) is True:
         raise HTTPException(409, "this thread is waiting for its session upload")
-    if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not is_admin(
-        email, login=login
+    if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not (
+        not login.startswith("user:") and is_admin(email, login=login)
     ):
         raise HTTPException(403, "only admins can send messages in this thread")
 
@@ -360,6 +397,24 @@ def thread_updated_ms(thread: ThreadLike) -> int:
     return _thread_timestamp_ms(thread, "updated_at")
 
 
+def upsert_pull_request_record(records: object, record: dict[str, Any]) -> list[dict[str, Any]]:
+    """``metadata["pull_requests"]`` with ``record`` replacing any entry for the same PR."""
+    existing = records if isinstance(records, list) else []
+    repo = record.get("repo_full_name")
+    number = record.get("number")
+    url = record.get("url")
+    return [
+        item
+        for item in existing
+        if isinstance(item, dict)
+        and not (
+            item.get("repo_full_name") == repo
+            and item.get("number") == number
+            or item.get("url") == url
+        )
+    ] + [record]
+
+
 def _pull_request_summary(record: object, fallback_title: str) -> dict[str, Any] | None:
     if not isinstance(record, dict):
         return None
@@ -485,6 +540,7 @@ async def _thread_summary(
     run_costs = _run_costs(metadata)
     summary: dict[str, Any] = {
         "id": thread_id,
+        "experience": metadata.get("experience", "coding"),
         "title": title,
         "repo": name,
         "repoFullName": full_name,
@@ -552,6 +608,8 @@ async def _thread_summary(
         # What the thread's Browser panel offers: its browser to watch, or to open.
         "browser": None if browser is None else browser.state,
     }
+    if metadata.get("experience") == "agent_workspace":
+        summary["latestRunId"] = _thread_run_id(metadata, latest_run_id)
     raw_pull_requests = metadata.get("pull_requests")
     pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []
     pull_requests = [
@@ -648,6 +706,25 @@ async def _refresh_latest_run_metadata(
     thread_id = thread.get("thread_id") or thread.get("id")
     if not isinstance(thread_id, str) or not thread_id:
         return thread, None, None
+    if thread_metadata(thread).get("experience") == "agent_workspace":
+        try:
+            indexed = await THREADS.get(thread_id)
+            if indexed is None:
+                return thread, None, None
+            with phase(record, "runs_list"):
+                refreshed = await WorkRunState(indexed).refresh()
+            raw_status = refreshed.metadata.get("latest_run_status")
+            raw_id = refreshed.metadata.get("latest_run_id")
+            return (
+                refreshed.as_langgraph(),
+                raw_status if isinstance(raw_status, str) else None,
+                raw_id if isinstance(raw_id, str) else None,
+            )
+        except Exception:
+            logger.warning(
+                "Could not refresh Work run metadata", extra={"thread_id": thread_id}, exc_info=True
+            )
+            return thread, None, None
     with phase(record, "runs_list"):
         latest_run_status, latest_run_id = await _latest_run_info(client, thread_id)
     metadata = thread_metadata(thread)

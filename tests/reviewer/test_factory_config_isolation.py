@@ -1,26 +1,15 @@
-"""Tests that graph factories do not mutate the caller's config."""
+"""The read-only graph does not mutate the caller's config."""
 
 from typing import cast
 from unittest.mock import MagicMock, patch
 
-import pytest
 from langgraph.graph.state import RunnableConfig
 
+from openswe.graphs.read_only import read_only_graph
 
-@pytest.mark.parametrize(
-    ("module_name", "factory_name"),
-    [
-        ("openswe.reviewer", "get_reviewer_agent"),
-        ("openswe.review_scout.graph", "get_review_scout"),
-    ],
-)
-@pytest.mark.asyncio
-async def test_factory_copies_config_dicts_but_preserves_runtime_objects(
-    module_name: str, factory_name: str
-) -> None:
-    """Factory config isolation must preserve callback and configurable value identities."""
-    module = __import__(module_name, fromlist=[factory_name])
-    factory = getattr(module, factory_name)
+
+async def test_read_only_graph_copies_config_dicts_but_preserves_runtime_objects() -> None:
+    """Config isolation must preserve callback and configurable value identities."""
     callback = object()
     configurable_value = object()
     callbacks = [callback]
@@ -35,8 +24,8 @@ async def test_factory_copies_config_dicts_but_preserves_runtime_objects(
     fake_pregel = MagicMock()
     fake_pregel.with_config = MagicMock(return_value=fake_pregel)
 
-    with patch(f"{module_name}.create_deep_agent", return_value=fake_pregel):
-        await factory(config)
+    with patch("openswe.graphs.read_only.create_deep_agent", return_value=fake_pregel):
+        await read_only_graph(config)
 
     assert fake_pregel.with_config.call_args is not None
     bound_config = cast(dict[str, object], fake_pregel.with_config.call_args.args[0])
@@ -47,6 +36,5 @@ async def test_factory_copies_config_dicts_but_preserves_runtime_objects(
     assert configurable is not original_configurable
     assert configurable["custom_key"] is configurable_value
     assert bound_config["callbacks"] is callbacks
-    assert cast(list[object], bound_config["callbacks"])[0] is callback
-    assert "recursion_limit" not in config
+    assert bound_config["callbacks"][0] is callback
     assert config.get("configurable") == {"thread_id": None, "custom_key": configurable_value}

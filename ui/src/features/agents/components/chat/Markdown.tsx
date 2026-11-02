@@ -1,3 +1,4 @@
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import {
   InfoRegularIcon,
   WarningRegularIcon,
@@ -16,9 +17,14 @@ import type { ComponentProps, ReactNode } from "react"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import type { Components, ExtraProps } from "streamdown"
 import "streamdown/styles.css"
-import { PreviewablePullRequestLink } from "@/features/agents/components/PullRequestPreview"
+import { cn } from "@/lib/utils"
+import {
+  PreviewablePullRequestCard,
+  PreviewablePullRequestLink,
+} from "@/features/agents/components/PullRequestPreview"
 import { CodeBlock } from "./CodeBlock"
 import { MermaidDiagram } from "./MermaidDiagram"
+import { TableScroll } from "./TableScroll"
 import {
   orderedListGutterStyle,
   remarkGithubAlerts,
@@ -36,6 +42,7 @@ interface MarkdownProps {
    */
   transformImageUrl?: (src: string) => string
   enlargeImages?: boolean
+  className?: string
 }
 
 const REMARK_PLUGINS = [
@@ -114,9 +121,9 @@ function GithubAttachment({ href }: { href: string }) {
   const [failed, setFailed] = useState(false)
   if (failed)
     return (
-      <a href={href} target="_blank" rel="noreferrer">
+      <MacawLink variant="xs" href={href} target="_blank" rel="noreferrer">
         {href}
-      </a>
+      </MacawLink>
     )
   return (
     <video
@@ -160,7 +167,23 @@ const COMPONENTS: Components = {
           <GithubAttachment key={href} href={href} />
         </p>
       )
-    return <p {...props}>{children}</p>
+    const paragraph = <p {...props}>{children}</p>
+    const label = link?.type === "element" ? link.children[0] : undefined
+    if (
+      link?.type === "element" &&
+      link.tagName === "a" &&
+      typeof href === "string" &&
+      link.children.length === 1 &&
+      label?.type === "text"
+    )
+      return (
+        <PreviewablePullRequestCard
+          href={href}
+          label={label.value}
+          fallback={paragraph}
+        />
+      )
+    return paragraph
   },
   ul: passthrough("ul"),
   li: passthrough("li"),
@@ -223,9 +246,9 @@ const COMPONENTS: Components = {
     children,
     ...props
   }: ExtraProps & ComponentProps<"table">) => (
-    <div className="chat-markdown-table">
+    <TableScroll className="chat-markdown-table">
       <table {...props}>{children}</table>
-    </div>
+    </TableScroll>
   ),
   inlineCode: ({
     node: _node,
@@ -295,6 +318,7 @@ export const Markdown = memo(function Markdown({
   isLive = false,
   transformImageUrl,
   enlargeImages = false,
+  className,
 }: MarkdownProps) {
   const [image, setImage] = useState<{ src: string; alt: string } | null>(null)
   const components = useMemo(
@@ -341,7 +365,12 @@ export const Markdown = memo(function Markdown({
   }, [transformImageUrl])
 
   return (
-    <div className="chat-markdown max-w-full min-w-0 text-sm leading-[1.6] [overflow-wrap:anywhere] break-words text-primary">
+    <div
+      className={cn(
+        "chat-markdown max-w-full min-w-0 text-sm leading-[1.6] [overflow-wrap:anywhere] break-words text-primary",
+        className
+      )}
+    >
       <MarkdownErrorBoundary content={content}>
         <Streamdown
           mode={isLive ? "streaming" : "static"}

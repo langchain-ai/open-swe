@@ -12,6 +12,7 @@ the feature that notices the trigger decides when to call ``suggest``.
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from fastapi import BackgroundTasks
@@ -42,6 +43,7 @@ class SuggestedAction:
     accepted: str
     request: str
     prompt_name: str
+    unavailable_reason: Callable[[str], Awaitable[str | None]] | None = None
 
     def _button(self, label: str, choice: str, thread_ts: str, subject: str) -> ButtonElement:
         value = {
@@ -125,8 +127,26 @@ async def handle_button(
         return ignored("Suggestion already accepted")
     await respond_to_slack_interaction(
         interaction.response_url,
-        {"replace_original": True, "text": action.accepted.format(subject=value.subject)},
+        {
+            "replace_original": True,
+            "text": "Checking whether this suggestion is still available…"
+            if action.unavailable_reason
+            else action.accepted.format(subject=value.subject),
+            "blocks": [],
+        },
     )
+    if action.unavailable_reason:
+        reason = await action.unavailable_reason(value.subject)
+        await respond_to_slack_interaction(
+            interaction.response_url,
+            {
+                "replace_original": True,
+                "text": reason or action.accepted.format(subject=value.subject),
+                "blocks": [],
+            },
+        )
+        if reason:
+            return accepted("Suggestion no longer available")
     thread_ts = value.thread_ts
     channel_context = await common.resolve_slack_channel_context(channel_id)
     thread_id = await common.resolve_slack_thread_id(langgraph_client(), channel_id, thread_ts)

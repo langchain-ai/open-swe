@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { useEffect, useState } from "react"
 
 import {
@@ -45,16 +46,28 @@ export default function PerfHud() {
         <span className="font-semibold">perf</span>
         <span className="text-secondary">{spans.length} spans</span>
         <span className="flex-1" />
-        <button type="button" className="hover:underline" onClick={copy}>
-          {copied ? "copied" : "copy json"}
-        </button>
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="xs"
+          aria-label={copied ? "copied" : "copy json"}
           type="button"
-          className="hover:underline"
+          className="h-auto border-0 px-0 hover:underline"
+          onClick={copy}
+        >
+          {copied ? "copied" : "copy json"}
+        </Button>
+        <Button
+          color="secondary"
+          variant="plain"
+          size="xs"
+          aria-label="clear"
+          type="button"
+          className="h-auto border-0 px-0 hover:underline"
           onClick={clearPerfSpans}
         >
           clear
-        </button>
+        </Button>
       </header>
       <ul className="max-h-[40vh] overflow-y-auto">
         {visible.length === 0 && (
@@ -64,9 +77,13 @@ export default function PerfHud() {
         )}
         {visible.map((span) => (
           <li key={span.id} className="border-b border-subtle last:border-0">
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label={formatSpan(span)}
               type="button"
-              className="w-full px-space-2 py-space-1 text-left hover:bg-surface-level-1-hover/40"
+              className="h-auto w-full justify-start px-space-2 py-space-1 text-left whitespace-normal hover:bg-surface-level-1-hover/40"
               onClick={() =>
                 setExpanded((current) => (current === span.id ? null : span.id))
               }
@@ -82,7 +99,7 @@ export default function PerfHud() {
               >
                 {formatSpan(span)}
               </span>
-            </button>
+            </Button>
             {expanded === span.id && (
               <p className="px-space-2 pb-space-1 break-all whitespace-pre-wrap text-secondary">
                 {attributeSummary(span) || "no attributes"}

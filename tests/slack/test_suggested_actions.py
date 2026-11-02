@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
@@ -21,9 +22,18 @@ class _Tasks:
         self.tasks.append((func, args))
 
 
+@pytest.mark.parametrize("stale", [False, True])
 async def test_accepting_a_suggestion_asks_the_slack_threads_agent_once(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, stale: bool
 ) -> None:
+    monkeypatch.setitem(
+        suggested_actions._ACTIONS,
+        GET_REVIEWED.kind,
+        replace(
+            GET_REVIEWED,
+            unavailable_reason=AsyncMock(return_value="Already reviewed." if stale else None),
+        ),
+    )
     slack_events.reset_slack_event_claims()
     monkeypatch.setattr(slack_events, "_claim_remotely", AsyncMock(return_value=True))
     respond = AsyncMock(return_value=True)
@@ -60,10 +70,14 @@ async def test_accepting_a_suggestion_asks_the_slack_threads_agent_once(
     for _ in range(2):
         await suggested_actions.handle_button(interaction, button, cast(BackgroundTasks, tasks))
 
+    assert respond.await_args.args[1]["blocks"] == []
+    if stale:
+        assert tasks.tasks == []
+        assert respond.await_args.args[1]["text"] == "Already reviewed."
+        return
     assert len(tasks.tasks) == 1
     request = cast(SlackRequest, tasks.tasks[0][1][0])
     assert (request.channel_id, request.thread_ts, request.thread_id) == ("C1", "100.000001", "t1")
     assert request.event_ts == "200.5"
     assert request.text == "Get https://github.com/lc/repo/pull/7 reviewed."
     assert "<@U1>" in request.turn_context
-    respond.assert_awaited_once()

@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-import atexit
+import asyncio
 import os
 from threading import Lock
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
-from managed_deepagents._telemetry.background import BackgroundTelemetryClient
 from managed_deepagents._telemetry.client import TelemetryClient
 from managed_deepagents._telemetry.gates import is_telemetry_disabled
+from managed_deepagents._telemetry.otel import LogAttributes, record_log
 from managed_deepagents._telemetry.run import finish_run
 from managed_deepagents._telemetry.transport import posthog_transport
+from managed_deepagents.define_browser import BROWSER_TOOL_PREFIX
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -19,45 +20,39 @@ if TYPE_CHECKING:
     from langgraph.callbacks import GraphInterruptEvent
 
     from managed_deepagents._telemetry.run import PendingRun, RunCompletedEvent, RunOutcome
+    from managed_deepagents._telemetry.transport.posthog import PosthogTransport
 
-_client: BackgroundTelemetryClient[RunCompletedEvent] | None = None
+_client: TelemetryClient[RunCompletedEvent] | None = None
+_transport: PosthogTransport | None = None
 _client_resolved = False
 _client_lock = Lock()
 
 AgentT = TypeVar("AgentT")
 
 
-def _run_client() -> BackgroundTelemetryClient[RunCompletedEvent] | None:
-    global _client, _client_resolved  # noqa: PLW0603 - process-wide cache, resolved once
+def _run_client() -> TelemetryClient[RunCompletedEvent] | None:
+    global _client, _transport, _client_resolved  # noqa: PLW0603 - process-wide cache, resolved once
     with _client_lock:
         if not _client_resolved:
-            transport = None if is_telemetry_disabled(os.environ) else posthog_transport()
-            if transport is not None:
-                _client = BackgroundTelemetryClient(TelemetryClient(transport))
+            _transport = None if is_telemetry_disabled(os.environ) else posthog_transport()
+            if _transport is not None:
+                _client = TelemetryClient(_transport)
             _client_resolved = True
         return _client
 
 
 def set_run_telemetry_client_for_tests(override: TelemetryClient[RunCompletedEvent] | None) -> None:
     """Test-only transport override."""
-    global _client, _client_resolved  # noqa: PLW0603 - mirrors the process-wide cache
+    global _client, _transport, _client_resolved  # noqa: PLW0603 - mirrors the process-wide cache
     with _client_lock:
-        previous = _client
-        _client = BackgroundTelemetryClient(override) if override is not None else None
+        _client = override
+        _transport = None
         _client_resolved = override is not None
-    if previous is not None:
-        previous.close()
 
 
 def flush_run_telemetry_for_tests() -> bool:
-    """Wait for queued test events without creating a transport."""
-    return _client is None or _client.flush()
-
-
-@atexit.register
-def _shutdown_run_telemetry() -> None:
-    if _client is not None:
-        _client.close()
+    """Wait for queued events from the built-in transport."""
+    return _transport is None or _transport.idle()
 
 
 def observe_run(agent: AgentT, pending: PendingRun) -> AgentT:  # noqa: C901 - lazy callback class
@@ -93,6 +88,16 @@ def observe_run(agent: AgentT, pending: PendingRun) -> AgentT:  # noqa: C901 - l
             if self.root is None:
                 self.root = run_id
 
+        def on_tool_start(
+            self,
+            serialized: dict[str, Any],
+            input_str: str,  # noqa: ARG002 - callback signature
+            **kwargs: Any,
+        ) -> None:
+            name = kwargs.get("name") or serialized.get("name")
+            if isinstance(name, str) and name.startswith(BROWSER_TOOL_PREFIX):
+                pending.browser_used = True
+
         def on_interrupt(self, event: GraphInterruptEvent) -> None:
             if event.run_id == self.root:
                 self.interrupted = True
@@ -109,20 +114,41 @@ def observe_run(agent: AgentT, pending: PendingRun) -> AgentT:  # noqa: C901 - l
 
         def on_chain_error(
             self,
-            error: BaseException,  # noqa: ARG002 - callback signature
+            error: BaseException,
             *,
             run_id: UUID,
             **_kwargs: Any,
         ) -> None:
             if run_id == self.root:
+                # Agent Server cancels a run by cancelling its task.
+                if isinstance(error, asyncio.CancelledError):
+                    self.report("cancelled")
+                    return
+                record_log("ERROR", "run failed", error=error)
                 self.report("failure")
 
         def report(self, outcome: RunOutcome) -> None:
             if pending.emitted:
                 return
             pending.emitted = True
+            event = finish_run(pending, outcome)
+            record_log("INFO", "run completed", attributes=_completion_attributes(event))
             client = _run_client()
             if client is not None:
-                client.record(finish_run(pending, outcome))
+                client.record(event)
 
     return cast("AgentT", configure({"callbacks": [RunListener()]}))
+
+
+#: Event bookkeeping that says nothing about the run. ``event_id`` stays, so the
+#: record joins to its PostHog event.
+_EVENT_ONLY_FIELDS = frozenset({"event_type", "schema_version", "created_at", "distinct_id"})
+
+
+def _completion_attributes(event: RunCompletedEvent) -> LogAttributes:
+    """The ``run_completed`` fields as attributes of the completion log record."""
+    return {
+        key: value
+        for key, value in event.items()
+        if key not in _EVENT_ONLY_FIELDS and isinstance(value, str | int | float | bool)
+    }

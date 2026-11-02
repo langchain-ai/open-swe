@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import { useMemo, useState } from "react"
 import {
@@ -117,9 +118,11 @@ export function LocalRepoSelector({
   placeholder = "Select repository",
   triggerClassName,
   side = "bottom",
+  onUseTaskFolder,
 }: {
   repos: Array<DesktopProject>
   selectedRepoPath: string | null
+  onUseTaskFolder?: () => void
   onSelectRepo: (cwd: string) => void
   onAddRepo: () => void
   onRemoveRepo: (cwd: string) => void
@@ -149,8 +152,19 @@ export function LocalRepoSelector({
         sideOffset={7}
       >
         <DropdownMenuGroup>
-          <ComposerMenuLabel>Repositories</ComposerMenuLabel>
-          {repos.length === 0 && (
+          <ComposerMenuLabel>
+            {onUseTaskFolder ? "Working folder" : "Repositories"}
+          </ComposerMenuLabel>
+          {onUseTaskFolder && (
+            <ComposerMenuOption
+              icon={FolderIcon}
+              onSelect={onUseTaskFolder}
+              selected={!selectedRepoPath}
+            >
+              Automatic task folder
+            </ComposerMenuOption>
+          )}
+          {repos.length === 0 && !onUseTaskFolder && (
             <ComposerMenuOption disabled>
               No repositories added
             </ComposerMenuOption>
@@ -170,7 +184,7 @@ export function LocalRepoSelector({
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <ComposerMenuOption icon={FolderPlusIcon} onSelect={onAddRepo}>
-            Add repository…
+            {onUseTaskFolder ? "Use another folder…" : "Add repository…"}
           </ComposerMenuOption>
           {repos.length > 0 && (
             <DropdownMenuSub>
@@ -332,12 +346,18 @@ export function LocalBranchSelector({
             </div>
           ) : (
             filtered.map((ref) => (
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={ref.name}
                 key={ref.name}
                 type="button"
                 onClick={() => select(ref.name)}
                 className={cn(
-                  "flex w-full items-center gap-space-2 rounded-sm px-space-2 py-space-1 text-left transition-colors hover:bg-elevated-hover hover:text-primary focus-visible:bg-elevated-hover focus-visible:outline-none",
+                  "focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+                  "h-auto justify-start whitespace-normal",
+                  "w-full gap-space-2 px-space-2 py-space-1 text-left hover:bg-elevated-hover hover:text-primary focus-visible:bg-elevated-hover",
                   ref.name === selectedBranch
                     ? "text-primary"
                     : "text-secondary"
@@ -349,7 +369,7 @@ export function LocalBranchSelector({
                     {badge(ref)}
                   </span>
                 )}
-              </button>
+              </Button>
             ))
           )}
         </div>

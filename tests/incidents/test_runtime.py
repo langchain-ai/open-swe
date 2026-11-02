@@ -1,13 +1,11 @@
-"""Incident session loading, middleware, and the report tool on the main agent."""
+"""Incident session loading, context, and the report tool on the main agent."""
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import langgraph_sdk
 import pytest
-from langchain.agents.middleware.types import ModelRequest
-from langchain_core.messages import HumanMessage
 
 from openswe.incidents import documents, runtime, service
 from openswe.incidents.models import Incident, IncidentPolicy
@@ -56,69 +54,65 @@ def config(**configurable) -> dict:
     }
 
 
-def context_message(ts: str = "1.0") -> HumanMessage:
+def context_message(ts: str = "1.0") -> str:
     header = json.dumps(
         {
             "evidence_id": f"slack:{ts}",
             "source_url": f"https://slack.com/archives/C1/p{ts.replace('.', '')}",
         }
     )
-    return HumanMessage(content=f"{CONTEXT_MARKER}{header}\nErrors reported")
+    return f"{CONTEXT_MARKER}{header}\nErrors reported"
 
 
-def request(*messages) -> ModelRequest:
-    return ModelRequest(
-        model=MagicMock(), messages=list(messages), tools=[], state={"messages": []}
-    )
+async def load(run_id: str = "run-1", **configurable: str) -> runtime.IncidentSession:
+    return await runtime.load_incident_session(config(**configurable), run_id=run_id)
 
 
 async def test_forged_source_on_a_normal_thread_is_refused(incident):
     incident.metadata.update(source="slack", owner_type="user")
     with pytest.raises(PermissionError, match="not an incident"):
-        await runtime.load_incident_session(config())
+        await load()
 
 
 @pytest.mark.parametrize("change", [{"owner_type": "user"}, {"visibility": "private"}])
 async def test_incident_threads_must_be_system_owned_and_public(incident, change):
     incident.metadata.update(change)
     with pytest.raises(PermissionError, match="system owned"):
-        await runtime.load_incident_session(config())
+        await load()
 
 
 @pytest.mark.parametrize("identity", [{"github_login": "octocat"}, {"user_email": "o@x.dev"}])
 async def test_incident_runs_cannot_carry_personal_identity(incident, identity):
     with pytest.raises(PermissionError, match="personal"):
-        await runtime.load_incident_session(config(**identity))
+        await load(**identity)
 
 
 async def test_binding_must_match_the_saved_incident(incident):
     incident.record.thread_id = "other-thread"
     await service.INCIDENTS.put(incident.record.id, incident.record)
     with pytest.raises(PermissionError, match="binding"):
-        await runtime.load_incident_session(config())
+        await load()
     incident.metadata["incident_id"] = "missing"
     with pytest.raises(PermissionError, match="binding"):
-        await runtime.load_incident_session(config())
+        await load()
 
 
 async def test_paused_incidents_stop_automatic_turns_but_answer_questions(incident):
     incident.record.status = "paused"
     await service.INCIDENTS.put(incident.record.id, incident.record)
     with pytest.raises(PermissionError, match="not watching"):
-        await runtime.load_incident_session(config())
-    session = await runtime.load_incident_session(config(incident_request="status?"))
+        await load()
+    session = await load(incident_request="status?")
     assert session.explicit_request == "status?"
 
     await service.POLICIES.put(IncidentPolicy(enabled=False, workspace_id="T1"))
     with pytest.raises(PermissionError, match="disabled"):
-        await runtime.IncidentMiddleware(session).awrap_model_call(request(), AsyncMock())
+        await session.context([])
 
 
 async def test_failed_slack_delivery_is_retried_on_the_next_report(incident):
-    session = await runtime.load_incident_session(config())
-    await runtime.IncidentMiddleware(session).awrap_model_call(
-        request(context_message("1.0")), AsyncMock()
-    )
+    session = await load()
+    await session.context([context_message("1.0")])
     draft = {"summary": [{"text": "Errors reported", "evidence_ids": ["slack:1.0"]}]}
     runtime.post_slack_thread_reply_with_ts.side_effect = SlackRequestError("channel_not_found")
 
@@ -135,7 +129,7 @@ async def test_failed_slack_delivery_is_retried_on_the_next_report(incident):
 
 
 async def test_postmortem_failure_records_nothing(incident, monkeypatch):
-    session = await runtime.load_incident_session(config())
+    session = await load()
     monkeypatch.setattr(
         documents, "update_from_report", AsyncMock(side_effect=RuntimeError("store"))
     )
@@ -151,15 +145,14 @@ async def test_the_channel_gets_one_automatic_investigation_and_then_stays_quiet
     """Responders asked for one investigation, not a running commentary on their channel."""
     from datetime import UTC, datetime, timedelta
 
-    session = await runtime.load_incident_session(config())
-    middleware = runtime.IncidentMiddleware(session)
+    session = await load()
 
-    await middleware.awrap_model_call(request(context_message("1.0")), AsyncMock())
+    await session.context([context_message("1.0")])
     first = await session._record_incident_report(
         summary=[{"text": "Gateway internal errors began", "evidence_ids": ["slack:1.0"]}],
         problem=[{"text": "The gateway breached its 5xx SLO", "evidence_ids": ["slack:1.0"]}],
     )
-    await middleware.awrap_model_call(request(context_message("2.0")), AsyncMock())
+    await session.context([context_message("2.0")])
     draft = {"summary": [{"text": "Monitors are back to OK", "evidence_ids": ["slack:2.0"]}]}
     second = await session._record_incident_report(**draft)
 
@@ -184,10 +177,9 @@ async def test_the_channel_gets_one_automatic_investigation_and_then_stays_quiet
 
 async def test_an_inconclusive_first_turn_does_not_spend_the_automatic_message(incident):
     """Otherwise a first turn with nothing to say would silence the real investigation."""
-    session = await runtime.load_incident_session(config())
-    middleware = runtime.IncidentMiddleware(session)
+    session = await load()
 
-    await middleware.awrap_model_call(request(context_message("1.0")), AsyncMock())
+    await session.context([context_message("1.0")])
     empty = await session._record_incident_report(
         summary=[{"text": "Unsupported guess", "evidence_ids": ["nope"]}]
     )
@@ -205,18 +197,14 @@ async def test_an_inconclusive_first_turn_does_not_spend_the_automatic_message(i
 
 async def test_questions_are_answered_after_the_investigation_is_published(incident):
     """Going quiet silences unprompted updates; it never delays a responder."""
-    unprompted = await runtime.load_incident_session(config())
-    await runtime.IncidentMiddleware(unprompted).awrap_model_call(
-        request(context_message("1.0")), AsyncMock()
-    )
+    unprompted = await load("run-1")
+    await unprompted.context([context_message("1.0")])
     await unprompted._record_incident_report(
         summary=[{"text": "Gateway internal errors began", "evidence_ids": ["slack:1.0"]}]
     )
 
-    asked = await runtime.load_incident_session(config(incident_request="failure rate?"))
-    await runtime.IncidentMiddleware(asked).awrap_model_call(
-        request(context_message("2.0")), AsyncMock()
-    )
+    asked = await load("run-2", incident_request="failure rate?")
+    await asked.context([context_message("2.0")])
     answer = await asked._record_incident_report(
         summary=[{"text": "The endpoint failure rate is 0%", "evidence_ids": ["slack:2.0"]}]
     )

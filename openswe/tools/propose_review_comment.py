@@ -1,32 +1,8 @@
 """Tool: ``propose_review_comment``. Drafts a line comment the user confirms before it posts."""
 
-from typing import Literal
-
 from pydantic import BaseModel
 
-MAX_BODY_CHARS = 10_000
-
-DiffSide = Literal["LEFT", "RIGHT"]
-
-
-class DiffRange(BaseModel):
-    file: str
-    start_line: int
-    end_line: int
-    side: DiffSide
-
-
-def validate_range(
-    file: str, start_line: int, end_line: int | None, side: DiffSide
-) -> DiffRange | str:
-    """The normalized range, or why it is invalid."""
-    path = file.strip().lstrip("/")
-    if not path:
-        return "file must be a path from the diff"
-    end = end_line if end_line is not None else start_line
-    if start_line < 1 or end < start_line:
-        return "start_line must be at least 1 and end_line must not precede it"
-    return DiffRange(file=path, start_line=start_line, end_line=end, side=side)
+from openswe.tools.diff_lines import DiffRange, DiffSide, comment_text
 
 
 class ProposeReviewCommentResult(BaseModel):
@@ -51,19 +27,14 @@ async def propose_review_comment(
 def _propose(
     file: str, line: int, body: str, start_line: int | None, side: DiffSide
 ) -> ProposeReviewCommentResult:
-    text = body.strip()
-    if not text:
-        return ProposeReviewCommentResult(proposed=False, error="body must not be empty")
-    if len(text) > MAX_BODY_CHARS:
-        return ProposeReviewCommentResult(
-            proposed=False, error=f"body must be at most {MAX_BODY_CHARS} characters"
-        )
-    checked = validate_range(file, start_line if start_line is not None else line, line, side)
-    if isinstance(checked, str):
-        return ProposeReviewCommentResult(proposed=False, error=checked)
+    try:
+        lines = DiffRange.of(file, line, start_line, side)
+        text = comment_text(body)
+    except ValueError as exc:
+        return ProposeReviewCommentResult(proposed=False, error=str(exc))
     return ProposeReviewCommentResult(
         proposed=True,
-        range=checked,
+        range=lines,
         body=text,
         note=(
             "Shown to the user as a draft. If they accept it, it joins their pending"

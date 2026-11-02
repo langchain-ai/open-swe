@@ -25,11 +25,15 @@ it("distinguishes an unset selection from an explicit no-repository choice", asy
   })
   fireEvent.click(screen.getByRole("button", { name: props.placeholder }))
   expect(screen.queryByLabelText("Selected")).toBeNull()
+  expect(screen.queryByRole("button", { pressed: true })).toBeNull()
   fireEvent.click(await screen.findByRole("button", { name: "org/active" }))
   expect(onRepoChange).toHaveBeenLastCalledWith("org/active")
 
   rerender(<RepoSelector {...props} selectedRepo="org/active" />)
   fireEvent.click(screen.getByRole("button", { name: "org/active" }))
+  expect(
+    await screen.findByRole("button", { name: "org/active", pressed: true })
+  ).toBeTruthy()
   fireEvent.click(
     await screen.findByRole("button", { name: props.emptySelectionLabel })
   )
@@ -39,7 +43,12 @@ it("distinguishes an unset selection from an explicit no-repository choice", asy
   fireEvent.click(
     screen.getByRole("button", { name: props.emptySelectionLabel })
   )
-  expect(await screen.findByLabelText("Selected")).toBeTruthy()
+  expect(
+    await screen.findByRole("button", {
+      name: props.emptySelectionLabel,
+      pressed: true,
+    })
+  ).toBeTruthy()
 })
 
 it("never offers archived choices or an archive toggle by default", async () => {

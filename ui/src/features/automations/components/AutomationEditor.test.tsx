@@ -11,6 +11,9 @@ import { useSession } from "@/lib/session"
 const mocks = vi.hoisted(() => ({
   createMutate: vi.fn(),
   updateMutate: vi.fn(),
+  triggerMutate: vi.fn(),
+  navigate: vi.fn(),
+  triggerPending: false,
   workspaces: [
     { slug: "default", name: "Default", repos: [], is_default: true },
     { slug: "oss", name: "OSS", repos: ["acme/oss"], is_default: false },
@@ -20,7 +23,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
-  useNavigate: () => vi.fn(),
+  useNavigate: () => mocks.navigate,
 }))
 vi.mock("@/features/agents/lib/queries", () => ({
   useCreateAgentSchedule: () => ({
@@ -37,6 +40,10 @@ vi.mock("@/features/agents/lib/queries", () => ({
     error: null,
     isPending: false,
     mutate: mocks.updateMutate,
+  }),
+  useTriggerAgentSchedule: () => ({
+    isPending: mocks.triggerPending,
+    mutate: mocks.triggerMutate,
   }),
   useWorkspaceOptions: () => ({
     data: { default_slug: "default", workspaces: mocks.workspaces },
@@ -95,6 +102,7 @@ vi.mock("@/features/agents/components/ModelPicker", () => ({
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  mocks.triggerPending = false
 })
 
 const TEMPLATE = {
@@ -112,7 +120,69 @@ function signInAsAdmin() {
   } as unknown as ReturnType<typeof useSession>)
 }
 
+const SCHEDULE = {
+  id: "sched_1",
+  name: "Nightly",
+  prompt: "Check dependencies",
+  schedule: "0 9 * * *",
+  triggers: [{ id: "trigger_1", kind: "schedule" as const, cron: "0 9 * * *" }],
+  scope: "workspace" as const,
+  workspace: "default",
+  adminThread: false,
+  model: "Default",
+  enabled: false,
+}
+
 describe("AutomationEditor", () => {
+  it("runs a saved automation, including a paused one, and opens its thread", () => {
+    signInAsAdmin()
+    mocks.triggerMutate.mockImplementationOnce(
+      (
+        _id: string,
+        options: { onSuccess: (result: { thread_id: string }) => void }
+      ) => options.onSuccess({ thread_id: "run_1" })
+    )
+    render(<AutomationEditor mode="edit" schedule={SCHEDULE} />, {
+      wrapper: TooltipProvider,
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Run now" }))
+
+    expect(mocks.triggerMutate.mock.calls[0]?.[0]).toBe("sched_1")
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/agents/$threadId",
+      params: { threadId: "run_1" },
+    })
+  })
+
+  it("requires saving edits before running and prevents duplicate runs", () => {
+    signInAsAdmin()
+    const { rerender } = render(
+      <AutomationEditor mode="edit" schedule={SCHEDULE} />,
+      { wrapper: TooltipProvider }
+    )
+    fireEvent.change(screen.getByLabelText("Automation name"), {
+      target: { value: "Changed" },
+    })
+    const run = screen.getByRole("button", {
+      name: "Run now",
+    }) as HTMLButtonElement
+    expect(run.disabled).toBe(true)
+    fireEvent.click(run)
+    expect(mocks.triggerMutate).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText("Automation name"), {
+      target: { value: SCHEDULE.name },
+    })
+    expect(run.disabled).toBe(false)
+    mocks.triggerPending = true
+    rerender(<AutomationEditor mode="edit" schedule={SCHEDULE} />)
+    expect(
+      (screen.getByRole("button", { name: "Starting…" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true)
+  })
+
   it("shows the admin-thread checkbox only to admins", () => {
     vi.mocked(useSession).mockReturnValue({
       data: { is_admin: true },

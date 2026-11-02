@@ -653,8 +653,9 @@ mod tests {
                 body: "{}",
             },
         ]);
-        let client = langsmith::Client::new_with_platform(&base, Some(&base), "key", None).unwrap();
-        let context_client = ContextHubClient::new(&base, "key", None).unwrap();
+        let client =
+            langsmith::Client::new(&base, &base, langsmith::ApiKey::new("key"), None).unwrap();
+        let context_client = ContextHubClient::for_test(&base);
         link_context_repo_to_agent(&client, &context_client, "deployment-id", "repo-handle")
             .unwrap();
         server.join().unwrap();
@@ -1005,7 +1006,7 @@ mod tests {
                 body: r#"{"commit":{"commit_hash":"new"}}"#,
             },
         ]);
-        let client = ContextHubClient::new(&base_url, "key".to_string(), None).unwrap();
+        let client = ContextHubClient::for_test(&base_url);
 
         let plan = prepare_context_sync(
             &client,
@@ -1086,7 +1087,7 @@ mod tests {
             status: "200 OK",
             body: r#"{"commit_hash":"new","files":{".mda/deploy-manifest.json":{"type":"file","content":"{\"instructions\":null,\"skills\":null}\n"},"memories/agent/AGENTS.md":{"type":"file","content":"new memory\n"}}}"#,
         }]);
-        let client = ContextHubClient::new(&base_url, "key".to_string(), None).unwrap();
+        let client = ContextHubClient::for_test(&base_url);
 
         let summary = apply_context_sync(&client, plan, ConflictResolution::KeepHub).unwrap();
 
@@ -1108,7 +1109,7 @@ mod tests {
             status: "200 OK",
             body: r#"{"commit_hash":"new","files":{".mda/deploy-manifest.json":{"type":"file","content":"{\"instructions\":null,\"skills\":null}\n"},"instructions.md":{"type":"file","content":"edited in Hub\n"}}}"#,
         }]);
-        let client = ContextHubClient::new(&base_url, "key".to_string(), None).unwrap();
+        let client = ContextHubClient::for_test(&base_url);
 
         let err = apply_context_sync(&client, plan, ConflictResolution::KeepHub).unwrap_err();
 
@@ -1130,7 +1131,7 @@ mod tests {
             status: "200 OK",
             body: r#"{"commit_hash":"new","files":{".mda/deploy-manifest.json":{"type":"file","content":"{\"instructions\":null,\"skills\":null,\"note\":\"edited\"}\n"}}}"#,
         }]);
-        let client = ContextHubClient::new(&base_url, "key".to_string(), None).unwrap();
+        let client = ContextHubClient::for_test(&base_url);
 
         let err = apply_context_sync(&client, plan, ConflictResolution::KeepHub).unwrap_err();
 
@@ -1161,10 +1162,10 @@ mod tests {
                 body: r#"{"commit":{"commit_hash":"new-commit"}}"#,
             },
         ]);
-        let client = ContextHubClient::with_credential_and_host(
+        let client = ContextHubClient::new(
             &base_url,
             &format!("{base_url}/api-host"),
-            langsmith::Credential::ApiKey("key".into()),
+            langsmith::ApiKey::new("key"),
             None,
         )
         .unwrap();
@@ -1204,7 +1205,7 @@ mod tests {
                 body: r#"{"detail":"stale parent"}"#,
             },
         ]);
-        let client = ContextHubClient::new(&base_url, "key".to_string(), None).unwrap();
+        let client = ContextHubClient::for_test(&base_url);
 
         let plan =
             prepare_context_sync(&client, &project(root.path(), "agent.ts"), "my-agent", true)

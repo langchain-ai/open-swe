@@ -1,7 +1,10 @@
 import asyncio
 import importlib
+import logging
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -366,22 +369,61 @@ async def test_purge_deletes_only_expired_wakeups() -> None:
     assert client.crons.search_calls[0]["metadata"] == {"kind": "thread_wakeup"}
 
 
-async def test_a_wakeup_the_worker_reaches_after_its_expiry_starts_no_run(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("lateness_seconds", [-60, 0, 90, 91, 600])
+async def test_queued_wakeups_run_even_when_late(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, lateness_seconds: int
 ) -> None:
-    started: list[str] = []
+    started: list[dict[str, object]] = []
 
     class _Runs:
-        async def create(self, thread_id: str, assistant_id: str, **_kwargs: Any) -> Any:
-            started.append(thread_id)
+        async def create(
+            self, thread_id: str, assistant_id: str, **kwargs: object
+        ) -> dict[str, str]:
+            started.append({"thread_id": thread_id, "assistant_id": assistant_id, **kwargs})
             return {"run_id": "run-1"}
 
-    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: type("C", (), {"runs": _Runs()})())
+    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: SimpleNamespace(runs=_Runs()))
+    monkeypatch.setattr(wakeup_tool, "COMPLETION_WEBHOOK_URL", "https://example.com/complete")
     now = datetime.now(UTC)
-    payload: dict[str, Any] = {"thread_id": "t1", "input": {"messages": []}}
+    due_at = now - timedelta(seconds=lateness_seconds)
+    original_input = wakeup_tool.build_run_input(
+        "Check CI status",
+        {"sender_id": "system:thread-wakeup", "surface": "automation", "kind": "system"},
+    )
+    payload = wakeup_tool._json.validate_python(
+        {
+            "thread_id": "t1",
+            "input": original_input,
+            "config": {"configurable": {"thread_id": "t1", "source": "slack"}},
+            "metadata": {"kind": "thread_wakeup", "thread_id": "t1"},
+            "expires_at": (due_at + timedelta(seconds=90)).isoformat(),
+        }
+    )
+    with patch.object(wakeup_tool, "datetime") as clock:
+        clock.now.return_value = now
+        assert (
+            await wakeup_tool.run_thread_wakeup(payload, job_id="job-1", due_at=due_at) == "run-1"
+        )
 
-    late = {**payload, "expires_at": (now - timedelta(minutes=1)).isoformat()}
-    assert await wakeup_tool.run_thread_wakeup(late) is None
-    on_time = {**payload, "expires_at": (now + timedelta(minutes=1)).isoformat()}
-    assert await wakeup_tool.run_thread_wakeup(on_time) == "run-1"
-    assert started == ["t1"]
+    [run] = started
+    assert run["thread_id"] == "t1"
+    assert run["assistant_id"] == "agent"
+    assert run["config"] == payload["config"]
+    assert run["metadata"] == payload["metadata"]
+    assert run["multitask_strategy"] == "enqueue"
+    assert run["webhook"] == "https://example.com/complete"
+    run_input = wakeup_tool._run_input.validate_python(run["input"])
+    if lateness_seconds > 90:
+        assert run_input["messages"][1:] == original_input["messages"]
+        note = str(run_input["messages"][0]["content"])
+        assert "running late" in note
+        assert f"{lateness_seconds / 60:.1f} minutes" in note
+        [warning] = caplog.records
+        assert warning.levelno == logging.WARNING
+        assert warning.thread_id == "t1"
+        assert warning.job_id == "job-1"
+        assert warning.lateness_seconds == lateness_seconds
+    else:
+        assert run_input == original_input
+        assert caplog.records == []
+    assert payload["input"] == original_input
