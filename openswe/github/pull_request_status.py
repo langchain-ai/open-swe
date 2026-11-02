@@ -1022,7 +1022,9 @@ class PullRequestClient:
         base = pull.get("base")
         base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
         if base_ref is not None and result.merge_state != "clean":
-            required = await RequiredCheckCache(self.repo.full_name, base_ref).read()
+            required = await RequiredCheckCache(self.repo.full_name, base_ref).read(
+                self.repo.github.login
+            )
             if required is not None:
                 passing_runs = [
                     run

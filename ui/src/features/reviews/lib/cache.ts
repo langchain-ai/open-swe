@@ -32,7 +32,10 @@ export function pullRequestStatusQuery(login: string, pr: PullRequestRef) {
     queryKey: [PULL_REQUEST_STATUS, login, pr.repo, pr.number],
     queryFn: () => api.pullRequestStatus(pr.repo, pr.number),
     meta: {
-      invalidatedBy: [pullRequestTopic(pr), invalidationTopic("pull-requests")],
+      invalidatedBy: [
+        pullRequestTopic(pr),
+        invalidationTopic("required-checks", pr.repo.toLowerCase()),
+      ],
     },
   } as const
 }

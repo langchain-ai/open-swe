@@ -4,18 +4,19 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from uuid import uuid7
+from uuid import UUID, uuid7
 
 from pydantic import BaseModel, TypeAdapter
 from sqlalchemy import text
 
 from openswe.database.postgres import session, transaction
 from openswe.github.ci import RequiredCheck
-from openswe.github.http import GitHubClient
+from openswe.github.http import GitHubAppUnavailable, GitHubClient
 from openswe.github.repositories import Repository
 from openswe.jobs import queue
 from openswe.jobs.queue import Job
 from openswe.ui_invalidations.topics import Topic
+from openswe.users.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,8 @@ class RequiredCheckCache:
     repo: str
     branch: str
 
-    async def read(self) -> set[RequiredCheck] | None:
+    async def read(self, login: str | None = None) -> set[RequiredCheck] | None:
+        cached: set[RequiredCheck] | None = None
         try:
             async with transaction() as conn:
                 row = (
@@ -49,24 +51,46 @@ class RequiredCheckCache:
                         {"repo": self.repo.lower(), "branch": self.branch},
                     )
                 ).first()
-            if row is not None and datetime.now(UTC) - row.updated_at < CACHE_TTL:
-                return {RequiredCheck(c.name, c.app_id) for c in CHECKS.validate_python(row.checks)}
+            if row is not None:
+                cached = {
+                    RequiredCheck(c.name, c.app_id) for c in CHECKS.validate_python(row.checks)
+                }
+                if datetime.now(UTC) - row.updated_at < CACHE_TTL:
+                    return cached
+            viewer = await User.for_session(None, login) if login else None
             await queue.schedule(
                 REFRESH_JOB,
-                {"repo": self.repo.lower(), "branch": self.branch},
+                {
+                    "repo": self.repo.lower(),
+                    "branch": self.branch,
+                    "viewer_id": str(viewer.id) if viewer else None,
+                },
                 key=f"{REFRESH_JOB}:{self.repo.lower()}:{self.branch}",
                 replace=False,
             )
         except Exception:
             logger.warning("Required-check cache read failed", exc_info=True)
-        return None
+        return cached
 
-    async def refresh(self) -> None:
+    async def refresh(self, viewer_id: UUID | None = None) -> None:
         owner, name = self.repo.split("/", 1)
-        async with GitHubClient.as_app(owner, name) as github:
-            required = await RequiredCheck.for_branch(
-                github.repo(owner, name), self.branch, include_review_checks=True
+        try:
+            async with GitHubClient.as_app(owner, name) as github:
+                required = await RequiredCheck.for_branch(
+                    github.repo(owner, name), self.branch, include_review_checks=True
+                )
+        except GitHubAppUnavailable:
+            logger.info(
+                "Using viewer credentials for required-check refresh",
+                extra={"repo_full_name": self.repo},
             )
+            viewer = await User.get(viewer_id) if viewer_id else None
+            if viewer is None:
+                raise
+            async with GitHubClient.as_user(viewer.github_login) as github:
+                required = await RequiredCheck.for_branch(
+                    github.repo(owner, name), self.branch, include_review_checks=True
+                )
         if required is None:
             raise RuntimeError("Required checks unavailable")
         checks = json.dumps([{"name": check.name, "app_id": check.app_id} for check in required])
@@ -86,11 +110,14 @@ class RequiredCheckCache:
                     "checks": checks,
                 },
             )
-            await Topic.PULL_REQUESTS.invalidate(conn)
+            await Topic.REQUIRED_CHECKS.invalidate(conn, key=self.repo.lower())
 
 
 async def refresh_required_checks(job: Job) -> None:
     repo, branch = job.payload["repo"], job.payload["branch"]
     if not isinstance(repo, str) or not isinstance(branch, str):
         raise ValueError("Required-check refresh needs a repository and branch")
-    await RequiredCheckCache(repo, branch).refresh()
+    viewer_id = job.payload.get("viewer_id")
+    await RequiredCheckCache(repo, branch).refresh(
+        UUID(viewer_id) if isinstance(viewer_id, str) else None
+    )
