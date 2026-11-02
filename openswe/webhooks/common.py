@@ -412,7 +412,8 @@ def is_repo_allowed(repo_config: dict[str, str]) -> bool:
 
     Returns True if no allowlist is configured (both ALLOWED_GITHUB_ORGS and
     ALLOWED_GITHUB_REPOS are empty), or if the repo owner is in
-    ALLOWED_GITHUB_ORGS, or if owner/name is in ALLOWED_GITHUB_REPOS.
+    ALLOWED_GITHUB_ORGS, or if owner/name is in ALLOWED_GITHUB_REPOS. An owner
+    without a name, as installation events name, passes when any of its repos does.
     """
     if not ALLOWED_GITHUB_ORGS and not ALLOWED_GITHUB_REPOS:
         return True
@@ -420,9 +421,11 @@ def is_repo_allowed(repo_config: dict[str, str]) -> bool:
     name = repo_config.get("name", "").lower()
     if ALLOWED_GITHUB_ORGS and owner in ALLOWED_GITHUB_ORGS:
         return True
-    if ALLOWED_GITHUB_REPOS and f"{owner}/{name}" in ALLOWED_GITHUB_REPOS:
-        return True
-    return False
+    if not owner:
+        return False
+    if name:
+        return f"{owner}/{name}" in ALLOWED_GITHUB_REPOS
+    return any(repo.startswith(f"{owner}/") for repo in ALLOWED_GITHUB_REPOS)
 
 
 async def is_repo_auto_review_enabled(repo_config: dict[str, str]) -> bool:

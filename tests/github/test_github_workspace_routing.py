@@ -57,6 +57,32 @@ async def test_repo_outside_allowed_orgs_is_dropped_before_logging(
     assert response.json() == {"status": "ignored", "reason": "Repository not in allowlist"}
 
 
+async def test_installation_event_for_an_allowed_repos_owner_clears_the_repo_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_REPOS", frozenset({"acme/widgets"}))
+    cleared: list[bool] = []
+
+    async def record(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def forget() -> None:
+        cleared.append(True)
+
+    monkeypatch.setattr(EventLog, "record", record)
+    monkeypatch.setattr(github_routes, "forget_cached_repos", forget)
+
+    response = await _post_github_webhook(
+        "installation_repositories",
+        {"action": "added", "installation": {"id": 1, "account": {"login": "Acme"}}},
+    )
+
+    assert response.status_code == 200
+    assert cleared == [True]
+
+
 async def test_unowned_repo_is_ignored_when_policy_is_ignore(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
