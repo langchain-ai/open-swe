@@ -24,6 +24,7 @@ from openswe.incidents.records import (
     CommandReceipts,
     IncidentPolicies,
     IncidentReports,
+    IncidentRunEvidence,
     Incidents,
 )
 from openswe.input_messages import PersonIdentity
@@ -36,6 +37,7 @@ logger = logging.getLogger(__name__)
 POLICIES = IncidentPolicies()
 INCIDENTS = Incidents()
 REPORTS = IncidentReports()
+RUN_EVIDENCE = IncidentRunEvidence()
 COMMANDS = CommandReceipts()
 ACTIVE_STATUSES = frozenset({"watching", "needs_attention"})
 _VIEWS = {"active": ACTIVE_STATUSES, "inactive": frozenset({"paused", "completed"})}

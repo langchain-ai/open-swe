@@ -42,7 +42,7 @@ async def test_cancelled_worker_wakeup_cannot_reconnect_or_start_work(
     monkeypatch.setattr(server, "get_cached_sandbox_backend", backend)
 
     with pytest.raises(PermissionError, match="cancelled"):
-        await server.plan_agent(
+        await server.agent_catalog(
             {
                 "configurable": {"thread_id": "worker", "source": "dashboard"},
                 "metadata": {"kind": "thread_wakeup"},

@@ -55,15 +55,25 @@ class LocalWrites:
 
     def seal(self) -> None:
         """Replace every create operation with a refusal; raise if one can't be found."""
+        found: set[tuple[str, str]] = set()
+        operations: list[tuple[type, str, str]] = []
         for module_name in _OPS_MODULES:
             module = importlib.import_module(module_name)
             for class_name, method in _CREATES:
-                ops = getattr(module, class_name)
+                ops = getattr(module, class_name, None)
+                if ops is None:
+                    continue
                 operation = f"{module_name}.{class_name}.{method}"
                 if not callable(getattr(ops, method, None)):
                     raise RuntimeError(f"Agent Server operation {operation} not found to seal")
-                setattr(ops, method, staticmethod(_Refusal(operation)))
-                self.sealed.append(operation)
+                found.add((class_name, method))
+                operations.append((ops, method, operation))
+        missing = set(_CREATES) - found
+        if missing:
+            raise RuntimeError(f"Agent Server operations not found to seal: {sorted(missing)}")
+        for ops, method, operation in operations:
+            setattr(ops, method, staticmethod(_Refusal(operation)))
+            self.sealed.append(operation)
         logger.info("Sealed the local Agent Server", extra={"operations": self.sealed})
 
 

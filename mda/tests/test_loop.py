@@ -32,9 +32,11 @@ from runtime_api.endpoint import Delivery
 from runtime_api.loop import (
     Done,
     GitHubProxyRefreshed,
+    IncidentContext,
     PhaseResult,
     Prepared,
     Route,
+    Routed,
     TaskContext,
 )
 from runtime_api.reports import REPORTS, Reports, ReportsTaken
@@ -132,6 +134,28 @@ async def test_a_failed_github_token_refresh_waits_before_the_next_try(
 
     assert first.call is not None and second.call is not None
     assert [name for name, _ in calls] == ["refresh_github_proxy"]
+
+
+async def test_an_incident_run_asks_for_its_incident_before_each_model_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, calls = _backend(
+        monkeypatch,
+        {"incident_context": IncidentContext(instructions="Investigate the incident.")},
+        LoopRules(incident=True),
+    )
+
+    planned = await RunLoop(backend).before_model(
+        _state(HumanMessage(content="What broke?", id="human-1"))
+    )
+
+    assert planned.call is not None
+    assert planned.call.system_prompt.endswith("Investigate the incident.")
+    [(name, body)] = calls
+    assert name == "incident_context"
+    assert [m.content for m in messages_from_dict(Routed.model_validate(body).humans)] == [
+        "What broke?"
+    ]
 
 
 async def test_failed_task_context_preserves_error_and_cleans_up_refresh(

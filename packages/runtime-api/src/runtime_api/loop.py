@@ -3,14 +3,13 @@
 The runtime's middleware runs the loop: it nudges, routes, assembles each call
 and ends the run as the catalog's ``LoopRules`` say. It asks the backend only for
 what needs the backend's data or credentials, one named call each: the route a
-task takes, a model's settings, the task a thread belongs to, a fresh GitHub proxy
-token, a reply posted on the model's behalf, and what the end of the run records.
+task takes, a model's settings, the task a thread belongs to, the incident a run
+investigates, a fresh GitHub proxy token, a reply posted on the model's behalf, and what the end of the run records.
 The transcript and usage hear of the run's start, each reply and tool call, and the
 run's end.
 
-Preparation, and every phase of a run still answered from its plan, are phase
-calls: the backend runs the graph's own middleware for the phase, and graph state
-it writes comes back in ``update`` and goes back with every later call in ``state``.
+Preparation is a phase call: the backend readies the turn, and graph state it writes
+comes back in ``update`` and goes back with every later call in ``state``.
 
 Before each model call the runtime also reads the thread's inbox: what was sent
 to the thread while its run worked, and only that. The request names the run and
@@ -264,6 +263,13 @@ class TaskContext(BaseModel):
     message: str | None = None
 
 
+class IncidentContext(BaseModel):
+    """The incident a run investigates, as each model call tells the model."""
+
+    # Added to the call's system prompt.
+    instructions: str
+
+
 class ReplyOnBehalf(RunCall):
     """The model's final answer, posted for it after it ignored the reply tool."""
 
@@ -273,10 +279,6 @@ class ReplyOnBehalf(RunCall):
 # Preparation the runtime makes again on a restarted run anyway. It waits up to ten
 # minutes on the review scout's walkthrough.
 PREPARE = Endpoint("prepare", Prepare, Prepared, seconds=900.0, delivery="idempotent")
-# Builds the next call, so it is sent again to a backend that never took it.
-BEFORE_MODEL = Endpoint(
-    "before_model", RunCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
-)
 # Only reads, so it is safe to send again.
 INBOX = Endpoint("inbox", InboxRead, Inbox, seconds=LOOP_CALL_SECONDS, delivery="idempotent")
 # What a model call will answer is owed no more; receiving it twice is a no-op.
@@ -284,10 +286,6 @@ INBOX_RECEIVED = Endpoint(
     "inbox_received", InboxReceipt, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 MODEL_RESULT = Endpoint("model_result", ModelResult, Done, seconds=LOOP_CALL_SECONDS)
-AFTER_MODEL = Endpoint(
-    "after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
-)
-AFTER_AGENT = Endpoint("after_agent", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS)
 TOOL_STARTED = Endpoint("tool_started", ToolCallReport, Done, seconds=LOOP_CALL_SECONDS)
 TOOL_RESULT = Endpoint("tool_result", ToolResultReport, Done, seconds=LOOP_CALL_SECONDS)
 # The runtime replaced the thread's sandbox: the backend connects to the fresh one.
@@ -305,6 +303,11 @@ MODEL_CHOICE = Endpoint(
 )
 TASK_CONTEXT = Endpoint(
     "task_context", RunRequest, TaskContext, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+)
+# Checks the incident still wants the run and records the evidence its messages carry,
+# each once: safe to send again.
+INCIDENT_CONTEXT = Endpoint(
+    "incident_context", Routed, IncidentContext, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 # Mints a token and sets it on the sandbox, so sending it again only mints another.
 REFRESH_GITHUB_PROXY = Endpoint(

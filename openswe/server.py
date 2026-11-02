@@ -1,10 +1,9 @@
-"""Main entry point and graph factory for the Open SWE agent.
+"""What starting an Open SWE agent run works out, and what preparing its turns does.
 
-Resolves the model, ensures one sandbox per thread (simplified
-get-or-create-then-reconnect, no cross-process ``__creating__`` sentinel),
-builds the curated tool list plus optional integrations, and wires the
-middleware stack. All per-thread state lives in the sandbox + thread metadata;
-the agent itself is stateless.
+Resolves the run's models, builds the curated tool list plus optional integrations,
+and sets the rules MDA's middleware follows around each model call (``agent_catalog``).
+All per-thread state lives in the sandbox + thread metadata; the agent itself is
+stateless.
 """
 
 # ruff: noqa: E402, PLC2701
@@ -14,7 +13,7 @@ import time
 import warnings
 from collections.abc import Awaitable, Mapping, Sequence
 from functools import cache, cached_property, partial
-from typing import Any, Final, Self, cast
+from typing import Any, Final, Self
 from uuid import UUID
 
 from openswe.config import ENV
@@ -52,9 +51,6 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.store import StoreBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
-from langchain.agents.middleware import ModelCallLimitMiddleware
-from langchain.agents.middleware.types import AgentMiddleware
-from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
@@ -104,22 +100,11 @@ from openswe.memories.store import MEMORIES
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
-    ExcludeToolsMiddleware,
-    ModelErrorMiddleware,
-    ModelFallbackMiddleware,
-    ModelSelectionMiddleware,
-    PullRequestCreationGuardMiddleware,
-    RequireUserReplyMiddleware,
-    WorkflowPushGuardMiddleware,
-    notify_step_limit_reached,
-    record_run_usage,
-    refresh_github_proxy_before_model,
 )
 from openswe.middleware.client_tools import ClientToolsMiddleware
-from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.model_selection import RoutingMode
 from openswe.middleware.prepare_run import PrepareRunState
-from openswe.middleware.require_cli_result import RequireCliResultMiddleware, cli_result_nudge
+from openswe.middleware.require_cli_result import cli_result_nudge
 from openswe.middleware.require_user_reply import (
     CARD_TOOLS,
     REPLY_GUARD,
@@ -133,7 +118,6 @@ from openswe.middleware.require_user_reply import (
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.middleware.stale_workspace import queue_stale_workspace_notice
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
-from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.model_request import (
     ModelSelectionDecision,
     infer_requested_model,
@@ -142,7 +126,6 @@ from openswe.model_request import (
 from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from openswe.prompt import SystemPrompt, TurnContext, construct_system_prompt
 from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
-from openswe.review_guide.middleware import ReviewGuideMiddleware
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import (
@@ -722,7 +705,7 @@ ADMIN_TOOLS = (
 )
 
 
-# Every tool the agent may offer; each run's plan offers those it keeps (``plan_agent``),
+# Every tool the agent may offer; each run's plan offers those it keeps (``agent_catalog``),
 # and a call answered without the plan finds its tool here by name.
 AGENT_TOOLS: Final = (
     http_request,
@@ -1723,19 +1706,19 @@ async def record_agent_run(
         await asyncio.gather(*recording)
 
 
-async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
-    """Plan an agent run into ``surface``: the tools, middleware, models and subagents its MDA run plays."""
+async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
+    """Work out an agent run into ``surface``: its tools, models, subagents and loop rules."""
     configurable = config.get("configurable") or {}
     cfg = RunConfig.parse(configurable)
     thread_id = cfg.thread_id
     if thread_id is None:
         raise ValueError("An agent run needs a thread")
 
-    from openswe.incidents.runtime import IncidentMiddleware, IncidentSession, load_incident_session
+    from openswe.incidents.runtime import IncidentSession, load_incident_session
 
     incident_session: IncidentSession | None = None
     if cfg.source == "incidents_agent":
-        incident_session = await load_incident_session(config)
+        incident_session = await load_incident_session(config, run_id=None)
         cfg.slack_thread = incident_session.slack_thread
         configurable["slack_thread"] = cfg.slack_thread.dump()
     credential_scope = asyncio.ensure_future(_credential_scope(config))
@@ -1947,18 +1930,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         max_tokens=DEFAULT_LLM_MAX_TOKENS,
     )
 
-    def make_fallback_model(primary_model_id: str) -> BaseChatModel | None:
-        fallback = fallback_model_choice(primary_model_id)
-        if fallback is None:
-            return None
-        logger.info(
-            "Configured model fallback",
-            extra={"primary_model_id": primary_model_id, "fallback_model_id": fallback.model_id},
-        )
-        return _make_model_or_defer(fallback.model_id, use_gateway=use_gateway, **fallback.kwargs)
-
-    fallback_middleware = ModelFallbackMiddleware(make_fallback_model(model_id))
-
     source = cfg.source or "dashboard"
     configurable["source"] = source
     configurable["resolved_agent_model_id"] = model_id
@@ -2067,7 +2038,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     skill_stores = RunSkillStores(credential_login)
     files = ThreadFiles(thread_id, cfg, skills=skill_stores, bridged=bridge_client is not None)
-    main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     requested_models = (
         available_requested_models(fable_enabled=fable_enabled)
         if (adaptive_model_routing or source == "slack")
@@ -2109,7 +2079,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         **{route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()},
         "default": model_id,
     }
-    model_selection = ModelSelectionMiddleware(route_model_ids, routing_mode=model_routing_mode)
     # What preparing each turn reads, signed into the run's token (``RunSettings.agent``).
     turn = AgentTurnSettings(
         profile_login=profile_login,
@@ -2131,112 +2100,58 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         tool_discovery_failures=list(mcp_tools.failures) if isinstance(mcp_tools, MCPTools) else [],
     )
     configurable[AGENT_TURN_KEY] = turn.model_dump(mode="json")
-    run_preparation = PrepareAgentRunMiddleware(config, turn, repo_instructions=repo_instructions)
     subagent_tools = [
         tool
         for tool in static_tools
         if _registered_tool_name(tool) != _registered_tool_name(save_user_settings)
     ]
     initial_surface = _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
-    middleware = cast(
-        list[AgentMiddleware[Any, Any, Any]],
-        [
-            AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
-            ConversationOffloadingMiddleware(
-                main_model, files.backend, manual=cfg.offload_conversation is True
-            ),
-            run_preparation,
-            # Installed after a walkthrough closes too, to tell the model its rules ended.
-            *(
-                [ReviewGuideMiddleware(thread_id=thread_id, approve_ts=cfg.review_guide_approve_ts)]
-                if walkthrough is not None
-                else []
-            ),
-            TranscriptMiddleware(),
-            *([client_tools] if client_tools else []),
-            *([IncidentMiddleware(incident_session)] if incident_session is not None else []),
-            ModelCallLimitMiddleware(
-                run_limit=incident_session.policy.max_model_calls
-                if incident_session is not None
-                else MODEL_CALL_RECURSION_LIMIT,
-                exit_behavior="end",
-            ),
-            ExcludeToolsMiddleware(excluded=excluded_tools),
-            *([task_coordination] if task_coordination else []),
-            *(
-                []
-                if task_coordination and task_coordination.is_worker
-                else [refresh_github_proxy_before_model]
-            ),
-            RequireUserReplyMiddleware(
-                _registered_tool_name(slack_reply),
-                _registered_tool_name(slack_no_reply_needed),
-                initial_surface=initial_surface,
-                replies=frozenset(
-                    {
-                        *(GUIDE_REPLY_TOOLS if guide is not None else ()),
-                        *((work_state_tool,) if goal_mode else ()),
-                    }
-                ),
-            ),
-            *(
-                [RequireCliResultMiddleware(_registered_tool_name(cli_result))]
-                if cli_result_required
-                else []
-            ),
-            notify_step_limit_reached,
-            record_run_usage,
-            model_selection,
-            fallback_middleware,
-            *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
-            ModelErrorMiddleware(),
-        ],
+    surface.base_tools = [*main_tools, *(client_tools.tools if client_tools else [])]
+    surface.model_call_limit = (
+        incident_session.policy.max_model_calls
+        if incident_session is not None
+        else MODEL_CALL_RECURSION_LIMIT
     )
-    surface.base_tools = main_tools
-    surface.middleware = middleware
+    surface.delegates = task_coordination is not None and task_coordination.can_delegate
     reply_tool = _registered_tool_name(slack_reply)
     no_reply_tool = _registered_tool_name(slack_no_reply_needed)
     cli_result_tool = _registered_tool_name(cli_result)
-    # A requested offload and an incident run keep their loop on the backend: the offload
-    # needs the conversation's model, and the incident the evidence its plan collects.
-    surface.loop = (
-        None
-        if incident_session is not None or cfg.offload_conversation
-        else LoopRules(
-            hidden_tools=sorted(excluded_tools),
-            routing=RoutingRules(mode=model_routing_mode, route_model_ids=route_model_ids),
-            reply=ReplyRules(
-                tool=reply_tool,
-                no_reply_tool=no_reply_tool,
-                surface=initial_surface,
-                replies=sorted(
-                    {
-                        *CARD_TOOLS,
-                        *(GUIDE_REPLY_TOOLS if guide is not None else ()),
-                        *((work_state_tool,) if goal_mode else ()),
-                    }
-                ),
-                nudge=reply_nudge(reply_tool, no_reply_tool),
-                nudge_sender=REPLY_GUARD["id"],
+    surface.loop = LoopRules(
+        hidden_tools=sorted(excluded_tools),
+        routing=RoutingRules(mode=model_routing_mode, route_model_ids=route_model_ids),
+        reply=ReplyRules(
+            tool=reply_tool,
+            no_reply_tool=no_reply_tool,
+            surface=initial_surface,
+            replies=sorted(
+                {
+                    *CARD_TOOLS,
+                    *(GUIDE_REPLY_TOOLS if guide is not None else ()),
+                    *((work_state_tool,) if goal_mode else ()),
+                }
             ),
-            cli_result=CliResultRules(tool=cli_result_tool, nudge=cli_result_nudge(cli_result_tool))
-            if cli_result_required
-            else None,
-            work_state=WorkStateRules(
-                tool=work_state_tool,
-                waits=[
-                    _registered_tool_name(tool)
-                    for tool in (schedule_thread_wakeup, background_execute, monitor)
-                ],
-                nudge=work_state_nudge(work_state_tool),
-                nudge_sender=WORK_STATE_GUARD["id"],
-            )
-            if goal_mode
-            else None,
-            task_coordination=task_coordination is not None,
-            client_tools=client_tools is not None,
-            refresh_github_proxy=not (task_coordination and task_coordination.is_worker),
+            nudge=reply_nudge(reply_tool, no_reply_tool),
+            nudge_sender=REPLY_GUARD["id"],
+        ),
+        cli_result=CliResultRules(tool=cli_result_tool, nudge=cli_result_nudge(cli_result_tool))
+        if cli_result_required
+        else None,
+        work_state=WorkStateRules(
+            tool=work_state_tool,
+            waits=[
+                _registered_tool_name(tool)
+                for tool in (schedule_thread_wakeup, background_execute, monitor)
+            ],
+            nudge=work_state_nudge(work_state_tool),
+            nudge_sender=WORK_STATE_GUARD["id"],
         )
+        if goal_mode
+        else None,
+        task_coordination=task_coordination is not None,
+        client_tools=client_tools is not None,
+        refresh_github_proxy=not (task_coordination and task_coordination.is_worker),
+        incident=incident_session is not None,
+        offload_conversation=cfg.offload_conversation,
     )
     surface.inbox = InboxSpec(
         events=True,
@@ -2244,9 +2159,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         model_id=model_id,
         image_fallback=vision_model is not None,
     )
-    surface.files = files.backend
     surface.artifacts_root = files.artifacts_root
-    surface.shell_guards = [PullRequestCreationGuardMiddleware(), WorkflowPushGuardMiddleware()]
     surface.file_checks = ("image_reads", "agents_md")
     surface.models = SurfaceModels(
         main=ModelChoice(model_id, dict(model_kwargs)),
