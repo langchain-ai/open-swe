@@ -66,6 +66,7 @@ test.describe("my pull requests", () => {
       ...approved,
     });
     await openMine(page);
+    const listTitle = await page.title();
     await page
       .getByRole("textbox", { name: "Search pull requests" })
       .fill("Unified");
@@ -78,6 +79,7 @@ test.describe("my pull requests", () => {
     await expect(
       preview.getByRole("article", { name: "Description" }),
     ).toContainText("The description stays with the review in both layouts.");
+    await expect(page).toHaveTitle(listTitle);
     await expect(
       preview.getByRole("button", { name: "Close", exact: true }),
     ).toBeVisible();
@@ -131,6 +133,7 @@ test.describe("my pull requests", () => {
     await expect(
       page.getByRole("article", { name: "Description" }),
     ).toContainText("The description stays with the review in both layouts.");
+    await expect(page).toHaveTitle(/Unified review layout/);
     await page.getByRole("tab", { name: "Discussion", exact: true }).click();
     await page.getByRole("link", { name: "Back to PR preview" }).click();
     await expect(preview).toBeVisible();
@@ -140,6 +143,12 @@ test.describe("my pull requests", () => {
     await expect(
       preview.getByRole("checkbox", { name: "Viewed src/shared.ts" }),
     ).toBeChecked();
+    await expect(page).toHaveTitle(listTitle);
+    await preview
+      .getByRole("button", { name: "Close pull request preview" })
+      .click();
+    await expect(preview).toHaveCount(0);
+    await expect(page).toHaveTitle(listTitle);
   });
 
   test("finds description-only matches in My PRs and the command palette", async ({

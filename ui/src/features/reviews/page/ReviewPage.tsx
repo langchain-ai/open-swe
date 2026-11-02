@@ -89,8 +89,8 @@ export function ReviewPage({
     detail.data?.pr.title ?? `${pr.owner}/${pr.repo} #${pr.number}`
   )
   useEffect(() => {
-    document.title = title
-  }, [title])
+    if (!inline) document.title = title
+  }, [inline, title])
 
   // Re-marked when a walkthrough lands, since its arrival is what made the row unread.
   const walkthroughSha = detail.data?.walkthrough?.head_sha
