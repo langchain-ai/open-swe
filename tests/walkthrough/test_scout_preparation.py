@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langgraph.runtime import Runtime
 
+from openswe.github import app
 from openswe.review_scout import graph
 from openswe.sandboxes.repo_prep import ReviewRepoPreparationError
 
@@ -27,7 +28,9 @@ async def test_scout_preparation_retries_and_checks_head_without_a_pinned_checko
     monkeypatch: pytest.MonkeyPatch, failures: int, heads: list[str | Exception], expected: str
 ) -> None:
     checkout = MagicMock(repo_dir="/work/widgets", pin=AsyncMock())
-    monkeypatch.setattr(graph, "_ensure_scout_sandbox", AsyncMock())
+    monkeypatch.setattr(app, "GITHUB_APP_INSTALLATION_ID", "")
+    monkeypatch.setattr(app, "_local_dev_token", AsyncMock(return_value=None))
+    monkeypatch.setattr(graph, "ensure_sandbox_for_thread", AsyncMock())
     monkeypatch.setattr(graph.PinnedCheckout, "locate", AsyncMock(return_value=checkout))
     prepare = AsyncMock(
         side_effect=[
