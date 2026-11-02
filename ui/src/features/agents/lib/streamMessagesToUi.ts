@@ -11,7 +11,7 @@ import type { BaseMessage, ContentBlock } from "@langchain/core/messages"
 import type { AssembledToolCall } from "@langchain/react"
 
 import type { StructuredEntity } from "./structuredInputMessages"
-import type { Chunk, Message, ToolExecutionChunk } from "./types"
+import type { Chunk, ImageChunk, Message, ToolExecutionChunk } from "./types"
 
 function senderNote(entity: StructuredEntity | undefined): string | undefined {
   if (entity?.senderType === "bot") return undefined
@@ -38,6 +38,7 @@ type ToolKind = ToolExecutionChunk["toolKind"]
 
 export function toolKind(name: string): ToolKind {
   const lowered = name.toLowerCase()
+  if (lowered.startsWith("mcp_")) return "other"
   if (lowered === "task") return "task"
   if (lowered === "eval") return "code"
   if (lowered === "read_only_sql") return "sql"
@@ -59,6 +60,7 @@ export function toolKind(name: string): ToolKind {
 }
 
 export function toolTitle(name: string, args: Record<string, unknown>): string {
+  if (name.toLowerCase().startsWith("mcp_")) return humanizeToolName(name)
   const path = args.path ?? args.file_path ?? args.target_file
   if (typeof path === "string" && path.trim()) return `${name} ${path.trim()}`
   const command = args.command
@@ -152,39 +154,45 @@ function reasoningText(raw: BaseMessage): string {
   return text.trim()
 }
 
-function imageChunks(content: unknown): Array<Chunk> {
+type InlineImage = { base64?: string; mimeType?: string }
+
+function dataUrlImage(url: unknown): InlineImage {
+  const match =
+    typeof url === "string"
+      ? /^data:(image\/[^;]+);base64,(.+)$/s.exec(url)
+      : null
+  return match ? { mimeType: match[1], base64: match[2] } : {}
+}
+
+/** The bytes an `image` or `image_url` content block carries inline, if any. */
+function inlineImage(block: Record<string, unknown>): InlineImage {
+  if (block.type === "image") {
+    const data = block.data ?? block.base64
+    const mimeType = block.mime_type ?? block.mimeType
+    if (typeof data === "string" && typeof mimeType === "string")
+      return { base64: data, mimeType }
+    // The standard block's data-URL form, which MDA's browser screenshots use.
+    return dataUrlImage(block.url)
+  }
+  if (block.type === "image_url") {
+    const imageUrl = block.image_url
+    return dataUrlImage(
+      imageUrl && typeof imageUrl === "object"
+        ? (imageUrl as Record<string, unknown>).url
+        : undefined
+    )
+  }
+  return {}
+}
+
+function imageChunks(content: unknown): Array<ImageChunk> {
   if (!Array.isArray(content)) return []
 
-  const chunks: Array<Chunk> = []
+  const chunks: Array<ImageChunk> = []
   for (const item of content) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue
     const block = item as Record<string, unknown>
-    const type = block.type
-    let base64: string | undefined
-    let mimeType: string | undefined
-
-    if (type === "image") {
-      const data = block.data ?? block.base64
-      const mime = block.mime_type ?? block.mimeType
-      if (typeof data === "string" && typeof mime === "string") {
-        base64 = data
-        mimeType = mime
-      }
-    } else if (type === "image_url") {
-      const imageUrl = block.image_url
-      const url =
-        imageUrl && typeof imageUrl === "object"
-          ? (imageUrl as Record<string, unknown>).url
-          : undefined
-      if (typeof url === "string") {
-        const match = /^data:(image\/[^;]+);base64,(.+)$/s.exec(url)
-        if (match) {
-          mimeType = match[1]
-          base64 = match[2]
-        }
-      }
-    }
-
+    const { base64, mimeType } = inlineImage(block)
     if (base64 && mimeType) {
       const fileName = block.fileName ?? block.file_name
       chunks.push({
@@ -319,7 +327,7 @@ export function streamMessagesToUi(
       flushAgentTurn()
       turnKey = typeof raw.id === "string" ? raw.id : undefined
       const content = (raw as unknown as { content?: unknown }).content
-      const chunks = imageChunks(content)
+      const chunks: Array<Chunk> = imageChunks(content)
       const parsed = parseStructuredInput(raw.text, structuredEntities)
       if (parsed.type === "entity") return
       if (parsed.type === "message" && isSilentSender(parsed.sender)) return
@@ -397,6 +405,8 @@ export function streamMessagesToUi(
         if (output) chunk.output = output
         const display = outputIframeDisplay(toolMessage?.artifact)
         if (display) chunk.display = display
+        const images = imageChunks(toolMessage?.content)
+        if (images.length) chunk.images = images
         const diffData = maybeDiffFromArgs(args)
         if (diffData) chunk.diffData = diffData
         chunks.push(chunk)

@@ -82,7 +82,7 @@ async def test_push_event_skips_when_thread_not_watching() -> None:
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": False},
         ),
-        patch("openswe.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.dispatch.dispatch_client", return_value=fake_client),
     ):
         await github_webhooks.process_github_push_event(payload)
     fake_client.runs.create.assert_not_called()
@@ -163,7 +163,7 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
             new_callable=AsyncMock,
             return_value=True,
         ) as complete_check,
-        patch("openswe.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.dispatch.dispatch_client", return_value=fake_client),
     ):
         if storage_fails:
             with pytest.raises(RuntimeError, match="Storage unavailable"):
@@ -272,7 +272,7 @@ async def test_head_update_triggers_re_review_run_when_watching(
             new_callable=AsyncMock,
             return_value=99,
         ) as create_check,
-        patch("openswe.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.dispatch.dispatch_client", return_value=fake_client),
     ):
         if not fork:
             await github_webhooks.process_github_push_event(payload)
@@ -370,7 +370,7 @@ async def test_re_review_that_fails_to_dispatch_settles_its_check() -> None:
             new_callable=AsyncMock,
             return_value=99,
         ),
-        patch("openswe.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.dispatch.dispatch_client", return_value=fake_client),
         patch(
             "openswe.review.publish.get_thread_metadata",
             new_callable=AsyncMock,
@@ -495,7 +495,7 @@ async def test_push_re_review_targets_pushed_head_and_supersedes_previous_check(
             new_callable=AsyncMock,
             side_effect=lambda **kwargs: kwargs["check_run_id"] != 41,
         ) as complete_check,
-        patch("openswe.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.dispatch.dispatch_client", return_value=fake_client),
     ):
         await github_webhooks.process_github_push_event(payload)
 
@@ -561,7 +561,7 @@ async def test_head_update_idempotent_when_head_already_reviewed(fork: bool) -> 
                 "last_reviewed_sha": "samesha",
             },
         ),
-        patch("openswe.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.dispatch.dispatch_client", return_value=fake_client),
     ):
         if fork:
             await github_webhooks.process_github_pr_synchronize(payload)
@@ -617,7 +617,7 @@ async def test_push_event_rescopes_token_when_pr_metadata_reveals_public() -> No
             "openswe.webhooks.common.reconcile_findings_with_review_threads", new_callable=AsyncMock
         ),
         patch("openswe.webhooks.common.set_reviewer_thread_metadata", new_callable=AsyncMock),
-        patch("openswe.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.dispatch.dispatch_client", return_value=fake_client),
     ):
         await github_webhooks.process_github_push_event(payload)
 

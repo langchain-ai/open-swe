@@ -21,7 +21,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from openswe import event_claims
-from openswe.config import ENV
+from openswe.config import ENV, EnvVar
 from openswe.database import postgres
 from openswe.utils import ttl_cache
 from openswe.utils.http_pool import pooled_connector
@@ -31,6 +31,32 @@ SLACK_REQUEST_ERRORS = (SlackApiError, aiohttp.ClientError, TimeoutError, ValueE
 # SDK debug logs include message bodies and upload URLs. Application callers log
 # only the Slack error code, never the SDK exception's full response.
 _SDK_LOGGER = logging.Logger("openswe.slack.sdk", level=logging.WARNING)
+
+
+class SlackConfigurationError(RuntimeError):
+    """Required deployment-level Slack configuration is missing."""
+
+
+def required_slack_value(variable: EnvVar) -> str:
+    """Read required Slack configuration without treating a broken deployment as an API failure."""
+    try:
+        return variable.require()
+    except KeyError as exc:
+        raise SlackConfigurationError(
+            f"{variable.name} is required: every Open SWE deployment must have Slack configured"
+        ) from exc
+
+
+def validate_slack_startup_config() -> None:
+    """Refuse to start without the Slack app every deployment needs."""
+    for variable in (
+        ENV.SLACK_BOT_TOKEN,
+        ENV.SLACK_SIGNING_SECRET,
+        ENV.SLACK_APP_ID,
+        ENV.SLACK_BOT_USER_ID,
+        ENV.SLACK_BOT_USERNAME,
+    ):
+        required_slack_value(variable)
 
 
 class SlackRequestError(RuntimeError):
@@ -212,9 +238,7 @@ class SlackClient(AsyncWebClient):
     @classmethod
     @asynccontextmanager
     async def bot(cls) -> AsyncIterator[Self]:
-        token = ENV.SLACK_BOT_TOKEN.get()
-        if not token:
-            raise HTTPException(400, "Slack is not configured.")
+        token = required_slack_value(ENV.SLACK_BOT_TOKEN)
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30, sock_connect=10),
             response_class=_SlackResponse,

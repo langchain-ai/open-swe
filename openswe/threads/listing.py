@@ -13,6 +13,9 @@ from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel
 
 from openswe.review.session import ReviewSessionMetadata
+from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
+from openswe.slack.records import lookup_slack_link_thread_id
+from openswe.source_context import SourceContext
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
 from openswe.threads import index
 from openswe.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
@@ -61,6 +64,7 @@ _PINNED_THREADS_BATCH_SIZE = 1000
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
 
+DashboardThreadExperience = Literal["coding", "agent_workspace"]
 DashboardThreadScope = Literal["all", "interactive", "automation", "bot"]
 
 logger = logging.getLogger(__name__)
@@ -133,6 +137,16 @@ def _search_rank(thread: ThreadLike) -> float:
 
 
 def _search_matches(values: Sequence[object], query: str) -> bool:
+    if expected := parse_github_pr_url(query):
+        return any(
+            actual is not None
+            and actual.owner.lower() == expected.owner.lower()
+            and actual.repo.lower() == expected.repo.lower()
+            and actual.number == expected.number
+            for value in values
+            if isinstance(value, str)
+            for actual in [parse_github_pr_url(value)]
+        )
     needle = query.lower()
     return any(isinstance(value, (str, int)) and needle in str(value).lower() for value in values)
 
@@ -151,8 +165,11 @@ def _metadata_matches_filters(
     admin_threads: bool | None = None,
     owner: str | None = None,
     exclude_sources: Collection[str] = (),
+    experience: DashboardThreadExperience | None = None,
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
+    if experience is not None and metadata.get("experience", "coding") != experience:
+        return False
     if thread_is_unlisted(metadata):
         return False
     if owner and not thread_is_owner(metadata, owner):
@@ -355,6 +372,7 @@ async def _readable_threads_by_id(
     *,
     include_private: bool = True,
     resolved: bool | None = None,
+    experience: DashboardThreadExperience | None = None,
 ) -> dict[str, ThreadLike]:
     threads_by_id: dict[str, ThreadLike] = {}
     for offset in range(0, len(thread_ids), _PINNED_THREADS_BATCH_SIZE):
@@ -368,6 +386,7 @@ async def _readable_threads_by_id(
                 thread_id
                 and thread_is_readable(metadata, login, email)
                 and not thread_is_unlisted(metadata)
+                and (experience is None or metadata.get("experience", "coding") == experience)
                 and (include_private or metadata.get("visibility", "public") == "public")
                 and (resolved is None or _is_thread_resolved(metadata) is resolved)
             ):
@@ -416,6 +435,7 @@ async def attach_task_workers(
     resolved: bool | None = None,
     include_private: bool = True,
     filter_workers: Callable[[list[ThreadLike]], Awaitable[list[ThreadLike]]] | None = None,
+    experience: DashboardThreadExperience | None = None,
 ) -> None:
     """Attach independently readable task children without recursively expanding them."""
     ids = [thread_id for summary in summaries if isinstance(thread_id := summary.get("id"), str)]
@@ -428,7 +448,12 @@ async def attach_task_workers(
     children = await sidebar_memberships(coordinator_ids, workers_of=True)
     parent_ids = list({membership.coordinator_thread_id for membership in memberships.values()})
     related = await _readable_threads_by_id(
-        client, [*parent_ids, *children], login, email, include_private=include_private
+        client,
+        [*parent_ids, *children],
+        login,
+        email,
+        include_private=include_private,
+        experience=experience,
     )
     worker_threads = [
         related[key]
@@ -476,6 +501,7 @@ async def _task_hierarchy_page(
     include_private: bool,
     sort_by: _ThreadSortBy,
     matches_metadata: Callable[[ThreadLike], bool],
+    experience: DashboardThreadExperience | None = None,
 ) -> JsonObject:
     memberships = await sidebar_memberships(
         [thread_id for thread in candidates if (thread_id := _thread_id(thread))]
@@ -493,6 +519,7 @@ async def _task_hierarchy_page(
         email,
         include_private=include_private,
         resolved=resolved,
+        experience=experience,
     )
     roots: dict[str, ThreadLike] = {}
     activity: dict[str, int] = {}
@@ -556,6 +583,7 @@ async def _task_hierarchy_page(
         resolved=resolved,
         include_private=include_private,
         filter_workers=filter_workers,
+        experience=experience,
     )
     return {
         "items": items,
@@ -580,6 +608,7 @@ async def _collect_thread_candidates(
     owned: bool = False,
     admin_threads: bool | None = None,
     exclude_sources: Collection[str] = (),
+    experience: DashboardThreadExperience | None = None,
     viewer_login: str | None = None,
     viewer_email: str | None = None,
     include_private: bool = True,
@@ -644,6 +673,7 @@ async def _collect_thread_candidates(
                     admin_threads=admin_threads,
                     owner=viewer_login if owned else None,
                     exclude_sources=exclude_sources,
+                    experience=experience,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -689,6 +719,7 @@ async def _collect_thread_candidates(
                         viewer_email,
                         include_private=include_private,
                         resolved=resolved,
+                        experience=experience,
                     )
                 )
                 checked_parents.update(parent_ids)
@@ -747,7 +778,12 @@ async def list_unresolved_dashboard_threads(
 
 
 async def list_dashboard_threads(
-    login: str, *, email: str | None = None, limit: int = 50, include_all: bool = False
+    login: str,
+    *,
+    email: str | None = None,
+    limit: int = 50,
+    include_all: bool = False,
+    experience: DashboardThreadExperience | None = None,
 ) -> list[dict[str, Any]]:
     page = await list_dashboard_threads_page(
         login,
@@ -755,6 +791,7 @@ async def list_dashboard_threads(
         limit=limit,
         offset=0,
         include_all=include_all,
+        experience=experience,
     )
     return page["items"]
 
@@ -763,6 +800,8 @@ async def _pinned_thread_summaries(
     client: LangGraphClient,
     login: str,
     email: str | None,
+    *,
+    experience: DashboardThreadExperience | None = None,
 ) -> list[JsonObject]:
     pin_ids = await list_thread_pin_ids(login)
     threads_by_id: dict[str, ThreadLike] = {}
@@ -777,7 +816,14 @@ async def _pinned_thread_summaries(
         )
         for thread in threads:
             thread_id = _thread_id(thread)
-            if thread_id and thread_is_readable(_thread_metadata(thread), login, email):
+            metadata = _thread_metadata(thread)
+            slack_thread = SourceContext.from_metadata(metadata).slack_thread
+            if (
+                thread_id
+                and thread_is_readable(metadata, login, email)
+                and not (slack_thread is not None and slack_thread.is_concierge)
+                and (experience is None or metadata.get("experience", "coding") == experience)
+            ):
                 threads_by_id[thread_id] = thread
     # Search order is unrelated to pin order; deleted/inaccessible IDs are omitted.
     summaries = await _summarize_threads(
@@ -785,7 +831,7 @@ async def _pinned_thread_summaries(
         [threads_by_id[thread_id] for thread_id in pin_ids if thread_id in threads_by_id],
         minimal_run_update=True,
     )
-    await attach_task_workers(client, summaries, login, email)
+    await attach_task_workers(client, summaries, login, email, experience=experience)
     return summaries
 
 
@@ -793,7 +839,22 @@ async def list_dashboard_pinned_threads(
     login: str,
     *,
     email: str | None = None,
+    experience: DashboardThreadExperience | None = None,
 ) -> list[dict[str, Any]]:
+    if experience is not None:
+        threads = await list_dashboard_pinned_threads(login, email=email)
+        return [
+            {
+                **thread,
+                "taskWorkers": [
+                    worker
+                    for worker in thread.get("taskWorkers", [])
+                    if worker.get("experience", "coding") == experience
+                ],
+            }
+            for thread in threads
+            if thread.get("experience", "coding") == experience
+        ]
     return await _pinned_thread_summaries(langgraph_client(), login, email)
 
 
@@ -806,6 +867,7 @@ async def list_dashboard_thread_repos(
     owned: bool = False,
     include_all: bool = False,
     exclude_sources: Collection[str] = (),
+    experience: DashboardThreadExperience | None = None,
 ) -> list[dict[str, Any]]:
     """The repositories the viewer's threads ran in, newest activity first.
 
@@ -822,6 +884,7 @@ async def list_dashboard_thread_repos(
         scope="all" if include_automations else "interactive",
         owned=owned,
         exclude_sources=exclude_sources,
+        experience=experience,
     )
     repos: dict[str, dict[str, Any]] = {}
     for thread in candidates:
@@ -878,6 +941,7 @@ async def list_dashboard_threads_page(
     ownerless: bool = False,
     owned: bool = False,
     exclude_sources: Collection[str] = (),
+    experience: DashboardThreadExperience | None = None,
     filter_participant_login: str | None = None,
     include_private: bool = True,
     surfaced_only: bool = False,
@@ -886,9 +950,32 @@ async def list_dashboard_threads_page(
     hierarchy: bool = False,
 ) -> dict[str, Any]:
     client = langgraph_client()
+    normalized_query = query.strip() if query else ""
+    if parse_slack_thread_url(normalized_query):
+        thread_id = await lookup_slack_link_thread_id(normalized_query)
+        items = []
+        if thread_id and offset <= 0:
+            try:
+                thread = await client.threads.get(thread_id)
+            except NotFoundError:
+                thread = None
+            if thread is not None:
+                metadata = _thread_metadata(thread)
+                if (
+                    thread_is_readable(metadata, login, email)
+                    and (include_private or metadata.get("visibility", "public") == "public")
+                    and (experience is None or metadata.get("experience", "coding") == experience)
+                ):
+                    items = [await _summarize_thread(client, thread)]
+        return {"items": items, "limit": 1, "offset": max(offset, 0), "hasMore": False}
+    pr_ref = parse_github_pr_url(normalized_query)
+    if pr_ref:
+        query = pr_ref.url
     search_login = filter_participant_login or login
     search_email = email if search_login == login else None
-    if scope == "automation" and filter_participant_login is None:
+    if pr_ref and filter_participant_login is None:
+        searches = [{}]
+    elif scope == "automation" and filter_participant_login is None:
         searches = [{"thread_category": "automation"}, {"source": "schedule"}]
     elif scope == "bot" and filter_participant_login is None:
         # Bot threads have no participants, and every signed-in user may read them.
@@ -916,6 +1003,7 @@ async def list_dashboard_threads_page(
         owned=owned,
         admin_threads=admin_threads,
         exclude_sources=exclude_sources,
+        experience=experience,
         viewer_login=login,
         viewer_email=email,
         include_private=include_private,
@@ -940,6 +1028,7 @@ async def list_dashboard_threads_page(
             status=status,
             include_private=include_private,
             sort_by=sort_by,
+            experience=experience,
             matches_metadata=lambda thread: (
                 _metadata_matches_filters(
                     _thread_metadata(thread),
@@ -953,6 +1042,7 @@ async def list_dashboard_threads_page(
                     admin_threads=admin_threads,
                     owner=login if owned else None,
                     exclude_sources=exclude_sources,
+                    experience=experience,
                 )
                 and (
                     not surfaced_only

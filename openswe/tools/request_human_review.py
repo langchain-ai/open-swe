@@ -15,6 +15,7 @@ from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import (
     Origin,
+    RequestResult,
     ReviewStatus,
     assign,
     request_review,
@@ -23,6 +24,7 @@ from openswe.human_review.standard import (
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.cards import run_slack_location
+from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     GitHubPrRef,
     fetch_slack_message_by_ts,
@@ -38,6 +40,17 @@ from openswe.users import User
 
 def _failure(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
+
+
+def _supplementary_note(result: RequestResult, supplementary_review: str) -> str:
+    if not supplementary_review.strip():
+        return ""
+    if result.supplementary_refusal:
+        return f" The supplementary review was not requested: {result.supplementary_refusal}"
+    return (
+        f" The `{supplementary_review.strip()}` supplementary review is requested; "
+        "Open SWE rotates and notifies its reviewer."
+    )
 
 
 async def _repository_refusal(pr_ref: GitHubPrRef, cfg: RunConfig) -> str | None:
@@ -68,13 +81,18 @@ async def _repository_refusal(pr_ref: GitHubPrRef, cfg: RunConfig) -> str | None
 @expose_mcp()
 @audit_tool()
 async def request_human_review(
-    pr_url: str, inline_summary: str, channel: str = "", auto_merge: bool | None = None
+    pr_url: str,
+    inline_summary: str = "",
+    channel: str = "",
+    auto_merge: bool | None = None,
+    supplementary_review: str = "",
+    supplementary_review_reason: str = "",
 ) -> dict[str, Any]:
     """Implement the `request_human_review` tool."""
     pr_ref = parse_github_pr_url(pr_url)
     if pr_ref is None:
         return _failure("pr_url must be a canonical GitHub pull request URL")
-    if not inline_summary.strip():
+    if not inline_summary.strip() and not supplementary_review.strip():
         return _failure(
             "inline_summary is required: one or two sentences on what the change does and why."
         )
@@ -82,7 +100,15 @@ async def request_human_review(
     if refusal := await _repository_refusal(pr_ref, cfg):
         return _failure(refusal)
     if caller := cfg.mcp_caller:
-        return await _request_for_mcp_caller(pr_ref, caller, inline_summary, channel, auto_merge)
+        return await _request_for_mcp_caller(
+            pr_ref,
+            caller,
+            inline_summary,
+            channel,
+            auto_merge,
+            supplementary_review,
+            supplementary_review_reason,
+        )
     login = cfg.github_login or ""
     thread_id = cfg.thread_id or ""
     own_channel, own_thread = await run_slack_location(cfg, thread_id)
@@ -94,7 +120,13 @@ async def request_human_review(
         slack_thread_ts=own_thread,
     )
     result = await request_review(
-        pr_ref, origin, channel=channel, inline_summary=inline_summary, auto_merge=auto_merge
+        pr_ref,
+        origin,
+        channel=channel,
+        inline_summary=inline_summary or None,
+        auto_merge=auto_merge,
+        supplementary_review=supplementary_review,
+        supplementary_review_reason=supplementary_review_reason,
     )
     if not result.success:
         return _failure(result.error)
@@ -103,6 +135,7 @@ async def request_human_review(
             "success": True,
             "request_id": result.request_id,
             "slack_channel_id": result.channel,
+            "slack_channel_name": await SlackChannel.name_for(result.channel),
             "next": prompt(
                 "tools/human-review-channel-mismatch",
                 channel=result.channel,
@@ -125,8 +158,10 @@ async def request_human_review(
         "auto_merge": result.auto_merge,
         "request_id": result.request_id,
         "slack_channel_id": result.channel,
+        "slack_channel_name": await SlackChannel.name_for(result.channel),
         "next": f"{posted} People sign up from the card. {merge_note} "
-        "You are woken if nobody signs up. Do not announce or link the card; do not poll.",
+        "You are woken if nobody signs up. Do not announce or link the card; do not poll."
+        + _supplementary_note(result, supplementary_review),
     }
 
 
@@ -136,6 +171,8 @@ async def _request_for_mcp_caller(
     inline_summary: str,
     channel: str,
     auto_merge: bool | None = None,
+    supplementary_review: str = "",
+    supplementary_review_reason: str = "",
 ) -> dict[str, Any]:
     """Request review as a person calling over MCP, who has no thread to point at the card."""
     requester = await User.for_login("github", login)
@@ -145,8 +182,10 @@ async def _request_for_mcp_caller(
         pr_ref,
         Origin(requester=requester),
         channel=channel,
-        inline_summary=inline_summary,
+        inline_summary=inline_summary or None,
         auto_merge=auto_merge,
+        supplementary_review=supplementary_review,
+        supplementary_review_reason=supplementary_review_reason,
     )
     if not result.success:
         return _failure(result.error)
@@ -183,7 +222,8 @@ async def _request_for_mcp_caller(
         "request_id": result.request_id,
         "permalink": result.permalink,
         "next": f"{posted} People sign up from the card. {merge_note} "
-        "If nobody signs up, Open SWE picks a reviewer. Do not poll.",
+        "If nobody signs up, Open SWE picks a reviewer. Do not poll."
+        + _supplementary_note(result, supplementary_review),
     }
 
 

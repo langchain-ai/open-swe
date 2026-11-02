@@ -26,10 +26,7 @@ import {
   markPullRequestReady,
   pullRequestStatusQuery,
 } from "@/features/reviews/lib/cache"
-import {
-  actionLabel,
-  githubActions,
-} from "@/features/reviews/lib/githubActions"
+import { actionLabel } from "@/features/reviews/lib/githubActions"
 import {
   standingReview,
   withSubmittedReview,
@@ -67,10 +64,7 @@ const VERDICTS: ReadonlyArray<{
 const approveColors =
   "bg-success-strong! border-transparent! text-white! dark:text-black! hover:brightness-110"
 
-/**
- * The header's review action: one click for the viewer's next step (Approve,
- * or Mark ready on their own draft), with GitHub's review form behind it.
- */
+/** The viewer's next review action, with the review form behind it. */
 export function ReviewButton({
   owner,
   repo,
@@ -79,6 +73,8 @@ export function ReviewButton({
   onOpenChange: setOpen,
   defaultVerdict,
   onOpenReview,
+  approveLabel = "Approve",
+  onApproved,
 }: {
   owner: string
   repo: string
@@ -89,6 +85,10 @@ export function ReviewButton({
   defaultVerdict: PullRequestReviewEvent
   /** Opens the form on a verdict, e.g. to show why a one-click approval failed. */
   onOpenReview: (verdict: PullRequestReviewEvent) => void
+  /** Names what an approval also does, e.g. "Approve & next" while working through a queue. */
+  approveLabel?: string
+  /** Runs once GitHub accepts an approval, e.g. to open the next pull request. */
+  onApproved?: () => void
 }) {
   const queryClient = useQueryClient()
   const session = useSession()
@@ -145,6 +145,7 @@ export function ReviewButton({
       )
       refresh.reviewed()
       void pending.invalidate()
+      if (review.event === "APPROVE") onApproved?.()
     },
   })
   const submitForm = () =>
@@ -182,10 +183,19 @@ export function ReviewButton({
       }}
     >
       {isAuthor ? (
-        <div className="flex items-center gap-space-2">
-          {status.data?.draft && (
+        status.data?.draft ? (
+          <ButtonGroup size="sm" color="primary" variant="normal">
             <MarkReadyButton pr={status.data} onReady={refresh.status} />
-          )}
+            <PopoverTrigger asChild>
+              <Button
+                tagText={pendingTag}
+                aria-label={`Comment${pendingLabel}`}
+              >
+                <CaretDownIcon aria-hidden className="size-4" />
+              </Button>
+            </PopoverTrigger>
+          </ButtonGroup>
+        ) : (
           <PopoverTrigger asChild>
             <Button
               size="sm"
@@ -197,14 +207,16 @@ export function ReviewButton({
               Comment
             </Button>
           </PopoverTrigger>
-        </div>
+        )
       ) : (
         <ButtonGroup size="sm" color="primary" variant="normal">
           <Button
             leftDecorator={approved ? CheckIcon : undefined}
             tagText={approved ? undefined : pendingTag}
             disabled={approved || submit.isPending}
-            aria-label={approved ? "Approved" : `Approve${pendingLabel}`}
+            aria-label={
+              approved ? "Approved" : `${approveLabel}${pendingLabel}`
+            }
             aria-live="polite"
             onClick={approve}
             className={cn(
@@ -213,7 +225,7 @@ export function ReviewButton({
                 : approveColors
             )}
           >
-            {approved ? "Approved" : "Approve"}
+            {approved ? "Approved" : approveLabel}
           </Button>
           <PopoverTrigger asChild>
             <IconButton
@@ -402,7 +414,15 @@ function MarkReadyButton({
       aria-live="polite"
       onClick={() => ready.mutate()}
     >
-      {actionLabel(githubActions["mark-ready"].labels, ready)}
+      {actionLabel(
+        {
+          idle: "Undraft",
+          pending: "Undrafting…",
+          done: "Undrafted",
+          retry: "Retry undraft",
+        },
+        ready
+      )}
     </Button>
   )
 }

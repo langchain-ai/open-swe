@@ -11,12 +11,13 @@ import hmac
 import secrets
 import time
 from collections.abc import Mapping
-from typing import Final, Self
+from typing import Final
 
 import jwt
-from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
+from runtime_api.catalog import RoutingRules
 
-from openswe.agent_api.preparation import AgentPreparation
+from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
 
 _ISSUER: Final = "open-swe"
@@ -38,6 +39,54 @@ class RuntimeTokenError(Exception):
     """A token was refused; the message names the failed check, never the token."""
 
 
+# The run config key planning leaves an agent run's ``AgentTurnSettings`` under.
+AGENT_TURN_KEY: Final = "agent_turn"
+
+
+class AgentTurnSettings(BaseModel):
+    """What starting an agent run decided that preparing its turn reads.
+
+    The turn's preparation (``prepare``) is a call of its own, answered from the token,
+    so what the run's settings, profile and access decided is signed in with it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    # Whoever sent the message that started the run, and whose private credentials it may use.
+    profile_login: str | None = None
+    credential_login: str | None = None
+    # Whether the sender administers workspaces, and is the only one who may write here.
+    admin_workspaces: bool = False
+    sole_writer: bool = False
+    # The model that titles the thread.
+    title_model_id: str
+    title_effort: str | None = None
+    use_gateway: bool = False
+    # How each call's route is picked, and the model and effort each route stands for.
+    routing: RoutingRules = RoutingRules()
+    route_models: dict[str, tuple[str, str | None]] = {}
+    # Whether the opening message may ask for a model, and the one an earlier message did.
+    offers_requested_models: bool = False
+    fable_enabled: bool = False
+    saved_requested_model: str | None = None
+    # The client of a thread bridged to a person's machine.
+    bridge_client: BridgeClient | None = None
+    # Why managed tool discovery failed while planning, which the prompt says.
+    tool_discovery_failures: list[str] = []
+    # Whether the thread runs a review walkthrough, which pins its checkout in the sandbox.
+    review_guide: bool = False
+    # Whether the thread had one that has closed: its guide stays, to retire its rules.
+    review_guide_closed: bool = False
+    # Whether the thread is a task worker, which may use its coordinator's sandbox only once
+    # the backend has checked it may.
+    task_worker: bool = False
+
+    @property
+    def reaches_sandbox(self) -> bool:
+        """Whether preparing a turn connects to the thread's sandbox even where MDA keeps it."""
+        return self.review_guide or self.task_worker
+
+
 class RunSettings(BaseModel):
     """What the backend decided for a run as it started it, which every later call reads."""
 
@@ -50,10 +99,13 @@ class RunSettings(BaseModel):
     # The model and effort the run calls, once settings and overrides are applied.
     model_id: str | None = None
     effort: str | None = None
+    # What preparing an agent run's turn reads; None for the other graphs.
+    agent: AgentTurnSettings | None = None
     # The digest of every tool the run started with, kept in ``run_tool_sets``;
     # its catalog lists only those the model is offered.
     tools: str | None = None
-    preparation: AgentPreparation | None = None
+    # Where an incident run answers: its incident's Slack thread, not the run's own.
+    slack_thread: dict[str, JsonValue] | None = None
 
     def configurable(self) -> dict[str, JsonValue]:
         """The run config keys these settings fill."""
@@ -62,6 +114,7 @@ class RunSettings(BaseModel):
             "draft_prs": self.draft_prs,
             "resolved_agent_model_id": self.model_id,
             "resolved_agent_effort": self.effort,
+            "slack_thread": self.slack_thread,
         }
         return {key: value for key, value in values.items() if value is not None}
 
@@ -76,30 +129,21 @@ class RemoteRun(BaseModel):
     configurable: dict[str, JsonValue]
     metadata: dict[str, JsonValue] = {}
     settings: RunSettings = RunSettings()
-    # What the run's operation grants are signed under; None on a run started before
-    # operations were granted, whose tools its plan bounds instead.
-    grant_id: str | None = None
+    # What the run's operation grants are signed under, its own.
+    grant_id: str = Field(default_factory=lambda: secrets.token_urlsafe(16))
     # When the run's token expires, in epoch seconds; a token signed again for the run
     # keeps it, so holding one never extends it.
     expires_at: int | None = None
 
-    def granting(self) -> Self:
-        """This run, with a grant id of its own for the operations its catalog grants."""
-        return self.model_copy(update={"grant_id": secrets.token_urlsafe(16)})
-
     def grant(self, operation: str) -> str | None:
         """The grant of ``operation`` to this run, which its calls of it must carry."""
         keys = _signing_keys()
-        return None if self.grant_id is None or not keys else _grant(keys[0], self, operation)
+        return _grant(keys[0], self, operation) if keys else None
 
     def granted(self, operation: str, grant: str | None) -> bool:
         """Whether this run may call ``operation``: its catalog granted it, under any live key."""
-        return (
-            self.grant_id is not None
-            and grant is not None
-            and any(
-                hmac.compare_digest(_grant(key, self, operation), grant) for key in _signing_keys()
-            )
+        return grant is not None and any(
+            hmac.compare_digest(_grant(key, self, operation), grant) for key in _signing_keys()
         )
 
 
@@ -132,7 +176,7 @@ def _sign(audience: str, run: RemoteRun, extra: dict[str, JsonValue], now: int |
         "cfg": run.configurable,
         "md": run.metadata,
         **({"set": settings} if (settings := run.settings.model_dump(exclude_none=True)) else {}),
-        **({"gid": run.grant_id} if run.grant_id else {}),
+        "gid": run.grant_id,
         **extra,
     }
     return jwt.encode(claims, keys[0], algorithm=_ALGORITHM)

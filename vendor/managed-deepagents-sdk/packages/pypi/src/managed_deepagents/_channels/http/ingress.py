@@ -66,13 +66,19 @@ PrepareInput = Callable[[], Awaitable["NormalizedRunInput | None"]]
 
 
 async def wait_for_http_ingress_thread(
-    *, user_id: str, source_thread_key: str, source_provider: str, thread_id: str
+    *,
+    user_id: str,
+    source_thread_key: str,
+    source_provider: str,
+    thread_id: str,
+    principal_id: str | None = None,
 ) -> None:
     """Wait until the thread's queued and running runs have finished."""
     client = _create_ingress_loopback_client(
         user_id=user_id,
         source_thread_key=source_thread_key,
         source_provider=source_provider,
+        principal_id=principal_id,
     )
     await wait_for_idle_thread(client=client, thread_id=thread_id)
 
@@ -134,6 +140,7 @@ async def start_http_ingress_agent(
     prepare: PrepareInput | None = None,
     delivery_key: str | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
+    principal_id: str | None = None,
 ) -> StartedIngressRun | SkippedIngressRun:
     if not _has_loopback_credential():
         raise ChannelError(
@@ -143,6 +150,7 @@ async def start_http_ingress_agent(
         user_id=user_id,
         source_thread_key=source_thread_key,
         source_provider=source_provider,
+        principal_id=principal_id,
     )
     read = await ingress_thread_state(client=client, thread_id=thread_id, delivery_key=delivery_key)
     state = read["state"]
@@ -246,6 +254,7 @@ async def observe_http_ingress_agent(
     source_provider: str,
     thread_id: str,
     run_id: str,
+    principal_id: str | None = None,
 ) -> HttpIngressOutcome | None:
     """How the run ended, or ``None`` when it hasn't, as observing it stopped while
     it was still ``pending`` or ``running``: it may still answer."""
@@ -253,6 +262,7 @@ async def observe_http_ingress_agent(
         user_id=user_id,
         source_thread_key=source_thread_key,
         source_provider=source_provider,
+        principal_id=principal_id,
     )
     try:
         observed = await observe_ingress_run(client=client, thread_id=thread_id, run_id=run_id)

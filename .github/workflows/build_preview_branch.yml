@@ -150,17 +150,23 @@ jobs:
           MDA_LINEAR_CLIENT_ID: ${{ secrets.MDA_LINEAR_CLIENT_ID_PREVIEW }}
           MDA_LINEAR_CLIENT_SECRET: ${{ secrets.MDA_LINEAR_CLIENT_SECRET_PREVIEW }}
           MDA_LINEAR_WEBHOOK_SECRET: ${{ secrets.MDA_LINEAR_WEBHOOK_SECRET_PREVIEW }}
-          # No GitHub App key: this deploy runs labeled PRs' code, and the App is installed on every
-          # repository. open-swe-mda-preview already has the App in Agent Auth, and keeps it.
+          # No GitHub App key and no Slack app token or signing secret: this deploy runs labeled PRs'
+          # code. open-swe-mda-preview already has the GitHub App in Agent Auth, and Trigger Server
+          # keeps its Slack channel's app once a trusted deploy registered it; both stay.
           TREE_SHA: ${{ needs.build.outputs.sha }}
         run: |
           if [[ -z "$LANGSMITH_GATEWAY_API_KEY" ]]; then
             echo "::error::Set the LANGSMITH_GATEWAY_API_KEY_PREVIEW secret to the preview backend's gateway key."
             exit 1
           fi
+          if [[ -z "$MDA_SERVICE_SECRET" ]]; then
+            echo "::error::Set the MDA_SERVICE_SECRET_PREVIEW secret to the preview backend's MDA_SERVICE_SECRET: without it the backend refuses every channel call."
+            exit 1
+          fi
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
           # its gateway key, the secret they share, and the commit its traces name as their revision.
-          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\nLANGSMITH_REVISION_ID=%s\n' "https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" "$(git rev-parse HEAD)" >mda/.env
+          # The backend acts on the channels' threads with the same secret, as MDA's ingress secret.
+          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\nMDA_INGRESS_SECRET=%s\nLANGSMITH_REVISION_ID=%s\n' "https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" "$MDA_SERVICE_SECRET" "$(git rev-parse HEAD)" >mda/.env
           uv run --project mda --locked mda deploy mda \
             --name open-swe-mda-preview \
             --deployment-type prod \

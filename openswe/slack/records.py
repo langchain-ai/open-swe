@@ -40,7 +40,14 @@ from sqlalchemy.orm import InstrumentedAttribute, Mapped, mapped_column
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.slack.channels import SlackChannel
-from openswe.slack.client import SlackThreadMappingError, normalize_slack_location
+from openswe.slack.client import (
+    SLACK_REQUEST_ERRORS,
+    SlackClient,
+    SlackThreadMappingError,
+    normalize_slack_location,
+    parse_slack_thread_url,
+    slack_error,
+)
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.thread_ids import slack_thread_id
 from openswe.threads import index
@@ -451,6 +458,38 @@ async def lookup_slack_thread_id(channel_id: str, thread_ts: str) -> str | None:
         return await session.scalar(
             select(SlackThread.thread_id).where(_at_location(channel, timestamp))
         )
+
+
+async def lookup_slack_link_thread_id(url: str) -> str | None:
+    """Resolve a permalink to its bound Open SWE thread, including reply-only links."""
+    from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
+
+    location = parse_slack_thread_url(url)
+    if location is None:
+        return None
+    channel, timestamp = location
+    if thread_id := await lookup_slack_thread_id(channel, timestamp):
+        return thread_id
+    mapping = await lookup_slack_run_mapping(channel, timestamp)
+    if mapping and mapping.thread_ts:
+        if thread_id := await lookup_slack_thread_id(channel, mapping.thread_ts):
+            return thread_id
+    if thread_id := await lookup_slack_thread_id(channel, CODE_CHANNEL_SESSION_TS):
+        return thread_id
+    try:
+        async with SlackClient.bot() as client:
+            data = await client.conversations_replies(channel=channel, ts=timestamp, limit=1)
+        messages = data.get("messages", [])
+        if messages and isinstance(messages[0], Mapping):
+            root = messages[0].get("thread_ts") or messages[0].get("ts")
+            if isinstance(root, str) and root != timestamp:
+                return await lookup_slack_thread_id(channel, root)
+    except SLACK_REQUEST_ERRORS as exc:
+        logger.warning(
+            "Slack permalink lookup failed",
+            extra={"slack_channel": channel, "slack_error": slack_error(exc)},
+        )
+    return None
 
 
 async def bind_slack_thread_id(

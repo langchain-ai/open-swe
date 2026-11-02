@@ -125,6 +125,31 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     );
 
     await page.goto("open-swe://app/agents");
+    const taskThreadId = "74000000-0000-4000-8000-000000000099";
+    const bridgeId = await page.evaluate(async (threadId) => {
+      return window.openSweDesktop!.takeOverThread({ threadId, repo: "" });
+    }, taskThreadId);
+    expect(bridgeId).toBeTruthy();
+    const tasks = await page.evaluate(() =>
+      window.openSweDesktop!.listLocalThreads(),
+    );
+    const task = tasks.find((thread) => thread.id === taskThreadId);
+    expect(task?.managedTaskFolder).toBe(true);
+    expect(task?.cwd).toContain(taskThreadId);
+    const work = page.getByRole("button", { name: "Work", exact: true });
+    const coding = page.getByRole("button", { name: "Coding", exact: true });
+    await expect(work).toHaveAttribute("aria-pressed", "true");
+    await expect(page).toHaveTitle(/Open SWE/);
+    const workBounds = await work.boundingBox();
+    const codingBounds = await coding.boundingBox();
+    expect(workBounds).not.toBeNull();
+    expect(codingBounds).not.toBeNull();
+    expect(workBounds!.x).toBeLessThan(codingBounds!.x);
+    expect(Math.abs(workBounds!.width - codingBounds!.width)).toBeLessThan(1);
+    await coding.click();
+    await expect(coding).toHaveAttribute("aria-pressed", "true");
+    await page.reload();
+    await expect(coding).toHaveAttribute("aria-pressed", "true");
 
     await expect(
       page.getByRole("button", { name: /Cloud threads, \d+/ }),

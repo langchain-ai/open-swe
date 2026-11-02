@@ -144,6 +144,7 @@ class ReviewGuideMiddleware(OpenSWEMiddleware):
                     gone.message_ts,
                     gone.message_text,
                     "The pull request changed these lines",
+                    shown=gone,
                 )
             logger.info(
                 "Review walkthrough carried to a newer head",

@@ -304,6 +304,7 @@ async def expedite_pr_approval(
             "approvers": active.approvers,
             "completion_reply_required": active.awaiting_ready,
             "slack_channel_id": active.slack_channel_id,
+            "slack_channel_name": await SlackChannel.name_for(active.slack_channel_id),
             "next": readiness_warning
             or (
                 "The full draft card is in the author's DM; no thread card is posted until ready."
@@ -368,6 +369,7 @@ async def expedite_pr_approval(
             "pr_url": pr_ref.url,
             "head_sha": head_sha,
             "slack_channel_id": channel_id,
+            "slack_channel_name": await SlackChannel.name_for(channel_id),
             "completion_reply_required": True,
             "next": "The full draft card was sent only to the author by DM. The thread card "
             "will be posted once they mark it ready. Keep a /baby-sit watch on the PR.",
@@ -417,5 +419,6 @@ async def expedite_pr_approval(
         "generated_lines": verdict.generated_lines,
         "excluded_lines": verdict.excluded_lines,
         "slack_channel_id": channel_id,
+        "slack_channel_name": await SlackChannel.name_for(channel_id),
         "next": readiness_warning or next_step,
     }

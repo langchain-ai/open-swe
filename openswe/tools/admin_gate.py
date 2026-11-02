@@ -16,6 +16,8 @@ def configurable() -> RunConfig:
 
 async def actor_is_admin(cfg: RunConfig, *, login: str | None = None) -> bool:
     """Whether the run's actor is a configured admin, or a scheduled run carries one's authorization."""
+    if cfg.auth_provider == "langsmith":
+        return False
     if cfg.source == "schedule":
         return await authorized_admin_schedule(cfg) is not None
     login = login or cfg.github_login
@@ -31,6 +33,8 @@ async def participant_is_admin(login: str) -> bool:
     roster describes each participant, so an admin requester must not make
     everyone else in the thread look like one.
     """
+    if User.key_id(login) is not None:
+        return False
     return is_admin(await User.email_for_login(login), login=login)
 
 

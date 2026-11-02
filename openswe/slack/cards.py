@@ -61,7 +61,6 @@ async def repost_thread_card(
     broadcast: bool,
     agent_thread_id: str | None,
     adopt: Callable[[str], Awaitable[bool]],
-    login: str | None = None,
 ) -> bool:
     """Replace a thread card with a fresh reply, sent to the channel too if ``broadcast``.
 
@@ -77,7 +76,6 @@ async def repost_thread_card(
             blocks=block_payload(blocks),
             agent_thread_id=agent_thread_id,
             reply_broadcast=broadcast,
-            login=login,
         )
     except SlackRequestError as exc:
         logger.warning(

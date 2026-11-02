@@ -81,6 +81,7 @@ function toolCall(
     status: "completed",
     output_preview: null,
     has_output: false,
+    attachments: null,
     namespace: [],
     ...row,
   }
@@ -217,6 +218,39 @@ describe("transcript snapshot", () => {
     ])
     expect(messages[1]?.startedAt).toBe("2026-01-01T00:00:01Z")
     expect(messages[1]?.timestamp).toBe("2026-01-01T00:00:02Z")
+  })
+
+  it("hides the context Claude Code adds to a mirrored prompt", () => {
+    const sender = { login: "octocat", kind: "claude_code" }
+    const messages = toMessages(
+      fromSnapshot(
+        snapshot({
+          turns: [turn("t1", "2026-01-01T00:00:00Z")],
+          messages: [
+            messageRow({
+              message_id: "human-1",
+              turn_id: "t1",
+              role: "human",
+              text: "<system-reminder>\nIn a worktree\n</system-reminder>\n\nFix it",
+              sender,
+              created_at: "2026-01-01T00:00:00Z",
+            }),
+            messageRow({
+              message_id: "human-2",
+              turn_id: "t1",
+              role: "human",
+              text: "<task-notification>\n<status>done</status>\n</task-notification>",
+              sender,
+              created_at: "2026-01-01T00:00:01Z",
+            }),
+          ],
+        })
+      )
+    )
+
+    expect(messages.map((entry) => [entry.id, entry.chunks])).toEqual([
+      ["human-1", [{ kind: "text", text: "Fix it" }]],
+    ])
   })
 
   it("keeps a subagent's nested work out of the root transcript, on its task call", () => {
@@ -889,6 +923,45 @@ describe("tool output", () => {
     expect(after).toBe(before)
     expect(await Promise.all([before?.(), after?.()])).toEqual(["full", "full"])
     expect(fetchToolOutput).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("tool images", () => {
+  it("puts a tool result's images on its chunk, reloaded or live", () => {
+    const shot = attachment({
+      file_name: null,
+      attachment_id: "11111111-2222-3333-4444-555555555555",
+    })
+    const reloaded = fromSnapshot(
+      twoTurnSnapshot({
+        tool_calls: [
+          toolCall({
+            tool_call_id: "read-1",
+            turn_id: "turn-1",
+            name: "screenshot",
+            started_at: "2026-01-01T00:00:02Z",
+            attachments: [shot],
+          }),
+        ],
+      })
+    )
+    const live = applyEvent(
+      fromSnapshot(twoTurnSnapshot()),
+      toolCompleted(11, { attachments: [shot] })
+    )
+
+    const expected = [
+      {
+        kind: "image",
+        url: expect.stringContaining(
+          "/threads/thread-1/transcript/attachments/11111111-2222-3333-4444-555555555555"
+        ) as unknown as string,
+        credentials: "session",
+        mimeType: "image/png",
+      },
+    ]
+    expect(readChunk(reloaded)?.images).toEqual(expected)
+    expect(readChunk(live)?.images).toEqual(expected)
   })
 })
 

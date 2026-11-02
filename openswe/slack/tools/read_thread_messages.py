@@ -8,6 +8,8 @@ from openswe.slack.client import (
     slack_image_file_urls,
     slack_message_bot_id,
 )
+from openswe.slack.tools.read_channel_messages import ChannelNotReadable, readable_public_channel
+from openswe.tools import access as tool_access
 
 
 async def fetch_and_format_thread(channel_id: str, message_ts: str) -> dict[str, Any]:
@@ -47,14 +49,23 @@ async def fetch_and_format_thread(channel_id: str, message_ts: str) -> dict[str,
     }
 
 
+@tool_access.access(tool_access.Policy(trusted="thread_history"))
 async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[str, Any]:
     """Implement the `slack_read_thread_messages` tool."""
     if not channel_id or not channel_id.strip():
         return {"success": False, "error": "channel_id is required"}
     if not message_ts or not message_ts.strip():
         return {"success": False, "error": "message_ts is required"}
+    channel_id = channel_id.strip()
+    current_access = await tool_access.resolve_access()
+    if not current_access.slack_context:
+        # Without a Slack thread of its own, the run reads as channel history does.
+        try:
+            await readable_public_channel(channel_id, current_access)
+        except ChannelNotReadable as exc:
+            return {"success": False, "error": str(exc)}
 
-    result = await fetch_and_format_thread(channel_id.strip(), message_ts.strip())
+    result = await fetch_and_format_thread(channel_id, message_ts.strip())
     if not result.get("success"):
         return {
             "success": False,

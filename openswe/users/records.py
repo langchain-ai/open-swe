@@ -14,7 +14,7 @@ from sqlalchemy.orm import InstrumentedAttribute, Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.users.models import UserIdentity
+from openswe.users.models import User, UserIdentity
 from openswe.utils.json_types import JsonObject
 
 
@@ -38,6 +38,8 @@ class UserRecord(Base):
 
 
 def user_id_for_login(login: str) -> ScalarSelect[UUID]:
+    if login.startswith("user:"):
+        return select(User.id).where(User.id == User.key_id(login)).scalar_subquery()
     return (
         select(UserIdentity.user_id)
         .where(

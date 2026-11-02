@@ -259,6 +259,9 @@ pub(super) fn typescript_imports_outside_root(source: &str, rel: &Path) -> Vec<S
             }
             _ => continue,
         };
+        let Some(specifier) = specifier else {
+            continue;
+        };
         if escapes_root(depth, specifier) {
             outside.push(specifier.to_string());
         }

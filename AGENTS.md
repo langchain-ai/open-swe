@@ -23,8 +23,9 @@ Shape new behavior to fit:
 - Data fixed for a run is worked out once when the backend starts it and sent in the run context (`Catalog`, `openswe/agent_api/client.py`); a call that needs a fact derives it from the token.
 - State kept between calls lives in MDA's run state or PostgreSQL, never in backend memory.
 
-The per-run plan is legacy: `plan_agent`, `plan_reviewer` and `plan_review_scout` fill a `ToolSurface` that `RunSession` (`openswe/agent_api/graph.py`) serves to `prepare` and a few runs still on it.
-Shrink it toward named APIs and MDA middleware; add nothing to it.
+Open SWE starts three kinds of run (`agent`, `reviewer`, `review-scout`), each a `RunKind` (`openswe/agent_api/run_kinds.py`); MDA plays all of them with its one graph.
+As a run starts, its kind resolves the run's catalog from what only the backend holds, such as thread settings, workspace defaults, the sender's access and credentialed integrations (`agent_catalog`, `reviewer_catalog`, `review_scout_catalog`, `openswe/agent_api/run_catalog.py`); after that, every call is answered from the token (`openswe/agent_api/run_calls.py`).
+The backend never runs middleware around a model call; the only middleware objects it keeps are the preparation and the reporters a named endpoint calls.
 
 ## Conventions
 
@@ -34,12 +35,14 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
   Add a sync method only when an interface requires it, and make it raise `NotImplementedError`.
 - Strong types in Python and TypeScript.
   Never use `Any`/`any`, including to silence a type error; use a union, generic, protocol, or `object`/`unknown` with narrowing.
-- Put behavior on the object it acts on.
-  If functions keep passing the same value around (a request, a client, a `(backend, repo_dir)` pair), that value is a missing class.
-  Free functions are for framework entrypoints (routes, graph nodes, tools) and helpers spanning unrelated types.
+- **Every new function is a method.**
+  Put behavior on the object it acts on: a store, a model, a client, or a class that owns the state.
+  The only new module-level functions are framework entrypoints: routes, graph nodes, tools and job handlers.
+  A private helper (`_person()`, `_workspace_id(cfg)`) is a missing method on the class whose data it reads, and a value functions keep passing around (a request, a client, a `(backend, repo_dir)` pair) is a missing class.
   A new class must own real state, never be a bag of arguments.
 - Call GitHub through named `RepoClient`/`PullRequestClient` methods (e.g. `pull.comment(body)`); outside `openswe/github/http.py` and `openswe/github/pull_request_status.py`, never pass a REST path or GraphQL query to the transport (`get`, `post`, `patch`, `delete`, `pages`, `graphql`, `request`).
   Open the client as who it acts for, `GitHubClient.as_user(login)` or `GitHubClient.as_app(owner, repo)`; `GitHubClient.connect(token=...)` is only for a token a run was handed.
+- Build a per-call `httpx2.AsyncClient` with `transport=pooled_transport()` (an `aiohttp` session with `connector=pooled_connector(), connector_owner=False`) from `openswe/utils/http_pool.py`, so it reuses the event loop's warm connections instead of opening new ones.
 - Absolute imports across packages; same-package imports may start with one dot.
   Never use parent-relative imports.
 - New dashboard endpoints go in the `router` of the package that owns the feature, never in `openswe/dashboard/routes.py`.

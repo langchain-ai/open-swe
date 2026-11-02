@@ -56,7 +56,7 @@ async def test_scout_run_context_preserves_history_and_system_prefix(
     from langchain_core.messages import AIMessage, HumanMessage, messages_from_dict
     from langgraph.runtime import Runtime
 
-    from openswe.agent_api.loop import run_hooks
+    from openswe.agent_api.run_state import run_hooks
     from openswe.review.author_guidance import HumanTurn, SteeringHistory
     from openswe.review_scout import graph
     from openswe.walkthrough.checkout import PinnedCheckout

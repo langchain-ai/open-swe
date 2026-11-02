@@ -211,6 +211,11 @@ async def api_update_agent_instructions(
 ) -> AgentInstructions:
     full_name = normalize_repo_full_name(full_name)
     await require_repo_access_for_user(session["sub"], full_name)
+    if len(body.instructions.encode("utf-8")) > 32 * 1024:
+        raise HTTPException(
+            status_code=422,
+            detail="Repository custom instructions must not exceed 32 KiB (32,768 UTF-8 bytes)",
+        )
     return await AGENT_INSTRUCTIONS.set_instructions(full_name, body.instructions)
 
 

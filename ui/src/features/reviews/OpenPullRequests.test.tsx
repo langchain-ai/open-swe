@@ -338,6 +338,28 @@ describe("My PRs", () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
+  it("enables auto-merge for pending checks without marking the PR merged", async () => {
+    vi.mocked(api.openPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1, { ci: "pending", pendingChecks: ["Tests"] })],
+    })
+    vi.mocked(api.mergePullRequest).mockResolvedValue({
+      action: "merge",
+      done: true,
+    })
+    mount()
+    await screen.findByText("Change 1")
+    await chooseMergeMethod(1, "Squash merge")
+    fireEvent.click(screen.getByRole("button", { name: "Enable auto-merge" }))
+    expect(
+      await screen.findByRole("button", { name: "Auto-merge enabled" })
+    ).toBeTruthy()
+    expect(screen.queryByText(/^Merged ·/)).toBeNull()
+    expect(toast.success).toHaveBeenCalledWith(
+      "Auto-merge enabled for acme/app#1"
+    )
+  })
+
   it("rolls a rejected merge back to a retry action", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
@@ -455,7 +477,7 @@ describe("My PRs", () => {
     await screen.findByText("Change 1")
     expect(api.openPullRequests).toHaveBeenCalledWith(
       "",
-      "updatedAt",
+      "createdAt",
       "desc",
       1,
       "mine"
@@ -492,6 +514,32 @@ describe("My PRs", () => {
         1,
         "mine"
       )
+    )
+  })
+
+  it("restores the user's last sort when returning without URL filters", async () => {
+    const first = mount()
+    await screen.findByText("Change 1")
+    fireEvent.click(screen.getByRole("button", { name: /Last updated/ }))
+    await waitFor(() =>
+      expect(api.openPullRequests).toHaveBeenLastCalledWith(
+        "",
+        "updatedAt",
+        "asc",
+        1,
+        "mine"
+      )
+    )
+    first.unmount()
+    vi.mocked(api.openPullRequests).mockClear()
+    mount()
+    await screen.findByText("Change 1")
+    expect(api.openPullRequests).toHaveBeenLastCalledWith(
+      "",
+      "updatedAt",
+      "asc",
+      1,
+      "mine"
     )
   })
 
@@ -537,7 +585,7 @@ describe("My PRs", () => {
     await waitFor(() =>
       expect(api.openPullRequests).toHaveBeenLastCalledWith(
         "",
-        "updatedAt",
+        "createdAt",
         "desc",
         2,
         "mine"
@@ -871,7 +919,7 @@ describe("My PRs", () => {
     await waitFor(() =>
       expect(api.openPullRequests).toHaveBeenLastCalledWith(
         "acme/other",
-        "updatedAt",
+        "createdAt",
         "desc",
         1,
         "mine"
@@ -882,7 +930,7 @@ describe("My PRs", () => {
     await waitFor(() =>
       expect(api.openPullRequests).toHaveBeenLastCalledWith(
         "acme/other,acme/app",
-        "updatedAt",
+        "createdAt",
         "desc",
         1,
         "mine"

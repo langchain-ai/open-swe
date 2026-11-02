@@ -232,6 +232,8 @@ async function loadPrDetails(
 
 export interface SessionUser {
   login: string
+  auth_provider?: "github" | "langsmith"
+  github_login?: string | null
   /** How the server labels this user's messages; empty until they have a name. */
   display_name?: string
   email: string | null
@@ -313,6 +315,7 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
+  agent_workspace_tasks_supported?: boolean
   experimental_background_callbacks?: boolean | null
   login?: string
   email?: string
@@ -323,12 +326,9 @@ export interface Profile {
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
-  pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  experimental_fleet?: boolean
-  experimental_monitor?: boolean | null
-  experimental_act_as_approval?: boolean
-  act_as_always_allowed?: boolean
+  goal_mode?: boolean
+  experimental_memory?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -344,11 +344,9 @@ export interface ProfileUpdate {
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
-  pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  experimental_fleet?: boolean
-  experimental_monitor?: boolean | null
-  experimental_act_as_approval?: boolean
+  goal_mode?: boolean
+  experimental_memory?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -1056,6 +1054,7 @@ export interface OpenPullRequest {
   deletions: number | null
   mergeable: boolean | null
   mergeState: string
+  autoMerge?: boolean
   headSha: string | null
   headRef: string | null
   reviewDecision: "approved" | "changes_requested" | "none" | null
@@ -1093,7 +1092,12 @@ export type PullRequestActionName =
   | "update-branch"
 
 export type PullRequestActionRequest =
-  | { action: "merge"; sha: string | null; merge_method: MergeMethod }
+  | {
+      action: "merge"
+      sha: string | null
+      merge_method: MergeMethod
+      auto_merge?: boolean
+    }
   | { action: "close"; reason?: string }
   | { action: "mark-ready" }
   | { action: "update-branch"; sha: string | null }
@@ -1897,6 +1901,9 @@ export const api = {
       action: "merge",
       sha: pr.headSha,
       merge_method: method,
+      ...(pr.ci === "pending" && pr.mergeState === "blocked"
+        ? { auto_merge: true }
+        : {}),
     }),
   closePullRequest: (
     pr: OpenPullRequest,
@@ -1914,7 +1921,7 @@ export const api = {
     pr: OpenPullRequest
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
-  humanReviewAvailability: (pr: OpenPullRequest) =>
+  humanReviewAvailability: (pr: Pick<OpenPullRequest, "repo" | "number">) =>
     request<{
       available: boolean
       active: boolean
@@ -2101,14 +2108,19 @@ export const api = {
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 }
 
-export function loginUrl(redirectTo?: string): string {
+export function loginUrl(
+  redirectTo?: string,
+  provider: "github" | "langsmith" = "github"
+): string {
   const target =
     redirectTo ??
     (typeof window !== "undefined"
       ? `${window.location.pathname}${window.location.search}${window.location.hash}`
       : "")
   const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : ""
-  return `${API_BASE}/dashboard/api/auth/login${qs}`
+  const path =
+    provider === "langsmith" ? "/auth/langsmith/login" : "/auth/login"
+  return `${API_BASE}/dashboard/api${path}${qs}`
 }
 
 /**

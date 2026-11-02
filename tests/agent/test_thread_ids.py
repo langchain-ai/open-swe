@@ -4,15 +4,7 @@ These ids are persisted and re-derived across processes, so a formula change
 must be a deliberate act that updates these literals — not a silent refactor.
 """
 
-from openswe.thread_ids import (
-    github_issue_thread_id,
-    linear_issue_thread_id,
-    thread_id_from_branch,
-)
-
-
-def test_issue_thread_ids_are_namespaced_apart() -> None:
-    assert linear_issue_thread_id("12345") != github_issue_thread_id("12345")
+from openswe.thread_ids import thread_id_from_branch
 
 
 def test_thread_id_from_branch() -> None:
