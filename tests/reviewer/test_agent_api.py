@@ -1160,6 +1160,34 @@ def test_search_tools_ranks_by_bm25_and_names_code_calls() -> None:
     assert [spec.name for spec in matches] == ["searchDatadogLogs", "get_datadog_metric"]
     assert tools.search("kubernetes", 5) == []
 
+    tools = ToolSet(
+        [
+            tool("expedite_pr_approval", "Request approval.", "expeditePrApproval"),
+            tool("merge_expedited_pr", "expedite_pr_approval " * 10, "mergeExpeditedPr"),
+            tool("get_thread", "Read a conversation.", "getThread"),
+            tool("search_tools", "Find tools.", "searchTools"),
+            tool("hidden_tool", "expedite_pr_approval", "hiddenTool"),
+        ],
+        excluded=["hidden_tool"],
+    )
+    for query in ("expedite_pr_approval", "+expeditePrApproval", "EXPEDITE_PR_APPROVAL"):
+        assert [spec.name for spec in tools.search(query, 1)] == ["expedite_pr_approval"]
+    assert [
+        spec.name for spec in tools.search("+GETTHREAD expedite_pr_approval expeditePrApproval", 20)
+    ] == ["get_thread", "expedite_pr_approval", "merge_expedited_pr"]
+    assert [spec.name for spec in tools.search("approval", 2)] == [
+        "merge_expedited_pr",
+        "expedite_pr_approval",
+    ]
+    assert tools.search("search_tools +searchTools hidden_tool +hiddenTool", 20) == []
+
+    tools = ToolSet([tool(f"tool_{index}", "Available tool.", None) for index in range(25)])
+    query = " ".join(f"tool_{index}" for index in reversed(range(25)))
+    for limit, count in ((0, 1), (-1, 1), (2, 2), (100, 20)):
+        assert [spec.name for spec in tools.search(query, limit)] == [
+            f"tool_{index}" for index in range(24, 24 - count, -1)
+        ]
+
 
 async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_changed() -> None:
     """An operation is its tool's work alone: what it reads comes with the call, what it writes goes back."""
