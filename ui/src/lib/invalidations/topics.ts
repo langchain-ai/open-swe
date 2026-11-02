@@ -17,6 +17,7 @@ type KeyedTopic =
   | "thread-queues"
   | "thread-browsers"
   | "thread-background-work"
+  | "thread-goals"
 
 export type InvalidationTopic = string
 

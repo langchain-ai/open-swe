@@ -45,6 +45,7 @@ from runtime_api.catalog import (
 from runtime_api.endpoint import call
 from runtime_api.loop import (
     FINISH_SCOUT_PLAN,
+    GOAL_TURN_ENDED,
     MODEL_CHOICE,
     REFRESH_GITHUB_PROXY,
     REPLY_ON_BEHALF,
@@ -56,6 +57,7 @@ from runtime_api.loop import (
     BeforeModel,
     ChosenModel,
     GitHubProxyRefreshed,
+    GoalTurnEnded,
     ModelCall,
     PhaseResult,
     Prepared,
@@ -420,6 +422,7 @@ class RunLoop:
                 vision=None if model.reads_images else self._models.vision,
                 fallback=model.fallback,
                 use_gateway=self._models.use_gateway,
+                reminder=context.goal_reminder,
             ),
         )
 
@@ -461,7 +464,7 @@ class RunLoop:
         return _github_proxy_due(prepared.github_proxy, datetime.now(UTC))
 
     async def _task_context(self) -> TaskContext:
-        if not self.rules.task_coordination:
+        if not self.rules.task_coordination and self.rules.work_state is None:
             return TaskContext()
         return await call(self._backend, TASK_CONTEXT, RunRequest(run_id=run_id()))
 
@@ -570,7 +573,7 @@ class RunLoop:
             if asked is not None:
                 return asked
         if self.rules.work_state is not None:
-            asked = self._work_state(self.rules.work_state, state, held, update)
+            asked = await self._work_state(self.rules.work_state, state, held, update)
             if asked is not None:
                 return asked
         if self.rules.reply is not None:
@@ -622,30 +625,29 @@ class RunLoop:
             jump_to="model",
         )
 
-    def _work_state(
+    async def _work_state(
         self,
         rules: WorkStateRules,
         state: Mapping[str, object],
         held: Mapping[str, object],
         update: dict[str, JsonValue],
     ) -> PhaseResult | None:
-        """Send the model back to work until it says it is blocked or complete, or waits."""
-        turn = _Turn(_messages(state), self._guards)
-        call_ids = {
-            str(tool_call.get("id"))
-            for tool_call in turn.calls()
-            if tool_call.get("name") in {rules.tool, *rules.waits}
-        }
-        if turn.succeeded(call_ids):
-            update["work_state_nudges"] = 0
-            return None
+        """Send the model back to work until the thread's goal rests: waiting on its person,
+        paused, or waiting on something that wakes the thread again.
+
+        The backend keeps the goal, so a report or a wait counts however the model made
+        it, code mode included, and a wait started in an earlier turn counts too.
+        """
         nudges = held.get("work_state_nudges")
         asked = nudges if isinstance(nudges, int) else 0
-        if asked >= rules.max_nudges:
-            logger.warning(
-                "Run ended without a work state after every nudge",
-                extra={"work_state_tool": rules.tool, "work_state_attempts": asked},
-            )
+        ended = GoalTurnEnded(run_id=run_id(), last=asked >= rules.max_nudges)
+        try:
+            rests = (await call(self._backend, GOAL_TURN_ENDED, ended)).rests
+        except BackendCallError:
+            # A goal the backend cannot read must not hold the run open.
+            logger.warning("Could not read the thread's goal; ending the turn", exc_info=True)
+            rests = True
+        if rests:
             update["work_state_nudges"] = 0
             return None
         return PhaseResult(

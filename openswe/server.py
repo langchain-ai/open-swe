@@ -2145,6 +2145,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         review_guide=guide is not None,
         review_guide_closed=walkthrough is not None and walkthrough.closed,
         task_worker=task_coordination is not None and task_coordination.is_worker,
+        goal_mode=goal_mode,
         tool_discovery_failures=list(mcp_tools.failures) if isinstance(mcp_tools, MCPTools) else [],
     )
     configurable[AGENT_TURN_KEY] = turn.model_dump(mode="json")
@@ -2241,10 +2242,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             else None,
             work_state=WorkStateRules(
                 tool=work_state_tool,
-                waits=[
-                    _registered_tool_name(tool)
-                    for tool in (schedule_thread_wakeup, background_execute, monitor)
-                ],
                 nudge=work_state_nudge(work_state_tool),
                 nudge_sender=WORK_STATE_GUARD["id"],
             )

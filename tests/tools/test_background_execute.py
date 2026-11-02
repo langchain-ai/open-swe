@@ -436,7 +436,7 @@ async def test_background_execute_schedules_a_cron_only_without_callbacks(callba
             "openswe.background_tasks.ensure_background_task_polling", AsyncMock()
         ) as ensure_cron,
     ):
-        result = await background_execute("sleep 10")
+        result = await background_execute("make test")
 
     assert result == {"success": True, "task_id": "cmd-1", "status": "running"}
     assert ensure_cron.await_count == int(not callback)
@@ -464,7 +464,7 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
             AsyncMock(side_effect=RuntimeError("invalid assistant ID")),
         ),
     ):
-        result = await background_execute("sleep 10")
+        result = await background_execute("make test")
 
     assert result == {
         "success": False,

@@ -116,6 +116,9 @@ class ModelCall(BaseModel):
     # Another provider's model, tried once when a call to ``model`` fails.
     fallback: ModelSpec | None = None
     use_gateway: bool = False
+    # Appended as a ``<system-reminder>`` to the latest input this call sends, a tool result
+    # or a message, and kept nowhere: the conversation, and so the transcript, never holds it.
+    reminder: str | None = None
 
 
 class BeforeModel(PhaseResult):
@@ -261,6 +264,23 @@ class TaskContext(BaseModel):
     instructions: str | None = None
     # The task's context, added to the conversation where the model no longer sees it.
     message: str | None = None
+    # What the thread's Goal mode work waits on its person for, reminded with each input
+    # while it does (``ModelCall.reminder``).
+    goal_reminder: str | None = None
+
+
+class GoalTurnEnded(RunRequest):
+    """A Goal mode turn ended without saying where the work stands."""
+
+    # The run already sent the model back to work as often as it may: rest the goal
+    # by pausing it, unless something will wake the thread again.
+    last: bool = False
+
+
+class GoalRest(BaseModel):
+    """Whether the turn may end: the goal waits on its person, is paused, or waits on something."""
+
+    rests: bool
 
 
 class ReplyOnBehalf(RunCall):
@@ -314,6 +334,7 @@ REFRESH_GITHUB_PROXY = Endpoint(
     delivery="idempotent",
 )
 REPLY_ON_BEHALF = Endpoint("reply_on_behalf", ReplyOnBehalf, Done, seconds=LOOP_CALL_SECONDS)
+GOAL_TURN_ENDED = Endpoint("goal_turn_ended", GoalTurnEnded, GoalRest, seconds=LOOP_CALL_SECONDS)
 # The run's turn began: the transcript opens it, and the thread and usage record what
 # it runs as.
 RUN_STARTED = Endpoint("run_started", RunStarted, Done, seconds=LOOP_CALL_SECONDS)

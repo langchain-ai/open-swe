@@ -364,6 +364,22 @@ export interface AgentBackgroundCommand {
   started_at: number | null
 }
 
+/** One thing a Goal mode thread waits on to wake it again. */
+export interface AgentGoalWait {
+  kind: "wakeup" | "command" | "monitor" | "event"
+  until: string | null
+  detail: string | null
+}
+
+/** Where a Goal mode thread's work stands (`openswe/threads/goal.py`). */
+export interface AgentThreadGoal {
+  state: "working" | "waiting" | "waiting_on_user" | "paused"
+  reason: "blocked" | "ready" | "stopped" | "no_progress" | null
+  ask: string | null
+  waits: Array<AgentGoalWait>
+  updated_at_ms: number
+}
+
 export interface AgentThreadMonitor {
   monitor_id: string
   description: string

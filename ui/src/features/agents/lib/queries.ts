@@ -63,6 +63,7 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "queued-messages"] as const,
   backgroundWork: (threadId: string) =>
     ["agent-threads", threadId, "background-work"] as const,
+  goal: (threadId: string) => ["agent-threads", threadId, "goal"] as const,
   backgroundOutput: (threadId: string, taskId: string) =>
     ["agent-threads", threadId, "background-work", taskId, "output"] as const,
   branchDiff: (threadId: string) =>
@@ -1034,6 +1035,15 @@ export function useAgentThreadBackgroundWork(threadId: string) {
     meta: {
       invalidatedBy: [invalidationTopic("thread-background-work", threadId)],
     },
+  })
+}
+
+export function useAgentThreadGoal(threadId: string) {
+  return useQuery({
+    queryKey: agentThreadKeys.goal(threadId),
+    queryFn: () => agentsApi.getThreadGoal(threadId),
+    enabled: Boolean(threadId),
+    meta: { invalidatedBy: [invalidationTopic("thread-goals", threadId)] },
   })
 }
 

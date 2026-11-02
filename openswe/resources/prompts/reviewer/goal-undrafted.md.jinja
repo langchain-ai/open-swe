@@ -1,0 +1,6 @@
+The person marked {{ pr_url }} ready for review, after the automated Open SWE review passed on its current head.
+Put it up for human review now: call `request_human_review` with `pr_url` and a one- or two-sentence `inline_summary`, leaving `channel` empty so the repository's usual review channel is chosen.
+If it fails because {{ repository }} has no review channel, do not guess one.
+Call `report_work_state` with `blocked` and a message that:
+- asks them which Slack channel should review it, linking the review page{% if review_url %} ({{ review_url }}){% endif %} and the PR;
+- tells them that to have it picked automatically next time they can set `reviewChannel` in `{{ repository }}`'s `.open-swe/settings.json` to a Slack channel name, optionally routed by changed paths.

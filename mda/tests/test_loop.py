@@ -31,6 +31,7 @@ from runtime_api.endpoint import Delivery
 from runtime_api.loop import (
     Done,
     GitHubProxyRefreshed,
+    GoalRest,
     PhaseResult,
     Prepared,
     Route,
@@ -434,7 +435,7 @@ async def test_an_answer_that_owes_a_slack_reply_is_asked_again_then_posted_for_
     assert on_the_web == PhaseResult()
 
 
-async def test_goal_mode_work_is_sent_back_until_it_reports_its_state_or_waits(
+async def test_goal_mode_work_is_sent_back_until_its_goal_rests_then_pauses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     guard = "system:work-state-guard"
@@ -445,46 +446,35 @@ async def test_goal_mode_work_is_sent_back_until_it_reports_its_state_or_waits(
     rules = LoopRules(
         reply=_REPLY,
         work_state=WorkStateRules(
-            tool="report_work_state",
-            waits=["schedule_thread_wakeup"],
-            nudge=[nudge],
-            nudge_sender=guard,
+            tool="report_work_state", nudge=[nudge], nudge_sender=guard, max_nudges=3
         ),
     )
-    backend, _calls = _backend(monkeypatch, {}, rules)
+    answers: dict[str, BaseModel | BackendCallError] = {"goal_turn_ended": GoalRest(rests=False)}
+    backend, calls = _backend(monkeypatch, answers, rules)
     loop = RunLoop(backend)
     asked = HumanMessage(content="Fix it", id="human-1")
     stopped = AIMessage(content="", id="ai-1")
 
-    def finished(tool: str) -> list[BaseMessage]:
-        call = AIMessage(content="", id="ai-0", tool_calls=[{"id": "c1", "name": tool, "args": {}}])
-        return [asked, call, ToolMessage(content='{"success": true}', tool_call_id="c1")]
-
     nudged = await loop.after_model(_state(asked, stopped, reply_surface="web"))
-    again = await loop.after_model(
-        _state(
-            *finished("slack_no_reply_needed")[1:],
-            HumanMessage(content=nudge, id="nudge-1"),
-            stopped,
-            reply_surface="web",
-        )
+    await loop.after_model(_state(asked, stopped, reply_surface="web", work_state_nudges=3))
+    answers["goal_turn_ended"] = GoalRest(rests=True)
+    rested = await loop.after_model(
+        _state(asked, stopped, reply_surface="web", work_state_nudges=1)
     )
-    reported = await loop.after_model(
-        _state(*finished("report_work_state"), stopped, reply_surface="web")
-    )
-    waiting = await loop.after_model(
-        _state(*finished("schedule_thread_wakeup"), stopped, reply_surface="web")
-    )
-    gave_up = await loop.after_model(
-        _state(asked, stopped, reply_surface="web", work_state_nudges=5)
-    )
+    answers["goal_turn_ended"] = BackendCallError("down")
+    unreadable = await loop.after_model(_state(asked, stopped, reply_surface="web"))
 
     assert nudged.jump_to == "model" and nudged.update == {"work_state_nudges": 1}
     assert [message.content for message in messages_from_dict(nudged.messages)] == [nudge]
-    assert again.jump_to == "model"
-    assert reported.jump_to is None and reported.update == {"work_state_nudges": 0}
-    assert waiting.jump_to is None
-    assert gave_up.jump_to is None and gave_up.update == {"work_state_nudges": 0}
+    # The last allowed stop asks the backend to pause the goal; it answers that it rests.
+    assert [body["last"] for name, body in calls if name == "goal_turn_ended"] == [
+        False,
+        True,
+        False,
+        False,
+    ]
+    assert rested.jump_to is None and rested.update == {"work_state_nudges": 0}
+    assert unreadable.jump_to is None
 
 
 @pytest.mark.parametrize(

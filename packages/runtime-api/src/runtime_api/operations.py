@@ -4,7 +4,8 @@ An operation takes its arguments and returns its result. The tool call around it
 with its result message, errors and transcript, is the runtime's.
 """
 
-from typing import Literal
+import re
+from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
@@ -64,11 +65,21 @@ class OperationResult(BaseModel):
 OPERATION = Endpoint("operation", RunOperation, OperationResult)
 
 
+_QUOTED: Final = re.compile(r"'[^']*'|\"(?:\\.|[^\"\\])*\"")
+_SLEEP: Final = re.compile(r"(?<![\w./-])sleep\s+[\d$.]")
+
+
 class ShellCheck(RunRequest):
     """A shell command a tool is about to run in the thread's sandbox."""
 
     tool: str
     command: str
+
+    @property
+    def sleeps(self) -> bool:
+        """Whether the command waits with ``sleep``: a thread waits with ``monitor`` or a
+        wakeup instead, which free the run and wake it when there is something to see."""
+        return bool(_SLEEP.search(_QUOTED.sub("", self.command)))
 
 
 class ShellVerdict(BaseModel):

@@ -36,7 +36,7 @@ from rt.model_calls import (
     model_call_guards,
 )
 from rt.models import ModelSpec
-from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
+from rt.run_prompt import ReminderMiddleware, RunPromptMiddleware, ThreadPromptMiddleware
 from runtime_api.catalog import Catalog
 
 _ANTHROPIC = ChatAnthropic(model_name="claude-opus-5-5", api_key=SecretStr("test"))
@@ -256,6 +256,43 @@ def _through(
 def _search(query: str) -> str:
     """Search."""
     return query
+
+
+@pytest.mark.parametrize(
+    "latest",
+    [
+        ToolMessage(content="checks pending", tool_call_id="c1"),
+        HumanMessage(content="A background command completed."),
+    ],
+)
+async def test_a_reminder_rides_on_the_latest_input_of_the_call_alone(
+    latest: AnyMessage,
+) -> None:
+    """A wakeup or a monitor's event is an input as much as a tool result; the reminder
+    goes with whichever came last, and the conversation the run keeps never holds it."""
+    messages: list[AnyMessage] = [HumanMessage(content="Fix it"), latest]
+    call = ModelCall(system_prompt="", reminder="Still waiting on the person.")
+    request = ModelRequest(
+        model=_OPENAI,
+        messages=messages,
+        system_message=None,
+        tools=[],
+        state=cast(AgentState, {"messages": messages, "open_swe_call": call.model_dump()}),
+    )
+    sent: list[ModelRequest] = []
+
+    async def handler(request: ModelRequest) -> ModelResponse:
+        sent.append(request)
+        return ModelResponse(result=[AIMessage(content="ok")])
+
+    await ReminderMiddleware().awrap_model_call(request, handler)
+
+    [reminded] = sent
+    assert reminded.messages[-1].content == (
+        f"{latest.content}\n\n<system-reminder>\nStill waiting on the person.\n</system-reminder>"
+    )
+    assert messages[-1] is latest
+    assert "system-reminder" not in str(latest.content)
 
 
 async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(

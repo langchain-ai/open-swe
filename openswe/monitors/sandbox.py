@@ -1,5 +1,6 @@
 """One thread's monitors, as its sandbox holds them."""
 
+import shlex
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, JsonValue
@@ -83,11 +84,18 @@ class SandboxMonitors:
         description: str,
         timeout: int,
         callback: bool,
+        interval: int | None = None,
     ) -> MonitorState:
+        """Start ``command``; with ``interval``, as a check run that often until it passes.
+
+        A checked monitor works as a wait for a condition: its check's output is
+        printed only once the check exits 0, as the monitor's one event, and the
+        monitor ends there.
+        """
         result = await self._call(
             "start",
             monitor_id=monitor_id,
-            command=command,
+            command=command if interval is None else self._until_passes(command, interval),
             filter=filter,
             description=description,
             timeout=timeout,
@@ -96,6 +104,13 @@ class SandboxMonitors:
             tools_url_file=TOOLS_URL_FILE,
         )
         return MonitorState.model_validate(result)
+
+    @staticmethod
+    def _until_passes(check: str, interval: int) -> str:
+        return (
+            f"while :; do out=$(/bin/sh -c {shlex.quote(check)} 2>&1) && "
+            f'{{ printf "%s\\n" "$out"; exit 0; }}; sleep {interval}; done'
+        )
 
     async def listing(self) -> list[dict[str, JsonValue]]:
         result = await self._call("list")

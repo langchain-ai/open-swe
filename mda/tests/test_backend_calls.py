@@ -1615,6 +1615,52 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
     assert recorded.content == "pr_creation_fallback_blocked"
 
 
+@pytest.mark.parametrize(
+    ("command", "refused"),
+    [
+        ("for i in $(seq 60); do gh pr checks 1 && break; sleep 30; done", True),
+        ("sleep 240; gh pr view 1", True),
+        ('git commit -m "wait: sleep 5 before retry"', False),
+    ],
+)
+async def test_an_execute_that_sleeps_is_refused_with_the_catalogs_reason(
+    monkeypatch: pytest.MonkeyPatch, command: str, refused: bool
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    backend = _run_backend(
+        catalog=Catalog(files=FilesSpec(sleep_refusal="use monitor"), sandbox=_IN_SANDBOX)
+    )
+    post = AsyncMock()
+    monkeypatch.setattr(backend, "post", post)
+    monkeypatch.setattr(backend.outbox, "started", MagicMock())
+    monkeypatch.setattr(backend.outbox, "finished", MagicMock())
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    request = ToolCallRequest(
+        tool_call={"name": "execute", "args": {"command": command}, "id": "call-1"},
+        tool=None,
+        state={"messages": []},
+        runtime=runtime,
+    )
+    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
+
+    screened = await files._screened(request)
+
+    if refused:
+        assert isinstance(screened, ToolMessage) and screened.content == "use monitor"
+    else:
+        assert screened is request
+    post.assert_not_awaited()
+
+
 @pytest.mark.parametrize("excluded", [[], ["grep", "glob"]])
 async def test_execute_searches_through_the_shell_where_grep_and_glob_are_excluded(
     monkeypatch: pytest.MonkeyPatch, excluded: list[str]
