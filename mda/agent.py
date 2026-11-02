@@ -321,7 +321,6 @@ def agent(inputs: GraphInputs) -> DeepAgentDefinition:
     }
     return define_deep_agent(
         name="open-swe",
-        replicate_traces=False,
         model=inputs.agent_model(),
         context_schema=RunContext,
         # The thread's sandbox, for the file and shell tools run in it and for MDA's own use
