@@ -253,7 +253,14 @@ export async function readPullRequest(
 // follow-up. It may finish while the UI observes the next server refresh.
 export async function openRunningThreadViaSlackLink(page: Page) {
   await page.goto("/mock/slack");
-  await page.locator("#reset").click();
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/control/reset") &&
+        response.request().method() === "POST",
+    ),
+    page.locator("#reset").click(),
+  ]);
   await expect(page.locator("#thread")).toContainText("No messages yet");
   await page
     .locator("#text")
@@ -273,7 +280,14 @@ export async function openThreadViaSlackLink(
   options: { repoPrivate?: boolean; message?: string } = {},
 ) {
   await page.goto("/mock/slack");
-  await page.locator("#reset").click();
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/control/reset") &&
+        response.request().method() === "POST",
+    ),
+    page.locator("#reset").click(),
+  ]);
   if (options.repoPrivate) {
     await setRepoPrivate(page, true);
   }
@@ -298,7 +312,14 @@ export async function openThreadViaSlackLink(
 // briefly lag; a reload re-fetches it. Retry until the PR link renders.
 export async function openMultiRepoPrThreadViaSlackLink(page: Page) {
   await page.goto("/mock/slack");
-  await page.locator("#reset").click();
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/control/reset") &&
+        response.request().method() === "POST",
+    ),
+    page.locator("#reset").click(),
+  ]);
   await page
     .locator("#text")
     .fill(

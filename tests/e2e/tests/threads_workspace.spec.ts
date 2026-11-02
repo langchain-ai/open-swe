@@ -722,6 +722,9 @@ test.describe("threads workspace", () => {
       data: ADMIN_USER,
     });
     expect(loginResponse.ok()).toBeTruthy();
+    await page.addInitScript((login) => {
+      localStorage.setItem(`open-swe.desktop.experience:${login}`, "coding");
+    }, ADMIN_USER.login);
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/agents");
     await dismissOnboardingIfShown(page);
