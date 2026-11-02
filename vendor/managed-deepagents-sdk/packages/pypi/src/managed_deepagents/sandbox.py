@@ -159,10 +159,6 @@ _RESERVED_CREATE_FIELDS = frozenset(
 )
 
 
-class BoundSandboxMissingError(RuntimeError):
-    """The provider confirmed that the thread's bound workspace no longer exists."""
-
-
 async def open_sandbox(backend: object, *, wait: bool = True) -> str:
     """Adopt or create the run's managed sandbox now and return its name.
 
@@ -173,13 +169,6 @@ async def open_sandbox(backend: object, *, wait: bool = True) -> str:
     from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
 
     return await _managed_sandbox_of(backend).aopen(wait=wait)
-
-
-async def recover_missing_sandbox(backend: object) -> None:
-    """Recover a provider-confirmed missing workspace under its original name."""
-    from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
-
-    await _managed_sandbox_of(backend).arecover_missing()
 
 
 def is_per_thread(options: Mapping[str, object]) -> bool:
@@ -250,5 +239,4 @@ __all__ = [
     "bearer",
     "normalize_sandbox_options",
     "open_sandbox",
-    "recover_missing_sandbox",
 ]

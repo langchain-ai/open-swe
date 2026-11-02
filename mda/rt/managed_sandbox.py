@@ -50,10 +50,8 @@ from langsmith.sandbox import (
 )
 from managed_deepagents import ConnectionNotFoundError, basic, bearer, connections, define_sandbox
 from managed_deepagents.sandbox import (
-    BoundSandboxMissingError,
     SandboxDefinition,
     open_sandbox,
-    recover_missing_sandbox,
 )
 from pydantic import JsonValue
 from runtime_api.catalog import SandboxCreate, SandboxSpec
@@ -289,7 +287,6 @@ class OpenedSandbox:
 
     sandbox_id: str | None = None
     error: str | None = None
-    workspace_lost: bool = False
 
 
 def _transient(exc: BaseException) -> bool:
@@ -380,22 +377,11 @@ async def _first_write(proxy: SandboxProxyWriter, runtime: Runtime, sandbox_id: 
 
 
 async def _opening(backend: object, *, wait: bool) -> OpenedSandbox:
-    """``backend``'s sandbox, retried while the sandbox service fails transiently.
-
-    A bound sandbox that is gone is replaced, and the run told its workspace was lost.
-    """
+    """``backend``'s sandbox, retried while the sandbox service fails transiently."""
     deadline = time.monotonic() + OPEN_MAX_ELAPSED_SECONDS
     for backoff in OPEN_BACKOFF_SECONDS:
         try:
             return OpenedSandbox(sandbox_id=await open_sandbox(backend, wait=wait))
-        except BoundSandboxMissingError:
-            try:
-                await recover_missing_sandbox(backend)
-                return OpenedSandbox(
-                    sandbox_id=await open_sandbox(backend, wait=wait), workspace_lost=True
-                )
-            except Exception as exc:
-                return _not_opened(exc)
         except Exception as exc:
             delay = backoff * random.uniform(0.8, 1.2)
             if not _transient(exc) or time.monotonic() + delay > deadline:

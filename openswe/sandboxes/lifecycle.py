@@ -771,28 +771,6 @@ async def _bind_mda_sandbox(
         await client.threads.update(thread_id=thread_id, metadata=bind_metadata)
 
 
-async def hand_gone_sandbox_to_mda(thread_id: str, sandbox_id: str) -> bool:
-    """Hand the thread to MDA if the sandbox the backend made for it is gone; whether it was.
-
-    Checked before the run is planned, so the run starts in MDA's sandbox rather than
-    failing on the deleted one. A sandbox LangSmith cannot account for stays bound.
-    """
-    from openswe.sandboxes.providers.langsmith import sandbox_exists
-
-    try:
-        if await sandbox_exists(sandbox_id):
-            return False
-    except Exception:
-        logger.warning(
-            "Could not tell whether a thread's old sandbox still exists",
-            extra={"thread_id": thread_id, "sandbox_id": sandbox_id},
-            exc_info=True,
-        )
-        return False
-    await _hand_to_mda(thread_id, sandbox_id)
-    return True
-
-
 async def _hand_to_mda(thread_id: str, sandbox_id: str) -> None:
     """Unbind the thread from a sandbox the backend made, so its next run starts in MDA's own."""
     SANDBOX_CONNECTIONS.pop(sandbox_id, None)

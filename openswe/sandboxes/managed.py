@@ -17,7 +17,6 @@ from openswe.bridge.store import Bridge
 from openswe.github.app import PermissionMap
 from openswe.sandboxes.lifecycle import (
     SandboxCreateConfig,
-    hand_gone_sandbox_to_mda,
     mda_github_proxy,
 )
 from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
@@ -50,8 +49,7 @@ class ManagedSandbox(BaseModel):
         """The sandbox the thread's MDA run declares, or ``None`` when the backend keeps its own.
 
         New threads and MDA's own get MDA's sandbox. A thread the backend gave a sandbox before
-        MDA owned them keeps it until it is gone, when this run starts in MDA's
-        instead; bridged threads run on the user's machine. A task worker shares its
+        MDA owned them keeps it; bridged threads run on the user's machine. A task worker shares its
         coordinator's MDA sandbox once the backend has attached it there, which checks that
         it may. ``github_repositories`` and ``github_permissions`` narrow the run's
         GitHub token beyond its thread's own scope, as a review's do.
@@ -71,11 +69,7 @@ class ManagedSandbox(BaseModel):
             host = ThreadMetadata.model_validate(sandbox_metadata)
             if host.sandbox_owner != "mda" or host.sandbox_id != metadata.sandbox_id:
                 return None
-        elif (
-            metadata.sandbox_id is not None
-            and metadata.sandbox_owner != "mda"
-            and not await hand_gone_sandbox_to_mda(thread_id, metadata.sandbox_id)
-        ):
+        elif metadata.sandbox_id is not None and metadata.sandbox_owner != "mda":
             return None
         config = await SandboxCreateConfig.resolve(workspace_slug)
         return cls(

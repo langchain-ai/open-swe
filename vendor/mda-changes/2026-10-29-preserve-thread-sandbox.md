@@ -3,7 +3,7 @@
 **Verdict: not upstream as-is.**
 Preserving work is right; selecting this policy with `_openswe_per_thread` is Open SWE-specific.
 
-**Changed:** `managed_deepagents/runtime.py` (sandbox lookup, restart, adoption, resolution and tool-error recovery), `managed_deepagents/sandbox.py` (`recover_missing_sandbox`).
+**Changed:** `managed_deepagents/runtime.py` (sandbox lookup, restart, adoption, resolution and tool-error recovery).
 
 ## What
 
@@ -11,7 +11,6 @@ With `_openswe_per_thread=True`, only a sandbox lookup that reports not-found pe
 Other lookup errors, failed restarts and unusable existing sandboxes fail the open instead.
 A create-name conflict may adopt the concurrent winner, but never creates a second sandbox with a random suffix.
 A tool reporting that the cached sandbox is gone does not implicitly replace its workspace.
-`recover_missing_sandbox` permits recovery only after the provider confirms the sandbox is missing and retains the thread's original sandbox name; it never renames or stops an existing sandbox.
 
 ## Why
 

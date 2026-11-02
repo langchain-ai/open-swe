@@ -55,7 +55,6 @@ from langchain_core.messages import (
     HumanMessage,
     ToolCall,
     ToolMessage,
-    add_notification_metadata,
     messages_from_dict,
     messages_to_dict,
 )
@@ -438,21 +437,6 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         )
         self._backend.outbox.notify(RUN_STARTED, self._started(state, prepared))
         update = {**update, "open_swe_prepared_for": invocation}
-        if opened.workspace_lost:
-            messages = update.get("messages", [])
-            update["messages"] = [
-                *(messages if isinstance(messages, list) else []),
-                add_notification_metadata(
-                    HumanMessage(
-                        id=f"run-guidance:workspace-lost:{invocation}",
-                        content="The sandbox provider confirmed that this thread's bound workspace "
-                        "was deleted. A fresh workspace was created under the same name. "
-                        "Tell the user that local files and unpushed work from the deleted "
-                        "workspace are unavailable; do not claim they were recovered.",
-                    ),
-                    source="run_guidance",
-                ),
-            ]
         return update, opened.error is None
 
     def _started(self, state: RunState, prepared: Prepared) -> RunStarted:

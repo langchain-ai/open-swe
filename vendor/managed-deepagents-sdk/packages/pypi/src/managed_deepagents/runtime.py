@@ -2264,20 +2264,6 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             return (await self._abackend()).id
         return name
 
-    async def arecover_missing(self) -> None:
-        """Recover only a provider-confirmed missing workspace."""
-        source = self._source
-        backend = await asyncio.to_thread(
-            _recover_missing_managed_sandbox,
-            self._sandbox(),
-            self._config(),
-            source.connectors,
-            source.identity,
-            source.selection,
-        )
-        source.proxy_config_sync.invalidate(backend.id)
-        self._keep(backend)
-
     def _config(self) -> ManagedRunConfig | None:
         return _effective_sandbox_run_config(
             self._source.run_config, bound_configurable=self._bound_configurable
@@ -2671,52 +2657,6 @@ def _recover_managed_sandbox(
         with _managed_sandbox_lock:
             _managed_sandboxes[key] = replacement
         return backend
-
-
-def _recover_missing_managed_sandbox(
-    sandbox: SandboxDefinition,
-    config: ManagedRunConfig | None,
-    connectors: list[Connector] | None = None,
-    identity: IdentityDefinitionLike | None = None,
-    selection: _SandboxSelection | None = None,
-) -> SandboxBackendProtocol:
-    """Create a missing workspace under its original name without replacing an existing one."""
-    key = _sandbox_scope_key(sandbox, config, selection)
-    with _sandbox_key_lock(key):
-        with _managed_sandbox_lock:
-            entry = _managed_sandboxes.get(key)
-        name = _string_option(sandbox.options.get("_openswe_sandbox_id"))
-        if name is None and entry is not None:
-            name = entry.host_name
-        if name is None:
-            deployment = _managed_deployment_name()
-            if deployment:
-                name = _managed_sandbox_name(deployment, key)
-        if name is None:
-            raise RuntimeError("This run's sandbox has no name to replace it under")
-        client = _sandbox_client_for(sandbox)
-        existing = _fetch_sandbox(client, name, preserve_existing=True)
-        if existing is not None:
-            raise RuntimeError(f"Sandbox {name!r} exists; refusing automatic replacement")
-        backend, host_name, sandbox_id = _create_langsmith_sandbox(
-            sandbox,
-            config=config,
-            connectors=connectors,
-            identity=identity,
-            scope_key=key,
-            selection=selection,
-            recovery_name=name,
-        )
-        fresh = _ManagedSandboxEntry(
-            backend,
-            host_name=host_name,
-            sandbox_id=sandbox_id,
-            selection_fingerprint=selection.fingerprint if selection is not None else None,
-        )
-        fresh.synced_threads.add(_thread_sync_key(config))
-        with _managed_sandbox_lock:
-            _managed_sandboxes[key] = fresh
-    return backend
 
 
 def _managed_sandbox_of(backend: object) -> _LazyManagedSandboxBackend:
@@ -3370,7 +3310,6 @@ def _claim_langsmith_sandbox(
 ) -> _SandboxClaim:
     """Adopt this scope's LangSmith sandbox or create it; without ``wait``, before it boots."""
     from managed_deepagents.sandbox import (  # noqa: PLC0415
-        BoundSandboxMissingError,
         declared_create_fields,
         is_per_thread,
         owning_thread,
@@ -3404,9 +3343,7 @@ def _claim_langsmith_sandbox(
     elif bound_name := _string_option(sandbox.options.get("_openswe_sandbox_id")):
         bound = _adopt_sandbox(client, bound_name, preserve_existing=True)
         if bound is None:
-            raise BoundSandboxMissingError(
-                f"The thread's bound sandbox {bound_name!r} no longer exists"
-            )
+            raise RuntimeError(f"The thread's bound sandbox {bound_name!r} no longer exists")
         if _sandbox_name_blocked(bound_name):
             raise RuntimeError(f"The thread's bound sandbox {bound_name!r} was invalidated")
         langsmith_sandbox, adopted = bound, True
