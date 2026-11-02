@@ -11,10 +11,10 @@ import hmac
 import secrets
 import time
 from collections.abc import Mapping
-from typing import Final, Self
+from typing import Final
 
 import jwt
-from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
 from runtime_api.catalog import RoutingRules
 
 from openswe.bridge.constants import BridgeClient
@@ -104,6 +104,8 @@ class RunSettings(BaseModel):
     # The digest of every tool the run started with, kept in ``run_tool_sets``;
     # its catalog lists only those the model is offered.
     tools: str | None = None
+    # Where an incident run answers: its incident's Slack thread, not the run's own.
+    slack_thread: dict[str, JsonValue] | None = None
 
     def configurable(self) -> dict[str, JsonValue]:
         """The run config keys these settings fill."""
@@ -112,6 +114,7 @@ class RunSettings(BaseModel):
             "draft_prs": self.draft_prs,
             "resolved_agent_model_id": self.model_id,
             "resolved_agent_effort": self.effort,
+            "slack_thread": self.slack_thread,
         }
         return {key: value for key, value in values.items() if value is not None}
 
@@ -126,30 +129,21 @@ class RemoteRun(BaseModel):
     configurable: dict[str, JsonValue]
     metadata: dict[str, JsonValue] = {}
     settings: RunSettings = RunSettings()
-    # What the run's operation grants are signed under; None on a run started before
-    # operations were granted, whose tools its plan bounds instead.
-    grant_id: str | None = None
+    # What the run's operation grants are signed under, its own.
+    grant_id: str = Field(default_factory=lambda: secrets.token_urlsafe(16))
     # When the run's token expires, in epoch seconds; a token signed again for the run
     # keeps it, so holding one never extends it.
     expires_at: int | None = None
 
-    def granting(self) -> Self:
-        """This run, with a grant id of its own for the operations its catalog grants."""
-        return self.model_copy(update={"grant_id": secrets.token_urlsafe(16)})
-
     def grant(self, operation: str) -> str | None:
         """The grant of ``operation`` to this run, which its calls of it must carry."""
         keys = _signing_keys()
-        return None if self.grant_id is None or not keys else _grant(keys[0], self, operation)
+        return _grant(keys[0], self, operation) if keys else None
 
     def granted(self, operation: str, grant: str | None) -> bool:
         """Whether this run may call ``operation``: its catalog granted it, under any live key."""
-        return (
-            self.grant_id is not None
-            and grant is not None
-            and any(
-                hmac.compare_digest(_grant(key, self, operation), grant) for key in _signing_keys()
-            )
+        return grant is not None and any(
+            hmac.compare_digest(_grant(key, self, operation), grant) for key in _signing_keys()
         )
 
 
@@ -182,7 +176,7 @@ def _sign(audience: str, run: RemoteRun, extra: dict[str, JsonValue], now: int |
         "cfg": run.configurable,
         "md": run.metadata,
         **({"set": settings} if (settings := run.settings.model_dump(exclude_none=True)) else {}),
-        **({"gid": run.grant_id} if run.grant_id else {}),
+        "gid": run.grant_id,
         **extra,
     }
     return jwt.encode(claims, keys[0], algorithm=_ALGORITHM)

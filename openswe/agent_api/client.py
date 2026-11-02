@@ -145,11 +145,12 @@ async def start_remote_run(
         assistant_id=assistant_id,
         configurable=_json_object.validate_python(configurable),
         metadata=_json_object.validate_python(metadata),
-    ).granting()
+    )
     # The webapp must not import the agent stack at startup.
     from openswe.agent_api.hosted import hosted_graphs
+    from openswe.agent_api.run_start import StartingRun
 
-    started = await hosted_graphs()[graph].start_run(run)
+    started = await (await StartingRun.of(hosted_graphs()[graph], run)).start()
     # Signed, so every later call reads the settings the run started with.
     run = run.model_copy(update={"settings": started.settings})
     return StartedRun(

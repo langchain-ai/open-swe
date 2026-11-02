@@ -7,8 +7,9 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 
 from openswe import reviewer
+from openswe.agent_api.reviewer import ReviewerParts
+from openswe.agent_api.tokens import RunSettings
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
-from openswe.sandboxes.tool_runtime import ToolSurface
 
 
 def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
@@ -42,12 +43,9 @@ def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
 
 
 async def _planned_prepare(config: RunnableConfig) -> AgentMiddleware:
-    """The reviewer's run preparation, as its planner sets it up for ``config``."""
-    surface = ToolSurface()
-    await reviewer.plan_reviewer(config, surface)
-    return next(
-        m for m in surface.middleware if isinstance(m, reviewer.PrepareReviewerRunMiddleware)
-    )
+    """The reviewer's run preparation, as its run's turn sets it up for ``config``."""
+    preparation = await ReviewerParts().preparation(config, RunSettings(), sandbox_id=None)
+    return next(m for m in preparation if isinstance(m, reviewer.PrepareReviewerRunMiddleware))
 
 
 async def _run_prepare(prepare: AgentMiddleware) -> dict[str, object]:
@@ -346,7 +344,7 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
 ) -> None:
     from langchain_core.messages import AIMessage, HumanMessage, messages_from_dict
 
-    from openswe.agent_api.loop import run_hooks
+    from openswe.agent_api.run_state import run_hooks
 
     config: RunnableConfig = {
         "configurable": {

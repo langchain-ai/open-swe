@@ -1,8 +1,8 @@
 """What Managed Deep Agents runs call back into, behind the run token.
 
 Every call is ``POST /agent-api/{endpoint}``, the typed API in
-``runtime_api``: the graph's catalog, each phase of the run's model loop and the
-work of its tools (see ``openswe.agent_api.graph``), and the launch of its
+``runtime_api``: the graph's catalog, the calls of the run's model loop and the
+work of its tools (see ``openswe.agent_api.run_calls``), and the launch of its
 task workers (``openswe.agent_api.async_workers``). The middleware verifies
 the bearer token once per request and leaves the verified run for the handler,
 which picks the graph the token was signed for and reads the thread and run
@@ -15,6 +15,7 @@ coordinator's catalog and ``adopt`` a run token of its own, nothing else.
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
+from functools import partial
 from typing import Final
 
 from fastapi import HTTPException
@@ -55,8 +56,12 @@ class CallerHungUpError(ConnectionError):
 def _graphs() -> Mapping[str, Api]:
     # The webapp must not import the agent stack at startup.
     from openswe.agent_api.hosted import hosted_graphs
+    from openswe.agent_api.run_calls import TokenRun
 
-    return {assistant_id: graph.api for assistant_id, graph in hosted_graphs().items()}
+    return {
+        assistant_id: partial(TokenRun.answer, parts)
+        for assistant_id, parts in hosted_graphs().items()
+    }
 
 
 def _scope_principal(scope: Scope) -> RemoteRun | WorkerGrant:

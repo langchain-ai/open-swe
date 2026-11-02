@@ -14,7 +14,10 @@ import pytest
 from deepagents.backends.protocol import ExecuteResponse
 from runtime_api.connections import ConnectionRef
 
-from openswe.agent_api.graph import RemoteGraph, managed_sandbox
+from openswe.agent_api.hosted import hosted_graphs
+from openswe.agent_api.run_calls import TokenRun
+from openswe.agent_api.run_sandbox import RunSandbox
+from openswe.agent_api.runs import run_config
 from openswe.agent_api.server import RefusedCallError
 from openswe.agent_api.tokens import RemoteRun
 from openswe.github import app, proxy, sandbox_access
@@ -269,32 +272,26 @@ async def test_a_reconnecting_reviewer_without_a_known_pr_gets_no_repository_at_
 
 @pytest.mark.parametrize("kind", ["reviewer", "review-scout", "agent"])
 @pytest.mark.parametrize("known_repo", [True, False])
-async def test_legacy_review_replacement_uses_authenticated_run_scope(
+async def test_a_replaced_sandbox_reconnects_on_the_authenticated_run_scope(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
     kind: str,
     known_repo: bool,
 ) -> None:
-    from openswe.sandboxes.tool_runtime import ToolSurface
-
-    async def build(config: object, surface: ToolSurface) -> None:
-        pass
-
     monkeypatch.setattr(lifecycle, "thread_token_repositories", AsyncMock(return_value=None))
     monkeypatch.setattr(
         lifecycle,
         "get_sandbox_metadata",
         AsyncMock(return_value={"sandbox_id": "sandbox", "sandbox_owner": "mda"}),
     )
-    monkeypatch.setattr(ToolSurface, "prepare", AsyncMock())
-    graph = RemoteGraph(kind, build)
+    parts = hosted_graphs()[kind]
     run = RemoteRun(
         thread_id="thread",
         assistant_id=kind,
         configurable={"repo": {"owner": "acme", "name": "api"}} if known_repo else {},
     )
 
-    await graph.api(run, "sandbox_replaced", {})
+    await TokenRun.answer(parts, run, "sandbox_replaced", {})
     assert await proxy.maybe_refresh_proxy_token(
         "thread", now=datetime.now(UTC) + timedelta(hours=1)
     )
@@ -319,28 +316,22 @@ async def test_mda_alone_writes_the_proxy_of_its_sandbox_where_the_token_reaches
     """The catalog hands the proxy to MDA exactly where the backend stops writing it: an
     installation-wide token is never written over a review's narrowed one, even on a
     thread that does not say it is a review's."""
-    from openswe.sandboxes.tool_runtime import ToolSurface
-
-    async def build(config: object, surface: ToolSurface) -> None:
-        pass
-
     metadata = AsyncMock(return_value={"sandbox_id": "sandbox", "sandbox_owner": "mda"})
     monkeypatch.setenv("MDA_GITHUB_PROXY_CONNECTION", "mda/github-token")
     monkeypatch.setattr(lifecycle, "thread_token_repositories", AsyncMock(return_value=None))
     monkeypatch.setattr(lifecycle, "get_sandbox_metadata", metadata)
     monkeypatch.setattr("openswe.sandboxes.managed.get_sandbox_metadata", metadata)
     monkeypatch.setattr(lifecycle, "load_workspace", AsyncMock(return_value=None))
-    monkeypatch.setattr(ToolSurface, "prepare", AsyncMock())
-    graph = RemoteGraph(kind, build)
+    parts = hosted_graphs()[kind]
     run = RemoteRun(
         thread_id="thread",
         assistant_id=kind,
         configurable={"repo": {"owner": "acme", "name": "api"}},
     )
 
-    managed = await managed_sandbox(graph.config_for(run, None), kind)
-    await graph.api(run, "sandbox_replaced", {})
-    refreshed = await graph.api(run, "refresh_github_proxy", {})
+    managed = await RunSandbox(run_config(run), reviews=parts.reviews).managed()
+    await TokenRun.answer(parts, run, "sandbox_replaced", {})
+    refreshed = await TokenRun.answer(parts, run, "refresh_github_proxy", {})
 
     assert managed is not None
     if kind == "agent":
@@ -356,7 +347,9 @@ async def test_mda_alone_writes_the_proxy_of_its_sandbox_where_the_token_reaches
         assert injected_auth(github) == [read_only, read_only]
         # The sandbox's capability goes only to a run that writes its proxy config.
         with pytest.raises(RefusedCallError):
-            await graph.api(run, "sandbox_proxy", {"run_id": "run", "sandbox_id": "sandbox"})
+            await TokenRun.answer(
+                parts, run, "sandbox_proxy", {"run_id": "run", "sandbox_id": "sandbox"}
+            )
 
 
 @pytest.mark.parametrize("kind", ["reviewer", "review-scout"])
@@ -367,11 +360,6 @@ async def test_without_mda_github_proxy_a_review_refreshes_on_its_threads_scope(
 ) -> None:
     """Unset, the setting changes nothing: a review whose run names no repository still
     refreshes its sandbox's token to the pull request its thread records."""
-    from openswe.sandboxes.tool_runtime import ToolSurface
-
-    async def build(config: object, surface: ToolSurface) -> None:
-        pass
-
     metadata = AsyncMock(
         return_value={"sandbox_id": "sandbox", "kind": kind, "pr": {"owner": "acme", "name": "api"}}
     )
@@ -379,10 +367,9 @@ async def test_without_mda_github_proxy_a_review_refreshes_on_its_threads_scope(
     monkeypatch.setattr(lifecycle, "thread_token_repositories", AsyncMock(return_value=None))
     monkeypatch.setattr(lifecycle, "get_sandbox_metadata", metadata)
     monkeypatch.setattr(lifecycle, "load_workspace", AsyncMock(return_value=None))
-    graph = RemoteGraph(kind, build)
     run = RemoteRun(thread_id="thread", assistant_id=kind, configurable={})
 
-    await graph.api(run, "refresh_github_proxy", {})
+    await TokenRun.answer(hosted_graphs()[kind], run, "refresh_github_proxy", {})
 
     assert injected_auth(github) == [
         "x-access-token:repos:11;actions=read,checks=read,contents=read,issues=read,"

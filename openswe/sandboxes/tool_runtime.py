@@ -1,7 +1,7 @@
-"""What a graph factory plans for a run: its tools, middleware, models and subagents.
+"""What starting a run works out for it: its tools, models, subagents and loop rules.
 
 The model loop runs on Managed Deep Agents, which builds a tool for each of the
-planned tools and calls the backend to run it (``openswe.agent_api``).
+run's tools and calls the backend to run it (``openswe.agent_api``).
 """
 
 from collections.abc import Callable, Mapping, Sequence
@@ -9,8 +9,6 @@ from dataclasses import dataclass, field
 from typing import cast
 from uuid import uuid4
 
-from deepagents.backends.protocol import BackendProtocol
-from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
@@ -99,9 +97,8 @@ type PlannedTool = BaseTool | Callable[..., object] | dict[str, object]
 
 @dataclass
 class ToolSurface:
-    """A run as its graph factory plans it."""
+    """A run as starting it works it out, for its catalog."""
 
-    # The factory's own tools; its middleware adds theirs.
     base_tools: Sequence[PlannedTool] = ()
     dynamic: DynamicToolMiddleware | None = None
     excluded: frozenset[str] = frozenset()
@@ -109,41 +106,34 @@ class ToolSurface:
     integration_names: list[str] = field(default_factory=list)
     # MCP servers whose credential is an MDA connection, which the MDA run connects to itself.
     mcp_servers: Sequence[McpServerSpec] = ()
-    # What a model loop running elsewhere needs from the graph: its own middleware,
-    # in order, and the models and subagents the factory picked.
-    middleware: Sequence[AgentMiddleware] = ()
     models: SurfaceModels | None = None
     subagents: Sequence[SurfaceSubagent] = ()
-    # The thread's files: its sandbox, with the paths this deployment serves routed in.
-    files: BackendProtocol | None = None
-    # Paths under ``files`` this deployment serves rather than the sandbox.
+    # Paths in the thread's files this deployment serves rather than the sandbox.
     backend_paths: tuple[str, ...] = ()
-    # Where the run's skills are under ``files``, a later source's skill taking the
+    # Where the run's skills are in the thread's files, a later source's skill taking the
     # place of an earlier one's of the same name.
     skill_sources: tuple[str, ...] = ()
     # Where large tool results and binary reads are offloaded.
     artifacts_root: str = "/"
-    # The guards on the shell commands the run's tools run, as tool-call middleware.
-    shell_guards: Sequence[AgentMiddleware] = ()
     # The checks on what the run's ``read_file`` calls return.
     file_checks: tuple[FileCheck, ...] = ()
     # Whether the graph's core tools it seldom needs belong in a runtime's code mode.
     code_mode: bool = False
     # How the run reads what is sent to its thread while it runs, before each model call.
     inbox: InboxSpec | None = None
-    # What the hooks around each model call are built from, without the rest of the plan.
-    loop: LoopRules | None = None
+    # What MDA's middleware does around each model call.
+    loop: LoopRules = field(default_factory=LoopRules)
+    # The most model calls the run makes; None leaves it to the runtime.
+    model_call_limit: int | None = None
+    # Whether the thread coordinates a task through workers rather than synchronous subagents.
+    delegates: bool = False
 
     async def prepare(self) -> None:
-        planned = [
-            *self.base_tools,
-            *(tool for middleware in self.middleware for tool in getattr(middleware, "tools", ())),
-        ]
         tools = {
             tool.name: tool
             for tool in (
                 item if isinstance(item, BaseTool) else as_tool(item)
-                for item in planned
+                for item in self.base_tools
                 if not isinstance(item, dict)
             )
         }

@@ -635,22 +635,16 @@ This is the easiest way to encode conventions per-repo without modifying Open SW
 
 ## 6. Middleware
 
-Middleware hooks run around the agent loop.
+Middleware hooks run around the agent loop, in the Managed Deep Agents run (`mda/`).
 Follow-ups and events that arrive mid-run are not middleware: the MDA run takes them from the thread's inbox (`openswe/threads/inbox.py`) before each model call.
-Open SWE includes:
-
-| Middleware | Type | Purpose |
-|---|---|---|
-| `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors |
-| `notify_step_limit_reached` | After agent | Posts a Slack reply when the agent hits the model-call limit |
+What the loop does around each model call (reply and CLI-result nudges, routing, the step limit, what the run's end records) follows the `LoopRules` the backend puts in each run's catalog (`plan_agent()` in `openswe/server.py`), and MDA's own middleware carries them out (`mda/rt/loop.py`).
 
 There is intentionally no after-agent middleware that opens a PR for the agent.
 The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel.
-If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
 
-Add custom middleware by appending to the middleware list in `plan_agent()`.
-The MDA run hands each phase of its loop to it (`openswe/agent_api/graph.py`), so `before_agent`, `before_model`, `after_model` and `after_agent` hooks run on the backend as they would in a graph.
-Tool calls are the MDA run's: a check around them goes in `mda/rt` (`rt/file_tools.py` for the file and shell tools), or behind an endpoint of the typed API in `packages/runtime-api` where it needs the backend, as the shell-command guards do.
+Add custom middleware to the graph's middleware in `mda/agent.py` (`_parts`).
+Tool calls are the MDA run's: a check around them goes in `mda/rt` (`rt/file_tools.py` for the file and shell tools).
+Work that needs the backend's credentials or data goes behind a named endpoint of the typed API in `packages/runtime-api`, as the shell-command guards (`check_shell`) and the task context (`task_context`) do.
 See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
 
 **Example — adding a CI check after agent completion:**
@@ -667,12 +661,12 @@ async def run_ci_check(state: AgentState, runtime: Runtime):
     ...
 ```
 
-Then add it to the middleware list:
+Then add it to the graph's middleware in `mda/agent.py`:
 
 ```python
 middleware = [
-    ToolErrorMiddleware(),
-    notify_step_limit_reached,
+    BackendRunMiddleware(backend, opened_sandbox, booted_sandbox, read_ahead=[...]),
+    ...,
     run_ci_check,  # new middleware
 ]
 ```

@@ -23,8 +23,8 @@ Shape new behavior to fit:
 - Data fixed for a run is worked out once when the backend starts it and sent in the run context (`Catalog`, `openswe/agent_api/client.py`); a call that needs a fact derives it from the token.
 - State kept between calls lives in MDA's run state or PostgreSQL, never in backend memory.
 
-The per-run plan is legacy: `plan_agent`, `plan_reviewer` and `plan_review_scout` fill a `ToolSurface` that `RunSession` (`openswe/agent_api/graph.py`) serves to `prepare` and a few runs still on it.
-Shrink it toward named APIs and MDA middleware; add nothing to it.
+Each graph is a `RunParts` (`openswe/agent_api/run_parts.py`): it works out a starting run's catalog (`plan_agent`, `plan_reviewer`, `plan_review_scout`, `openswe/agent_api/run_start.py`) and builds what each call needs from the token (`openswe/agent_api/run_calls.py`).
+The backend never runs a graph's middleware around a model call; middleware objects it keeps are only the preparation and the reporters a named endpoint calls.
 
 ## Conventions
 

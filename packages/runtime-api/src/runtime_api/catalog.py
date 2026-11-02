@@ -226,6 +226,11 @@ class LoopRules(BaseModel):
     client_tools: bool = False
     # Whether the backend gives the sandbox's GitHub proxy a fresh token before each model call.
     refresh_github_proxy: bool = False
+    # Whether the run investigates an incident: before each model call the backend checks the
+    # incident still wants it and gives the call its instructions (``incident_context``).
+    incident: bool = False
+    # Whether the run was asked only to offload the conversation: it summarizes it and ends.
+    offload_conversation: bool = False
     # What the run's end does besides recording it.
     at_end: list[Literal["settle_review_check", "finish_scout_plan"]] = []
 
@@ -267,9 +272,8 @@ class Catalog(BaseModel):
     skill_sources: list[str] = []
     # How the run reads what is sent to its thread while it works; None reads nothing.
     inbox: InboxSpec | None = None
-    # What the runtime's middleware does around each model call; None leaves it to the
-    # backend's phase calls, for the runs still answered from their plan.
-    loop: LoopRules | None = None
+    # What the runtime's middleware does around each model call.
+    loop: LoopRules = LoopRules()
     # Whether the run offers ``search_tools`` over all its tools and calls those its
     # catalog leaves out from code, and how the model reads the search.
     search_tools: bool = False

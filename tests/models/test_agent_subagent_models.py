@@ -72,15 +72,14 @@ async def test_agent_subagent_uses_workspace_defaults_despite_profile_override()
             },
         ),
         patch("openswe.server.fallback_model_id_for", return_value=None),
-        patch("openswe.server.make_model", return_value=MagicMock()) as make_model,
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
     ):
         await plan_agent(config, surface)
 
     assert surface.models is not None
     assert surface.models.subagent == surface.models.main
-    assert make_model.call_args_list[0].args == ("openai:gpt-6.1-sol",)
-    assert make_model.call_args_list[0].kwargs["reasoning"]["effort"] == "medium"
+    assert surface.models.main.model_id == "openai:gpt-6.1-sol"
+    assert surface.models.main.kwargs["reasoning"]["effort"] == "medium"
 
 
 @pytest.mark.asyncio
@@ -127,12 +126,11 @@ async def test_agent_ignores_disabled_fable_profile() -> None:
             },
         ),
         patch("openswe.server.fallback_model_id_for", return_value=None),
-        patch("openswe.server.make_model", return_value=MagicMock()) as make_model,
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
     ):
         await plan_agent(config, surface)
 
-    assert make_model.call_args_list[0].args == ("openai:gpt-6.1-sol",)
-    assert make_model.call_args_list[0].kwargs["reasoning"]["effort"] == "medium"
     assert surface.models is not None
+    assert surface.models.main.model_id == "openai:gpt-6.1-sol"
+    assert surface.models.main.kwargs["reasoning"]["effort"] == "medium"
     assert surface.models.subagent == surface.models.main

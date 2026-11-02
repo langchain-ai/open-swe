@@ -1,26 +1,22 @@
-"""What the main agent's planner hands an MDA run: its tools, middleware, models and subagents."""
+"""What the main agent's planner hands an MDA run: its tools, loop rules, models and subagents."""
 
 import json
-from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Literal, cast
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import langgraph_sdk
 import pytest
-from langchain_core.language_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
 from runtime_api.catalog import McpServerSpec
 from runtime_api.connections import ConnectionRef
 
 from openswe.agent_api.connections import ACTING_USER_KEY
-from openswe.agent_api.loop import ModelChoices
 from openswe.agent_api.tokens import AGENT_TURN_KEY, AgentTurnSettings
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.mcp.runtime import MCPTools
-from openswe.middleware.model_selection import RouteSelection
 from openswe.sandboxes.state import SANDBOX_BACKENDS
-from openswe.sandboxes.tool_runtime import ToolSurface
+from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
 from openswe.server import PrepareAgentRunMiddleware, _registered_tool_name, plan_agent
 from openswe.threads.inbox import ThreadInbox
 
@@ -57,7 +53,6 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     ) as mcps:
         captured = await _plan_agent(config)
     assert captured["skills"] == ["/organization-skills/", "/bundled-skills/"]
-    assert "/skills/" not in captured["backend"].routes
     tools = captured["tools"]
     assert isinstance(tools, list)
     tool_names = {_registered_tool_name(tool) for tool in tools}
@@ -76,7 +71,8 @@ async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatc
     from runtime_api.operations import RunRequest
     from runtime_api.skills import RunSkills
 
-    from openswe.agent_api.agent import AGENT
+    from openswe.agent_api.agent import AgentParts
+    from openswe.agent_api.run_calls import TokenRun
     from openswe.agent_api.tokens import RemoteRun
     from openswe.skill_store.store import _record
 
@@ -94,7 +90,9 @@ async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatc
     run = RemoteRun(thread_id="thread-ctx", assistant_id="agent", configurable=configurable)
 
     # Listed from the run's token alone: no plan of the run is made for it.
-    listed = RunSkills.model_validate(await AGENT.api(run, "skills", RunRequest().model_dump()))
+    listed = RunSkills.model_validate(
+        await TokenRun.answer(AgentParts(), run, "skills", RunRequest().model_dump())
+    )
 
     personal = next(f for f in listed.files if f.path == "/skills/personal-workflow/SKILL.md")
     assert "Do it." in personal.content
@@ -113,8 +111,16 @@ async def test_monitor_is_available_without_opt_in(profile: dict[str, object] | 
 async def test_offloaded_images_are_served_from_a_thread_scoped_store() -> None:
     from deepagents.backends.store import StoreBackend
 
-    captured = await _plan_agent()
-    blobs = captured["backend"].routes["/blobs/"]
+    from openswe.run_config import RunConfig
+    from openswe.server import ThreadFiles
+    from openswe.skill_store.run_skills import RunSkillStores
+
+    config = _base_config()
+    captured = await _plan_agent(config)
+    files = ThreadFiles(
+        "thread-ctx", RunConfig.from_config(config), skills=RunSkillStores(None), bridged=False
+    )
+    blobs = files.routes["/blobs/"]
     assert isinstance(blobs, StoreBackend)
     assert blobs._namespace(MagicMock()) == ("thread_blobs", "thread-ctx")
     surface = cast(ToolSurface, captured["surface"])
@@ -245,18 +251,12 @@ async def _plan_agent(
     profile: dict[str, object] | None = None,
     thread_settings: dict[str, object] | None = None,
     workspace_settings: WorkspaceSettings | None = None,
-    make_model: Callable[..., BaseChatModel] | None = None,
 ) -> dict[str, object]:
-    """The run ``config`` plans, with the parts tests read pulled out of its middleware."""
+    """The run ``config`` plans, with the parts tests read pulled out of its surface."""
 
     surface = ToolSurface()
-    make_model_calls: list[tuple[str, dict[str, object]]] = []
     config = config or _base_config()
     thread_id = str((config.get("configurable") or {}).get("thread_id"))
-
-    def fake_make_model(model_id: str, **kwargs: object) -> MagicMock | BaseChatModel:
-        make_model_calls.append((model_id, kwargs))
-        return MagicMock() if make_model is None else make_model(model_id, **kwargs)
 
     SANDBOX_BACKENDS.pop(thread_id, None)
     with (
@@ -299,23 +299,28 @@ async def _plan_agent(
             return_value=thread_settings or {},
         ),
         patch("openswe.server.fallback_model_id_for", return_value=None),
-        patch("openswe.server.make_model", side_effect=fake_make_model),
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
     ):
         await plan_agent(config, surface)
 
     SANDBOX_BACKENDS.pop(thread_id, None)
-    middleware = list(surface.middleware)
     return {
         "surface": surface,
         "tools": list(surface.base_tools),
-        "middleware": middleware,
         "subagents": list(surface.subagents),
-        "backend": surface.files,
         "skills": list(surface.skill_sources),
-        "make_model_calls": make_model_calls,
         "turn": AgentTurnSettings.model_validate(config["configurable"][AGENT_TURN_KEY]),
     }
+
+
+def _models(agent: dict[str, object]) -> SurfaceModels:
+    models = cast(ToolSurface, agent["surface"]).models
+    assert models is not None
+    return models
+
+
+def _main_model(agent: dict[str, object]) -> ModelChoice:
+    return _models(agent).main
 
 
 @pytest.mark.asyncio
@@ -341,7 +346,7 @@ async def test_existing_thread_reloads_sender_draft_preference_into_run_config(
 
 
 @pytest.mark.asyncio
-async def test_router_failure_uses_fast_tier_not_profile_default() -> None:
+async def test_routed_default_route_uses_fast_tier_not_profile_default() -> None:
     config = _base_config()
     config["configurable"].update(thread_id="thread-1", source="dashboard", model_selection="auto")
     profile = {
@@ -350,15 +355,8 @@ async def test_router_failure_uses_fast_tier_not_profile_default() -> None:
         "model_routing_enabled": True,
     }
     agent = await _plan_agent(config, profile=profile)
-    model_selection = next(
-        item
-        for item in cast(list[object], agent["middleware"])
-        if type(item).__name__ == "ModelSelectionMiddleware"
-    )
-    route = await model_selection.select_route({"messages": []})
 
-    assert route.route == "default"
-    assert agent["make_model_calls"][0][0] == "google_genai:gemini-3.8-flash"
+    assert _main_model(agent).model_id == "google_genai:gemini-3.8-flash"
 
 
 @pytest.mark.asyncio
@@ -398,15 +396,18 @@ async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) 
     fresh_config["configurable"]["thread_id"] = "new-thread"
     fresh = await _plan_agent(fresh_config, workspace_settings=changed_defaults)
 
-    original_calls = cast(list[tuple[str, dict[str, object]]], original["make_model_calls"])
-    existing_calls = cast(list[tuple[str, dict[str, object]]], existing["make_model_calls"])
-    fresh_calls = cast(list[tuple[str, dict[str, object]]], fresh["make_model_calls"])
+    original_models, existing_models, fresh_models = (
+        _models(agent) for agent in (original, existing, fresh)
+    )
     titles = [cast(AgentTurnSettings, agent["turn"]) for agent in (original, existing, fresh)]
-    assert existing_calls == original_calls
+    assert existing_models == original_models
     # The title model is no thread setting: it follows the workspace's default.
     assert titles[1].title_model_id == titles[2].title_model_id != titles[0].title_model_id
-    assert fresh_calls != original_calls
-    assert {model for model, _ in fresh_calls} == {"google_genai:gemini-3.8-flash"}
+    assert fresh_models != original_models
+    assert {
+        choice.model_id
+        for choice in (fresh_models.main, fresh_models.subagent, *fresh_models.routes.values())
+    } == {"google_genai:gemini-3.8-flash"}
 
 
 @pytest.mark.parametrize(
@@ -546,13 +547,8 @@ async def test_web_reply_turns_require_slack_thread_context_for_slack_tools(
 
     tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
     assert tool_names & SLACK_TOOL_NAMES == (SLACK_TOOL_NAMES if slack_enabled else set())
-    middleware = captured["middleware"]
-    assert isinstance(middleware, list)
-    require_reply = next(
-        item for item in middleware if type(item).__name__ == "RequireUserReplyMiddleware"
-    )
-    prepared = await require_reply.abefore_agent({}, MagicMock())
-    assert prepared["reply_surface"] == "web"
+    reply = cast(ToolSurface, captured["surface"]).loop.reply
+    assert reply is not None and reply.surface == "web"
 
 
 @pytest.mark.asyncio
@@ -709,13 +705,11 @@ async def test_explicit_breakout_model_survives_startup_and_followup(
     followup_config["configurable"].update(source=followup_source, model_selection="auto")
     followup = await _plan_agent(followup_config, thread_settings=snapshot)
     for agent in (initial, followup):
-        calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
-        assert calls[0][0] == "anthropic:claude-opus-5-5"
-        assert calls[0][1]["effort"] == "max"
-        prepare = next(
-            item
-            for item in cast(list[object], agent["middleware"])
-            if isinstance(item, PrepareAgentRunMiddleware)
+        main = _main_model(agent)
+        assert main.model_id == "anthropic:claude-opus-5-5"
+        assert main.kwargs["effort"] == "max"
+        prepare = PrepareAgentRunMiddleware(
+            _base_config(), cast(AgentTurnSettings, agent["turn"]), repo_instructions=None
         )
         assert prepare._requested_models is None
 
@@ -747,8 +741,6 @@ async def test_requested_model_survives_auto_followups_but_explicit_selection_wi
 async def test_text_only_adaptive_route_names_a_vision_model_after_handoff(
     route: Literal["fast", "balanced", "performance"],
 ) -> None:
-    from openswe.agent_api.graph import RunSession
-
     model_id = "fireworks:accounts/fireworks/models/kimi-k3"
     config = _base_config()
     config["configurable"].update(source="dashboard", model_selection="auto")
@@ -765,15 +757,10 @@ async def test_text_only_adaptive_route_names_a_vision_model_after_handoff(
             },
         },
     )
-    session = RunSession(cast(ToolSurface, planned["surface"]), {}, None, started_here=True)
-    choices = ModelChoices(session.start_models())
+    models = _models(planned)
 
-    routed = choices.model_for({"model_route": route})
-    vision = choices.vision_for(routed)
-
-    assert routed.model_id == model_id
-    assert vision is not None and vision.model_id == "openai:gpt-6.1-sol"
-    assert choices.vision_for(vision) is None
+    assert models.routes[route].model_id == model_id
+    assert models.vision is not None and models.vision.model_id == "openai:gpt-6.1-sol"
 
 
 @pytest.mark.asyncio
@@ -795,14 +782,9 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
     pinned_settings: dict[str, object],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from openswe.middleware.model_selection import ModelSelectionMiddleware
     from openswe.server import PrepareAgentRunMiddleware
 
     monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto")
-    monkeypatch.setattr(
-        "openswe.middleware.model_selection._select_jev_route",
-        AsyncMock(return_value=RouteSelection("default")),
-    )
     config = _base_config()
     config["configurable"].update(
         source="dashboard", model_selection="auto", model_selection_changed=True
@@ -822,11 +804,12 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
     followup["configurable"].update(source="dashboard", model_selection="auto")
     followup_agent = await _plan_agent(followup, thread_settings=snapshot)
     for agent in (captured, followup_agent):
-        middleware = cast(list[object], agent["middleware"])
-        selection = next(item for item in middleware if isinstance(item, ModelSelectionMiddleware))
-        assert (await selection.select_route({"messages": []})).route == "default"
-        assert agent["make_model_calls"][0][0] == expected_model
-        prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
+        routing = cast(ToolSurface, agent["surface"]).loop.routing
+        assert routing is not None and routing.mode == "auto"
+        assert _main_model(agent).model_id == expected_model
+        prepare = PrepareAgentRunMiddleware(
+            _base_config(), cast(AgentTurnSettings, agent["turn"]), repo_instructions=None
+        )
         assert prepare._requested_models is None
 
 
@@ -834,7 +817,6 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
 async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
     monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str
 ) -> None:
-    from openswe.middleware.model_selection import ModelSelectionMiddleware
     from openswe.threads.runs import _build_dashboard_configurable
 
     monkeypatch.setattr("openswe.threads.runs.resolve_run_email", AsyncMock(return_value=None))
@@ -855,14 +837,10 @@ async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
             )
         )
         captured = await _plan_agent(config, profile={"model_routing_enabled": True})
-        selection = next(
-            item
-            for item in cast(list[object], captured["middleware"])
-            if isinstance(item, ModelSelectionMiddleware)
-        )
-        assert (await selection.select_route({"messages": []})).route == (
-            "fast" if source == "dashboard" else "default"
-        )
+        routing = cast(ToolSurface, captured["surface"]).loop.routing
+        # A Slack question keeps the default route; the dashboard's routes to the fast tier.
+        assert routing is not None
+        assert routing.mode == ("fast" if source == "dashboard" else None)
 
 
 async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
@@ -870,7 +848,6 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
 ) -> None:
     from langchain_core.messages import convert_to_messages
 
-    from openswe.agent_api.graph import RunSession
     from openswe.message_queue import QueuedMessage
 
     config = _base_config()
@@ -888,9 +865,8 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
     messages = convert_to_messages(taken.messages)
     content = messages[-1].content
     assert isinstance(content, list) and image in content
-    models = RunSession(surface, {}, None, started_here=True).start_models()
-    vision = ModelChoices(models).vision_for(models.model)
-    assert vision is not None and vision.model_id != models.model.model_id
+    models = _models(planned)
+    assert models.vision is not None and models.vision.model_id != models.main.model_id
 
 
 @pytest.mark.asyncio
@@ -904,8 +880,9 @@ async def test_historical_personal_models_and_routing_do_not_override_workspace(
             "model_routing_enabled": True,
         }
     )
-    assert captured["make_model_calls"][0][0] == "openai:gpt-6.1-sol"
-    assert captured["make_model_calls"][0][1]["reasoning"]["effort"] == "medium"
+    main = _main_model(captured)
+    assert main.model_id == "openai:gpt-6.1-sol"
+    assert main.kwargs["reasoning"]["effort"] == "medium"
 
 
 async def test_anthropic_title_model_omits_thinking_without_affecting_agent() -> None:
@@ -920,7 +897,6 @@ async def test_anthropic_title_model_omits_thinking_without_affecting_agent() ->
             }
         )
     )
-    calls = cast(list[tuple[str, dict[str, object]]], captured["make_model_calls"])
     titled: list[tuple[str, dict[str, object]]] = []
 
     def make_title_model(model_id: str, **kwargs: object) -> MagicMock:
@@ -936,5 +912,6 @@ async def test_anthropic_title_model_omits_thinking_without_affecting_agent() ->
     assert "thinking" not in title_kwargs
     assert title_kwargs["effort"] == "high"
     assert title_kwargs["max_tokens"] == 1024
-    agent_kwargs = next(kwargs for model, kwargs in calls if model == "anthropic:claude-opus-5-5")
-    assert agent_kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
+    main = _main_model(captured)
+    assert main.model_id == "anthropic:claude-opus-5-5"
+    assert main.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
