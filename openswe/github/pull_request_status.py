@@ -15,10 +15,11 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from pydantic.alias_generators import to_camel
 
-from openswe.github.ci import RequiredCheck, unreported_required_checks
+from openswe.github.ci import unreported_required_checks
 from openswe.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient, or_none
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.queue import QueuePull, Review, ReviewPage
+from openswe.github.required_check_cache import RequiredCheckCache
 
 logger = logging.getLogger(__name__)
 
@@ -1021,9 +1022,7 @@ class PullRequestClient:
         base = pull.get("base")
         base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
         if base_ref is not None and result.merge_state != "clean":
-            required = await RequiredCheck.for_branch(
-                self.repo, base_ref, include_review_checks=True
-            )
+            required = await RequiredCheckCache(self.repo.full_name, base_ref).read()
             if required is not None:
                 passing_runs = [
                     run

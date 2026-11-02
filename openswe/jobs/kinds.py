@@ -25,6 +25,8 @@ from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
 from openswe.github.forwarding import FORWARD_JOB as GITHUB_CHANNEL_FORWARD
 from openswe.github.forwarding import ForwardJob
+from openswe.github.required_check_cache import REFRESH_JOB as REQUIRED_CHECK_REFRESH
+from openswe.github.required_check_cache import refresh_required_checks
 from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.standard import run_deadline
 from openswe.jobs import queue
@@ -72,6 +74,7 @@ RECONCILE: Final = "reconcile"
 _FIRE_CLAIM_TTL: Final = timedelta(days=2)
 
 WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
+WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
 
 
 def _text(job: Job, key: str) -> str | None:

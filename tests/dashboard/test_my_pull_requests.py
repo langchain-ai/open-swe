@@ -146,7 +146,7 @@ async def test_blocked_merge_names_required_checks_the_head_never_reported(
         prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0, False))
     )
     rules = AsyncMock(return_value={RequiredCheck("unit"), RequiredCheck("lint")})
-    monkeypatch.setattr(RequiredCheck, "for_branch", rules)
+    monkeypatch.setattr(prs.RequiredCheckCache, "read", rules)
     result = await _client(1).load(wanted={"open"})
     assert result is not None
     assert result.missing_checks == missing
@@ -177,7 +177,7 @@ async def test_review_and_thread_status_agree_on_check_outcomes(
         "base": {"ref": "main"},
     }
     monkeypatch.setattr(
-        RequiredCheck, "for_branch", AsyncMock(return_value={RequiredCheck("unit")})
+        prs.RequiredCheckCache, "read", AsyncMock(return_value={RequiredCheck("unit")})
     )
     runs = [
         {
