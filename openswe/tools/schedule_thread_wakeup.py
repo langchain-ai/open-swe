@@ -32,7 +32,7 @@ _MIN_DELAY_SECONDS = 60
 _MAX_DELAY_SECONDS = 86_400
 _END_TIME_PADDING_SECONDS = 90
 
-_WAKEUP_KIND = "thread_wakeup"
+WAKEUP_KIND = "thread_wakeup"
 WAKE_THREAD_JOB = "thread_wakeup"
 _WAKEUP_SENDER_ID = "system:thread-wakeup"
 _WAKEUP_LOCKS: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
@@ -90,7 +90,7 @@ async def find_expired_wakeup_cron_ids(client: Any, *, now: datetime) -> list[st
     offset = 0
     while True:
         page = await client.crons.search(
-            metadata={"kind": _WAKEUP_KIND},
+            metadata={"kind": WAKEUP_KIND},
             limit=_PURGE_PAGE_SIZE,
             offset=offset,
         )
@@ -125,7 +125,7 @@ async def purge_expired_wakeup_crons(client: Any, *, now: datetime) -> int:
 
 
 async def cancel_thread_wakeups(thread_id: str) -> None:
-    await queue.cancel_matching({"kind": _WAKEUP_KIND, "thread_id": thread_id})
+    await queue.cancel_matching({"kind": WAKEUP_KIND, "thread_id": thread_id})
     # Wakeups scheduled before the job queue are Agent Server crons.
     client = get_client(url=langgraph_url())
     cron_ids: list[str] = []
@@ -133,7 +133,7 @@ async def cancel_thread_wakeups(thread_id: str) -> None:
     while True:
         page = await client.crons.search(
             thread_id=thread_id,
-            metadata={"kind": _WAKEUP_KIND},
+            metadata={"kind": WAKEUP_KIND},
             limit=_PURGE_PAGE_SIZE,
             offset=offset,
         )
@@ -164,7 +164,7 @@ async def _schedule_wakeup(
 ) -> dict[str, Any]:
     run_config = prepare_run_config(
         {"configurable": configurable},
-        {"kind": _WAKEUP_KIND, "thread_id": thread_id},
+        {"kind": WAKEUP_KIND, "thread_id": thread_id},
     )
     run_input = build_run_input(
         prompt,
@@ -190,7 +190,7 @@ async def _schedule_wakeup(
             }
         ),
         due_at=fire_time,
-        metadata={"kind": _WAKEUP_KIND, "thread_id": thread_id},
+        metadata={"kind": WAKEUP_KIND, "thread_id": thread_id},
     )
     return {
         "success": True,

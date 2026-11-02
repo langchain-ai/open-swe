@@ -513,7 +513,10 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
     from openswe.middleware import task_coordination
 
     task = store.Task(
-        title="Repair login", workspace_id=uuid4(), coordinator_thread_id=_COORDINATOR
+        title="Repair login",
+        workspace_id=uuid4(),
+        coordinator_thread_id=_COORDINATOR,
+        delegated=True,
     )
     context = store.TaskContext(
         task,

@@ -31,6 +31,7 @@ from runtime_api.endpoint import Delivery
 from runtime_api.loop import (
     Done,
     GitHubProxyRefreshed,
+    Goal,
     IncidentContext,
     PhaseResult,
     Prepared,
@@ -458,57 +459,171 @@ async def test_an_answer_that_owes_a_slack_reply_is_asked_again_then_posted_for_
     assert on_the_web == PhaseResult()
 
 
-async def test_goal_mode_work_is_sent_back_until_it_reports_its_state_or_waits(
+_WORK_GUARD = "system:work-state-guard"
+_WORK_NUDGE = (
+    f'<input-message sender="{_WORK_GUARD}" surface="automation" kind="system">'
+    "Keep working.</input-message>"
+)
+_GOAL_RULES = LoopRules(
+    reply=_REPLY,
+    work_state=WorkStateRules(
+        tool="report_work_state",
+        nudge=[_WORK_NUDGE],
+        nudge_sender=_WORK_GUARD,
+        max_nudges=3,
+        reminder="Still waiting on them.",
+    ),
+)
+
+
+def _turn(kind: str) -> list[BaseMessage]:
+    """A turn the guard sent the model back for: idle, running a command that failed, or
+    one that succeeded; or the person's own request, answered with nothing."""
+    if kind == "asked":
+        return [HumanMessage(content="Fix it", id="human-1"), AIMessage(content="", id="ai-1")]
+    nudged: list[BaseMessage] = [
+        HumanMessage(content="Fix it", id="human-1"),
+        AIMessage(content="", id="ai-0"),
+        HumanMessage(content=_WORK_NUDGE, id="nudge-1"),
+    ]
+    if kind == "idle":
+        return [*nudged, AIMessage(content="", id="ai-1")]
+    if kind == "talking":
+        return [*nudged, AIMessage(content="Waiting for CI to finish.", id="ai-1")]
+    exit_code = 1 if kind == "failing" else 0
+    status = "failed" if exit_code else "succeeded"
+    return [
+        *nudged,
+        AIMessage(
+            content="",
+            id="ai-1",
+            tool_calls=[{"id": "c1", "name": "execute", "args": {"command": "make test"}}],
+        ),
+        ToolMessage(
+            content=f"boom\n[Command {status} with exit code {exit_code}]",
+            tool_call_id="c1",
+            name="execute",
+        ),
+        AIMessage(content="", id="ai-2"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("goal", "turn", "held", "sent_back", "moved"),
+    [
+        (Goal(state="working"), "asked", {}, True, None),
+        (Goal(state="working", waits=["wakeup"]), "asked", {}, False, ("waiting", None)),
+        # As Codex blocks a goal: three idle turns in a row, or three running only failing
+        # commands; anything the model gets done starts the count again.
+        (Goal(state="working"), "idle", {"goal_empty_turns": 2}, False, ("paused", "no_progress")),
+        # Words are no progress: only a tool call is, until a token budget bounds the goal.
+        (
+            Goal(state="working"),
+            "talking",
+            {"goal_empty_turns": 2},
+            False,
+            ("paused", "no_progress"),
+        ),
+        (
+            Goal(state="working"),
+            "failing",
+            {"goal_failing_turns": 2},
+            False,
+            ("paused", "failing_commands"),
+        ),
+        (Goal(state="working"), "working", {"goal_failing_turns": 2}, True, None),
+        (Goal(state="waiting_on_user", reason="ready"), "asked", {}, False, None),
+        (BackendCallError("down"), "asked", {}, False, None),
+    ],
+)
+async def test_goal_mode_work_is_sent_back_until_its_goal_rests_or_stalls(
+    monkeypatch: pytest.MonkeyPatch,
+    goal: Goal | BackendCallError,
+    turn: str,
+    held: dict[str, JsonValue],
+    sent_back: bool,
+    moved: tuple[str, str | None] | None,
+) -> None:
+    answers: dict[str, BaseModel | BackendCallError] = {"goal": goal, "set_goal": Done()}
+    backend, calls = _backend(monkeypatch, answers, _GOAL_RULES)
+
+    ended = await RunLoop(backend).after_model(_state(*_turn(turn), reply_surface="web", **held))
+
+    assert (ended.jump_to == "model") is sent_back
+    assert [(body["state"], body["reason"]) for name, body in calls if name == "set_goal"] == (
+        [] if moved is None else [moved]
+    )
+    if sent_back:
+        assert [message.content for message in messages_from_dict(ended.messages)] == [_WORK_NUDGE]
+
+
+@pytest.mark.parametrize(
+    ("goal", "came_in", "runs", "moved"),
+    [
+        # A wakeup, a monitor's event or a review's findings put a waiting goal to work.
+        (Goal(state="waiting"), "system", True, "working"),
+        # A stopped goal ignores them until its person writes.
+        (Goal(state="paused", reason="stopped"), "system", False, None),
+        (Goal(state="paused", reason="stopped"), "human", True, "working"),
+        (Goal(state="waiting_on_user", reason="blocked"), "human", True, "working"),
+        (Goal(), "human", True, "working"),
+    ],
+)
+async def test_what_comes_in_moves_the_goal_before_the_model_answers_it(
+    monkeypatch: pytest.MonkeyPatch, goal: Goal, came_in: str, runs: bool, moved: str | None
+) -> None:
+    backend, calls = _backend(monkeypatch, {"goal": goal, "set_goal": Done()}, _GOAL_RULES)
+    message = HumanMessage(
+        content=f'<input-message sender="x" surface="web" kind="{came_in}">Go.</input-message>',
+        id="in-1",
+    )
+
+    planned = await RunLoop(backend).before_model(_state(message))
+
+    assert (planned.jump_to != "end") is runs
+    assert [body["state"] for name, body in calls if name == "set_goal"] == (
+        [] if moved is None else [moved]
+    )
+
+
+async def test_a_goal_starts_from_the_request_and_its_objective_stays_in_view(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    guard = "system:work-state-guard"
-    nudge = (
-        f'<input-message sender="{guard}" surface="automation" kind="system">'
-        "Keep working.</input-message>"
-    )
-    rules = LoopRules(
-        reply=_REPLY,
-        work_state=WorkStateRules(
-            tool="report_work_state",
-            waits=["schedule_thread_wakeup"],
-            nudge=[nudge],
-            nudge_sender=guard,
-        ),
-    )
-    backend, _calls = _backend(monkeypatch, {}, rules)
+    objective = '<dynamic-context kind="run" id="goal"><![CDATA[\nFix it\n]]></dynamic-context>'
+    answers: dict[str, BaseModel | BackendCallError] = {"goal": Goal(), "set_goal": Done()}
+    backend, calls = _backend(monkeypatch, answers, _GOAL_RULES)
     loop = RunLoop(backend)
-    asked = HumanMessage(content="Fix it", id="human-1")
-    stopped = AIMessage(content="", id="ai-1")
-
-    def finished(tool: str) -> list[BaseMessage]:
-        call = AIMessage(content="", id="ai-0", tool_calls=[{"id": "c1", "name": tool, "args": {}}])
-        return [asked, call, ToolMessage(content='{"success": true}', tool_call_id="c1")]
-
-    nudged = await loop.after_model(_state(asked, stopped, reply_surface="web"))
-    again = await loop.after_model(
-        _state(
-            *finished("slack_no_reply_needed")[1:],
-            HumanMessage(content=nudge, id="nudge-1"),
-            stopped,
-            reply_surface="web",
-        )
-    )
-    reported = await loop.after_model(
-        _state(*finished("report_work_state"), stopped, reply_surface="web")
-    )
-    waiting = await loop.after_model(
-        _state(*finished("schedule_thread_wakeup"), stopped, reply_surface="web")
-    )
-    gave_up = await loop.after_model(
-        _state(asked, stopped, reply_surface="web", work_state_nudges=5)
+    asked = HumanMessage(
+        content='<input-message sender="u" surface="web" kind="human">Fix it</input-message>',
+        id="in-1",
     )
 
-    assert nudged.jump_to == "model" and nudged.update == {"work_state_nudges": 1}
-    assert [message.content for message in messages_from_dict(nudged.messages)] == [nudge]
-    assert again.jump_to == "model"
-    assert reported.jump_to is None and reported.update == {"work_state_nudges": 0}
-    assert waiting.jump_to is None
-    assert gave_up.jump_to is None and gave_up.update == {"work_state_nudges": 0}
+    await loop.before_model(_state(asked))
+    answers["goal"] = Goal(state="working", objective=objective)
+    shown = await loop.before_model(_state(asked))
+    seen = await loop.before_model(
+        _state(asked, *messages_from_dict(shown.messages), AIMessage(content="", id="ai-1"))
+    )
+
+    assert [body["request"] for name, body in calls if name == "set_goal"] == ["Fix it"]
+    assert [m.content for m in messages_from_dict(shown.messages)] == [objective]
+    assert messages_from_dict(seen.messages) == []
+
+
+async def test_a_goal_waiting_on_its_person_is_reminded_after_the_report_not_with_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    waiting = Goal(state="waiting_on_user", reason="blocked", ask="Which channel?", updated_at_ms=5)
+    backend, _calls = _backend(monkeypatch, {"goal": waiting}, _GOAL_RULES)
+    loop = RunLoop(backend)
+    result = ToolMessage(content='{"success": true}', tool_call_id="c1")
+
+    with_report = await loop.before_model(_state(result))
+    after = await loop.before_model(_state(result, **with_report.update))
+
+    assert with_report.call is not None and with_report.call.reminder is None
+    assert after.call is not None
+    assert after.call.reminder == "Still waiting on them.\n\nWhich channel?"
 
 
 @pytest.mark.parametrize(

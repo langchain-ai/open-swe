@@ -36,7 +36,7 @@ from rt.model_calls import (
     model_call_guards,
 )
 from rt.models import ModelSpec
-from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
+from rt.run_prompt import ReminderMiddleware, RunPromptMiddleware, ThreadPromptMiddleware
 from runtime_api.catalog import Catalog
 
 _ANTHROPIC = ChatAnthropic(model_name="claude-opus-5-5", api_key=SecretStr("test"))
@@ -256,6 +256,53 @@ def _through(
 def _search(query: str) -> str:
     """Search."""
     return query
+
+
+@pytest.mark.parametrize(
+    "latest",
+    [
+        ToolMessage(content="checks pending", tool_call_id="c1"),
+        HumanMessage(content="A background command completed."),
+    ],
+)
+async def test_a_reminder_rides_on_the_latest_input_after_the_cached_prefix(
+    latest: AnyMessage,
+) -> None:
+    """A wakeup or a monitor's event is an input as much as a tool result; the reminder
+    goes with whichever came last, after the block that ends the cached prefix, and the
+    conversation the run keeps never holds it."""
+    messages: list[AnyMessage] = [HumanMessage(content="Fix it"), latest]
+    call = ModelCall(system_prompt="", reminder="Still waiting on the person.")
+    sent: list[ModelRequest] = []
+
+    async def handler(request: ModelRequest) -> ModelResponse:
+        sent.append(request)
+        return ModelResponse(result=[AIMessage(content="ok")])
+
+    request = ModelRequest(
+        model=_ANTHROPIC,
+        messages=messages,
+        system_message=None,
+        tools=[],
+        state=cast(AgentState, {"messages": messages, "open_swe_call": call.model_dump()}),
+    )
+    await ReminderMiddleware().awrap_model_call(
+        request, _through([model_call_guards()[-1]], handler)
+    )
+
+    [reminded] = sent
+    cached = {"type": "ephemeral", "ttl": "1h"}
+    assert reminded.messages[-1].content == [
+        {"type": "text", "text": latest.content, "cache_control": cached},
+        {
+            "type": "text",
+            "text": "<system-reminder>\nStill waiting on the person.\n</system-reminder>",
+        },
+    ]
+    # The conversation's own breakpoint replaces the automatic one, keeping four.
+    assert "cache_control" not in reminded.model_settings
+    assert messages[-1] is latest
+    assert "system-reminder" not in str(latest.content)
 
 
 async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(

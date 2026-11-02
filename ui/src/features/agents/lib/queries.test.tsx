@@ -1,9 +1,11 @@
-import { desktopExperience } from "@/lib/experience"
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
+
+import { desktopExperience } from "@/lib/experience"
+import { invalidationTopic, queryTopics } from "@/lib/invalidations/topics"
 
 import { agentsApi } from "./api"
 import {
@@ -1176,13 +1178,15 @@ describe("sidebar task families", () => {
     ).toEqual([])
   })
 
-  it("keeps the existing page poll alive for idle coordinators and discovers new workers", async () => {
+  it("finds an idle coordinator's new workers when its task-workers topic is invalidated, without polling", async () => {
     vi.useFakeTimers()
     let workers: Array<AgentThread> = [{ ...worker, status: "finished" }]
-    vi.spyOn(agentsApi, "listThreadsPage").mockImplementation(async () => ({
-      ...page,
-      items: [{ ...coordinator, taskWorkers: workers }],
-    }))
+    const listed = vi
+      .spyOn(agentsApi, "listThreadsPage")
+      .mockImplementation(async () => ({
+        ...page,
+        items: [{ ...coordinator, taskWorkers: workers }],
+      }))
     const client = testClient()
     const { result } = renderHook(
       () => useSidebarRecents({ repoMode: false }),
@@ -1192,9 +1196,24 @@ describe("sidebar task families", () => {
       expect(result.current.items[0]?.taskWorkers).toHaveLength(1)
     )
     workers = [...workers, { ...worker, id: "new-worker", status: "running" }]
-    await act(() => vi.advanceTimersByTimeAsync(2100))
-    expect(result.current.items[0]?.taskWorkers).toHaveLength(1)
-    await act(() => vi.advanceTimersByTimeAsync(30_000))
+    const calls = listed.mock.calls.length
+    await act(() => vi.advanceTimersByTimeAsync(60_000))
+    expect(listed.mock.calls.length).toBe(calls)
+    const topic = invalidationTopic("task-workers", coordinator.id)
+    console.log(
+      "METAS",
+      JSON.stringify(
+        client
+          .getQueryCache()
+          .getAll()
+          .map((q) => [q.queryKey, q.meta])
+      )
+    )
+    await act(() =>
+      client.invalidateQueries({
+        predicate: (query) => queryTopics(query).includes(topic),
+      })
+    )
     await vi.waitFor(() =>
       expect(result.current.items[0]?.taskWorkers).toHaveLength(2)
     )

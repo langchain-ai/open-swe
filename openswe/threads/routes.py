@@ -16,7 +16,7 @@ from openswe.github.pull_request_checks import PullRequestState
 from openswe.github.pull_request_context import PullRequestFixScope
 from openswe.github.token_auth import bearer_github_token
 from openswe.message_queue import QueuedPreview
-from openswe.threads import browser, terminal
+from openswe.threads import browser, goal, terminal
 from openswe.threads.background_work import (
     BackgroundOutput,
     BackgroundWork,
@@ -358,6 +358,7 @@ async def api_get_thread(
 
 router.include_router(terminal.router)
 router.include_router(browser.router)
+router.include_router(goal.router)
 
 
 @router.get("/threads/{thread_id}/recovery.patch")

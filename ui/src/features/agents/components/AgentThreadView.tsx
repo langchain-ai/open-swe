@@ -39,6 +39,7 @@ import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/Rig
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { PullRequestPreviewProvider } from "@/features/agents/components/PullRequestPreview"
+import { ThreadGoalBar } from "@/features/agents/components/ThreadGoalBar"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
 import {
   readStoredPanelCollapsed,
@@ -978,6 +979,7 @@ export function AgentThreadView({
           {!isHydrating && (
             <AgentComposerDock>
               <CodeChannelLink url={thread.codeChannelUrl} />
+              {!reviewChat && <ThreadGoalBar threadId={thread.id} />}
               {!reviewChat && (
                 <ThreadPullRequests
                   pullRequests={

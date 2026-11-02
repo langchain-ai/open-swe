@@ -51,6 +51,7 @@ from openswe.review.findings import (
 from openswe.review.findings import (
     list_findings as list_findings_async,
 )
+from openswe.review.goal_review import GoalReview
 from openswe.review.publish import (
     ReviewAssessment,
     approval_allowed_for_head,
@@ -326,6 +327,17 @@ async def _publish_review_async(
     # review anchors to (and last_reviewed_sha advances to) the commit actually
     # reviewed, not the stale one this run was created for.
     head_sha = await resolve_review_head_sha(thread_id, RunConfig(head_sha=head_sha))
+    goal_review = GoalReview.of(await get_thread_metadata(thread_id))
+    if goal_review is not None:
+        return await goal_review.publish(
+            reviewer_thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            token=token,
+            severity_threshold=severity_threshold,
+        )
     if assessment is not None and assessment.head_sha != head_sha:
         return {
             "success": False,

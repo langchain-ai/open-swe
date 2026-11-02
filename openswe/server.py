@@ -83,6 +83,7 @@ from openswe.dashboard.options import (
 from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.database import postgres
 from openswe.github.token import resolve_github_token
 from openswe.input_messages import (
     dynamic_context_hash,
@@ -162,13 +163,16 @@ from openswe.skill_store.run_skills import RunSkillStores
 from openswe.slack.client import get_slack_user_timezone, remember_slack_user_timezone
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.slack.staged_files import deliver_slack_files, slack_files_pending
+from openswe.tasks.store import Task
 from openswe.thread_title import (
     ANTHROPIC_TITLE_GENERATION_MAX_TOKENS,
     TITLE_GENERATION_MAX_TOKENS,
     schedule_thread_title_generation,
 )
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
+from openswe.threads.goal import ThreadGoal
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
+from openswe.threads.store import THREADS
 from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.tools import (
     assign_human_reviewer,
@@ -192,6 +196,7 @@ from openswe.tools import (
     expose_port,
     fetch_url,
     forget,
+    get_goal,
     get_human_review_status,
     get_thread,
     http_request,
@@ -249,6 +254,7 @@ from openswe.tools import (
     switch_to_performance_model,
     trigger_automation,
     update_automation,
+    update_goal,
     web_search,
     write_database_rows,
 )
@@ -635,6 +641,8 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "monitor",
         # Only the parent's own turn can say where the work stands.
         "report_work_state",
+        "get_goal",
+        "update_goal",
         "submit_thread_feedback",
         "submit_review_assessment_feedback",
         # The review page reads both from the parent's transcript.
@@ -754,6 +762,8 @@ AGENT_TOOLS: Final = (
     report_platform_issue,
     schedule_thread_wakeup,
     report_work_state,
+    get_goal,
+    update_goal,
     request_rollout_check,
     listen_events,
     list_event_types,
@@ -1880,9 +1890,28 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
-    goal_mode = bool(profile_login) and (
-        (await User.preferences_for_login(profile_login)).goal_mode
+    # A task's goal is its coordinator's: workers report back to it and keep none.
+    goal_mode = (
+        bool(profile_login)
+        and not (task_coordination and task_coordination.is_worker)
+        and (await User.preferences_for_login(profile_login)).goal_mode
     )
+    try:
+        # Every agent thread works on a task, coordinating its own until it joins another's.
+        if cfg.source != "incidents_agent" and postgres.configured():
+            indexed = await THREADS.get(thread_id)
+            title = indexed.metadata.get("title") if indexed is not None else None
+            await Task.for_thread(
+                thread_id,
+                title=title if isinstance(title, str) and title.strip() else "Untitled",
+                # Delegation reads a thread without a workspace as the default one's.
+                workspace=cfg.workspace_slug or "default",
+            )
+        if not goal_mode:
+            # One left from when the person had Goal mode on would show, and pause, forever.
+            await ThreadGoal(thread_id).change(None)
+    except Exception:
+        logger.exception("Could not ready the thread's task", extra={"agent_thread_id": thread_id})
     work_state_tool = _registered_tool_name(report_work_state)
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs
@@ -1980,7 +2009,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_start_review_channel,
     ]
     withheld = [
-        *(() if goal_mode else (report_work_state,)),
+        *(() if goal_mode else (report_work_state, get_goal, update_goal)),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
         *(() if managed_gateway else (connect_managed_tools,)),
@@ -2115,6 +2144,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         review_guide=guide is not None,
         review_guide_closed=walkthrough is not None and walkthrough.closed,
         task_worker=task_coordination is not None and task_coordination.is_worker,
+        goal_mode=goal_mode,
         tool_discovery_failures=list(mcp_tools.failures) if isinstance(mcp_tools, MCPTools) else [],
     )
     configurable[AGENT_TURN_KEY] = turn.model_dump(mode="json")
@@ -2160,6 +2190,8 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
                 _registered_tool_name(tool)
                 for tool in (schedule_thread_wakeup, background_execute, monitor)
             ],
+            reminder=prompt("runs/goal-waiting-on-user"),
+            sleep_refusal=prompt("tools/no-sleep"),
             nudge=work_state_nudge(work_state_tool),
             nudge_sender=WORK_STATE_GUARD["id"],
         )
