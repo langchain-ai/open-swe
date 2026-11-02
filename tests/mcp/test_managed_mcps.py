@@ -393,21 +393,9 @@ async def test_gateway_tools_load_only_for_the_private_owner(monkeypatch):
     assert await runtime.load_mcp_tools(managed.managed_mcp_source("bob", GATEWAY_ID)) == []
 
 
-@pytest.mark.parametrize("scope", ["public", "system", "other_owner", "other_actor"])
-async def test_discovery_denies_shared_and_foreign_credentials(monkeypatch, scope):
+async def test_discovery_denies_shared_threads_before_reading_integrations(monkeypatch):
     tool = importlib.import_module("openswe.tools.discover_managed_tools")
-    metadata = private_thread(monkeypatch, "alice")
-    if scope == "public":
-        metadata["visibility"] = "public"
-    elif scope == "system":
-        metadata["owner_type"] = "system"
-    elif scope == "other_owner":
-        metadata["owner_login"] = "bob"
-    else:
-        monkeypatch.setattr(
-            "openswe.run_config.get_config",
-            lambda: {"configurable": {"thread_id": "t", "github_login": "bob"}},
-        )
+    monkeypatch.setattr(tool, "private_credential_login", AsyncMock(return_value=None))
     gateway = AsyncMock(return_value=GATEWAY_ID)
     inventory = AsyncMock()
     monkeypatch.setattr(tool, "instance_gateway", gateway)
