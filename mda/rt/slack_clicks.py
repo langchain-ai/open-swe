@@ -1,7 +1,10 @@
-"""Clicks on the agent's buttons in this deployment's Slack conversations.
+"""Every Slack click Trigger Server forwards: buttons, feedback and submitted modals.
 
-The handler checks who may click and updates the message through ``response_url``;
-the backend builds the run (``plan_slack_click``), once per clicked message.
+In this deployment's conversations, the handler checks who may click the agent's
+options, workflow push approvals and Retry, updates the message through
+``response_url``, and the backend builds the run (``plan_slack_click``), once per
+clicked message. Every other click, and one in a conversation the backend holds, the
+backend acts on as it always has (``act_on_slack_click``).
 """
 
 import json
@@ -18,7 +21,9 @@ from managed_deepagents import (
     SlackInteractionEvent,
 )
 from runtime_api.slack import (
+    ACT_ON_SLACK_CLICK,
     PLAN_SLACK_CLICK,
+    ActOnSlackClick,
     OptionClick,
     PlanSlackClick,
     RetryClick,
@@ -56,17 +61,33 @@ async def start_click(
     event: SlackInteractionEvent, thread: SlackChannelThread
 ) -> ChannelRunResult | None:
     actor = event.actor
-    value = _button(event.value)
-    if actor is None or event.message_ts is None or value is None:
+    if actor is None:
         return None
-    click = _Click(event, thread, actor.id, value)
-    match value.get("type"):
-        case "open_swe_option":
-            return await click.option()
-        case "workflow_push_approval":
-            return await click.workflow_push()
-        case "slack_retry":
-            return await click.retry()
+    value = _button(event.value) if event.message_ts is not None else None
+    if value is not None and not (value.get("type") == "slack_retry" and value.get("response")):
+        click = _Click(event, thread, actor.id, value)
+        match value.get("type"):
+            case "open_swe_option":
+                result = await click.option()
+            case "workflow_push_approval":
+                result = await click.workflow_push()
+            case "slack_retry":
+                result = await click.retry()
+            case _:
+                click.backend = True
+                result = None
+        if not click.backend:
+            return result
+    await ask_backend(
+        ACT_ON_SLACK_CLICK,
+        ActOnSlackClick(
+            channel_id=event.channel_id,
+            thread_ts=event.thread_ts,
+            user_id=actor.id,
+            payload=event.payload,
+        ),
+        msg_id=f"msg_{event.delivery_id}",
+    )
     return None
 
 
@@ -85,6 +106,8 @@ class _Click:
         self.message = _mapping(event.payload.get("message"))
         self.action = _first_option_action(event.payload.get("actions"))
         self.response_url = _response_url(event.payload.get("response_url"))
+        # The click is the backend's to act on.
+        self.backend = False
 
     async def option(self) -> ChannelRunResult | None:
         recipient = self.value.get("user_id")
@@ -96,7 +119,7 @@ class _Click:
         if not text:
             return None
         start = await self._plan(OptionClick(text=text))
-        if not start.acted:
+        if start.backend or not start.acted:
             return None
         await self._replace_buttons(f"Selected: {self._label(text)}")
         return run_result(start)
@@ -113,6 +136,8 @@ class _Click:
         start = await self._plan(
             WorkflowPushClick(fingerprint=fingerprint, approved=action == "approve")
         )
+        if start.backend:
+            return None
         if start.workflow_push is None:
             await self._tell_clicker(_NO_WORKFLOW_PUSH)
             return None
@@ -145,6 +170,11 @@ class _Click:
         return run_result(start) if start.acted else None
 
     async def _plan(self, click: SlackClick) -> SlackClickStart:
+        start = await self._ask(click)
+        self.backend = start.backend
+        return start
+
+    async def _ask(self, click: SlackClick) -> SlackClickStart:
         team = _mapping(self.event.payload.get("team"))
         return await ask_backend(
             PLAN_SLACK_CLICK,

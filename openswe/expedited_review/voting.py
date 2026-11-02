@@ -35,7 +35,7 @@ from openswe.human_review.requests import HumanReviewParticipant, HumanReviewReq
 from openswe.input_messages import PersonIdentity, split_person_id
 from openswe.prompts import prompt
 from openswe.slack.blocks import block_payload, context
-from openswe.slack.client import update_slack_message
+from openswe.slack.client import respond_to_slack_interaction, update_slack_message
 from openswe.slack.dm import note_for_concierge
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
@@ -226,21 +226,31 @@ async def process_vote(
     message_ts: str = "",
     message_text: str = "",
     message_blocks: list[JsonObject] | None = None,
+    response_url: str = "",
 ) -> None:
     """Background entry point for a Slack click; answers the clicker ephemerally.
 
-    ``target_channel`` is the channel a ``send`` click picked.
+    ``target_channel`` is the channel a ``send`` click picked. The clicked message is
+    updated through the click's ``response_url`` where it has one.
     """
     slack_user_id = split_person_id(person)[1]
+
+    async def update(blocks: list[JsonObject]) -> None:
+        if response_url:
+            body = {"replace_original": True, "text": message_text, "blocks": blocks}
+            if not await respond_to_slack_interaction(response_url, body):
+                logger.warning("Could not update the clicked expedited review card")
+            return
+        try:
+            await update_slack_message(channel_id, message_ts, message_text, blocks=blocks)
+        except SlackRequestError:
+            logger.warning("Could not update the clicked expedited review card", exc_info=True)
 
     async def handle(approval: HumanReviewRequest) -> Outcome:
         if message_ts and message_blocks:
             pending = [block for block in message_blocks if block.get("type") != "actions"]
             pending.extend(block_payload([context("Working on your click…")]))
-            try:
-                await update_slack_message(channel_id, message_ts, message_text, blocks=pending)
-            except SlackRequestError:
-                logger.warning("Could not acknowledge expedited review click", exc_info=True)
+            await update(pending)
         original = (
             approval.state,
             approval.awaiting_ready,
@@ -266,9 +276,7 @@ async def process_vote(
                         == original
                         or (current.awaiting_ready and current.state == "open")
                     ):
-                        await update_slack_message(
-                            channel_id, message_ts, message_text, blocks=message_blocks
-                        )
+                        await update(message_blocks)
                     elif current is not None and not completed:
                         await ReviewCard(current).refresh(
                             outcome=current.detail or current.state
@@ -303,4 +311,5 @@ async def process_vote(
         thread_ts=thread_ts,
         slack_user_id=slack_user_id,
         handle=handle,
+        response_url=response_url,
     )

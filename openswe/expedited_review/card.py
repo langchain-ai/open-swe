@@ -4,26 +4,31 @@ import json
 
 from openswe.expedited_review.eligibility import ChangedFile, ExpeditedDiff
 from openswe.human_review.requests import ChannelChoice, HumanReviewRequest
+from openswe.slack.app_modals import modal_button
 from openswe.slack.blocks import (
     SECTION_TEXT_MAX_CHARS,
     Block,
     ButtonElement,
+    ModalView,
     actions,
     button,
     code_block,
     context,
+    conversation_input,
     divider,
     escape,
     image,
-    option,
+    modal,
     section,
-    static_select,
 )
 
 BUTTON_TYPE = "expedited_review"
 SEND_BLOCK_ID = "expedited_review_send"
 CHANNEL_SELECT_ACTION = "expedited_review_channel"
 OTHER_CHANNEL = "other"
+CHANNEL_MODAL = "expedited_review_channel"
+PICKER_BLOCK = "channel"
+PICKER_ACTION = "channel"
 
 _MAX_FILE_SECTIONS = 20
 # Slack refuses a section over 3000 characters, and refusing means no card at all.
@@ -144,35 +149,41 @@ def _vote_buttons(approval: HumanReviewRequest) -> list[ButtonElement]:
     return [approve, _dismiss_button(approval)]
 
 
+def channel_picker(private_metadata: str | None = None) -> ModalView:
+    """The modal that picks another channel to send the card to."""
+    return modal(
+        callback_id=CHANNEL_MODAL,
+        title="Send expedited review",
+        blocks=[
+            conversation_input(
+                block_id=PICKER_BLOCK, label="Channel", action_id=PICKER_ACTION, include=["public"]
+            )
+        ],
+        submit="Send",
+        close="Cancel",
+        private_metadata=private_metadata,
+    )
+
+
 def _send_controls(approval: HumanReviewRequest, choices: list[ChannelChoice]) -> list[Block]:
-    """Send the card to its own channel or another one; offered once, while it awaits a vote."""
+    """Send the card to its first channel or another one; offered once, while it awaits a vote.
+
+    Plain buttons: Trigger Server forwards no select's change.
+    """
     if not choices or approval.sent_elsewhere:
         return []
-    configured_only = len(choices) == 1 and choices[0]["id"] != approval.slack_channel_id
-    other = button(
-        "Other channel…",
-        action_id="open_swe_option_select_other",
-        value=_button_value("other", approval),
+    broadcast = button(
+        f"Broadcast in #{choices[0]['name']}",
+        action_id="open_swe_option_select_broadcast",
+        value=_button_value("broadcast", approval),
     )
-    if len(choices) == 1:
-        broadcast = button(
-            f"Broadcast in #{choices[0]['name']}",
-            action_id="open_swe_option_select_broadcast",
-            value=_button_value("broadcast", approval),
-        )
-        return [actions(broadcast, *([] if configured_only else [other]), block_id=SEND_BLOCK_ID)]
-    options = [option(f"#{choice['name']}", choice["id"]) for choice in choices]
-    picker = static_select(
-        action_id=CHANNEL_SELECT_ACTION,
-        options=[*options, option("Other…", f"{OTHER_CHANNEL}:{approval.id}")],
-        initial=options[0],
+    if len(choices) == 1 and choices[0]["id"] != approval.slack_channel_id:
+        # The configured channel is the only place it may go.
+        return [actions(broadcast, block_id=SEND_BLOCK_ID)]
+    other = modal_button(
+        "Other channel…", name=CHANNEL_MODAL, id=str(approval.id), view=channel_picker()
     )
-    send = button(
-        "Broadcast",
-        action_id="open_swe_option_select_send",
-        value=_button_value("send", approval),
-    )
-    return [actions(picker, send, block_id=SEND_BLOCK_ID)]
+    return [actions(broadcast, other, block_id=SEND_BLOCK_ID)]
 
 
 def _ready_button(approval: HumanReviewRequest) -> ButtonElement:

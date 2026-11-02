@@ -51,6 +51,7 @@ from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.people import Outcome, Participant, resolve_writer
 from openswe.human_review.pick_message import PickMessage
+from openswe.human_review.pick_modals import SNOOZE_DURATIONS
 from openswe.human_review.picking import (
     Area,
     Coverage,
@@ -99,14 +100,6 @@ SETTLED_KINDS: tuple[RequestKind, ...] = ("standard", "posted")
 # A deadline run may start a little before the wait its timer was set for has passed.
 _SCHEDULER_EARLINESS = timedelta(minutes=1)
 _DEADLINE_RETRY = timedelta(minutes=5)
-SNOOZE_DURATIONS = {
-    "30 minutes": timedelta(minutes=30),
-    "1 hour": timedelta(hours=1),
-    "2 hours": timedelta(hours=2),
-    "4 hours": timedelta(hours=4),
-    "1 day": timedelta(days=1),
-    "2 days": timedelta(days=2),
-}
 _AUTO_ASSIGN_ASKED = "auto_assign_asked"
 _REMAINING_OWNERS_ASKED = "remaining_owners_asked"
 

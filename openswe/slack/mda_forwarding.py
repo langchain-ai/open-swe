@@ -25,7 +25,7 @@ import asyncio
 import logging
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 
 import httpx2
@@ -361,8 +361,11 @@ async def forward_to_trigger_server(
     thread_id: str,
     message_ts: str,
     event_id: str,
+    on_refused: Callable[[], Awaitable[None]] | None = None,
 ) -> None:
     """Deliver a Slack request to Trigger Server unchanged, retrying while its signature is valid.
+
+    ``on_refused`` answers a request Trigger Server never took, such as a click, here.
 
     When Trigger Server refuses it, or every attempt fails, the message remembered at
     ``message_ts`` (none for Slack's Stop) is answered here: by the backend itself while
@@ -414,6 +417,8 @@ async def forward_to_trigger_server(
             "attempts": attempt,
         },
     )
+    if not delivered and on_refused is not None:
+        await on_refused()
     if not delivered and message_ts:
         if await channel_started(thread_id):
             await report_lost(thread_id, message_ts, f"Trigger Server forward {outcome} ({status})")

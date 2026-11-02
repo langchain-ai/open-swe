@@ -14,6 +14,7 @@ for a click on the agent's buttons.
 endpoint, until every deployment runs the handler.
 """
 
+import json
 import logging
 from datetime import timedelta
 from typing import Annotated, Final, Literal, cast
@@ -24,10 +25,12 @@ from managed_deepagents import EndpointAnswer, EndpointThread
 from managed_deepagents import JsonValue as AnswerJson
 from pydantic import JsonValue
 from runtime_api.slack import (
+    ActOnSlackClick,
     OptionClick,
     PlanSlackClick,
     PlanSlackTurn,
     RetryClick,
+    SlackClickActed,
     SlackClickStart,
     SlackTurnRun,
     SlackTurnStart,
@@ -42,7 +45,7 @@ from openswe.mda_channels.auth import require_mda_channel
 from openswe.slack import mda_forwarding
 from openswe.slack import webhook as service
 from openswe.slack.dm import CONCIERGE_TS
-from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.payloads import SlackChannelContext, SlackInteraction
 from openswe.slack.request import SlackRequest
 from openswe.slack.retry import SlackRetry
 from openswe.threads import index
@@ -185,8 +188,7 @@ async def plan_slack_click(call: ChannelCall, plan: PlanSlackClick) -> SlackClic
     fields = {"slack_channel_id": plan.channel_id, "slack_message_ts": plan.message_ts}
     run_thread = await mda_forwarding.owned_conversation(plan.channel_id, plan.thread_ts)
     if run_thread is None:
-        logger.warning("MDA's Slack channel asked about a click outside its threads", extra=fields)
-        return SlackClickStart(acted=False)
+        return SlackClickStart(acted=False, backend=True)
     channel_context = await common.resolve_slack_channel_context(plan.channel_id, use_cache=False)
     if not channel_context.allows_operations:
         return SlackClickStart(acted=False)
@@ -233,6 +235,30 @@ async def plan_slack_click(call: ChannelCall, plan: PlanSlackClick) -> SlackClic
     if turn.run is not None and run_thread != str(plan.thread_id):
         start.thread_id = UUID(run_thread)
     return start
+
+
+async def act_on_slack_click(call: ChannelCall, click: ActOnSlackClick) -> SlackClickActed:
+    """Act on a click as the backend always has, as the person Trigger Server verified."""
+    webhook_id = call.request.headers.get("webhook-id", "")
+    if webhook_id and not await event_claims.claim(
+        _CLICK_CALL_SCOPE, f"act:{webhook_id}", ttl=_CLICK_CALL_TTL
+    ):
+        return SlackClickActed(acted=False)
+    payload = dict(click.payload)
+    user = payload.get("user")
+    payload["user"] = {**(user if isinstance(user, dict) else {}), "id": click.user_id}
+    interaction = SlackInteraction.parse(payload)
+    if interaction is None:
+        return SlackClickActed(acted=False)
+    from openswe.slack.routes import act_on_interaction  # noqa: PLC0415 - routes imports this
+
+    await act_on_interaction(
+        interaction,
+        json.dumps(payload),
+        call.background,
+        origin=(click.channel_id, click.thread_ts),
+    )
+    return SlackClickActed()
 
 
 async def _claim_click(plan: PlanSlackClick, webhook_id: str) -> Literal["first", "again"] | None:

@@ -13,10 +13,13 @@ from managed_deepagents._channels.http.types import ChannelName
 from pydantic import BaseModel
 from runtime_api.endpoint import Endpoint
 from runtime_api.slack import (
+    ACT_ON_SLACK_CLICK,
     PLAN_SLACK_CLICK,
+    ActOnSlackClick,
     OptionClick,
     PlanSlackClick,
     RetryClick,
+    SlackClickActed,
     SlackClickStart,
     SlackTurnRun,
     WorkflowPushClick,
@@ -90,8 +93,11 @@ class _Slack:
         async def backend(
             endpoint: Endpoint[BaseModel, BaseModel], request: BaseModel, *, msg_id: str
         ) -> BaseModel:
-            assert endpoint is PLAN_SLACK_CLICK
             assert msg_id == "msg_delivery-1"
+            if endpoint is ACT_ON_SLACK_CLICK:
+                self.calls.append(("act", request))
+                return SlackClickActed()
+            assert endpoint is PLAN_SLACK_CLICK
             self.calls.append(("backend", request))
             return start
 
@@ -108,6 +114,10 @@ class _Slack:
     @property
     def posted(self) -> list[dict[str, Any]]:
         return [body for kind, body in self.calls if kind == "slack"]
+
+    @property
+    def acted(self) -> list[ActOnSlackClick]:
+        return [cast(ActOnSlackClick, request) for kind, request in self.calls if kind == "act"]
 
 
 def _option(user_id: str | None = "U1") -> dict[str, Any]:
@@ -285,3 +295,60 @@ def test_only_slacks_response_url_is_posted_to() -> None:
     assert clicks._response_url(_RESPONSE_URL) == _RESPONSE_URL
     assert clicks._response_url("https://evil.example/actions") is None
     assert clicks._response_url("http://hooks.slack.com/actions") is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"type": "expedited_review", "action": "approve", "fingerprint": "r1"},
+        {"type": "human_review", "action": "review", "fingerprint": "r1"},
+        {"type": "act_as", "action": "approve", "fingerprint": "f1", "thread_id": "t1"},
+        {"type": "slack_retry", "response": "a.signed.token"},
+        {"run_id": "run-1", "rating": "up"},
+    ],
+    ids=["expedited review", "human review", "act as", "token retry", "feedback"],
+)
+def test_every_other_click_is_the_backends_as_the_verified_clicker(
+    monkeypatch: pytest.MonkeyPatch, value: dict[str, Any]
+) -> None:
+    slack = _Slack(monkeypatch, SlackClickStart(run=_RUN))
+    event = _click(value, clicker="U7")
+
+    assert asyncio.run(clicks.start_click(event, _THREAD)) is None
+
+    assert slack.asked == []
+    assert slack.posted == []
+    [acted] = slack.acted
+    assert (acted.user_id, acted.channel_id, acted.thread_ts) == ("U7", "C1", "171.1")
+    assert acted.payload == event.payload
+
+
+def test_an_option_in_the_backends_conversation_is_the_backends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slack = _Slack(monkeypatch, SlackClickStart(acted=False, backend=True))
+
+    assert asyncio.run(clicks.start_click(_click(_option()), _THREAD)) is None
+
+    # The backend updates the message itself, as it always has.
+    assert slack.posted == []
+    assert [kind for kind, _ in slack.calls] == ["backend", "act"]
+
+
+def test_a_submitted_modal_is_the_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    slack = _Slack(monkeypatch, SlackClickStart())
+    submission = SlackInteractionEvent(
+        delivery_id="delivery-1",
+        action_id="mda_modal::human_review_snooze:r1",
+        channel_id="D1",
+        thread_ts="171.5",
+        value={"choice": {"choice": {"selected_option": {"value": "1 hour"}}}},
+        user_id="U1",
+        actor=SlackActor(id="U1", team_id="T1"),
+        payload={"type": "view_submission", "view": {"callback_id": "mda_modal::x:1"}},
+    )
+
+    assert asyncio.run(clicks.start_click(submission, _THREAD)) is None
+
+    [acted] = slack.acted
+    assert (acted.channel_id, acted.thread_ts) == ("D1", "171.5")

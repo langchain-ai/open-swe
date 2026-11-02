@@ -1,8 +1,10 @@
 """Slack webhook HTTP routes."""
 
 import asyncio
+import functools
 import hashlib
 import re
+from collections.abc import Awaitable, Callable
 from time import time_ns
 from typing import Literal, TypedDict, cast
 
@@ -17,7 +19,7 @@ from openswe.review_guide.advance import advance
 from openswe.review_guide.buttons import NEXT_LABELS
 from openswe.review_guide.launch import close_guide_for_channel
 from openswe.review_guide.sessions import ReviewGuideSession
-from openswe.slack import mda_forwarding, retry, suggested_actions
+from openswe.slack import app_modals, mda_forwarding, retry, suggested_actions
 from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
 from openswe.slack.ask import (
@@ -97,8 +99,6 @@ _THREAD_CONFLICT = (
     "which agent thread to use."
 )
 _OPTION_ACTION_ID = "open_swe_option_select"
-#: Button types MDA's Slack channel acts on in its conversations.
-_MDA_CLICKS = frozenset({"open_swe_option", "workflow_push_approval", retry.BUTTON_TYPE})
 
 
 def _synthetic_slack_ts() -> str:
@@ -132,6 +132,7 @@ def _hand_to_mda(
     event_id: str,
     message_ts: str = "",
     url: str = mda_forwarding.TRIGGER_EVENTS_URL,
+    on_refused: Callable[[], Awaitable[None]] | None = None,
 ) -> WebhookResponse:
     """Forward Slack's request to MDA's Slack channel, through Trigger Server, after answering Slack.
 
@@ -146,6 +147,7 @@ def _hand_to_mda(
         thread_id=thread_id,
         message_ts=message_ts,
         event_id=event_id,
+        on_refused=on_refused,
     )
     return accepted(message)
 
@@ -1145,6 +1147,68 @@ async def slack_interactivity(
 
     if interaction is None:
         return ignored("Invalid Slack interaction")
+    if not _answered_here(interaction):
+        # Trigger Server takes every other click and MDA's Slack channel decides what it
+        # does; where Trigger Server refuses it, the backend acts on it after all.
+        return _hand_to_mda(
+            background_tasks,
+            body,
+            mda_forwarding.forwarded_headers(request.headers),
+            "Slack click handed to MDA",
+            thread_id="",
+            event_id=interaction.trigger_id,
+            url=mda_forwarding.TRIGGER_INTERACTIVITY_URL,
+            on_refused=functools.partial(_act_here, interaction, payload_raw),
+        )
+    return await act_on_interaction(interaction, payload_raw, background_tasks)
+
+
+def _answered_here(interaction: SlackInteraction) -> bool:
+    """Explain this, code channel views and the options they load, and modals the backend
+    opened itself: Trigger Server takes none of them."""
+    if interaction.type in {"message_action", "block_suggestion"}:
+        return True
+    if interaction.container.type == "code_channel_view":
+        return True
+    if interaction.type != "view_submission":
+        return False
+    callback_id = interaction.view.callback_id
+    return (
+        callback_id == expedited_review.CHANNEL_MODAL
+        or callback_id in human_review.PICK_MODALS
+        or app_modals.origin_here(interaction) is not None
+    )
+
+
+async def _act_here(interaction: SlackInteraction, payload_raw: str) -> None:
+    tasks = common.BackgroundTasks()
+    await act_on_interaction(interaction, payload_raw, tasks)
+    await tasks()
+
+
+async def act_on_interaction(
+    interaction: SlackInteraction,
+    payload_raw: str,
+    background_tasks: common.BackgroundTasks,
+    *,
+    origin: tuple[str, str] | None = None,
+) -> WebhookResponse | BlockSuggestionResponse | FeedbackResponse:
+    """What the backend does with a click: one it answers itself, one Trigger Server
+    refused, or one MDA's Slack channel hands it. ``origin`` is the channel and thread
+    of the button that opened a submitted modal, as Trigger Server sealed them."""
+    if interaction.type == "view_submission" and interaction.view.callback_id.startswith(
+        app_modals.PREFIX
+    ):
+        where = origin or app_modals.origin_here(interaction)
+        named = app_modals.modal_action(interaction.view.callback_id)
+        if where is None or named is None:
+            return ignored("Modal submission names no card")
+        return _act_on_modal(interaction, *named, where, background_tasks)
+    opener = next(
+        (a for a in interaction.actions if a.action_id.startswith(app_modals.PREFIX)), None
+    )
+    if interaction.type == "block_actions" and opener is not None:
+        return await app_modals.open_here(interaction, opener)
     if interaction.type == "message_action" and interaction.callback_id == "open_swe_explain":
         if not (
             interaction.channel_id
@@ -1232,28 +1296,6 @@ async def slack_interactivity(
     button = SlackButtonValue.parse(button_value)
     if button is None:
         return ignored("Invalid action value")
-    if (
-        interaction.type == "block_actions"
-        and button.type in _MDA_CLICKS
-        # A token Retry button stays on the backend.
-        and not (button.type == retry.BUTTON_TYPE and button.response)
-        and interaction.channel_id
-        and interaction.thread_ts
-        and (
-            clicked_in := await mda_forwarding.owned_conversation(
-                interaction.channel_id, interaction.thread_ts
-            )
-        )
-    ):
-        return _hand_to_mda(
-            background_tasks,
-            body,
-            mda_forwarding.forwarded_headers(request.headers),
-            "Slack click handed to MDA",
-            thread_id=clicked_in,
-            event_id=interaction.trigger_id or action.action_ts,
-            url=mda_forwarding.TRIGGER_INTERACTIVITY_URL,
-        )
     if button.type == "plan_approval":
         if not interaction.channel_id or not interaction.user.id:
             return ignored("Missing Slack action context")
@@ -1467,6 +1509,22 @@ async def slack_interactivity(
         return accepted("Slack option queued")
 
     return await answer_slack_request(target, dispatch)
+
+
+def _act_on_modal(
+    interaction: SlackInteraction,
+    name: str,
+    id: str,
+    origin: tuple[str, str],
+    background_tasks: common.BackgroundTasks,
+) -> WebhookResponse:
+    if name == expedited_review.CHANNEL_MODAL:
+        return expedited_review.handle_picker_modal(interaction, id, origin, background_tasks)
+    if (pick_modal := human_review.PICK_MODALS.get(name)) is not None:
+        return human_review.handle_pick_submission(
+            interaction, pick_modal, id, origin, background_tasks
+        )
+    return ignored("Unknown modal")
 
 
 async def _update_selected_option_message(

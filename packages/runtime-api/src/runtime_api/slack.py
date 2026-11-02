@@ -6,7 +6,9 @@ handler then asks here what the message starts (``plan_slack_turn``): the backen
 builds the run from the request it remembered, as for its own Slack runs, signs
 its context, and says whether the message redirects the thread's work in
 progress or waits its turn behind it, which the channel starts the run with.
-``plan_slack_click`` does the same for a click on the agent's buttons.
+``plan_slack_click`` does the same for a click on the agent's buttons. Every other
+click, and one in a conversation the backend holds, goes to ``act_on_slack_click``:
+the backend acts on it as it always has.
 """
 
 from typing import Annotated, Final, Literal
@@ -97,9 +99,27 @@ class SlackClickStart(SlackTurnStart):
     # False when another click on the message was acted on already, so this one
     # changes nothing and starts nothing.
     acted: bool = True
+    # The click's conversation is the backend's: ``act_on_slack_click`` acts on it.
+    backend: bool = False
     # A workflow push's status once decided; ``None`` when the backend has no such
     # request any more.
     workflow_push: Literal["approved", "rejected"] | None = None
+
+
+class ActOnSlackClick(BaseModel):
+    """A click the backend acts on: Slack's payload, as Trigger Server forwarded it."""
+
+    # The Slack thread of the clicked message, or of the button that opened a modal.
+    channel_id: str = Field(min_length=1, max_length=64)
+    thread_ts: str = Field(min_length=1, max_length=64)
+    # The person who clicked, as Trigger Server verified them from Slack's request.
+    user_id: str = Field(min_length=1, max_length=64)
+    payload: dict[str, JsonValue]
+
+
+class SlackClickActed(BaseModel):
+    # False for a call already acted on under the same webhook ID.
+    acted: bool = True
 
 
 PLAN_SLACK_TURN: Final = Endpoint(
@@ -121,5 +141,14 @@ PLAN_SLACK_CLICK: Final = Endpoint(
     seconds=120.0,
     # The first call for a clicked message claims it; one sent again under the same
     # webhook ID builds the run again, any other starts nothing.
+    prefix=CHANNEL_API_PREFIX,
+)
+
+ACT_ON_SLACK_CLICK: Final = Endpoint(
+    "act_on_slack_click",
+    ActOnSlackClick,
+    SlackClickActed,
+    seconds=60.0,
+    # The backend acts once per webhook ID; one sent again changes nothing.
     prefix=CHANNEL_API_PREFIX,
 )

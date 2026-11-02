@@ -78,6 +78,7 @@ from langgraph_sdk.errors import NotFoundError  # noqa: E402
 
 from openswe.api.app import app  # noqa: E402
 from openswe.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
+from openswe.slack import mda_forwarding  # noqa: E402
 from openswe.slack.records import lookup_slack_thread_id  # noqa: E402
 from openswe.users import User  # noqa: E402
 from openswe.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
@@ -93,6 +94,20 @@ LAST_SLACK_EVENT: dict[str, Any] = {"payload": None}
 # webhook dedupes against is persisted — so event ids need a per-process salt or
 # a rerun's mentions look like redeliveries of the previous run's.
 EVENT_ID_SALT = uuid.uuid4().hex[:8]
+
+_FORWARD_TO_TRIGGER_SERVER = mda_forwarding.forward_to_trigger_server
+
+
+async def _clicks_stay_here(url: str, *args: Any, **kwargs: Any) -> None:
+    """No Trigger Server knows this Slack app, so it refuses every click the backend
+    forwards, and the backend acts on it after all; anything else goes as before."""
+    if url != mda_forwarding.TRIGGER_INTERACTIVITY_URL:
+        await _FORWARD_TO_TRIGGER_SERVER(url, *args, **kwargs)
+    elif (on_refused := kwargs.get("on_refused")) is not None:
+        await on_refused()
+
+
+mda_forwarding.forward_to_trigger_server = _clicks_stay_here
 
 fakes.seed_bare_remotes()
 

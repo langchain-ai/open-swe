@@ -14,6 +14,13 @@ from openswe.slack.payloads import SlackBlockAction, SlackChannelContext, SlackI
 from tests.conftest import MemoryEventClaims
 
 
+@pytest.fixture(autouse=True)
+def _backend_acts_on_clicks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These drive the backend's own handling of a click, which ``act_on_slack_click``
+    runs for each click MDA's Slack channel hands it."""
+    monkeypatch.setattr(slack_routes, "_answered_here", lambda _interaction: True)
+
+
 def _request(payload: dict[str, Any]) -> Request:
     body = urlencode({"payload": json.dumps(payload)}).encode()
 

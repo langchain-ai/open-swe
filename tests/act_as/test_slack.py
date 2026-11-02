@@ -22,6 +22,13 @@ from openswe.utils.json_types import JsonObject
 _SECRET = "test-signing-secret"
 
 
+@pytest.fixture(autouse=True)
+def _backend_acts_on_clicks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These drive the backend's own handling of a click, which ``act_on_slack_click``
+    runs for each click MDA's Slack channel hands it."""
+    monkeypatch.setattr(slack_routes, "_answered_here", lambda _interaction: True)
+
+
 def _request(action: str, fingerprint: str, user_id: str = "U-ALICE") -> Request:
     value = {
         "type": act_as_slack.BUTTON_TYPE,

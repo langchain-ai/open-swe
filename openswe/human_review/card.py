@@ -7,6 +7,7 @@ signed up to review it on GitHub and where each of them stands.
 import json
 
 from openswe.expedited_review.eligibility import ChangedFile
+from openswe.human_review.pick_modals import PICK_MODALS
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, slack_mention
 from openswe.slack.blocks import Block, ButtonElement, actions, button, context, escape, section
 from openswe.users import User
@@ -95,30 +96,21 @@ def _stats(
 
 
 def accept_button(request: HumanReviewRequest) -> ButtonElement:
-    """What a picked reviewer clicks to take the review; anyone else clicking signs up instead."""
+    """What a picked reviewer clicks to take the review; the answer links the pull request."""
     return button(
         "Accept",
         action_id="open_swe_option_select_accept",
         value=_button_value("review", request),
-        url=request.pull_request.url,
         style="primary",
     )
 
 
 def decline_button(request: HumanReviewRequest) -> ButtonElement:
-    return button(
-        "Decline",
-        action_id="open_swe_option_select_decline",
-        value=_button_value("decline", request),
-    )
+    return PICK_MODALS["human_review_decline"].button(str(request.id))
 
 
 def snooze_button(request: HumanReviewRequest) -> ButtonElement:
-    return button(
-        "Snooze",
-        action_id="open_swe_option_select_snooze",
-        value=_button_value("snooze", request),
-    )
+    return PICK_MODALS["human_review_snooze"].button(str(request.id))
 
 
 PICK_BUTTON_IDS = frozenset(
@@ -132,12 +124,11 @@ PICK_BUTTON_IDS = frozenset(
 
 def _buttons(request: HumanReviewRequest) -> list[ButtonElement]:
     return [
-        # Slack opens the URL and still delivers the click, so signing up lands on the PR.
+        # The answer links the pull request: Trigger Server forwards no URL button's click.
         button(
             "I'll review",
             action_id="open_swe_option_select_review",
             value=_button_value("review", request),
-            url=request.pull_request.url,
             style="primary",
         ),
         button(

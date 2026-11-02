@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import cast
 from unittest.mock import AsyncMock
@@ -146,7 +146,12 @@ async def test_a_conversation_for_mda_goes_to_trigger_server_exactly_as_slack_se
     [(task, (url, body, headers))] = tasks.tasks
     # The forward knows which message it carries, to tell its thread if it's lost.
     assert tasks.kwargs == [
-        {"thread_id": _MDA_THREAD, "message_ts": "1786573369.551099", "event_id": "Ev-mda"}
+        {
+            "thread_id": _MDA_THREAD,
+            "message_ts": "1786573369.551099",
+            "event_id": "Ev-mda",
+            "on_refused": None,
+        }
     ]
     assert task is mda_forwarding.forward_to_trigger_server
     assert url == _EVENTS_URL
@@ -919,26 +924,19 @@ async def _interact(
     [
         {"type": "open_swe_option", "response": "Option B", "user_id": "U1"},
         {"type": "workflow_push_approval", "action": "approve", "fingerprint": "f1"},
-        {
-            "type": "slack_retry",
-            "channel_id": "C1",
-            "thread_ts": "171.1",
-            "user_id": "U1",
-            "nonce": "n1",
-        },
+        {"type": "slack_retry", "response": "a.signed.token"},
+        {"type": "expedited_review", "action": "approve", "fingerprint": "r1"},
+        {"type": "human_review", "action": "review", "fingerprint": "r1"},
+        {"type": "act_as", "action": "approve", "fingerprint": "f1", "thread_id": "t1"},
     ],
-    ids=["option", "workflow push", "retry"],
+    ids=["option", "workflow push", "token retry", "expedited review", "human review", "act as"],
 )
-async def test_a_click_in_mdas_conversation_goes_to_trigger_server_as_slack_sent_it(
+async def test_every_click_goes_to_trigger_server_as_slack_sent_it(
     monkeypatch: pytest.MonkeyPatch, value: dict[str, JsonValue]
 ) -> None:
-    owned = AsyncMock(return_value=_MDA_THREAD)
-    monkeypatch.setattr(mda_forwarding, "owned_conversation", owned)
-
     response, tasks, request = await _interact(monkeypatch, _click(value))
 
     assert response == {"status": "accepted", "message": "Slack click handed to MDA"}
-    owned.assert_awaited_once_with("C1", "171.1")
     [(task, (url, body, headers))] = tasks.tasks
     assert task is mda_forwarding.forward_to_trigger_server
     assert url == mda_forwarding.TRIGGER_INTERACTIVITY_URL
@@ -948,38 +946,60 @@ async def test_a_click_in_mdas_conversation_goes_to_trigger_server_as_slack_sent
         "X-Slack-Request-Timestamp": "1786573369",
         "Content-Type": "application/x-www-form-urlencoded",
     }
-    # A click remembers no message, so a lost forward hands nothing back.
-    assert tasks.kwargs == [{"thread_id": _MDA_THREAD, "message_ts": "", "event_id": "trigger-1"}]
+    [kwargs] = tasks.kwargs
+    # A click remembers no message; one Trigger Server refuses is acted on here.
+    assert (kwargs["thread_id"], kwargs["message_ts"], kwargs["event_id"]) == ("", "", "trigger-1")
+    assert callable(kwargs["on_refused"])
 
 
-async def test_a_click_in_the_backends_conversation_stays_there(
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"type": "message_action", "callback_id": "open_swe_explain", "user": {"id": "U1"}},
+        {"type": "block_suggestion", "container": {"type": "code_channel_view"}, "value": "a"},
+        {
+            "type": "block_actions",
+            "container": {"type": "code_channel_view", "view_id": "V1"},
+            "user": {"id": "U1"},
+            "actions": [],
+        },
+        {
+            "type": "view_submission",
+            "user": {"id": "U1"},
+            "view": {"callback_id": "human_review_decline", "private_metadata": "{}"},
+        },
+    ],
+    ids=["explain this", "options load", "code channel view", "backend-opened modal"],
+)
+async def test_explain_this_code_channel_views_and_the_backends_modals_stay_here(
+    monkeypatch: pytest.MonkeyPatch, payload: dict[str, JsonValue]
+) -> None:
+    act = AsyncMock(return_value={})
+    monkeypatch.setattr(slack_routes, "act_on_interaction", act)
+
+    _, tasks, _ = await _interact(monkeypatch, payload)
+
+    assert tasks.tasks == []
+    act.assert_awaited_once()
+
+
+async def test_a_click_trigger_server_refuses_is_acted_on_here(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(mda_forwarding, "owned_conversation", AsyncMock(return_value=None))
-    monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", AsyncMock(return_value=None))
+    acted: list[str] = []
 
-    response, tasks, _ = await _interact(
-        monkeypatch, _click({"type": "open_swe_option", "response": "Option B"})
+    async def act(interaction: object, _raw: str, tasks: BackgroundTasks, **_: object) -> dict:
+        tasks.add_task(acted.append, cast(slack_routes.SlackInteraction, interaction).user.id)
+        return {}
+
+    monkeypatch.setattr(slack_routes, "act_on_interaction", act)
+    _, tasks, _ = await _interact(
+        monkeypatch, _click({"type": "expedited_review", "action": "approve", "fingerprint": "r1"})
     )
 
-    assert response == {"status": "ignored", "reason": "Slack thread is not associated"}
-    assert tasks.tasks == []
+    await cast(Callable[[], Awaitable[None]], tasks.kwargs[0]["on_refused"])()
 
-
-async def test_a_retry_button_with_a_token_stays_on_the_backend(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    owned = AsyncMock(return_value=_MDA_THREAD)
-    monkeypatch.setattr(mda_forwarding, "owned_conversation", owned)
-    monkeypatch.setattr(webhook_common, "post_slack_ephemeral_message", AsyncMock())
-
-    response, tasks, _ = await _interact(
-        monkeypatch, _click({"type": "slack_retry", "response": "a.signed.token"})
-    )
-
-    assert response == {"status": "ignored", "reason": "Invalid retry button"}
-    owned.assert_not_awaited()
-    assert tasks.tasks == []
+    assert acted == ["U1"]
 
 
 async def test_the_handler_finds_a_concierge_dms_message_by_its_slack_thread(
@@ -1103,6 +1123,7 @@ async def test_an_option_click_is_the_persons_message_and_is_acted_on_once(
         "interrupts": True,
         "thread_id": None,
         "acted": False,
+        "backend": False,
         "workflow_push": None,
     }
     request = prepare.await_args_list[0].args[0]
@@ -1140,7 +1161,7 @@ async def test_a_click_in_a_concierge_dm_runs_on_the_dms_thread(
     )
 
 
-async def test_a_click_outside_mdas_conversations_starts_nothing(
+async def test_a_click_in_the_backends_conversation_is_the_backends_to_act_on(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     app = _click_app(monkeypatch, owner=None)
@@ -1148,8 +1169,147 @@ async def test_a_click_outside_mdas_conversations_starts_nothing(
 
     start = await _post_click(app, _plan_click({"kind": "option", "text": "Option B"}))
 
-    assert start["acted"] is False
+    assert (start["acted"], start["backend"]) == (False, True)
     prepare.assert_not_awaited()
+
+
+async def _act(
+    app: FastAPI, payload: dict[str, JsonValue], msg_id: str = "msg_delivery-1", **fields: str
+) -> dict[str, JsonValue]:
+    body = {"channel_id": "C1", "thread_ts": "171.1", "user_id": "U1", "payload": payload}
+    answered = await _post_endpoint(
+        app,
+        cast(dict[str, JsonValue], body | fields),
+        signed=True,
+        path="/mda/channel-api/act_on_slack_click",
+        msg_id=msg_id,
+    )
+    assert answered.status_code == 200, answered.text
+    return answered.json()
+
+
+async def test_the_backend_acts_on_a_click_once_as_the_clicker_trigger_server_verified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = _click_app(monkeypatch)
+    act = AsyncMock(return_value={})
+    monkeypatch.setattr(slack_routes, "act_on_interaction", act)
+    # Slack's payload names someone else: only Trigger Server's verified clicker counts.
+    payload = _click({"type": "expedited_review", "action": "approve", "fingerprint": "r1"})
+    payload["user"] = {"id": "U9", "name": "someone"}
+
+    first = await _act(app, payload)
+    again = await _act(app, payload)
+
+    assert (first["acted"], again["acted"]) == (True, False)
+    [call] = act.await_args_list
+    interaction = call.args[0]
+    assert interaction.user.id == "U1"
+    assert call.kwargs["origin"] == ("C1", "171.1")
+
+
+async def test_a_review_card_click_reaches_the_cards_own_handling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.expedited_review import slack as expedited  # noqa: PLC0415
+
+    app = _click_app(monkeypatch)
+    monkeypatch.setattr(
+        slack_routes.User, "concierge_mode_for_slack", AsyncMock(return_value=False)
+    )
+    vote = AsyncMock()
+    monkeypatch.setattr(expedited, "process_vote", vote)
+
+    await _act(app, _click({"type": "expedited_review", "action": "approve", "fingerprint": "r1"}))
+
+    vote.assert_awaited_once()
+    assert vote.await_args.args == ("r1",)
+    kwargs = vote.await_args.kwargs
+    assert (kwargs["decision"], kwargs["person"], kwargs["thread_ts"]) == (
+        "approve",
+        {"id": "slack:U1"},
+        "171.1",
+    )
+    # The answer goes back through the click's response_url.
+    assert kwargs["response_url"] == "https://hooks.slack.com/actions/T1/1/abc"
+
+
+def _submission(callback_id: str, values: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    return {
+        "type": "view_submission",
+        "team": {"id": "T1"},
+        "user": {"id": "U1"},
+        "view": {"id": "V1", "callback_id": callback_id, "state": {"values": values}},
+    }
+
+
+async def test_a_pick_modal_trigger_server_opened_acts_on_its_pick_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.human_review import slack as human  # noqa: PLC0415
+
+    app = _click_app(monkeypatch)
+    process = AsyncMock()
+    monkeypatch.setattr(human, "_process_on_message", process)
+    choice = {
+        "choice": {"choice": {"type": "static_select", "selected_option": {"value": "1 hour"}}}
+    }
+
+    await _act(
+        app,
+        _submission("mda_modal::human_review_snooze:r1", choice),
+        channel_id="D1",
+        thread_ts="171.5",
+    )
+
+    process.assert_awaited_once_with(
+        "r1",
+        "snooze",
+        channel_id="D1",
+        message_ts="171.5",
+        slack_user_id="U1",
+        choice="1 hour",
+    )
+
+
+async def test_a_pick_modal_with_a_choice_it_never_offered_does_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.human_review import slack as human  # noqa: PLC0415
+
+    app = _click_app(monkeypatch)
+    process = AsyncMock()
+    monkeypatch.setattr(human, "_process_on_message", process)
+    forged = {
+        "choice": {"choice": {"type": "static_select", "selected_option": {"value": "1 year"}}}
+    }
+
+    await _act(app, _submission("mda_modal::human_review_snooze:r1", forged))
+
+    process.assert_not_awaited()
+
+
+async def test_the_channel_picker_trigger_server_opened_sends_the_card(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.expedited_review import slack as expedited  # noqa: PLC0415
+
+    app = _click_app(monkeypatch)
+    vote = AsyncMock()
+    monkeypatch.setattr(expedited, "process_vote", vote)
+    picked = {
+        "channel": {"channel": {"type": "conversations_select", "selected_conversation": "C9"}}
+    }
+
+    await _act(app, _submission("mda_modal::expedited_review_channel:r1", picked))
+
+    vote.assert_awaited_once()
+    assert vote.await_args.kwargs["decision"] == "send"
+    assert vote.await_args.kwargs["target_channel"] == "C9"
+    assert (vote.await_args.kwargs["channel_id"], vote.await_args.kwargs["thread_ts"]) == (
+        "C1",
+        "171.1",
+    )
 
 
 @pytest.mark.parametrize(("approved", "status"), [(True, "approved"), (False, "rejected")])

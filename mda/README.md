@@ -300,11 +300,17 @@ A mention, a direct message or an explicit request redirects the thread's run in
 The backend still answers `/slack/channel/events` for a deployment whose channel names it as an endpoint, until every deployment runs the handler.
 The agent replies with Open SWE's Slack tools (`reply="none"`), and the channel shows the run's status and Stop.
 
-Clicks on the agent's own buttons in MDA's conversations (options, workflow push approvals, Retry) go to the channel too: `/webhooks/slack/interactivity` forwards them unchanged to Trigger Server's interactivity URL (`TRIGGER_INTERACTIVITY_URL`), after answering Slack, and every other click stays on the backend.
+Every Slack click goes to the channel too: `/webhooks/slack/interactivity` forwards it unchanged to Trigger Server's interactivity URL (`TRIGGER_INTERACTIVITY_URL`), after answering Slack, so the Slack app's Interactivity URL can move to Trigger Server with no code change.
+Only "Explain this" (a message shortcut), code channel views and the options they load (`block_suggestion`), and modals the backend opened itself stay on the backend.
+Where Trigger Server refuses a click (an environment without MDA), the backend acts on it after all.
 The handler (`rt/slack_clicks.py`) takes the clicker Trigger Server verified, refuses an option meant for someone else and a Retry by anyone but its requester (an ephemeral reply, nothing started), and updates the clicked message through its `response_url`; Retry removes its button before anything runs.
 The backend's `plan_slack_click` finds the click's conversation from its own bindings, acts on each clicked message once (a call MDA sends again under its `webhook-id` gets its run again), decides a workflow push under its lock, finds the message a Retry sends again, and builds and signs the run, which redirects or waits as a message would.
 A Retry button carries its fields in its value, with no token: Slack signs the click, and only Open SWE's own message carries the value.
-Older Retry buttons, which carry a token, stay on the backend.
+Every other click, and one in a conversation the backend holds, the handler hands to the backend's `act_on_slack_click` with Slack's payload as Trigger Server forwarded it: the backend acts on it as it always has, as the clicker Trigger Server verified, once per call.
+That covers the review cards (votes, sign-ups, picks, dismissals), act-as approvals, suggested actions, run feedback and older Retry buttons, which carry a token.
+A review card's modals (another channel to send it to, a pick's Decline and Snooze) open through Trigger Server: the button's `action_id` is `mda_modal::<name>:<id>` and its value the view, whose inputs are required, since Trigger Server answers Slack before the backend sees the submission.
+The submission reaches the handler as a click on the button's Slack thread.
+Answers to review clicks, and their updates to the clicked message, go through the click's `response_url`.
 It adds no reaction to the message that starts a run (`reactions=False`).
 
 The backend forwards to Trigger Server's Slack events URL (`TRIGGER_EVENTS_URL` in `openswe/slack/mda_forwarding.py`), the same on US LangSmith for every environment: Trigger Server routes each request by its Slack app.
@@ -326,9 +332,9 @@ Which conversations go where (`mda_can_start` in `openswe/slack/mda_forwarding.p
 | A person's @mention of Open SWE in a channel, as a new message or in a thread Open SWE isn't in yet | Code channels (one session per channel), which MDA can't hold yet |
 | A person's DM to Open SWE (a thread per message) | Bots' messages, breakouts, `/btw`, slash commands |
 | A kitchen channel's untagged messages, each Slack thread its own conversation, routed to the channel's workspace | Every conversation the backend already holds, a concierge DM included: one never moves |
-| A new concierge DM, as one conversation on one thread | Review cards, Explain this and every other click but the three to the left |
+| A new concierge DM, as one conversation on one thread | "Explain this", code channel views and the options they load: Trigger Server takes none of them |
 | Every later message in those conversations, and Slack's Stop | Reactions (`:x:` stop, feedback), edits and `thread_broadcast` replies: Trigger Server doesn't take them. In MDA's conversations these do nothing yet; Slack's Stop works |
-| Clicks on the agent's options, workflow push approvals and Retry in those conversations | Retry buttons that carry a token, from before MDA took them |
+| Every click: the agent's options, workflow push approvals and Retry in those conversations start their run in MDA; the backend acts on every other one (`act_on_slack_click`) | Modals the backend opened itself, before their cards opened them through Trigger Server |
 
 `mda deploy` registers each environment's own Slack app with Trigger Server from `MDA_SLACK_BOT_TOKEN_<ENV>` and `MDA_SLACK_SIGNING_SECRET_<ENV>` (repository secrets; an app can be registered to one deployment only).
 Trigger Server keeps an app once registered, so later deploys need neither.
