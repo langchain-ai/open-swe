@@ -282,6 +282,14 @@ pub(crate) fn existing_app_settings(manifest: &Value) -> Result<String> {
                 .to_string(),
         );
     }
+    // Its scope and event are in the lists above, from the same manifest.
+    if enabled("/features/code_channels/enabled") {
+        steps.push(
+            "Code channels: turn them on, so the agent can work on a task in a channel of its \
+             own."
+                .to_string(),
+        );
+    }
     steps.push(format!(
         "OAuth & Permissions: under Bot Token Scopes, add\n{}\n\
          {PAD}Then click Reinstall to Workspace at the top of the page.",
@@ -753,6 +761,32 @@ mod tests {
         assert!(settings.contains("  4. App Home: turn on the Messages Tab"));
         assert!(settings.contains("  5. Agents & AI Apps: turn it on"));
         assert!(settings.contains("  6. OAuth & Permissions"));
+    }
+
+    #[test]
+    fn existing_app_settings_cover_code_channels_when_the_manifest_asks() {
+        let mut manifest = manifest();
+        manifest["features"] = json!({
+            "agent_view": {"agent_description": "Support"},
+            "code_channels": {"enabled": true}
+        });
+        manifest["oauth_config"]["scopes"]["bot"] = json!(["chat:write", "code_channels:manage"]);
+        manifest["settings"]["event_subscriptions"]["bot_events"] =
+            json!(["app_mention", "message.session", "agent_session_stopped"]);
+
+        let settings = existing_app_settings(&manifest).unwrap();
+
+        assert!(settings.contains("  4. Agents & AI Apps: turn it on"));
+        assert!(settings.contains("  5. Code channels: turn them on"));
+        assert!(settings.contains("  6. OAuth & Permissions"));
+        assert!(settings.contains("message.session"));
+        assert!(settings.contains("agent_session_stopped"));
+        assert!(settings.contains("code_channels:manage"));
+
+        manifest["features"]["code_channels"]["enabled"] = json!(false);
+        assert!(!existing_app_settings(&manifest)
+            .unwrap()
+            .contains("Code channels"));
     }
 
     #[test]

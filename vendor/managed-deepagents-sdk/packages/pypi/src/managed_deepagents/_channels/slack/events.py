@@ -140,6 +140,10 @@ class SlackMessageEvent:
     Slack Connect channel isn't your app's. ``None`` when Trigger Server names
     no one, such as an older Trigger Server or a message from a bot. It is
     personal data: MDA neither logs it nor adds it to the run's metadata."""
+    code_channel: bool = False
+    """Whether it happened inside a Slack code channel, with
+    ``channels.slack(code_channel=True)``: a run on the event's conversation
+    then runs on the channel's one thread."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -172,6 +176,9 @@ class SlackInteractionEvent:
     actor: SlackActor | None = None
     """The Slack user who clicked, as Trigger Server verified it; see
     ``SlackMessageEvent.actor``."""
+    code_channel: bool = False
+    """Whether it happened inside a Slack code channel; see
+    ``SlackMessageEvent.code_channel``."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -213,6 +220,9 @@ class SlackActivityEvent:
     """Whether a reaction was removed rather than added."""
     actor: SlackActor | None = None
     """Who acted, as Trigger Server verified it; see ``SlackMessageEvent.actor``."""
+    code_channel: bool = False
+    """Whether it happened inside a Slack code channel; see
+    ``SlackMessageEvent.code_channel``."""
 
 
 SlackEvent: TypeAlias = SlackMessageEvent | SlackInteractionEvent | SlackActivityEvent
@@ -326,6 +336,8 @@ class SlackEndpointFields(TypedDict, total=False):
     """Whether a reaction was removed."""
     value: JsonValue
     """An interaction's button ``value`` or modal ``state.values``."""
+    codeChannel: bool
+    """``True`` when it happened inside a Slack code channel; absent otherwise."""
 
 
 class SlackEndpointEvent(EndpointEvent[SlackEventKey, dict[str, JsonValue]], SlackEndpointFields):
@@ -343,9 +355,17 @@ def endpoint_fields(event: SlackEvent) -> SlackEndpointFields:
     and payload: the one place they're listed, as TypeScript's
     ``SLACK_ENDPOINT_EVENT_FIELDS``."""
     if isinstance(event, SlackInteractionEvent):
-        return _interaction_endpoint_fields(event)
-    if isinstance(event, SlackActivityEvent):
-        return _activity_endpoint_fields(event)
+        fields = _interaction_endpoint_fields(event)
+    elif isinstance(event, SlackActivityEvent):
+        fields = _activity_endpoint_fields(event)
+    else:
+        fields = _message_endpoint_fields(event)
+    if event.code_channel:
+        fields["codeChannel"] = True
+    return fields
+
+
+def _message_endpoint_fields(event: SlackMessageEvent) -> SlackEndpointFields:
     fields: SlackEndpointFields = {
         "text": event.text,
         "channelId": event.channel_id,
@@ -617,6 +637,7 @@ def slack_event(
         payload=cast("dict[str, JsonValue]", copy.deepcopy(dict(raw))),
         # A Slack message's actor is a Slack user.
         actor=actor if isinstance(actor, SlackActor) else None,
+        code_channel=address.get("code_channel") is True,
     )
 
 
@@ -664,6 +685,7 @@ def slack_activity_event(
         removed=kind["type"] == "reaction_removed",
         action_id=action_id,
         actor=actor if isinstance(actor, SlackActor) else None,
+        code_channel=address.get("code_channel") is True,
     )
 
 
@@ -713,6 +735,7 @@ def slack_interaction_event(
         ),
         # The actor of a click in Slack is a Slack user.
         actor=actor if isinstance(actor, SlackActor) else None,
+        code_channel=address.get("code_channel") is True,
     )
 
 
