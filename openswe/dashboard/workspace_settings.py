@@ -11,7 +11,7 @@ that honour them. Per-repo style prompts live in :mod:`openswe.review.styles`.
 import asyncio
 import logging
 from collections.abc import Iterator, Mapping
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NamedTuple, TypedDict
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
@@ -114,6 +114,10 @@ class WorkspaceSettingsUpdate(BaseModel):
     default_reviewer_subagent_reasoning_effort: str | None = None
     default_thread_title_model: str | None = None
     default_thread_title_reasoning_effort: str | None = None
+    # The share of newly reviewed pull requests that also get a shadow review on this model.
+    review_shadow_percent: int | None = Field(default=None, ge=0, le=100, strict=True)
+    review_shadow_model: str | None = None
+    review_shadow_reasoning_effort: str | None = None
 
     @field_validator("managed_tools_gateway_id", mode="before")
     @classmethod
@@ -143,72 +147,13 @@ class WorkspaceSettingsUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _validate_model_pairs(self) -> WorkspaceSettingsUpdate:
-        self.default_agent_model, self.default_agent_reasoning_effort = _normalize_stale_model_pair(
-            self.default_agent_model,
-            self.default_agent_reasoning_effort,
-        )
-        self.default_agent_subagent_model, self.default_agent_subagent_reasoning_effort = (
-            _normalize_stale_model_pair(
-                self.default_agent_subagent_model,
-                self.default_agent_subagent_reasoning_effort,
-            )
-        )
-        for tier in ("fast", "balanced", "performance"):
-            model_field = f"default_agent_routing_{tier}_model"
-            effort_field = f"default_agent_routing_{tier}_reasoning_effort"
-            if not hasattr(self, model_field):
-                continue
+        for model_field, effort_field, role in _MODEL_PAIRS:
             model, effort = _normalize_stale_model_pair(
                 getattr(self, model_field), getattr(self, effort_field)
             )
             setattr(self, model_field, model)
             setattr(self, effort_field, effort)
-        self.default_reviewer_model, self.default_reviewer_reasoning_effort = (
-            _normalize_stale_model_pair(
-                self.default_reviewer_model,
-                self.default_reviewer_reasoning_effort,
-            )
-        )
-        (
-            self.default_reviewer_subagent_model,
-            self.default_reviewer_subagent_reasoning_effort,
-        ) = _normalize_stale_model_pair(
-            self.default_reviewer_subagent_model,
-            self.default_reviewer_subagent_reasoning_effort,
-        )
-        self.default_thread_title_model, self.default_thread_title_reasoning_effort = (
-            _normalize_stale_model_pair(
-                self.default_thread_title_model,
-                self.default_thread_title_reasoning_effort,
-            )
-        )
-        _validate_model_effort_pair(
-            self.default_agent_model, self.default_agent_reasoning_effort, "agent"
-        )
-        _validate_model_effort_pair(
-            self.default_agent_subagent_model,
-            self.default_agent_subagent_reasoning_effort,
-            "agent subagent",
-        )
-        for tier in ("fast", "balanced", "performance"):
-            _validate_model_effort_pair(
-                getattr(self, f"default_agent_routing_{tier}_model"),
-                getattr(self, f"default_agent_routing_{tier}_reasoning_effort"),
-                f"agent routing {tier}",
-            )
-        _validate_model_effort_pair(
-            self.default_reviewer_model, self.default_reviewer_reasoning_effort, "reviewer"
-        )
-        _validate_model_effort_pair(
-            self.default_reviewer_subagent_model,
-            self.default_reviewer_subagent_reasoning_effort,
-            "reviewer subagent",
-        )
-        _validate_model_effort_pair(
-            self.default_thread_title_model,
-            self.default_thread_title_reasoning_effort,
-            "thread title",
-        )
+            _validate_model_effort_pair(model, effort, role)
         return self
 
     def apply_fable_policy(self, *, fable_enabled: bool) -> None:
@@ -219,7 +164,7 @@ class WorkspaceSettingsUpdate(BaseModel):
         whether Fable is on.
         """
         if fable_enabled:
-            for model_field, _ in _MODEL_PAIR_FIELDS:
+            for model_field, _, _ in _MODEL_PAIRS:
                 model = getattr(self, model_field)
                 if model in NON_DEFAULT_MODEL_IDS:
                     raise ValueError(f"{model!r} cannot be a default model")
@@ -228,25 +173,7 @@ class WorkspaceSettingsUpdate(BaseModel):
             # than reject a payload that still carries a Fable default, swap each
             # Fable default to its safe non-Fable fallback (mirrors the runtime
             # gate_fable_model guard) so the stored record can't advertise Fable.
-            for model_field, effort_field in (
-                ("default_agent_model", "default_agent_reasoning_effort"),
-                ("default_agent_subagent_model", "default_agent_subagent_reasoning_effort"),
-                (
-                    "default_agent_routing_fast_model",
-                    "default_agent_routing_fast_reasoning_effort",
-                ),
-                (
-                    "default_agent_routing_balanced_model",
-                    "default_agent_routing_balanced_reasoning_effort",
-                ),
-                (
-                    "default_agent_routing_performance_model",
-                    "default_agent_routing_performance_reasoning_effort",
-                ),
-                ("default_reviewer_model", "default_reviewer_reasoning_effort"),
-                ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
-                ("default_thread_title_model", "default_thread_title_reasoning_effort"),
-            ):
+            for model_field, effort_field, _ in _MODEL_PAIRS:
                 model = getattr(self, model_field)
                 if model in FABLE_MODEL_IDS:
                     new_model, new_effort = gate_fable_model(
@@ -275,27 +202,32 @@ def _normalize_stale_model_pair(
     return model, effort
 
 
-_MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
-    ("default_agent_model", "default_agent_reasoning_effort"),
-    ("default_agent_subagent_model", "default_agent_subagent_reasoning_effort"),
-    ("default_agent_routing_fast_model", "default_agent_routing_fast_reasoning_effort"),
-    (
-        "default_agent_routing_balanced_model",
-        "default_agent_routing_balanced_reasoning_effort",
+# Each (model, reasoning effort) pair of fields, and the role validation errors name it by.
+_MODEL_PAIRS: tuple[tuple[str, str, str], ...] = (
+    ("default_agent_model", "default_agent_reasoning_effort", "agent"),
+    ("default_agent_subagent_model", "default_agent_subagent_reasoning_effort", "agent subagent"),
+    *(
+        (
+            f"default_agent_routing_{tier}_model",
+            f"default_agent_routing_{tier}_reasoning_effort",
+            f"agent routing {tier}",
+        )
+        for tier in ("fast", "balanced", "performance")
     ),
+    ("default_reviewer_model", "default_reviewer_reasoning_effort", "reviewer"),
     (
-        "default_agent_routing_performance_model",
-        "default_agent_routing_performance_reasoning_effort",
+        "default_reviewer_subagent_model",
+        "default_reviewer_subagent_reasoning_effort",
+        "reviewer subagent",
     ),
-    ("default_reviewer_model", "default_reviewer_reasoning_effort"),
-    ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
-    ("default_thread_title_model", "default_thread_title_reasoning_effort"),
+    ("default_thread_title_model", "default_thread_title_reasoning_effort", "thread title"),
+    ("review_shadow_model", "review_shadow_reasoning_effort", "shadow reviewer"),
 )
 
 
 def normalize_workspace_settings_for_response(settings: dict[str, Any]) -> dict[str, Any]:
     value = dict(settings)
-    for model_field, effort_field in _MODEL_PAIR_FIELDS:
+    for model_field, effort_field, _ in _MODEL_PAIRS:
         model = value.get(model_field)
         effort = value.get(effort_field)
         if isinstance(model, str):
@@ -355,6 +287,9 @@ def _default_settings() -> dict[str, Any]:
         "default_reviewer_subagent_reasoning_effort": fallback_effort,
         "default_thread_title_model": DEFAULT_THREAD_TITLE_MODEL,
         "default_thread_title_reasoning_effort": DEFAULT_THREAD_TITLE_REASONING_EFFORT,
+        "review_shadow_percent": 0,
+        "review_shadow_model": None,
+        "review_shadow_reasoning_effort": None,
         "updated_at": None,
     }
 
@@ -604,6 +539,14 @@ def _resolve_default_pair(model: object, effort: object) -> tuple[str, str]:
     return default_model_pair()
 
 
+class ReviewShadowArm(NamedTuple):
+    """The share of newly reviewed pull requests shadow-reviewed, and the model that does it."""
+
+    percent: int
+    model_id: str
+    reasoning_effort: str
+
+
 class WorkspaceSettings(Mapping[str, Any]):
     """The settings a run in one workspace sees, and the choices derived from them.
 
@@ -705,6 +648,23 @@ class WorkspaceSettings(Mapping[str, Any]):
         else:
             pair = DEFAULT_THREAD_TITLE_MODEL, DEFAULT_THREAD_TITLE_REASONING_EFFORT
         return _gate_openai_title_model(pair, gateway_enabled=self.effective_gateway_enabled)
+
+    @property
+    def review_shadow(self) -> ReviewShadowArm | None:
+        """The shadow review experiment, when it samples any pull requests on a usable model."""
+        percent = self.get("review_shadow_percent")
+        model = self.get("review_shadow_model")
+        effort = self.get("review_shadow_reasoning_effort")
+        if (
+            type(percent) is not int
+            or percent <= 0
+            or not isinstance(model, str)
+            or not isinstance(effort, str)
+            or model not in SUPPORTED_MODEL_IDS
+            or not model_supports_effort(model, effort)
+        ):
+            return None
+        return ReviewShadowArm(percent, model, effort)
 
     @property
     def review_trace_links_enabled(self) -> bool:

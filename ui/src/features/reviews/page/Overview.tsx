@@ -21,8 +21,12 @@ import { commentFacts } from "./commentFacts"
 
 const CLAMP_PX = 320
 
-/** `#123` and `owner/repo#123` in prose link to that pull request's review page here; code is left alone. */
-function linkPullRequestRefs(body: string, pr: PullRequestRef): string {
+/** Link GitHub references in prose without assuming they are pull requests. */
+function linkGithubRefs(
+  body: string,
+  pr: PullRequestRef,
+  pullRequests: ReadonlyArray<number>
+): string {
   return body
     .split(/(```[\s\S]*?```|`[^`\n]*`)/)
     .map((part, index) =>
@@ -39,7 +43,14 @@ function linkPullRequestRefs(body: string, pr: PullRequestRef): string {
             ) => {
               const target = owner && repo ? { owner, repo } : pr
               const text = owner ? `${owner}/${repo}#${number}` : `#${number}`
-              return `${lead}[${text}](/agents/reviews/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repo)}/${number})`
+              const sameRepo =
+                target.owner.toLowerCase() === pr.owner.toLowerCase() &&
+                target.repo.toLowerCase() === pr.repo.toLowerCase()
+              const href =
+                sameRepo && pullRequests.includes(Number(number))
+                  ? `/agents/reviews/${encodeURIComponent(pr.owner)}/${encodeURIComponent(pr.repo)}/${number}`
+                  : `https://github.com/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repo)}/issues/${number}`
+              return `${lead}[${text}](${href})`
             }
           )
     )
@@ -95,6 +106,7 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
       <Description
         pr={pr}
         body={detail.pr.body}
+        pullRequests={detail.pr.description_pull_requests ?? []}
         author={detail.pr.author}
         createdAt={detail.pr.created_at}
         labels={
@@ -138,12 +150,14 @@ function CommentFacts({ pr }: { pr: PullRequestRef }) {
 function Description({
   pr,
   body,
+  pullRequests,
   author,
   createdAt,
   labels,
 }: {
   pr: PullRequestRef
   body: string
+  pullRequests: ReadonlyArray<number>
   author: ReviewUserRef | null
   createdAt: string | null
   labels: ReactNode
@@ -203,7 +217,7 @@ function Description({
       >
         {body.trim() ? (
           <Markdown
-            content={linkPullRequestRefs(body, pr)}
+            content={linkGithubRefs(body, pr, pullRequests)}
             transformImageUrl={proxyImage}
             enlargeImages
           />
