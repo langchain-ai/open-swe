@@ -44,6 +44,7 @@ import type { SVGProps } from "react"
 import type { PullRequestSnapshot } from "@/features/agents/lib/api"
 import type {
   AgentSource,
+  AgentStatus,
   AgentSubagentSummary,
   AgentThread,
 } from "@/features/agents/lib/types"
@@ -260,6 +261,8 @@ function sidebarRowClassName({
 export function SidebarConversationRow({
   title,
   threadId,
+  status,
+  viewed,
   active,
   compact,
   onNavigate,
@@ -271,6 +274,8 @@ export function SidebarConversationRow({
 }: {
   title: string
   threadId: string
+  status: AgentStatus
+  viewed: boolean
   active: boolean
   compact: boolean
   onNavigate: () => void
@@ -340,16 +345,29 @@ export function SidebarConversationRow({
               aria-current={active ? "page" : undefined}
               onClick={onNavigate}
               className={cn(
-                "flex items-center rounded-xl px-space-2 text-secondary transition-colors group-focus-within/row:bg-surface-level-3 group-focus-within/row:pr-14 group-hover/row:bg-surface-level-3 group-hover/row:pr-14 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+                "flex items-center rounded-xl py-0 pr-7 pl-space-2 text-secondary transition-colors group-focus-within/row:bg-surface-level-3 group-focus-within/row:pr-20 group-hover/row:bg-surface-level-3 group-hover/row:pr-20 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
                 compact ? "h-7" : "h-8",
                 active && "bg-surface-level-3"
               )}
             >
               <SidebarRowTitle title={title} marquee={marquee} />
+              <span className="absolute inset-y-0 right-2 flex w-3.5 shrink-0 items-center justify-center">
+                {status === "running" ? (
+                  <RunningIndicator label="Chat running" />
+                ) : !viewed ? (
+                  <span
+                    role="img"
+                    aria-label="Unread chat"
+                    className="size-2 rounded-full bg-brand"
+                  />
+                ) : status === "error" ? (
+                  <ErrorIndicator label="Chat error" />
+                ) : null}
+              </span>
             </Link>
           )}
           {draft === null && (
-            <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 rounded-xl bg-surface-level-3 opacity-0 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100">
+            <span className="pointer-events-none absolute inset-y-0 right-7 flex items-center gap-0.5 rounded-xl bg-surface-level-3 opacity-0 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100">
               <IconButton
                 icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
                 label={pinned ? "Unpin chat" : "Pin chat"}

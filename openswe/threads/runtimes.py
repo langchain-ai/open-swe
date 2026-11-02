@@ -185,6 +185,12 @@ class _SdkThreads:
         thread = await self.indexed(thread_id)
         return "idle" if thread is None else thread.status
 
+    async def latest_run(self, thread_id: str) -> MdaRun | None:
+        runs = await self.client.runs.list(thread_id, limit=1)
+        if runs and runs[0]["status"] in {"pending", "interrupted"}:
+            runs = await self.client.runs.list(thread_id, status="running", limit=1) or runs
+        return MdaRun.model_validate(runs[0]) if runs else None
+
     async def run_error(self, thread_id: str) -> str | None:
         """Why the thread's latest run here failed, or ``None`` when it recorded no error."""
         thread = await self.get(thread_id)
@@ -527,6 +533,18 @@ class _MdaThreads(_SdkThreads):
         return next(
             (thread for raw in found if (thread := IndexedThread.from_agent_server(raw))), None
         )
+
+    async def latest_run(self, thread_id: str) -> MdaRun | None:
+        response = await self.reads.get(f"/threads/{thread_id}/runs", params={"limit": 1})
+        response.raise_for_status()
+        runs = _runs.validate_python(response.json())
+        if runs and runs[0].status in {"pending", "interrupted"}:
+            response = await self.reads.get(
+                f"/threads/{thread_id}/runs", params={"status": "running", "limit": 1}
+            )
+            response.raise_for_status()
+            runs = _runs.validate_python(response.json()) or runs
+        return runs[0] if runs else None
 
     async def state(self, thread_id: str) -> dict[str, JsonValue]:
         response = await self.reads.get(f"/threads/{thread_id}/state")
