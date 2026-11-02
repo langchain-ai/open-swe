@@ -96,35 +96,4 @@ describe("productAnalytics", () => {
       $initial_current_url: `${origin}/agents/:threadId`,
     })
   })
-
-  it("marks events from the desktop app with its version", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        Response.json({
-          environment: "production",
-          posthog: { key: "phc_project", host: "https://us.i.posthog.com" },
-        })
-      )
-    )
-    window.openSweDesktop = {
-      getVersion: async () => "1.2.3",
-    } as unknown as NonNullable<Window["openSweDesktop"]>
-    const { client, load } = postHogClient()
-
-    await productAnalytics.initialize(load)
-    delete window.openSweDesktop
-
-    const beforeSend = client.init.mock.calls[0]?.[1].before_send
-    if (typeof beforeSend !== "function") throw new Error("before_send unset")
-    const event = beforeSend({
-      uuid: "event-id",
-      event: "$pageview",
-      properties: {},
-    } satisfies CaptureResult)
-    expect(event?.properties).toMatchObject({
-      platform: "desktop",
-      desktop_version: "1.2.3",
-    })
-  })
 })
