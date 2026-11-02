@@ -220,6 +220,7 @@ class ResumeAgentFn(Protocol):
         user_id: str,
         context: Mapping[str, object],
         binding: ChannelBinding,
+        metadata: Mapping[str, JsonValue] | None = None,
     ) -> StartedIngressRun: ...
 
 
@@ -527,10 +528,13 @@ async def _start_event_run(
             handler_resume_target=handler_resume_target,
             handler_threads=handler_threads,
         )
+        run_metadata: dict[str, Mapping[str, JsonValue]] = {}
         if "source_thread_key" in target:
             handler_target = cast("HandlerThreadTarget", target)
             source_thread_key = handler_target["source_thread_key"]
             binding["reply"] = handler_target["reply"]
+            # The resumed run is the one Stop and the next answer look for.
+            run_metadata["metadata"] = handler_target["run_metadata"]
         resume = resume_agent or resume_ingress_agent
         started = await resume(
             thread_id=target["thread_id"],
@@ -541,6 +545,7 @@ async def _start_event_run(
             user_id=user_id,
             context=context,
             binding=binding,
+            **run_metadata,
         )
         return started, source_thread_key
     _assert_never(event)
