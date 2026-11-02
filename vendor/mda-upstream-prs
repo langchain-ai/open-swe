@@ -4,8 +4,8 @@
 1135 7d845bdd9dfe7d0b107d3cda7974ca9dcd96f00c feat(channels): keep a Linear agent session alive while its run works
 1136 b5477b73cc1167d9b0f34908d27b1d3593a074bf fix(channels): tell a Linear session at once when its run can't start
 1143 d031eb7d3f3b155698cdcee1a92bceb42042f795 feat(channels): let a GitHub channel handle its own App's events
-1147 e365dc2bf6dc1d125336666e81befeb2a7556edf feat(channels): let handlers start runs on threads they choose
+1147 391ae5846aad7c385beb6c80eb5d663e061d00d8 feat(channels): let handlers start runs on threads they choose
 1149 3cc46489733aecd961883d0ba05fe42bd57ec18b feat(channels): answer the provider first, then ask the channel's handler
-1171 c02c045ff9a9cc78819569c410fe4598095fd1cd feat(channels): let Slack handlers choose each run's thread
+1171 16543f03e4dacce70a9a3a5aeb2a1eeaab9357cc feat(channels): let Slack handlers choose each run's thread
 1174 b3da45216c4885e4831c0f8a0a722364e86f7884 feat(channels): handle every GitHub action of handled events, and installation events
-1175 10f17a5d7e9ab520ac7e8a9090016bda9d79284c feat(channels): let Slack handlers take edits, deletions and reactions
+1175 5a01751f8b3b6d7797ff6abe72d72169085355e1 feat(channels): let Slack handlers take edits, deletions and reactions
