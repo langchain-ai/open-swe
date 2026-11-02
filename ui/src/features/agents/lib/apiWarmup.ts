@@ -35,7 +35,7 @@ function warmApiRequests(
       const prefs = raw ? JSON.parse(raw) : null
       const filters = prefs?.filters
       repoMode = prefs?.organize !== "list"
-      sortByCreated = prefs?.sortChats !== "updated"
+      sortByCreated = repoMode && prefs?.sortChats !== "updated"
       if (filters) {
         includeAutomations =
           filters.includeAutomations === true ||
