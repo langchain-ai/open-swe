@@ -7,9 +7,10 @@ import logging
 import re
 import secrets
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, Self
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlencode, urlparse
 from uuid import UUID
 
 import httpx2
@@ -343,6 +344,7 @@ def issue_state(
     provider: Literal["github", "langsmith"] = "github",
     encrypted_code_verifier: str | None = None,
     redirect_uri: str | None = None,
+    browser_resume: str | None = None,
 ) -> str:
     now = int(time.time())
     payload: dict[str, Any] = {
@@ -351,6 +353,8 @@ def issue_state(
         "iat": now,
         "exp": now + STATE_TTL_SECONDS,
     }
+    if browser_resume is not None:
+        payload["browser_resume"] = browser_resume
     if provider == "langsmith":
         payload.update(
             provider=provider,
@@ -531,18 +535,91 @@ def build_settings_url() -> str | None:
     return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
 
 
+@dataclass(frozen=True)
+class BrowserLogin:
+    path: str
+    query: str
+
+    @classmethod
+    def from_request(cls, request: HTTPConnection) -> BrowserLogin | None:
+        if (
+            request.scope["type"] != "http"
+            or request.scope.get("method") != "GET"
+            or "text/html" not in request.headers.get("accept", "")
+            or request.headers.get("sec-fetch-dest", "document") != "document"
+        ):
+            return None
+        path = request.url.path
+        if not path.startswith("/dashboard/api/") or path.startswith("/dashboard/api/auth/"):
+            return None
+        return cls(path, request.url.query)
+
+    def login_required(self) -> HTTPException:
+        now = int(time.time())
+        resume = jwt.encode(
+            {
+                "aud": "dashboard-browser-login",
+                "path": self.path,
+                "query": self.query,
+                "iat": now,
+                "exp": now + STATE_TTL_SECONDS,
+            },
+            _secret(),
+            algorithm=JWT_ALG,
+        )
+        return HTTPException(
+            302,
+            "Sign in to continue",
+            headers={
+                "Location": f"{dashboard_api_base_url()}/dashboard/api/auth/login?"
+                + urlencode({"resume": resume}),
+                "Cache-Control": "no-store",
+                "Referrer-Policy": "no-referrer",
+            },
+        )
+
+    @classmethod
+    def destination(cls, resume: str) -> str:
+        try:
+            payload = jwt.decode(
+                resume,
+                _secret(),
+                algorithms=[JWT_ALG],
+                audience="dashboard-browser-login",
+                options={"require": ["exp", "path", "query"]},
+            )
+        except jwt.PyJWTError as exc:
+            raise HTTPException(
+                400, "Login link expired or invalid — please reopen the original link"
+            ) from exc
+        path, query = payload["path"], payload["query"]
+        if (
+            not isinstance(path, str)
+            or not isinstance(query, str)
+            or not path.startswith("/dashboard/api/")
+            or path.startswith("/dashboard/api/auth/")
+        ):
+            raise HTTPException(400, "Invalid login destination")
+        return f"{dashboard_api_base_url()}{path}" + (f"?{query}" if query else "")
+
+
 async def require_session(
     request: HTTPConnection, _cookie: str | None = Depends(SESSION_COOKIE)
 ) -> dict[str, Any]:
-    token = request.cookies.get(COOKIE_NAME)
-    if not token:
-        raise HTTPException(401, "not authenticated")
-    session = decode_session(token)
     from openswe.dashboard.principal import DashboardPrincipal
 
-    principal = DashboardPrincipal.from_session(session)
-    principal.authorize_path(request.url.path, request.scope.get("method", "GET"))
-    await principal.authorize()
+    try:
+        token = request.cookies.get(COOKIE_NAME)
+        if not token:
+            raise HTTPException(401, "not authenticated")
+        session = decode_session(token)
+        principal = DashboardPrincipal.from_session(session)
+        principal.authorize_path(request.url.path, request.scope.get("method", "GET"))
+        await principal.authorize()
+    except HTTPException as exc:
+        if exc.status_code == 401 and (navigation := BrowserLogin.from_request(request)):
+            raise navigation.login_required() from exc
+        raise
     bind_audit_session(request, session)
     return session
 
