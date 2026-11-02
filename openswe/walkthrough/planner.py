@@ -234,7 +234,7 @@ class PlanWorkspace:
             title=trimmed,
             explanation=explanation.strip()[:MAX_EXPLANATION_CHARS],
             lines=lines,
-            notes=LineNote.placed(notes or [], lines),
+            notes=LineNote.placed(notes or [], await self.checkout.find_notes(lines, notes or [])),
             code=await self.checkout.render(lines),
         )
         number = 0

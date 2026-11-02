@@ -16,7 +16,7 @@ from typing import Self
 
 import httpx2
 from deepagents.backends.protocol import SandboxBackendProtocol
-from pydantic import JsonValue
+from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_status import PullRequestClient
@@ -24,13 +24,15 @@ from openswe.sandboxes.paths import resolve_checkout_dir, resolve_sandbox_work_d
 from openswe.sandboxes.repo_prep import BLOBLESS_CLONE_ARGS
 from openswe.sandboxes.scripts import SandboxScript, SandboxScriptError
 from openswe.walkthrough.diff import Carry, DiffIndex, LineMaps
-from openswe.walkthrough.lines import LineSet
+from openswe.walkthrough.lines import LinePoint, LineSet, Sign
+from openswe.walkthrough.plan import FileNote
 
 GIT_TIMEOUT_SECONDS = 300
 HEAD_REF = "refs/walkthrough/head"
 MERGE_BASE_REF = "refs/walkthrough/merge-base"
 _DIFF = "git -c core.quotePath=false diff --no-color --no-ext-diff --no-renames --full-index"
 _REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_FOUND = TypeAdapter(list[list[tuple[Sign, int]]])
 
 
 class CheckoutError(RuntimeError):
@@ -164,6 +166,28 @@ class PinnedCheckout:
         if not isinstance(codes, list) or not all(isinstance(code, str) for code in codes):
             raise CheckoutError("the sandbox rendered no chunks")
         return [str(code) for code in codes]
+
+    async def find_notes(self, lines: LineSet, notes: Sequence[FileNote]) -> list[list[LinePoint]]:
+        """Where each note's ``text`` matches among ``lines``: the last line of every match."""
+        if not notes:
+            return []
+        found = await self._ask(
+            {
+                "op": "locate",
+                "lines": lines.dump(),
+                "find": [{"path": note.path, "text": note.text} for note in notes],
+            }
+        )
+        try:
+            matches = _FOUND.validate_python(found.get("found"))
+        except ValidationError as exc:
+            raise CheckoutError("the sandbox located no notes") from exc
+        if len(matches) != len(notes):
+            raise CheckoutError("the sandbox located no notes")
+        return [
+            [LinePoint(path=note.path, sign=sign, lineno=lineno) for sign, lineno in points]
+            for note, points in zip(notes, matches, strict=True)
+        ]
 
     async def wordless(self, sets: Sequence[LineSet]) -> list[bool]:
         """Which of ``sets`` hold only braces, punctuation or blank lines."""

@@ -56,10 +56,10 @@ class FileHunks(BaseModel):
 
 
 class FileNote(BaseModel):
-    """A note on one tricky changed line of a chunk, named like ``+12`` or ``-40``."""
+    """A note on the chunk's changed lines in ``path`` whose text ``text`` matches exactly once."""
 
     path: str
-    line: str
+    text: str
     note: str
 
 
@@ -68,18 +68,27 @@ class LineNote(BaseModel):
     note: str
 
     @classmethod
-    def placed(cls, notes: list[FileNote], lines: LineSet) -> list[Self]:
-        """``notes`` on changed lines of ``lines``, trimmed; one note per line."""
+    def placed(cls, notes: list[FileNote], matches: list[list[LinePoint]]) -> list[Self]:
+        """``notes``, each at the last line its one match covers, trimmed; one note per line."""
         if len(notes) > MAX_NOTES_PER_CHUNK:
             raise RangeError(f"a chunk takes at most {MAX_NOTES_PER_CHUNK} notes")
         placed: dict[LinePoint, Self] = {}
-        for note in notes:
+        for note, found in zip(notes, matches, strict=True):
             text = note.note.strip()[:MAX_NOTE_CHARS]
             if not text:
-                raise RangeError(f"the note on `{note.path}` {note.line} is empty")
-            point = find_line(note.path, note.line, lines)
+                raise RangeError(f"a note on `{note.path}` is empty")
+            if not found:
+                raise RangeError(
+                    f"`{note.path}` has no changed line in this chunk matching {note.text!r}"
+                )
+            if len(found) > 1:
+                raise RangeError(
+                    f"{note.text!r} matches {len(found)} places in `{note.path}`; "
+                    "include more of the surrounding lines to make it unique"
+                )
+            point = found[0]
             if point in placed:
-                raise RangeError(f"`{note.path}` {note.line} already has a note")
+                raise RangeError(f"`{note.path}` {point.name} already has a note")
             placed[point] = cls(at=point, note=text)
         return list(placed.values())
 
