@@ -152,7 +152,9 @@ class SlackInteractionEvent:
 
     Or a submitted modal it opened, as Trigger Server forwards it: one that
     answers no decision the thread waits on. A click on a decision's buttons
-    resumes the run instead.
+    resumes the run instead. In a code channel, also any element's action in
+    a Block Kit view your agent set on it, which has ``view_id`` and no
+    thread: it belongs to the whole channel.
     """
 
     key: Literal["interaction"] = "interaction"
@@ -162,15 +164,20 @@ class SlackInteractionEvent:
     """The button's ``action_id``, or the modal's ``callback_id``."""
     channel_id: str
     """The Slack conversation the message is in."""
-    thread_ts: str
-    """The timestamp of its thread's first message."""
+    thread_ts: str | None
+    """The timestamp of its thread's first message; ``None`` for a click in a
+    code channel's view."""
     payload: dict[str, JsonValue]
     """Slack's interaction payload, such as a ``block_actions`` one, with its
     ``response_url`` and ``actions``, without its verification ``token``."""
     value: JsonValue = None
     """The button's ``value``, or the modal's ``state.values``."""
     message_ts: str | None = None
-    """The timestamp of the message holding the button; ``None`` for a modal."""
+    """The timestamp of the message holding the button; ``None`` for a modal
+    or a view."""
+    view_id: str | None = None
+    """The code channel view the click was in, as
+    ``agents.conversations.setView`` returned it; ``None`` elsewhere."""
     user_id: str | None = None
     """The Slack user who clicked, as Slack's payload says."""
     actor: SlackActor | None = None
@@ -336,6 +343,8 @@ class SlackEndpointFields(TypedDict, total=False):
     """Whether a reaction was removed."""
     value: JsonValue
     """An interaction's button ``value`` or modal ``state.values``."""
+    viewId: str
+    """The code channel view an interaction was in; absent elsewhere."""
     codeChannel: bool
     """``True`` when it happened inside a Slack code channel; absent otherwise."""
 
@@ -403,8 +412,11 @@ def _interaction_endpoint_fields(event: SlackInteractionEvent) -> SlackEndpointF
     fields: SlackEndpointFields = {
         "actionId": event.action_id,
         "channelId": event.channel_id,
-        "threadTs": event.thread_ts,
     }
+    if event.thread_ts is not None:
+        fields["threadTs"] = event.thread_ts
+    if event.view_id is not None:
+        fields["viewId"] = event.view_id
     if event.value is not None:
         fields["value"] = event.value
     if event.message_ts is not None:
@@ -689,12 +701,17 @@ def slack_activity_event(
     )
 
 
+_CODE_CHANNEL_VIEW = "code_channel_view"
+"""The ``container.type`` of a click in a code channel's Block Kit view."""
+
+
 def slack_interaction_event(
     event: TriggerChannelUserPromptResponseEvent, actor: ChannelActor | None = None
 ) -> SlackInteractionEvent | None:
     """The interaction a forwarded click or modal submission carries, as a handler reads it.
 
-    ``None`` without the conversation it happened in.
+    ``None`` without the conversation it happened in: a channel, and a thread
+    unless the click was in a code channel's view, which is the channel's.
     """
     raw = event.get("raw_event")
     raw = raw if isinstance(raw, Mapping) else {}
@@ -717,7 +734,13 @@ def slack_interaction_event(
         or _text(message.get("thread_ts"))
         or message_ts
     )
-    if channel_id is None or thread_ts is None:
+    code_channel = address.get("code_channel") is True
+    view_id = (
+        _text(container.get("view_id"))
+        if code_channel and container.get("type") == _CODE_CHANNEL_VIEW
+        else None
+    )
+    if channel_id is None or (thread_ts is None and view_id is None):
         return None
     interaction = event["interaction"]
     return SlackInteractionEvent(
@@ -728,6 +751,7 @@ def slack_interaction_event(
         channel_id=channel_id,
         message_ts=message_ts,
         thread_ts=thread_ts,
+        view_id=view_id,
         # Slack's legacy verification token isn't the handler's to have.
         payload=cast(
             "dict[str, JsonValue]",
@@ -735,7 +759,7 @@ def slack_interaction_event(
         ),
         # The actor of a click in Slack is a Slack user.
         actor=actor if isinstance(actor, SlackActor) else None,
-        code_channel=address.get("code_channel") is True,
+        code_channel=code_channel,
     )
 
 

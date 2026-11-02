@@ -874,6 +874,10 @@ MDA does only this:
   Stop cancels the conversation's runs.
 - **Handlers see it.** A handler's event has `code_channel` set (`True` inside a
   code channel), and an endpoint is sent `codeChannel: true`.
+- **Clicks in views.** Any element's action in a Block Kit view your agent set
+  on the channel (`agents.conversations.setView`) reaches the `interaction`
+  handler with `view_id` and no `thread_ts`: it belongs to the whole channel,
+  so its run is the channel's conversation's.
 
 Everything else the channel shows, the agent's tools do with their own Slack
 client: the context bar, view tabs, renaming the session, opening a channel or
