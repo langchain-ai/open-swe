@@ -110,8 +110,7 @@ SEVERITY_ORDER: dict[Severity, int] = {
     "critical": 3,
 }
 
-# Surface states only ever move forward, so normalization of a legacy record can
-# reconcile contradictory leftovers by taking the furthest-along state.
+# Normalize contradictory legacy records by taking the furthest-along state.
 SURFACE_STATE_ORDER: dict[SurfaceState, int] = {
     "not_surfaced": 0,
     "surfaced": 1,

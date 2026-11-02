@@ -40,6 +40,7 @@ from openswe.review.findings import (
     findings_by_thread,
     is_thread_resolved,
 )
+from openswe.review.reconcile import reconcile_linked_findings
 from openswe.review.session import PullRequestState, ReviewSession, now_ms
 from openswe.review_scout.launch import ReviewScoutTarget, ScoutProgress
 from openswe.thread_ids import reviewer_thread_id
@@ -691,7 +692,7 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     The reviewer graph is optional — a PR it has never run on still renders with
     its GitHub-sourced details, checks and diff, and no findings.
     """
-    async with GitHubClient.as_app() as github:
+    async with GitHubClient.as_app(owner, repo) as github:
         repository = github.repo(owner, repo)
         pr_payload = await repository.pull_request(pr_number).pull(rendered_body=True)
         details = _serialize_pr_details(pr_payload)
@@ -700,9 +701,11 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         ).pull_request_numbers(owner, repo)
 
         thread = await _reviewer_thread_for(owner, repo, pr_number)
-        stored = (
-            (await _thread_findings([thread])).get(thread.get("thread_id"), []) if thread else []
-        )
+        stored = (await _thread_findings([thread])).get(thread["thread_id"], []) if thread else []
+        if thread:
+            stored = await reconcile_linked_findings(
+                thread["thread_id"], repository.pull_request(pr_number), findings=stored
+            )
         summary = _thread_review_summary(thread, stored) if thread else None
         metadata = thread_metadata(thread) if thread else {}
         if not summary:
