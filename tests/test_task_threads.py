@@ -97,6 +97,33 @@ async def test_worker_model_overrides_and_defaults(monkeypatch: pytest.MonkeyPat
         await service.model_choice("default", metadata, None, "none")
 
 
+@pytest.mark.parametrize(
+    ("coordinator", "channel"),
+    [({"channel": "slack"}, "slack"), ({}, None)],
+    ids=["channel-conversation", "backend-thread"],
+)
+def test_a_channel_conversations_worker_belongs_to_its_channel(
+    coordinator: dict[str, JsonValue], channel: str | None
+) -> None:
+    """MDA creates the worker as the conversation's own, so the backend acts on it there."""
+    current_task = task()
+    delegation = store.TaskDelegation(
+        worker_thread_id=str(uuid4()),
+        task_id=current_task.id,
+        coordinator_thread_id=COORDINATOR,
+        instructions="Fix login",
+        model=MODEL,
+        effort="low",
+    )
+    metadata = ThreadMetadata.model_validate(
+        {"owner_type": "user", "owner_login": OWNER, "sandbox_id": "shared", **coordinator}
+    )
+
+    worker = service._worker_metadata(current_task, delegation, metadata)
+
+    assert worker.get("channel") == channel
+
+
 def task() -> store.Task:
     workspace = WorkspaceRow(slug="default", name="Default")
     task = store.Task(
@@ -366,6 +393,8 @@ async def test_task_owner_id_survives_rename_and_rejects_reassigned_login(
     )
     monkeypatch.setattr(User, "get", AsyncMock(return_value=owner))
     client.metadata[COORDINATOR]["visibility"] = "private"
+    config = await service.recipient_config(COORDINATOR)
+    assert config["github_login"] == "renamed-owner"
     assert (
         await service.authorized_metadata(service.Actor(COORDINATOR, "renamed-owner"))
     ).owner_user_id == owner_id
@@ -435,10 +464,12 @@ async def test_task_wakeup_preserves_current_model_selection(
         model="anthropic:claude-opus-5-5",
         effort="high",
         model_selection=selection,
+        experience="agent_workspace",
     )
 
     config = await service.recipient_config(COORDINATOR)
 
+    assert config["experience"] == "coding"
     assert config["model_selection"] == selection
     if selection == "explicit":
         assert config["agent_model_id"] == "anthropic:claude-opus-5-5"
@@ -456,6 +487,7 @@ async def test_desktop_worker_cannot_be_shared(
         sandbox_id="bridge:desktop",
         sandbox_kind="bridge",
         sandbox_bridge_client="desktop",
+        experience="agent_workspace",
     )
     current_task = task()
     delegation = store.TaskDelegation(
@@ -473,6 +505,7 @@ async def test_desktop_worker_cannot_be_shared(
         current_task, delegation, ThreadMetadata.model_validate(client.metadata[COORDINATOR])
     )
 
+    assert client.metadata[delegation.worker_thread_id]["experience"] == "agent_workspace"
     with pytest.raises(HTTPException, match="owner's machine") as error:
         await handlers.share_thread_with_workspace(delegation.worker_thread_id, OWNER)
     assert error.value.status_code == 409
@@ -975,3 +1008,45 @@ async def test_concurrent_registrations_of_one_launch_make_one_worker(
     assert delegation.worker_thread_id == registered[0]["worker_thread_id"]
     replayed = await service.authorize_async_worker(actor, "launch", "Implement login fix")
     assert replayed == registered[0]
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.parametrize("experience", ["coding", "agent_workspace"])
+async def test_langsmith_task_workers_inherit_uuid_and_local_bridge_without_github(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch, experience: str
+) -> None:
+    from openswe.dashboard.langsmith_login import LangSmithLogin
+
+    grant = AsyncMock(return_value="langsmith-token")
+    monkeypatch.setattr(LangSmithLogin, "access_token", grant)
+    owner = client.owner
+    owner.identities = [UserIdentity(provider="langsmith", external_id="ls-subject")]
+    subject = f"user:{owner.id}"
+    client.metadata[COORDINATOR].update(
+        owner_login=subject,
+        owner_user_id=str(owner.id),
+        visibility="private",
+        experience=experience,
+        repo_explicitly_none=True,
+        sandbox_id="bridge:local-task",
+        sandbox_kind="bridge",
+        sandbox_bridge_client="desktop",
+    )
+    monkeypatch.setattr(BridgeStore, "is_connected", AsyncMock(return_value=True))
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    actor = service.Actor(COORDINATOR, subject)
+    worker = str((await launch(actor, "local-worker", "Research"))["worker_thread_id"])
+    config = await service.recipient_config(worker)
+    assert config["user_id"] == str(owner.id)
+    assert config["auth_provider"] == "langsmith"
+    assert config["experience"] == experience
+    assert "github_login" not in config
+    assert client.metadata[worker]["owner_user_id"] == str(owner.id)
+    assert client.metadata[worker]["sandbox_id"] == "bridge:local-task"
+    await service.authorized_metadata(service.Actor(worker, subject))
+    service.enforce_github_login_gate.assert_not_awaited()
+    grant.return_value = None
+    with pytest.raises(HTTPException, match="LangSmith login expired"):
+        await service.recipient_config(worker)
+    with pytest.raises(HTTPException, match="LangSmith login expired"):
+        await service.authorized_metadata(service.Actor(worker, subject))

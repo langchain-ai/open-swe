@@ -14,3 +14,7 @@ Place one chunk of unplanned hunks in the walkthrough plan, and optionally send 
   Leave it out to reuse the first replaced chunk's position, or add it last when not replacing.
 
 Returns the chunk's number and the plan as it now stands.
+
+In a flagged implementation thread, pass `pr_url` with the linked PR’s canonical URL to each planning tool.
+Call this tool with only `pr_url` first to pin the latest head and get the unplanned hunks and shared planning guidance without placing a chunk.
+The result includes `complete` and `head_sha`; finish planning the latest pushed head before delivering the PR.

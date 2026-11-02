@@ -13,7 +13,7 @@ from openswe.utils.html_artifact import (
 # the Linux sandbox to run. subprocess.run(shell=True) sends it through cmd.exe on
 # Windows, which has neither base64 nor python3 and does not treat ' as a quote.
 # Deliberately keyed on the platform rather than on tool availability, so a POSIX
-# CI box missing python3 fails loudly instead of quietly skipping.
+# CI sandbox missing python3 fails loudly instead of quietly skipping.
 _requires_posix_shell = pytest.mark.skipif(
     sys.platform == "win32",
     reason="sandbox_wrap_command is a POSIX shell pipeline",

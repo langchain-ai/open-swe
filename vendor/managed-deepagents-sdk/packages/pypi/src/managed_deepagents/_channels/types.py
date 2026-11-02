@@ -108,7 +108,10 @@ ChannelReply: TypeAlias = Literal["auto", "none"]
 ``"auto"`` (the default) posts the agent's last reply once the run succeeds,
 and ``"none"`` leaves replying to the agent, through ``runtime.channel.post``
 or its own tools. Either way the channel keeps its other updates, such as
-Slack's status and reactions."""
+Slack's status and reactions.
+
+Experimental: this may change in a minor release.
+"""
 
 CHANNEL_REPLIES: frozenset[ChannelReply] = frozenset({"auto", "none"})
 """Every ``ChannelReply``, for channels that check one."""
@@ -139,7 +142,10 @@ class PostedChannelMessage(PostedChannelMessageRequired, total=False):
 
 
 class PostedChannelThread(PostedChannelMessage):
-    """A post that started a new provider thread."""
+    """A post that started a new provider thread.
+
+    Experimental: this may change in a minor release.
+    """
 
     thread_id: str
     """The LangGraph thread replies in the new provider thread run on."""

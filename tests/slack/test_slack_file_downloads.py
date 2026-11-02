@@ -142,7 +142,7 @@ async def test_download_slack_file_closes_redirect_before_blocking_private_host(
 async def test_slack_files_wait_for_the_runs_sandbox_and_land_there_once(
     monkeypatch, tmp_path
 ) -> None:
-    """The webhook only records the files: MDA creates the thread's box when its run starts."""
+    """The webhook only records the files: MDA creates the thread's sandbox when its run starts."""
     from deepagents.backends.protocol import FileUploadResponse
 
     from openswe.sandboxes import state

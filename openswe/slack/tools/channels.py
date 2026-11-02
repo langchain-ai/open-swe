@@ -10,6 +10,7 @@ from openswe.schedules.delivery import CreatorDelivery, DeliveryRefused
 from openswe.slack.availability import SlackUserInfo
 from openswe.slack.blocks import block_payload
 from openswe.slack.cards import origin_footer, run_slack_location
+from openswe.slack.channels import SlackChannel as ChannelDirectory
 from openswe.slack.client import (
     SLACK_USER_ID_RE,
     convert_mentions_to_slack_format,
@@ -108,6 +109,7 @@ async def slack_list_channels(cursor: str | None = None) -> SlackChannelList | S
     next_cursor = metadata.get("next_cursor", "") if isinstance(metadata, dict) else None
     if not isinstance(next_cursor, str):
         return {"success": False, "error": "invalid_slack_response"}
+    await ChannelDirectory.save_all(*({**channel, "is_member": True} for channel in raw_channels))
     return {"success": True, "channels": channels, "next_cursor": next_cursor}
 
 

@@ -8,16 +8,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from deepagents.backends.protocol import ExecuteResponse
-from runtime_api.loop import Prepare
 
-from openswe.agent_api.git_metadata import TurnGitMetadata
-from openswe.agent_api.graph import RunSession
+from openswe.agent_api.run_sandbox import RunSandbox
 from openswe.github.sandbox_access import SandboxGitHubAccess
 from openswe.sandboxes.lifecycle import _connect_existing_sandbox
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy, SandboxUnreachableError
-from openswe.sandboxes.tool_runtime import ToolSurface
 
 
 async def _connect(backend: MagicMock, thread_id: str) -> object:
@@ -102,7 +99,7 @@ async def test_a_failed_proxy_does_not_leave_the_identity_write_running() -> Non
         await _connect(backend, "thread-proxy-fails")
 
     # Cancelled with the sandbox, rather than left behind to report into a run
-    # that has already given up on the box.
+    # that has already given up on the sandbox.
     assert not release.is_set()
 
 
@@ -184,21 +181,13 @@ async def test_identity_is_reset_each_run_in_the_first_command(
         assert "could not lock config file" not in result.output
         assert (await run("printf still-usable")).output == "still-usable"
 
-        session = RunSession(
-            ToolSurface(), {"configurable": {"thread_id": "thread-reset"}}, None, started_here=True
-        )
         monkeypatch.setitem(
             SANDBOX_BACKENDS, "thread-reset", SandboxBackendProxy(backend, thread_id="thread-reset")
         )
-        monkeypatch.setattr(session, "bind_sandbox", AsyncMock())
-        monkeypatch.setattr(
-            TurnGitMetadata,
-            "begin",
-            AsyncMock(side_effect=AssertionError("baseline must be deferred")),
-        )
         backend.reset_git_identity()
-        prepared = await session.prepare(Prepare())
-        assert prepared.update["git_trace_baseline"] is None
+        await RunSandbox(
+            {"configurable": {"thread_id": "thread-reset"}}, reviews=False
+        ).finish_git_identity()
 
         (home / ".gitconfig.lock").unlink()
         await _connect_existing_sandbox("thread-reset", cached=backend, sandbox_id=backend.id)

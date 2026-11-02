@@ -39,6 +39,9 @@ test.describe("Open SWE full flow", () => {
         .split("/")
         .pop() ?? "";
 
+    // The run is worked out once as it starts: every other call, its preparation,
+    // model calls and tool calls included, is answered from its token, as by a
+    // replica that never served the run.
     expect(await plannedCalls(page, threadId)).toEqual(["start"]);
 
     // Follow the link → the PR page shows what GitHub would show.

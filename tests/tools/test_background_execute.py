@@ -776,7 +776,7 @@ async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
 
 
 async def test_reattach_reconciles_tracked_tasks() -> None:
-    """A reconnect, to the box the thread kept or to the one MDA opened after, finds lost tasks."""
+    """A reconnect, to the sandbox the thread kept or to the one MDA opened after, finds lost tasks."""
     import asyncio
 
     from openswe.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread

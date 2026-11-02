@@ -327,9 +327,9 @@ def _search(query: str) -> str:
 async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The graph's prompt and the run's shared one each end in an Anthropic cache
-    breakpoint ahead of the skills and the thread's own part, the tools take none, and a
-    fallback to another provider carries none."""
+    """The run's shared prompt and the workspace's each end in an Anthropic cache
+    breakpoint ahead of the skills and the thread's own part, keeping a request within
+    four, the tools take none, and a fallback to another provider carries none."""
     built: dict[str, BaseChatModel] = {"anthropic:opus": _ANTHROPIC, "openai:gpt": _OPENAI}
     monkeypatch.setattr(
         "rt.middleware.build_model", lambda spec, *, use_gateway: built[spec.model_id]
@@ -354,6 +354,7 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
     for thread in ("First thread's part", "Next thread's part"):
         call = ModelCall(
             system_prompt="Every thread's prompt",
+            workspace_prompt="The workspace's prompt",
             thread_prompt=thread,
             model=ModelSpec(model_id="anthropic:opus", kwargs={}),
             fallback=ModelSpec(model_id="openai:gpt", kwargs={}),
@@ -372,16 +373,17 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
     cached = {"type": "ephemeral", "ttl": "1h"}
     first, first_fallback, second, _ = sent
     assert cast(SystemMessage, first.system_message).content == [
-        {"type": "text", "text": "The graph's own instructions", "cache_control": cached},
+        {"type": "text", "text": "The graph's own instructions"},
         {"type": "text", "text": "Every thread's prompt", "cache_control": cached},
+        {"type": "text", "text": "The workspace's prompt", "cache_control": cached},
         {"type": "text", "text": "\n\nSkills"},
         {"type": "text", "text": "First thread's part", "cache_control": cached},
     ]
     assert first.model_settings == {"cache_control": cached}
     assert first.tools == [_search]
     second_blocks = cast(SystemMessage, second.system_message).content
-    assert second_blocks[:3] == cast(SystemMessage, first.system_message).content[:3]
-    assert second_blocks[3] == {
+    assert second_blocks[:4] == cast(SystemMessage, first.system_message).content[:4]
+    assert second_blocks[4] == {
         "type": "text",
         "text": "Next thread's part",
         "cache_control": cached,
@@ -389,6 +391,7 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
     assert cast(SystemMessage, first_fallback.system_message).content == [
         {"type": "text", "text": "The graph's own instructions"},
         {"type": "text", "text": "Every thread's prompt"},
+        {"type": "text", "text": "The workspace's prompt"},
         {"type": "text", "text": "\n\nSkills"},
         {"type": "text", "text": "First thread's part"},
     ]
@@ -574,7 +577,8 @@ async def test_streamed_partial_output_is_superseded_on_retry_or_fallback(
     backend_middleware = BackendRunMiddleware(
         run.backend, model_timeout_seconds=2.0 if outcome == "exhausted" else 0.15
     )
-    for name in ("_before_agent", "_before_model", "_after_model", "_after_agent"):
+    monkeypatch.setattr(backend_middleware, "_before_agent", AsyncMock(return_value=(None, False)))
+    for name in ("_before_model", "_after_model", "_after_agent"):
         monkeypatch.setattr(backend_middleware, name, AsyncMock(return_value=None))
     graph = create_agent(
         model=model,

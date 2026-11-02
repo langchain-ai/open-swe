@@ -193,9 +193,6 @@ def model_call_guards(
         ReplayableHistoryMiddleware(),
         ModelCallTimeoutMiddleware(timeout_seconds),
         ModelRetriesMiddleware(),
-        # An agent's two breakpoints from RunPromptMiddleware and this one's last system
-        # block and automatic one fill all four a request may have; Anthropic rejects a
-        # fifth, so anything adding one must give one up. A subagent's take the last tool.
         (AnthropicPromptCachingMiddleware if subagent else _RunPromptCaching)(
             ttl=PROMPT_CACHE_TTL, unsupported_model_behavior="ignore"
         ),

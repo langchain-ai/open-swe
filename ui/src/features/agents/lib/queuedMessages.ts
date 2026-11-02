@@ -58,7 +58,7 @@ export function visiblePendingMessages(
       ...(senderName ? { structuredSenderName: senderName } : {}),
       timestamp: new Date(message.createdAt).toISOString(),
       timestampIsFallback: true,
-      deliveryStatus: message.status,
+      ...(message.status !== "sent" ? { deliveryStatus: message.status } : {}),
       deliveryError: message.error,
       optimistic: true,
       ...(message.replies ? { replies: message.replies } : {}),

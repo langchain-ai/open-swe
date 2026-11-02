@@ -91,7 +91,9 @@ class ThreadStoreOverClient(ThreadStore):
     async def state(self, thread_id: str) -> dict[str, Any] | None:
         return await proxy.langgraph_client().threads.get_state(thread_id)
 
-    async def command(self, thread_id: str, body: bytes) -> CommandReply:
+    async def command(
+        self, thread_id: str, body: bytes, *, user_id: str | None = None
+    ) -> CommandReply:
         response = await proxy.langgraph_client().http.client.post(
             f"/threads/{thread_id}/commands",
             content=body,

@@ -7,7 +7,7 @@ from html import escape
 from typing import Any, Final, Literal, NotRequired, TypedDict
 from xml.etree import ElementTree
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage, add_notification_metadata
 from runtime_api.loop import VISIBLE_FROM
 
 INJECTED_DYNAMIC_CONTEXT_HASHES_KEY = "injected_dynamic_context_hashes"
@@ -40,6 +40,7 @@ class PersonIdentity(TypedDict):
     workspace_admin: NotRequired[Literal["yes", "no"]]
     new_prs: NotRequired[Literal["as drafts", "ready for review"]]
     standing_instructions: NotRequired[str]
+    personal_memories: NotRequired[str]
 
 
 class ChannelIdentity(TypedDict):
@@ -92,6 +93,7 @@ class RunMessage(TypedDict):
     role: Literal["user", "system"]
     content: str | list[dict[str, Any]]
     id: NotRequired[str]
+    additional_kwargs: NotRequired[dict[str, object]]
 
 
 class RunInput(TypedDict):
@@ -426,7 +428,16 @@ def human_input(content: str | list[dict[str, Any]], context: InputMessageContex
 def system_input(content: str | list[dict[str, Any]], context: InputMessageContext) -> RunMessage:
     if context["kind"] != "system":
         raise ValueError("system_input requires kind='system'")
-    return {"role": "user", "content": _structured_content(content, context)}
+    structured = _structured_content(content, context)
+    message = add_notification_metadata(
+        HumanMessage(content=structured if isinstance(structured, str) else [*structured]),
+        source=context["sender_id"],
+    )
+    return {
+        "role": "user",
+        "content": structured,
+        "additional_kwargs": message.additional_kwargs,
+    }
 
 
 def build_input_messages(

@@ -174,6 +174,14 @@ export const Messages = memo(function MessagesComponent({
     if (!lastMessage || lastMessage.author !== "agent") return undefined
     return liveActivityLabel(lastMessage.chunks, repoPath)
   }, [isStreaming, repoPath, visibleMessages])
+  // Work on a message the user just sent counts from when it was sent, so the
+  // count carries on when a new thread's page hands over to the thread's own.
+  const lastMessage = visibleMessages.at(-1)
+  const workingSince =
+    lastMessage?.author === "user" &&
+    (lastMessage.optimistic || !lastMessage.timestampIsFallback)
+      ? Date.parse(lastMessage.timestamp)
+      : undefined
 
   return (
     <TooltipProvider delayDuration={250}>
@@ -270,6 +278,7 @@ export const Messages = memo(function MessagesComponent({
                 reconnectLabel ??
                 (isOffloading ? "Offloading conversation..." : activityLabel)
               }
+              since={workingSince}
             />
             <QueuedMessages
               queuedMessages={queuedMessages}

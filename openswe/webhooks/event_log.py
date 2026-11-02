@@ -1,4 +1,7 @@
-"""Append-only log of verified GitHub, Slack, Linear, and deployment deliveries."""
+"""Append-only log of verified GitHub, Slack, Linear, and deployment deliveries, and Open SWE's own workspace events.
+
+Sources in ``ADMIN_ONLY_SOURCES`` are listed and subscribable only from admin threads.
+"""
 
 import asyncio
 import json
@@ -13,6 +16,7 @@ from fastapi import Request
 from pydantic import BaseModel, JsonValue, ValidationError
 from sqlalchemy import text
 
+from openswe import event_claims
 from openswe.database import configured, transaction
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.slack.payloads import SlackEventEnvelope
@@ -20,11 +24,19 @@ from openswe.slack.pr_links import event_pull_requests
 
 logger = logging.getLogger(__name__)
 
-type WebhookSource = Literal["github", "slack", "linear", "deployment"]
+type EventVisibility = Literal["public", "private", "admin"]
+
+type WebhookSource = Literal[
+    "github", "slack", "linear", "deployment", "workspace", "human_review", "reviewer"
+]
+
+ADMIN_ONLY_SOURCES: frozenset[WebhookSource] = frozenset({"workspace", "human_review", "reviewer"})
 
 RETAINED_DAYS = 14
 _TABLE = "event_log"
 _ROTATE_INTERVAL_SECONDS = 3600
+# Longer than any sender keeps retrying one delivery.
+_DELIVERY_CLAIM_TTL = timedelta(hours=24)
 
 _ROTATED_AT: float | None = None
 _ROTATION_LOCK = asyncio.Lock()
@@ -34,7 +46,7 @@ _INSERT = text(
     f"""
     INSERT INTO {_TABLE} (
         source, endpoint, event_type, delivery_id, payload,
-        user_id, workspace_id, repository_id, pull_request_id
+        user_id, workspace_id, repository_id, pull_request_id, visibility, visible_to_user_id
     )
     SELECT
         :source, :endpoint, :event_type, :delivery_id, CAST(:payload AS jsonb),
@@ -47,27 +59,36 @@ _INSERT = text(
              WHERE email <> '' AND lower(email) = lower(CAST(:email AS text)) LIMIT 1)
         ),
         COALESCE(
+            CAST(:workspace_id AS uuid),
             workspace_repository.workspace_id,
             (SELECT workspace_id FROM workspace_slack_channel
              WHERE channel_id = :slack_channel_id)
         ),
         repository.id,
         (SELECT id FROM pull_request
-         WHERE repository_id = repository.id AND number = :pull_request_number)
+         WHERE repository_id = repository.id AND number = :pull_request_number),
+        :visibility, CAST(:visible_to_user_id AS uuid)
     FROM (SELECT 1) AS delivery
     LEFT JOIN repository ON repository.key = lower(CAST(:github_repository AS text))
     LEFT JOIN workspace_repository ON workspace_repository.repository_id = repository.id
     RETURNING source, event_type, delivery_id, received_at,
-        user_id, workspace_id, repository_id, pull_request_id
+        user_id, workspace_id, repository_id, pull_request_id, visibility, visible_to_user_id
     """
 )
+
+_VISIBLE = """
+    (visibility = 'public'
+     OR (visibility = 'private' AND visible_to_user_id = CAST(:viewer_id AS uuid))
+     OR (visibility = 'admin' AND :admin AND workspace_id = CAST(:workspace_id AS uuid)))
+"""
 
 _EVENT_KINDS = text(
     f"""
     SELECT source, event_type, count(*) AS count, max(received_at) AS last_received_at
     FROM {_TABLE}
-    WHERE received_at >= :since
+    WHERE {_VISIBLE} AND received_at >= :since
       AND (CAST(:source AS text) IS NULL OR source = :source)
+      AND NOT (source = ANY(CAST(:hidden_sources AS text[])))
       AND (CAST(:event_type AS text) = ''
            OR event_type = :event_type
            OR starts_with(event_type, :event_type || '.'))
@@ -80,7 +101,7 @@ _LATEST_PAYLOAD = text(
     f"""
     SELECT payload
     FROM {_TABLE}
-    WHERE source = :source AND event_type = :event_type AND received_at >= :since
+    WHERE {_VISIBLE} AND source = :source AND event_type = :event_type AND received_at >= :since
     ORDER BY received_at DESC
     LIMIT 1
     """
@@ -100,6 +121,8 @@ class LoggedEvent(BaseModel):
     repository_id: UUID | None
     pull_request_id: UUID | None
     payload: JsonValue
+    visibility: EventVisibility = "public"
+    visible_to_user_id: UUID | None = None
 
     @property
     def base_event_type(self) -> str:
@@ -119,11 +142,13 @@ class EventRefs(BaseModel):
     """External identifiers a delivery names, resolved into row links on insert."""
 
     github_repository: str = ""
+    github_owner: str = ""
     github_user_id: str = ""
     pull_request_number: int | None = None
     slack_user_id: str = ""
     slack_channel_id: str = ""
     email: str = ""
+    workspace_id: UUID | None = None
 
     @property
     def pull_request(self) -> PullRequestKey | None:
@@ -151,8 +176,14 @@ class EventRefs(BaseModel):
                 ),
                 None,
             )
+        owner = (
+            (delivery.repository.owner if delivery.repository else None)
+            or delivery.organization
+            or (delivery.installation.account if delivery.installation else None)
+        )
         return cls(
             github_repository=delivery.repository.full_name if delivery.repository else "",
+            github_owner=owner.login if owner else "",
             github_user_id=str(delivery.sender.id)
             if delivery.sender and delivery.sender.id
             else "",
@@ -191,10 +222,16 @@ class EventRefs(BaseModel):
 
 class _GitHubAccount(BaseModel):
     id: int | None = None
+    login: str = ""
+
+
+class _GitHubInstallation(BaseModel):
+    account: _GitHubAccount | None = None
 
 
 class _GitHubRepository(BaseModel):
     full_name: str = ""
+    owner: _GitHubAccount | None = None
 
 
 class _GitHubPullRequest(BaseModel):
@@ -213,6 +250,8 @@ class _GitHubCheck(BaseModel):
 class _GitHubDelivery(BaseModel):
     repository: _GitHubRepository | None = None
     sender: _GitHubAccount | None = None
+    organization: _GitHubAccount | None = None
+    installation: _GitHubInstallation | None = None
     pull_request: _GitHubPullRequest | None = None
     issue: _GitHubIssue | None = None
     check_run: _GitHubCheck | None = None
@@ -244,14 +283,14 @@ class EventLog:
         event_type: str = "",
         delivery_id: str = "",
         refs: EventRefs | None = None,
+        visibility: EventVisibility = "public",
+        visible_to_user_id: UUID | None = None,
     ) -> bool:
         """Log, then wake subscribed threads.
 
         Never raises. False means the row was not stored, so a caller that must
         not drop the delivery can ask the sender to retry.
         """
-        from openswe.webhooks.event_subscriptions import EventSubscription  # noqa: PLC0415
-
         if not configured():
             return False
         if source == "slack":
@@ -267,32 +306,66 @@ class EventLog:
                 return False
             if not channel.details.publishes_events:
                 return True
-        try:
-            await cls.ensure_partitions()
-        except Exception:  # noqa: BLE001
-            logger.warning("Rotating event log partitions failed", exc_info=True)
         payload = cls._decode(request, body)
         action = payload.get("action") if isinstance(payload, dict) else None
         if event_type and isinstance(action, str) and action:
             event_type = f"{event_type}.{action}"
+        return await cls.append(
+            source,
+            payload,
+            endpoint=request.url.path,
+            event_type=event_type,
+            delivery_id=delivery_id,
+            refs=refs,
+            visibility=visibility,
+            visible_to_user_id=visible_to_user_id,
+        )
+
+    @classmethod
+    async def append(
+        cls,
+        source: WebhookSource,
+        payload: JsonValue,
+        *,
+        endpoint: str = "",
+        event_type: str,
+        delivery_id: str,
+        refs: EventRefs | None = None,
+        visibility: EventVisibility = "public",
+        visible_to_user_id: UUID | None = None,
+    ) -> bool:
+        """Store one event and wake subscribed threads; ``record`` for a webhook request.
+
+        Never raises. False means the row was not stored.
+        """
+        from openswe.webhooks.event_subscriptions import EventSubscription  # noqa: PLC0415
+
+        if not configured():
+            return False
+        try:
+            await cls.ensure_partitions()
+        except Exception:  # noqa: BLE001
+            logger.warning("Rotating event log partitions failed", exc_info=True)
         try:
             async with transaction() as conn:
                 result = await conn.execute(
                     _INSERT,
                     {
                         "source": source,
-                        "endpoint": request.url.path,
+                        "endpoint": endpoint,
                         "event_type": event_type,
                         "delivery_id": delivery_id,
                         "payload": json.dumps(payload),
+                        "visibility": visibility,
+                        "visible_to_user_id": visible_to_user_id,
                         **(refs or EventRefs()).model_dump(),
                     },
                 )
                 row = result.mappings().one()
         except Exception:  # noqa: BLE001
             logger.warning(
-                "Recording a webhook in the event log failed",
-                extra={"webhook_source": source, "webhook_endpoint": request.url.path},
+                "Recording an event in the event log failed",
+                extra={"webhook_source": source, "webhook_endpoint": endpoint},
                 exc_info=True,
             )
             return False
@@ -306,17 +379,87 @@ class EventLog:
         return True
 
     @classmethod
+    async def record_once(
+        cls,
+        request: Request,
+        body: bytes,
+        source: WebhookSource,
+        *,
+        event_type: str,
+        delivery_id: str,
+        refs: EventRefs | None = None,
+        visibility: EventVisibility = "public",
+        visible_to_user_id: UUID | None = None,
+    ) -> bool:
+        """``record`` a delivery the sender may send more than once, at most once.
+
+        A retry, or another call for the same delivery, logs and wakes nothing
+        again. A delivery that was not stored gives its claim back, so its next
+        try records it. Never raises; False means the row was not stored.
+        """
+        if not configured():
+            return False
+        scope = f"{_TABLE}:{source}"
+        claimed = False
+        try:
+            claimed = await event_claims.claim(scope, delivery_id, ttl=_DELIVERY_CLAIM_TTL)
+        except Exception:  # noqa: BLE001 - a duplicate row beats a lost one
+            logger.warning(
+                "Claiming a delivery for the event log failed; recording it unclaimed",
+                extra={"webhook_source": source, "webhook_delivery": delivery_id},
+                exc_info=True,
+            )
+        else:
+            if not claimed:
+                return True
+        stored = await cls.record(
+            request,
+            body,
+            source,
+            event_type=event_type,
+            delivery_id=delivery_id,
+            refs=refs,
+            visibility=visibility,
+            visible_to_user_id=visible_to_user_id,
+        )
+        if not stored and claimed:
+            try:
+                await event_claims.release(scope, delivery_id)
+            except Exception:  # noqa: BLE001 - the claim lapses on its own
+                logger.warning(
+                    "Releasing an unrecorded delivery's event log claim failed",
+                    extra={"webhook_source": source, "webhook_delivery": delivery_id},
+                    exc_info=True,
+                )
+        return stored
+
+    @classmethod
     async def kinds(
-        cls, since: datetime, *, source: WebhookSource | None = None, event_type: str = ""
+        cls,
+        since: datetime,
+        *,
+        source: WebhookSource | None = None,
+        event_type: str = "",
+        admin: bool = False,
+        viewer_id: UUID | None = None,
+        workspace_id: UUID | None = None,
     ) -> list[EventKind]:
         """Every distinct source and event type received since ``since``.
 
         ``event_type`` narrows to that type and its ``.<action>`` variants. With
         ``source``, an exact match also gets the newest payload's shape: keys and value
-        types, never values.
+        types, never values. ``ADMIN_ONLY_SOURCES`` are left out unless ``admin``.
         """
         await cls.ensure_partitions()
-        params = {"since": since, "source": source, "event_type": event_type}
+        params = {
+            "viewer_id": viewer_id,
+            "workspace_id": workspace_id,
+            "admin": admin,
+            "since": since,
+            "source": source,
+            "event_type": event_type,
+            "hidden_sources": [] if admin else sorted(ADMIN_ONLY_SOURCES),
+        }
         async with transaction() as conn:
             rows = await conn.execute(_EVENT_KINDS, params)
             kinds = [EventKind.model_validate(dict(row)) for row in rows.mappings()]

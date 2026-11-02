@@ -22,9 +22,55 @@ pub enum ErrorCategory {
     Unclassified,
 }
 
+/// One specific failure, finer than its [`ErrorCategory`], so it can be counted
+/// on its own. Most failures have none and report [`ErrorCode::Unclassified`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCode {
+    Unclassified,
+    /// Channel setup through Trigger Server needs a LangSmith key that belongs
+    /// to a user, and the key has none.
+    ChannelRequiresUserKey,
+}
+
+/// How a command failed: its category, and its code when it has one.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Failure {
+    pub category: ErrorCategory,
+    pub code: ErrorCode,
+}
+
+impl Failure {
+    pub fn of(err: &Error) -> Self {
+        Self {
+            category: category_of(err),
+            code: code_of(err),
+        }
+    }
+}
+
+impl From<ErrorCategory> for Failure {
+    fn from(category: ErrorCategory) -> Self {
+        Self {
+            category,
+            code: ErrorCode::Unclassified,
+        }
+    }
+}
+
 pub fn categorized(category: ErrorCategory, message: impl Into<String>) -> Error {
     Error::new(Categorized {
         category,
+        code: None,
+        message: message.into(),
+    })
+}
+
+/// [`categorized`], also naming the specific failure.
+pub fn coded(category: ErrorCategory, code: ErrorCode, message: impl Into<String>) -> Error {
+    Error::new(Categorized {
+        category,
+        code: Some(code),
         message: message.into(),
     })
 }
@@ -104,9 +150,23 @@ pub fn category_of(err: &Error) -> ErrorCategory {
         .unwrap_or(ErrorCategory::Unclassified)
 }
 
+pub fn code_of(err: &Error) -> ErrorCode {
+    err.chain()
+        .find_map(|cause| {
+            // A recategorized error keeps the code of the one it stands in for,
+            // which its chain skips.
+            if let Some(recategorized) = cause.downcast_ref::<Recategorized>() {
+                return Some(code_of(&recategorized.inner));
+            }
+            cause.downcast_ref::<Categorized>()?.code
+        })
+        .unwrap_or(ErrorCode::Unclassified)
+}
+
 #[derive(Debug)]
 struct Categorized {
     category: ErrorCategory,
+    code: Option<ErrorCode>,
     message: String,
 }
 
@@ -340,5 +400,56 @@ mod tests {
 
         assert_eq!(format!("{err:#}"), "outer: inner");
         assert_eq!(category_of(&err), ErrorCategory::Deployment);
+    }
+
+    #[test]
+    fn every_code_serializes_to_its_documented_name() {
+        let table = [
+            (ErrorCode::Unclassified, "unclassified"),
+            (
+                ErrorCode::ChannelRequiresUserKey,
+                "channel_requires_user_key",
+            ),
+        ];
+
+        for (code, name) in table {
+            assert_eq!(serde_json::to_value(code).unwrap(), json!(name));
+            match code {
+                ErrorCode::Unclassified | ErrorCode::ChannelRequiresUserKey => {}
+            }
+        }
+
+        assert_eq!(table.len(), 2, "a new code needs a row here");
+    }
+
+    #[test]
+    fn a_coded_failure_keeps_its_code_and_category_under_context() {
+        let err = coded(
+            ErrorCategory::Authentication,
+            ErrorCode::ChannelRequiresUserKey,
+            "inner",
+        )
+        .context("outer");
+
+        assert_eq!(format!("{err:#}"), "outer: inner");
+        assert_eq!(
+            Failure::of(&err),
+            Failure {
+                category: ErrorCategory::Authentication,
+                code: ErrorCode::ChannelRequiresUserKey,
+            }
+        );
+    }
+
+    #[test]
+    fn an_uncoded_failure_is_unclassified() {
+        assert_eq!(
+            code_of(&categorized(ErrorCategory::Project, "x")),
+            ErrorCode::Unclassified
+        );
+        assert_eq!(
+            code_of(&api_error(StatusCode::FORBIDDEN)),
+            ErrorCode::Unclassified
+        );
     }
 }

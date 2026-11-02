@@ -294,6 +294,15 @@ class SlackChannel(Base):
         return known if known is not None and known.fresh else None
 
     @classmethod
+    async def name_for(cls, channel_id: str) -> str:
+        """A display name from the directory, fetching only when no name is stored."""
+        known = await cls._row(channel_id)
+        if known is not None and known.name:
+            return known.details.name or known.name
+        channel = await cls.load(channel_id, use_cache=False)
+        return (channel.details.name or channel.name) if channel is not None else ""
+
+    @classmethod
     async def load(
         cls, channel_id: str, *, use_cache: bool = True, raise_unavailable: bool = False
     ) -> Self | None:
@@ -387,19 +396,17 @@ class SlackChannel(Base):
             )
             return False
 
-    async def post(
-        self, text: str, *, blocks: list[dict[str, Any]] | None = None, login: str | None = None
-    ) -> str:
+    async def post(self, text: str, *, blocks: list[dict[str, Any]] | None = None) -> str:
         """Post a top-level message, joining the channel when the bot is outside it."""
         try:
             return await post_slack_top_level_message_with_ts(
-                self.id, text, unfurl_links=False, unfurl_media=False, blocks=blocks, login=login
+                self.id, text, unfurl_links=False, unfurl_media=False, blocks=blocks
             )
         except SlackRequestError as exc:
             if exc.code != "not_in_channel" or not await self.join():
                 raise
         return await post_slack_top_level_message_with_ts(
-            self.id, text, unfurl_links=False, unfurl_media=False, blocks=blocks, login=login
+            self.id, text, unfurl_links=False, unfurl_media=False, blocks=blocks
         )
 
     async def messages(self, limit: int = 30) -> list[SlackMessage]:
