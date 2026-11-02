@@ -1,3 +1,7 @@
+import {
+  invalidationTopic,
+  type InvalidationTopic,
+} from "@/lib/invalidations/topics"
 import type {
   AgentSource,
   AgentStatus,
@@ -234,15 +238,20 @@ export function sidebarItemContains(
 export function sidebarRefreshInterval(
   threads: ReadonlyArray<AgentThread> = []
 ): number | false {
-  if (
-    threads.some((thread) =>
-      threadFamily(thread).some((member) => member.status === "running")
-    )
+  return threads.some((thread) =>
+    threadFamily(thread).some((member) => member.status === "running")
   )
-    return 2000
-  return threads.some((thread) => thread.taskMembership?.role === "coordinator")
-    ? 30_000
+    ? 2000
     : false
+}
+
+/** What tells a sidebar list that a coordinator it shows gained or lost a worker. */
+export function taskWorkerTopics(
+  threads: ReadonlyArray<AgentThread> = []
+): Array<InvalidationTopic> {
+  return threads
+    .filter((thread) => thread.taskMembership?.role === "coordinator")
+    .map((thread) => invalidationTopic("task-workers", thread.id))
 }
 
 export function pinnedThreadShortcuts(

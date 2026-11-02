@@ -1,38 +1,36 @@
-"""A Goal mode thread's goal: where its work stands, and what it waits on.
+"""A Goal mode task's goal, as seen from one of its threads.
 
 The person who turned on Goal mode wants the agent to keep going until the work is
-blocked on them or ready. The agent's run (MDA) decides when the goal moves: it
-sends the agent back to work, lets a turn rest on a wait, and pauses the goal after
-a few turns without progress. The backend keeps the goal in the thread's metadata,
-where the dashboard shows it, reads what will wake the thread from where each wait
-lives, and pauses it when the person stops the thread.
+blocked on them or ready. The agent's run (MDA) decides when the goal moves: it sends
+the agent back to work, lets a turn rest on a wait, and pauses the goal after a few
+turns without progress. The goal is kept on the thread's task (``Task.goal_state``),
+which the dashboard shows; the backend reads what will wake the thread from where
+each wait lives, and pauses the goal when the person stops the thread.
 """
 
 import logging
-import time
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Final, Literal, Self
+from typing import Final, Literal, Self, TypedDict, Unpack
+from uuid import UUID
 
 from fastapi import APIRouter
 from pydantic import BaseModel, JsonValue, ValidationError
 from runtime_api.loop import GoalState
 
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.database import postgres
 from openswe.jobs import queue
 from openswe.run_config import RunConfig
+from openswe.tasks.store import Task
 from openswe.threads.access import _readable_thread_metadata
 from openswe.threads.store import THREADS
 from openswe.ui_invalidations.topics import Topic
 from openswe.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY, RUNNING_MONITORS_KEY
-from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["threads"])
 
-GOAL_KEY: Final = "goal"
 # The draft PR whose Goal mode review this thread waits on, until its findings arrive.
 REVIEW_PENDING_KEY: Final = "goal_review_pending"
 _MAX_ASK_CHARS: Final = 1000
@@ -56,6 +54,15 @@ class GoalWait(BaseModel):
     detail: str | None = None
 
 
+class _GoalChange(TypedDict, total=False):
+    state: GoalState | None
+    reason: UserWaitReason | PauseReason | None
+    ask: str | None
+    waits: list[dict[str, JsonValue]] | None
+    by: UUID | None
+    over_stop: bool
+
+
 class Goal(BaseModel):
     """What the thread's metadata keeps of its goal."""
 
@@ -68,7 +75,8 @@ class Goal(BaseModel):
 
 
 class ThreadGoal:
-    """One thread's goal, as its run moves it and its person steps in."""
+    """The goal of the task ``thread_id`` works on, as its run moves it and its person
+    steps in."""
 
     def __init__(self, thread_id: str) -> None:
         self.thread_id = thread_id
@@ -82,51 +90,59 @@ class ThreadGoal:
         return cls(thread_id)
 
     async def current(self) -> Goal | None:
-        if not postgres.configured():
-            return None
-        return self._of(await self._metadata())
+        task = await Task.of_thread(self.thread_id)
+        return None if task is None else self._of(task)
 
     async def change(self, state: GoalState | None, reason: PauseReason | None = None) -> None:
         """Move the goal as the run decided: working again, resting on what will wake the
-        thread (whose waits are recorded), paused, or gone once Goal mode is off."""
-        if state is None and await self.current() is None:
+        thread (whose waits are recorded), paused, or gone once Goal mode is off.
+
+        A rest never overrides a stop: the person who stopped the goal resumes it.
+        """
+        task = await Task.of_thread(self.thread_id)
+        if task is None:
+            logger.warning("A goal moved on a thread without a task", extra=self._log)
             return
-        async with agent_thread_pr_state_lock(self.thread_id):
-            if state is None:
-                await self._write(None)
-            elif state == "paused":
-                await self._pause(reason or "no_progress")
-            elif state == "waiting":
-                await self._write(Goal(state="waiting", waits=await self.waits()))
-            else:
-                await self._write(Goal(state=state))
+        if state is None:
+            if task.goal_state is not None:
+                await self._move(task.id, state=None)
+        elif state == "paused":
+            await self._pause(task.id, reason or "no_progress", over_stop=False)
+        elif state == "waiting":
+            waits = [wait.model_dump(mode="json") for wait in await self.waits()]
+            await self._move(task.id, state="waiting", waits=waits, over_stop=False)
+        else:
+            await self._move(task.id, state=state)
 
     async def reported(self, state: Literal["blocked", "complete"], message: str) -> None:
         """The agent said the work is blocked on the person, or complete: it waits on them
         for what ``message``, its reply to them, asks."""
+        task = await Task.of_thread(self.thread_id)
+        if task is None:
+            logger.warning("Work reported on a thread without a task", extra=self._log)
+            return
         reason: UserWaitReason = "blocked" if state == "blocked" else "ready"
         ask = message.strip()
         if len(ask) > _MAX_ASK_CHARS:
             ask = ask[: _MAX_ASK_CHARS - 1].rstrip() + "…"
-        async with agent_thread_pr_state_lock(self.thread_id):
-            await self._write(Goal(state="waiting_on_user", reason=reason, ask=ask))
+        await self._move(task.id, state="waiting_on_user", reason=reason, ask=ask, over_stop=False)
 
-    async def stopped(self) -> None:
-        """The person stopped the thread's run: its goal pauses until they write again.
+    async def stopped(self, *, by: str | None = None) -> None:
+        """The person logged in as ``by`` stopped the thread's run: its goal pauses until
+        they write again, recorded as theirs.
 
         The stop itself has happened already, so a goal that cannot be paused is logged
         rather than failing it.
         """
+        from openswe.tasks.schemas import user_for_login
+
         try:
-            async with agent_thread_pr_state_lock(self.thread_id):
-                goal = await self.current()
-                if goal is not None and (goal.state, goal.reason) != ("paused", "stopped"):
-                    await self._pause("stopped")
+            task = await Task.of_thread(self.thread_id)
+            if task is not None and task.goal_state is not None:
+                person = await user_for_login(by) if by else None
+                await self._pause(task.id, "stopped", by=None if person is None else person.id)
         except Exception:
-            logger.exception(
-                "Could not pause the goal of a stopped thread",
-                extra={"agent_thread_id": self.thread_id},
-            )
+            logger.exception("Could not pause the goal of a stopped thread", extra=self._log)
 
     async def review_requested(self, pr_url: str) -> None:
         """The agent asked for a Goal mode review of its draft: its findings will wake it."""
@@ -141,7 +157,8 @@ class ThreadGoal:
         from openswe.tools.schedule_thread_wakeup import WAKEUP_KIND
         from openswe.webhooks.event_subscriptions import EventSubscription
 
-        metadata = await self._metadata()
+        thread = await THREADS.get(self.thread_id)
+        metadata: Mapping[str, JsonValue] = {} if thread is None else thread.metadata
         waits = [
             GoalWait(kind="wakeup", until=job.due_at)
             for job in await queue.find({"kind": WAKEUP_KIND, "thread_id": self.thread_id})
@@ -176,34 +193,43 @@ class ThreadGoal:
         await self.change("paused", "no_progress")
         return await self.current()
 
-    async def _pause(self, reason: PauseReason) -> None:
+    @property
+    def _log(self) -> dict[str, str]:
+        return {"agent_thread_id": self.thread_id}
+
+    def _of(self, task: Task) -> Goal | None:
+        if task.goal_state is None:
+            return None
+        try:
+            return Goal.model_validate(
+                {
+                    "state": task.goal_state,
+                    "reason": task.goal_reason,
+                    "ask": task.goal_ask,
+                    "waits": task.goal_waits or [],
+                    "updated_at_ms": int(task.goal_updated_at.timestamp() * 1000)
+                    if task.goal_updated_at
+                    else 0,
+                }
+            )
+        except ValidationError:
+            logger.warning("Ignored an unreadable goal", extra=self._log, exc_info=True)
+            return None
+
+    async def _pause(
+        self, task_id: UUID, reason: PauseReason, *, by: UUID | None = None, over_stop: bool = True
+    ) -> None:
         """Stop pushing the work on; what it scheduled to wake it is dropped."""
         from openswe.tools.schedule_thread_wakeup import cancel_thread_wakeups
 
-        await self._write(Goal(state="paused", reason=reason))
-        await cancel_thread_wakeups(self.thread_id)
+        if await self._move(task_id, state="paused", reason=reason, by=by, over_stop=over_stop):
+            await cancel_thread_wakeups(self.thread_id)
 
-    async def _metadata(self) -> Mapping[str, JsonValue]:
-        thread = await THREADS.get(self.thread_id)
-        return {} if thread is None else thread.metadata
-
-    def _of(self, metadata: Mapping[str, JsonValue]) -> Goal | None:
-        raw = metadata.get(GOAL_KEY)
-        if raw is None:
-            return None
-        try:
-            return Goal.model_validate(raw)
-        except ValidationError:
-            logger.warning("Ignored an unreadable goal", extra={"agent_thread_id": self.thread_id})
-            return None
-
-    async def _write(self, goal: Goal | None) -> None:
-        if goal is not None:
-            goal.updated_at_ms = time.time_ns() // 1_000_000
-        await THREADS.update(
-            self.thread_id, {GOAL_KEY: None if goal is None else goal.model_dump(mode="json")}
-        )
-        await Topic.THREAD_GOALS.invalidate(key=self.thread_id)
+    async def _move(self, task_id: UUID, **change: Unpack[_GoalChange]) -> bool:
+        moved = await Task.move_goal(task_id, **change)
+        if moved:
+            await Topic.THREAD_GOALS.invalidate(key=self.thread_id)
+        return moved
 
 
 @router.get("/threads/{thread_id}/goal")

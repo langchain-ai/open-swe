@@ -21,7 +21,7 @@ import {
   type WorkspaceSettingsView,
 } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
-import { invalidationTopic } from "@/lib/invalidations/topics"
+import { invalidationTopic, queryTopics } from "@/lib/invalidations/topics"
 import { makeQueryClient } from "@/lib/query"
 
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
@@ -159,8 +159,7 @@ async function invalidateWorkspaces() {
   await act(async () => {
     await clients.at(-1)?.invalidateQueries({
       predicate: (query) =>
-        query.meta?.invalidatedBy?.includes(invalidationTopic("workspaces")) ??
-        false,
+        queryTopics(query).includes(invalidationTopic("workspaces")),
     })
     await vi.advanceTimersByTimeAsync(1)
   })

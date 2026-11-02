@@ -87,6 +87,7 @@ from openswe.dashboard.options import (
 from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.database import postgres
 from openswe.github.token import resolve_github_token
 from openswe.input_messages import (
     dynamic_context_hash,
@@ -178,6 +179,7 @@ from openswe.skill_store.run_skills import RunSkillStores
 from openswe.slack.client import get_slack_user_timezone, remember_slack_user_timezone
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.slack.staged_files import deliver_slack_files, slack_files_pending
+from openswe.tasks.store import Task
 from openswe.thread_title import (
     ANTHROPIC_TITLE_GENERATION_MAX_TOKENS,
     TITLE_GENERATION_MAX_TOKENS,
@@ -186,6 +188,7 @@ from openswe.thread_title import (
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
 from openswe.threads.goal import ThreadGoal
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
+from openswe.threads.store import THREADS
 from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.tools import (
     assign_human_reviewer,
@@ -1903,14 +1906,22 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         and not (task_coordination and task_coordination.is_worker)
         and (await User.preferences_for_login(profile_login)).goal_mode
     )
-    if not goal_mode:
-        # One left from when the person had Goal mode on would show, and pause, forever.
-        try:
-            await ThreadGoal(thread_id).change(None)
-        except Exception:
-            logger.exception(
-                "Could not clear a goal left from Goal mode", extra={"agent_thread_id": thread_id}
+    try:
+        # Every agent thread works on a task, coordinating its own until it joins another's.
+        if cfg.source != "incidents_agent" and postgres.configured():
+            indexed = await THREADS.get(thread_id)
+            title = indexed.metadata.get("title") if indexed is not None else None
+            await Task.for_thread(
+                thread_id,
+                title=title if isinstance(title, str) and title.strip() else "Untitled",
+                # Delegation reads a thread without a workspace as the default one's.
+                workspace=cfg.workspace_slug or "default",
             )
+        if not goal_mode:
+            # One left from when the person had Goal mode on would show, and pause, forever.
+            await ThreadGoal(thread_id).change(None)
+    except Exception:
+        logger.exception("Could not ready the thread's task", extra={"agent_thread_id": thread_id})
     work_state_tool = _registered_tool_name(report_work_state)
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs

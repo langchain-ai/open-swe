@@ -110,6 +110,10 @@ class Topic(BaseTopic):
     THREAD_GOALS: ClassVar[KeyedTopic[str]]
     """Keyed by thread id: where that thread's Goal mode work stands."""
 
+    TASK_WORKERS: ClassVar[KeyedTopic[str]]
+    """Keyed by coordinator thread id: the workers its task delegated to, as the
+    sidebar nests them beneath it."""
+
     ANNOUNCEMENTS: ClassVar[Topic]
     """Admin announcements and their delivery progress; admins only."""
 
@@ -236,5 +240,6 @@ Topic.THREAD_BACKGROUND_WORK = KeyedTopic(
     "thread-background-work", authorize_keys=_readable_threads
 )
 Topic.THREAD_GOALS = KeyedTopic("thread-goals", authorize_keys=_readable_threads)
+Topic.TASK_WORKERS = KeyedTopic("task-workers", authorize_keys=_readable_threads)
 Topic.ANNOUNCEMENTS = AdminTopic("announcements")
 Topic.SLACK_CHANNELS = Topic("slack-channels")

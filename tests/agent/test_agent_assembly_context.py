@@ -159,7 +159,10 @@ async def test_existing_task_keeps_controls_without_delegation(
     )
     workspace = WorkspaceRow(slug="default", name="Default")
     task = Task(
-        coordinator_thread_id="coordinator", title="Existing task", workspace_id=workspace.id
+        coordinator_thread_id="coordinator",
+        title="Existing task",
+        workspace_id=workspace.id,
+        delegated=True,
     )
     task.workspace = workspace
     context = TaskContext(task, TaskMembership(thread_id="thread-ctx", task_id=task.id, role=role))

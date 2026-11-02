@@ -1,6 +1,7 @@
 import {
   mergeTaskFamily,
   sidebarRefreshInterval,
+  taskWorkerTopics,
   threadFamily,
 } from "./sidebarThreads"
 import {
@@ -676,6 +677,10 @@ export function useSidebarPinnedThreads({ enabled = true } = {}) {
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchInterval: (query) => sidebarRefreshInterval(query.state.data),
+    meta: {
+      invalidatedBy: (data) =>
+        taskWorkerTopics(data as Array<AgentThread> | undefined),
+    },
   })
 }
 
@@ -728,6 +733,11 @@ function useFetchedSidebarThread(
     refetchOnWindowFocus: "always",
     refetchInterval: (current) =>
       sidebarRefreshInterval(current.state.data ? [current.state.data] : []),
+    meta: {
+      invalidatedBy: threadId
+        ? [invalidationTopic("task-workers", threadId)]
+        : [],
+    },
     retry: false,
   }).data
 }
@@ -1566,6 +1576,14 @@ export function useInfiniteThreadsPages(
     queryKey,
     queryFn: ({ pageParam }) =>
       agentsApi.listThreadsPage({ ...params, offset: pageParam }),
+    meta: {
+      invalidatedBy: (data) =>
+        taskWorkerTopics(
+          (data as InfiniteData<ThreadsPage> | undefined)?.pages.flatMap(
+            (page) => page.items
+          )
+        ),
+    },
     initialPageParam: 0,
     getNextPageParam: (page) =>
       page.hasMore ? page.offset + page.items.length : undefined,
@@ -1673,6 +1691,12 @@ export function useThreadsPage(
     queryFn: () => agentsApi.listThreadsPage(params),
     enabled: options.enabled,
     placeholderData: (prev) => prev,
+    meta: {
+      invalidatedBy: (data) =>
+        options.pollWhileRunning
+          ? taskWorkerTopics((data as ThreadsPage | undefined)?.items)
+          : [],
+    },
     refetchInterval: (query) =>
       options.pollWhileRunning
         ? sidebarRefreshInterval(query.state.data?.items)

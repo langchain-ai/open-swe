@@ -1,42 +1,35 @@
 import importlib
-from collections.abc import AsyncIterator, Mapping
-from contextlib import asynccontextmanager
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 from pydantic import JsonValue
 
+from openswe.database import postgres
+from openswe.tasks.store import Task
 from openswe.threads import goal as goal_module
+from openswe.threads import index
 from openswe.threads.goal import ThreadGoal
+from openswe.workspaces.rows import WorkspaceRow
 
 _THREAD = "thread-1"
 
 
-class _Threads:
-    """The thread index, holding one thread's metadata."""
-
-    def __init__(self) -> None:
-        self.metadata: dict[str, JsonValue] = {}
-
-    async def get(self, thread_id: str) -> SimpleNamespace:
-        return SimpleNamespace(metadata=self.metadata)
-
-    async def update(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
-        self.metadata.update(metadata)
-
-
 @pytest.fixture
-def threads(monkeypatch: pytest.MonkeyPatch) -> _Threads:
-    store = _Threads()
-    monkeypatch.setattr(goal_module, "THREADS", store)
-    monkeypatch.setattr(goal_module.postgres, "configured", lambda: True)
+async def goal(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> ThreadGoal:
+    """An agent thread working alone on its own task."""
 
     async def invalidate(**_key: str) -> None:
         return None
 
     monkeypatch.setattr(goal_module.Topic.THREAD_GOALS, "invalidate", invalidate)
-    return store
+    workspace = WorkspaceRow(slug="goals", name="Goals")
+    async with postgres.session() as session:
+        session.add(workspace)
+    await index.create(_THREAD, runtime="mda", metadata={})
+    await Task.for_thread(_THREAD, title="Fix login", workspace=workspace.slug)
+    return ThreadGoal(_THREAD)
 
 
 @pytest.fixture
@@ -63,19 +56,9 @@ def wakeups(monkeypatch: pytest.MonkeyPatch) -> list[SimpleNamespace]:
     return jobs
 
 
-@pytest.fixture(autouse=True)
-def no_lock(monkeypatch: pytest.MonkeyPatch) -> None:
-    @asynccontextmanager
-    async def lock(thread_id: str) -> AsyncIterator[None]:
-        yield
-
-    monkeypatch.setattr(goal_module, "agent_thread_pr_state_lock", lock)
-
-
 async def test_a_goal_rests_on_what_will_wake_it_and_stalls_once_that_lapses(
-    threads: _Threads, wakeups: list[SimpleNamespace]
+    goal: ThreadGoal, wakeups: list[SimpleNamespace]
 ) -> None:
-    goal = ThreadGoal(_THREAD)
     due = datetime(2026, 11, 1, 23, 28, tzinfo=UTC)
     wakeups.append(SimpleNamespace(due_at=due))
     await goal.review_requested("https://github.com/o/r/pull/1")
@@ -94,33 +77,30 @@ async def test_a_goal_rests_on_what_will_wake_it_and_stalls_once_that_lapses(
     assert stalled is not None and (stalled.state, stalled.reason) == ("paused", "no_progress")
 
 
-async def test_waiting_on_the_person_keeps_their_ask(
-    threads: _Threads, wakeups: list[SimpleNamespace]
+async def test_a_stop_holds_until_its_person_writes_and_drops_the_wakeups(
+    goal: ThreadGoal, wakeups: list[SimpleNamespace]
 ) -> None:
-    goal = ThreadGoal(_THREAD)
-
-    await goal.reported("blocked", "Which Slack channel should review it?")
-    waiting = await goal.current()
-
-    assert waiting is not None
-    assert (waiting.state, waiting.reason) == ("waiting_on_user", "blocked")
-    assert waiting.ask == "Which Slack channel should review it?"
-
-
-async def test_a_stop_pauses_a_goal_and_drops_its_wakeups_but_leaves_other_threads_alone(
-    threads: _Threads, wakeups: list[SimpleNamespace]
-) -> None:
-    goal = ThreadGoal(_THREAD)
-    wakeups.append(SimpleNamespace(due_at=datetime(2026, 11, 1, 23, 28, tzinfo=UTC)))
-
     await goal.stopped()
-    assert goal_module.GOAL_KEY not in threads.metadata
-    assert wakeups
+    assert await goal.current() is None
 
     await goal.change("working")
+    wakeups.append(SimpleNamespace(due_at=datetime(2026, 11, 1, 23, 28, tzinfo=UTC)))
     await goal.stopped()
+    # A run still finishing cannot rest or report over the stop.
+    await goal.change("waiting")
+    await goal.reported("complete", "Ready for review.")
     stopped = await goal.current()
+
     assert stopped is not None and (stopped.state, stopped.reason) == ("paused", "stopped")
     assert not wakeups
+    await goal.change("working")
+    await goal.reported("blocked", "Which Slack channel should review it?")
+    waiting = await goal.current()
+    assert waiting is not None
+    assert (waiting.state, waiting.reason, waiting.ask) == (
+        "waiting_on_user",
+        "blocked",
+        "Which Slack channel should review it?",
+    )
     await goal.change(None)
     assert await goal.current() is None

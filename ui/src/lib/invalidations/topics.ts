@@ -1,3 +1,5 @@
+import type { Query } from "@tanstack/react-query"
+
 /**
  * Topics the backend invalidates when data changes
  * (`openswe/ui_invalidations/topics.py`). A query lists the ones it reads in
@@ -18,6 +20,7 @@ type KeyedTopic =
   | "thread-browsers"
   | "thread-background-work"
   | "thread-goals"
+  | "task-workers"
 
 export type InvalidationTopic = string
 
@@ -31,4 +34,12 @@ export function invalidationTopic(
   key?: string
 ): InvalidationTopic {
   return key === undefined ? name : `${name}/${key}`
+}
+
+/** The topics a query reads: listed in `meta.invalidatedBy`, or read from its data. */
+export function queryTopics(query: Query): readonly InvalidationTopic[] {
+  const topics = query.meta?.invalidatedBy
+  return typeof topics === "function"
+    ? topics(query.state.data)
+    : (topics ?? [])
 }

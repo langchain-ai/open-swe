@@ -315,7 +315,7 @@ async def cancel_dashboard_thread(
     if on_interrupted is not None:
         await on_interrupted()
     await interrupt_transcript_turns(thread_id, cancelled_run_ids)
-    await ThreadGoal(thread_id).stopped()
+    await ThreadGoal(thread_id).stopped(by=login)
 
     metadata_update: dict[str, Any] = _stopped_metadata()
     await client.threads.update(thread_id=thread_id, metadata=metadata_update)
@@ -380,7 +380,7 @@ async def admin_cancel_dashboard_thread(
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
     await interrupt_transcript_turns(thread_id, cancelled_run_ids)
-    await ThreadGoal(thread_id).stopped()
+    await ThreadGoal(thread_id).stopped(by=login)
 
     await client.threads.update(
         thread_id=thread_id,
