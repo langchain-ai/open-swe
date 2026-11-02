@@ -326,6 +326,25 @@ def _user_ref(value: Any) -> dict[str, Any] | None:
     return {"login": login, "avatar_url": value.get("avatar_url")}
 
 
+class DescriptionReferences:
+    def __init__(self, html: str):
+        from bs4 import BeautifulSoup
+
+        self.document = BeautifulSoup(html, "html.parser")
+
+    def pull_request_numbers(self, owner: str, repo: str) -> list[int]:
+        prefix = f"https://github.com/{owner}/{repo}/pull/".lower()
+        return sorted(
+            {
+                int(href[len(prefix) :])
+                for link in self.document.find_all("a", href=True)
+                if isinstance(href := link.get("href"), str)
+                and href.lower().startswith(prefix)
+                and href[len(prefix) :].isdigit()
+            }
+        )
+
+
 def _serialize_pr_details(payload: dict[str, Any]) -> dict[str, Any]:
     labels = payload.get("labels")
     state = payload.get("state")
@@ -671,8 +690,11 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     """
     async with GitHubClient.as_app() as github:
         repository = github.repo(owner, repo)
-        pr_payload = await repository.pull_request(pr_number).pull()
+        pr_payload = await repository.pull_request(pr_number).pull(rendered_body=True)
         details = _serialize_pr_details(pr_payload)
+        details["description_pull_requests"] = DescriptionReferences(
+            pr_payload.get("body_html") or ""
+        ).pull_request_numbers(owner, repo)
 
         thread = await _reviewer_thread_for(owner, repo, pr_number)
         stored = (

@@ -20,6 +20,18 @@ def test_review_details_preserve_closed_draft_lifecycle(merged: bool, expected: 
     assert details["state"] == expected
 
 
+def test_description_references_only_identifies_same_repo_pull_requests():
+    from openswe.review.reviews import DescriptionReferences
+
+    references = DescriptionReferences(
+        '<a href="https://github.com/acme/repo/issues/4879">#4879</a>'
+        '<a href="https://github.com/acme/repo/pull/12">#12</a>'
+        '<a href="https://github.com/acme/other/pull/13">acme/other#13</a>'
+        "<code>#14</code>"
+    )
+    assert references.pull_request_numbers("acme", "repo") == [12]
+
+
 def test_is_allowed_image_url_rejects_unsafe_urls():
     # Non-https scheme.
     assert not _is_allowed_image_url("http://github.com/user-attachments/assets/x")

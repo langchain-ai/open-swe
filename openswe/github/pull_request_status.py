@@ -455,8 +455,18 @@ class PullRequestClient:
     def _log_extra(self) -> dict[str, object]:
         return {"pr_repo_full_name": self.repo.full_name, "pr_number": self.number}
 
-    async def pull(self) -> dict[str, Any]:
-        payload = await self.repo.get(f"pulls/{self.number}")
+    async def pull(self, *, rendered_body: bool = False) -> dict[str, Any]:
+        payload = (
+            (
+                await self.repo.github.request(
+                    "GET",
+                    f"repos/{self.repo.full_name}/pulls/{self.number}",
+                    headers={"Accept": "application/vnd.github.full+json"},
+                )
+            ).json()
+            if rendered_body
+            else await self.repo.get(f"pulls/{self.number}")
+        )
         if not isinstance(payload, dict):
             raise ValueError("GitHub answered the pull request without an object")
         return payload
