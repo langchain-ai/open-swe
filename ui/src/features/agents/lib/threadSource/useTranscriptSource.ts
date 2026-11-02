@@ -40,6 +40,15 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
 
   const state = transcript.state
   const contextUsage = state?.contextUsage ?? null
+  const latestTurnId = state?.turnOrder.at(-1)
+  const latestTurn = latestTurnId ? state?.turns[latestTurnId] : null
+  const settledRunId =
+    latestTurn &&
+    (latestTurn.state === "completed" ||
+      latestTurn.state === "failed" ||
+      latestTurn.state === "interrupted")
+      ? latestTurn.runId
+      : null
   const subagents = useCallback(
     (namespace: ReadonlyArray<string>): Array<SubagentToolCall> =>
       state ? subagentToolCalls(state, namespace) : [],
@@ -59,6 +68,7 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
   return useMemo(
     () => ({
       kind: "transcript",
+      settledRunId,
       threadId,
       messages: transcript.messages,
       queued: transcript.queued,
@@ -81,6 +91,7 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
       loadOlder: transcript.loadOlder,
     }),
     [
+      settledRunId,
       contextUsage,
       startRun,
       stop,

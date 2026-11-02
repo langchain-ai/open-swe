@@ -15,6 +15,7 @@ from openswe.agent_api.runs import run_config
 from openswe.agent_api.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
 from openswe.threads import index, proxy, router, runtimes, store
 from openswe.threads.index import Runtime, ThreadStatus
+from openswe.threads.local_writes import LocalAgentServerWriteError
 from openswe.threads.principals import Principal
 from openswe.users.models import User
 
@@ -62,10 +63,12 @@ class _Client:
 class _Threads:
     """One runtime's threads, as the router copies them."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, sealed: bool = False) -> None:
         self.threads: dict[str, dict[str, JsonValue]] = {}
         self.client = _Client(self)
         self.reachable = True
+        # The local Agent Server, which refuses every create as the sealed one does.
+        self.sealed = sealed
 
     async def get(self, thread_id: str) -> dict[str, JsonValue] | None:
         return self.threads.get(thread_id)
@@ -77,6 +80,8 @@ class _Threads:
         return None if thread is None else index.IndexedThread.from_agent_server(thread)
 
     async def create(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
+        if self.sealed:
+            raise LocalAgentServerWriteError("Threads.put")
         now = datetime.now(UTC).isoformat()
         self.threads.setdefault(
             thread_id,
@@ -106,15 +111,12 @@ class _Threads:
 
 class _Runtimes:
     def __init__(self, mda_runtime: runtimes.MdaRuntime) -> None:
-        self.local = _Threads()
+        self.local = _Threads(sealed=True)
         self.mda = _Threads()
         self.mda_runtime = mda_runtime
 
     def runs_on(self, runtime: Runtime) -> _Threads:
         return self.mda if runtime == "mda" else self.local
-
-    def copies(self, runtime: Runtime) -> list[_Threads]:
-        return [self.local, self.mda] if runtime == "mda" else [self.local]
 
 
 class _Harness:
@@ -246,7 +248,7 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
     assert missed == 0
     assert counted == 1
     await store.THREADS.copies.settled(THREAD)
-    assert harness.runtimes.local.threads[THREAD]["metadata"] == read["metadata"]
+    assert harness.runtimes.local.threads == {}
     assert harness.runtimes.mda.threads[THREAD]["metadata"] == read["metadata"]
     assert harness.reached_here == []
 
@@ -395,7 +397,7 @@ async def test_a_new_thread_runs_on_mda(
     assert indexed is not None and indexed.runtime == "mda"
     assert indexed.metadata["runtime"] == "mda"
     assert harness.runtimes.mda.threads[THREAD]["metadata"] == indexed.metadata
-    assert harness.runtimes.local.threads[THREAD]["metadata"] == indexed.metadata
+    assert harness.runtimes.local.threads == {}
     [(_, sent)] = harness.forwarded
     assert sent["assistant_id"] == graph
     # Nothing the remote graph is handed carries the configurable but the signed token.
@@ -466,7 +468,7 @@ async def test_a_channel_thread_is_indexed_for_mda_without_creating_it_there(
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.runtime == "mda"
     assert indexed.metadata["channel"] == "linear"
-    assert harness.runtimes.local.threads[THREAD]["metadata"]["runtime"] == "mda"
+    assert harness.runtimes.local.threads == {}
     # MDA's channel creates it as its conversation's own thread; a copy made
     # here first would belong to the backend and keep the channel out.
     assert THREAD not in harness.runtimes.mda.threads
@@ -492,7 +494,7 @@ async def test_a_channel_conversations_worker_is_indexed_without_creating_it_on_
     assert status == 200
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.metadata["channel"] == "slack"
-    assert THREAD in harness.runtimes.local.threads
+    assert harness.runtimes.local.threads == {}
     assert THREAD not in harness.runtimes.mda.threads
 
 
@@ -807,7 +809,7 @@ async def test_reads_reach_mda_as_studio_for_channel_and_own_threads(
     assert THREAD not in harness.runtimes.mda_runtime._mda_threads
 
 
-async def test_a_channel_threads_metadata_is_copied_only_here(
+async def test_a_channel_threads_metadata_stays_in_the_index(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     harness = _Harness(monkeypatch)
@@ -819,7 +821,9 @@ async def test_a_channel_threads_metadata_is_copied_only_here(
     await store.THREADS.copies.settled(THREAD)
 
     assert status == 200
-    assert harness.runtimes.local.threads[THREAD]["metadata"]["title"] == "Renamed"
+    indexed = await index.get(THREAD)
+    assert indexed is not None and indexed.metadata["title"] == "Renamed"
+    assert harness.runtimes.local.threads == {}
     # On MDA the thread is the channel's; the backend writes nothing there.
     assert THREAD not in harness.runtimes.mda.threads
 
@@ -840,7 +844,8 @@ async def test_writes_to_the_backends_own_mda_threads_go_through_the_owner_scope
 async def test_deleting_a_thread_removes_every_copy(monkeypatch: pytest.MonkeyPatch) -> None:
     harness = _Harness(monkeypatch)
     await index.create(THREAD, runtime="mda")
-    await harness.runtimes.local.create(THREAD, {})
+    # A copy the Agent Server kept from before it was sealed.
+    harness.runtimes.local.threads[THREAD] = {"thread_id": THREAD, "metadata": {}}
     await harness.runtimes.mda.create(THREAD, {})
 
     status, _ = await harness.request("DELETE", f"/threads/{THREAD}")
@@ -901,7 +906,7 @@ async def test_a_copy_of_an_mda_thread_is_indexed_on_mda(monkeypatch: pytest.Mon
     assert status == 200 and isinstance(made, dict)
     copy = await index.get(str(made["thread_id"]))
     assert copy is not None and copy.runtime == "mda" and copy.metadata == {"title": "source"}
-    assert copy.thread_id in harness.runtimes.local.threads
+    assert harness.runtimes.local.threads == {}
 
 
 @pytest.mark.parametrize(("permissions", "from_index"), [([], False), (["openswe:backend"], True)])

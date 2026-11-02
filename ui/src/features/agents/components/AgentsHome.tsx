@@ -117,8 +117,11 @@ export function AgentsHome({
     null
   )
   const defaultWorkspaceSlug = workspaceOptionsQuery.data?.default_slug ?? null
-  const [submittedDraft, setSubmittedDraft] =
-    useState<CreateAgentThreadVariables | null>(null)
+  const [submitted, setSubmitted] = useState<{
+    draft: CreateAgentThreadVariables
+    sentAt: number
+  } | null>(null)
+  const submittedDraft = submitted?.draft ?? null
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(NEW_AGENT_PANEL_ID)
   )
@@ -431,7 +434,7 @@ export function AgentsHome({
   const resetPendingSubmit = () => {
     pendingRun.current = null
     setPendingThreadId(null)
-    setSubmittedDraft(null)
+    setSubmitted(null)
   }
 
   const cancelPendingThread = async (threadId: string) => {
@@ -466,7 +469,7 @@ export function AgentsHome({
       profileQuery.data?.agent_workspace_tasks_supported !== true
     ) {
       setLocalError(
-        "The connected backend needs an update before it can start general-purpose Agent Workspace chats."
+        "The connected backend needs an update before it can start Work chats."
       )
       return
     }
@@ -511,12 +514,13 @@ export function AgentsHome({
           model_id: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
         }
-    setSubmittedDraft(draft)
+    const sentAt = Date.now()
+    setSubmitted({ draft, sentAt })
     setLocalError(null)
 
     const configurable: Record<string, unknown> =
       modelConfigurable(activeSelection)
-    if (agentWorkspace) configurable.experience = "agent_workspace"
+    configurable.experience = agentWorkspace ? "agent_workspace" : "coding"
     if (localRun) {
       if (localCheckout)
         window.localStorage.setItem(LAST_LOCAL_REPO_KEY, localCheckout.cwd)
@@ -553,7 +557,12 @@ export function AgentsHome({
           // Awaited so the thread route already knows it is This Mac's.
           await queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
           configurable.sandbox_bridge_id = local.bridgeId
-          if (local.repo) configurable.repo = local.repo
+          if (
+            local.repo &&
+            !agentWorkspace &&
+            session.data?.auth_provider !== "langsmith"
+          )
+            configurable.repo = local.repo
           else configurable.repo_explicitly_none = true
         }
         await startRun(
@@ -587,8 +596,11 @@ export function AgentsHome({
       // Seeded so the thread route renders the prompt immediately; the real
       // record lands with the next detail fetch.
       const thread: AgentThread = {
+        experience: agentWorkspace ? "agent_workspace" : "coding",
         ...optimisticThread(threadId, draft, {
           recorded: session.data?.transcript_recording === true,
+          owner: session.data,
+          sentAt,
         }),
         // So the seeded thread already reads as This Mac, not Cloud, until
         // the server's record replaces it.
@@ -618,14 +630,19 @@ export function AgentsHome({
     runTarget === "local"
       ? localRepos.find((checkout) => checkout.cwd === localRepoPath)
       : undefined
-  const optimisticDraftThread = submittedDraft
-    ? optimisticThread("pending", submittedDraft)
+  const optimisticDraftThread = submitted
+    ? optimisticThread("pending", submitted.draft, {
+        owner: session.data,
+        sentAt: submitted.sentAt,
+      })
     : null
 
   return (
     <>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {session.data && !routePending && <OnboardingDialog />}
+        {session.data && !routePending && !agentWorkspace && (
+          <OnboardingDialog />
+        )}
         <AgentThreadHeader
           title={optimisticDraftThread?.title}
           target={runTarget === "local" ? "This Mac" : "Cloud"}
@@ -681,7 +698,7 @@ export function AgentsHome({
               repos={workspaceRepos}
               selectedRepo={repo}
               onRepoChange={optimisticDraftThread ? undefined : selectRepo}
-              runTarget={isDesktop ? runTarget : undefined}
+              runTarget={runTarget}
               onRunTargetChange={
                 !optimisticDraftThread && isDesktop && cloudEnabled
                   ? handleRunTargetChange

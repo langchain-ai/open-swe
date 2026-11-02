@@ -38,7 +38,6 @@ from openswe.slack.request import SlackRequest
 from openswe.slack.webhook import notify_slack_processing_error, process_slack_mention
 from openswe.threads import index
 from openswe.threads.router import adopt_channel_run
-from openswe.threads.runtimes import RUNTIMES
 from openswe.utils.http_pool import pooled_transport
 from openswe.webhooks.common import (
     PROVISIONAL_VISIBILITY_KEY,
@@ -295,7 +294,6 @@ async def take_back(thread_id: str, message_ts: str) -> bool:
     request, repo = _remembered(entry)
     released: dict[str, JsonValue] = {CHANNEL_METADATA_KEY: None}
     await index.update(thread_id, released)
-    await RUNTIMES.local.update(thread_id, released)
     await process_slack_mention(request, repo)
     return True
 

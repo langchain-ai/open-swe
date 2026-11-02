@@ -7,6 +7,7 @@ from openswe.claude_code.transcript import (
     MISSING_TOOL_RESULT,
     ClaudeTranscript,
     TranscriptError,
+    prompt_text,
 )
 
 
@@ -61,6 +62,23 @@ def test_rewound_branch_is_dropped_and_parallel_results_are_kept() -> None:
     assert isinstance(calls, AIMessage)
     assert [call["id"] for call in calls.tool_calls] == ["c1", "c2"]
     assert [message.content for message in session.messages[2:]] == ["one", "two", "done"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "shown"),
+    [
+        ("<system-reminder>\nworktree\n</system-reminder>\n\nfix it", "fix it"),
+        ("<task-notification>\n<task-id>b1</task-id>\n</task-notification>", ""),
+        ('<agent-message from="a1">\nreport\n</agent-message>', ""),
+        (
+            "<command-message>model</command-message>\n<command-name>/model</command-name>\n"
+            "<command-args>opus</command-args>",
+            "/model opus",
+        ),
+    ],
+)
+def test_prompt_text_hides_what_claude_code_added(raw: str, shown: str) -> None:
+    assert prompt_text(raw) == shown
 
 
 def test_prompt_queued_mid_turn_waits_for_open_tool_calls_and_dangling_calls_get_a_result() -> None:

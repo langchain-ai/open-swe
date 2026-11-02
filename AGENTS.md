@@ -23,12 +23,14 @@ Shape new behavior to fit:
 - Data fixed for a run is worked out once when the backend starts it and sent in the run context (`Catalog`, `openswe/agent_api/client.py`); a call that needs a fact derives it from the token.
 - State kept between calls lives in MDA's run state or PostgreSQL, never in backend memory.
 
-The per-run plan is legacy: `plan_agent`, `plan_reviewer` and `plan_review_scout` fill a `ToolSurface` that `RunSession` (`openswe/agent_api/graph.py`) serves to `prepare` and a few runs still on it.
-Shrink it toward named APIs and MDA middleware; add nothing to it.
+Open SWE starts three kinds of run (`agent`, `reviewer`, `review-scout`), each a `RunKind` (`openswe/agent_api/run_kinds.py`); MDA plays all of them with its one graph.
+As a run starts, its kind resolves the run's catalog from what only the backend holds, such as thread settings, workspace defaults, the sender's access and credentialed integrations (`agent_catalog`, `reviewer_catalog`, `review_scout_catalog`, `openswe/agent_api/run_catalog.py`); after that, every call is answered from the token (`openswe/agent_api/run_calls.py`).
+The backend never runs middleware around a model call; the only middleware objects it keeps are the preparation and the reporters a named endpoint calls.
 
 ## Conventions
 
 - Before changing the dashboard (`ui/`), read `ui/AGENTS.md` and `ui/DESIGN.md`.
+- Flag likely desktop-release requirements to the developer for native shell/preload, bundled bridge/CLI, packaging, or incompatible IPC changes; downloaded UI and backend-only changes need no desktop release.
 
 - Async-only.
   Add a sync method only when an interface requires it, and make it raise `NotImplementedError`.

@@ -82,6 +82,9 @@ async def test_sql_repair_commits_ddl_bulk_writes_and_migration_metadata(registr
         "INSERT INTO repair_example SELECT generate_series(1, 101)", confirm=True
     )
     assert result == {"ok": True, "row_count": 101}
+    await execute_database_sql(
+        "INSERT INTO alembic_version (version_num) VALUES ('parallel-head')", confirm=True
+    )
     result = await execute_database_sql(
         "UPDATE alembic_version SET version_num = 'repaired' "
         "WHERE version_num = (SELECT min(version_num) FROM alembic_version)",
@@ -97,9 +100,9 @@ async def test_sql_repair_commits_ddl_bulk_writes_and_migration_metadata(registr
         assert await conn.scalar(text("SELECT count(*) FROM repair_example")) == 101
         assert (
             await conn.scalar(
-                text("SELECT count(*) FROM alembic_version WHERE version_num = 'repaired'")
+                text("SELECT version_num FROM alembic_version WHERE version_num = 'repaired'")
             )
-            == 1
+            == "repaired"
         )
         assert await conn.scalar(text("SELECT config FROM repair_example LIMIT 1")) == {
             "enabled": True,
