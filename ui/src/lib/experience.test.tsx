@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import { ExperienceSelector } from "@/components/ExperienceSelector"
-import { useDesktopExperience } from "./experience"
+import { useExperience } from "./experience"
 
 const state = vi.hoisted(() => ({
   login: "alice",
@@ -44,11 +44,11 @@ it("defaults desktop to Work, persists a switch locally, and isolates users", ()
     configurable: true,
     value: {},
   })
-  const first = renderHook(() => useDesktopExperience())
+  const first = renderHook(() => useExperience())
   expect(first.result.current.experience).toBe("agent_workspace")
   act(() => first.result.current.select("coding"))
   first.unmount()
-  const second = renderHook(() => useDesktopExperience())
+  const second = renderHook(() => useExperience())
   expect(second.result.current.experience).toBe("coding")
   state.login = "bob"
   second.rerender()
@@ -119,6 +119,6 @@ it("opens the selected home and exposes the selected label in browser and deskto
     hash: undefined,
   })
   Reflect.deleteProperty(window, "openSweDesktop")
-  const browser = renderHook(() => useDesktopExperience())
+  const browser = renderHook(() => useExperience())
   expect(browser.result.current.experience).toBe("coding")
 })

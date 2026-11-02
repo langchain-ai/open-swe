@@ -14,7 +14,7 @@ import { AppSidebar } from "@/components/AppSidebar"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
-import { useDesktopExperience } from "@/lib/experience"
+import { useExperience } from "@/lib/experience"
 import {
   AgentWorkspaceProvider,
   useAgentWorkspace,
@@ -107,7 +107,7 @@ export function SettingsPage({
   children,
   ...props
 }: SettingsPageProps) {
-  const { experience } = useDesktopExperience()
+  const { experience } = useExperience()
   const agentWorkspace = experience === "agent_workspace"
   const session = useSession()
   if (session.isLoading) {

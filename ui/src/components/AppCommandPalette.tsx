@@ -1,4 +1,4 @@
-import { desktopExperience, useDesktopExperience } from "@/lib/experience"
+import { experienceStore, useExperience } from "@/lib/experience"
 import { MagnifyingGlassRegularIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import {
@@ -130,7 +130,7 @@ export function AppCommandPalette({
     const timer = window.setTimeout(() => setDebouncedQuery(threadQuery), 180)
     return () => window.clearTimeout(timer)
   }, [open, threadQuery])
-  const { experience } = useDesktopExperience()
+  const { experience } = useExperience()
   const cloudThreads = useInfiniteThreadsPages(
     {
       experience,
@@ -148,7 +148,7 @@ export function AppCommandPalette({
     ...buildPaletteResults(
       commands,
       debouncedQuery === threadQuery
-        ? desktopExperience.filter(
+        ? experienceStore.filter(
             cloudThreads.data?.pages.flatMap((page) => page.items) ?? [],
             experience
           )

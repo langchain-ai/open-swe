@@ -5,14 +5,14 @@ import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { useSession } from "@/lib/session"
 import { useHrefLinkOptions } from "@/lib/appLocation"
 import { cn } from "@/lib/utils"
-import { desktopExperience, useDesktopExperience } from "@/lib/experience"
+import { experienceStore, useExperience } from "@/lib/experience"
 
 export function ExperienceSelector({
   onNavigate,
 }: {
   onNavigate?: () => void
 }) {
-  const { experience, select } = useDesktopExperience()
+  const { experience, select } = useExperience()
   const navigate = useNavigate()
   const session = useSession()
   const userId = session.data?.user_id ?? ""
@@ -46,8 +46,8 @@ export function ExperienceSelector({
             )}
             onClick={() => {
               if (value === experience) return
-              desktopExperience.rememberLocation(userId, experience, href)
-              const destination = desktopExperience.location(userId, value)
+              experienceStore.rememberLocation(userId, experience, href)
+              const destination = experienceStore.location(userId, value)
               select(value)
               onNavigate?.()
               void navigate(linkOptions(destination))
