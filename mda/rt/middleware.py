@@ -103,7 +103,7 @@ from rt.managed_sandbox import OpenedSandbox
 from rt.models import build_model
 from rt.offload import OFFLOADING_KEY, RequestedOffload
 from rt.outbox import OUTBOX_KEY, carry
-from rt.remote_files import RemoteFiles
+from rt.remote_files import RemoteFiles, RunArtifacts
 from rt.sandbox_setup import sandbox_setup
 from rt.tools import STATE_KEY, cited, run_id, tool_report
 from rt.tracing import MIDDLEWARE_TRACE_POLICY, TurnTrace
@@ -482,10 +482,14 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     async def _offload(self, state: RunState, runtime: Runtime) -> dict[str, object]:
         """Summarize the conversation now, as the run was asked to, and end the run."""
+        # Where MDA's own summarization keeps the history: the sandbox, or else the run's
+        # artifacts root on the backend, never the root of a person's machine.
         files = (
             getattr(runtime, "backend", None)
             if self._in_sandbox
-            else RemoteFiles(self._backend, run_id)
+            else RunArtifacts(
+                self._backend, run_id, lambda: self._backend.run.catalog.files.artifacts_root
+            )
         )
         if not isinstance(files, BackendProtocol):
             raise BackendCallError("The run has no files to offload the conversation to")
