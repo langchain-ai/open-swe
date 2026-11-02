@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from managed_deepagents._channels.trigger.http import TriggerChannelThread
     from managed_deepagents._channels.trigger.types import (
         TriggerChannelMessageEvent,
+        TriggerChannelProviderEvent,
         TriggerChannelUserPromptResponseEvent,
     )
 
@@ -48,13 +49,54 @@ SlackMessageKey = Literal["mention", "directMessage", "message"]
   ``"thread"`` or ``"all"`` delivers.
 """
 
-SlackEventKey = Literal["mention", "directMessage", "message", "interaction"]
-"""What reached the agent from Slack: a kind of message (``SlackMessageKey``),
-or ``"interaction"``, a click on a button in a message your agent posted with
-its own blocks, or a submitted modal it opened, that answers no decision the
-thread waits on."""
+SlackActivityKey = Literal["edit", "delete", "reaction", "shortcut"]
+"""What happened to a Slack message: ``"edit"``, ``"delete"``, ``"reaction"``,
+an emoji added or removed, or ``"shortcut"``, one of your app's message
+shortcuts a person used on it."""
 
-SLACK_EVENT_KEYS: frozenset[str] = frozenset({"mention", "directMessage", "message", "interaction"})
+SlackEventKey = Literal[
+    "mention",
+    "directMessage",
+    "message",
+    "interaction",
+    "edit",
+    "delete",
+    "reaction",
+    "shortcut",
+]
+"""What reached the agent from Slack: a kind of message (``SlackMessageKey``),
+``"interaction"``, a click on a button in a message your agent posted with its
+own blocks, or a submitted modal it opened, that answers no decision the thread
+waits on, or something that happened to a message (``SlackActivityKey``)."""
+
+SLACK_EVENT_KEYS: frozenset[str] = frozenset(
+    {
+        "mention",
+        "directMessage",
+        "message",
+        "interaction",
+        "edit",
+        "delete",
+        "reaction",
+        "shortcut",
+    }
+)
+
+#: The Slack events Trigger Server forwards for each activity key: a channel asks
+#: for them only when it has a handler for the key.
+SLACK_FORWARDED_EVENTS: dict[str, tuple[str, ...]] = {
+    "edit": ("message_changed",),
+    "delete": ("message_deleted",),
+    "reaction": ("reaction_added", "reaction_removed"),
+    "shortcut": ("message_action",),
+}
+_ACTIVITY_KEYS: dict[str, SlackActivityKey] = {
+    "message_changed": "edit",
+    "message_deleted": "delete",
+    "reaction_added": "reaction",
+    "reaction_removed": "reaction",
+    "message_action": "shortcut",
+}
 
 
 @dataclass(frozen=True)
@@ -132,10 +174,51 @@ class SlackInteractionEvent:
     ``SlackMessageEvent.actor``."""
 
 
-SlackEvent: TypeAlias = SlackMessageEvent | SlackInteractionEvent
+@dataclass(frozen=True, kw_only=True)
+class SlackActivityEvent:
+    """Something that happened to a Slack message: an edit, a deletion, a
+    reaction, or a message shortcut a person used on it.
+
+    Trigger Server forwards an edit, a deletion or a reaction only for a thread
+    the channel already took a message from, unless the channel takes every
+    message (``trigger_mode="all"``) or it is in a direct message, and never for
+    your agent's own. A shortcut goes wherever a person used it, as a mention
+    does; your Slack app defines its shortcuts and answers through the payload's
+    ``response_url``.
+    """
+
+    key: SlackActivityKey
+    delivery_id: str
+    """Trigger Server's ID for this delivery."""
+    channel_id: str
+    """The Slack conversation the message is in."""
+    message_ts: str
+    """The timestamp of the message edited, deleted or reacted to."""
+    thread_ts: str
+    """The timestamp of its thread's first message."""
+    text: str
+    """The message's text: as edited, as it was before it was deleted, or as reacted to."""
+    payload: dict[str, JsonValue]
+    """The Slack event as Slack sent it, from the Events API, or a shortcut's
+    interaction payload, without its verification ``token``."""
+    user_id: str | None = None
+    """The message's author for an edit or a deletion, the person who reacted
+    for a reaction, the person who used it for a shortcut. On a deletion that
+    may not be who deleted it, such as an admin: Slack doesn't say."""
+    action_id: str | None = None
+    """A shortcut's ``callback_id``."""
+    reaction: str | None = None
+    """The emoji's name, such as ``"thumbsup"``, for a reaction."""
+    removed: bool = False
+    """Whether a reaction was removed rather than added."""
+    actor: SlackActor | None = None
+    """Who acted, as Trigger Server verified it; see ``SlackMessageEvent.actor``."""
+
+
+SlackEvent: TypeAlias = SlackMessageEvent | SlackInteractionEvent | SlackActivityEvent
 """What reached the agent from Slack, as a handler gets it: a message
-(``SlackMessageEvent``) or a click or modal (``SlackInteractionEvent``);
-switch on ``key``."""
+(``SlackMessageEvent``), a click or modal (``SlackInteractionEvent``), or an
+edit, deletion or reaction (``SlackActivityEvent``); switch on ``key``."""
 
 
 @dataclass(frozen=True)
@@ -168,6 +251,13 @@ SlackInteractionCallback = Callable[
 ]
 """An ``interaction`` handler, as a ``SlackEventCallback`` but for an interaction."""
 
+SlackActivityCallback = Callable[
+    [SlackActivityEvent, SlackChannelThread],
+    "ChannelRunResult | Awaitable[ChannelRunResult | None] | None",
+]
+"""An ``edit``, ``delete``, ``reaction`` or ``shortcut`` handler, as a
+``SlackEventCallback`` but for something that happened to a message."""
+
 
 class SlackHandlers(TypedDict, total=False):
     """Handlers that decide what each kind of message starts, by its key.
@@ -186,6 +276,19 @@ class SlackHandlers(TypedDict, total=False):
     one, such a click starts a run with no new message, which reads the click
     from ``runtime.channel.event``. A click that answers a decision the thread
     waits on resumes the run, and never reaches it."""
+    edit: SlackActivityCallback | EventEndpoint
+    """Decides what a message's edit starts. With it, the channel asks Trigger
+    Server for edits; without it, they never reach the deployment."""
+    delete: SlackActivityCallback | EventEndpoint
+    """Decides what a message's deletion starts, as ``edit``."""
+    reaction: SlackActivityCallback | EventEndpoint
+    """Decides what an emoji added to or removed from a message starts, as
+    ``edit``. Your app's Slack app then needs ``reactions:read``, which a
+    LangSmith-managed app gets at its next deploy, after a reinstall."""
+    shortcut: SlackActivityCallback | EventEndpoint
+    """Decides what one of your app's message shortcuts starts, used on a
+    message, as ``edit``. Your Slack app defines its shortcuts and needs
+    ``commands``."""
 
 
 class SlackEndpointFile(TypedDict):
@@ -215,7 +318,12 @@ class SlackEndpointFields(TypedDict, total=False):
     actor: SlackEndpointActor
     """The verified Slack user; absent when Trigger Server signs none."""
     actionId: str
-    """An interaction's button ``action_id`` or modal ``callback_id``."""
+    """An interaction's button ``action_id`` or modal ``callback_id``, or a
+    shortcut's ``callback_id``."""
+    reaction: str
+    """A reaction's emoji name."""
+    removed: bool
+    """Whether a reaction was removed."""
     value: JsonValue
     """An interaction's button ``value`` or modal ``state.values``."""
 
@@ -236,6 +344,8 @@ def endpoint_fields(event: SlackEvent) -> SlackEndpointFields:
     ``SLACK_ENDPOINT_EVENT_FIELDS``."""
     if isinstance(event, SlackInteractionEvent):
         return _interaction_endpoint_fields(event)
+    if isinstance(event, SlackActivityEvent):
+        return _activity_endpoint_fields(event)
     fields: SlackEndpointFields = {
         "text": event.text,
         "channelId": event.channel_id,
@@ -245,6 +355,25 @@ def endpoint_fields(event: SlackEvent) -> SlackEndpointFields:
     }
     if event.user_id is not None:
         fields["userId"] = event.user_id
+    if event.actor is not None:
+        fields["actor"] = endpoint_actor(event.actor)
+    return fields
+
+
+def _activity_endpoint_fields(event: SlackActivityEvent) -> SlackEndpointFields:
+    fields: SlackEndpointFields = {
+        "text": event.text,
+        "channelId": event.channel_id,
+        "messageTs": event.message_ts,
+        "threadTs": event.thread_ts,
+    }
+    if event.user_id is not None:
+        fields["userId"] = event.user_id
+    if event.reaction is not None:
+        fields["reaction"] = event.reaction
+        fields["removed"] = event.removed
+    if event.action_id is not None:
+        fields["actionId"] = event.action_id
     if event.actor is not None:
         fields["actor"] = endpoint_actor(event.actor)
     return fields
@@ -356,15 +485,20 @@ def reset_slack_bot_user() -> None:
 
 
 async def read_slack_event(
-    event: TriggerChannelMessageEvent | TriggerChannelUserPromptResponseEvent,
+    event: TriggerChannelMessageEvent
+    | TriggerChannelUserPromptResponseEvent
+    | TriggerChannelProviderEvent,
     actor: ChannelActor | None = None,
 ) -> SlackEvent | None:
-    """What a delivery carries: a message, of the kind Slack's event says, or an interaction.
+    """What a delivery carries: a message, of the kind Slack's event says, an
+    interaction, or an edit, deletion or reaction.
 
     ``None`` when it has nothing to read one from.
     """
     if event.get("type") == "user_prompt_response":
         return slack_interaction_event(cast("TriggerChannelUserPromptResponseEvent", event), actor)
+    if event.get("type") == "provider_event":
+        return slack_activity_event(cast("TriggerChannelProviderEvent", event), actor)
     raw = event.get("raw_event")
     if not isinstance(raw, Mapping):
         return None
@@ -486,6 +620,53 @@ def slack_event(
     )
 
 
+def slack_activity_event(
+    event: TriggerChannelProviderEvent, actor: ChannelActor | None = None
+) -> SlackActivityEvent | None:
+    """The edit, deletion or reaction a forwarded provider event carries, as a
+    handler reads it.
+
+    ``None`` for one no key reads, without the message it is about, or without
+    a reaction's emoji or a shortcut's ``callback_id``.
+    """
+    kind = event["provider_event"]
+    key = _ACTIVITY_KEYS.get(kind.get("subtype") or kind["type"])
+    raw = event["raw_event"]
+    address = event["address"] if isinstance(event.get("address"), Mapping) else {}
+    message = event.get("message")
+    channel_id = _text(address.get("conversation_id"))
+    message_ts = _text(message.get("id")) if message else None
+    thread_ts = _text(address.get("thread_id")) or message_ts
+    if key is None or channel_id is None or message_ts is None or thread_ts is None:
+        return None
+    reaction = _text(raw.get("reaction")) if key == "reaction" else None
+    action_id = _text(raw.get("callback_id")) if key == "shortcut" else None
+    if (key == "reaction" and reaction is None) or (key == "shortcut" and action_id is None):
+        return None
+    if key == "reaction":
+        user_id = _text(raw.get("user"))
+    elif key == "shortcut":
+        user = raw.get("user")
+        user_id = _text(user.get("id")) if isinstance(user, Mapping) else None
+    else:
+        changed = raw.get("message" if key == "edit" else "previous_message")
+        user_id = _text(changed.get("user")) if isinstance(changed, Mapping) else None
+    return SlackActivityEvent(
+        key=key,
+        delivery_id=event["delivery_id"],
+        channel_id=channel_id,
+        message_ts=message_ts,
+        thread_ts=thread_ts,
+        text=message["text"] if message else "",
+        payload=cast("dict[str, JsonValue]", copy.deepcopy(dict(raw))),
+        user_id=user_id,
+        reaction=reaction,
+        removed=kind["type"] == "reaction_removed",
+        action_id=action_id,
+        actor=actor if isinstance(actor, SlackActor) else None,
+    )
+
+
 def slack_interaction_event(
     event: TriggerChannelUserPromptResponseEvent, actor: ChannelActor | None = None
 ) -> SlackInteractionEvent | None:
@@ -552,7 +733,11 @@ def _slack_file(item: object) -> SlackFile | None:
 
 __all__ = [
     "SLACK_EVENT_KEYS",
+    "SLACK_FORWARDED_EVENTS",
     "DecidedSlackEvents",
+    "SlackActivityCallback",
+    "SlackActivityEvent",
+    "SlackActivityKey",
     "SlackActor",
     "SlackChannelThread",
     "SlackEndpointEvent",
@@ -572,6 +757,7 @@ __all__ = [
     "finished_slack_thread",
     "read_slack_event",
     "reset_slack_bot_user",
+    "slack_activity_event",
     "slack_event",
     "slack_event_key",
     "slack_interaction_event",

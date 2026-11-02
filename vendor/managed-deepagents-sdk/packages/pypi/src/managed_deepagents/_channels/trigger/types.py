@@ -14,6 +14,7 @@ from pydantic import (
     Field,
     SkipValidation,
     TypeAdapter,
+    ValidationInfo,
     field_validator,
 )
 
@@ -138,11 +139,54 @@ class TriggerChannelRunCancelEvent(TriggerChannelRunCancelEventRequired, total=F
     raw_event: TriggerChannelRawEvent | None
 
 
+class TriggerChannelProviderEventKindRequired(TypedDict):
+    type: str
+
+
+class TriggerChannelProviderEventKind(TriggerChannelProviderEventKindRequired, total=False):
+    """Which provider event a ``provider_event`` delivery carries: Slack's event
+    type, and for a message event its subtype (``message_changed``, ...)."""
+
+    subtype: str
+
+
+class TriggerChannelProviderMessage(TypedDict):
+    """The message a provider event is about: as edited, as it was before it was
+    deleted, or the one reacted to."""
+
+    id: str
+    text: str
+
+
+class TriggerChannelProviderEventRequired(TypedDict):
+    version: Literal["1"]
+    type: Literal["provider_event"]
+    provider: str
+    event_id: str
+    delivery_id: str
+    created_at: str
+    channel_id: str
+    source_thread_key: str
+    address: TriggerChannelAddress
+    provider_event: TriggerChannelProviderEventKind
+    raw_event: TriggerChannelRawEvent
+
+
+class TriggerChannelProviderEvent(TriggerChannelProviderEventRequired, total=False):
+    """A provider event besides messages that the channel asked Trigger Server for,
+    such as a Slack edit or reaction."""
+
+    identity_context: str | None
+    actor: object
+    message: TriggerChannelProviderMessage
+
+
 #: Events that start or resume a run on the source thread.
 TriggerChannelRunEvent = (
     TriggerChannelMessageEvent
     | TriggerChannelInterruptResumeEvent
     | TriggerChannelUserPromptResponseEvent
+    | TriggerChannelProviderEvent
 )
 
 TriggerChannelEvent = TriggerChannelRunEvent | TriggerChannelRunCancelEvent
@@ -415,6 +459,37 @@ class _RunCancelEventModel(_WireModel):
         return _opaque_mapping(value, field="address")
 
 
+class _ProviderEventKindModel(_WireModel):
+    type: _NonBlankString
+    subtype: _NonBlankString | None = None
+
+
+class _ProviderMessageModel(_WireModel):
+    id: str
+    text: str
+
+
+class _ProviderEventModel(_WireModel):
+    version: Literal["1"]
+    type: Literal["provider_event"]
+    provider: _NonBlankString
+    event_id: _NonBlankString
+    delivery_id: _NonBlankString
+    created_at: _NonBlankString
+    channel_id: _UuidString
+    source_thread_key: _NonBlankString
+    address: SkipValidation[dict[str, object]]
+    provider_event: _ProviderEventKindModel
+    raw_event: SkipValidation[dict[str, object]]
+    message: _ProviderMessageModel | None = None
+    identity_context: str | None = None
+
+    @field_validator("address", "raw_event", mode="before")
+    @classmethod
+    def _opaque_mappings(cls, value: object, info: ValidationInfo) -> object:
+        return _opaque_mapping(value, field=str(info.field_name))
+
+
 _USER_PROMPT_RESPONSE_EVENT = Annotated[
     _SlackUserPromptResponseEventModel, Field(discriminator="provider")
 ]
@@ -424,7 +499,8 @@ _EVENT_ADAPTER = TypeAdapter(
         _MessageEventModel
         | _InterruptResumeEventModel
         | _USER_PROMPT_RESPONSE_EVENT
-        | _RunCancelEventModel,
+        | _RunCancelEventModel
+        | _ProviderEventModel,
         Field(discriminator="type"),
     ]
 )
@@ -468,6 +544,9 @@ __all__ = [
     "TriggerChannelInterruptResumeEvent",
     "TriggerChannelMessageEvent",
     "TriggerChannelPostAction",
+    "TriggerChannelProviderEvent",
+    "TriggerChannelProviderEventKind",
+    "TriggerChannelProviderMessage",
     "TriggerChannelRawEvent",
     "TriggerChannelReactAction",
     "TriggerChannelResume",

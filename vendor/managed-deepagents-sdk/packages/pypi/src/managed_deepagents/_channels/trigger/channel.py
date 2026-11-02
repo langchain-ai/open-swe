@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     )
     from managed_deepagents._channels.trigger.types import (
         TriggerChannelMessageEvent,
+        TriggerChannelProviderEvent,
         TriggerChannelUserPromptResponseEvent,
     )
     from managed_deepagents._channels.types import ChannelReply, JsonValue
@@ -152,6 +153,14 @@ class TriggerSlackChannel(Channel):
                 on_event or {}, event, thread, name, actor, remember=remember
             )
 
+        async def decide_provider_event(
+            event: TriggerChannelProviderEvent,
+            thread: TriggerChannelThread,
+            actor: ChannelActor | None,
+        ) -> TriggerMessageRoute | None:
+            assert on_event is not None  # noqa: S101 - only passed with handlers
+            return await _decide_event(on_event, event, thread, name, actor, remember=remember)
+
         on_finish = None
         if self.on_finish is not None:
             from managed_deepagents._channels.http.provider import (  # noqa: PLC0415
@@ -194,6 +203,7 @@ class TriggerSlackChannel(Channel):
             # type; with no handler for the event, it starts the default run.
             decide_message=decide_message,
             decide_interaction=decide_interaction,
+            decide_provider_event=decide_provider_event if self.forwarded_events else None,
             multitask_strategy=self.multitask_strategy,
             on_finish=on_finish,
             resolve_user=context.get("resolve_user"),
@@ -209,6 +219,23 @@ class TriggerSlackChannel(Channel):
             self._decided = DecidedSlackEvents()
         return self._decided
 
+    @property
+    def forwarded_events(self) -> tuple[str, ...]:
+        """The Slack events besides messages the channel's handlers ask Trigger
+        Server to forward."""
+        from managed_deepagents._channels.slack.events import (  # noqa: PLC0415
+            SLACK_FORWARDED_EVENTS,
+        )
+
+        return tuple(
+            sorted(
+                event
+                for key, events in SLACK_FORWARDED_EVENTS.items()
+                if (self.on_event or {}).get(key) is not None
+                for event in events
+            )
+        )
+
     def requirements(self, name: str) -> ChannelManifest:
         # Older CLIs require triggerOnAllMessages and reject unknown fields, so
         # "all" is sent as that flag and triggerMode only for mention/thread.
@@ -221,6 +248,9 @@ class TriggerSlackChannel(Channel):
         }
         if self.trigger_mode in ("mention", "thread"):
             provider_config["triggerMode"] = self.trigger_mode
+        # Only with a handler that needs it, so other channels deploy with any CLI.
+        if forwarded := self.forwarded_events:
+            provider_config["forwardedEvents"] = cast("JsonValue", list(forwarded))
         return {
             "name": name,
             "provider": "slack",
@@ -259,14 +289,17 @@ async def _is_plain_message(event: TriggerChannelMessageEvent) -> bool:
 
 async def _decide_event(
     handlers: Mapping[str, SlackEventCallback],
-    delivery: TriggerChannelMessageEvent | TriggerChannelUserPromptResponseEvent,
+    delivery: TriggerChannelMessageEvent
+    | TriggerChannelUserPromptResponseEvent
+    | TriggerChannelProviderEvent,
     thread: TriggerChannelThread,
     channel_name: str,
     actor: ChannelActor | None = None,
     *,
     remember: Callable[[str, SlackEvent], None] | None = None,
 ) -> TriggerMessageRoute | None:
-    """What a message or interaction starts, as its key's handler decides.
+    """What a message, interaction, edit, deletion or reaction starts, as its key's
+    handler decides.
 
     ``None``, so what it starts without one. Every handler is asked after
     Trigger Server has its answer, since it may take longer than Trigger Server
@@ -316,6 +349,7 @@ async def _run_handler(
         RunChannel,
         normalize_run_inputs,
     )
+    from managed_deepagents._channels.slack.events import SlackMessageEvent  # noqa: PLC0415
     from managed_deepagents._channels.trigger.http import (  # noqa: PLC0415
         TriggerMessageDecision,
     )
@@ -337,7 +371,7 @@ async def _run_handler(
         return TriggerMessageDecision("failed")
     if not runs:
         return TriggerMessageDecision("skipped")
-    if event.key != "interaction":
+    if isinstance(event, SlackMessageEvent):
         for run in runs:
             if run["messages"]:
                 run["messages"] = _with_rich_content(run["messages"], event)

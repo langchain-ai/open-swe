@@ -4,3 +4,4 @@
 1149 8bc4e362d4375238316e69972944e6386effa0b0 feat(channels): answer the provider first, then ask the channel's handler
 1171 16543f03e4dacce70a9a3a5aeb2a1eeaab9357cc feat(channels): let Slack handlers choose each run's thread
 1174 48365c151ff3dabfd9ac10665565c3dfcce59e23 feat(channels): handle every GitHub action of handled events, and installation events
+1175 5a01751f8b3b6d7797ff6abe72d72169085355e1 feat(channels): let Slack handlers take edits, deletions and reactions
