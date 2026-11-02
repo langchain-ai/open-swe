@@ -629,7 +629,17 @@ async def test_agent_request_is_refused_when_its_policy_cannot_apply(
     assert _state(review).area == ("" if refusal else area)
 
 
-def test_invalid_policies_are_dropped_without_discarding_other_settings() -> None:
+@pytest.mark.parametrize(
+    "invalid_areas",
+    [
+        {"checkout": {"label": "Checkout"}},
+        {"unmapped": {"label": "Checkout", "githubLogin": "owner"}},
+        [],
+    ],
+)
+def test_invalid_policies_are_dropped_without_discarding_other_settings(
+    invalid_areas: object,
+) -> None:
     settings = RepoSettings.model_validate_json(
         """{
             "reviewChannel": "#eng-reviews",
@@ -641,12 +651,25 @@ def test_invalid_policies_are_dropped_without_discarding_other_settings() -> Non
                  "criteria": "first"},
                 {"id": "design", "label": "Design review", "team": "a/b", "paths": ["*"],
                  "criteria": "second"},
-                {"id": "security", "label": "Security review", "team": "a/c", "paths": ["*"]},
-                {"id": "experience", "label": "Experience review", "team": "a/b", "paths": ["*"],
-                 "criteria": "x", "areas": {"unmapped": {"label": "Checkout", "githubLogin": "owner"}}}
+                {"id": "security", "label": "Security review", "team": "a/c", "paths": ["*"]}
             ]
         }"""
     )
     assert settings.review_channel == "#eng-reviews"
     assert settings.review_allowed_authors == ["langsmith-engine[bot]"]
     assert [(p.id, p.criteria) for p in settings.supplementary_reviews] == [("design", "first")]
+    configured = RepoSettings.model_validate(
+        {
+            **settings.model_dump(by_alias=True),
+            "supplementaryReviews": [
+                {**POLICY.model_dump(), "areas": invalid_areas},
+                {**POLICY.model_dump(), "id": "security"},
+            ],
+        }
+    )
+    assert configured.review_channel == settings.review_channel
+    assert configured.review_allowed_authors == settings.review_allowed_authors
+    assert configured.supplementary_reviews == [
+        POLICY,
+        POLICY.model_copy(update={"id": "security"}),
+    ]

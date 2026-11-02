@@ -92,6 +92,7 @@ Configure them on the default branch:
 - `areas` optionally maps lowercase area slugs to a classification `label` and the owner's `githubLogin`.
   Area names, descriptions, and owners belong in this repository configuration; Open SWE has no built-in product or team map.
   `unmapped` is reserved for team rotation and cannot be configured as an area.
+  A malformed area map is ignored with a warning; the review policy remains active using team rotation.
 
 When standard or posted review starts, each policy whose paths the pull request touches gets an isolated, unlisted assessment.
 If the criteria are met, an available team member is rotated in (least recently assigned for that policy, within working hours, honoring out-of-office and opt-outs).

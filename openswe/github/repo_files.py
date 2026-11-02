@@ -7,7 +7,15 @@ from datetime import timedelta
 from fnmatch import fnmatchcase
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    ValidatorFunctionWrapHandler,
+    field_validator,
+)
 
 from openswe.github.http import (
     GitHubAppUnavailable,
@@ -74,13 +82,21 @@ class SupplementaryReviewPolicy(BaseModel):
         Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")], SupplementaryReviewArea
     ] = Field(default_factory=dict)
 
-    @field_validator("areas")
+    @field_validator("areas", mode="wrap")
     @classmethod
-    def _reserved_area(
-        cls, areas: dict[str, SupplementaryReviewArea]
+    def _valid_areas(
+        cls, raw: object, handler: ValidatorFunctionWrapHandler
     ) -> dict[str, SupplementaryReviewArea]:
-        if "unmapped" in areas:
-            raise ValueError("'unmapped' is reserved for team rotation")
+        try:
+            areas: dict[str, SupplementaryReviewArea] = handler(raw)
+            if "unmapped" in areas:
+                raise ValueError("'unmapped' is reserved for team rotation")
+        except ValueError:
+            logger.warning(
+                "Ignoring invalid supplementary review areas; falling back to team rotation",
+                exc_info=True,
+            )
+            return {}
         return areas
 
     def matches(self, path: str) -> bool:
