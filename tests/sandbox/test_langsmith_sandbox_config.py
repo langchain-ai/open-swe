@@ -204,11 +204,9 @@ def _serve(
     handler: Callable[[httpx2.Request], httpx2.Response],
 ) -> None:
     """Answer the provider's own client from `handler` instead of the network."""
-    client = httpx2.AsyncClient
     monkeypatch.setattr(
-        langsmith_provider.httpx2,
-        "AsyncClient",
-        lambda **_kwargs: client(transport=httpx2.MockTransport(handler)),
+        "openswe.utils.http_pool.PooledAsyncClient._init_transport",
+        lambda *args, **kwargs: httpx2.MockTransport(handler),
     )
 
 

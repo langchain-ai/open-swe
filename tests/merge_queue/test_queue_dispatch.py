@@ -39,7 +39,11 @@ async def test_workflow_policy_requires_fresh_authenticated_response(monkeypatch
             headers={"X-Merge-Queue-Signature": "invalid" if fault == "signature" else signature},
         )
 
-    monkeypatch.setattr(dispatch, "pooled_transport", lambda: httpx2.MockTransport(respond))
+    monkeypatch.setattr(
+        dispatch,
+        "PooledAsyncClient",
+        lambda **kwargs: httpx2.AsyncClient(**kwargs, transport=httpx2.MockTransport(respond)),
+    )
     gateway = DispatchGateway("https://dispatcher.example/dispatch", SecretStr("s" * 32))
     if fault:
         with pytest.raises(ValueError):
@@ -103,7 +107,11 @@ async def test_dispatch_retries_only_authenticated_preflight_failures(
             204 if retry == "once" and len(sent) > 1 else status, headers=headers
         )
 
-    monkeypatch.setattr(dispatch, "pooled_transport", lambda: httpx2.MockTransport(handle))
+    monkeypatch.setattr(
+        dispatch,
+        "PooledAsyncClient",
+        lambda **kwargs: httpx2.AsyncClient(**kwargs, transport=httpx2.MockTransport(handle)),
+    )
     gateway = DispatchGateway("https://dispatcher.example/queue", SecretStr(secret))
     if status == 204 or retry == "once":
         await gateway.dispatch(contract, deadline)

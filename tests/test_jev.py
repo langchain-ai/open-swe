@@ -30,8 +30,7 @@ def transport(
 
     def install(handler: ResponseHandler) -> None:
         monkeypatch.setattr(
-            httpx2,
-            "AsyncClient",
+            "openswe.utils.jev.PooledAsyncClient",
             lambda **kw: client(**{**kw, "transport": httpx2.MockTransport(handler)}),
         )
 

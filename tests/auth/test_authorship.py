@@ -111,7 +111,7 @@ class _FakeAsyncClient:
 @pytest.fixture
 def github_client(monkeypatch: pytest.MonkeyPatch) -> _FakeAsyncClient:
     client = _FakeAsyncClient([])
-    monkeypatch.setattr(authorship.httpx2, "AsyncClient", lambda *a, **kw: client)
+    monkeypatch.setattr(authorship, "PooledAsyncClient", lambda *a, **kw: client)
     return client
 
 

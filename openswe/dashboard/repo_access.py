@@ -9,8 +9,7 @@ from openswe.dashboard.profiles import get_valid_access_token
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.http import github_reauth_message
 from openswe.github.repo_names import normalize_repo_full_name
-from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
-from openswe.utils.http_pool import pooled_transport
+from openswe.utils.http_pool import PooledAsyncClient
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +33,7 @@ async def assert_repo_access(full_name: str, token: str) -> str:
         "X-GitHub-Api-Version": "2022-11-28",
     }
     owner, name = full_name.split("/", 1)
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
-    ) as client:
+    async with PooledAsyncClient() as client:
         response = await client.get(
             f"https://api.github.com/repos/{owner}/{name}",
             headers=headers,
@@ -114,9 +111,7 @@ async def repo_is_private(full_name: str) -> bool | None:
         return None
     owner, name = normalize_repo_full_name(full_name).split("/", 1)
     try:
-        async with httpx2.AsyncClient(
-            transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
-        ) as client:
+        async with PooledAsyncClient() as client:
             response = await client.get(
                 f"https://api.github.com/repos/{owner}/{name}",
                 headers={

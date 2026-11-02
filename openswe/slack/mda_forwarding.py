@@ -38,7 +38,7 @@ from openswe.slack.request import SlackRequest
 from openswe.slack.webhook import notify_slack_processing_error, process_slack_mention
 from openswe.threads import index
 from openswe.threads.router import adopt_channel_run
-from openswe.utils.http_pool import pooled_transport
+from openswe.utils.http_pool import PooledAsyncClient
 from openswe.webhooks.common import (
     PROVISIONAL_VISIBILITY_KEY,
     SlackRepoResolution,
@@ -321,9 +321,7 @@ async def forward_to_trigger_server(
     backoff = _FIRST_BACKOFF_SECONDS
     status: int | None = None
     attempt = 0
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=_TIMEOUT_SECONDS, follow_redirects=False
-    ) as client:
+    async with PooledAsyncClient(timeout=_TIMEOUT_SECONDS, follow_redirects=False) as client:
         for attempt in range(1, _ATTEMPTS + 1):
             try:
                 response = await client.post(url, content=body, headers=dict(headers))

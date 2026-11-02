@@ -5,13 +5,12 @@ from dataclasses import dataclass
 from math import isfinite
 from typing import Literal
 
-import httpx2
 from langchain_typesafe import Choice, TypeSafeClassifier
 from langchain_typesafe.client import TypeSafePermissionDeniedError
 
 from openswe.config import ENV
 from openswe.utils.gateway import gateway_base_url
-from openswe.utils.http_pool import pooled_transport
+from openswe.utils.http_pool import PooledAsyncClient
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +61,7 @@ async def select_jev_choices(
     try:
         async with (
             asyncio.timeout(JEV_TIMEOUT_SECONDS),
-            httpx2.AsyncClient(transport=pooled_transport(), timeout=JEV_TIMEOUT_SECONDS) as client,
+            PooledAsyncClient(timeout=JEV_TIMEOUT_SECONDS) as client,
         ):
             classifier = TypeSafeClassifier(
                 model="typesafe/jev-1.13.0",

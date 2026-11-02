@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 from uuid import UUID
 
-import httpx2
 from langgraph_sdk import get_client
 from pydantic import JsonValue
 from runtime_api.catalog import InboxSpec
@@ -48,8 +47,7 @@ from openswe.utils.dashboard_handoff import (
     dashboard_input_context,
     passage_replies,
 )
-from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
-from openswe.utils.http_pool import pooled_transport
+from openswe.utils.http_pool import PooledAsyncClient
 from openswe.utils.multimodal import fetch_image_block, vision_not_supported_warning
 from openswe.webhooks.event_matches import EventMatch
 
@@ -99,9 +97,7 @@ async def _build_blocks_from_payload(
                 "text": text + vision_not_supported_warning(model_id, len(image_urls)),
             }
         return blocks
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
-    ) as client:
+    async with PooledAsyncClient() as client:
         for image_url in image_urls:
             image_block = await fetch_image_block(image_url, client)
             if image_block:

@@ -23,7 +23,7 @@ from openswe.dashboard.oauth_credentials import (
 from openswe.dashboard.oauth_refresh import refresh_guard
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.users.authorization import UnauthorizedUser
-from openswe.utils.http_pool import pooled_transport
+from openswe.utils.http_pool import PooledAsyncClient
 
 if TYPE_CHECKING:
     from openswe.dashboard.principal import DashboardPrincipal
@@ -75,9 +75,7 @@ class LangSmithLogin:
         if token:
             headers["Authorization"] = f"Bearer {token}"
         try:
-            async with httpx2.AsyncClient(
-                timeout=httpx2.Timeout(15.0, connect=5.0), transport=pooled_transport()
-            ) as client:
+            async with PooledAsyncClient(timeout=httpx2.Timeout(15.0, connect=5.0)) as client:
                 response = await client.request(
                     method, self.same_origin(url), headers=headers, data=data
                 )

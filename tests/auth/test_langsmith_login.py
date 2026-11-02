@@ -139,7 +139,11 @@ async def langsmith_client(registry_db, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
     server = LangSmithServer()
     monkeypatch.setattr(
-        langsmith_login, "pooled_transport", lambda: httpx2.MockTransport(server.respond)
+        langsmith_login,
+        "PooledAsyncClient",
+        lambda **kwargs: httpx2.AsyncClient(
+            **kwargs, transport=httpx2.MockTransport(server.respond)
+        ),
     )
     app = FastAPI()
     app.add_exception_handler(

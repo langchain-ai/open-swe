@@ -11,7 +11,7 @@ import httpx2
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from openswe.merge_queue.validation_contract import ValidationRequest
-from openswe.utils.http_pool import pooled_transport
+from openswe.utils.http_pool import PooledAsyncClient
 
 
 class DispatchEnvelope(BaseModel):
@@ -68,7 +68,7 @@ class DispatchGateway:
 
     async def workflow_policy(self) -> WorkflowPolicy:
         nonce = uuid7()
-        async with httpx2.AsyncClient(transport=pooled_transport(), timeout=10) as client:
+        async with PooledAsyncClient(timeout=10) as client:
             response = await client.get(
                 self._sibling_url("workflow-policy"),
                 params={"nonce": str(nonce)},
@@ -112,7 +112,7 @@ class DispatchGateway:
         body = report.model_dump_json(exclude_none=True).encode()
         signature = self._signature(body, b"check-report:")
         url = self._sibling_url("check-reports")
-        async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30) as client:
+        async with PooledAsyncClient(timeout=30) as client:
             response = await client.post(
                 url,
                 content=body,
@@ -147,7 +147,7 @@ class DispatchGateway:
         retry_signature = hmac.digest(
             self.secret.get_secret_value().encode(), b"retry:" + body, "sha256"
         ).hex()
-        async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30) as client:
+        async with PooledAsyncClient(timeout=30) as client:
             for delivery in range(3):
                 response = await client.post(
                     self.url,

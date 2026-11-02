@@ -141,7 +141,7 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     client_context = MagicMock()
     client_context.__aenter__ = AsyncMock(return_value=proxy_client)
     client_context.__aexit__ = AsyncMock(return_value=False)
-    monkeypatch.setattr(langsmith.httpx2, "AsyncClient", MagicMock(return_value=client_context))
+    monkeypatch.setattr(langsmith, "PooledAsyncClient", MagicMock(return_value=client_context))
     patch_proxy = AsyncMock()
     monkeypatch.setattr(langsmith, "_patch_proxy_config", patch_proxy)
     client = MagicMock()

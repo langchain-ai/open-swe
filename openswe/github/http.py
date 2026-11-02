@@ -44,7 +44,7 @@ from openswe.github.queue import (
     WorkflowRun,
 )
 from openswe.utils.dashboard_links import dashboard_api_base_url
-from openswe.utils.http_pool import pooled_transport
+from openswe.utils.http_pool import PooledAsyncClient
 from openswe.utils.url_safety import request_with_safe_redirects
 
 if TYPE_CHECKING:
@@ -138,10 +138,9 @@ async def github_client(
         merged_headers.update(github_headers(token))
     if headers:
         merged_headers.update(headers)
-    async with httpx2.AsyncClient(
+    async with PooledAsyncClient(
         headers=merged_headers or None,
         timeout=timeout or DEFAULT_TIMEOUT,
-        transport=pooled_transport(),
     ) as client:
         yield client
 

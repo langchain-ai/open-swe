@@ -241,8 +241,7 @@ async def test_prepare_auth_fallback_attributes_default_without_pinning_route(
 
     client = httpx2.AsyncClient
     monkeypatch.setattr(
-        httpx2,
-        "AsyncClient",
+        "openswe.utils.jev.PooledAsyncClient",
         lambda **kwargs: client(**{**kwargs, "transport": httpx2.MockTransport(handle)}),
     )
     state: PrepareRunState = {"messages": [HumanMessage(content="Fix the typo")]}

@@ -154,7 +154,7 @@ async def test_jev_routes_or_falls_back(
     monkeypatch.setenv("LANGSMITH_API_KEY", "other-key")
     monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", "https://gateway.example.com/")
     monkeypatch.setattr(
-        "httpx2.AsyncClient",
+        "openswe.utils.jev.PooledAsyncClient",
         lambda **kwargs: client(**{**kwargs, "transport": httpx2.MockTransport(handle)}),
     )
     middleware = _middleware()

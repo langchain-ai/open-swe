@@ -46,7 +46,7 @@ from openswe.threads import index
 from openswe.threads.status import thread_run_error
 from openswe.threads.succession import SUCCEEDED_BY_KEY
 from openswe.utils import ttl_cache
-from openswe.utils.http_pool import pooled_transport
+from openswe.utils.http_pool import PooledAsyncClient
 from openswe.utils.json_types import ThreadLike, thread_metadata
 from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.thread_ops import langgraph_client
@@ -1093,9 +1093,7 @@ async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Res
     token = await _require_app_token()
 
     current_url = url
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=_GITHUB_TIMEOUT, follow_redirects=False
-    ) as client:
+    async with PooledAsyncClient(timeout=_GITHUB_TIMEOUT, follow_redirects=False) as client:
         for _ in range(_MAX_IMAGE_REDIRECTS + 1):
             async with client.stream(
                 "GET", current_url, headers=_image_request_headers(current_url, token)
