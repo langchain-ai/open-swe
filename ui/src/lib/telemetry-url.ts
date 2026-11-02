@@ -21,7 +21,7 @@ function templateDashboardPath(pathname: string): string {
 
 export function stripUrlDetails(url: string, dashboardOrigin?: string): string {
   const withoutDetails = url.split(/[?#]/, 1)[0] ?? ""
-  // Also covers the desktop app's `open-swe://app`, whose URL origin is "null".
+  // A prefix match, so the desktop app's `open-swe://app` counts whatever origin its custom scheme parses to.
   if (dashboardOrigin && withoutDetails.startsWith(`${dashboardOrigin}/`))
     return `${dashboardOrigin}${templateDashboardPath(withoutDetails.slice(dashboardOrigin.length))}`
   if (withoutDetails.startsWith("/"))

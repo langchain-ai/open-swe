@@ -26,6 +26,8 @@ const pages = new Set([
 class ProductAnalytics {
   #client: PostHog | undefined
   #environment = ""
+  #platform: "web" | "desktop" = "web"
+  #desktopVersion: string | undefined
   #person: SessionUser | undefined
 
   async initialize(
@@ -49,10 +51,18 @@ class ProductAnalytics {
     if (!client) return
 
     this.#environment = config.environment
+    const desktop = window.openSweDesktop
+    this.#platform = desktop ? "desktop" : "web"
+    this.#desktopVersion = await desktop
+      ?.getVersion()
+      .catch((error: unknown) => {
+        console.warn("Desktop version unavailable for analytics", error)
+        return undefined
+      })
     client.init(config.posthog.key, {
       api_host: config.posthog.host,
       defaults: "2026-08-30",
-      // The desktop app's custom scheme has no cookies.
+      // Behaves the same on the web and on the desktop app's custom scheme.
       persistence: "localStorage",
       person_profiles: "identified_only",
       autocapture: false,
@@ -91,6 +101,10 @@ class ProductAnalytics {
       product: "open-swe",
       environment: this.#environment,
       surface: "dashboard",
+      platform: this.#platform,
+      ...(this.#desktopVersion
+        ? { desktop_version: this.#desktopVersion }
+        : {}),
       page_name: this.#pageName(),
       $ip: "0.0.0.0",
       $geoip_disable: true,

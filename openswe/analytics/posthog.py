@@ -1,11 +1,14 @@
 """Optional PostHog capture without tool content or page identifiers."""
 
 import logging
+from typing import Literal, Self
 
 import httpx
 from langgraph.config import get_config
+from pydantic import BaseModel, ValidationError
 
 from openswe.config import ENV
+from openswe.github.pull_requests import PullRequest
 from openswe.run_config import RunConfig
 from openswe.users import User
 from openswe.webhooks.event_log import LoggedEvent
@@ -40,6 +43,8 @@ async def _capture(
                     "repository_id",
                     "repo",
                     "pull_request_id",
+                    "pull_request_author_id",
+                    "sender_type",
                 }
             },
             "product": "open-swe",
@@ -55,7 +60,8 @@ async def _capture(
             capture_properties["$set"] = {
                 key: value
                 for key, value in traits.items()
-                if key in {"email", "github_login"} and isinstance(value, str) and value
+                if (key in {"email", "github_login"} and isinstance(value, str) and value)
+                or (key == "is_bot" and isinstance(value, bool))
             }
     if timestamp:
         payload["timestamp"] = timestamp
@@ -95,17 +101,90 @@ async def record_usage(
         logger.warning("PostHog usage capture failed", exc_info=True)
 
 
+class _GitHubSender(BaseModel):
+    id: int
+    login: str
+    type: str = ""
+
+
+class _SlackMessage(BaseModel):
+    user: str = ""
+    bot_id: str = ""
+    message: _SlackMessage | None = None
+
+
+class _SlackDelivery(BaseModel):
+    event: _SlackMessage
+
+
+class WebhookSender(BaseModel):
+    """Who a logged event counts as in PostHog: a person, a bot, or a provider account."""
+
+    distinct_id: str
+    type: Literal["user", "bot", "system"]
+    is_person: bool
+    github_login: str = ""
+
+    @classmethod
+    def of(cls, event: LoggedEvent) -> Self:
+        if event.user_id:
+            return cls(distinct_id=str(event.user_id), type="user", is_person=True)
+        try:
+            if event.source == "github" and isinstance(event.payload, dict):
+                sender = _GitHubSender.model_validate(event.payload.get("sender"))
+                if sender.type == "Bot":
+                    return cls(
+                        distinct_id=f"github:{sender.id}",
+                        type="bot",
+                        is_person=True,
+                        github_login=sender.login,
+                    )
+                return cls(distinct_id=f"github:{sender.id}", type="user", is_person=False)
+            if event.source == "slack":
+                slack = _SlackDelivery.model_validate(event.payload).event
+                message = slack.message or slack
+                if message.user:
+                    return cls(distinct_id=f"slack:{message.user}", type="user", is_person=False)
+                if message.bot_id:
+                    return cls(distinct_id=f"slack:{message.bot_id}", type="bot", is_person=True)
+        except ValidationError:
+            logger.debug("Logged event names no sender", extra={"webhook_source": event.source})
+        return cls(distinct_id=f"open-swe:webhook:{event.source}", type="system", is_person=False)
+
+    @property
+    def traits(self) -> dict[str, object]:
+        if self.type != "bot":
+            return {}
+        return {
+            "is_bot": True,
+            **({"github_login": self.github_login} if self.github_login else {}),
+        }
+
+
 async def record_webhook(event: LoggedEvent) -> None:
+    # Private events (a person's own threads, DMs) stay out of analytics entirely.
+    if event.visibility == "private" or not ENV.POSTHOG_API_KEY.get():
+        return
+    try:
+        sender = WebhookSender.of(event)
+        author_id = (
+            await PullRequest.author_user_id_of(event.pull_request_id)
+            if event.pull_request_id
+            else None
+        )
+    except Exception:
+        logger.warning("PostHog webhook attribution failed", exc_info=True)
+        return
     action = event.payload.get("action") if isinstance(event.payload, dict) else None
     repository = event.payload.get("repository") if isinstance(event.payload, dict) else None
     repo = repository.get("full_name") if isinstance(repository, dict) else None
     await _capture(
         "Webhook Received",
         {
-            "distinct_id": str(event.user_id)
-            if event.user_id
-            else f"open-swe:webhook:{event.source}",
-            "$process_person_profile": bool(event.user_id),
+            "distinct_id": sender.distinct_id,
+            "$process_person_profile": sender.is_person,
+            "$set": sender.traits,
+            "sender_type": sender.type,
             "source": event.source,
             "event_type": event.base_event_type,
             "action": action if isinstance(action, str) else "",
@@ -117,6 +196,7 @@ async def record_webhook(event: LoggedEvent) -> None:
                     "workspace_id": event.workspace_id,
                     "repository_id": event.repository_id,
                     "pull_request_id": event.pull_request_id,
+                    "pull_request_author_id": author_id,
                 }.items()
             },
         },

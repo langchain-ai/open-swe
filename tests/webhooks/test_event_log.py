@@ -96,9 +96,41 @@ async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
     assert "private results" not in json.dumps(requests)
     assert requests[3]["properties"]["tool"] == "safe_tool"
     assert requests[3]["properties"]["is_error"] is False
+    author_id = uuid4()
+    monkeypatch.setattr(posthog.PullRequest, "author_user_id_of", AsyncMock(return_value=author_id))
+    bot_comment = event.model_copy(
+        update={
+            "pull_request_id": uuid4(),
+            "payload": {
+                **event.payload,
+                "sender": {"id": 41898282, "login": "github-actions[bot]", "type": "Bot"},
+            },
+        }
+    )
+    await posthog.record_webhook(bot_comment)
+    assert requests[-1]["properties"]["distinct_id"] == "github:41898282"
+    assert requests[-1]["properties"]["$process_person_profile"] is True
+    assert requests[-1]["properties"]["$set"] == {
+        "is_bot": True,
+        "github_login": "github-actions[bot]",
+    }
+    assert requests[-1]["properties"]["pull_request_author_id"] == str(author_id)
+    await posthog.record_webhook(bot_comment.model_copy(update={"visibility": "private"}))
+    assert len(requests) == 7
+    await posthog.record_webhook(
+        event.model_copy(
+            update={
+                "source": "slack",
+                "event_type": "message",
+                "payload": {"event": {"message": {"bot_id": "B123"}}},
+            }
+        )
+    )
+    assert requests[-1]["properties"]["distinct_id"] == "slack:B123"
+    assert requests[-1]["properties"]["sender_type"] == "bot"
     monkeypatch.delenv("POSTHOG_API_KEY")
     await posthog.record_webhook(event)
-    assert len(requests) == 6
+    assert len(requests) == 8
 
 
 async def _partitions() -> set[str]:

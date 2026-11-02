@@ -201,6 +201,14 @@ class PullRequest(Base):
             return await cls(owner=owner, repo=repo, number=number).fetch(session)
 
     @classmethod
+    async def author_user_id_of(cls, pull_request_id: UUID) -> UUID | None:
+        """The Open SWE person who opened that stored PR, or ``None``."""
+        if not postgres.configured():
+            return None
+        async with postgres.session() as session:
+            return await session.scalar(select(cls.author_user_id).where(cls.id == pull_request_id))
+
+    @classmethod
     async def load(cls, owner: str, repo: str, number: int) -> Self:
         """The stored row, or an unsaved one, so callers always hold a record."""
         return await cls.get(owner, repo, number) or cls(owner=owner, repo=repo, number=number)
