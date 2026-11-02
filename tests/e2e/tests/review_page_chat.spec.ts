@@ -197,6 +197,43 @@ test.describe("review page", () => {
     expect(pillBox!.x + pillBox!.width).toBeLessThanOrEqual(titleBox!.x);
   });
 
+  test("links description references to GitHub without assuming they are pull requests", async ({
+    page,
+  }) => {
+    const linkedPr = await seedOpenPullRequest(page, {
+      repo: `${OWNER}/${REPO}`,
+      title: "Fix issue backlinks",
+      body: "Fixes #4879 and langchain-ai/langgraph#9252. Leave `#42` alone.",
+      author: "bob",
+      head: "issue-backlinks",
+      files: { "backlinks.py": "FIXED = True\n" },
+    });
+    await openReview(page, linkedPr);
+    const description = page.getByRole("article", {
+      name: "Description",
+      exact: true,
+    });
+    await expect(
+      description.getByRole("link", { name: "#4879", exact: true }),
+    ).toHaveAttribute(
+      "href",
+      `https://github.com/${OWNER}/${REPO}/issues/4879`,
+    );
+    await expect(
+      description.getByRole("link", {
+        name: "langchain-ai/langgraph#9252",
+        exact: true,
+      }),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/langchain-ai/langgraph/issues/9252",
+    );
+    await expect(
+      description.getByRole("link", { name: "#42", exact: true }),
+    ).toHaveCount(0);
+    await expect(description.locator("code")).toHaveText("#42");
+  });
+
   test("keeps description spacing stable when expanding and collapsing", async ({
     page,
   }) => {

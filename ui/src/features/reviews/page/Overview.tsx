@@ -21,8 +21,8 @@ import { commentFacts } from "./commentFacts"
 
 const CLAMP_PX = 320
 
-/** `#123` and `owner/repo#123` in prose link to that pull request's review page here; code is left alone. */
-function linkPullRequestRefs(body: string, pr: PullRequestRef): string {
+/** Link GitHub references in prose without assuming they are pull requests. */
+function linkGithubRefs(body: string, pr: PullRequestRef): string {
   return body
     .split(/(```[\s\S]*?```|`[^`\n]*`)/)
     .map((part, index) =>
@@ -39,7 +39,7 @@ function linkPullRequestRefs(body: string, pr: PullRequestRef): string {
             ) => {
               const target = owner && repo ? { owner, repo } : pr
               const text = owner ? `${owner}/${repo}#${number}` : `#${number}`
-              return `${lead}[${text}](/agents/reviews/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repo)}/${number})`
+              return `${lead}[${text}](https://github.com/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repo)}/issues/${number})`
             }
           )
     )
@@ -197,7 +197,7 @@ function Description({
       >
         {body.trim() ? (
           <Markdown
-            content={linkPullRequestRefs(body, pr)}
+            content={linkGithubRefs(body, pr)}
             transformImageUrl={proxyImage}
             enlargeImages
           />
