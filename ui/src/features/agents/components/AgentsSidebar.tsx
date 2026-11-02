@@ -1454,10 +1454,7 @@ export function AgentsShell({
               activeThreadId={activeThreadId}
               layout={layout}
             />
-            <main
-              key={experience}
-              className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1"
-            >
+            <main className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1">
               {children}
             </main>
           </div>
