@@ -215,6 +215,12 @@ ENV.var(
     "in; defaults to this backend's own workspace.",
 )
 ENV.var(
+    "MDA_LANGSMITH_PROJECT",
+    "LangSmith project the deployment at MDA_RUNTIME_URL traces its runs into (its "
+    "LANGSMITH_PROJECT, which LangGraph Platform sets to the deployment name); trace links, "
+    "costs, feedback and reviewer evals read runs there. Defaults to LANGSMITH_PROJECT.",
+)
+ENV.var(
     "MDA_SERVICE_SECRET",
     "Secret shared with the MDA deployment at MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): MDA "
     "signs each call its channels make to /linear/channel/* and /github/channel/* with it "

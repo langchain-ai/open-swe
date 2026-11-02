@@ -302,22 +302,14 @@ def _preparing(**update: JsonValue) -> Answer:
     return answer
 
 
-@pytest.mark.parametrize(
-    ("replicate", "override", "projects"),
-    [
-        (False, "canonical", {"canonical"}),
-        (True, "canonical", {"canonical", "deployment"}),
-        (False, None, {"canonical", "deployment"}),
-    ],
-)
+@pytest.mark.parametrize("override", ["canonical", None])
 @pytest.mark.parametrize("has_parent", [False, True])
-async def test_managed_traces_keep_the_requested_project_without_mirroring(
+async def test_managed_traces_keep_agent_servers_replicas(
     monkeypatch: pytest.MonkeyPatch,
-    replicate: bool,
     override: str | None,
-    projects: set[str],
     has_parent: bool,
 ) -> None:
+    projects = {"canonical", "deployment"}
     monkeypatch.setattr(FakeListChatModel, "bind_tools", lambda self, *args, **kwargs: self)
     client = MagicMock()
     example_id = "00000000-0000-4000-8000-000000000001"
@@ -339,7 +331,6 @@ async def test_managed_traces_keep_the_requested_project_without_mirroring(
         define_deep_agent(
             name="test-agent",
             model=FakeListChatModel(responses=["first", "second"]),
-            **({"replicate_traces": False} if not replicate else {}),
         ),
         {"configurable": {"__langsmith_project__": override}},
         report_telemetry=False,
