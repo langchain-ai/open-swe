@@ -303,9 +303,19 @@ async def test_mapped_owner_waits_only_for_temporary_unavailability(
     review: HumanReviewRequest,
     ineligible: str,
 ) -> None:
-    review.run_config = _stored(reason="Medium impact: new runtime flow", area="runtime")
-    policy = POLICY.model_copy(update={"team": "langchain-ai/product-design"})
-    owner, other = _user("hannahmacaulay-langchain"), _user("other")
+    policy = SupplementaryReviewPolicy.model_validate(
+        {
+            **POLICY.model_dump(),
+            "id": "experience",
+            "areas": {"checkout": {"label": "Checkout and payments", "githubLogin": "area-owner"}},
+        }
+    )
+    review.run_config = {
+        "supplementary_reviews": {
+            policy.id: {"reason": "Medium impact: new checkout flow", "area": "checkout"}
+        }
+    }
+    owner, other = _user("area-owner"), _user("other")
     pull = MagicMock(spec=PullRequestClient)
     pull.repo = MagicMock()
     pull.repo.can_write = AsyncMock(return_value=True)
@@ -490,8 +500,17 @@ async def test_request_reuses_open_review_without_replacing_engineering(
     review.tldr = "Original engineering summary"
     reason = "Redesigned experiment comparison workflow"
     pr = review.pull_request
-    settings = RepoSettings(
-        supplementaryReviews=[POLICY.model_copy(update={"team": "langchain-ai/product-design"})]
+    settings = RepoSettings.model_validate(
+        {
+            "supplementaryReviews": [
+                {
+                    **POLICY.model_dump(),
+                    "areas": {
+                        "comparison": {"label": "Comparison flows", "githubLogin": "area-owner"}
+                    },
+                }
+            ]
+        }
     )
     with (
         patch.object(supplementary.RepoSettings, "cached", AsyncMock(return_value=settings)),
@@ -518,13 +537,13 @@ async def test_request_reuses_open_review_without_replacing_engineering(
             inline_summary=None,
             supplementary_review="design",
             supplementary_review_reason=reason,
-            supplementary_review_area="engine-insights-chat",
+            supplementary_review_area="comparison",
         )
     assert result.reused and result.success
     assert review.kind == kind
     assert review.tldr == "Original engineering summary"
     assert _state(review).reason == reason
-    assert _state(review).area == "engine-insights-chat"
+    assert _state(review).area == "comparison"
     assert review.participants == []
     post.assert_not_awaited()
 
@@ -562,26 +581,52 @@ async def test_unconfigured_repository_does_not_start_supplementary_reviews(
 
 
 @pytest.mark.parametrize(
-    ("policy_id", "path", "refusal"),
+    ("policy_id", "path", "mapped", "area", "refusal"),
     [
-        ("design", "smith-frontend/src/Flow.tsx", ""),
-        ("security", "smith-frontend/src/Flow.tsx", "configures no `security`"),
-        ("design", "smith-frontend/src/Flow.test.tsx", "match the Design review paths"),
+        ("design", "smith-frontend/src/Flow.tsx", False, "", ""),
+        ("security", "smith-frontend/src/Flow.tsx", False, "", "configures no `security`"),
+        ("design", "smith-frontend/src/Flow.test.tsx", False, "", "match the Design review paths"),
+        ("design", "smith-frontend/src/Flow.tsx", True, "checkout", ""),
+        ("design", "smith-frontend/src/Flow.tsx", True, "unmapped", ""),
+        ("design", "smith-frontend/src/Flow.tsx", True, "", "Choose a configured area"),
+        (
+            "design",
+            "smith-frontend/src/Flow.tsx",
+            True,
+            "other",
+            "Unknown supplementary review area",
+        ),
     ],
 )
 async def test_agent_request_is_refused_when_its_policy_cannot_apply(
-    review: HumanReviewRequest, policy_id: str, path: str, refusal: str
+    review: HumanReviewRequest, policy_id: str, path: str, mapped: bool, area: str, refusal: str
 ) -> None:
+    settings = RepoSettings.model_validate(
+        {
+            "supplementaryReviews": [
+                {
+                    **POLICY.model_dump(),
+                    "areas": (
+                        {"checkout": {"label": "Checkout", "githubLogin": "area-owner"}}
+                        if mapped
+                        else {}
+                    ),
+                }
+            ]
+        }
+    )
     with (
+        patch.object(supplementary.RepoSettings, "cached", AsyncMock(return_value=settings)),
         patch.object(ChangedFile, "of_pull", AsyncMock(return_value=[ChangedFile(filename=path)])),
         patch.object(deadlines.queue, "schedule", AsyncMock()),
     ):
         if refusal:
             with pytest.raises(supplementary.SupplementaryReviewRefused, match=refusal):
-                await SupplementaryReviews(review).ask(MagicMock(), policy_id, "New flow")
+                await SupplementaryReviews(review).ask(MagicMock(), policy_id, "New flow", area)
         else:
-            await SupplementaryReviews(review).ask(MagicMock(), policy_id, "New flow")
+            await SupplementaryReviews(review).ask(MagicMock(), policy_id, "New flow", area)
     assert _state(review).reason == ("" if refusal else "New flow")
+    assert _state(review).area == ("" if refusal else area)
 
 
 def test_invalid_policies_are_dropped_without_discarding_other_settings() -> None:
@@ -596,7 +641,9 @@ def test_invalid_policies_are_dropped_without_discarding_other_settings() -> Non
                  "criteria": "first"},
                 {"id": "design", "label": "Design review", "team": "a/b", "paths": ["*"],
                  "criteria": "second"},
-                {"id": "security", "label": "Security review", "team": "a/c", "paths": ["*"]}
+                {"id": "security", "label": "Security review", "team": "a/c", "paths": ["*"]},
+                {"id": "experience", "label": "Experience review", "team": "a/b", "paths": ["*"],
+                 "criteria": "x", "areas": {"unmapped": {"label": "Checkout", "githubLogin": "owner"}}}
             ]
         }"""
     )

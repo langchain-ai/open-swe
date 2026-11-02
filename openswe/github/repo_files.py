@@ -5,6 +5,7 @@ import random
 from collections import Counter
 from datetime import timedelta
 from fnmatch import fnmatchcase
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
 
@@ -51,6 +52,13 @@ class ReviewChannelRule(BaseModel):
     channel: str = Field(min_length=1)
 
 
+class SupplementaryReviewArea(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    label: str = Field(min_length=1, max_length=300)
+    github_login: str = Field(alias="githubLogin", pattern=r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$")
+
+
 class SupplementaryReviewPolicy(BaseModel):
     """A specialist review a repository asks for alongside engineering review, such as design."""
 
@@ -62,6 +70,18 @@ class SupplementaryReviewPolicy(BaseModel):
     paths: list[str] = Field(min_length=1)
     exclude: list[str] = Field(default_factory=list)
     criteria: str = Field(min_length=1, max_length=2000)
+    areas: dict[
+        Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")], SupplementaryReviewArea
+    ] = Field(default_factory=dict)
+
+    @field_validator("areas")
+    @classmethod
+    def _reserved_area(
+        cls, areas: dict[str, SupplementaryReviewArea]
+    ) -> dict[str, SupplementaryReviewArea]:
+        if "unmapped" in areas:
+            raise ValueError("'unmapped' is reserved for team rotation")
+        return areas
 
     def matches(self, path: str) -> bool:
         return any(fnmatchcase(path, pattern) for pattern in self.paths) and not any(

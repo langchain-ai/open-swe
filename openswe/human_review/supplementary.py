@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from html import escape
 from html.parser import HTMLParser
-from pathlib import Path
 from urllib.parse import urlsplit
 
 from markdown_it import MarkdownIt
@@ -44,23 +43,6 @@ from openswe.utils.preview import skip_on_preview
 logger = logging.getLogger(__name__)
 STEP_PREFIX = "supplementary_review:"
 _RETRY = timedelta(hours=1)
-
-
-class DesignOwner(BaseModel):
-    label: str
-    github_login: str
-
-
-class DesignOwners(BaseModel):
-    team: str
-    areas: dict[str, DesignOwner]
-
-    @classmethod
-    def load(cls, policy: SupplementaryReviewPolicy) -> DesignOwners | None:
-        owners = cls.model_validate_json(
-            Path(__file__).parents[1].joinpath("resources/design-review-owners.json").read_text()
-        )
-        return owners if policy.id == "design" and policy.team == owners.team else None
 
 
 class ReviewImages(HTMLParser):
@@ -216,7 +198,7 @@ class SupplementaryReview:
                             policy_id=self.policy.id,
                             label=self.policy.label,
                             criteria=self.policy.criteria,
-                            owners=DesignOwners.load(self.policy),
+                            areas=self.policy.areas,
                         ),
                         title=f"Assess {self.policy.label} for {pr.repo}#{pr.number}",
                         repos=[f"{pr.owner}/{pr.repo}"],
@@ -245,8 +227,7 @@ class SupplementaryReview:
     async def _candidates(self, pull: PullRequestClient) -> list[tuple[User, ReviewerAvailability]]:
         org, team = self.policy.team.split("/", 1)
         members = await team_members(org, team)
-        owners = DesignOwners.load(self.policy)
-        owner = owners.areas.get(self.state.area) if owners else None
+        owner = self.policy.areas.get(self.state.area)
         users = await asyncio.gather(*(User.for_login("github", login) for login in members or []))
         reviews = await latest_review_states(pull, self.request.pull_request.author)
         if reviews is None:
@@ -272,7 +253,7 @@ class SupplementaryReview:
                 eligible.append((user, hours))
         if owner:
             logger.warning(
-                "Mapped design owner is ineligible; falling back to team rotation",
+                "Mapped specialist owner is ineligible; falling back to team rotation",
                 extra={"request_id": str(self.request.id), "owner_login": owner.github_login},
             )
         return eligible
@@ -359,20 +340,19 @@ class SupplementaryReview:
             state = self.state_of(row)
             user = await User.for_login("github", state.github_login)
             pr = row.pull_request
-            owners = DesignOwners.load(self.policy)
-            owner = owners.areas.get(state.area) if owners else None
+            owner = self.policy.areas.get(state.area)
             why = (
                 owner.label
                 if owner and state.github_login.lower() == owner.github_login.lower()
                 else f"{self.policy.team} specialist (team rotation)"
             )
             note = (
-                f"*{label} requested* · {slack_mention(user, state.github_login)} · "
+                f"*{escape(label, quote=False)} requested* · {slack_mention(user, state.github_login)} · "
                 f"<{pr.url}|{pr.repo}#{pr.number}>\n"
                 f"{escape(' '.join(pr.title.split())[:160], quote=False)}\n"
                 f"*Impact:* {escape(' '.join(state.reason.split())[:320], quote=False)}\n"
                 f"*Scope:* {pr.changed_files} files · +{pr.additions}/−{pr.deletions}\n"
-                f"*Why you:* {why}\n"
+                f"*Why you:* {escape(why, quote=False)}\n"
                 f"<{pr.url}/files|Review the changes> and leave feedback or approve on GitHub. "
                 "Engineering review remains separate."
             )
@@ -457,11 +437,10 @@ class SupplementaryReviews:
                 f"This repository configures no `{policy_id}` supplementary review "
                 f"(configured: {configured})."
             )
-        owners = DesignOwners.load(policy)
-        if area and (owners is None or area not in {*owners.areas, "unmapped"}):
-            raise SupplementaryReviewRefused("Unknown supplementary review product area.")
-        if owners and not area:
-            raise SupplementaryReviewRefused("Choose a configured product area, or 'unmapped'.")
+        if area and area not in {*policy.areas, "unmapped"}:
+            raise SupplementaryReviewRefused("Unknown supplementary review area.")
+        if policy.areas and not area:
+            raise SupplementaryReviewRefused("Choose a configured area, or 'unmapped'.")
         review = SupplementaryReview(self.request, policy)
         files = await ChangedFile.of_pull(pull)
         if files is None:
