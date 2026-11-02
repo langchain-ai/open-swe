@@ -29,10 +29,10 @@ FORCE_MESSAGE = "preview: force deployment"
 WORKFLOWS_MESSAGE = "preview: keep the published workflows"
 # GitHub refuses a push by the workflow's token that changes anything here.
 WORKFLOWS = ".github/workflows"
-TYPECHECK_IMAGE = "node:24-bookworm-slim"
+TYPECHECK_IMAGE = "node:26-bookworm-slim"
 TYPECHECK_SCRIPT = (
-    "corepack pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile"
-    " && corepack pnpm --filter open-swe-dashboard run typecheck"
+    "npx --yes pnpm@11.22.0 install --frozen-lockfile --ignore-scripts --ignore-pnpmfile"
+    " && npx --yes pnpm@11.22.0 --filter open-swe-dashboard run typecheck"
 )
 TYPECHECK_OUTPUT_LIMIT = 20_000
 FAILED_REF = "refs/preview-failed"
@@ -394,10 +394,6 @@ async def typecheck() -> str | None:
             f"{os.getuid()}:{os.getgid()}",
             "-e",
             "HOME=/tmp",
-            "-e",
-            "COREPACK_HOME=/tmp/corepack",
-            "-e",
-            "COREPACK_ENABLE_DOWNLOAD_PROMPT=0",
             "-v",
             f"{source}:/src",
             "-w",
