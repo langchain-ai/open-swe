@@ -797,6 +797,9 @@ async def test_missing_or_invalid_settings_have_no_review_channel(status: int, t
 async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_reviews(
     monkeypatch,
 ):
+    from sqlalchemy import func, update
+
+    from openswe.database import postgres
     from openswe.github.pull_requests import PullRequest
     from openswe.human_review.requests import (
         HumanReviewParticipant,
@@ -852,12 +855,27 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         ("2.0", "<@UADA> https://github.com/o/r/pull/10"),
         ("3.0", "https://github.com/o/r/pull/11"),
         ("4.0", "<@UADA> https://github.com/o/r/pull/1"),
+        ("5.0", "<@UADA> https://github.com/o/r/pull/12"),
+        ("7.0", "<@UADA> https://github.com/o/r/pull/13"),
+        ("6.0", "<@UADA> still need you here"),
     ]:
+        if ts == "6.0":
+            async with postgres.session() as session:
+                await session.execute(
+                    update(SlackThreadMention).values(updated_at=func.now() - timedelta(days=40))
+                )
         envelope = SlackEventEnvelope.model_validate(
             {
                 "type": "event_callback",
                 "team_id": "T1",
-                "event": {"type": "message", "channel": "C1", "ts": ts, "user": "UG", "text": text},
+                "event": {
+                    "type": "message",
+                    "channel": "C1",
+                    "ts": ts,
+                    "thread_ts": "5.0" if ts == "6.0" else "",
+                    "user": "UG",
+                    "text": text,
+                },
             }
         )
         await SlackPullRequestLink.record(envelope)
@@ -893,7 +911,7 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
     assert [(row.number, row.assignment) for row in result.pull_requests] == [
         (1, "assigned"),
         (7, "tentative"),
-        (9, "mentioned"),
+        (12, "mentioned"),
     ]
 
 

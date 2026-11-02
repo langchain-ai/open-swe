@@ -34,7 +34,7 @@ def upgrade() -> None:
         "ON slack_thread_mention (team_id, channel_id, thread_ts, user_id)"
     )
     op.execute(
-        "CREATE INDEX slack_thread_mention_user ON slack_thread_mention (user_id, created_at)"
+        "CREATE INDEX slack_thread_mention_user ON slack_thread_mention (user_id, updated_at)"
     )
 
 

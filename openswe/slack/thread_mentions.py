@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timedelta
 from uuid import UUID, uuid7
 
-from sqlalchemy import ForeignKey, func, select
+from sqlalchemy import ForeignKey, Numeric, cast, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,7 +40,7 @@ class SlackThreadMention(Base):
 
     @classmethod
     async def record(cls, envelope: SlackEventEnvelope) -> None:
-        """Remember each person a posted message mentions, other than its poster, once per thread."""
+        """Remember each person a posted message mentions, other than its poster, as of their latest mention per thread."""
         message = envelope.posted_message()
         event = envelope.event
         if not postgres.configured() or message is None or event is None:
@@ -62,10 +62,10 @@ class SlackThreadMention(Base):
             if not (mentioned := mentioned & people.keys()):
                 return
             author = people.get(poster)
+            statement = insert(cls)
             async with postgres.session() as session:
                 await session.execute(
-                    insert(cls)
-                    .values(
+                    statement.values(
                         [
                             {
                                 "id": uuid7(),
@@ -79,8 +79,17 @@ class SlackThreadMention(Base):
                             }
                             for slack_user_id in sorted(mentioned)
                         ]
+                    ).on_conflict_do_update(
+                        index_elements=[cls.team_id, cls.channel_id, cls.thread_ts, cls.user_id],
+                        set_={
+                            "message_ts": statement.excluded.message_ts,
+                            "updated_by": statement.excluded.updated_by,
+                            "updated_at": func.clock_timestamp(),
+                        },
+                        # An edit to an older message is not a fresh mention.
+                        where=cast(statement.excluded.message_ts, Numeric)
+                        > cast(cls.message_ts, Numeric),
                     )
-                    .on_conflict_do_nothing()
                 )
         except Exception:
             logger.warning(
@@ -101,7 +110,7 @@ class SlackThreadMention(Base):
         if not postgres.configured():
             return []
         link = SlackPullRequestLink
-        mentioned_at = func.max(cls.created_at)
+        mentioned_at = func.max(cls.updated_at)
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(link.pr_url)
@@ -113,7 +122,7 @@ class SlackThreadMention(Base):
                 )
                 .where(
                     cls.user_id == user_id,
-                    cls.created_at >= func.now() - within,
+                    cls.updated_at >= func.now() - within,
                 )
                 .group_by(link.pr_url)
                 .order_by(mentioned_at.desc())
