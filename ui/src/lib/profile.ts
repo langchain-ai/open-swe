@@ -175,8 +175,6 @@ export function buildProfileUpdate(
     auto_human_review_enabled: current?.auto_human_review_enabled ?? true,
     draft_prs: current?.draft_prs ?? true,
     review_draft_prs: current?.review_draft_prs ?? null,
-    experimental_background_callbacks:
-      current?.experimental_background_callbacks ?? null,
     ...patch,
   }
 }

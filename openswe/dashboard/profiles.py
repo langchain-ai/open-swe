@@ -46,6 +46,7 @@ RETIRED_PROFILE_KEYS = frozenset(
         "model_routing_enabled",
         "experimental_mcp_ptc",
         "experimental_monitor",
+        "experimental_background_callbacks",
         "experimental_assistant_ui",
         "recent_thread_context_enabled",
     }
@@ -93,9 +94,6 @@ class ProfileUpdate(BaseModel):
     experimental_memory: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
-    experimental_background_callbacks: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
     slack_onboarding_dismissed: bool = False
 
     @field_validator("workspace_default_repos")
@@ -161,11 +159,6 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),
         "review_draft_prs": update.review_draft_prs,
-        "experimental_background_callbacks": (
-            update.experimental_background_callbacks
-            if update.experimental_background_callbacks is not None
-            else existing.get("experimental_background_callbacks")
-        ),
         "slack_onboarding_dismissed": (
             update.slack_onboarding_dismissed
             if "slack_onboarding_dismissed" in update.model_fields_set

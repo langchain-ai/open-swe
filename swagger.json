@@ -4995,18 +4995,6 @@
             ],
             "title": "Draft Prs"
           },
-          "experimental_background_callbacks": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Background Callbacks"
-          },
           "experimental_memory": {
             "anyOf": [
               {

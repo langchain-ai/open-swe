@@ -430,6 +430,8 @@ class Runner:
             return None
         base = os.environ.get(self.config["tools_url_env"])
         query = ""
+        if base:
+            base, _, query = base.partition("?")
         if not base:
             try:
                 with open(self.config["tools_url_file"]) as handle:
@@ -668,13 +670,9 @@ def start(request):
                 active += 1
         if active >= MAX_ACTIVE_PER_THREAD:
             fail(f"at most {MAX_ACTIVE_PER_THREAD} monitors may run per thread; stop one first")
-        # Without curl or a tools URL the backend polls instead.
-        callback = (
-            bool(request.get("callback"))
-            and shutil.which("curl") is not None
-            and bool(
-                os.environ.get(request["tools_url_env"]) or nonempty(request["tools_url_file"])
-            )
+        # Without a tools URL the backend polls instead.
+        callback = bool(request.get("callback")) and bool(
+            os.environ.get(request["tools_url_env"]) or nonempty(request["tools_url_file"])
         )
         os.mkdir(monitor.dir)
         write_json(

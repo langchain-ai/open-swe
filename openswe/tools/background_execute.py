@@ -1,13 +1,11 @@
 """Non-blocking command execution in the thread sandbox."""
 
 import logging
-import shlex
 import uuid
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, JsonValue
+from pydantic import JsonValue
 
-from openswe.dashboard.profiles import get_profile
 from openswe.run_config import RunConfig
 from openswe.sandboxes.scripts import SandboxScript, SandboxScriptError
 from openswe.sandboxes.state import SandboxBackendProxy, get_or_create_sandbox_backend_proxy
@@ -24,9 +22,6 @@ TASK_PREFIX = "cmd"
 TASK_KIND = "sandbox_command"
 DEFAULT_TIMEOUT_SECONDS = 3600
 MAX_TIMEOUT_SECONDS = 86_400
-# The script enforces it too, under its launch lock.
-MAX_ACTIVE_TASKS = 4
-
 
 # Run from a copy in TASK_ROOT; see openswe/sandbox_scripts/background_task.py.
 SCRIPT = SandboxScript("background_task.py", TASK_ROOT)
@@ -83,27 +78,11 @@ async def background_execute(
         return {"success": False, "error": f"timeout must be between 1 and {MAX_TIMEOUT_SECONDS}s"}
     try:
         thread_id, backend = current_backend()
-        if await uses_completion_callback():
-            return await _launch_with_callback(thread_id, backend, command, timeout)
-        return await _launch_with_cron(thread_id, backend, command, timeout)
+        await backend.ready()
+        return await _launch_with_callback(thread_id, backend, command, timeout)
     except Exception as exc:
         logger.exception("Failed to start background command")
         return {"success": False, "error": str(exc)}
-
-
-class _CallbackFlag(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    experimental_background_callbacks: bool | None = None
-
-
-async def uses_completion_callback() -> bool:
-    """The triggering person's opt-in to sandbox completion callbacks instead of polling crons."""
-    login = RunConfig.from_runtime().github_login
-    if not login:
-        return False
-    profile = await get_profile(login)
-    return bool(profile and _CallbackFlag.model_validate(profile).experimental_background_callbacks)
 
 
 async def _track(thread_id: str, task_id: str, *, running: bool = True) -> None:
@@ -134,42 +113,18 @@ async def _launch_with_callback(
     except Exception:
         await _track(thread_id, task_id, running=False)
         raise
-    return {"success": True, **state}
+    if state.get("callback") is False:
+        from openswe.background_tasks import ensure_background_task_polling
 
-
-async def _launch_with_cron(
-    thread_id: str, backend: Any, command: str, timeout: int
-) -> dict[str, Any]:
-    active = sum(task.get("status") == "running" for task in await list_tasks(backend))
-    if active >= MAX_ACTIVE_TASKS:
-        return {"success": False, "error": "active task limit reached"}
-    from openswe.background_tasks import MONITOR_LOCK, ensure_background_task_polling
-
-    wait_for_monitor = f"while [ -d {shlex.quote(MONITOR_LOCK)} ]; do sleep .1; done"
-    wait = await backend.aexecute(wait_for_monitor, timeout=15)
-    if getattr(wait, "exit_code", None) != 0:
-        raise RuntimeError("background-task monitor is busy")
-    task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
-    state = await _launch(
-        backend, task_id, command, timeout, callback=False, owner_thread_id=thread_id
-    )
-    await _track(thread_id, task_id)
-    wait = await backend.aexecute(wait_for_monitor, timeout=15)
-    if getattr(wait, "exit_code", None) != 0:
-        return {
-            "success": False,
-            **state,
-            "error": "command started, but automatic completion monitoring is busy",
-        }
-    try:
-        await ensure_background_task_polling(thread_id)
-    except Exception:
-        logger.warning("Failed to schedule background-task monitor", exc_info=True)
-        return {
-            "success": False,
-            **state,
-            "error": "command started, but automatic completion monitoring could not be scheduled",
-        }
+        try:
+            await ensure_background_task_polling(thread_id)
+        except Exception:
+            logger.warning("Failed to schedule background-task monitor", exc_info=True)
+            return {
+                "success": False,
+                **state,
+                "error": "command started, but automatic completion monitoring could not be scheduled",
+            }
     return {"success": True, **state}
 
 

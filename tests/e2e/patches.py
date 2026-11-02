@@ -466,9 +466,32 @@ async def _fake_builder_sandbox(_record: object, _snapshot_id: object = None) ->
 async def _stand_in_sandbox(
     sandbox_id: str | None = None, *_args: object, **_kwargs: object
 ) -> object:
+    import jwt
     import sandbox_service
+    from langchain_core.runnables.config import var_child_runnable_config
 
-    return sandbox_service.open_mda_sandbox(sandbox_id)
+    from openswe.config import ENV
+    from openswe.run_config import RunConfig
+    from openswe.sandboxes.tool_access import (
+        TOOLS_AUDIENCE,
+        TOOLS_PATH,
+        ToolAccess,
+        sandbox_host_thread_id,
+    )
+
+    sandbox = sandbox_service.open_mda_sandbox(sandbox_id)
+    thread_id = RunConfig.from_config(var_child_runnable_config.get() or {}).thread_id
+    if thread_id:
+        access = ToolAccess(
+            thread_id=await sandbox_host_thread_id(thread_id), sandbox_id=sandbox.id
+        )
+        token = jwt.encode(
+            {"aud": TOOLS_AUDIENCE, **access.model_dump()},
+            ENV.DASHBOARD_JWT_SECRET.get(),
+            algorithm="HS256",
+        )
+        sandbox.provision_callbacks(ENV.DASHBOARD_API_BASE_URL.get() + TOOLS_PATH, token)
+    return sandbox
 
 
 async def _configure_no_proxy(*_args: object, **_kwargs: object) -> None:

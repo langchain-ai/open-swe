@@ -1,9 +1,8 @@
 """Model-free completion delivery for sandbox background commands.
 
-Two triggers, chosen per launch by the triggering person's
-``experimental_background_callbacks`` flag: the runner calling back through the
-sandbox tools channel when its command exits, or a per-thread cron polling every
-minute. Either one reconciles the commands the owning thread launched, and claims
+The runner calls back through the sandbox tools channel when its command exits.
+Sandboxes without callback support use a per-thread cron polling every minute.
+Either trigger reconciles the commands the owning thread launched, and claims
 keep a completion from being delivered twice.
 """
 
@@ -33,7 +32,7 @@ from openswe.utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
 
-# Threads whose triggering person has not opted into callbacks poll with a per-thread cron.
+# Sandboxes without callback support poll with a per-thread cron.
 CRON_KIND = "background_tasks"
 CRON_SCHEDULE = "* * * * *"
 # The server drops a `thread_id` key from cron metadata, so crons are tagged with this instead.

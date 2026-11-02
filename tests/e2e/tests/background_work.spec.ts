@@ -13,6 +13,7 @@ test.describe("background work panel (real dashboard UI)", () => {
   test("lists the running monitor and background command", async ({
     page,
   }, testInfo) => {
+    test.setTimeout(180_000);
     await page.setViewportSize({ width: 1440, height: 900 });
     await loginAs(page, SAME_USER);
     await page.goto("/mock/slack");
@@ -42,6 +43,16 @@ test.describe("background work panel (real dashboard UI)", () => {
     await launcher.click();
     const panel = page.getByTestId("background-work-panel");
     await expect(panel).toBeVisible();
+    const threadId = new URL(page.url()).pathname.split("/").pop();
+    await expect
+      .poll(async () => {
+        const response = await page.request.get(
+          `/dashboard/api/threads/${threadId}/background-work`,
+        );
+        const work = await response.json();
+        return work.monitors?.[0]?.callback;
+      })
+      .toBe(true);
     const monitors = panel.getByRole("region", { name: "Monitors" });
     const commands = panel.getByRole("region", { name: "Commands" });
     await expect(monitors).toContainText("errors in the dev server log", {
@@ -73,5 +84,17 @@ test.describe("background work panel (real dashboard UI)", () => {
       path: panelPath,
       contentType: "image/png",
     });
+    await expect
+      .poll(
+        async () => {
+          const response = await page.request.get(
+            `/dashboard/api/threads/${threadId}/background-work`,
+          );
+          const work = await response.json();
+          return work.commands.length + work.monitors.length;
+        },
+        { timeout: 140_000 },
+      )
+      .toBe(0);
   });
 });
