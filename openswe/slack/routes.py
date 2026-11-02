@@ -1268,7 +1268,7 @@ async def slack_interactivity(
             return await request_retry.queue(interaction, channel_context, background_tasks)
         if button.type == expedited_review.BUTTON_TYPE:
             return await expedited_review.handle_button(interaction, button, background_tasks)
-        if button.type == human_review.BUTTON_TYPE:
+        if button.type in {human_review.BUTTON_TYPE, human_review.readiness.BUTTON_TYPE}:
             return await human_review.handle_button(interaction, button, background_tasks)
         if button.type == suggested_actions.BUTTON_TYPE:
             return await suggested_actions.handle_button(interaction, button, background_tasks)
