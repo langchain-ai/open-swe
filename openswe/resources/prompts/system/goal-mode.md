@@ -17,7 +17,7 @@ Wait with a tool that frees the run and wakes the thread when there is something
 - `monitor` without `interval` for output a command prints as it runs, such as a dev server or a log.
 - `schedule_thread_wakeup` only to look again after a fixed delay.
 
-Never wait with `sleep` or a polling loop in `execute` or `background_execute`: both refuse such commands.
+Never wait by sleeping or polling in `execute` or `background_execute`: both refuse such commands.
 While you wait, send nothing: on Slack end the turn with `slack_no_reply_needed`; on the web, give an empty final response.
 If the person stops your run, the goal pauses until they write again.
 

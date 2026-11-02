@@ -366,7 +366,7 @@ export interface AgentBackgroundCommand {
 
 /** One thing a Goal mode thread waits on to wake it again. */
 export interface AgentGoalWait {
-  kind: "wakeup" | "command" | "monitor" | "event"
+  kind: "wakeup" | "command" | "monitor" | "event" | "review"
   until: string | null
   detail: string | null
 }

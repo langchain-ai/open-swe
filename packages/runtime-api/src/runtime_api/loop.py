@@ -264,23 +264,39 @@ class TaskContext(BaseModel):
     instructions: str | None = None
     # The task's context, added to the conversation where the model no longer sees it.
     message: str | None = None
-    # What the thread's Goal mode work waits on its person for, reminded with each input
-    # while it does (``ModelCall.reminder``).
-    goal_reminder: str | None = None
 
 
-class GoalTurnEnded(RunRequest):
-    """A Goal mode turn ended without saying where the work stands."""
-
-    # The run already sent the model back to work as often as it may: rest the goal
-    # by pausing it, unless something will wake the thread again.
-    last: bool = False
+GoalState = Literal["working", "waiting", "waiting_on_user", "paused"]
 
 
-class GoalRest(BaseModel):
-    """Whether the turn may end: the goal waits on its person, is paused, or waits on something."""
+class GoalRead(RunRequest):
+    # Whether to list what will wake the thread again, which costs lookups; the run
+    # asks only as a turn ends.
+    waits: bool = False
 
-    rests: bool
+
+class Goal(BaseModel):
+    """A Goal mode thread's goal as the backend keeps it."""
+
+    # None: the thread has no goal.
+    state: GoalState | None = None
+    # Why it waits on its person (``blocked``, ``ready``) or paused (``stopped``,
+    # ``no_progress``).
+    reason: str | None = None
+    # What the agent asked its person for, while it waits on them.
+    ask: str | None = None
+    # When the goal last changed, in epoch milliseconds.
+    updated_at_ms: int = 0
+    # What will wake the thread again, when asked for: ``wakeup``, ``command``,
+    # ``monitor``, ``event`` or ``review``.
+    waits: list[str] = []
+
+
+class GoalChange(RunRequest):
+    """The run moved its thread's goal; None clears it."""
+
+    state: Literal["working", "waiting", "paused"] | None
+    reason: Literal["no_progress"] | None = None
 
 
 class ReplyOnBehalf(RunCall):
@@ -334,7 +350,8 @@ REFRESH_GITHUB_PROXY = Endpoint(
     delivery="idempotent",
 )
 REPLY_ON_BEHALF = Endpoint("reply_on_behalf", ReplyOnBehalf, Done, seconds=LOOP_CALL_SECONDS)
-GOAL_TURN_ENDED = Endpoint("goal_turn_ended", GoalTurnEnded, GoalRest, seconds=LOOP_CALL_SECONDS)
+GOAL = Endpoint("goal", GoalRead, Goal, seconds=LOOP_CALL_SECONDS, delivery="idempotent")
+SET_GOAL = Endpoint("set_goal", GoalChange, Done, seconds=LOOP_CALL_SECONDS)
 # The run's turn began: the transcript opens it, and the thread and usage record what
 # it runs as.
 RUN_STARTED = Endpoint("run_started", RunStarted, Done, seconds=LOOP_CALL_SECONDS)

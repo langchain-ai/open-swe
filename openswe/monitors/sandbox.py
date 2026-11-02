@@ -107,8 +107,10 @@ class SandboxMonitors:
 
     @staticmethod
     def _until_passes(check: str, interval: int) -> str:
+        # Each check gets an interval's time, at least a minute, so a hung one is retried.
+        limit = max(interval, 60)
         return (
-            f"while :; do out=$(/bin/sh -c {shlex.quote(check)} 2>&1) && "
+            f"while :; do out=$(timeout {limit} /bin/sh -c {shlex.quote(check)} 2>&1) && "
             f'{{ printf "%s\\n" "$out"; exit 0; }}; sleep {interval}; done'
         )
 

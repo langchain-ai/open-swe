@@ -6,6 +6,7 @@ findings go to that agent's thread to address; once a round leaves none open,
 the PR's ``Open SWE Review`` check passes, marking the draft reviewed.
 """
 
+import logging
 from collections.abc import Mapping, Sequence
 from typing import Final, Self
 
@@ -24,6 +25,8 @@ from openswe.review.findings import (
 from openswe.threads.store import THREADS
 from openswe.utils.dashboard_links import dashboard_review_url
 
+logger = logging.getLogger(__name__)
+
 GOAL_REVIEW_KEY: Final = "goal_review"
 
 _SENDER: Final[SystemIdentity] = {
@@ -39,10 +42,16 @@ _CONTEXT: Final[InputMessageContext] = {
 
 
 class GoalReview(BaseModel):
-    """A Goal mode review, kept on its reviewer thread: whose draft it is."""
+    """A Goal mode review, kept on its reviewer thread until the person marks the PR
+    ready and its current head has passed: whose draft it is, and how far it got."""
 
     # The implementing thread that asked for it, where its findings go.
     thread_id: str
+    # The head a round last left no open findings on.
+    passed_sha: str | None = None
+    # The person marked the PR ready before its head passed: once it does, the agent
+    # puts it up for human review.
+    handoff: bool = False
 
     @classmethod
     def of(cls, metadata: Mapping[str, object]) -> Self | None:
@@ -53,7 +62,21 @@ class GoalReview(BaseModel):
         try:
             return cls.model_validate(raw)
         except ValidationError:
+            logger.warning("Ignored an unreadable Goal mode review", exc_info=True)
             return None
+
+    async def ready(
+        self, *, reviewer_thread_id: str, owner: str, repo: str, pr_number: int, head_sha: str
+    ) -> bool:
+        """The person marked the PR ready: hand it to the agent to put up for human review
+        if its head passed, the review over; otherwise review it again first. Whether
+        the review is over."""
+        if self.passed_sha == head_sha:
+            await self._end(reviewer_thread_id)
+            await self.undrafted(owner=owner, repo=repo, pr_number=pr_number)
+            return True
+        await self._keep(reviewer_thread_id, self.model_copy(update={"handoff": True}))
+        return False
 
     async def publish(
         self,
@@ -88,6 +111,11 @@ class GoalReview(BaseModel):
                 finding_count=0,
             )
         await set_reviewer_thread_metadata(reviewer_thread_id, last_reviewed_sha=head_sha)
+        handed_off = not open_findings and self.handoff
+        if handed_off:
+            await self._end(reviewer_thread_id)
+        elif not open_findings:
+            await self._keep(reviewer_thread_id, self.model_copy(update={"passed_sha": head_sha}))
         await clear_review_started_comment(
             thread_id=reviewer_thread_id, owner=owner, repo=repo, token=token
         )
@@ -100,12 +128,15 @@ class GoalReview(BaseModel):
             title=title,
             summary=title,
         )
-        await self.report(
-            pr_url=f"https://github.com/{owner}/{repo}/pull/{pr_number}",
-            head_sha=head_sha,
-            findings=open_findings,
-            review_url=dashboard_review_url(owner, repo, pr_number),
-        )
+        if handed_off:
+            await self.undrafted(owner=owner, repo=repo, pr_number=pr_number)
+        else:
+            await self.report(
+                pr_url=f"https://github.com/{owner}/{repo}/pull/{pr_number}",
+                head_sha=head_sha,
+                findings=open_findings,
+                review_url=dashboard_review_url(owner, repo, pr_number),
+            )
         return {
             "success": True,
             "goal_review": True,
@@ -149,10 +180,21 @@ class GoalReview(BaseModel):
             )
         )
 
+    async def _keep(self, reviewer_thread_id: str, review: Self) -> None:
+        await set_reviewer_thread_metadata(
+            reviewer_thread_id, extra={GOAL_REVIEW_KEY: review.model_dump(mode="json")}
+        )
+
+    async def _end(self, reviewer_thread_id: str) -> None:
+        """The PR is ready and reviewed: later reviews of it are public again."""
+        await set_reviewer_thread_metadata(reviewer_thread_id, extra={GOAL_REVIEW_KEY: None})
+
     async def _tell(self, text: str) -> None:
         from openswe.background_tasks import completion_configurable
         from openswe.dispatch import dispatch_agent_run
+        from openswe.threads.goal import ThreadGoal
 
+        await ThreadGoal(self.thread_id).review_returned()
         thread = await THREADS.get(self.thread_id)
         metadata = {} if thread is None else thread.metadata
         configurable = await completion_configurable(

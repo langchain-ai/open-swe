@@ -2556,6 +2556,114 @@
         "title": "GitHubTrigger",
         "type": "object"
       },
+      "Goal": {
+        "description": "What the thread's metadata keeps of its goal.",
+        "properties": {
+          "ask": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ask"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "blocked",
+                  "ready"
+                ],
+                "type": "string"
+              },
+              {
+                "enum": [
+                  "stopped",
+                  "no_progress"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "state": {
+            "default": "working",
+            "enum": [
+              "working",
+              "waiting",
+              "waiting_on_user",
+              "paused"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "updated_at_ms": {
+            "default": 0,
+            "title": "Updated At Ms",
+            "type": "integer"
+          },
+          "waits": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/GoalWait"
+            },
+            "title": "Waits",
+            "type": "array"
+          }
+        },
+        "title": "Goal",
+        "type": "object"
+      },
+      "GoalWait": {
+        "description": "One thing that wakes the thread again.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "kind": {
+            "enum": [
+              "wakeup",
+              "command",
+              "monitor",
+              "event",
+              "review"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "GoalWait",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -20923,6 +21031,64 @@
         "summary": "Api Get Thread Path",
         "tags": [
           "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/goal": {
+      "get": {
+        "description": "The thread's goal, for someone allowed to read the thread; None without Goal mode.",
+        "operationId": "api_get_thread_goal_dashboard_api_threads__thread_id__goal_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Goal"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Api Get Thread Goal Dashboard Api Threads  Thread Id  Goal Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Thread Goal",
+        "tags": [
+          "dashboard",
+          "threads",
           "threads"
         ]
       }

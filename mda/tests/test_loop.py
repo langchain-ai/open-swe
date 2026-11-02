@@ -31,7 +31,7 @@ from runtime_api.endpoint import Delivery
 from runtime_api.loop import (
     Done,
     GitHubProxyRefreshed,
-    GoalRest,
+    Goal,
     PhaseResult,
     Prepared,
     Route,
@@ -435,46 +435,100 @@ async def test_an_answer_that_owes_a_slack_reply_is_asked_again_then_posted_for_
     assert on_the_web == PhaseResult()
 
 
+_WORK_GUARD = "system:work-state-guard"
+_WORK_NUDGE = (
+    f'<input-message sender="{_WORK_GUARD}" surface="automation" kind="system">'
+    "Keep working.</input-message>"
+)
+_GOAL_RULES = LoopRules(
+    reply=_REPLY,
+    work_state=WorkStateRules(
+        tool="report_work_state",
+        nudge=[_WORK_NUDGE],
+        nudge_sender=_WORK_GUARD,
+        max_nudges=3,
+        reminder="Still waiting on them.",
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("goal", "nudges", "sent_back", "moved"),
+    [
+        (Goal(state="working"), 0, True, None),
+        (Goal(state="working", waits=["wakeup"]), 0, False, ("waiting", None)),
+        (Goal(state="working"), 3, False, ("paused", "no_progress")),
+        (Goal(state="waiting_on_user", reason="ready"), 0, False, None),
+        (BackendCallError("down"), 0, False, None),
+    ],
+)
 async def test_goal_mode_work_is_sent_back_until_its_goal_rests_then_pauses(
     monkeypatch: pytest.MonkeyPatch,
+    goal: Goal | BackendCallError,
+    nudges: int,
+    sent_back: bool,
+    moved: tuple[str, str | None] | None,
 ) -> None:
-    guard = "system:work-state-guard"
-    nudge = (
-        f'<input-message sender="{guard}" surface="automation" kind="system">'
-        "Keep working.</input-message>"
-    )
-    rules = LoopRules(
-        reply=_REPLY,
-        work_state=WorkStateRules(
-            tool="report_work_state", nudge=[nudge], nudge_sender=guard, max_nudges=3
-        ),
-    )
-    answers: dict[str, BaseModel | BackendCallError] = {"goal_turn_ended": GoalRest(rests=False)}
-    backend, calls = _backend(monkeypatch, answers, rules)
-    loop = RunLoop(backend)
+    answers: dict[str, BaseModel | BackendCallError] = {"goal": goal, "set_goal": Done()}
+    backend, calls = _backend(monkeypatch, answers, _GOAL_RULES)
     asked = HumanMessage(content="Fix it", id="human-1")
     stopped = AIMessage(content="", id="ai-1")
 
-    nudged = await loop.after_model(_state(asked, stopped, reply_surface="web"))
-    await loop.after_model(_state(asked, stopped, reply_surface="web", work_state_nudges=3))
-    answers["goal_turn_ended"] = GoalRest(rests=True)
-    rested = await loop.after_model(
-        _state(asked, stopped, reply_surface="web", work_state_nudges=1)
+    ended = await RunLoop(backend).after_model(
+        _state(asked, stopped, reply_surface="web", work_state_nudges=nudges)
     )
-    answers["goal_turn_ended"] = BackendCallError("down")
-    unreadable = await loop.after_model(_state(asked, stopped, reply_surface="web"))
 
-    assert nudged.jump_to == "model" and nudged.update == {"work_state_nudges": 1}
-    assert [message.content for message in messages_from_dict(nudged.messages)] == [nudge]
-    # The last allowed stop asks the backend to pause the goal; it answers that it rests.
-    assert [body["last"] for name, body in calls if name == "goal_turn_ended"] == [
-        False,
-        True,
-        False,
-        False,
-    ]
-    assert rested.jump_to is None and rested.update == {"work_state_nudges": 0}
-    assert unreadable.jump_to is None
+    assert (ended.jump_to == "model") is sent_back
+    assert [(body["state"], body["reason"]) for name, body in calls if name == "set_goal"] == (
+        [] if moved is None else [moved]
+    )
+    if sent_back:
+        assert [message.content for message in messages_from_dict(ended.messages)] == [_WORK_NUDGE]
+
+
+@pytest.mark.parametrize(
+    ("goal", "came_in", "runs", "moved"),
+    [
+        # A wakeup, a monitor's event or a review's findings put a waiting goal to work.
+        (Goal(state="waiting"), "system", True, "working"),
+        # A stopped goal ignores them until its person writes.
+        (Goal(state="paused", reason="stopped"), "system", False, None),
+        (Goal(state="paused", reason="stopped"), "human", True, "working"),
+        (Goal(state="waiting_on_user", reason="blocked"), "human", True, "working"),
+        (Goal(), "human", True, "working"),
+    ],
+)
+async def test_what_comes_in_moves_the_goal_before_the_model_answers_it(
+    monkeypatch: pytest.MonkeyPatch, goal: Goal, came_in: str, runs: bool, moved: str | None
+) -> None:
+    backend, calls = _backend(monkeypatch, {"goal": goal, "set_goal": Done()}, _GOAL_RULES)
+    message = HumanMessage(
+        content=f'<input-message sender="x" surface="web" kind="{came_in}">Go.</input-message>',
+        id="in-1",
+    )
+
+    planned = await RunLoop(backend).before_model(_state(message))
+
+    assert (planned.jump_to != "end") is runs
+    assert [body["state"] for name, body in calls if name == "set_goal"] == (
+        [] if moved is None else [moved]
+    )
+
+
+async def test_a_goal_waiting_on_its_person_is_reminded_after_the_report_not_with_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    waiting = Goal(state="waiting_on_user", reason="blocked", ask="Which channel?", updated_at_ms=5)
+    backend, _calls = _backend(monkeypatch, {"goal": waiting}, _GOAL_RULES)
+    loop = RunLoop(backend)
+    result = ToolMessage(content='{"success": true}', tool_call_id="c1")
+
+    with_report = await loop.before_model(_state(result))
+    after = await loop.before_model(_state(result, **with_report.update))
+
+    assert with_report.call is not None and with_report.call.reminder is None
+    assert after.call is not None
+    assert after.call.reminder == "Still waiting on them.\n\nWhich channel?"
 
 
 @pytest.mark.parametrize(

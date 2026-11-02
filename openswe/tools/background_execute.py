@@ -6,10 +6,8 @@ import uuid
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, JsonValue
-from runtime_api.operations import ShellCheck
 
 from openswe.dashboard.profiles import get_profile
-from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.sandboxes.scripts import SandboxScript, SandboxScriptError
 from openswe.sandboxes.state import SandboxBackendProxy, get_or_create_sandbox_backend_proxy
@@ -81,8 +79,6 @@ async def background_execute(
     """Implement the `background_execute` tool."""
     if not command.strip():
         return {"success": False, "error": "command must not be empty"}
-    if ShellCheck(tool="background_execute", command=command).sleeps:
-        return {"success": False, "error": prompt("tools/no-sleep")}
     if not isinstance(timeout, int) or not 1 <= timeout <= MAX_TIMEOUT_SECONDS:
         return {"success": False, "error": f"timeout must be between 1 and {MAX_TIMEOUT_SECONDS}s"}
     try:
@@ -129,15 +125,14 @@ async def _launch_with_callback(
     thread_id: str, backend: Any, command: str, timeout: int
 ) -> dict[str, Any]:
     task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
-    # Tracked first: a fast command's completion callback can reconcile before launch returns.
-    await _track(thread_id, task_id)
-    try:
-        state = await _launch(
-            backend, task_id, command, timeout, callback=True, owner_thread_id=thread_id
-        )
-    except Exception:
-        await _track(thread_id, task_id, running=False)
-        raise
+    # Tracked once launched: a reconcile during the launch, such as the one reconnecting
+    # the sandbox starts, finds no task yet and would untrack it as finished. A command
+    # that finishes before this has already reconciled; its completion run clears it.
+    state = await _launch(
+        backend, task_id, command, timeout, callback=True, owner_thread_id=thread_id
+    )
+    if state.get("status") == "running":
+        await _track(thread_id, task_id)
     return {"success": True, **state}
 
 

@@ -1,11 +1,12 @@
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from openswe.agent_api.tokens import AGENT_TURN_KEY
 from openswe.audit_logs.tools import audit_tool
 from openswe.review.goal_review import GoalReview
 from openswe.slack.client import GitHubPrRef, get_active_slack_thread, parse_github_pr_url
+from openswe.threads.goal import ThreadGoal
 from openswe.tools.mcp_exposure import expose_mcp
-from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_review_url
 
 
@@ -49,8 +50,9 @@ async def request_pr_review(pr_url: str) -> dict[str, object]:
     source = configurable.get("source") or "agent"
     github_login = configurable.get("github_login", "")
     thread_id = configurable.get("thread_id")
-    # A Goal mode agent's review comes back to it to address; the person hears nothing.
-    goal_mode = bool(github_login) and (await User.preferences_for_login(github_login)).goal_mode
+    # A Goal mode run's review comes back to it to address; the person hears nothing.
+    turn = configurable.get(AGENT_TURN_KEY)
+    goal_mode = isinstance(turn, dict) and turn.get("goal_mode") is True
     goal_review = (
         GoalReview(thread_id=thread_id) if goal_mode and isinstance(thread_id, str) else None
     )
@@ -75,4 +77,6 @@ async def request_pr_review(pr_url: str) -> dict[str, object]:
         review_url := dashboard_review_url(pr_ref.owner, pr_ref.repo, pr_ref.number)
     ):
         result["review_url"] = review_url
+    if result.get("success") and result.get("goal_review") and goal_review is not None:
+        await ThreadGoal(goal_review.thread_id).review_requested(pr_ref.url)
     return result

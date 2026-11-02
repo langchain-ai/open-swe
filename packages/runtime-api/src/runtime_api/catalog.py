@@ -140,9 +140,6 @@ class FilesSpec(BaseModel):
     guards: list[ShellGuard] = []
     # Checks on what ``read_file`` returns.
     checks: list[FileCheck] = []
-    # Refuses an ``execute`` that waits with ``sleep`` (``ShellCheck.sleeps``), as this
-    # tool result; None runs it.
-    sleep_refusal: str | None = None
 
 
 class InboxSpec(BaseModel):
@@ -186,14 +183,22 @@ class CliResultRules(BaseModel):
 
 
 class WorkStateRules(BaseModel):
-    """The person wants the run to keep working until it calls ``tool`` to say it is blocked
-    or complete. A turn that ends while the thread's goal neither says so nor waits on
-    anything is sent back, ``nudge`` up to ``max_nudges`` times, then the goal pauses."""
+    """Goal mode: the person wants the run to keep working until it calls ``tool`` to say
+    it is blocked or complete. A turn that ends while the thread's goal neither says so
+    nor waits on anything is sent back, ``nudge`` up to ``max_nudges`` times, then the
+    goal pauses; its commands wait with the thread's wait tools, never ``sleep``."""
 
     tool: str
+    # Tools that wake the thread again, for runtimes deployed before the backend kept the
+    # goal (``runtime_api.loop.GOAL``); the runtime reads the goal's waits instead.
+    waits: list[str] = []
     nudge: list[str] = []
     nudge_sender: str = ""
     max_nudges: int = 3
+    # Said with each input while the goal waits on its person, ahead of what was asked.
+    reminder: str = ""
+    # Said when a command waits with ``sleep``, refusing it.
+    sleep_refusal: str = ""
 
 
 class RoutingRules(BaseModel):

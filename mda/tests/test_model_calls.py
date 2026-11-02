@@ -265,32 +265,42 @@ def _search(query: str) -> str:
         HumanMessage(content="A background command completed."),
     ],
 )
-async def test_a_reminder_rides_on_the_latest_input_of_the_call_alone(
+async def test_a_reminder_rides_on_the_latest_input_after_the_cached_prefix(
     latest: AnyMessage,
 ) -> None:
     """A wakeup or a monitor's event is an input as much as a tool result; the reminder
-    goes with whichever came last, and the conversation the run keeps never holds it."""
+    goes with whichever came last, after the block that ends the cached prefix, and the
+    conversation the run keeps never holds it."""
     messages: list[AnyMessage] = [HumanMessage(content="Fix it"), latest]
     call = ModelCall(system_prompt="", reminder="Still waiting on the person.")
-    request = ModelRequest(
-        model=_OPENAI,
-        messages=messages,
-        system_message=None,
-        tools=[],
-        state=cast(AgentState, {"messages": messages, "open_swe_call": call.model_dump()}),
-    )
     sent: list[ModelRequest] = []
 
     async def handler(request: ModelRequest) -> ModelResponse:
         sent.append(request)
         return ModelResponse(result=[AIMessage(content="ok")])
 
-    await ReminderMiddleware().awrap_model_call(request, handler)
+    request = ModelRequest(
+        model=_ANTHROPIC,
+        messages=messages,
+        system_message=None,
+        tools=[],
+        state=cast(AgentState, {"messages": messages, "open_swe_call": call.model_dump()}),
+    )
+    await ReminderMiddleware().awrap_model_call(
+        request, _through([model_call_guards()[-1]], handler)
+    )
 
     [reminded] = sent
-    assert reminded.messages[-1].content == (
-        f"{latest.content}\n\n<system-reminder>\nStill waiting on the person.\n</system-reminder>"
-    )
+    cached = {"type": "ephemeral", "ttl": "1h"}
+    assert reminded.messages[-1].content == [
+        {"type": "text", "text": latest.content, "cache_control": cached},
+        {
+            "type": "text",
+            "text": "<system-reminder>\nStill waiting on the person.\n</system-reminder>",
+        },
+    ]
+    # The conversation's own breakpoint replaces the automatic one, keeping four.
+    assert "cache_control" not in reminded.model_settings
     assert messages[-1] is latest
     assert "system-reminder" not in str(latest.content)
 

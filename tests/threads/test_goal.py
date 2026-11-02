@@ -1,5 +1,6 @@
 import importlib
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -62,28 +63,38 @@ def wakeups(monkeypatch: pytest.MonkeyPatch) -> list[SimpleNamespace]:
     return jobs
 
 
-async def test_a_turn_rests_on_a_pending_wait_and_otherwise_pauses_after_the_last_prod(
+@pytest.fixture(autouse=True)
+def no_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    @asynccontextmanager
+    async def lock(thread_id: str) -> AsyncIterator[None]:
+        yield
+
+    monkeypatch.setattr(goal_module, "agent_thread_pr_state_lock", lock)
+
+
+async def test_a_goal_rests_on_what_will_wake_it_and_stalls_once_that_lapses(
     threads: _Threads, wakeups: list[SimpleNamespace]
 ) -> None:
     goal = ThreadGoal(_THREAD)
-
-    assert not await goal.turn_ended(last=False)
-    assert (await goal.current()).state == "working"
-
     due = datetime(2026, 11, 1, 23, 28, tzinfo=UTC)
     wakeups.append(SimpleNamespace(due_at=due))
-    assert await goal.turn_ended(last=False)
+    await goal.review_requested("https://github.com/o/r/pull/1")
+
+    await goal.change("waiting")
     waiting = await goal.current()
-    assert waiting.state == "waiting" and [wait.until for wait in waiting.waits] == [due]
 
-    await goal.woke()
+    assert waiting is not None and waiting.state == "waiting"
+    assert [(wait.kind, wait.until) for wait in waiting.waits] == [
+        ("wakeup", due),
+        ("review", None),
+    ]
     wakeups.clear()
-    assert await goal.turn_ended(last=True)
-    paused = await goal.current()
-    assert (paused.state, paused.reason) == ("paused", "no_progress")
+    await goal.review_returned()
+    stalled = await goal.shown()
+    assert stalled is not None and (stalled.state, stalled.reason) == ("paused", "no_progress")
 
 
-async def test_waiting_on_the_person_keeps_their_ask_until_they_write(
+async def test_waiting_on_the_person_keeps_their_ask(
     threads: _Threads, wakeups: list[SimpleNamespace]
 ) -> None:
     goal = ThreadGoal(_THREAD)
@@ -91,16 +102,9 @@ async def test_waiting_on_the_person_keeps_their_ask_until_they_write(
     await goal.reported("blocked", "Which Slack channel should review it?")
     waiting = await goal.current()
 
+    assert waiting is not None
     assert (waiting.state, waiting.reason) == ("waiting_on_user", "blocked")
     assert waiting.ask == "Which Slack channel should review it?"
-    assert await goal.turn_ended(last=False)
-    assert "Which Slack channel should review it?" in (await goal.reminder() or "")
-    # A wakeup or an event does not answer for them; only their message does.
-    await goal.woke()
-    assert (await goal.current()).state == "waiting_on_user"
-    await goal.resumed()
-    assert (await goal.current()).state == "working"
-    assert await goal.reminder() is None
 
 
 async def test_a_stop_pauses_a_goal_and_drops_its_wakeups_but_leaves_other_threads_alone(
@@ -113,8 +117,10 @@ async def test_a_stop_pauses_a_goal_and_drops_its_wakeups_but_leaves_other_threa
     assert goal_module.GOAL_KEY not in threads.metadata
     assert wakeups
 
-    await goal.turn_ended(last=False)
+    await goal.change("working")
     await goal.stopped()
     stopped = await goal.current()
-    assert (stopped.state, stopped.reason) == ("paused", "stopped")
+    assert stopped is not None and (stopped.state, stopped.reason) == ("paused", "stopped")
     assert not wakeups
+    await goal.change(None)
+    assert await goal.current() is None

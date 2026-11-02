@@ -114,7 +114,11 @@ class ThreadPromptMiddleware(AgentMiddleware):
 class ReminderMiddleware(AgentMiddleware):
     """Remind the model of what its loop planned to (``ModelCall.reminder``) with the
     latest input: a tool result, or a message such as a wakeup, a background command's
-    completion or a monitor's event. In this call's request alone, never the conversation."""
+    completion or a monitor's event. In this call's request alone, never the conversation.
+
+    The reminder is the input's last block, and for Anthropic the block before it ends
+    the conversation's cached prefix, so the next call, reminded elsewhere, reads it.
+    """
 
     trace_policy = MIDDLEWARE_TRACE_POLICY
 
@@ -130,11 +134,15 @@ class ReminderMiddleware(AgentMiddleware):
         last = messages[-1]
         if not isinstance(last, ToolMessage | HumanMessage):
             return await handler(request)
-        reminder = f"<system-reminder>\n{planned.reminder}\n</system-reminder>"
-        content = (
-            f"{last.content}\n\n{reminder}"
+        blocks: list[_Block] = (
+            [{"type": "text", "text": last.content}]
             if isinstance(last.content, str)
-            else [*last.content, {"type": "text", "text": reminder}]
+            else list(last.content)
         )
-        reminded = last.model_copy(update={"content": content})
+        if blocks and isinstance(request.model, ChatAnthropic):
+            blocks[-1] = _cached(blocks[-1])
+        reminder = f"<system-reminder>\n{planned.reminder}\n</system-reminder>"
+        reminded = last.model_copy(
+            update={"content": [*blocks, {"type": "text", "text": reminder}]}
+        )
         return await handler(request.override(messages=[*messages[:-1], reminded]))

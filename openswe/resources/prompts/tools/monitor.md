@@ -18,8 +18,9 @@ Pick the tool by how many notifications you need:
 - One per occurrence, until the command ends or the timeout: use `monitor`, e.g. `command="tail -F app.log"`, `filter="grep -E 'ERROR|Traceback'"`.
 - One, when a condition holds: use `monitor` with `interval`, which works like Playwright's `waitForFunction`.
   `command` is then a check: it runs every `interval` seconds until it exits 0, and its output at that moment is the one event, after which the monitor ends.
-  For example, CI settled: `command="! gh pr checks 123 | grep -q pending"`, `interval=30`; a server up: `command="curl -fsS localhost:3000/health"`, `interval=5`.
-  Write no loop or `sleep` yourself: `execute` and `background_execute` refuse commands that `sleep`.
+  For example, a server up: `command="curl -fsS localhost:3000/health"`, `interval=5`; a file written: `command="test -s out/report.json"`, `interval=10`.
+  For CI on a pull request, `listen_events` with `check_suite.completed` wakes you when GitHub reports, without polling.
+  Write no polling loop yourself: in Goal mode `execute` and `background_execute` refuse commands that wait by sleeping.
 
 Silence is not success.
 A filter that only matches the happy path stays silent through a crash or a hang.
@@ -55,7 +56,7 @@ Args:
   Defaults to 3600.
 - interval: Seconds between runs of `command` as a check, 5 to 3600.
   Optional; without it `command` runs once and every line it prints can be an event.
-  `timeout` still bounds the wait: a check that never passes ends the monitor as timed out.
+  Each check runs for at most `interval` seconds or a minute, whichever is longer, and `timeout` still bounds the wait: a check that never passes ends the monitor as timed out.
 - monitor_id: The monitor to read or stop.
   Required for `output` and `stop`.
 - start_line: First raw line to return for `output` (1-based, inclusive).

@@ -107,7 +107,7 @@ from runtime_api.loop import (
     BEFORE_MODEL,
     BROWSER,
     FINISH_SCOUT_PLAN,
-    GOAL_TURN_ENDED,
+    GOAL,
     INBOX,
     INBOX_RECEIVED,
     MODEL_CHOICE,
@@ -120,6 +120,7 @@ from runtime_api.loop import (
     RUN_STARTED,
     SANDBOX_REPLACED,
     SANDBOX_UNREACHABLE,
+    SET_GOAL,
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
     TASK_CONTEXT,
@@ -130,8 +131,9 @@ from runtime_api.loop import (
     ChosenModel,
     Done,
     GitHubProxyRefreshed,
-    GoalRest,
-    GoalTurnEnded,
+    Goal,
+    GoalChange,
+    GoalRead,
     Inbox,
     InboxItems,
     InboxRead,
@@ -219,7 +221,6 @@ from openswe.github.app import PermissionMap
 from openswe.github.proxy import proxy_token_recorded, proxy_token_set_since
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
-from openswe.input_messages import message_sender_id
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.model_selection import classify_route
 from openswe.middleware.notify_step_limit import notify_step_limit
@@ -499,7 +500,6 @@ class RunSession:
                 artifacts_root=self.surface.artifacts_root,
                 guards=["shell_commands"] if self._shell_guards.active else [],
                 checks=list(self.surface.file_checks),
-                sleep_refusal=prompt("tools/no-sleep"),
             ),
             incident_evidence=self._incident is not None,
             worker_webhook=COMPLETION_WEBHOOK_URL if self._delegates else None,
@@ -1122,16 +1122,9 @@ class TokenRun:
         async def record(_state: dict[str, object], _runtime: Runtime) -> None:
             await self.parts.started(self.config, self.run.settings, request, carried=carried)
 
-        humans = messages_from_dict(request.humans)
-        await self._reporting(request, "run_started", record, messages=humans)
-        goal = ThreadGoal(self.run.thread_id)
-        turn = self.run.settings.agent
-        if turn is not None and turn.goal_mode:
-            await goal.started()
-        if humans and message_sender_id(humans[-1].content, kind="human") is not None:
-            await goal.resumed()
-        else:
-            await goal.woke()
+        await self._reporting(
+            request, "run_started", record, messages=messages_from_dict(request.humans)
+        )
         return Done()
 
     def _tool_recorders(self) -> list[RecordsRemoteTools]:
@@ -1245,18 +1238,15 @@ class TokenRun:
         return chosen_model(request.model_id, request.effort)
 
     async def task_context(self, _request: RunRequest) -> TaskContext:
-        """The task the thread belongs to, and what its goal waits on its person for, as
-        each model call tells the model."""
+        """The task the thread belongs to, as each model call tells the model."""
 
         async def read() -> TaskContext:
-            reminder = await ThreadGoal(self.run.thread_id).reminder()
             coordination = await TaskCoordinationMiddleware.for_thread(self.run.thread_id)
             if coordination is None:
-                return TaskContext(goal_reminder=reminder)
+                return TaskContext()
             return TaskContext(
                 instructions=coordination.instructions,
                 message=await coordination.context_message(),
-                goal_reminder=reminder,
             )
 
         return await in_graph_context(
@@ -1310,8 +1300,23 @@ class TokenRun:
         await self.in_run("reply_on_behalf", post)
         return Done()
 
-    async def goal_turn_ended(self, request: GoalTurnEnded) -> GoalRest:
-        return GoalRest(rests=await ThreadGoal(self.run.thread_id).turn_ended(last=request.last))
+    async def goal(self, request: GoalRead) -> Goal:
+        """The thread's goal, with what will wake the thread again when asked."""
+        thread_goal = ThreadGoal(self.run.thread_id)
+        kept = await thread_goal.current()
+        if kept is None:
+            return Goal()
+        return Goal(
+            state=kept.state,
+            reason=kept.reason,
+            ask=kept.ask,
+            updated_at_ms=kept.updated_at_ms,
+            waits=[wait.kind for wait in await thread_goal.waits()] if request.waits else [],
+        )
+
+    async def set_goal(self, request: GoalChange) -> Done:
+        await ThreadGoal(self.run.thread_id).change(request.state, request.reason)
+        return Done()
 
     async def run_ended(self, request: RunEnded) -> Done:
         """Record the run's end: its transcript turn and its usage."""
@@ -1675,7 +1680,8 @@ RUN_CALLS.serve(TASK_CONTEXT, TokenRun.task_context)
 RUN_CALLS.serve(REFRESH_GITHUB_PROXY, TokenRun.refresh_github_proxy)
 RUN_CALLS.serve(SANDBOX_PROXY, TokenRun.sandbox_proxy)
 RUN_CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)
-RUN_CALLS.serve(GOAL_TURN_ENDED, TokenRun.goal_turn_ended)
+RUN_CALLS.serve(GOAL, TokenRun.goal)
+RUN_CALLS.serve(SET_GOAL, TokenRun.set_goal)
 RUN_CALLS.serve(RUN_STARTED, TokenRun.run_started)
 RUN_CALLS.serve(RUN_ENDED, TokenRun.run_ended)
 RUN_CALLS.serve(STEP_LIMIT_REACHED, TokenRun.step_limit_reached)

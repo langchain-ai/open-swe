@@ -198,13 +198,27 @@ class _RunPromptCaching(AnthropicPromptCachingMiddleware):
         """deepagents replaces its own prompt cache with the one of the same name."""
         return AnthropicPromptCachingMiddleware.__name__
 
+    @staticmethod
+    def _breaks_conversation(request: ModelRequest) -> bool:
+        """Whether a message of the conversation carries its own cache breakpoint."""
+        return any(
+            isinstance(block, dict) and "cache_control" in block
+            for message in request.messages
+            if isinstance(message.content, list)
+            for block in message.content
+        )
+
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelCallResult:
         async def untagged_tools(tagged: ModelRequest) -> ModelResponse:
-            return await handler(tagged.override(tools=request.tools))
+            settings = tagged.model_settings
+            if self._breaks_conversation(tagged):
+                # The conversation already ends its cached prefix itself (``ReminderMiddleware``).
+                settings = {k: v for k, v in settings.items() if k != "cache_control"}
+            return await handler(tagged.override(tools=request.tools, model_settings=settings))
 
         return await super().awrap_model_call(request, untagged_tools)
 

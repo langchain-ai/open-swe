@@ -45,19 +45,22 @@ from runtime_api.catalog import (
 from runtime_api.endpoint import call
 from runtime_api.loop import (
     FINISH_SCOUT_PLAN,
-    GOAL_TURN_ENDED,
+    GOAL,
     MODEL_CHOICE,
     REFRESH_GITHUB_PROXY,
     REPLY_ON_BEHALF,
     ROUTE_MODEL,
     RUN_ENDED,
+    SET_GOAL,
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
     TASK_CONTEXT,
     BeforeModel,
     ChosenModel,
     GitHubProxyRefreshed,
-    GoalTurnEnded,
+    Goal,
+    GoalChange,
+    GoalRead,
     ModelCall,
     PhaseResult,
     Prepared,
@@ -84,6 +87,8 @@ logger = logging.getLogger(__name__)
 # What ``ModelCallLimitMiddleware`` ends a run with once it reaches its limit.
 _LIMIT_MARKER: Final = "Model call limits exceeded"
 _SUMMARIZATION_EVENT: Final = "_summarization_event"
+# The goal's last change the model saw: an input after it carries the goal's reminder.
+_GOAL_SEEN: Final = "goal_seen_ms"
 # Held state: when the sandbox's GitHub token next needs replacing. It lives in the thread's
 # checkpoint, so it holds for the next run on whichever backend replica serves it.
 _GITHUB_PROXY_DUE: Final = "github_proxy_refresh_at"
@@ -366,6 +371,9 @@ class RunLoop:
             context, update = await asked.answers()
         finally:
             await asked.close()
+        stopped, reminder = await self._goal(state, held, update)
+        if stopped:
+            return BeforeModel(update=update, jump_to="end")
         messages = _messages(state)
         visible = _visible(state)
         guidance = self._guidance.get(self._backend.run)
@@ -422,7 +430,7 @@ class RunLoop:
                 vision=None if model.reads_images else self._models.vision,
                 fallback=model.fallback,
                 use_gateway=self._models.use_gateway,
-                reminder=context.goal_reminder,
+                reminder=reminder,
             ),
         )
 
@@ -464,7 +472,7 @@ class RunLoop:
         return _github_proxy_due(prepared.github_proxy, datetime.now(UTC))
 
     async def _task_context(self) -> TaskContext:
-        if not self.rules.task_coordination and self.rules.work_state is None:
+        if not self.rules.task_coordination:
             return TaskContext()
         return await call(self._backend, TASK_CONTEXT, RunRequest(run_id=run_id()))
 
@@ -625,6 +633,49 @@ class RunLoop:
             jump_to="model",
         )
 
+    async def _goal(
+        self, state: Mapping[str, object], held: Mapping[str, object], update: dict[str, JsonValue]
+    ) -> tuple[bool, str | None]:
+        """Move the thread's goal for what this model call answers: whether the run stops
+        here, and what to remind the model of.
+
+        A person's message puts the goal back to work; so does a wait waking the thread,
+        unless the person stopped it, when the run ends without a model call. While the
+        goal waits on its person, each input after the one that reported it carries a
+        reminder of what for.
+        """
+        rules = self.rules.work_state
+        if rules is None:
+            return False, None
+        goal = await self._read_goal(GoalRead(run_id=run_id()))
+        if goal is None:
+            return False, None
+        inputs = self._inputs(_messages(state))
+        person = any(self._from_person(message) for message in inputs)
+        woken = not person and any(
+            isinstance(message, HumanMessage)
+            and not _dynamic_context(message)
+            and _system_sender(message) not in self._guards
+            for message in inputs
+        )
+        if woken and (goal.state, goal.reason) == ("paused", "stopped"):
+            return True, None
+        if (
+            goal.state is None
+            or (person and goal.state != "working")
+            or (woken and goal.state in {"waiting", "paused"})
+        ):
+            await self._set_goal(GoalChange(run_id=run_id(), state="working"))
+            return False, None
+        if goal.state != "waiting_on_user":
+            return False, None
+        seen = held.get(_GOAL_SEEN)
+        update[_GOAL_SEEN] = goal.updated_at_ms
+        # Changed since the last call: what comes in is the report itself.
+        if seen != goal.updated_at_ms:
+            return False, None
+        return False, "\n\n".join(text for text in (rules.reminder, goal.ask) if text)
+
     async def _work_state(
         self,
         rules: WorkStateRules,
@@ -633,21 +684,23 @@ class RunLoop:
         update: dict[str, JsonValue],
     ) -> PhaseResult | None:
         """Send the model back to work until the thread's goal rests: waiting on its person,
-        paused, or waiting on something that wakes the thread again.
+        paused, or on something that wakes the thread again; pause it after ``max_nudges``.
 
-        The backend keeps the goal, so a report or a wait counts however the model made
-        it, code mode included, and a wait started in an earlier turn counts too.
+        The backend reads what will wake the thread from where each wait lives, so a wait
+        counts however the model started it, code mode included, and whenever.
         """
         nudges = held.get("work_state_nudges")
         asked = nudges if isinstance(nudges, int) else 0
-        ended = GoalTurnEnded(run_id=run_id(), last=asked >= rules.max_nudges)
-        try:
-            rests = (await call(self._backend, GOAL_TURN_ENDED, ended)).rests
-        except BackendCallError:
-            # A goal the backend cannot read must not hold the run open.
-            logger.warning("Could not read the thread's goal; ending the turn", exc_info=True)
-            rests = True
-        if rests:
+        goal = await self._read_goal(GoalRead(run_id=run_id(), waits=True))
+        if goal is None or goal.state in {"waiting_on_user", "paused"}:
+            update["work_state_nudges"] = 0
+            return None
+        if goal.waits or asked >= rules.max_nudges:
+            await self._set_goal(
+                GoalChange(run_id=run_id(), state="waiting")
+                if goal.waits
+                else GoalChange(run_id=run_id(), state="paused", reason="no_progress")
+            )
             update["work_state_nudges"] = 0
             return None
         return PhaseResult(
@@ -655,6 +708,39 @@ class RunLoop:
             messages=self._nudge(rules.nudge, state),
             jump_to="model",
         )
+
+    @staticmethod
+    def _inputs(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
+        """What came in since the model last answered."""
+        for index in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[index], AIMessage):
+                return list(messages[index + 1 :])
+        return list(messages)
+
+    @staticmethod
+    def _from_person(message: BaseMessage) -> bool:
+        return isinstance(message, HumanMessage) and any(
+            (root := _root(text, "input-message")) is not None and root.get("kind") == "human"
+            for text in _texts(message.content)
+        )
+
+    async def _read_goal(self, request: GoalRead) -> Goal | None:
+        """The thread's goal; None when the backend cannot say, which never holds the run."""
+        try:
+            return await call(self._backend, GOAL, request)
+        except BackendCallError:
+            logger.warning("Could not read the thread's goal", exc_info=True)
+            return None
+
+    async def _set_goal(self, change: GoalChange) -> None:
+        try:
+            await call(self._backend, SET_GOAL, change)
+        except BackendCallError:
+            logger.warning(
+                "Could not move the thread's goal",
+                extra={"goal_state": change.state},
+                exc_info=True,
+            )
 
     async def _reply(
         self,

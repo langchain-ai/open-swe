@@ -83,11 +83,13 @@ from runtime_api.catalog import (
     Catalog,
     FilesSpec,
     InboxSpec,
+    LoopRules,
     ModelSpec,
     RunModels,
     SandboxCreate,
     SandboxSpec,
     ToolSpec,
+    WorkStateRules,
 )
 from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import Delivery, Endpoint, call
@@ -1616,26 +1618,31 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
 
 
 @pytest.mark.parametrize(
-    ("command", "refused"),
+    ("command", "goal_mode", "refused"),
     [
-        ("for i in $(seq 60); do gh pr checks 1 && break; sleep 30; done", True),
-        ("sleep 240; gh pr view 1", True),
-        ('git commit -m "wait: sleep 5 before retry"', False),
+        ("for i in $(seq 60); do gh pr checks 1 && break; sleep 30; done", True, True),
+        ("sleep 240; gh pr view 1", True, True),
+        ("sleep 240; gh pr view 1", False, False),
+        ("npm run dev & sleep 3 && curl localhost:3000", True, False),
+        ("for i in 1 2 3; do curl -f localhost:3000 && break; sleep 2; done", True, False),
+        ('git commit -m "wait: sleep 30 before retry"', True, False),
+        ("bash -c 'until gh pr checks 1; do sleep 30; done'", True, True),
     ],
 )
-async def test_an_execute_that_sleeps_is_refused_with_the_catalogs_reason(
-    monkeypatch: pytest.MonkeyPatch, command: str, refused: bool
+async def test_a_goal_mode_execute_that_waits_by_sleeping_is_refused(
+    monkeypatch: pytest.MonkeyPatch, command: str, goal_mode: bool, refused: bool
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    work_state = WorkStateRules(tool="report_work_state", sleep_refusal="use monitor")
     backend = _run_backend(
-        catalog=Catalog(files=FilesSpec(sleep_refusal="use monitor"), sandbox=_IN_SANDBOX)
+        catalog=Catalog(
+            loop=LoopRules(work_state=work_state if goal_mode else None), sandbox=_IN_SANDBOX
+        )
     )
     post = AsyncMock()
     monkeypatch.setattr(backend, "post", post)
-    monkeypatch.setattr(backend.outbox, "started", MagicMock())
-    monkeypatch.setattr(backend.outbox, "finished", MagicMock())
     runtime = ToolRuntime(
         state={"messages": []},
         context=None,

@@ -184,6 +184,7 @@ from openswe.thread_title import (
     schedule_thread_title_generation,
 )
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
+from openswe.threads.goal import ThreadGoal
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.tools import (
@@ -1896,9 +1897,20 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
-    goal_mode = bool(profile_login) and (
-        (await User.preferences_for_login(profile_login)).goal_mode
+    # A task's goal is its coordinator's: workers report back to it and keep none.
+    goal_mode = (
+        bool(profile_login)
+        and not (task_coordination and task_coordination.is_worker)
+        and (await User.preferences_for_login(profile_login)).goal_mode
     )
+    if not goal_mode:
+        # One left from when the person had Goal mode on would show, and pause, forever.
+        try:
+            await ThreadGoal(thread_id).change(None)
+        except Exception:
+            logger.exception(
+                "Could not clear a goal left from Goal mode", extra={"agent_thread_id": thread_id}
+            )
     work_state_tool = _registered_tool_name(report_work_state)
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs
@@ -2242,6 +2254,12 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             else None,
             work_state=WorkStateRules(
                 tool=work_state_tool,
+                waits=[
+                    _registered_tool_name(tool)
+                    for tool in (schedule_thread_wakeup, background_execute, monitor)
+                ],
+                reminder=prompt("runs/goal-waiting-on-user"),
+                sleep_refusal=prompt("tools/no-sleep"),
                 nudge=work_state_nudge(work_state_tool),
                 nudge_sender=WORK_STATE_GUARD["id"],
             )

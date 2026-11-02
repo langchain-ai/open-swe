@@ -230,12 +230,8 @@ class FileToolsMiddleware(AgentMiddleware):
     async def _screened(self, request: ToolCallRequest) -> ToolCallRequest | ToolMessage:
         """``request`` as the guards let it run, an approved push as they fixed it, or their refusal."""
         command = request.tool_call["args"].get("command")
-        refusal = self._spec.sleep_refusal
-        if (
-            request.tool_call["name"] == "execute"
-            and refusal is not None
-            and isinstance(command, str)
-            and ShellCheck(tool="execute", command=command).sleeps
+        if request.tool_call["name"] == "execute" and (
+            refusal := self._backend.run.sleep_refusal(command)
         ):
             return ToolMessage(
                 content=refusal,
