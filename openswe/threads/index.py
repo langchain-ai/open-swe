@@ -136,6 +136,34 @@ class IndexedThread(BaseModel):
             updated_at=updated_at,
         )
 
+    async def update_if_current(
+        self, metadata: Mapping[str, JsonValue], status: ThreadStatus
+    ) -> Self | None:
+        """Update this snapshot only if no writer has changed it since it was read."""
+        async with transaction() as conn:
+            row = (
+                (
+                    await conn.execute(
+                        text(
+                            "UPDATE thread_index SET metadata = metadata || CAST(:metadata AS jsonb), "
+                            "status_since = CASE WHEN status = :status THEN status_since "
+                            "ELSE clock_timestamp() END, status = :status, "
+                            "updated_at = clock_timestamp() WHERE thread_id = :thread_id "
+                            f"AND updated_at = :updated_at RETURNING {_COLUMNS}"
+                        ),
+                        {
+                            "thread_id": self.thread_id,
+                            "updated_at": self.updated_at,
+                            "metadata": json.dumps(dict(metadata)),
+                            "status": status,
+                        },
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return None if row is None else self.from_row(row)
+
     def stopped_since(self, moment_ms: int) -> bool:
         """Whether someone stopped the thread at or after ``moment_ms``."""
         stopped = self.metadata.get(STOPPED_AT_KEY)

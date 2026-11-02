@@ -25,6 +25,8 @@ from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.slack.oauth import SLACK_TEAM_ID
 from openswe.source_context import SourceContext
 from openswe.threads.identity import ThreadIdentity
+from openswe.threads.status import WorkRunState
+from openswe.threads.store import THREADS
 from openswe.utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -121,7 +123,10 @@ def thread_is_private(metadata: Mapping[str, Any]) -> bool:
 
 def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
     """Threads that remain accessible directly but stay out of thread lists."""
-    return metadata.get("unlisted") is True or metadata.get("review_chat") is True
+    if metadata.get("unlisted") is True or metadata.get("review_chat") is True:
+        return True
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    return slack_thread is not None and slack_thread.is_concierge
 
 
 def thread_is_readable(
@@ -603,6 +608,8 @@ async def _thread_summary(
         # What the thread's Browser panel offers: its browser to watch, or to open.
         "browser": None if browser is None else browser.state,
     }
+    if metadata.get("experience") == "agent_workspace":
+        summary["latestRunId"] = _thread_run_id(metadata, latest_run_id)
     raw_pull_requests = metadata.get("pull_requests")
     pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []
     pull_requests = [
@@ -699,6 +706,25 @@ async def _refresh_latest_run_metadata(
     thread_id = thread.get("thread_id") or thread.get("id")
     if not isinstance(thread_id, str) or not thread_id:
         return thread, None, None
+    if thread_metadata(thread).get("experience") == "agent_workspace":
+        try:
+            indexed = await THREADS.get(thread_id)
+            if indexed is None:
+                return thread, None, None
+            with phase(record, "runs_list"):
+                refreshed = await WorkRunState(indexed).refresh()
+            raw_status = refreshed.metadata.get("latest_run_status")
+            raw_id = refreshed.metadata.get("latest_run_id")
+            return (
+                refreshed.as_langgraph(),
+                raw_status if isinstance(raw_status, str) else None,
+                raw_id if isinstance(raw_id, str) else None,
+            )
+        except Exception:
+            logger.warning(
+                "Could not refresh Work run metadata", extra={"thread_id": thread_id}, exc_info=True
+            )
+            return thread, None, None
     with phase(record, "runs_list"):
         latest_run_status, latest_run_id = await _latest_run_info(client, thread_id)
     metadata = thread_metadata(thread)

@@ -105,7 +105,11 @@ function AgentThreadContent({
 
   return (
     <AgentThreadStreamBoundary active={active}>
-      <ThreadSourceProvider threadId={threadId} transcript={transcript}>
+      <ThreadSourceProvider
+        threadId={threadId}
+        transcript={transcript}
+        experience={threadQuery.data.experience}
+      >
         {subagentId ? (
           <SubagentThreadView
             key={subagentId}

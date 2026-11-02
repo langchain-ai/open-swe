@@ -5007,17 +5007,6 @@
             ],
             "title": "Experimental Background Callbacks"
           },
-          "experimental_fleet": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Fleet"
-          },
           "experimental_memory": {
             "anyOf": [
               {
@@ -8071,6 +8060,20 @@
         "title": "ThreadResolveBody",
         "type": "object"
       },
+      "ThreadViewedBody": {
+        "properties": {
+          "run_id": {
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "ThreadViewedBody",
+        "type": "object"
+      },
       "ToolCallView": {
         "additionalProperties": false,
         "properties": {
@@ -8549,6 +8552,43 @@
           "status"
         ],
         "title": "WebhookResponse",
+        "type": "object"
+      },
+      "WorkRunView": {
+        "properties": {
+          "runId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runid"
+          },
+          "viewed": {
+            "title": "Viewed",
+            "type": "boolean"
+          },
+          "viewedAt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Viewedat"
+          }
+        },
+        "required": [
+          "runId",
+          "viewed",
+          "viewedAt"
+        ],
+        "title": "WorkRunView",
         "type": "object"
       },
       "WorkerActivity": {
@@ -22173,6 +22213,64 @@
         "tags": [
           "dashboard",
           "transcript"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/viewed": {
+      "post": {
+        "operationId": "api_mark_thread_viewed_dashboard_api_threads__thread_id__viewed_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThreadViewedBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkRunView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Mark Thread Viewed",
+        "tags": [
+          "dashboard",
+          "threads"
         ]
       }
     },

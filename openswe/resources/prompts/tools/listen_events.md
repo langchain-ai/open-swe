@@ -1,5 +1,7 @@
 Listen for inbound events in this thread's workspace and have each matching one delivered to this thread.
 
+Event visibility is enforced per item: public by default, private only in its user’s private thread, and admin-only only in an admin thread for its workspace.
+
 Events come from GitHub (repositories bound to the workspace) and Slack (channels bound to the workspace).
 Slack events from public and private channels Open SWE has joined are published to the event log and subscriptions.
 Inviting Open SWE to a private channel consents to making its events readable within the workspace.
