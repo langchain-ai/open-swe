@@ -178,10 +178,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
   return (
     <SidebarFrame
       {...layout}
-      className={cn(
-        "border-r border-default bg-surface-level-2 text-primary",
-        agentWorkspace && "border-transparent"
-      )}
+      className="border-r border-default bg-surface-level-2 text-primary"
     >
       <div
         className={cn(
