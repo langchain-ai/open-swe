@@ -143,14 +143,15 @@ def _mda(
         seen.append(request)
         return handler(request)
 
-    def client(
-        *, transport: httpx2.AsyncBaseTransport, timeout: float, follow_redirects: bool
-    ) -> httpx2.AsyncClient:
+    def client(*, timeout: float, follow_redirects: bool) -> httpx2.AsyncClient:
         assert follow_redirects is False
-        return real_client(transport=transport, timeout=timeout, follow_redirects=follow_redirects)
+        return real_client(
+            transport=httpx2.MockTransport(recording),
+            timeout=timeout,
+            follow_redirects=follow_redirects,
+        )
 
-    monkeypatch.setattr(forwarding.httpx2, "AsyncClient", client)
-    monkeypatch.setattr(forwarding, "pooled_transport", lambda: httpx2.MockTransport(recording))
+    monkeypatch.setattr(forwarding, "PooledAsyncClient", client)
     return seen
 
 

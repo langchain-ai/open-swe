@@ -13,7 +13,7 @@ from collections.abc import Iterable
 import httpx2
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-from openswe.utils.http_pool import pooled_transport
+from openswe.utils.http_pool import PooledAsyncClient
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ async def fetch_agents_md(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    async with httpx2.AsyncClient(transport=pooled_transport(), timeout=timeout) as client:
+    async with PooledAsyncClient(timeout=timeout) as client:
         for filename in _AGENT_DOC_FILENAMES:
             url = f"https://api.github.com/repos/{owner}/{repo}/contents/{filename}"
             try:

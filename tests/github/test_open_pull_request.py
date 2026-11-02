@@ -102,7 +102,7 @@ class _RoutingClient:
 
 
 def _install_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient | _RoutingClient) -> None:
-    monkeypatch.setattr(opr.httpx2, "AsyncClient", lambda **_kwargs: client)
+    monkeypatch.setattr(opr, "PooledAsyncClient", lambda **_kwargs: client)
 
 
 def _set_config(
@@ -197,7 +197,7 @@ def test_public_pr_cannot_use_requester_authority_outside_workspace(
         return httpx2.Response(200, json={"name": "existing-branch", "private": False})
 
     client = httpx2.AsyncClient(transport=httpx2.MockTransport(github))
-    monkeypatch.setattr(opr.httpx2, "AsyncClient", lambda **kwargs: client)
+    monkeypatch.setattr(opr, "PooledAsyncClient", lambda **kwargs: client)
     result = _open()
 
     if workspace_access == "allowed" and requester_access:

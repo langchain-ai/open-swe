@@ -2,18 +2,19 @@
 
 A fresh ``httpx2.AsyncClient`` or ``aiohttp.ClientSession`` opens its own TCP and
 TLS connection, so code that built one per request (or per ``async with`` block)
-paid a full handshake every time. A client built with
-``transport=pooled_transport()``, or a session built with
+paid a full handshake every time. A ``PooledAsyncClient``, or a session built with
 ``connector=pooled_connector(), connector_owner=False``, keeps its own headers,
 auth and timeouts but draws connections from the running loop's pool, which
 keeps them warm across calls. Closing such a client leaves the pool open.
 """
 
 import asyncio
+import ssl
 import weakref
 
 import aiohttp
 import httpx2
+from httpx2._types import CertTypes
 
 # httpx2 drops idle connections after 5 s; an agent's calls to the same host are
 # often further apart than that.
@@ -55,9 +56,20 @@ class _PooledTransport(httpx2.AsyncBaseTransport):
 _POOLED_TRANSPORT = _PooledTransport()
 
 
-def pooled_transport() -> httpx2.AsyncBaseTransport:
-    """The transport for a per-call client that should reuse warm connections."""
-    return _POOLED_TRANSPORT
+class PooledAsyncClient(httpx2.AsyncClient):
+    """An HTTP client with isolated request settings and shared warm connections."""
+
+    def _init_transport(
+        self,
+        verify: ssl.SSLContext | str | bool = True,
+        cert: CertTypes | None = None,
+        trust_env: bool = True,
+        http1: bool = True,
+        http2: bool = False,
+        limits: httpx2.Limits = _LIMITS,
+        transport: httpx2.AsyncBaseTransport | None = None,
+    ) -> httpx2.AsyncBaseTransport:
+        return transport if transport is not None else _POOLED_TRANSPORT
 
 
 def pooled_connector() -> aiohttp.TCPConnector:

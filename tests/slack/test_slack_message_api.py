@@ -126,8 +126,8 @@ async def test_upload_completes_external_upload_without_sending_token(slack_api,
 
     async_client = httpx2.AsyncClient
     with patch.object(
-        httpx2,
-        "AsyncClient",
+        slack_utils,
+        "PooledAsyncClient",
         side_effect=lambda **kwargs: async_client(
             **{**kwargs, "transport": httpx2.MockTransport(upload)}
         ),
@@ -173,8 +173,8 @@ async def test_upload_blocks_unsafe_urls_and_redirects(slack_api, redirect, monk
 
     async_client = httpx2.AsyncClient
     with patch.object(
-        httpx2,
-        "AsyncClient",
+        slack_utils,
+        "PooledAsyncClient",
         side_effect=lambda **kwargs: async_client(
             **{**kwargs, "transport": httpx2.MockTransport(upload)}
         ),

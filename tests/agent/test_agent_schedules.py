@@ -945,7 +945,7 @@ async def test_system_schedule_can_run_without_user_credentials(
         return httpx2.Response(github_status, json={})
 
     http_client = httpx2.AsyncClient(transport=httpx2.MockTransport(github))
-    monkeypatch.setattr(repo_access.httpx2, "AsyncClient", lambda **kwargs: http_client)
+    monkeypatch.setattr(repo_access, "PooledAsyncClient", lambda **kwargs: http_client)
     record = {
         "id": SCHED_SYSTEM,
         "prompt": "Triage new issues",

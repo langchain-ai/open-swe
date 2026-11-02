@@ -408,7 +408,11 @@ def _trigger_server(
         seen.append(request)
         return handler(request)
 
-    monkeypatch.setattr(mda_forwarding, "pooled_transport", lambda: httpx2.MockTransport(recording))
+    monkeypatch.setattr(
+        mda_forwarding,
+        "PooledAsyncClient",
+        lambda **kwargs: httpx2.AsyncClient(**kwargs, transport=httpx2.MockTransport(recording)),
+    )
     return seen
 
 

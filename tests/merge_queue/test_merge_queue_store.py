@@ -1276,7 +1276,11 @@ async def test_queue_dashboard_authorization(
     monkeypatch.setattr(repo_access, "get_valid_access_token", user_token)
     monkeypatch.setattr(profiles, "get_valid_access_token", user_token)
     monkeypatch.setattr(
-        repo_access, "pooled_transport", lambda: httpx2.MockTransport(github_response)
+        repo_access,
+        "PooledAsyncClient",
+        lambda **kwargs: httpx2.AsyncClient(
+            **kwargs, transport=httpx2.MockTransport(github_response)
+        ),
     )
     monkeypatch.setattr(GitHubClient, "as_user", as_user)
     app = FastAPI()
@@ -1815,7 +1819,11 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
             raise httpx2.ReadTimeout("Dispatch response lost", request=request)
         return httpx2.Response(204)
 
-    monkeypatch.setattr(dispatch, "pooled_transport", lambda: httpx2.MockTransport(deliver))
+    monkeypatch.setattr(
+        dispatch,
+        "PooledAsyncClient",
+        lambda **kwargs: httpx2.AsyncClient(**kwargs, transport=httpx2.MockTransport(deliver)),
+    )
 
     @asynccontextmanager
     async def open_repo(_queue: MergeQueue) -> AsyncIterator[RepoClient]:

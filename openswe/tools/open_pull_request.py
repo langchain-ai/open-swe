@@ -45,7 +45,7 @@ from openswe.threads.summary import upsert_pull_request_record
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from openswe.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
-from openswe.utils.http_pool import pooled_transport
+from openswe.utils.http_pool import PooledAsyncClient
 from openswe.utils.langsmith import create_langsmith_thread_feedback
 from openswe.utils.run_usage import summarize_run_usage
 
@@ -1100,7 +1100,7 @@ async def _open_pull_request(
             failed_step="resolve_pr_author_token",
         )
 
-    async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30.0) as client:
+    async with PooledAsyncClient(timeout=30.0) as client:
         if (
             kind == "user"
             and await private_credential_login() is None
@@ -1296,7 +1296,7 @@ async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[
     token, kind = await _resolve_pr_author_token()
     if not token:
         return {"success": False, "error": "No GitHub token was available to read the PR"}
-    async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30.0) as client:
+    async with PooledAsyncClient(timeout=30.0) as client:
         if (
             kind == "user"
             and await private_credential_login() is None

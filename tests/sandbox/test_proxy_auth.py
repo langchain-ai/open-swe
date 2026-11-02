@@ -32,7 +32,7 @@ class TestConfigureSandboxProxy:
 
     async def test_without_token_sends_no_github_credentials(self) -> None:
         with (
-            patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
+            patch("openswe.sandboxes.providers.langsmith.PooledAsyncClient") as mock_client_cls,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}),
         ):
             mock_client = MagicMock()
@@ -85,7 +85,7 @@ class TestConfigureSandboxProxy:
         static_cloud_rule = {"name": "static-aws", "type": "aws", "aws": {"region": "us-east-1"}}
         tools_rule = {"name": "open-swe-thread-tools", "headers": [{"value": "fresh-tools"}]}
         with (
-            patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
+            patch("openswe.sandboxes.providers.langsmith.PooledAsyncClient") as mock_client_cls,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}),
             patch(
                 "openswe.sandboxes.tool_access.tool_proxy_rule", AsyncMock(return_value=tools_rule)
@@ -142,7 +142,7 @@ class TestConfigureSandboxProxy:
             response=response,
         )
         with (
-            patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
+            patch("openswe.sandboxes.providers.langsmith.PooledAsyncClient") as mock_client_cls,
             patch("openswe.sandboxes.retry.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
         ):
@@ -188,7 +188,7 @@ class TestConfigureSandboxProxy:
             return response
 
         with (
-            patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
+            patch("openswe.sandboxes.providers.langsmith.PooledAsyncClient") as mock_client_cls,
             patch("openswe.sandboxes.retry.asyncio.sleep", sleep),
             patch("openswe.sandboxes.retry.time", SimpleNamespace(monotonic=lambda: clock.now)),
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
@@ -212,7 +212,7 @@ class TestConfigureSandboxProxy:
         response = httpx2.Response(403, request=request)
         error = httpx2.HTTPStatusError("Forbidden", request=request, response=response)
         with (
-            patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
+            patch("openswe.sandboxes.providers.langsmith.PooledAsyncClient") as mock_client_cls,
             patch("openswe.sandboxes.retry.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
         ):

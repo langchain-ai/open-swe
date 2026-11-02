@@ -39,8 +39,8 @@ def download_http(monkeypatch: pytest.MonkeyPatch):
 
     async_client = httpx2.AsyncClient
     monkeypatch.setattr(
-        httpx2,
-        "AsyncClient",
+        slack_client,
+        "PooledAsyncClient",
         lambda **kwargs: async_client(**{**kwargs, "transport": httpx2.MockTransport(handle)}),
     )
     monkeypatch.setattr(

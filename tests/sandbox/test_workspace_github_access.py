@@ -94,7 +94,7 @@ def github(
     def make_client(**kwargs: object) -> httpx2.AsyncClient:
         return client(transport=httpx2.MockTransport(handle_proxy))
 
-    monkeypatch.setattr(httpx2, "AsyncClient", make_client)
+    monkeypatch.setattr("openswe.sandboxes.providers.langsmith.PooledAsyncClient", make_client)
     mock_github_sdk(monkeypatch, handle)
     monkeypatch.setattr(app, "GITHUB_APP_ID", "1")
     monkeypatch.setattr(app, "GITHUB_APP_INSTALLATION_ID", "2")

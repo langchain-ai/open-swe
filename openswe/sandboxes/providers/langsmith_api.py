@@ -9,7 +9,7 @@ from typing import Literal, Self
 import httpx2
 
 from openswe.config import ENV
-from openswe.utils.http_pool import pooled_transport
+from openswe.utils.http_pool import PooledAsyncClient
 
 _ERROR_BODY_CHARS = 500
 _SANDBOX_API_SUFFIX = "/v2/sandboxes"
@@ -52,7 +52,7 @@ class SandboxAPI:
         timeout: float,
     ) -> httpx2.Response:
         """Call the sandbox API at ``path`` (under ``/v2/sandboxes``)."""
-        async with httpx2.AsyncClient(transport=pooled_transport(), timeout=timeout) as client:
+        async with PooledAsyncClient(timeout=timeout) as client:
             response = await client.request(
                 method, f"{self.endpoint}{path}", json=json, headers=self.headers()
             )

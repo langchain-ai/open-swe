@@ -41,7 +41,7 @@ from openswe.threads.summary import (
 )
 from openswe.transcript.turns import fail_unstarted_turn, steer_target
 from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
-from openswe.utils.http_pool import pooled_transport
+from openswe.utils.http_pool import PooledAsyncClient
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 from openswe.utils.thread_ops import langgraph_client, langgraph_url
@@ -431,9 +431,7 @@ async def proxy_dashboard_thread_history(
         payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
     headers = langgraph_proxy_headers(content_type=content_type)
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=_PROXY_REQUEST_TIMEOUT
-    ) as client:
+    async with PooledAsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, json=payload, headers=headers)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
@@ -466,9 +464,7 @@ async def proxy_dashboard_thread_runs_list(
         params.append(("status", status))
     for field in select or []:
         params.append(("select", field))
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=_PROXY_REQUEST_TIMEOUT
-    ) as client:
+    async with PooledAsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.get(url, headers=headers, params=params)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
@@ -574,9 +570,7 @@ async def proxy_dashboard_thread_run_cancel(
         raise HTTPException(403, "only its sender can withdraw a queued follow-up")
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/cancel"
     headers = langgraph_proxy_headers()
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=_PROXY_REQUEST_TIMEOUT
-    ) as client:
+    async with PooledAsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(
             url,
             headers=headers,

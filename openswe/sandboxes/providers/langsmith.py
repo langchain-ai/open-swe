@@ -39,7 +39,7 @@ from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.sandboxes.providers.registry import SandboxGoneError
 from openswe.sandboxes.retry import retry_transient_sandbox_errors
 from openswe.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
-from openswe.utils.http_pool import pooled_transport
+from openswe.utils.http_pool import PooledAsyncClient
 from openswe.utils.startup_trace import asubphase
 from openswe.workspaces.cloud_identity import federated_cloud
 
@@ -467,9 +467,7 @@ async def configure_sandbox_proxy(
         logger.warning("No LangSmith API key found, skipping sandbox proxy configuration")
         return
     url = f"{api.endpoint}/boxes/{sandbox_name}"
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=PROXY_CONFIG_TIMEOUT_SECONDS
-    ) as client:
+    async with PooledAsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
         proxy_config = await sandbox_proxy_config(
             sandbox_name,
             github_token,

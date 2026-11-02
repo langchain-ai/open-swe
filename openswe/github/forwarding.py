@@ -26,7 +26,7 @@ from openswe.agent_api.client import mda_runtime_url
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import react_to_github_comment
 from openswe.jobs import queue
-from openswe.utils.http_pool import pooled_transport
+from openswe.utils.http_pool import PooledAsyncClient
 
 logger = logging.getLogger(__name__)
 
@@ -119,9 +119,7 @@ async def forward_to_mda_channel(body: bytes, headers: Mapping[str, str]) -> Non
     backoff = _FIRST_BACKOFF_SECONDS
     status: int | None = None
     attempt = 0
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=_TIMEOUT_SECONDS, follow_redirects=False
-    ) as client:
+    async with PooledAsyncClient(timeout=_TIMEOUT_SECONDS, follow_redirects=False) as client:
         for attempt in range(1, _ATTEMPTS + 1):
             wait: float | None = None
             try:

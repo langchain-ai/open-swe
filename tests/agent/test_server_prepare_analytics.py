@@ -70,7 +70,7 @@ def github_client(monkeypatch: pytest.MonkeyPatch) -> _FakeGitHubClient:
     client = _FakeGitHubClient([])
     import openswe.utils.authorship as authorship
 
-    monkeypatch.setattr(authorship.httpx2, "AsyncClient", lambda *a, **kw: client)
+    monkeypatch.setattr(authorship, "PooledAsyncClient", lambda *a, **kw: client)
     return client
 
 
