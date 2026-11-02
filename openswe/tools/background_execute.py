@@ -135,6 +135,10 @@ async def _launch_with_callback(
     except Exception:
         await _track(thread_id, task_id, running=False)
         raise
+    if state.get("callback") is False:
+        from openswe.background_tasks import ensure_background_task_polling
+
+        await ensure_background_task_polling(thread_id)
     return {"success": True, **state}
 
 

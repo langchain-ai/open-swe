@@ -128,7 +128,7 @@ def test_runner_calls_back_on_completion_until_accepted(
         script.unlink(missing_ok=True)
 
 
-def test_background_launch_requires_callback_url(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_background_launch_falls_back_without_callback_url(monkeypatch: pytest.MonkeyPatch) -> None:
     if Path(tool_access.TOOLS_URL_FILE).exists():
         pytest.skip("this host has a provisioned sandbox tools URL")
     monkeypatch.delenv("OPEN_SWE_TOOLS_URL", raising=False)
@@ -136,8 +136,8 @@ def test_background_launch_requires_callback_url(monkeypatch: pytest.MonkeyPatch
     task_id = f"test-{uuid.uuid4().hex}"
     try:
         result = _launch(script, task_id, "true", 10, callback=True)
-        assert "callback URL" in result["error"] or "curl" in result["error"]
-        assert not Path(TASK_ROOT, task_id).exists()
+        assert result["callback"] is False
+        assert _finished(script, task_id)["status"] == "completed"
     finally:
         shutil.rmtree(Path(TASK_ROOT, task_id), ignore_errors=True)
         script.unlink(missing_ok=True)
@@ -415,11 +415,13 @@ async def test_callbacks_follow_the_triggering_persons_flag(
         get_profile.assert_awaited_once_with(login)
 
 
-@pytest.mark.parametrize("callback", [False, True])
-async def test_background_execute_schedules_a_cron_only_without_callbacks(callback: bool) -> None:
+@pytest.mark.parametrize(("callback", "available"), [(False, False), (True, True), (True, False)])
+async def test_background_execute_schedules_a_cron_only_without_callbacks(
+    callback: bool, available: bool
+) -> None:
     backend = AsyncMock()
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
-    launches = [{"task_id": "cmd-1", "status": "running"}]
+    launches = [{"task_id": "cmd-1", "status": "running", "callback": available}]
     with (
         patch(
             "openswe.tools.background_execute.uses_completion_callback",
@@ -439,8 +441,8 @@ async def test_background_execute_schedules_a_cron_only_without_callbacks(callba
     ):
         result = await background_execute("sleep 10")
 
-    assert result == {"success": True, "task_id": "cmd-1", "status": "running"}
-    assert ensure_cron.await_count == int(not callback)
+    assert result == {"success": True, **launches[0]}
+    assert ensure_cron.await_count == int(not available)
 
 
 async def test_background_execute_reports_monitor_scheduling_failure() -> None:

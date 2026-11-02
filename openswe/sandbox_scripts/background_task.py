@@ -180,6 +180,7 @@ class Runner:
                 "task_id": self.task.id,
                 "owner_thread_id": self.config["owner_thread_id"],
                 "command": self.config["command"],
+                "callback": self.config["callback"],
                 "status": status,
                 "pid": self.process.pid if self.process else None,
                 "runner_pid": os.getpid(),
@@ -300,14 +301,12 @@ def launch(request):
     task = Task(request["task_id"])
     if not valid_task_id(task.id):
         fail("invalid task_id")
-    callback = bool(request.get("callback"))
-    if callback and shutil.which("curl") is None:
-        fail("background execution requires curl")
     tools_url = request["tools_url_env"], request["tools_url_file"]
-    if callback and not (os.environ.get(tools_url[0]) or nonempty(tools_url[1])):
-        fail(
-            "background execution needs the sandbox callback URL, which this deployment does not provide"
-        )
+    callback = (
+        bool(request.get("callback"))
+        and shutil.which("curl") is not None
+        and bool(os.environ.get(tools_url[0]) or nonempty(tools_url[1]))
+    )
     os.makedirs(ROOT, exist_ok=True)
     for _ in range(10):
         try:
