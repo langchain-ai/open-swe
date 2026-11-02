@@ -209,17 +209,22 @@ test.describe("review page", () => {
     const input = description.getByRole("textbox", { name: "PR description" });
     const save = description.getByRole("button", { name: "Save description" });
     await edit.click();
-    await expect(input).toHaveValue(DESCRIPTION);
+    await expect(input).toBeFocused();
+    await expect(description.locator(".view-lines")).toContainText(DESCRIPTION);
     await expect(save).toBeDisabled();
-    await input.fill("Discard this draft");
+    await input.focus();
+    await input.press("ControlOrMeta+A");
+    await page.keyboard.insertText("Discard this draft");
     await description
       .getByRole("button", { name: "Cancel", exact: true })
       .click();
     await expect(description).toContainText(DESCRIPTION);
     await edit.click();
-    await expect(input).toHaveValue(DESCRIPTION);
+    await expect(description.locator(".view-lines")).toContainText(DESCRIPTION);
     const updated = "## Updated description\n\nSaved **from the review page**.";
-    await input.fill(updated);
+    await input.focus();
+    await input.press("ControlOrMeta+A");
+    await page.keyboard.insertText(updated);
     await input.press("Control+Enter");
     await expect(input).toBeHidden();
     await expect(
@@ -227,7 +232,9 @@ test.describe("review page", () => {
     ).toBeVisible();
     await page.reload();
     await edit.click();
-    await expect(input).toHaveValue(updated);
+    await expect(description.locator(".view-lines")).toContainText(
+      "Updated description",
+    );
     const endpoint = `**${reviewApi(pr, "/description")}`;
     await page.route(endpoint, (route) =>
       route.fulfill({
@@ -238,9 +245,13 @@ test.describe("review page", () => {
         }),
       }),
     );
-    await input.fill("Retry this draft");
+    await input.focus();
+    await input.press("ControlOrMeta+A");
+    await page.keyboard.insertText("Retry this draft");
     await save.click();
-    await expect(input).toHaveValue("Retry this draft");
+    await expect(description.locator(".view-lines")).toContainText(
+      "Retry this draft",
+    );
     await expect(
       page.getByText("Couldn't update description", { exact: true }),
     ).toBeVisible();
@@ -252,7 +263,9 @@ test.describe("review page", () => {
       description.getByRole("heading", { name: "Updated description" }),
     ).toBeVisible();
     await edit.click();
-    await input.fill("");
+    await input.focus();
+    await input.press("ControlOrMeta+A");
+    await input.press("Backspace");
     await save.click();
     await expect(
       description.getByText("No description.", { exact: true }),

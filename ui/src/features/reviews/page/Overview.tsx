@@ -1,11 +1,11 @@
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Button } from "@langchain/macaw-components/Button"
 import { CaretDownIcon } from "@langchain/macaw-components/icons"
-import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
+import { TextEditor } from "@/components/TextEditor"
 import { api, reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
 import { cn, INHERITED_LINK } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
@@ -210,23 +210,24 @@ function Description({
       </header>
       {draft !== null && (
         <div className="flex flex-col gap-space-2">
-          <Textarea
-            size="sm"
-            aria-label="PR description"
-            autoFocus
-            rows={12}
-            resize="vertical"
-            maxLength={65536}
-            value={draft}
-            onChange={setDraft}
-            onKeyDown={(event) => {
+          <div
+            className="flex h-64 min-h-0 flex-col overflow-hidden rounded-md border border-default"
+            onKeyDownCapture={(event) => {
               if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
                 event.preventDefault()
+                event.stopPropagation()
                 save()
               }
               if (event.key === "Escape") event.stopPropagation()
             }}
-          />
+          >
+            <TextEditor
+              ariaLabel="PR description"
+              autoFocus
+              value={draft}
+              onChange={setDraft}
+            />
+          </div>
           <div className="flex justify-end gap-space-2">
             <Button
               size="sm"
