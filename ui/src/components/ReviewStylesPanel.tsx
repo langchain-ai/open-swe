@@ -268,10 +268,11 @@ export function ReviewStylesPanel() {
               Approval Mode
             </Text>
             <p className="text-xs text-secondary">
-              Criteria come from <code>.open-swe/APPROVALS.md</code> in the
-              repository, read from each pull request&apos;s base branch. Dry
-              run posts the assessment without approving; Approve submits a
-              GitHub approval when the assessment passes. Nothing is merged.
+              Criteria come from the rules in{" "}
+              <code>.open-swe/auto-approve-rules/</code>, read from the
+              repository&apos;s default branch. Dry run posts the assessment
+              without approving; Approve submits a GitHub approval when the
+              assessment passes. Nothing is merged.
             </p>
             <Select<ReviewApprovalMode>
               aria-label="Approval mode"
@@ -291,14 +292,11 @@ export function ReviewStylesPanel() {
             {approvalsFile.data && (
               <p className="text-xs text-secondary">
                 {approvalsFile.data.found ? (
-                  <>
-                    <code>.open-swe/APPROVALS.md</code> found on the default
-                    branch.
-                  </>
+                  "Auto-approve rules found on the default branch."
                 ) : (
                   <>
-                    No <code>.open-swe/APPROVALS.md</code> on the default
-                    branch, so reviews post no approval assessment.
+                    No rules in <code>.open-swe/auto-approve-rules/</code> on
+                    the default branch, so reviews post no approval assessment.
                   </>
                 )}
               </p>

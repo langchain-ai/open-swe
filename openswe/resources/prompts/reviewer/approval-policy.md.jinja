@@ -1,0 +1,9 @@
+{% if approvals_md %}
+{{ approvals_md }}
+{% endif %}
+{% for path, criteria in rules %}
+
+## Auto-approve rule `{{ path }}`
+
+{{ criteria }}
+{% endfor %}

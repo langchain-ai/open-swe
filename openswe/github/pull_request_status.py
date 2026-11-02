@@ -591,8 +591,9 @@ class PullRequestClient:
         keep_review_id: int | None = None,
         keep_commit: str | None = None,
         scope_to_review_id: int | None = None,
+        state: Literal["approved", "changes_requested"] = "approved",
     ) -> list[int]:
-        """Dismiss Open SWE's standing approvals other than the kept ones; the ids GitHub refused.
+        """Dismiss Open SWE's standing reviews in ``state`` other than the kept ones; the ids GitHub refused.
 
         ``scope_to_review_id`` limits this to that review's login. An unknown review dismisses nothing.
         """
@@ -606,7 +607,7 @@ class PullRequestClient:
         refused: list[int] = []
         for review in reviews:
             if (
-                review.state != "approved"
+                review.state != state
                 or review.user is None
                 or review.user.login.lower() not in OPEN_SWE_GITHUB_LOGINS
                 or (only_login is not None and review.user.login.lower() != only_login)

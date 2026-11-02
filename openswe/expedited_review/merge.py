@@ -108,7 +108,7 @@ async def _merge_approved(
             return MergeResult(
                 "diff_changed",
                 "A commit since the card was posted changed the non-test diff, either what the "
-                "approver saw or what you excluded under APPROVALS.md. Nothing was discarded. "
+                "approver saw or what you excluded under the auto-approve rules. Nothing was discarded. "
                 "A changed excluded hunk is drawn on the card again. If the change does not "
                 "need the approver to look again, call `merge_expedited_pr` again with "
                 "`keep_approval_reason`; "

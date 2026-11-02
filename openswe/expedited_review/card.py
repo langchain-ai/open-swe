@@ -104,7 +104,7 @@ def _diffstat(title: str, noun: str, files: list[ChangedFile]) -> list[Block]:
 
 
 def _excluded_summary(diff: ExpeditedDiff) -> list[Block]:
-    """One line per APPROVALS.md guideline the agent cited, naming the files it covers."""
+    """One line per auto-approve rule the agent cited, naming the files it covers."""
     if not diff.excluded:
         return []
     stats: dict[str, dict[str, list[int]]] = {}
@@ -113,7 +113,7 @@ def _excluded_summary(diff: ExpeditedDiff) -> list[Block]:
         counts[0] += 1
         counts[1] += entry["additions"]
         counts[2] += entry["deletions"]
-    heading = "*Open SWE judged these auto-approvable under `.open-swe/APPROVALS.md` (not shown)*\n"
+    heading = "*Open SWE judged these auto-approvable under `.open-swe/auto-approve-rules/` (not shown)*\n"
     budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
     lines: list[str] = []
     for guideline, paths in stats.items():

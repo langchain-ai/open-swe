@@ -19,7 +19,7 @@ class SettingsChange(TypedDict):
 
 
 class ExpeditedExclusions(BaseModel):
-    """What an expedited card left off as qualifying under the target repo's APPROVALS.md."""
+    """What an expedited card left off as qualifying under the target repo's auto-approve rules."""
 
     model_config = ConfigDict(extra="forbid")
 
