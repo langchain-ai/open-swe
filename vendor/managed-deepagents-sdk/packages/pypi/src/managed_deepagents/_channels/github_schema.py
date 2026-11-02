@@ -163,6 +163,15 @@ class _LabeledPullRequestPayload(_PullRequestPayload):
     label: GitHubLabel
 
 
+# GitHub leaves out the label an unlabeled event removed when the label itself was deleted.
+class _UnlabeledIssuePayload(_IssuePayload):
+    label: NotRequired[GitHubLabel]
+
+
+class _UnlabeledPullRequestPayload(_PullRequestPayload):
+    label: NotRequired[GitHubLabel]
+
+
 class _ReviewPayload(_PullRequestPayload):
     review: GitHubReview
 
@@ -255,6 +264,8 @@ GitHubPayload = (
     | _IssueCommentPayload
     | _PullRequestPayload
     | _LabeledPullRequestPayload
+    | _UnlabeledIssuePayload
+    | _UnlabeledPullRequestPayload
     | _ReviewPayload
     | _ReviewCommentPayload
     | _WorkflowPayload
@@ -348,7 +359,7 @@ _PAYLOAD_ADAPTERS: dict[SupportedEventKey, TypeAdapter[GitHubPayload]] = {
     "issues.unpinned": _issue_adapter,
     "issues.assigned": _issue_adapter,
     "issues.unassigned": _issue_adapter,
-    "issues.unlabeled": TypeAdapter(_LabeledIssuePayload),
+    "issues.unlabeled": TypeAdapter(_UnlabeledIssuePayload),
     "issues.locked": _issue_adapter,
     "issues.unlocked": _issue_adapter,
     "issues.milestoned": _issue_adapter,
@@ -370,7 +381,7 @@ _PAYLOAD_ADAPTERS: dict[SupportedEventKey, TypeAdapter[GitHubPayload]] = {
     "pull_request.unassigned": _pr_adapter,
     "pull_request.review_requested": _pr_adapter,
     "pull_request.review_request_removed": _pr_adapter,
-    "pull_request.unlabeled": TypeAdapter(_LabeledPullRequestPayload),
+    "pull_request.unlabeled": TypeAdapter(_UnlabeledPullRequestPayload),
     "pull_request.locked": _pr_adapter,
     "pull_request.unlocked": _pr_adapter,
     "pull_request.milestoned": _pr_adapter,
