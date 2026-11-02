@@ -16,6 +16,8 @@ channel = channels.slack(
     # The backend decides what reaches the channel, so every forwarded message counts.
     trigger_mode="all",
     reply="none",
+    # No 👀 on the message that starts a run.
+    reactions=False,
     # A new message redirects the work in progress, as a tagged follow-up does on the backend.
     multitask_strategy="interrupt",
     on_event={

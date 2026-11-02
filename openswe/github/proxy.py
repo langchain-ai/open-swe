@@ -119,7 +119,7 @@ def _unpack_proxy_token_record(record: tuple[Any, ...]) -> ProxyTokenRecord:
 
 
 def proxy_token_set_since(thread_id: str | None, since: datetime) -> datetime | None:
-    """When the token this process put on ``thread_id``'s box at or after ``since`` expires.
+    """When the token this process put on ``thread_id``'s sandbox at or after ``since`` expires.
 
     None when it put none there since, or does not know when that one expires.
     """

@@ -257,6 +257,7 @@ async def create_dashboard_thread_record(
     email: str | None = None,
     repo_config: dict[str, str],
     repo_explicitly_none: bool = False,
+    experience: Literal["coding", "agent_workspace"] = "coding",
     prompt: str,
     images: list[DashboardImageBody] | None = None,
     title: str | None = None,
@@ -312,6 +313,8 @@ async def create_dashboard_thread_record(
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
+    if experience == "agent_workspace":
+        metadata["experience"] = experience
     if visibility == "private" and is_admin(email, login=login):
         metadata["admin_thread"] = True
     if workspace:
@@ -385,6 +388,8 @@ async def _build_dashboard_configurable(
         "user_email": await resolve_run_email(login, profile),
         "background_task_completion": False,
     }
+    if metadata.get("experience") == "agent_workspace":
+        configurable["experience"] = "agent_workspace"
     repo_config = repo_config_from_metadata(metadata)
     if repo_config:
         configurable["repo"] = repo_config
@@ -461,6 +466,7 @@ async def start_dashboard_thread(
     prompt: str,
     repos: Sequence[str],
     visibility: Literal["public", "private"],
+    unlisted: bool = False,
 ) -> str:
     """Start a person's dashboard thread; the first repo is the one its sandbox opens in."""
     repo_configs: list[dict[str, str]] = []
@@ -481,6 +487,7 @@ async def start_dashboard_thread(
         title=title,
         visibility=visibility,
         workspace=await _resolve_requested_workspace(None, primary, login=login),
+        extra_metadata={"unlisted": True} if unlisted else None,
     )
     thread_id = str(thread["thread_id"])
     client = langgraph_client()
@@ -940,6 +947,17 @@ async def _enrich_run_start_command(
             if sandbox_bridge is not None:
                 # Whoever can prompt a thread runs commands on its machine.
                 visibility = "private"
+            requested_experience = client_configurable.get("experience", "coding")
+            if requested_experience not in ("coding", "agent_workspace"):
+                raise HTTPException(422, "Unknown agent experience")
+            experience: Literal["coding", "agent_workspace"] = (
+                "agent_workspace" if requested_experience == "agent_workspace" else "coding"
+            )
+            if (
+                experience == "agent_workspace"
+                and not (await User.preferences_for_login(login)).experimental_fleet
+            ):
+                raise HTTPException(403, "LangSmith Agent Workspace is not enabled")
             repo_config = _parse_repo(client_configurable.get("repo")) or {}
             workspace = await _resolve_requested_workspace(
                 client_configurable.get("workspace") or client_configurable.get("environment"),
@@ -951,7 +969,9 @@ async def _enrich_run_start_command(
                 login=login,
                 email=email,
                 repo_config=repo_config,
-                repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
+                repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True
+                or (experience == "agent_workspace" and not repo_config),
+                experience=experience,
                 visibility=visibility,
                 prompt=_command_prompt_text(content),
                 images=command_images,

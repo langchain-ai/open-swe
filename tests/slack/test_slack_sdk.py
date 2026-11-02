@@ -86,9 +86,10 @@ async def test_removing_an_absent_reaction_is_already_settled(slack_api: SlackAP
     assert not await remove_slack_reaction("C1", "1.0", "x")
 
 
-async def test_read_thread_tool_paginates_and_resolves_authors(slack_api):
+async def test_read_thread_tool_paginates_and_resolves_authors(slack_api, grant_tool_access):  # noqa: ANN001
     from openswe.slack.tools.read_thread_messages import slack_read_thread_messages
 
+    grant_tool_access(slack_context=True)
     slack_api.respond(
         {
             "ok": True,
@@ -125,6 +126,36 @@ _PUBLIC_CHANNEL = {
         "is_pending_ext_shared": False,
     },
 }
+
+
+async def test_read_thread_tool_outside_slack_reads_public_channels_only(
+    slack_api, grant_tool_access
+):  # noqa: ANN001
+    from openswe.slack.tools.read_thread_messages import slack_read_thread_messages
+
+    grant_tool_access(private=True)
+
+    slack_api.respond({"ok": True, "channel": {"id": "C1", "is_channel": True, "is_private": True}})
+    refused = await slack_read_thread_messages("C1", "1.0")
+    assert refused["success"] is False
+    assert isinstance(refused["error"], str) and "public" in refused["error"]
+    assert [call[0] for call in slack_api.calls] == ["conversations.info"]
+
+    slack_api.respond(_PUBLIC_CHANNEL)
+    slack_api.respond(
+        {
+            "ok": True,
+            "messages": [
+                {"ts": "1.0", "user": "U1", "text": "Who broke the build?"},
+                {"ts": "1.1", "user": "U1", "text": "Never mind, it was me"},
+            ],
+        }
+    )
+    slack_api.respond({"ok": True, "user": {"profile": {"display_name": "Alice"}}})
+    result = await slack_read_thread_messages("C1", "1.0")
+    assert result["success"] is True
+    assert result["count"] == 2
+    assert "Never mind, it was me" in result["formatted"]
 
 
 @pytest.mark.parametrize("stale", [False, True])

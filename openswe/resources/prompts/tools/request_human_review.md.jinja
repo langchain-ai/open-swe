@@ -30,6 +30,13 @@ Do not repeat the review summary or link to the Slack card: Slack unfurls that l
 
 {% if mcp %}If nobody signs up within 2 hours (or the workspace’s configured timeout) Open SWE picks a reviewer itself; use `assign_human_reviewer` to name one sooner. Calling this again for a pull request with an open standard request returns the existing card; when the request came from the person you are working for, the card's summary is replaced with the new `inline_summary` unless the requested channel differs.{% else %}If nobody signs up within 2 hours (or the workspace’s configured timeout) you are woken to pick a reviewer with `assign_human_reviewer`. Calling this again for a pull request with an open standard request returns the existing card; when the request came from this thread or the person you are working for, the card's summary is replaced with the new `inline_summary` unless the requested channel differs.{% endif %} To take the request down instead, use `dismiss_human_review_request`.
 
+Repositories can configure supplementary reviews, such as design or security, under `supplementaryReviews` in `.open-swe/settings.json`; each has an `id`, a GitHub team, paths, and criteria.
+Open SWE assesses matching pull requests against those criteria on its own when review starts.
+To ask for one yourself, pass `supplementary_review` (the policy `id`) with `supplementary_review_reason` explaining the concrete change that meets its criteria.
+For an existing review request, pass only `pr_url`, `supplementary_review`, and `supplementary_review_reason`; omit `inline_summary` so the engineering card stays unchanged.
+Open SWE rotates a member of the configured team and sends GitHub and Slack notifications without replacing engineering review.
+Do not use `assign_human_reviewer` for supplementary reviewers.
+
 Pass `auto_merge=false` for review only: reviewer signup, assignment and reminders continue, but a person must merge the PR.
 Omit `auto_merge` to inherit the workspace’s `human_review_auto_merge_enabled` default (enabled unless configured otherwise), or pass `true` to enable it for this request.
 The resolved mode is saved when the request is created; later workspace-default changes do not alter existing requests.

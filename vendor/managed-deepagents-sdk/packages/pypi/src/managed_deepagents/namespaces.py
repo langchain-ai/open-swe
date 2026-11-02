@@ -105,7 +105,7 @@ def define_sandbox(
     _openswe_create_fields: dict[str, object] | None = None,
     _openswe_no_manage_proxy: bool = False,
     _openswe_select: Callable[[object], SandboxDefinition | None] | None = None,
-    _openswe_without_box: SandboxBackendProtocol | None = None,
+    _openswe_without_sandbox: SandboxBackendProtocol | None = None,
     idle_ttl_seconds: int | None = None,
     api_key: str | None = None,
     default_timeout: int | None = None,
@@ -140,7 +140,7 @@ def define_sandbox(
                 "_openswe_create_fields": _openswe_create_fields,
                 "_openswe_no_manage_proxy": _openswe_no_manage_proxy or None,
                 "_openswe_select": _openswe_select,
-                "_openswe_without_box": _openswe_without_box,
+                "_openswe_without_sandbox": _openswe_without_sandbox,
             }.items()
             if value is not None
         }

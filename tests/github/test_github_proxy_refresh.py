@@ -49,7 +49,7 @@ class TestProxyTokenNeedsRefresh:
 
 
 def test_only_a_token_set_since_preparation_began_is_reported() -> None:
-    # A record left by an earlier run may be for a box the thread has since left.
+    # A record left by an earlier run may be for a sandbox the thread has since left.
     expires_at = datetime(2999, 1, 1, tzinfo=UTC)
     record_proxy_token_expiry("thread-1", expires_at)
     began = datetime.now(UTC)

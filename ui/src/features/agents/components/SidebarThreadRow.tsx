@@ -284,23 +284,23 @@ export function SidebarConversationRow({
       onMouseLeave={marquee.reset}
     >
       <Link
-        to="/agents/chat"
-        search={{ chat: threadId }}
+        to="/agents/$threadId"
+        params={{ threadId }}
         aria-current={active ? "page" : undefined}
         onClick={onNavigate}
-        className={sidebarRowClassName({
-          compact,
-          active,
-          paddingLeft: "pl-space-2",
-          archived,
-        })}
+        className={cn(
+          "flex items-center rounded-xl px-space-2 text-secondary transition-colors group-focus-within/row:bg-surface-level-3 group-focus-within/row:pr-14 group-hover/row:bg-surface-level-3 group-hover/row:pr-14 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+          compact ? "h-7" : "h-8",
+          active && "bg-surface-level-3"
+        )}
       >
         <SidebarRowTitle title={title} marquee={marquee} />
       </Link>
-      <span className="absolute inset-y-0 right-0 mr-space-1 flex items-center rounded-lg bg-surface-level-2 opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100">
+      <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 rounded-xl bg-surface-level-3 opacity-0 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100">
         <IconButton
           icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
           label={pinned ? "Unpin chat" : "Pin chat"}
+          className="text-tertiary hover:text-secondary"
           size="xs"
           color="secondary"
           variant="plain"
@@ -314,6 +314,7 @@ export function SidebarConversationRow({
         <IconButton
           icon={archived ? ArrowCounterClockwiseIcon : ArchiveIcon}
           label={archived ? "Unarchive chat" : "Archive chat"}
+          className="text-tertiary hover:text-secondary"
           size="xs"
           color="secondary"
           variant="plain"
@@ -722,9 +723,11 @@ export function SidebarThreadRow({
         detail={
           !worktreeThread
             ? undefined
-            : worktreeThread.ownedWorktrees.length
-              ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
-              : "This removes its history but does not revert changes made to your repository."
+            : worktreeThread.managedTaskFolder
+              ? `This deletes the conversation. Its task files are kept at ${worktreeThread.cwd}.`
+              : worktreeThread.ownedWorktrees.length
+                ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
+                : "This removes its history but does not revert changes made to your repository."
         }
       />
     </>

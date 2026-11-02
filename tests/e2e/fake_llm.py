@@ -267,6 +267,12 @@ LAST_SYSTEM_PROMPT = SystemPromptRecord()
 # empty reply so background titling never renames threads or code channels mid-spec.
 _THREAD_TITLE_PROMPT_PREFIX = "Generate a title that will help the user recognize"
 
+# Gives every reply of the run a thought, as a reasoning model's would carry.
+THOUGHT_MARKER = "E2E_THOUGHT"
+THOUGHT_TEXT = (
+    "**Checking the snapshot status**\n\n"
+    "The workspace image looks stale, so I will compare it with the latest capture."
+)
 _BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
 _ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
@@ -1827,4 +1833,14 @@ class FakeScriptedChatModel(BaseChatModel):
         if hold:
             time.sleep(float(hold.group(1) or os.environ.get("E2E_BUSY_HOLD_SECONDS", "10")))
         step = script[step_index] if step_index < len(script) else SCRIPT_LIBRARY["followup"][0]
-        return ChatResult(generations=[ChatGeneration(message=_render_step(step, messages))])
+        reply = _render_step(step, messages)
+        if THOUGHT_MARKER in context.first_text and isinstance(reply.content, str):
+            reply = reply.model_copy(
+                update={
+                    "content": [
+                        {"type": "reasoning", "reasoning": THOUGHT_TEXT},
+                        {"type": "text", "text": reply.content},
+                    ]
+                }
+            )
+        return ChatResult(generations=[ChatGeneration(message=reply)])

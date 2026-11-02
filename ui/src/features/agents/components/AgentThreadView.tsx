@@ -194,7 +194,9 @@ export function AgentThreadView({
   }, [localThread, refetchLocalBridge])
   // A "This Mac" thread works in a checkout other threads on this machine may
   // share, so its branch and worktree are shown, and switched, from here.
-  const localRefsQuery = useLocalRepoRefs(localThread?.cwd)
+  const localRefsQuery = useLocalRepoRefs(
+    localThread?.managedTaskFolder ? undefined : localThread?.cwd
+  )
   const localRepoRefs = localRefsQuery.data
   const refetchLocalRepoRefs = localRefsQuery.refetch
   const localWorktreePath = localThread?.worktreePath ?? null
@@ -1005,8 +1007,9 @@ export function AgentThreadView({
                       selectedLocalRepoBranch: localBranch,
                       onRefreshLocalRepoBranch: () =>
                         void refetchLocalRepoRefs(),
-                      onSelectLocalRepoBranch: (branch: string) =>
-                        void selectLocalBranch(branch),
+                      onSelectLocalRepoBranch: localRepoRefs.length
+                        ? (branch: string) => void selectLocalBranch(branch)
+                        : undefined,
                       localWorkspaceMode: localWorktreePath
                         ? ("worktree" as const)
                         : ("local" as const),

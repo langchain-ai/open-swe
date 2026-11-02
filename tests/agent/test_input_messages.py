@@ -1,11 +1,13 @@
 from xml.etree import ElementTree
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, get_notification_metadata
 
+from openswe.agent_api.loop import as_messages
 from openswe.input_messages import (
     dynamic_context_hash,
     human_input,
     person_introduction,
+    system_input,
     visible_dynamic_context_hashes,
 )
 from openswe.utils.dashboard_handoff import PassageReply, dashboard_input_context
@@ -78,6 +80,22 @@ def test_replies_ride_as_escaped_elements_even_without_text() -> None:
         "comment: Draft?",
         "",
     ]
+
+
+def test_system_notification_survives_run_input_conversion() -> None:
+    image = {"type": "image", "base64": "abc", "mime_type": "image/png"}
+    notification = system_input(
+        [image, {"type": "text", "text": "Worker <finished>"}],
+        {"sender_id": "system:task", "surface": "web", "kind": "system"},
+    )
+    follow_up = human_input(
+        "Keep going", {"sender_id": "user:123", "surface": "web", "kind": "human"}
+    )
+
+    injected, human = as_messages([notification, follow_up])
+
+    assert get_notification_metadata(injected) == {"source": "system:task"}
+    assert get_notification_metadata(human) is None
 
 
 def _person_intro_message(entity_id: str) -> HumanMessage:

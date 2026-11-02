@@ -17,7 +17,7 @@ from openswe.review_guide.advance import advance
 from openswe.review_guide.buttons import NEXT_LABELS
 from openswe.review_guide.launch import close_guide_for_channel
 from openswe.review_guide.sessions import ReviewGuideSession
-from openswe.slack import mda_forwarding, suggested_actions
+from openswe.slack import mda_forwarding, retry, suggested_actions
 from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
 from openswe.slack.ask import (
@@ -814,6 +814,7 @@ async def slack_webhook(
                 thread_ts=thread_ts,
                 event_ts=event_ts,
                 original_message_ts=original_message_ts,
+                retry_message_ts=original_message_ts,
                 event_id=event_id,
                 user_id=user_id,
                 text=text,
@@ -828,7 +829,14 @@ async def slack_webhook(
         return accepted("Slack update queued")
 
     # From here on the message is addressed to Open SWE: any failure is reported to the thread.
-    target = SlackRequestTarget(channel_id=channel_id, thread_ts=thread_ts, event_id=event_id)
+    target = SlackRequestTarget(
+        channel_id=channel_id,
+        thread_ts=thread_ts,
+        event_id=event_id,
+        user_id=user_id,
+        message_ts=original_message_ts,
+        reply_thread_ts=reply_thread_ts if in_code_channel or in_concierge_mode else "",
+    )
 
     async def dispatch() -> WebhookResponse:
         if channel_context is None:
@@ -916,6 +924,7 @@ async def slack_webhook(
                 thread_ts=thread_ts,
                 event_ts=event_ts,
                 original_message_ts=original_message_ts,
+                retry_message_ts=original_message_ts,
                 event_id=event_id,
                 user_id=user_id,
                 text=text,
@@ -1245,6 +1254,17 @@ async def slack_interactivity(
     target = SlackRequestTarget(channel_id=channel_id, thread_ts=reply_ts or action_ts)
 
     async def dispatch() -> WebhookResponse:
+        if button.type == retry.BUTTON_TYPE:
+            request_retry = retry.SlackRetry.parse(button.response)
+            if request_retry is None:
+                await common.post_slack_ephemeral_message(
+                    channel_id,
+                    user_id,
+                    "This Retry button has expired or is invalid. Send your request again to retry.",
+                    thread_ts=reply_ts or None,
+                )
+                return ignored("Invalid retry button")
+            return await request_retry.queue(interaction, channel_context, background_tasks)
         if button.type == expedited_review.BUTTON_TYPE:
             return await expedited_review.handle_button(interaction, button, background_tasks)
         if button.type == human_review.BUTTON_TYPE:

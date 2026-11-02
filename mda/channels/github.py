@@ -20,7 +20,7 @@ from rt.github import on_event, on_installation_event
 
 channel = channels.github(
     # The App's repository permissions (docs/INSTALLATION.md): its token
-    # (``mda/github-token``) is the one a box's GitHub proxy carries where MDA writes it.
+    # (``mda/github-token``) is the one a sandbox's GitHub proxy carries where MDA writes it.
     app={
         "permissions": {
             "contents": "write",

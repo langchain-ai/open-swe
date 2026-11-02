@@ -15,8 +15,9 @@ from typing import Final, Self
 
 import jwt
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
+from runtime_api.catalog import RoutingRules
 
-from openswe.agent_api.preparation import AgentPreparation
+from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
 
 _ISSUER: Final = "open-swe"
@@ -38,6 +39,54 @@ class RuntimeTokenError(Exception):
     """A token was refused; the message names the failed check, never the token."""
 
 
+# The run config key planning leaves an agent run's ``AgentTurnSettings`` under.
+AGENT_TURN_KEY: Final = "agent_turn"
+
+
+class AgentTurnSettings(BaseModel):
+    """What starting an agent run decided that preparing its turn reads.
+
+    The turn's preparation (``prepare``) is a call of its own, answered from the token,
+    so what the run's settings, profile and access decided is signed in with it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    # Whoever sent the message that started the run, and whose private credentials it may use.
+    profile_login: str | None = None
+    credential_login: str | None = None
+    # Whether the sender administers workspaces, and is the only one who may write here.
+    admin_workspaces: bool = False
+    sole_writer: bool = False
+    # The model that titles the thread.
+    title_model_id: str
+    title_effort: str | None = None
+    use_gateway: bool = False
+    # How each call's route is picked, and the model and effort each route stands for.
+    routing: RoutingRules = RoutingRules()
+    route_models: dict[str, tuple[str, str | None]] = {}
+    # Whether the opening message may ask for a model, and the one an earlier message did.
+    offers_requested_models: bool = False
+    fable_enabled: bool = False
+    saved_requested_model: str | None = None
+    # The client of a thread bridged to a person's machine.
+    bridge_client: BridgeClient | None = None
+    # Why managed tool discovery failed while planning, which the prompt says.
+    tool_discovery_failures: list[str] = []
+    # Whether the thread runs a review walkthrough, which pins its checkout in the sandbox.
+    review_guide: bool = False
+    # Whether the thread had one that has closed: its guide stays, to retire its rules.
+    review_guide_closed: bool = False
+    # Whether the thread is a task worker, which may use its coordinator's sandbox only once
+    # the backend has checked it may.
+    task_worker: bool = False
+
+    @property
+    def reaches_sandbox(self) -> bool:
+        """Whether preparing a turn connects to the thread's sandbox even where MDA keeps it."""
+        return self.review_guide or self.task_worker
+
+
 class RunSettings(BaseModel):
     """What the backend decided for a run as it started it, which every later call reads."""
 
@@ -50,10 +99,11 @@ class RunSettings(BaseModel):
     # The model and effort the run calls, once settings and overrides are applied.
     model_id: str | None = None
     effort: str | None = None
+    # What preparing an agent run's turn reads; None for the other graphs.
+    agent: AgentTurnSettings | None = None
     # The digest of every tool the run started with, kept in ``run_tool_sets``;
     # its catalog lists only those the model is offered.
     tools: str | None = None
-    preparation: AgentPreparation | None = None
 
     def configurable(self) -> dict[str, JsonValue]:
         """The run config keys these settings fill."""

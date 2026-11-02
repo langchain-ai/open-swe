@@ -7,9 +7,11 @@ from urllib.parse import urlencode
 import pytest
 from fastapi import BackgroundTasks, Request
 
+from openswe.slack import retry
 from openswe.slack import routes as slack_routes
 from openswe.slack.blocks import option_actions
 from openswe.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
+from tests.conftest import MemoryEventClaims
 
 
 def _request(payload: dict[str, Any]) -> Request:
@@ -322,3 +324,83 @@ async def test_code_channel_external_select_returns_registered_suggestions(
 
     assert result == {"options": options}
     get_suggestions.assert_awaited_once_with("C-code", "V-plan", "repository", "open")
+
+
+@pytest.mark.parametrize(
+    "channel_id,thread_ts,message_ts",
+    [("C1", "1.0", "1.5"), ("C1", "0", "1.5"), ("D1", "0", "1.5"), ("C1", "1.0", "")],
+)
+async def test_retry_is_requester_scoped_and_dispatches_only_once(
+    monkeypatch: pytest.MonkeyPatch,
+    memory_event_claims: MemoryEventClaims,
+    channel_id: str,
+    thread_ts: str,
+    message_ts: str,
+) -> None:
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", "retry-test-secret-at-least-32-bytes")
+    context = SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
+    monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
+    monkeypatch.setattr(
+        slack_routes.common, "resolve_slack_channel_context", AsyncMock(return_value=context)
+    )
+    monkeypatch.setattr(
+        slack_routes.common, "resolve_slack_thread_id", AsyncMock(return_value="thread-1")
+    )
+    monkeypatch.setattr(slack_routes.common, "get_slack_repo_config", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        slack_routes.common,
+        "is_code_channel",
+        AsyncMock(return_value=thread_ts == "0" and channel_id.startswith("C")),
+    )
+    monkeypatch.setattr(retry, "is_kitchen_channel", AsyncMock(return_value=False))
+    update = AsyncMock()
+    monkeypatch.setattr(slack_routes.common, "update_slack_message", update)
+    notify = AsyncMock()
+    monkeypatch.setattr(retry, "post_slack_ephemeral_message", notify)
+    fetch = AsyncMock(return_value={"user": "U1", "text": "Fix the bug", "ts": message_ts})
+    monkeypatch.setattr(retry, "fetch_slack_thread_message_by_ts", fetch)
+    monkeypatch.setattr(retry, "fetch_slack_message_by_ts", fetch)
+    process = AsyncMock()
+    monkeypatch.setattr(slack_routes.service, "process_slack_mention", process)
+    retry_request = retry.SlackRetry(
+        channel_id=channel_id,
+        thread_ts=thread_ts,
+        user_id="U1",
+        message_ts=message_ts,
+        nonce="failure-1",
+    )
+    blocks = retry_request.blocks("Unexpected error")
+    assert blocks is not None
+    payload = _option_payload()
+    payload["channel"]["id"] = channel_id
+    payload["actions"][0]["value"] = blocks[1]["elements"][0]["value"]
+    payload["message"]["blocks"] = blocks
+    payload["user"]["id"] = "U2"
+    background = BackgroundTasks()
+    assert (await slack_routes.slack_interactivity(_request(payload), background)).get(
+        "status"
+    ) == "ignored"
+    assert not background.tasks
+    update.assert_not_awaited()
+    notify.assert_awaited_once()
+
+    payload["user"]["id"] = "U1"
+    assert (await slack_routes.slack_interactivity(_request(payload), background)).get(
+        "status"
+    ) == "accepted"
+    await background()
+    assert process.await_args is not None
+    request = process.await_args.args[0]
+    assert request.user_id == "U1"
+    assert request.thread_ts == thread_ts
+    assert request.text == ("Fix the bug" if message_ts else "Retry")
+    assert request.turn_context == ("" if message_ts else retry.prompt("runs/slack-retry").strip())
+    assert request.event_ts != message_ts
+    assert request.original_message_ts == message_ts
+    assert request.explicit_request
+    assert request.code_channel == (thread_ts == "0" and channel_id.startswith("C"))
+    assert request.concierge_mode == (channel_id.startswith("D") and thread_ts == "0")
+    assert (await slack_routes.slack_interactivity(_request(payload), BackgroundTasks())).get(
+        "status"
+    ) == "ignored"
+    process.assert_awaited_once()
