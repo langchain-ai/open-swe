@@ -101,6 +101,7 @@ import {
   cloudSidebarThread,
   DEFAULT_SIDEBAR_WORKSPACE_SLUG,
   groupRepoGroupsByWorkspace,
+  groupSidebarThreadsByDay,
   sidebarRepoKey,
   sortSidebarThreads,
   sidebarItemContains,
@@ -267,7 +268,7 @@ export function AgentsSidebar({
     includeResolved: agentWorkspaceEnabled || prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
     includeClaudeCode: prefs.filters.includeClaudeCode,
-    sort: agentWorkspaceEnabled ? "updated" : prefs.sortChats,
+    sort: repoMode ? prefs.sortChats : "updated",
     enabled: true,
   })
   const sidebarReposQuery = useSidebarRepos({
@@ -530,15 +531,17 @@ export function AgentsSidebar({
           { value: "list", label: "In one list" },
         ]}
       />
-      <MenuChoiceGroup<ChatSort>
-        label="Sort chats by"
-        value={prefs.sortChats}
-        onChange={(sortChats) => setView({ sortChats })}
-        options={[
-          { value: "created", label: "Created" },
-          { value: "updated", label: "Last updated" },
-        ]}
-      />
+      {repoMode && (
+        <MenuChoiceGroup<ChatSort>
+          label="Sort chats by"
+          value={prefs.sortChats}
+          onChange={(sortChats) => setView({ sortChats })}
+          options={[
+            { value: "created", label: "Created" },
+            { value: "updated", label: "Last updated" },
+          ]}
+        />
+      )}
       <DropdownMenuSeparator />
       <DropdownMenuGroup>
         <MenuCheckItem
@@ -924,8 +927,15 @@ export function AgentsSidebar({
               />
               {!sectionCollapsed("recents") && (
                 <>
-                  {recents.map((item) => (
-                    <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                  {groupSidebarThreadsByDay(recents).map((day) => (
+                    <div key={day.key}>
+                      <div className="px-space-2 pt-space-2 pb-space-1 text-xxs font-medium text-tertiary">
+                        {day.label}
+                      </div>
+                      {day.threads.map((item) => (
+                        <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                      ))}
+                    </div>
                   ))}
                   {recentsQuery.hasMore && (
                     <LoadMoreThreadsOnScroll
