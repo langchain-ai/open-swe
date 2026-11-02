@@ -1,5 +1,6 @@
 import importlib
 import json
+import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Literal, get_args
@@ -9,6 +10,7 @@ import pytest
 from fastapi import HTTPException
 
 from openswe import run_config
+from openswe.claude_code.hooks import mirror_thread_id
 from openswe.input_messages import human_input, person_introduction
 from openswe.message_queue import QueuedMessage
 from openswe.slack import allowed_bots
@@ -820,6 +822,30 @@ async def test_list_threads_resolves_slack_reply_link(
     get_dashboard_thread.assert_awaited_once_with(
         "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
     )
+
+
+async def test_list_threads_resolves_claude_code_session_to_its_mirror(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner_id = uuid.uuid4()
+    session_id = str(uuid.uuid4())
+    mirror = mirror_thread_id(owner_id, session_id)
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: object())
+    monkeypatch.setattr(
+        threads_tool.User, "for_login", AsyncMock(return_value=SimpleNamespace(id=owner_id))
+    )
+
+    async def dashboard_thread(thread_id: str, *args: object, **kwargs: object) -> dict[str, str]:
+        if thread_id != mirror:
+            raise HTTPException(404, "thread not found")
+        return {"id": mirror}
+
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", dashboard_thread)
+
+    result = await threads_tool.list_threads(query=session_id)
+
+    assert [item["id"] for item in result["items"]] == [mirror]
 
 
 async def test_get_thread_rejects_untrusted_dashboard_url_before_access(

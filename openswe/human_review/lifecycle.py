@@ -4,7 +4,6 @@ Every Slack write here edits or posts the one card, and only because someone
 just acted, a GitHub event arrived, or one of the request's deadlines passed.
 """
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -21,7 +20,6 @@ from openswe.expedited_review.channels import (
     sendable_channel,
     still_internal,
 )
-from openswe.expedited_review.diff_image import render_diff_png
 from openswe.expedited_review.eligibility import ChangedFile, ExpeditedDiff
 from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
@@ -54,9 +52,8 @@ from openswe.slack.client import (
     post_slack_thread_reply_with_ts,
     remove_slack_reaction,
     update_slack_message,
-    upload_slack_thread_file,
-    wait_for_slack_file,
 )
+from openswe.slack.diff_image import SlackDiffImage
 from openswe.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thread_owner import wake_thread_owner
@@ -157,35 +154,7 @@ class ReviewCard:
     async def _diff_image_id(self, files: list[ChangedFile]) -> str | None:
         """A hosted-but-unposted PNG of the diff, which the card renders inline."""
         shown = ExpeditedDiff(files, self.request.excluded_hunks).shown
-        if not shown:
-            return None
-        approval_id = str(self.request.id)
-        try:
-            png = await asyncio.to_thread(render_diff_png, shown)
-        except Exception:
-            logger.warning(
-                "Failed to render expedited review diff image; posting the text diff",
-                extra={"approval_id": approval_id},
-                exc_info=True,
-            )
-            return None
-        try:
-            file_id = await upload_slack_thread_file(
-                None, None, f"diff-{self.request.head_sha[:12]}.png", png, title="Diff"
-            )
-        except SlackRequestError as exc:
-            logger.warning(
-                "Failed to upload expedited review diff image",
-                extra={"approval_id": approval_id, "slack_error": exc.code},
-            )
-            return None
-        if not await wait_for_slack_file(file_id):
-            logger.warning(
-                "Slack did not finish processing the expedited review diff image",
-                extra={"approval_id": approval_id, "slack_file_id": file_id},
-            )
-            return None
-        return file_id
+        return await SlackDiffImage(shown, f"diff-{self.request.head_sha[:12]}.png").upload()
 
     async def _warn_target(self, card: tuple[str, list[Block]]) -> tuple[str, list[Block]]:
         pr = self.request.pull_request

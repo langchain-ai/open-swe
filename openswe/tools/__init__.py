@@ -67,6 +67,7 @@ _TOOL_MODULES = {
     "save_user_settings": ".save_user_settings",
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
+    "report_work_state": ".report_work_state",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_pull_requests": ".search_pull_requests",
     "snapshotctl": ".workspaces",
@@ -157,6 +158,7 @@ __all__ = [
     "save_user_settings",
     "save_user_skill",
     "delete_user_skill",
+    "report_work_state",
     "schedule_thread_wakeup",
     "search_pull_requests",
     "snapshotctl",
@@ -243,6 +245,7 @@ if TYPE_CHECKING:
     from openswe.tools.repair_data import execute_database_sql, write_database_rows
     from openswe.tools.reply_to_finding_thread import reply_to_finding_thread
     from openswe.tools.report_platform_issue import report_platform_issue
+    from openswe.tools.report_work_state import report_work_state
     from openswe.tools.request_human_review import (
         assign_human_reviewer,
         auto_assign_human_reviewer,

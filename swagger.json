@@ -3498,6 +3498,11 @@
             "title": "Action",
             "type": "string"
           },
+          "auto_merge": {
+            "default": false,
+            "title": "Auto Merge",
+            "type": "boolean"
+          },
           "merge_method": {
             "enum": [
               "squash",
@@ -4103,6 +4108,11 @@
               }
             ],
             "title": "Additions"
+          },
+          "autoMerge": {
+            "default": false,
+            "title": "Automerge",
+            "type": "boolean"
           },
           "ci": {
             "default": "unknown",
@@ -4991,6 +5001,17 @@
               }
             ],
             "title": "Experimental Memory"
+          },
+          "goal_mode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Mode"
           },
           "pr_failure_reactions": {
             "anyOf": [
@@ -9357,6 +9378,18 @@
             ],
             "title": "Human Review Auto Merge Enabled"
           },
+          "implementation_walkthrough_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Implementation Walkthrough Enabled"
+          },
           "managed_tools_gateway_id": {
             "anyOf": [
               {
@@ -11487,6 +11520,29 @@
         "tags": [
           "dashboard",
           "sandbox-bridge"
+        ]
+      }
+    },
+    "/dashboard/api/claude-code/connections": {
+      "post": {
+        "description": "Mint the token a ``connect_claude_code`` claim stands for, once, for the script installing it.",
+        "operationId": "api_redeem_claude_code_claim_dashboard_api_claude_code_connections_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MintedSyncToken"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Redeem Claude Code Claim",
+        "tags": [
+          "dashboard",
+          "claude-code"
         ]
       }
     },

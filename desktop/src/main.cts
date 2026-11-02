@@ -17,6 +17,7 @@ const {
   powerMonitor,
   session,
   shell,
+  webContents,
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const {
@@ -82,6 +83,7 @@ const {
   connectLoginUrl,
   isAppLoginUrl,
   isAppUrl,
+  headersFramedByApp,
   isConnectProvider,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
@@ -470,7 +472,7 @@ async function createThreadWorktree(thread, baseBranch) {
     worktreesPath(),
     `${path.basename(repo)}-${token}`,
   );
-  await addWorktree(repo, worktree, `open-swe/local-${token}`, base);
+  await addWorktree(repo, worktree, `open-swe/local-${token}`, base, true);
   return localThreadStore.setWorktree(thread.id, worktree, true);
 }
 
@@ -1814,6 +1816,21 @@ function createSetupWindow() {
   return window;
 }
 
+/** The thread's browser panel frames a LangSmith page, which cannot name the app as a frame ancestor. */
+function configureFraming() {
+  session.defaultSession.webRequest.onHeadersReceived(
+    { urls: ["https://*/*"] },
+    (details, callback) => {
+      const page = webContents.fromId(details.webContentsId)?.getURL();
+      callback(
+        details.resourceType === "subFrame" && isAppUrl(page ?? "")
+          ? { responseHeaders: headersFramedByApp(details.responseHeaders) }
+          : {},
+      );
+    },
+  );
+}
+
 function configurePermissions() {
   session.defaultSession.setPermissionRequestHandler(
     (webContents, permission, callback, details) => {
@@ -1916,6 +1933,7 @@ if (!hasSingleInstanceLock) {
     });
     protocol.handle("open-swe", serveDesktopUi);
     configurePermissions();
+    configureFraming();
     configureDesktopIpc();
     createMenu();
     void loadAlternativeEnvironments();

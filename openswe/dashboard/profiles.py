@@ -89,6 +89,7 @@ class ProfileUpdate(BaseModel):
     auto_human_review_enabled: bool = True
     concierge_mode: bool | None = None
     pr_failure_reactions: bool | None = None
+    goal_mode: bool | None = None
     experimental_memory: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
@@ -406,11 +407,15 @@ async def put_my_profile(
         UserPreferencesPatch(
             concierge_mode=update.concierge_mode,
             pr_failure_reactions=update.pr_failure_reactions,
+            goal_mode=update.goal_mode,
             experimental_memory=update.experimental_memory,
         ),
     )
     if preferences is None and (
-        update.concierge_mode or update.pr_failure_reactions or update.experimental_memory
+        update.concierge_mode
+        or update.pr_failure_reactions
+        or update.goal_mode
+        or update.experimental_memory
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)

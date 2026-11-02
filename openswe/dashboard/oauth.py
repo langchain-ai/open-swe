@@ -8,7 +8,7 @@ import re
 import secrets
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, Self
 from urllib.parse import quote, urlparse
 from uuid import UUID
 
@@ -49,6 +49,8 @@ TERMINAL_TICKET_TTL_SECONDS = 60
 TERMINAL_TICKET_AUDIENCE = "open-swe-cloud-terminal"
 UPLOAD_TICKET_TTL_SECONDS = 60 * 60
 UPLOAD_TICKET_AUDIENCE = "open-swe-session-upload"
+CONNECT_CLAIM_TTL_SECONDS = 5 * 60
+CONNECT_CLAIM_AUDIENCE = "open-swe-claude-code-connect"
 JWT_ALG = "HS256"
 
 
@@ -123,6 +125,43 @@ def decode_upload_ticket(token: str) -> UploadTicket:
         return UploadTicket.model_validate(payload)
     except (jwt.PyJWTError, ValidationError) as exc:
         raise HTTPException(401, "invalid or expired upload code") from exc
+
+
+class ConnectClaim(BaseModel):
+    """A one-time claim on a new Claude Code sync token for ``user_id``'s machine ``name``.
+
+    It stands in for the token wherever an agent can read it: redeeming it mints the
+    token, and ``jti`` lets the token table refuse a second redemption.
+    """
+
+    sub: str = Field(min_length=1)
+    user_id: UUID
+    name: str = Field(min_length=1)
+    jti: UUID
+
+    def issue(self) -> str:
+        now = int(time.time())
+        payload = {
+            **self.model_dump(mode="json"),
+            "aud": CONNECT_CLAIM_AUDIENCE,
+            "iat": now,
+            "exp": now + CONNECT_CLAIM_TTL_SECONDS,
+        }
+        return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
+
+    @classmethod
+    def decode(cls, token: str) -> Self:
+        try:
+            payload = jwt.decode(
+                token,
+                _secret(),
+                algorithms=[JWT_ALG],
+                audience=CONNECT_CLAIM_AUDIENCE,
+                options={"require": ["aud", "sub", "user_id", "name", "jti", "iat", "exp"]},
+            )
+            return cls.model_validate(payload)
+        except (jwt.PyJWTError, ValidationError) as exc:
+            raise HTTPException(401, "invalid or expired claim") from exc
 
 
 GITHUB_APP_CLIENT_ID = ENV.GITHUB_APP_CLIENT_ID.get()

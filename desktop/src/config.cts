@@ -152,6 +152,29 @@ function isTrustedProxyRequest(pageUrl) {
   return isAppUrl(pageUrl);
 }
 
+/**
+ * The response headers of a page the app frames, with its CSP letting the app
+ * frame it as well as whoever it already allowed. LangSmith's browser window
+ * names the origins that may frame it, and only https ones, so it can never
+ * name the app's own `open-swe://app`.
+ */
+function headersFramedByApp(headers: Record<string, string[]>) {
+  return Object.fromEntries(
+    Object.entries(headers).map(([name, values]) => [
+      name,
+      name.toLowerCase() === "content-security-policy"
+        ? values.map((value) =>
+            value.replace(
+              /(^|;)(\s*)frame-ancestors([^;]*)/i,
+              (_match, start, space, sources) =>
+                `${start}${space}frame-ancestors${sources.replace(/\s*'none'/i, "")} ${APP_ORIGIN}`,
+            ),
+          )
+        : values,
+    ]),
+  );
+}
+
 function backendRequestUrl(backendUrl, appRequestUrl) {
   if (!isAppUrl(appRequestUrl)) throw new Error("Invalid desktop request URL");
   const source = new URL(appRequestUrl);
@@ -229,6 +252,7 @@ export = {
   isAppUrl,
   isConnectProvider,
   isTrustedPermissionRequest,
+  headersFramedByApp,
   isTrustedProxyRequest,
   localCallbackUrl,
   parseDesktopEnvironments,

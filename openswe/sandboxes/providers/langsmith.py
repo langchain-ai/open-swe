@@ -69,6 +69,9 @@ PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 PROXY_CONFIG_RETRY_WINDOW_SECONDS = 180.0
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
 SERVICE_URL_TIMEOUT_SECONDS = 15.0
+# The capture request answers only once the capture lands, and squashing a large overlay
+# sandbox's layers can take up to the API's 20-minute capture budget; outlast it.
+SNAPSHOT_CAPTURE_REQUEST_TIMEOUT_SECONDS = 1260.0
 _KILL_TIMEOUT_SECONDS = 5.0
 # The most entries the sandbox file API returns for one listing.
 _LS_MAX_ENTRIES = 1000
@@ -522,9 +525,9 @@ async def capture_snapshot_with_tag(
     Snapshots are Docker-style: ``name:tag`` is a mutable pointer at immutable
     content, so re-capturing a tag moves it rather than colliding. The Python SDK
     has no ``tag`` parameter yet, so the field is injected into the capture body
-    the same way ``_install_create_extra_fields`` injects sandbox-create fields.
-    Drop this for a plain ``capture_snapshot(..., tag=...)`` once
-    langchain-ai/langsmith-sdk#3447 ships.
+    the same way ``_install_create_extra_fields`` injects sandbox-create fields,
+    along with a request timeout longer than the client's default, which
+    ``timeout`` does not cover: it only bounds the wait for the snapshot to be ready.
     """
     # Reaching into the SDK's transport is the whole mechanism: there is no public
     # seam for a field the client does not model.
@@ -534,6 +537,7 @@ async def capture_snapshot_with_tag(
         payload = kwargs.get("json")
         if str(url).endswith("/snapshot") and isinstance(payload, dict):
             kwargs["json"] = {**payload, "tag": tag}
+            kwargs["timeout"] = SNAPSHOT_CAPTURE_REQUEST_TIMEOUT_SECONDS
         return await original_post(url, *args, **kwargs)
 
     client._http.post = post_with_tag  # noqa: SLF001 # ty: ignore[invalid-assignment]

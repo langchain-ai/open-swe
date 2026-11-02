@@ -55,4 +55,3 @@ def test_github_thread_identity_preserves_attribution(monkeypatch):
     assert principal.sender_id == "github:Alice"
     assert principal.admin
     principal.authorize("system")
-

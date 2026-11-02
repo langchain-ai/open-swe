@@ -1,5 +1,4 @@
 import { useCallback, useSyncExternalStore } from "react"
-import { appDistribution } from "./pageTitle"
 import { useSession } from "./session"
 import type { AgentThread } from "@/features/agents/lib/types"
 
@@ -85,7 +84,7 @@ export function useDesktopExperience() {
     [login]
   )
   return {
-    experience: appDistribution.isDesktop ? selected : undefined,
+    experience: selected,
     select,
   }
 }

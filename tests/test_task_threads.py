@@ -469,7 +469,7 @@ async def test_task_wakeup_preserves_current_model_selection(
 
     config = await service.recipient_config(COORDINATOR)
 
-    assert config["experience"] == "agent_workspace"
+    assert config["experience"] == "coding"
     assert config["model_selection"] == selection
     if selection == "explicit":
         assert config["agent_model_id"] == "anthropic:claude-opus-5-5"

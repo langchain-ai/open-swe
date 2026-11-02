@@ -1370,8 +1370,7 @@ export function AgentsShell({
     ? desktopExperience.thread(activeThread)
     : undefined
   useEffect(() => {
-    if (threadExperience && window.openSweDesktop)
-      selectExperience(threadExperience)
+    if (threadExperience) selectExperience(threadExperience)
   }, [selectExperience, threadExperience])
   const agentWorkspaceEnabled = Boolean(
     experience && (threadExperience ?? experience) === "agent_workspace"

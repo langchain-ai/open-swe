@@ -535,6 +535,9 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         )
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     await _settle_transcript_turn(thread_id, run_id, status)
+    from openswe.review.events import ReviewEvents
+
+    await ReviewEvents.completed(thread_id, run_id, status)
     is_worker = False
     if run_id and isinstance(status, str) and status in _TERMINAL_RUN_STATUSES:
         from openswe.tasks.events import worker_finished

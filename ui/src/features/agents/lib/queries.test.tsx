@@ -44,6 +44,20 @@ import type {
   WorkflowPushApprovalsResponse,
 } from "./types"
 
+vi.mock("@/lib/experience", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/experience")>()
+  return {
+    ...actual,
+    useDesktopExperience: () => {
+      const state = actual.useDesktopExperience()
+      return {
+        ...state,
+        experience: window.openSweDesktop ? state.experience : undefined,
+      }
+    },
+  }
+})
+
 const params: ThreadsPageParams = {
   limit: 100,
   offset: 0,

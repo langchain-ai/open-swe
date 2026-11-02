@@ -327,6 +327,7 @@ export interface Profile {
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
+  goal_mode?: boolean
   experimental_memory?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -344,6 +345,7 @@ export interface ProfileUpdate {
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
+  goal_mode?: boolean
   experimental_memory?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -1052,6 +1054,7 @@ export interface OpenPullRequest {
   deletions: number | null
   mergeable: boolean | null
   mergeState: string
+  autoMerge?: boolean
   headSha: string | null
   headRef: string | null
   reviewDecision: "approved" | "changes_requested" | "none" | null
@@ -1089,7 +1092,12 @@ export type PullRequestActionName =
   | "update-branch"
 
 export type PullRequestActionRequest =
-  | { action: "merge"; sha: string | null; merge_method: MergeMethod }
+  | {
+      action: "merge"
+      sha: string | null
+      merge_method: MergeMethod
+      auto_merge?: boolean
+    }
   | { action: "close"; reason?: string }
   | { action: "mark-ready" }
   | { action: "update-branch"; sha: string | null }
@@ -1893,6 +1901,9 @@ export const api = {
       action: "merge",
       sha: pr.headSha,
       merge_method: method,
+      ...(pr.ci === "pending" && pr.mergeState === "blocked"
+        ? { auto_merge: true }
+        : {}),
     }),
   closePullRequest: (
     pr: OpenPullRequest,
@@ -1910,7 +1921,7 @@ export const api = {
     pr: OpenPullRequest
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
-  humanReviewAvailability: (pr: OpenPullRequest) =>
+  humanReviewAvailability: (pr: Pick<OpenPullRequest, "repo" | "number">) =>
     request<{
       available: boolean
       active: boolean

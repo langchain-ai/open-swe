@@ -6,9 +6,14 @@ from uuid import uuid7
 import pytest
 
 from openswe.review_guide import advance as advance_module
+from openswe.review_guide import messages
+from openswe.review_guide.buttons import NEXT
 from openswe.review_guide.github import PullRequestHead
+from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.review_guide.walk import Reader, Walk
 from openswe.sandbox_scripts.walkthrough import parse_index
+from openswe.slack import diff_image
+from openswe.slack.http import SlackRequestError
 from openswe.walkthrough.diff import DiffIndex
 from openswe.walkthrough.lines import LineSet
 from openswe.walkthrough.plan import Plan, PlanChunk
@@ -132,3 +137,70 @@ async def test_looks_good_during_a_turn_is_recorded_when_its_own_turn_starts(
     dispatch = advance_module.dispatch_guide_run
     assert isinstance(dispatch, AsyncMock) and dispatch.await_args is not None
     assert dispatch.await_args.kwargs["approve_ts"] == "1.0"
+
+
+async def test_unrenderable_chunk_body_is_not_posted_as_an_empty_next_button(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = ReviewGuideSession(
+        thread_id="thread-1", pull_request_id=uuid7(), user_id=uuid7(), slack_channel_id="C1"
+    )
+    post = AsyncMock()
+    monkeypatch.setattr(messages, "post_slack_top_level_message_with_ts", post)
+    text = "x" * 160_000
+    assert await messages.post_with_buttons(session, text, [NEXT]) == ""
+    post.assert_not_awaited()
+
+
+@pytest.mark.parametrize("failure", ["", "render", "upload", "processing"])
+async def test_chunk_images_survive_retirement_and_fall_back_to_accessible_text(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    plan = _plan(1)
+    plan.chunks[0].code = "`a.py` L1\n```python\ndef one():\n```"
+    session = ReviewGuideSession(
+        thread_id="thread-1", pull_request_id=uuid7(), user_id=uuid7(), slack_channel_id="C1"
+    )
+    shown = Reader.of(Walk(head_sha="head-1"), plan, LineSet()).show(plan.chunks[0])
+    render = MagicMock(wraps=diff_image.render_diff_png)
+    if failure == "render":
+        render.side_effect = RuntimeError("renderer unavailable")
+    monkeypatch.setattr(diff_image, "render_diff_png", render)
+    monkeypatch.setattr(
+        diff_image,
+        "upload_slack_thread_file",
+        AsyncMock(
+            return_value="F1",
+            side_effect=SlackRequestError("upload_failed") if failure == "upload" else None,
+        ),
+    )
+    monkeypatch.setattr(
+        diff_image, "wait_for_slack_file", AsyncMock(return_value=failure != "processing")
+    )
+    post = AsyncMock(return_value="2.0")
+    update = AsyncMock()
+    monkeypatch.setattr(messages, "post_slack_top_level_message_with_ts", post)
+    monkeypatch.setattr(messages, "update_slack_message", update)
+
+    assert (
+        await messages.post_with_buttons(session, shown.message_text, [NEXT], shown=shown) == "2.0"
+    )
+    await messages.retire("C1", "2.0", shown.message_text, "✓ Seen", shown=shown)
+
+    assert post.await_args is not None and update.await_args is not None
+    assert post.await_args.args[1] == shown.message_text
+    before = post.await_args.kwargs["blocks"]
+    after = update.await_args.kwargs["blocks"]
+    assert any(block["type"] == "actions" for block in before)
+    assert not any(block["type"] == "actions" for block in after)
+    if failure:
+        assert not shown.diff_file_id
+        assert not any(block["type"] == "image" for block in before)
+        assert "def one():" in str(before) and "def one():" in str(after)
+    else:
+        assert shown.diff_file_id == "F1"
+        assert render.call_args.args[0][0].patch == "@@ -0,0 +1,1 @@\n+def one():"
+        before_image = next(block for block in before if block["type"] == "image")
+        assert before_image in after
+        assert "a.py" in before_image["alt_text"]
+        assert "```" not in str(before) and "```" not in str(after)

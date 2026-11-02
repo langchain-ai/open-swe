@@ -12,7 +12,6 @@ from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.database import postgres
 from openswe.dispatch import thread_workspace
 from openswe.input_messages import SystemIdentity, build_input_messages
-from openswe.threads.identity import ThreadIdentity
 from openswe.threads.summary import TRANSCRIPT_VERSION, thread_is_owner
 from openswe.transcript.engine import Command, append
 from openswe.transcript.events import MessageSender, TurnCompleted, TurnRequested
@@ -57,8 +56,6 @@ class SandboxMove:
         """The move a request asks for, or ``None`` when the thread is already there."""
         if target not in (None, "cloud"):
             raise HTTPException(422, "sandbox_target must be cloud")
-        if ThreadIdentity(login).user_id is not None and target == "cloud":
-            raise HTTPException(403, "Agent Workspace tasks run only on a local machine")
         current = metadata.get("sandbox_id")
         if bridge is not None and bridge.sandbox_id != current:
             if metadata.get("visibility") != "private" or not thread_is_owner(metadata, login):

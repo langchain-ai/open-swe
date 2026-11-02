@@ -718,6 +718,13 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(
       page.getByText(/compare it with the latest capture/).first(),
     ).toBeVisible();
+    await expect(
+      page.getByText("**Checking the snapshot status**"),
+    ).toHaveCount(0);
+    await test.info().attach("expanded-reasoning", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
   });
 
   test("stops a Slack-started run from the web app", async ({ page }) => {

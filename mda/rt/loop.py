@@ -16,7 +16,7 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import Awaitable, Mapping, Sequence
+from collections.abc import Awaitable, Collection, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Final
 from xml.etree import ElementTree
@@ -40,6 +40,7 @@ from runtime_api.catalog import (
     ModelSpec,
     ReplyRules,
     RunModels,
+    WorkStateRules,
 )
 from runtime_api.endpoint import call
 from runtime_api.loop import (
@@ -235,14 +236,14 @@ def _normalized(route: str) -> str:
 class _Turn:
     """What happened since the last thing a person said."""
 
-    def __init__(self, messages: Sequence[AnyMessage], guard: str) -> None:
+    def __init__(self, messages: Sequence[AnyMessage], guards: Collection[str]) -> None:
         self.messages = list(messages)
         for index in range(len(self.messages) - 1, -1, -1):
             message = self.messages[index]
             if (
                 isinstance(message, HumanMessage)
                 and not _dynamic_context(message)
-                and _system_sender(message) != guard
+                and _system_sender(message) not in guards
             ):
                 self.messages = self.messages[index + 1 :]
                 break
@@ -543,8 +544,21 @@ class RunLoop:
                 hidden.update(tools)
         return sorted(hidden)
 
+    @property
+    def _guards(self) -> set[str]:
+        """The senders of the loop's own nudges, which do not start a new turn."""
+        rules = self.rules
+        return {
+            sender
+            for sender in (
+                rules.reply.nudge_sender if rules.reply else "",
+                rules.work_state.nudge_sender if rules.work_state else "",
+            )
+            if sender
+        }
+
     async def after_model(self, state: Mapping[str, object]) -> PhaseResult:
-        """Ask again for the CLI result, then the reply, an answer without either owes."""
+        """Ask again for the CLI result, unfinished work, then the reply an answer owes."""
         messages = state.get("messages")
         last = messages[-1] if isinstance(messages, list) and messages else None
         if not isinstance(last, AIMessage) or last.tool_calls:
@@ -553,6 +567,10 @@ class RunLoop:
         update: dict[str, JsonValue] = {}
         if self.rules.cli_result is not None:
             asked = self._cli_result(self.rules.cli_result, state, held, update)
+            if asked is not None:
+                return asked
+        if self.rules.work_state is not None:
+            asked = self._work_state(self.rules.work_state, state, held, update)
             if asked is not None:
                 return asked
         if self.rules.reply is not None:
@@ -580,7 +598,7 @@ class RunLoop:
         held: Mapping[str, object],
         update: dict[str, JsonValue],
     ) -> PhaseResult | None:
-        turn = _Turn(_messages(state), self.rules.reply.nudge_sender if self.rules.reply else "")
+        turn = _Turn(_messages(state), self._guards)
         call_ids = {
             str(tool_call.get("id"))
             for tool_call in turn.calls()
@@ -604,6 +622,38 @@ class RunLoop:
             jump_to="model",
         )
 
+    def _work_state(
+        self,
+        rules: WorkStateRules,
+        state: Mapping[str, object],
+        held: Mapping[str, object],
+        update: dict[str, JsonValue],
+    ) -> PhaseResult | None:
+        """Send the model back to work until it says it is blocked or complete, or waits."""
+        turn = _Turn(_messages(state), self._guards)
+        call_ids = {
+            str(tool_call.get("id"))
+            for tool_call in turn.calls()
+            if tool_call.get("name") in {rules.tool, *rules.waits}
+        }
+        if turn.succeeded(call_ids):
+            update["work_state_nudges"] = 0
+            return None
+        nudges = held.get("work_state_nudges")
+        asked = nudges if isinstance(nudges, int) else 0
+        if asked >= rules.max_nudges:
+            logger.warning(
+                "Run ended without a work state after every nudge",
+                extra={"work_state_tool": rules.tool, "work_state_attempts": asked},
+            )
+            update["work_state_nudges"] = 0
+            return None
+        return PhaseResult(
+            update={**update, "work_state_nudges": asked + 1},
+            messages=self._nudge(rules.nudge, state),
+            jump_to="model",
+        )
+
     async def _reply(
         self,
         rules: ReplyRules,
@@ -613,7 +663,7 @@ class RunLoop:
     ) -> PhaseResult:
         if held.get("reply_surface") != "slack":
             return PhaseResult(update=update)
-        turn = _Turn(_messages(state), rules.nudge_sender)
+        turn = _Turn(_messages(state), self._guards)
         if self._replied(rules, turn):
             return PhaseResult(update={**update, "reply_nudges": 0})
         nudges = held.get("reply_nudges")

@@ -44,14 +44,8 @@ it("defaults desktop to Work, persists a switch locally, and isolates users", ()
   expect(second.result.current.experience).toBe("coding")
 })
 
-it("opens the selected home and exposes the selected label without changing browser UI", () => {
-  const view = render(<ExperienceSelector />)
-  expect(screen.queryByRole("button", { name: "Work" })).toBeNull()
-  Object.defineProperty(window, "openSweDesktop", {
-    configurable: true,
-    value: {},
-  })
-  view.rerender(<ExperienceSelector />)
+it("opens the selected home and exposes the selected label in browser and desktop", () => {
+  render(<ExperienceSelector />)
   expect(
     screen.getByRole("button", { name: "Work" }).getAttribute("aria-pressed")
   ).toBe("true")
@@ -62,5 +56,5 @@ it("opens the selected home and exposes the selected label without changing brow
   expect(state.navigate).toHaveBeenCalledWith({ to: "/agents", search: {} })
   Reflect.deleteProperty(window, "openSweDesktop")
   const browser = renderHook(() => useDesktopExperience())
-  expect(browser.result.current.experience).toBeUndefined()
+  expect(browser.result.current.experience).toBe("coding")
 })

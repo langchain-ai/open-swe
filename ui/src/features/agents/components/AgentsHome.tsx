@@ -117,8 +117,11 @@ export function AgentsHome({
     null
   )
   const defaultWorkspaceSlug = workspaceOptionsQuery.data?.default_slug ?? null
-  const [submittedDraft, setSubmittedDraft] =
-    useState<CreateAgentThreadVariables | null>(null)
+  const [submitted, setSubmitted] = useState<{
+    draft: CreateAgentThreadVariables
+    sentAt: number
+  } | null>(null)
+  const submittedDraft = submitted?.draft ?? null
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(NEW_AGENT_PANEL_ID)
   )
@@ -132,14 +135,11 @@ export function AgentsHome({
   const [runTargetOverride, setRunTargetOverride] = useState<RunTarget | null>(
     initialLocalRepo ? "local" : initialRepo || initialNoRepo ? "cloud" : null
   )
-  const runTarget: RunTarget =
-    agentWorkspace || session.data?.auth_provider === "langsmith"
-      ? "local"
-      : isDesktop
-        ? cloudEnabled
-          ? (runTargetOverride ?? desktopThreadSource)
-          : "local"
-        : "cloud"
+  const runTarget: RunTarget = isDesktop
+    ? cloudEnabled
+      ? (runTargetOverride ?? desktopThreadSource)
+      : "local"
+    : "cloud"
   const [localRepoPath, setLocalRepoPath] = useState<string | null>(
     initialLocalRepo ?? null
   )
@@ -434,7 +434,7 @@ export function AgentsHome({
   const resetPendingSubmit = () => {
     pendingRun.current = null
     setPendingThreadId(null)
-    setSubmittedDraft(null)
+    setSubmitted(null)
   }
 
   const cancelPendingThread = async (threadId: string) => {
@@ -514,13 +514,13 @@ export function AgentsHome({
           model_id: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
         }
-    setSubmittedDraft(draft)
+    const sentAt = Date.now()
+    setSubmitted({ draft, sentAt })
     setLocalError(null)
 
     const configurable: Record<string, unknown> =
       modelConfigurable(activeSelection)
-    if (isDesktop)
-      configurable.experience = agentWorkspace ? "agent_workspace" : "coding"
+    configurable.experience = agentWorkspace ? "agent_workspace" : "coding"
     if (localRun) {
       if (localCheckout)
         window.localStorage.setItem(LAST_LOCAL_REPO_KEY, localCheckout.cwd)
@@ -599,6 +599,8 @@ export function AgentsHome({
         experience: agentWorkspace ? "agent_workspace" : "coding",
         ...optimisticThread(threadId, draft, {
           recorded: session.data?.transcript_recording === true,
+          owner: session.data,
+          sentAt,
         }),
         // So the seeded thread already reads as This Mac, not Cloud, until
         // the server's record replaces it.
@@ -628,8 +630,11 @@ export function AgentsHome({
     runTarget === "local"
       ? localRepos.find((checkout) => checkout.cwd === localRepoPath)
       : undefined
-  const optimisticDraftThread = submittedDraft
-    ? optimisticThread("pending", submittedDraft)
+  const optimisticDraftThread = submitted
+    ? optimisticThread("pending", submitted.draft, {
+        owner: session.data,
+        sentAt: submitted.sentAt,
+      })
     : null
 
   return (
@@ -693,13 +698,9 @@ export function AgentsHome({
               repos={workspaceRepos}
               selectedRepo={repo}
               onRepoChange={optimisticDraftThread ? undefined : selectRepo}
-              runTarget={isDesktop ? runTarget : undefined}
+              runTarget={runTarget}
               onRunTargetChange={
-                !optimisticDraftThread &&
-                isDesktop &&
-                cloudEnabled &&
-                session.data?.auth_provider !== "langsmith" &&
-                !agentWorkspace
+                !optimisticDraftThread && isDesktop && cloudEnabled
                   ? handleRunTargetChange
                   : undefined
               }

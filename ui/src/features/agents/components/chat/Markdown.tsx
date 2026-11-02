@@ -17,6 +17,7 @@ import type { ComponentProps, ReactNode } from "react"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import type { Components, ExtraProps } from "streamdown"
 import "streamdown/styles.css"
+import { cn } from "@/lib/utils"
 import { PreviewablePullRequestLink } from "@/features/agents/components/PullRequestPreview"
 import { CodeBlock } from "./CodeBlock"
 import { MermaidDiagram } from "./MermaidDiagram"
@@ -38,6 +39,7 @@ interface MarkdownProps {
    */
   transformImageUrl?: (src: string) => string
   enlargeImages?: boolean
+  className?: string
 }
 
 const REMARK_PLUGINS = [
@@ -297,6 +299,7 @@ export const Markdown = memo(function Markdown({
   isLive = false,
   transformImageUrl,
   enlargeImages = false,
+  className,
 }: MarkdownProps) {
   const [image, setImage] = useState<{ src: string; alt: string } | null>(null)
   const components = useMemo(
@@ -343,7 +346,12 @@ export const Markdown = memo(function Markdown({
   }, [transformImageUrl])
 
   return (
-    <div className="chat-markdown max-w-full min-w-0 text-sm leading-[1.6] [overflow-wrap:anywhere] break-words text-primary">
+    <div
+      className={cn(
+        "chat-markdown max-w-full min-w-0 text-sm leading-[1.6] [overflow-wrap:anywhere] break-words text-primary",
+        className
+      )}
+    >
       <MarkdownErrorBoundary content={content}>
         <Streamdown
           mode={isLive ? "streaming" : "static"}
