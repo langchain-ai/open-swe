@@ -1002,6 +1002,12 @@ export function AgentThreadView({
               )}
               {reviewChat && <ReviewExcerptChips />}
               <AgentPromptBar
+                key={`${session.data?.user_id}:${thread.id}`}
+                draftKey={
+                  session.data?.user_id
+                    ? `${session.data.user_id}:thread:${thread.id}`
+                    : undefined
+                }
                 placeholder={
                   moving
                     ? `Moving this thread to ${moving === "local" ? "This Mac" : "Cloud"}…`

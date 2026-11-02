@@ -4,9 +4,25 @@ import type { AgentThread } from "@/features/agents/lib/types"
 
 export type Experience = "coding" | "agent_workspace"
 
-class DesktopExperience {
+class ExperienceStore {
   private listeners = new Set<() => void>()
   private selections = new Map<string, Experience>()
+  private locations = new Map<string, string>()
+
+  rememberLocation(userId: string, experience: Experience, href: string) {
+    if (
+      userId &&
+      (href === "/agents" ||
+        href.startsWith("/agents/") ||
+        href.startsWith("/agents?"))
+    ) {
+      this.locations.set(`${userId}:${experience}`, href)
+    }
+  }
+
+  location(userId: string, experience: Experience): string {
+    return this.locations.get(`${userId}:${experience}`) ?? "/agents"
+  }
 
   key(login: string) {
     return `open-swe.desktop.experience:${login}`
@@ -69,18 +85,18 @@ class DesktopExperience {
   }
 }
 
-export const desktopExperience = new DesktopExperience()
+export const experienceStore = new ExperienceStore()
 
-export function useDesktopExperience() {
+export function useExperience() {
   const session = useSession()
   const login = session.data?.login ?? ""
   const selected = useSyncExternalStore(
-    desktopExperience.subscribe,
-    () => desktopExperience.read(login),
+    experienceStore.subscribe,
+    () => experienceStore.read(login),
     () => "agent_workspace" as const
   )
   const select = useCallback(
-    (experience: Experience) => desktopExperience.write(login, experience),
+    (experience: Experience) => experienceStore.write(login, experience),
     [login]
   )
   return {

@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { desktopExperience } from "@/lib/experience"
+import { experienceStore } from "@/lib/experience"
 import { AppCommandPalette } from "./AppCommandPalette"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "@/lib/appCommands"
@@ -99,7 +99,7 @@ describe("AppCommandPalette", () => {
       await screen.findByRole("option", { name: "Cloud result" })
     ).toBeTruthy()
 
-    desktopExperience.write("alice", "coding")
+    experienceStore.write("alice", "coding")
     fireEvent.change(input, {
       target: {
         value:

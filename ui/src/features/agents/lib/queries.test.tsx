@@ -1,4 +1,4 @@
-import { desktopExperience } from "@/lib/experience"
+import { experienceStore } from "@/lib/experience"
 /** @vitest-environment jsdom */
 
 import {
@@ -54,8 +54,8 @@ vi.mock("@/lib/experience", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/experience")>()
   return {
     ...actual,
-    useDesktopExperience: () => {
-      const state = actual.useDesktopExperience()
+    useExperience: () => {
+      const state = actual.useExperience()
       return {
         ...state,
         experience: window.openSweDesktop ? state.experience : undefined,
@@ -1263,7 +1263,7 @@ describe("desktop experience segregation", () => {
     ])
     expect(result.current.pins.data?.[0]?.taskWorkers).toEqual([])
     expect(result.current.active).toBeUndefined()
-    act(() => desktopExperience.write("mode-test", "coding"))
+    act(() => experienceStore.write("mode-test", "coding"))
     expect(result.current.recents.items).toEqual([])
     expect(result.current.pins.data).toBeUndefined()
     await waitFor(() =>
