@@ -20,6 +20,7 @@ import { Header } from "./Header"
 import { Navigator } from "./Navigator"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { Rail } from "./Rail"
+import { ReviewSessionBar } from "./ReviewSession"
 import { NAVIGATOR_INLINE_QUERY, useReviewPage } from "./store"
 
 /** The pull request page: files on the left, the PR and its code in the middle, the agent on the right. */
@@ -101,6 +102,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
           compactRail={!wide}
           navigatorShown={roomForNavigator ? navigatorOpen : navigatorOverlay}
         />
+        <ReviewSessionBar pr={pr} />
         {detail.isError ? (
           <PullRequestUnavailable pr={pr} message={detail.error.message} />
         ) : (

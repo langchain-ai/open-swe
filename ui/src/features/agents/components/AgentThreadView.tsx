@@ -4,7 +4,9 @@ import {
   ReviewChatActionsContext,
   ReviewExcerptChips,
 } from "@/features/reviews/components/ReviewChatActions"
+import { useReviewSessionHandoff } from "@/features/reviews/lib/reviewSessionHandoff"
 import { serializeExcerpts } from "@/features/agents/utils/codeExcerpt"
+import type { FollowUpBehavior } from "@/lib/api"
 import type { PassageReply } from "@/features/agents/utils/passageReply"
 import {
   Profiler,
@@ -95,6 +97,12 @@ import {
   threadHydrationFailed,
   threadTranscriptPainted,
 } from "@/lib/perf/threadLoad"
+
+/** How one message goes out: the composer's toggle, or an explicit follow-up behavior and id. */
+interface SendOptions extends Partial<SubmitOptions> {
+  followUp?: FollowUpBehavior
+  messageId?: string
+}
 
 interface AgentThreadViewProps {
   thread: AgentThread
@@ -329,16 +337,17 @@ export function AgentThreadView({
   const submitMessage = useCallback(
     async (
       { text: content, images, replies }: ComposerSubmission,
-      options?: SubmitOptions
+      options?: SendOptions
     ) => {
       // While a run is live the message either waits for it as a queued run of
       // its own, or goes straight in and steers it. The preference sets the
-      // default; ⌘↵ flips it for one message.
-      const queue =
-        (followUpBehavior === "queue") !== (options?.alternate === true)
+      // default; ⌘↵ flips it for one message, and a caller may choose outright.
+      const queue = options?.followUp
+        ? options.followUp === "queue"
+        : (followUpBehavior === "queue") !== (options?.alternate === true)
       const enqueue = isStreaming && queue
       const offload = content.trim() === "/offload"
-      const messageId = crypto.randomUUID()
+      const messageId = options?.messageId ?? crypto.randomUUID()
       // A message that goes straight into the transcript sits at the top while
       // the reply fills in below it. A queued one stays in the queue until its
       // run starts, and an offload sends no message at all.
@@ -502,6 +511,39 @@ export function AgentThreadView({
     },
     [restoreQueuedAutoSelection, source, thread.id]
   )
+  const agentQueue = useAgentThreadQueuedMessages(thread.id).data
+  // A review session's batch: sent as the reviewer chose, then followed until the agent has it.
+  const reviewHandoff = useReviewSessionHandoff({
+    pr: reviewChat,
+    canPost,
+    sighting: (id) => {
+      const pending = thread.pendingMessages?.find(
+        (message) => message.id === id
+      )
+      if (pending?.status === "failed")
+        return { kind: "failed", error: pending.error ?? "Sending failed." }
+      if (queued.some((entry) => entry.message.id === id))
+        return { kind: "queued" }
+      if (
+        baseMessages.some((message) => message.id === id) ||
+        agentQueue?.some((message) => message.id === id)
+      )
+        return { kind: "delivered", running: isStreaming }
+      if (pending) return { kind: "sending" }
+      if (source.isHydrating || agentQueue === undefined) return null
+      return { kind: "missing", settled: true }
+    },
+    send: (text, messageId, followUp) =>
+      submitMessage(plainSubmission(text), { followUp, messageId }),
+    withdraw: async (id) => {
+      const entry = queued.find((candidate) => candidate.message.id === id)
+      if (!entry) throw new Error("It has already started")
+      if (entry.runId === null)
+        throw new Error("It isn't scheduled yet; try again in a moment")
+      await withdrawQueued(entry)
+    },
+  })
+  const ownsQueued = reviewHandoff.owns
   const removeQueuedMessage = useCallback(
     (id: string) => {
       const entry = queued.find((candidate) => candidate.message.id === id)
@@ -510,6 +552,8 @@ export function AgentThreadView({
         const images = await materializeQueuedImages(entry)
         if (images === null) return
         await withdrawQueued(entry)
+        // A review session's batch goes back to its drafts instead.
+        if (ownsQueued(id)) return
         restoreQueuedToComposer(
           [queuedText(entry)],
           images,
@@ -519,7 +563,13 @@ export function AgentThreadView({
         reportError({ title: "Couldn't cancel the queued message", error })
       )
     },
-    [materializeQueuedImages, queued, restoreQueuedToComposer, withdrawQueued]
+    [
+      materializeQueuedImages,
+      ownsQueued,
+      queued,
+      restoreQueuedToComposer,
+      withdrawQueued,
+    ]
   )
   // Stop cancels the queued runs along with the live one; the user's own come
   // back to the composer instead of starting the moment the run settles. Only
@@ -563,8 +613,12 @@ export function AgentThreadView({
     const { images, failed } = await materialized
     restoreQueuedToComposer(
       [
-        ...pending.map(queuedText),
-        ...unacknowledged.map((message) => message.content),
+        ...pending
+          .filter((entry) => !ownsQueued(entry.message.id))
+          .map(queuedText),
+        ...unacknowledged
+          .filter((message) => !ownsQueued(message.id))
+          .map((message) => message.content),
       ],
       images,
       [
@@ -581,6 +635,7 @@ export function AgentThreadView({
     }
   }, [
     isOwnQueued,
+    ownsQueued,
     queryClient,
     queued,
     restoreQueuedAutoSelection,
@@ -668,7 +723,6 @@ export function AgentThreadView({
     )
   }, [baseMessages, queryClient, queued, thread.id, thread.pendingMessages])
 
-  const agentQueue = useAgentThreadQueuedMessages(thread.id).data
   const queuedRows = useMemo(() => {
     const known = new Set(queued.map((entry) => entry.message.id))
     // A steered follow-up is already on the transcript under the same id.

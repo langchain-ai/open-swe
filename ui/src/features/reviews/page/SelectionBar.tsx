@@ -48,13 +48,15 @@ function placement(
   }
 }
 
-/** Two things to do with highlighted code: ask the agent, or comment for the author. */
+/** Two things to do with highlighted code: ask the agent (or, in a review session, draft for it), or comment for the author. */
 export function SelectionBar({
   selection,
+  drafting,
   onAsk,
   onComment,
 }: {
   selection: TextSelection
+  drafting: boolean
   onAsk: () => void
   onComment: () => void
 }) {
@@ -93,13 +95,13 @@ export function SelectionBar({
         color="secondary"
         variant="plain"
         size="sm"
-        aria-label="Ask Open SWE"
+        aria-label={drafting ? "Draft agent comment" : "Ask Open SWE"}
         type="button"
         onClick={onAsk}
         className="gap-space-2 px-space-2 py-space-1 font-medium hover:bg-elevated-hover"
       >
         <AgentMark />
-        Ask Open SWE
+        {drafting ? "Draft agent comment" : "Ask Open SWE"}
         <Kbd>{askShortcut}</Kbd>
       </Button>
       <Button

@@ -32,6 +32,13 @@ import { StatusPill } from "@/features/reviews/components/StatusPill"
 import { ReviewButton } from "@/features/reviews/components/ReviewButton"
 import { copyPageLink, copyText } from "@/features/reviews/lib/copyText"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
+import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
+import {
+  reviewSessionKey,
+  useReviewSession,
+  useReviewSessions,
+} from "@/features/reviews/lib/reviewSession"
+import { AgentMark } from "./AgentMark"
 import { statusLabels } from "@/features/reviews/lib/status"
 import { ProfileLink } from "./notes/Byline"
 import { reviewQueries, type PullRequestRef } from "./queries"
@@ -89,6 +96,10 @@ export function Header({
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const jumpToUnviewed = useReviewPage((state) => state.jumpToUnviewed)
   const { openShortcutReference } = useAppCommandControls()
+  const chatAvailable = useReviewChat(pr).data?.available === true
+  const sessionActive = useReviewSession(pr).active
+  const startSession = useReviewSessions((state) => state.start)
+  const canStartSession = chatAvailable && !sessionActive
   const githubUrl = githubUrls.pullRequest(pr)
   const current = usePullRequestStanding(pr)
   const queue = useReviewQueue(pr)
@@ -340,6 +351,19 @@ export function Header({
           </Button>
         )}
         {queue && <ReviewQueueControls queue={queue} />}
+        {canStartSession && (
+          <Button
+            size="sm"
+            color="secondary"
+            variant="outlined"
+            className="max-lg:hidden"
+            title="Collect comments for Open SWE and send them together when you finish"
+            onClick={() => startSession(reviewSessionKey(pr))}
+          >
+            <AgentMark />
+            Start review session
+          </Button>
+        )}
         {compactRail && (
           <Button
             size="sm"
@@ -404,6 +428,14 @@ export function Header({
               <LinkIcon aria-hidden size={16} weight="regular" />
               Copy link to this page
             </DropdownMenuItem>
+            {canStartSession && (
+              <DropdownMenuItem
+                onSelect={() => startSession(reviewSessionKey(pr))}
+              >
+                <AgentMark className="size-4" />
+                Start review session
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={openShortcutReference}>
               <KeyboardIcon aria-hidden size={16} weight="regular" />

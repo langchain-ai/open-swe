@@ -14,6 +14,7 @@ import type {
   ProposedComment,
 } from "@/features/reviews/lib/chatDiffActions"
 import { rangeBounds, toPierreSide } from "@/features/reviews/lib/lineRange"
+import type { AgentComment } from "@/features/reviews/lib/reviewSession"
 import {
   patchHeader,
   rangeLineCount,
@@ -55,6 +56,8 @@ export type Note =
   | { kind: "pending"; id: number }
   | { kind: "draft"; id: string }
   | { kind: "agent-note"; id: string }
+  /** A review session's unsent comment for Open SWE. */
+  | { kind: "agent-comment"; id: string }
   | { kind: "composer" }
 
 type NoteAnnotation = DiffLineAnnotation<Note>
@@ -248,6 +251,7 @@ export interface NoteSources {
   pending: ReadonlyArray<PendingReviewComment>
   drafts: ReadonlyArray<ProposedComment>
   agentNotes: ReadonlyArray<AgentNote>
+  agentComments: ReadonlyArray<AgentComment>
   composer: CommentDraftTarget | null
 }
 
@@ -299,6 +303,16 @@ export function entryNotes(
       note.range.file === path ? at(note.range.side, note.range.endLine) : null
     if (spot)
       notes.push({ ...spot, metadata: { kind: "agent-note", id: note.id } })
+  }
+  for (const comment of sources.agentComments) {
+    if (comment.path !== path) continue
+    const { hi, side } = rangeBounds(comment.range)
+    const spot = at(side, hi)
+    if (spot)
+      notes.push({
+        ...spot,
+        metadata: { kind: "agent-comment", id: comment.id },
+      })
   }
   if (sources.composer?.path === path) {
     const { hi, side } = rangeBounds(sources.composer.range)

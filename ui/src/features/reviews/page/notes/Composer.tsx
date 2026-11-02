@@ -8,13 +8,21 @@ import {
   readableRangeLabel,
 } from "@/features/reviews/lib/lineRange"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import {
+  reviewSessionKey,
+  useReviewSession,
+  useReviewSessions,
+} from "@/features/reviews/lib/reviewSession"
 import { AgentMark } from "@/features/reviews/page/AgentMark"
 import type { PullRequestRef } from "@/features/reviews/page/queries"
 import {
   useReviewPage,
   type CommentDraftTarget,
 } from "@/features/reviews/page/store"
-import { useAskAboutLines } from "@/features/reviews/page/askAboutLines"
+import {
+  useAskAboutLines,
+  useDraftAgentComment,
+} from "@/features/reviews/page/askAboutLines"
 import { NoteFrame } from "./NoteFrame"
 
 /** Composers that already took focus; the diff remounts them as it scrolls. */
@@ -22,7 +30,8 @@ const focused = new WeakSet<CommentDraftTarget>()
 
 /**
  * The comment box on a line range. The same words can go to the author, as
- * part of your GitHub review, or to Open SWE.
+ * part of your GitHub review, or to Open SWE: straight away, or, in a review
+ * session, as a draft sent with the rest when the reviewer finishes.
  */
 export function Composer({
   pr,
@@ -37,6 +46,9 @@ export function Composer({
   const body = useReviewPage((state) => state.composerText)
   const setBody = useReviewPage((state) => state.setComposerText)
   const askAboutLines = useAskAboutLines(pr)
+  const draftAgentComment = useDraftAgentComment(pr)
+  const drafting = useReviewSession(pr).active
+  const startSession = useReviewSessions((state) => state.start)
   const askKey = useShortcutLabel("mod+enter")
   const addKey = useShortcutLabel("mod+shift+enter")
   const close = () => setComposer(null)
@@ -48,7 +60,11 @@ export function Composer({
     })
   }
   const ask = () => {
-    void askAboutLines(path, range, body.trim())
+    const text = body.trim()
+    if (drafting) {
+      if (!text) return
+      draftAgentComment(path, range, text)
+    } else void askAboutLines(path, range, text)
     close()
   }
   return (
@@ -75,7 +91,11 @@ export function Composer({
           rows={4}
           resize="vertical"
           value={body}
-          placeholder="Leave a comment, or ask Open SWE about these lines"
+          placeholder={
+            drafting
+              ? "Leave a comment, or draft one for Open SWE"
+              : "Leave a comment, or ask Open SWE about these lines"
+          }
           onChange={setBody}
           onKeyDown={(event) => {
             if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -90,6 +110,26 @@ export function Composer({
             }
           }}
         />
+        <p className="mt-space-1 text-secondary">
+          {drafting ? (
+            "For Open SWE only. A draft sends nothing; your drafts go together when you finish the session."
+          ) : (
+            <>
+              Ask Open SWE sends now.{" "}
+              <Button
+                type="button"
+                size="xs"
+                color="secondary"
+                variant="plain"
+                className="h-auto border-0 px-0 align-baseline text-brand-primary underline-offset-2 hover:underline"
+                onClick={() => startSession(reviewSessionKey(pr))}
+              >
+                Start a review session
+              </Button>{" "}
+              to collect comments and send them together.
+            </>
+          )}
+        </p>
         {pending.add.error && (
           <p role="alert" className="mt-space-1 text-error-secondary">
             {pending.add.error.message}
@@ -117,9 +157,9 @@ export function Composer({
             {pending.add.isPending ? "Adding…" : "Add review comment"}
             <Kbd>{addKey}</Kbd>
           </Button>
-          <Button type="submit" size="sm">
+          <Button type="submit" size="sm" disabled={drafting && !body.trim()}>
             <AgentMark />
-            Ask Open SWE
+            {drafting ? "Add to agent drafts" : "Ask Open SWE"}
             <Kbd variant="inherit">{askKey}</Kbd>
           </Button>
         </div>

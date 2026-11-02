@@ -84,6 +84,8 @@ interface VisitState {
   navigatorOverlay: boolean
   reviewOpen: boolean
   reviewVerdict: PullRequestReviewEvent
+  /** Whether the review session's drafts are open for a last look before they go to the agent. */
+  sessionDraftsOpen: boolean
   /** The file, and its diff entry, under the top of the diff viewport. */
   activePath: string | null
   activeEntry: string | null
@@ -125,6 +127,7 @@ interface ReviewPageActions {
   setNavigatorOverlay: (open: boolean) => void
   openReview: (verdict?: PullRequestReviewEvent) => void
   setReviewOpen: (open: boolean) => void
+  setSessionDraftsOpen: (open: boolean) => void
   setOrder: (order: DiffOrder) => void
   setDiffStyle: (style: DiffStyle) => void
   /** What the scroll position shows: the entry under the top edge, and whether the end is in view. */
@@ -292,6 +295,7 @@ function freshVisit(): VisitState {
     navigatorOverlay: false,
     reviewOpen: false,
     reviewVerdict: "COMMENT",
+    sessionDraftsOpen: false,
     activePath: null,
     activeEntry: null,
     visitedSteps: new Set(),
@@ -407,6 +411,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
     openReview: (verdict = "COMMENT") =>
       set({ reviewOpen: true, reviewVerdict: verdict }),
     setReviewOpen: (reviewOpen) => set({ reviewOpen }),
+    setSessionDraftsOpen: (sessionDraftsOpen) => set({ sessionDraftsOpen }),
     setOrder: (order) => {
       writePreference(ORDER_KEY, order)
       set({ order })

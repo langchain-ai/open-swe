@@ -31,6 +31,7 @@ import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
 import { toPierreSide } from "@/features/reviews/lib/lineRange"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import { useReviewSession } from "@/features/reviews/lib/reviewSession"
 import { useAskAboutLines } from "./askAboutLines"
 import { ChangesToolbar } from "./ChangesToolbar"
 import {
@@ -139,6 +140,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   const conversation = useQuery(reviewQueries.conversation(pr)).data
   const pending = usePendingReview(pr.owner, pr.repo, pr.number)
   const drafts = useChatDrafts()
+  const session = useReviewSession(pr)
   const order = useReviewPage((state) => state.order)
   const diffStyle = useReviewPage((state) => state.diffStyle)
   const viewed = useReviewPage((state) => state.viewed)
@@ -201,9 +203,11 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       agentNotes: (agentNotes ?? [])
         .filter((draft) => !draft.outcome)
         .map((draft) => draft.note),
+      agentComments: session.comments,
       composer,
     }),
     [
+      session.comments,
       detail?.findings,
       conversation?.threads,
       pending.comments,
@@ -493,10 +497,13 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       return null
     })
   }, [])
+  // In a review session, asking about lines drafts a comment instead of sending.
   const askAboutSelection = useCallback(() => {
-    if (selection) void askAboutLines(selection.path, selection.range)
+    if (selection && session.active)
+      setComposer({ path: selection.path, range: selection.range })
+    else if (selection) void askAboutLines(selection.path, selection.range)
     clearSelection()
-  }, [selection, askAboutLines, clearSelection])
+  }, [selection, session.active, setComposer, askAboutLines, clearSelection])
 
   useDiffKeys(askAboutSelection)
 
@@ -542,6 +549,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
               {selection && (
                 <SelectionBar
                   selection={selection}
+                  drafting={session.active}
                   onAsk={askAboutSelection}
                   onComment={() => {
                     setComposer({

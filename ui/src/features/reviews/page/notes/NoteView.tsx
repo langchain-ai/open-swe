@@ -11,6 +11,7 @@ import {
   type PullRequestRef,
 } from "@/features/reviews/page/queries"
 import { useReviewPage } from "@/features/reviews/page/store"
+import { AgentCommentNote } from "./AgentCommentNote"
 import { Composer } from "./Composer"
 import { FindingNote } from "./FindingNote"
 import { NoteFrame } from "./NoteFrame"
@@ -60,6 +61,8 @@ function NoteView({
           <AgentNoteCard id={note.id} />
         </NoteFrame>
       )
+    case "agent-comment":
+      return <AgentCommentNote pr={pr} id={note.id} />
     case "composer":
       return <ComposerNote pr={pr} />
   }
