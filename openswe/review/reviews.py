@@ -12,6 +12,7 @@ import logging
 import re
 import socket
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from html.parser import HTMLParser
 from typing import Any, Literal, Self
 from urllib.parse import urljoin, urlparse
 
@@ -326,21 +327,23 @@ def _user_ref(value: Any) -> dict[str, Any] | None:
     return {"login": login, "avatar_url": value.get("avatar_url")}
 
 
-class DescriptionReferences:
+class DescriptionReferences(HTMLParser):
     def __init__(self, html: str):
-        from bs4 import BeautifulSoup
+        super().__init__()
+        self.links: set[str] = set()
+        self.feed(html)
 
-        self.document = BeautifulSoup(html, "html.parser")
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "a":
+            self.links.update(value for name, value in attrs if name == "href" and value)
 
     def pull_request_numbers(self, owner: str, repo: str) -> list[int]:
         prefix = f"https://github.com/{owner}/{repo}/pull/".lower()
         return sorted(
             {
                 int(href[len(prefix) :])
-                for link in self.document.find_all("a", href=True)
-                if isinstance(href := link.get("href"), str)
-                and href.lower().startswith(prefix)
-                and href[len(prefix) :].isdigit()
+                for href in self.links
+                if href.lower().startswith(prefix) and href[len(prefix) :].isdigit()
             }
         )
 
