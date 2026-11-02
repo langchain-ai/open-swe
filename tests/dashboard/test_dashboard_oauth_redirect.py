@@ -6,7 +6,7 @@ from urllib.parse import parse_qs, urlparse
 
 import jwt
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from openswe.dashboard import auth_routes, routes
@@ -191,6 +191,117 @@ def test_auth_callback_preserves_relative_plan_redirect(monkeypatch) -> None:
         assert client.cookies.get(COOKIE_NAME)
 
     assert persisted == {"login": "alice", "email": "alice@example.com", "data": token_data}
+
+
+@pytest.mark.parametrize("cookie", [None, "expired-session"])
+def test_browser_navigation_resumes_after_login(monkeypatch, cookie) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "http://testserver")
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "http://testserver")
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-session-signing-key-at-least-32-bytes")
+    monkeypatch.setenv("GITHUB_APP_CLIENT_ID", "client-id")
+    monkeypatch.setattr(
+        auth_routes, "exchange_code", AsyncMock(return_value={"access_token": "token"})
+    )
+    monkeypatch.setattr(
+        auth_routes,
+        "fetch_github_user",
+        AsyncMock(return_value=(GithubUser(id=42, login="alice"), None)),
+    )
+    monkeypatch.setattr(auth_routes, "enforce_github_login_gate", AsyncMock())
+    monkeypatch.setattr(auth_routes, "upsert_access_token_from_github_response", AsyncMock())
+    _stub_sign_in(monkeypatch, User())
+    app = FastAPI()
+    app.include_router(routes.router)
+    target = "/dashboard/api/langsmith/login?redirect_to=%2Fagents%2Ft%3Ffrom%3Dslack"
+    start = AsyncMock(return_value="https://smith.example/consent")
+    monkeypatch.setattr("openswe.dashboard.langsmith_routes.start_langsmith_oauth", start)
+    with TestClient(app) as client:
+        if cookie:
+            client.cookies.set(COOKIE_NAME, cookie)
+        navigation = client.get(target, headers={"Accept": "text/html"}, follow_redirects=False)
+        assert navigation.status_code == 302
+        start.assert_not_awaited()
+        login = client.get(navigation.headers["location"], follow_redirects=False)
+        state = parse_qs(urlparse(login.headers["location"]).query)["state"][0]
+        callback = client.get(
+            "/dashboard/api/auth/callback",
+            params={"code": "code", "state": state},
+            follow_redirects=False,
+        )
+        assert callback.status_code == 302
+        assert callback.headers["location"] == f"http://testserver{target}"
+        resumed = client.get(callback.headers["location"], follow_redirects=False)
+        assert resumed.headers["location"] == "https://smith.example/consent"
+        assert start.await_args is not None
+        assert start.await_args.args[0] == "alice"
+
+
+@pytest.mark.parametrize(
+    ("method", "headers", "status"),
+    [
+        ("GET", {}, 401),
+        ("GET", {"Accept": "application/json"}, 401),
+        ("GET", {"Accept": "text/html", "Sec-Fetch-Dest": "empty"}, 401),
+        ("POST", {"Accept": "text/html"}, 401),
+        ("GET", {"Accept": "text/html", "Sec-Fetch-Dest": "document"}, 302),
+    ],
+)
+def test_browser_login_does_not_redirect_api_requests(monkeypatch, method, headers, status) -> None:
+    from openswe.dashboard.deps import SESSION_DEP
+
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://api.example")
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-session-signing-key-at-least-32-bytes")
+    app = FastAPI()
+
+    @app.api_route("/dashboard/api/protected", methods=["GET", "POST"])
+    async def protected(session=SESSION_DEP):
+        return session
+
+    with TestClient(app) as client:
+        response = client.request(
+            method, "/dashboard/api/protected", headers=headers, follow_redirects=False
+        )
+    assert response.status_code == status
+    if status == 302:
+        assert response.headers["location"].startswith(
+            "https://api.example/dashboard/api/auth/login?"
+        )
+
+
+@pytest.mark.parametrize("failure", ["tampered", "expired"])
+def test_browser_resume_cannot_be_forged_or_used_as_a_session(monkeypatch, failure) -> None:
+    from openswe.dashboard.oauth import BrowserLogin
+
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-session-signing-key-at-least-32-bytes")
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://api.example")
+    app = FastAPI()
+    app.include_router(routes.router)
+    challenge = BrowserLogin(
+        "/dashboard/api/my-managed-tools", "next=https%3A%2F%2Fevil.example"
+    ).login_required()
+    resume = parse_qs(urlparse(challenge.headers["Location"]).query)["resume"][0]
+    assert BrowserLogin.destination(resume) == (
+        "https://api.example/dashboard/api/my-managed-tools?next=https%3A%2F%2Fevil.example"
+    )
+    with pytest.raises(HTTPException) as rejected:
+        decode_session(resume)
+    assert rejected.value.status_code == 401
+    if failure == "expired":
+        payload = jwt.decode(
+            resume,
+            "test-session-signing-key-at-least-32-bytes",
+            algorithms=["HS256"],
+            audience="dashboard-browser-login",
+        )
+        payload["exp"] = 1
+        resume = jwt.encode(
+            payload, "test-session-signing-key-at-least-32-bytes", algorithm="HS256"
+        )
+    else:
+        resume += "invalid"
+    with TestClient(app) as client:
+        response = client.get("/dashboard/api/auth/login", params={"resume": resume})
+    assert response.status_code == 400
 
 
 def test_auth_callback_cross_origin_redirect(monkeypatch) -> None:

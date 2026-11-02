@@ -11098,6 +11098,22 @@
               ],
               "title": "Redirect To"
             }
+          },
+          {
+            "in": "query",
+            "name": "resume",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Resume"
+            }
           }
         ],
         "responses": {
@@ -11294,6 +11310,22 @@
                 }
               ],
               "title": "Redirect To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resume",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Resume"
             }
           },
           {

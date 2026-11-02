@@ -20,6 +20,7 @@ from openswe.dashboard.oauth import (
     MCP_SIGN_IN_CALLBACK_PATH,
     SESSION_TTL_SECONDS,
     STATE_COOKIE_NAME,
+    BrowserLogin,
     GithubUser,
     clear_state_cookie,
     cookie_security,
@@ -72,10 +73,13 @@ GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 async def auth_login(
     request: Request,
     redirect_to: str | None = None,
+    resume: str | None = None,
     desktop: bool = False,
     desktop_handoff: str | None = None,
     desktop_port: int | None = Query(default=None, ge=1024, le=65535),
 ) -> RedirectResponse:
+    if resume is not None:
+        BrowserLogin.destination(resume)
     client_id = ENV.GITHUB_APP_CLIENT_ID.get()
     if not client_id:
         # Locally there is no App to redirect to, and the `gh` CLI already holds
@@ -83,7 +87,10 @@ async def auth_login(
         if dev_login_enabled() and not desktop:
             return RedirectResponse(
                 "/dashboard/api/auth/dev-login?"
-                + urlencode({"redirect_to": sanitize_redirect_to(redirect_to)}),
+                + urlencode(
+                    {"redirect_to": sanitize_redirect_to(redirect_to)}
+                    | ({"resume": resume} if resume is not None else {})
+                ),
                 status_code=302,
             )
         raise HTTPException(500, "GITHUB_APP_CLIENT_ID not configured")
@@ -92,6 +99,7 @@ async def auth_login(
     nonce = new_state_nonce()
     state = issue_state(
         redirect_to=safe_redirect,
+        browser_resume=resume,
         nonce_hash=hash_state_nonce(nonce),
         handoff_challenge=valid_handoff_challenge(desktop_handoff),
         handoff_port=desktop_port,
@@ -116,13 +124,18 @@ async def auth_login(
 
 
 @router.get("/auth/dev-login")
-async def auth_dev_login(redirect_to: str | None = None) -> Response:
+async def auth_dev_login(redirect_to: str | None = None, resume: str | None = None) -> Response:
     """Sign in locally as the `gh` CLI's user, with no GitHub App involved.
 
     Refused outside `langgraph dev`, and still subject to the login allowlist.
     """
     if not dev_login_enabled():
         raise HTTPException(404, "not found")
+    target = (
+        BrowserLogin.destination(resume)
+        if resume is not None
+        else sanitize_redirect_to(redirect_to)
+    )
     try:
         credentials = await gh_credentials()
     except GhUnavailable as exc:
@@ -145,9 +158,7 @@ async def auth_dev_login(redirect_to: str | None = None) -> Response:
         user_id=str(signed_in.id),
     )
     logger.info("Signed in from the gh CLI", extra={"github_login": credentials.login})
-    response = RedirectResponse(
-        sanitize_redirect_to(redirect_to) or frontend_base_url(), status_code=302
-    )
+    response = RedirectResponse(target or frontend_base_url(), status_code=302)
     set_session_cookie(response, session_jwt)
     return response
 
@@ -174,7 +185,12 @@ async def auth_callback(request: Request, state: str, code: str | None = None) -
         # cookies blocked) or the state was issued for a different session.
         raise HTTPException(400, "oauth state mismatch — please retry login")
 
-    redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or frontend_base_url()
+    resume = state_payload.get("browser_resume")
+    redirect_to = (
+        BrowserLogin.destination(resume)
+        if isinstance(resume, str)
+        else sanitize_redirect_to(state_payload.get("redirect_to")) or frontend_base_url()
+    )
 
     token_data = await exchange_code(code)
     access_token = token_data.get("access_token")
