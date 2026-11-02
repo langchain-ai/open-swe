@@ -6,7 +6,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 
 from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
 from langgraph_sdk.errors import NotFoundError
 from pydantic import AliasChoices, AliasPath, BaseModel, Field, JsonValue, ValidationError
@@ -1114,10 +1114,16 @@ def recent_turns(messages: list[dict[str, JsonValue]], limit: int) -> list[dict[
     return messages[start:]
 
 
-async def _channel_history(channel_thread_id: str, pr_thread_id: str) -> list[dict[str, JsonValue]]:
-    """The channel conversation a PR thread continues, for the PR thread's first run."""
+async def _channel_history(
+    channel_thread_id: str, pr_thread_id: str, *, new: bool = False
+) -> list[dict[str, JsonValue]]:
+    """The channel conversation a PR thread continues, for the PR thread's first run.
+
+    ``new``: the PR thread was just indexed as MDA's GitHub channel's, which creates
+    it with its first run, so it has no messages to read yet.
+    """
     try:
-        if _state_messages(await THREADS.state(pr_thread_id)):
+        if not new and _state_messages(await THREADS.state(pr_thread_id)):
             return []
         messages = _state_messages(await THREADS.state(channel_thread_id))
     except Exception:  # noqa: BLE001 - the review still runs, without the conversation
@@ -1130,8 +1136,43 @@ async def _channel_history(channel_thread_id: str, pr_thread_id: str) -> list[di
     return recent_turns(messages, CHANNEL_HISTORY_MESSAGES)
 
 
+#: MDA's GitHub channel, as thread metadata names it (``CHANNEL_METADATA_KEY``).
+GITHUB_CHANNEL: Final = "github"
+
+
+class PrCommentChannel(Protocol):
+    """MDA's GitHub channel, which starts a comment's run on the pull request's own thread."""
+
+    async def adopt(self, thread_id: str, metadata: dict[str, JsonValue]) -> None:
+        """Index the thread as the channel's, before its metadata is written."""
+        ...
+
+    async def start(self, thread_id: str, configurable: dict[str, object], run_input: Any) -> bool:
+        """Sign the run for the channel to start; whether it starts."""
+        ...
+
+    async def once(self) -> bool:
+        """Whether a run the backend starts itself still starts: once per delivery."""
+        ...
+
+
+async def _channel_takes(channel: PrCommentChannel | None, thread_id: str) -> bool:
+    """Whether the channel starts the run on the PR's own thread: it is new, or the channel's.
+
+    One the backend made before the channel started these runs stays the backend's.
+    """
+    if channel is None:
+        return False
+    thread = await index.get(thread_id)
+    return thread is None or channel_of(thread.metadata) == GITHUB_CHANNEL
+
+
 async def process_github_pr_comment(
-    payload: dict[str, Any], event_type: str, *, agent_thread_id: str | None = None
+    payload: dict[str, Any],
+    event_type: str,
+    *,
+    agent_thread_id: str | None = None,
+    channel: PrCommentChannel | None = None,
 ) -> None:
     """Process a GitHub PR comment that tagged @open-swe.
 
@@ -1142,6 +1183,11 @@ async def process_github_pr_comment(
         payload: The parsed GitHub webhook payload.
         event_type: One of 'issue_comment', 'pull_request_review_comment',
                     'pull_request_review'.
+        agent_thread_id: The thread of the agent that opened the pull request,
+            for a comment that doesn't mention Open SWE.
+        channel: MDA's GitHub channel: it starts the run when it goes to the pull
+            request's own thread, new or the channel's; the backend starts any
+            other once per delivery.
     """
     (
         repo_config,
@@ -1175,8 +1221,17 @@ async def process_github_pr_comment(
         )
         return
     thread_id = await index.live_thread_id(derived_thread_id)
+    pr_thread_id = (
+        pr_comment_thread_id(repo_config.get("owner", ""), repo_config.get("name", ""), pr_number)
+        if pr_number
+        else None
+    )
+    on_channel = thread_id == pr_thread_id and await _channel_takes(channel, thread_id)
+    new_on_channel = on_channel and await index.get(thread_id) is None
+    if on_channel and channel is not None:
+        await channel.adopt(thread_id, {"branch_name": branch_name})
     # The agent's own thread exists; a PR thread or a successor may not yet.
-    if thread_id != own_thread_id:
+    elif thread_id != own_thread_id:
         common.logger.info("Using thread_id %s for branch '%s'", thread_id, branch_name)
         langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
         try:
@@ -1197,7 +1252,7 @@ async def process_github_pr_comment(
 
     # A channel (Linear, GitHub issues) starts the runs on its own threads, so
     # feedback on a PR its conversation opened continues on the PR's own thread.
-    channel_metadata = await common.get_thread_metadata_safe(thread_id)
+    channel_metadata = None if on_channel else await common.get_thread_metadata_safe(thread_id)
     continues_thread: str | None = None
     if channel_metadata is not None and channel_of(channel_metadata):
         if not pr_number:
@@ -1217,15 +1272,17 @@ async def process_github_pr_comment(
         inherited = {
             key: channel_metadata[key] for key in _INHERITED_ACCESS_KEYS if key in channel_metadata
         }
-        await THREADS.create(
-            thread_id,
-            title=f"PR #{pr_number}",
-            metadata={
-                "branch_name": branch_name,
-                CONTINUES_THREAD_KEY: continues_thread,
-                **inherited,
-            },
-        )
+        metadata: dict[str, JsonValue] = {
+            "branch_name": branch_name,
+            CONTINUES_THREAD_KEY: continues_thread,
+            **inherited,
+        }
+        on_channel = await _channel_takes(channel, thread_id)
+        if on_channel and channel is not None:
+            new_on_channel = await index.get(thread_id) is None
+            await channel.adopt(thread_id, metadata)
+        else:
+            await THREADS.create(thread_id, title=f"PR #{pr_number}", metadata=metadata)
 
     repo = Repo.parse(repo_config)
     if pr_number and repo is not None and repo.owner and repo.name:
@@ -1396,7 +1453,12 @@ async def process_github_pr_comment(
             )
         )
     if continues_thread is not None:
-        messages = [*await _channel_history(continues_thread, thread_id), *messages]
+        messages = [
+            *await _channel_history(continues_thread, thread_id, new=new_on_channel),
+            *messages,
+        ]
+    if channel is not None and not on_channel and not await channel.once():
+        return
     dispatched = await common.trigger_or_queue_run(
         thread_id,
         prompt,
@@ -1406,6 +1468,7 @@ async def process_github_pr_comment(
         repo_config=repo_config,
         pr_number=pr_number,
         token_repositories=common.event_thread_token_repositories(repo_config, payload),
+        start=channel.start if on_channel and channel is not None else None,
     )
     if not dispatched:
         return

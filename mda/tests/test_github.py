@@ -28,10 +28,10 @@ from runtime_api.github import (
     ACT_ON_GITHUB_DELIVERY,
     RECORD_GITHUB_DELIVERY,
     ActOnGitHubDelivery,
-    GitHubAutomationRun,
     GitHubDeliveryActed,
     GitHubDeliveryFacts,
     GitHubIssueRun,
+    GitHubThreadRun,
     PlannedGitHubIssueRun,
 )
 
@@ -182,12 +182,8 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             _FACTS,
             False,
             Route(
-                (
-                    "wake_merge_queue",
-                    "settle_human_reviews",
-                    "record_completed_review",
-                    "route_comment",
-                )
+                ("wake_merge_queue", "settle_human_reviews", "record_completed_review"),
+                comment=True,
             ),
             id="review-submitted",
         ),
@@ -276,7 +272,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             _comment("@openswe fix CI", on_pr=True),
             _FACTS,
             False,
-            Route(("route_comment",), mentioned=True),
+            Route(comment=True, mentioned=True),
             id="pr-comment-mention",
         ),
         pytest.param(
@@ -284,7 +280,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             _comment("CI is failing", on_pr=True, action="edited"),
             _FACTS,
             False,
-            Route(("route_comment",)),
+            Route(comment=True),
             id="pr-comment-untagged",
         ),
         pytest.param(
@@ -328,7 +324,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             },
             _FACTS,
             False,
-            Route(("route_comment",)),
+            Route(comment=True),
             id="review-comment-reply",
         ),
     ],
@@ -353,7 +349,8 @@ class _Backend:
                 webhook="https://backend.example/webhooks/run-complete",
             ),
         )
-        self.automations: list[GitHubAutomationRun] = []
+        self.automations: list[GitHubThreadRun] = []
+        self.comment_run: GitHubThreadRun | None = None
         self.calls: list[tuple[str, BaseModel, str]] = []
 
     async def __call__(
@@ -367,6 +364,7 @@ class _Backend:
         return GitHubDeliveryActed(
             issue_run=self.planned if act.issue_run is not None else None,
             automations=self.automations if act.automations else [],
+            comment_run=self.comment_run if act.comment else None,
         )
 
     def called[Request: BaseModel](self, endpoint: Endpoint[Request, Any]) -> list[Request]:
@@ -445,8 +443,8 @@ def _runs(started: GitHubEventResult) -> list[tuple[ChannelRunInput, ChannelRunO
     return started
 
 
-def _automation(prompt: str) -> GitHubAutomationRun:
-    return GitHubAutomationRun(
+def _automation(prompt: str) -> GitHubThreadRun:
+    return GitHubThreadRun(
         thread_id=uuid.uuid4(),
         input={"messages": [{"role": "user", "content": prompt}]},
         context={"__run_token": f"signed:{prompt}"},
@@ -514,16 +512,43 @@ async def test_a_mention_the_backend_refuses_starts_nothing(backend: _Backend) -
     assert await github.on_event(_event("issues", _issue()), _THREAD) is None
 
 
-async def test_pull_request_work_is_the_backends_and_starts_no_run_here(
+async def test_a_comment_the_backend_runs_itself_starts_no_run_here(
     backend: _Backend,
 ) -> None:
+    # The run goes to the agent's own thread, which the backend starts itself.
     started = await github.on_event(
         _event("issue_comment", _comment("@openswe fix CI", on_pr=True)), _THREAD
     )
 
     assert started is None
     [act] = backend.called(ACT_ON_GITHUB_DELIVERY)
-    assert (act.work, act.mentioned, act.issue_run) == (["route_comment"], True, None)
+    assert (act.work, act.comment, act.mentioned, act.issue_run) == ([], True, True, None)
+
+
+async def test_a_comment_starts_on_the_pull_requests_own_thread(backend: _Backend) -> None:
+    backend.comment_run = _automation("Fix CI")
+
+    started = _runs(
+        await github.on_event(
+            _event("issue_comment", _comment("@openswe fix CI", on_pr=True)), _THREAD
+        )
+    )
+
+    thread = {"mode": "persistent", "id": str(backend.comment_run.thread_id)}
+    # A newer comment replaces the work on an older one, as the backend's dispatch did.
+    assert started == [
+        (
+            backend.comment_run.input,
+            {
+                "context": backend.comment_run.context,
+                "metadata": backend.comment_run.metadata,
+                "thread": thread,
+                "multitask_strategy": "interrupt",
+            },
+        )
+    ]
+    [run] = normalize_run_inputs(started, RunChannel(name="github", provider="github"))
+    assert (run.get("thread"), run.get("multitask_strategy")) == (thread, "interrupt")
 
 
 async def test_an_installation_event_drops_the_cached_repository_listings(

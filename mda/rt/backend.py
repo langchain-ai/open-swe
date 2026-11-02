@@ -138,16 +138,6 @@ def held_state(state: Mapping[str, object]) -> dict[str, JsonValue]:
     return _json_object.validate_python({**(held if isinstance(held, dict) else {}), **forwarded})
 
 
-_GIT_TRACE_PREFIX: Final = "git_trace_"
-
-
-def git_trace(state: Mapping[str, object]) -> dict[str, JsonValue]:
-    """The turn's git trace the backend keeps in the run's state: its baseline and evidence."""
-    return {
-        key: value for key, value in held_state(state).items() if key.startswith(_GIT_TRACE_PREFIX)
-    }
-
-
 def namespace() -> list[str]:
     """The ``task`` calls the running subagent is nested in; empty for the agent itself."""
     return list(_namespace.get())

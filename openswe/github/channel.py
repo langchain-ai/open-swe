@@ -7,15 +7,19 @@ delivery and say what Open SWE knows about its repository
 (``record_github_delivery``); then, in one call (``act_on_github_delivery``), to run
 the work it chose, as the backend's own webhook ran it, and to plan the runs the
 channel starts: each automation's the delivery fires, on a thread of its own
-(``openswe.schedules.store``), and the run an ``@openswe`` mention on an issue
-starts on the channel's thread. Each run carries the backend's run-complete webhook.
+(``openswe.schedules.store``), a pull request comment's when it goes to the pull
+request's own thread, and the run an ``@openswe`` mention on an issue starts on
+the channel's thread. Each run carries the backend's run-complete webhook. A
+comment's run on the agent's thread, or on a thread the backend owns, the
+backend still starts itself.
 """
 
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import timedelta
 from typing import Any, Final, cast
+from uuid import UUID
 
 from pydantic import JsonValue
 from runtime_api.github import (
@@ -25,6 +29,7 @@ from runtime_api.github import (
     GitHubDeliveryFacts,
     GitHubIssueRun,
     GitHubIssueRunRequest,
+    GitHubThreadRun,
     GitHubWorkName,
     PlannedGitHubIssueRun,
 )
@@ -53,8 +58,10 @@ from openswe.workspaces.routing import repo_is_routable
 
 logger = logging.getLogger(__name__)
 
-CHANNEL: Final = "github"
+CHANNEL: Final = service.GITHUB_CHANNEL
 _WORK_CLAIMS: Final = "github_channel_work"
+# A comment's run the backend starts itself, once per delivery.
+_COMMENT_CLAIMS: Final = "github_channel_comment"
 # Longer than MDA keeps sending one call again.
 _WORK_CLAIM_TTL: Final = timedelta(hours=24)
 
@@ -110,29 +117,64 @@ async def _review_pull_request(payload: _Payload) -> None:
         await service.process_github_pr_ready(payload)
 
 
-async def _route_comment(payload: _Payload, event: str, *, mentioned: bool) -> None:
-    """A pull request comment's run, as the backend's webhook routed it."""
+class _CommentChannel:
+    """MDA's GitHub channel, for a pull request comment's run (``service.PrCommentChannel``)."""
+
+    def __init__(self, act: ActOnGitHubDelivery) -> None:
+        self._act = act
+        # The run the channel starts, once a comment's run goes to the PR's own thread.
+        self.run: GitHubThreadRun | None = None
+
+    async def adopt(self, thread_id: str, metadata: dict[str, JsonValue]) -> None:
+        await adopt_channel_run(thread_id, CHANNEL, metadata=metadata)
+
+    async def start(self, thread_id: str, configurable: dict[str, object], run_input: Any) -> bool:
+        self.run = GitHubThreadRun(
+            thread_id=UUID(thread_id),
+            input=cast(dict[str, JsonValue], run_input),
+            **await _signed(self._act, thread_id, configurable, source="github"),
+        )
+        return True
+
+    async def once(self) -> bool:
+        # MDA may send the call again after an answer it didn't get.
+        return not postgres.configured() or await event_claims.claim(
+            _COMMENT_CLAIMS, self._act.delivery_id, ttl=_WORK_CLAIM_TTL
+        )
+
+
+async def _route_comment(act: ActOnGitHubDelivery) -> GitHubThreadRun | None:
+    """A pull request comment's run, as the backend's webhook routed it.
+
+    The channel starts it when it goes to the pull request's own thread; the
+    backend starts any other itself, once per delivery.
+    """
+    payload, event = cast(_Payload, act.payload), act.event
     sender_login = str((payload.get("sender") or {}).get("login") or "")
     if not await service.is_accepted_commenter(sender_login):
         logger.debug(
             "Ignoring GitHub comment from an unregistered sender",
             extra={"github_event": event, "sender_login": sender_login},
         )
-        return
+        return None
+    channel = _CommentChannel(act)
     if (
         event == "pull_request_review_comment"
         and common.review_comment_reply_parent_id(payload) is not None
     ):
-        if await _gated(payload, event):
+        if await _gated(payload, event) and await channel.once():
             await service.process_github_review_finding_reply(payload)
-        return
+        return None
     agent_thread_id = None
-    if not mentioned:
+    if not act.mentioned:
         agent_thread_id = await service.untagged_agent_pr_thread_id(payload, event)
         if agent_thread_id is None:
-            return
+            return None
     if await _gated(payload, event):
-        await service.process_github_pr_comment(payload, event, agent_thread_id=agent_thread_id)
+        await service.process_github_pr_comment(
+            payload, event, agent_thread_id=agent_thread_id, channel=channel
+        )
+    return channel.run
 
 
 def _tasks(work: ActOnGitHubDelivery) -> dict[GitHubWorkName, Callable[[], Awaitable[object]]]:
@@ -155,7 +197,6 @@ def _tasks(work: ActOnGitHubDelivery) -> dict[GitHubWorkName, Callable[[], Await
         "review_push": lambda: service.process_github_push_event(payload),
         "ci_event": lambda: service.process_github_ci_event(payload, event, delivery_id),
         "record_completed_review": lambda: CompletedReview.record(payload),
-        "route_comment": lambda: _route_comment(payload, event, mentioned=work.mentioned),
     }
 
 
@@ -205,15 +246,26 @@ async def _prepare_run(plan: ActOnGitHubDelivery, thread_id: str) -> GitHubIssue
     )
     if prepared is None:
         return None
+    return GitHubIssueRun(
+        input=cast(dict[str, JsonValue], prepared.input),
+        **await _signed(plan, thread_id, prepared.configurable, source="github_issue"),
+    )
+
+
+async def _signed(
+    act: ActOnGitHubDelivery, thread_id: str, configurable: Mapping[str, object], *, source: str
+) -> dict[str, Any]:
+    """The run's signed context, metadata and run-complete webhook, for the channel to
+    start it on ``thread_id``; the thread is busy from here on."""
     run_config = await prepare_durable_run(
         "agent",
-        {"configurable": prepared.configurable},
+        {"configurable": dict(configurable)},
         {
             **common.AGENT_VERSION_METADATA,
             CHANNEL_METADATA_KEY: CHANNEL,
-            "github_delivery": plan.delivery_id,
+            "github_delivery": act.delivery_id,
         },
-        source="github_issue",
+        source=source,
     )
     rewritten = await RUNTIMES.mda_runtime.run_payload(
         thread_id,
@@ -226,14 +278,12 @@ async def _prepare_run(plan: ActOnGitHubDelivery, thread_id: str) -> GitHubIssue
         # A channel thread has no Slack thread to link.
         thread_metadata={},
     )
-    run = GitHubIssueRun(
-        input=cast(dict[str, JsonValue], prepared.input),
-        context=cast(dict[str, JsonValue], rewritten["context"]),
-        metadata=channel_run_metadata(run_config["metadata"]),
-        webhook=COMPLETION_WEBHOOK_URL or None,
-    )
     await channel_run_starting(thread_id)
-    return run
+    return {
+        "context": cast(dict[str, JsonValue], rewritten["context"]),
+        "metadata": channel_run_metadata(run_config["metadata"]),
+        "webhook": COMPLETION_WEBHOOK_URL or None,
+    }
 
 
 async def _plan_issue_run(
@@ -276,8 +326,11 @@ async def act_on_github_delivery(
         if act.automations
         else []
     )
+    comment_run = await _route_comment(act) if act.comment else None
     issue_run = None if act.issue_run is None else await _plan_issue_run(act, act.issue_run)
-    return GitHubDeliveryActed(issue_run=issue_run, automations=automations)
+    return GitHubDeliveryActed(
+        issue_run=issue_run, automations=automations, comment_run=comment_run
+    )
 
 
 def _no_run(reason: str, **fields: str) -> PlannedGitHubIssueRun:

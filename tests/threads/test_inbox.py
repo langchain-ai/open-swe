@@ -171,7 +171,7 @@ async def test_a_run_holds_the_events_it_was_started_with_once_prepared(
         "metadata": {"event_match_ids": [str(carried.id)]},
     }
 
-    # The thread has no box here; preparing would otherwise connect to it.
+    # The thread has no sandbox here; preparing would otherwise connect to it.
     monkeypatch.setattr(RunSession, "bind_sandbox", AsyncMock())
     await RunSession(surface, config, None, started_here=True).prepare(Prepare(run_id="run-1"))
 

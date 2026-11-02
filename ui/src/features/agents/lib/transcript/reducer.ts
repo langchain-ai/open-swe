@@ -84,6 +84,7 @@ export interface TranscriptToolCallState {
   outputComplete: boolean
   /** Whether the server holds output worth fetching on expand. */
   hasOutput: boolean
+  attachments: ReadonlyArray<TranscriptAttachment>
   namespace: Namespace
   startedAt: string
 }
@@ -231,6 +232,7 @@ function indexToolCalls(
       // whether it is the whole output, so the endpoint stays available.
       outputComplete: false,
       hasOutput: row.has_output,
+      attachments: row.attachments ?? [],
       namespace: row.namespace,
       startedAt: row.started_at,
     }
@@ -754,6 +756,7 @@ export function applyEvent(
         output: null,
         outputComplete: false,
         hasOutput: false,
+        attachments: [],
         namespace: payload.namespace,
         startedAt: at,
       })
@@ -774,6 +777,7 @@ export function applyEvent(
           payload.output_truncated
         ),
         hasOutput: payload.has_output,
+        attachments: payload.attachments ?? [],
       })
       break
     }
@@ -921,6 +925,8 @@ function toolChunk(
   if (output) chunk.output = output
   if (call.hasOutput && !call.outputComplete)
     chunk.loadOutput = outputLoader(threadId, call)
+  const images = imageChunks(threadId, call.attachments)
+  if (images.length) chunk.images = images
   const diffData = maybeDiffFromArgs(call.input)
   if (diffData) chunk.diffData = diffData
   // A `task` call owns the namespace of the subagent it spawned, which is what
@@ -953,10 +959,10 @@ function codeCalls(
 }
 
 /**
- * The attachments a message carries, as chunks a renderer can show: an
- * attachment is fetched from our own API with the session, a bare `url` is a
- * remote reference the browser loads itself, and one with neither has no bytes
- * to show.
+ * The attachments a message or tool result carries, as chunks a renderer can
+ * show: an attachment is fetched from our own API with the session, a bare
+ * `url` is a remote reference the browser loads itself, and one with neither
+ * has no bytes to show.
  */
 function imageChunks(
   threadId: string,

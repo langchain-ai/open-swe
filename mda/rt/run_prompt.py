@@ -9,13 +9,15 @@ goes first:
    every run offered the same tools;
 2. the run's prompt (``ModelCall.system_prompt``), the same for every thread of the
    deployment;
-3. the run's skills, the same for the runs of people who see the same skills;
-4. what only the thread's prompt says (``ModelCall.thread_prompt``).
+3. the workspace's prompt (``ModelCall.workspace_prompt``), the same for every thread
+   of the workspace that opened since its curator last published;
+4. the run's skills, the same for the runs of people who see the same skills;
+5. what only the thread's prompt says (``ModelCall.thread_prompt``).
 
-For Anthropic the first two each end in a cache breakpoint, so a thread's first
-call reads them from a cache another thread wrote; the prompt cache middleware
-marks the end of the system prompt and of the conversation. OpenAI finds the
-longest prefix it cached itself.
+For Anthropic the last two of the first three each end in a cache breakpoint, so a
+thread's first call reads them from a cache another thread wrote; the prompt cache
+middleware marks the end of the system prompt and of the conversation, and a request
+may have no more than those four. OpenAI finds the longest prefix it cached itself.
 """
 
 from collections.abc import Awaitable, Callable, Mapping
@@ -44,20 +46,20 @@ def _cached(block: _Block) -> dict:
     }
 
 
-def _appended(system: SystemMessage | None, text: str, *, cached: bool) -> SystemMessage:
-    """``system`` and then ``text``; with ``cached``, each ends in a cache breakpoint."""
-    blocks: list[_Block] = (
-        []
-        if system is None or not system.content
-        else [{"type": "text", "text": system.content}]
-        if isinstance(system.content, str)
-        else list(system.content)
-    )
-    added: _Block = {"type": "text", "text": text}
-    if cached:
-        blocks = [*blocks[:-1], _cached(blocks[-1])] if blocks else []
-        added = _cached(added)
-    content = [*blocks, added]
+def _appended(system: SystemMessage | None, texts: list[str], *, cached: int) -> SystemMessage:
+    """``system`` and then each of ``texts``; the last ``cached`` blocks end in a breakpoint."""
+    blocks: list[_Block] = [
+        *(
+            []
+            if system is None or not system.content
+            else [{"type": "text", "text": system.content}]
+            if isinstance(system.content, str)
+            else list(system.content)
+        ),
+        *({"type": "text", "text": text} for text in texts),
+    ]
+    split = max(len(blocks) - cached, 0)
+    content = [*blocks[:split], *map(_cached, blocks[split:])]
     return (
         SystemMessage(content=content)
         if system is None
@@ -66,7 +68,8 @@ def _appended(system: SystemMessage | None, text: str, *, cached: bool) -> Syste
 
 
 class RunPromptMiddleware(AgentMiddleware):
-    """Add the run's prompt after what every run offered the same tools shares.
+    """Add the run's prompt, then the workspace's, after what every run offered the same
+    tools shares.
 
     Place it inside the middleware that adds to the graph's own instructions for
     every run alike, and outside the skills middleware and ``ThreadPromptMiddleware``.
@@ -82,10 +85,11 @@ class RunPromptMiddleware(AgentMiddleware):
         planned = _planned(request)
         if planned is None or not planned.system_prompt:
             return await handler(request)
+        texts = [text for text in (planned.system_prompt, planned.workspace_prompt) if text]
         system = _appended(
             request.system_message,
-            planned.system_prompt,
-            cached=isinstance(request.model, ChatAnthropic),
+            texts,
+            cached=2 if isinstance(request.model, ChatAnthropic) else 0,
         )
         return await handler(request.override(system_message=system))
 
@@ -103,5 +107,5 @@ class ThreadPromptMiddleware(AgentMiddleware):
         planned = _planned(request)
         if planned is None or not planned.thread_prompt:
             return await handler(request)
-        system = _appended(request.system_message, planned.thread_prompt, cached=False)
+        system = _appended(request.system_message, [planned.thread_prompt], cached=0)
         return await handler(request.override(system_message=system))

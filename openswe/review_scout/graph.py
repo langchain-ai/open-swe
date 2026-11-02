@@ -336,8 +336,8 @@ def scout_tools() -> list[BaseTool]:
     )
 
 
-def scout_box(thread_id: str, cfg: RunConfig) -> BackendProtocol:
-    """The scout thread's box, connected again whenever it is gone."""
+def scout_sandbox(thread_id: str, cfg: RunConfig) -> BackendProtocol:
+    """The scout thread's sandbox, connected again whenever it is gone."""
     return get_cached_sandbox_backend(
         thread_id, reconnect=partial(_ensure_scout_sandbox, thread_id, cfg)
     )
@@ -378,7 +378,7 @@ async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> Non
         stop_when=["scout_nothing_to_plan"],
         at_end=["finish_scout_plan"],
     )
-    surface.files = scout_box(thread_id, cfg)
+    surface.files = scout_sandbox(thread_id, cfg)
     surface.models = models
     surface.subagents = [
         SurfaceSubagent(

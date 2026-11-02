@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -1101,11 +1101,14 @@ async def trigger_or_queue_run(
     repo_config: dict[str, str],
     pr_number: int,
     token_repositories: Sequence[str] | None = None,
+    start: Callable[[str, dict[str, object], Any], Awaitable[bool]] | None = None,
 ) -> bool:
     """Return whether a new agent run was created or queued for a busy thread.
 
     ``token_repositories`` is recorded if this creates the thread; a thread that
-    must be narrowed but could not record it is not started.
+    must be narrowed but could not record it is not started. ``start`` starts the
+    run instead of the backend, with the thread, its configurable and its input:
+    MDA's GitHub channel, for a pull request's own thread.
     """
     record = await ThreadRecord.read(thread_id)
     record.authorize(github_login)
@@ -1141,6 +1144,8 @@ async def trigger_or_queue_run(
     slack_thread = SourceContext.from_metadata(record.metadata).slack_thread
     if slack_thread is not None:
         configurable["slack_thread"] = slack_thread.dump()
+    if start is not None:
+        return await start(thread_id, configurable, input)
     logger.info("Dispatching LangGraph run for thread %s from GitHub PR comment", thread_id)
     await dispatch_agent_run(
         thread_id,

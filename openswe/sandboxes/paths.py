@@ -6,6 +6,7 @@ import shlex
 from collections.abc import AsyncIterable, Iterable
 
 from deepagents.backends.protocol import SandboxBackendProtocol
+from runtime_api import sandbox_setup
 
 from openswe.bridge.constants import SANDBOX_ID_PREFIX
 from openswe.sandboxes.state import SandboxBackendProxy
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 _WORK_DIR_CACHE_ATTR = "_open_swe_resolved_work_dir"
 _PROVIDER_ATTR_NAMES = ("sandbox", "_sandbox", "_backend")
-WORKSPACE_DIR = "/workspace"
+WORKSPACE_DIR = sandbox_setup.WORK_DIR
 
 
 def _is_local_checkout(sandbox_backend: SandboxBackendProtocol) -> bool:

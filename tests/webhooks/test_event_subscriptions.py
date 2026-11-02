@@ -306,3 +306,42 @@ async def test_slack_matches_joined_channels_but_not_dms(
             text("SELECT delivery_id FROM event_log WHERE source = 'slack'")
         )
         assert list(deliveries) == ["s-private", "s-public", "s-own"]
+
+
+async def test_workspace_events_reach_only_admin_threads_that_name_the_source(
+    workspace: dict[str, UUID], delivered: list[tuple[str, MultitaskStrategy]]
+) -> None:
+    await _subscribe(workspace, event_types=["refresh"])
+    await _subscribe(workspace, sources=["workspace"], event_types=["refresh"])
+    await EventSubscription(
+        thread_id="admin-thread",
+        workspace_id=workspace["workspace"],
+        multitask_strategy="enqueue",
+        run_config={"thread_id": "admin-thread", "admin_thread": True},
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+        sources=["workspace"],
+        event_types=["refresh"],
+    ).create()
+
+    await EventLog.append(
+        "workspace",
+        {
+            "workspace_slug": "acme",
+            "error": "TimeoutError with opaque-error-credential",
+            "log_tail": "Updating repo with opaque-log-credential",
+        },
+        event_type="refresh.failed",
+        delivery_id="w-1",
+        refs=EventRefs(workspace_id=workspace["workspace"]),
+    )
+
+    assert await _owed() == []
+    (match,) = await EventMatch.owed("admin-thread")
+    assert "refresh.failed" in match.content
+    assert "opaque-error-credential" not in match.content
+    assert "opaque-log-credential" not in match.content
+    since = datetime.now(UTC) - timedelta(hours=1)
+    assert await EventLog.kinds(since) == []
+    assert [(kind.source, kind.event_type) for kind in await EventLog.kinds(since, admin=True)] == [
+        ("workspace", "refresh.failed")
+    ]

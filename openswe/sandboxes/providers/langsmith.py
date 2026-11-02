@@ -56,12 +56,15 @@ DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES = 128 * 1024**3
 DEFAULT_SANDBOX_VCPUS = 4
 DEFAULT_SANDBOX_MEM_BYTES = 16 * 1024**3
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS = 2 * 60 * 60  # 2 hours
-DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS = 30 * 24 * 60 * 60  # 30 days
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS = 7 * 24 * 60 * 60  # 7 days
 SANDBOX_CREATE_MAX_ATTEMPTS = 3
 SANDBOX_CREATE_RETRY_DELAYS_SECONDS = (1.0, 3.0)
 SANDBOX_CREATE_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
+# How long connecting to a sandbox still booting waits for it: as long as MDA's own first use
+# waits, retries included.
+SANDBOX_BOOT_TIMEOUT_SECONDS = 90
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
-# The API cannot push a proxy config while the host suspends an idle box, which
+# The API cannot push a proxy config while the host suspends an idle sandbox, which
 # takes up to about three minutes; outlast that rather than fail the run.
 PROXY_CONFIG_RETRY_WINDOW_SECONDS = 180.0
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
@@ -293,9 +296,19 @@ def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
     }
 
 
+async def _booted_sandbox(client: AsyncSandboxClient, sandbox_id: str) -> Any:
+    """The sandbox once it has booted: MDA asks for a thread's sandbox without waiting for it."""
+    sandbox = await client.get_sandbox(name=sandbox_id)
+    if sandbox.status != "provisioning":
+        return sandbox
+    return await client.wait_for_sandbox(
+        sandbox_id, timeout=SANDBOX_BOOT_TIMEOUT_SECONDS, poll_interval=0.5
+    )
+
+
 async def _reuse_existing_sandbox(client: AsyncSandboxClient, sandbox_id: str) -> Any:
     try:
-        return await client.get_sandbox(name=sandbox_id)
+        return await _booted_sandbox(client, sandbox_id)
     except ResourceNotFoundError as e:
         msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
         raise SandboxGoneError(msg) from e
@@ -394,10 +407,10 @@ async def sandbox_proxy_config(
     thread_id: str | None = None,
     federated_rules: Sequence[dict[str, JsonValue]] | None = None,
 ) -> dict[str, JsonValue]:
-    """The box's proxy config: GitHub's rules with ``github_token``, none without one, the
+    """The sandbox's proxy config: GitHub's rules with ``github_token``, none without one, the
     thread's tool channel, and the custom settings of ``base_proxy_config``.
 
-    ``federated_rules`` are the cloud identity rules read from the live box, which replace
+    ``federated_rules`` are the cloud identity rules read from the live sandbox, which replace
     any in ``base_proxy_config``; without them, the base config's are kept."""
     from openswe.sandboxes.tool_access import TOOLS_RULE, tool_proxy_rule
 
@@ -418,7 +431,7 @@ async def sandbox_proxy_config(
     ]
     tools_rule = await tool_proxy_rule(thread_id, sandbox_name) if thread_id else None
     if federated_rules is not None:
-        # Federation is fixed at creation, including its absence on older boxes, and
+        # Federation is fixed at creation, including its absence on older sandboxes, and
         # LangSmith allows one rule per cloud.
         federated_clouds = {rule.get("type") for rule in federated_rules}
         preserved_rules = [
@@ -543,7 +556,7 @@ async def sandbox_exists(sandbox_id: str) -> bool:
 async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandboxClient, Any]:
     client = get_async_sandbox_client()
     try:
-        return client, await client.get_sandbox(name=sandbox_id)
+        return client, await _booted_sandbox(client, sandbox_id)
     except Exception:
         await client.aclose()
         raise
@@ -925,7 +938,7 @@ class SandboxProvider(ABC):
 
     Intentionally has no delete. A sandbox holds the agent's only copy of its
     working tree, and the thread metadata read fails open to "no sandbox", so a
-    delete keyed off it can destroy a live box. Reclamation is the platform's
+    delete keyed off it can destroy a live sandbox. Reclamation is the platform's
     job, via the idle TTL and delete-after-stop set at create time.
     """
 

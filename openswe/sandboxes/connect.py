@@ -13,7 +13,7 @@ async def connect_sandbox(
     """The sandbox a thread's ``sandbox_id`` names.
 
     A ``bridge:`` id is the user's own machine, which LangSmith has never heard
-    of; handing it one would fail as a missing box.
+    of; handing it one would fail as a missing sandbox.
     """
     bridge_id = Bridge.bridge_id_of(sandbox_id)
     if bridge_id is not None:

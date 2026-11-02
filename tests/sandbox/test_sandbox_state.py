@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 from deepagents.backends.protocol import (
@@ -73,14 +74,10 @@ async def test_sandbox_proxy_reconnects_from_metadata_once(monkeypatch: pytest.M
 async def test_sandbox_metadata_ignores_run_config_from_before_rebind(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class _Threads:
-        async def get(self, thread_id: str) -> dict[str, object]:
-            return {"thread_id": thread_id, "metadata": {"sandbox_id": "sandbox-new"}}
+    async def indexed(thread_id: str) -> MagicMock:
+        return MagicMock(thread_id=thread_id, metadata={"sandbox_id": "sandbox-new"})
 
-    class _Client:
-        threads = _Threads()
-
-    monkeypatch.setattr("openswe.sandboxes.state.get_client", lambda: _Client())
+    monkeypatch.setattr("openswe.threads.store.THREADS.get", indexed)
     token = var_child_runnable_config.set({"metadata": {"sandbox_id": "sandbox-old"}})
     try:
         assert await get_sandbox_id_from_metadata("thread-1") == "sandbox-new"
@@ -162,7 +159,7 @@ async def test_sandbox_proxy_delegates_delete_after_lazy_startup() -> None:
 @pytest.mark.parametrize(
     ("bound", "kept"), [("sandbox-1", True), ("sandbox-mda", False), (None, False)]
 )
-def test_a_cached_box_the_thread_left_is_forgotten(bound: str | None, kept: bool) -> None:
+def test_a_cached_sandbox_the_thread_left_is_forgotten(bound: str | None, kept: bool) -> None:
     """Another replica rebinds the thread (a move off a Mac, a hand-over to MDA); this one follows."""
     proxy = SandboxBackendProxy(
         cast("SandboxBackendProtocol", _FakeSandboxBackend()), thread_id="thread-follow"

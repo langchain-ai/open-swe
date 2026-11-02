@@ -30,7 +30,7 @@ _IMAGE_SIGNATURES: tuple[tuple[bytes, ...], ...] = (
 
 
 def is_image_bytes(head: bytes) -> bool:
-    # HEIC/HEIF (and AVIF) are ISO-BMFF containers: the `ftyp` box sits at offset 4.
+    # HEIC/HEIF (and AVIF) are ISO-BMFF containers: the `ftyp` sandbox sits at offset 4.
     if head[4:8] == b"ftyp":
         return True
     for parts in _IMAGE_SIGNATURES:

@@ -3,12 +3,13 @@
 Every delivery goes to the backend's event log (``record_github_delivery``), which
 answers what Open SWE knows about its repository. This side decides what the
 delivery starts (``rt.github_routes``), and tells the backend in one call
-(``act_on_github_delivery``): the backend's work, such as a review, a CI wakeup or a
-pull request comment's run, which the backend runs once per delivery; whether it may
-fire automations; and for an ``@openswe`` mention on an issue, the coding agent's run
-on the issue's conversation. The backend checks and signs the runs, and this side
-starts them: each automation's on a thread of its own, the issue's on its
-conversation. So a delivery takes at most two calls. An installation event, sent
+(``act_on_github_delivery``): the backend's work, such as a review or a CI wakeup,
+which the backend runs once per delivery; whether it may fire automations; a pull
+request comment to route; and for an ``@openswe`` mention on an issue, the coding
+agent's run on the issue's conversation. The backend checks and signs the runs, and
+this side starts them: each automation's on a thread of its own, a comment's on the
+pull request's own thread, the issue's on its conversation. A comment's run on the
+agent's own thread the backend still starts itself. So a delivery takes at most two calls. An installation event, sent
 when the App is installed, removed or suspended or its repositories change, is
 logged the same way and drops the backend's cached repository listings.
 """
@@ -16,6 +17,7 @@ logged the same way and drops the backend's cached repository listings.
 from typing import Final, cast
 from uuid import UUID
 
+from langgraph_sdk.schema import MultitaskStrategy
 from managed_deepagents import (
     ChannelRunInput,
     ChannelRunOptions,
@@ -30,10 +32,10 @@ from runtime_api.github import (
     ACT_ON_GITHUB_DELIVERY,
     RECORD_GITHUB_DELIVERY,
     ActOnGitHubDelivery,
-    GitHubAutomationRun,
     GitHubDelivery,
     GitHubIssueRun,
     GitHubIssueRunRequest,
+    GitHubThreadRun,
     PlannedGitHubIssueRun,
 )
 
@@ -58,7 +60,7 @@ async def on_event[Payload: GitHubPayload](
         RECORD_GITHUB_DELIVERY, delivery, msg_id=f"msg_{event.delivery_id}_record"
     )
     routed = route(event.name, delivery.payload, facts, from_app=event.from_app)
-    if not routed.work and not routed.automations and not routed.issue_run:
+    if not (routed.work or routed.comment or routed.automations or routed.issue_run):
         return None
     issue_run = (
         GitHubIssueRunRequest(thread_id=UUID(thread.id), waiting=thread.interrupted)
@@ -70,6 +72,7 @@ async def on_event[Payload: GitHubPayload](
         ActOnGitHubDelivery(
             **delivery.model_dump(),
             work=list(routed.work),
+            comment=routed.comment,
             mentioned=routed.mentioned,
             automations=routed.automations,
             issue_run=issue_run,
@@ -77,7 +80,10 @@ async def on_event[Payload: GitHubPayload](
         msg_id=f"msg_{event.delivery_id}_act",
     )
     runs = [_issue_run(acted.issue_run)] if acted.issue_run and acted.issue_run.starts else []
-    runs += [_automation_run(run) for run in acted.automations]
+    runs += [_thread_run(run) for run in acted.automations]
+    if acted.comment_run is not None:
+        # A newer comment replaces the work on an older one, as the backend's dispatch did.
+        runs.append(_thread_run(acted.comment_run, multitask_strategy="interrupt"))
     return runs or None
 
 
@@ -103,7 +109,7 @@ async def on_installation_event(
     return None
 
 
-def _options(run: GitHubIssueRun | GitHubAutomationRun) -> ChannelRunOptions:
+def _options(run: GitHubIssueRun | GitHubThreadRun) -> ChannelRunOptions:
     options: ChannelRunOptions = {"context": run.context, "metadata": run.metadata}
     if run.webhook:
         options["webhook"] = run.webhook
@@ -117,9 +123,14 @@ def _issue_run(planned: PlannedGitHubIssueRun) -> tuple[ChannelRunInput, Channel
     return (planned.run.input, _options(planned.run))
 
 
-def _automation_run(run: GitHubAutomationRun) -> tuple[ChannelRunInput, ChannelRunOptions]:
-    """An automation's run, on the thread the backend planned it on for this delivery."""
-    return (
-        run.input,
-        {**_options(run), "thread": {"mode": "persistent", "id": str(run.thread_id)}},
-    )
+def _thread_run(
+    run: GitHubThreadRun, *, multitask_strategy: MultitaskStrategy | None = None
+) -> tuple[ChannelRunInput, ChannelRunOptions]:
+    """A run on the thread the backend planned it on: an automation's, or the pull request's."""
+    options: ChannelRunOptions = {
+        **_options(run),
+        "thread": {"mode": "persistent", "id": str(run.thread_id)},
+    }
+    if multitask_strategy is not None:
+        options["multitask_strategy"] = multitask_strategy
+    return (run.input, options)

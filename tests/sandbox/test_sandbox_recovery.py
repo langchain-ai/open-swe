@@ -1,6 +1,7 @@
 import json
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from langsmith.sandbox import (
     SandboxConnectionError,
     SandboxOperationError,
@@ -84,3 +85,60 @@ async def test_command_level_sandbox_error_does_not_end_the_run() -> None:
     assert payload["status"] == "error"
     assert payload["error_type"] == "SandboxOperationError"
     assert "recovery" not in payload
+
+
+async def test_a_review_run_leaves_its_lost_sandbox_to_its_own_failure_notice() -> None:
+    """A review's failure notice and check already tell its PR; a second warning repeats it."""
+    with patch(
+        "openswe.agent_api.failures.post_sandbox_unreachable_notification",
+        new_callable=AsyncMock,
+    ) as notify:
+        failure = await OperationFailure.of(
+            SandboxConnectionError("WebSocket upgrade to sb-dead failed (no valid HTTP response)"),
+            operation="execute",
+            config=_CONFIG,
+            notify=False,
+        )
+
+    # The run still ends; only the warning is left to the review's notice.
+    assert failure.sandbox_unreachable
+    notify.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("assistant_id", "notified"),
+    [("reviewer", False), ("review-scout", False), ("agent", True)],
+)
+@pytest.mark.parametrize("token_run", [False, True])
+async def test_only_a_review_skips_the_lost_sandbox_notice(
+    assistant_id: str, notified: bool, token_run: bool
+) -> None:
+    from runtime_api.loop import SandboxGone
+
+    from openswe.agent_api import graph
+    from openswe.agent_api.tokens import RemoteRun
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    if token_run:
+        run = graph.TokenRun(
+            graph.RemoteGraph(assistant_id, AsyncMock()),
+            RemoteRun(
+                thread_id="thread-1", assistant_id=assistant_id, configurable={}, expires_at=0
+            ),
+            "run-1",
+        )
+    else:
+        run = graph.RunSession(
+            ToolSurface(), _CONFIG, None, started_here=True, assistant_id=assistant_id
+        )
+    with patch.object(
+        graph, "post_sandbox_unreachable_notification", new_callable=AsyncMock
+    ) as notify:
+        await run.sandbox_unreachable(SandboxGone(sandbox_id="sb-dead", reason="Image pull failed"))
+
+    if notified:
+        notify.assert_awaited_once_with(
+            run.config, sandbox_id="sb-dead", reason="Image pull failed"
+        )
+    else:
+        notify.assert_not_awaited()

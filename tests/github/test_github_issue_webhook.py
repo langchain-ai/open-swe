@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import httpx2
 import pytest
 from langgraph_sdk.errors import NotFoundError
-from runtime_api.github import GitHubAutomationRun
+from runtime_api.github import GitHubThreadRun
 
 from openswe.github import channel as github_channel
 from openswe.github import webhook as github_webhooks
@@ -115,7 +115,7 @@ async def test_github_webhook_plans_issue_automation_for_external_author(
     monkeypatch, registry_db
 ) -> None:
     called: dict[str, object] = {}
-    run = GitHubAutomationRun(
+    run = GitHubThreadRun(
         thread_id=uuid.uuid4(),
         input={"messages": []},
         context={"__run_token": "signed"},
@@ -124,7 +124,7 @@ async def test_github_webhook_plans_issue_automation_for_external_author(
 
     async def fake_plan(
         event_type: str, payload: dict[str, object], delivery_id: str
-    ) -> list[GitHubAutomationRun]:
+    ) -> list[GitHubThreadRun]:
         called["event_type"] = event_type
         called["payload"] = payload
         called["delivery_id"] = delivery_id
@@ -200,7 +200,7 @@ async def test_github_webhook_ignores_comments_from_unregistered_senders(
     )
 
     # The backend routes the comment, and an unregistered sender reaches no handler.
-    assert "route_comment" in delivered.work
+    assert delivered.comment
     handled.assert_not_awaited()
 
 
@@ -246,7 +246,7 @@ async def test_github_webhook_routes_review_comment_reply_without_tag(
         },
     )
 
-    assert delivered.work == ("route_comment",)
+    assert (delivered.work, delivered.comment) == ((), True)
     assert auto_review_checked is False
     payload = called["payload"]
     assert isinstance(payload, dict)
@@ -337,7 +337,7 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
     assert called == ({"agent_thread_id": expected_thread_id} if accepted else {})
     if body is not None and not accepted:
         # An untagged workflow command reaches the backend as no work at all.
-        assert "route_comment" not in delivered.work
+        assert not delivered.comment
 
 
 @pytest.mark.parametrize(
