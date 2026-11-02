@@ -11,7 +11,7 @@ import pytest
 
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.expedited_review.readiness import PullRequestSnapshot
-from openswe.github.http import GitHubClient, GitHubError, RepoClient
+from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, ThreadLink
 from openswe.github.repo_files import RepoSettings
@@ -837,21 +837,59 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
     async def as_user(login: str) -> AsyncIterator[GitHubClient]:
         yield GitHubClient(MagicMock())
 
-    async def info(repo: RepoClient) -> dict[str, object]:
-        if repo.name == "hidden":
-            raise GitHubError(_response(404))
-        return {}
+    from openswe.github.pull_request_status import (
+        OpenPullRequest,
+        OpenPullRequests,
+        PullRequestReviewer,
+    )
+    from openswe.github.pull_requests import ReviewLink
 
-    async def states(pull, author):
-        return {"ada": "APPROVED"} if pull.number == 5 else {}
+    await PullRequest(owner="o", repo="r", number=7, author="ada").save()
+    for number in [8, 9]:
+        await PullRequest(
+            owner="o",
+            repo="r",
+            number=number,
+            author="grace",
+            reviews=[ReviewLink(reviewer_thread_id=str(number))],
+        ).save()
+
+    async def search(github, login, repo, *, scope, **kwargs):
+        numbers = [7] if scope == "drafts" else [1, 5]
+        return OpenPullRequests(
+            pull_requests=[OpenPullRequest(repo="o/r", number=n, title=str(n)) for n in numbers],
+            next_page=None,
+            incomplete=False,
+            updated_at="",
+        )
+
+    async def load(pull, **kwargs):
+        if pull.repo.name == "hidden":
+            return None
+        return OpenPullRequest(
+            repo=pull.repo.full_name,
+            number=pull.number,
+            title=str(pull.number),
+            author="ada" if pull.number == 7 else "grace",
+            draft=pull.number in {7, 9},
+            reviewers=[PullRequestReviewer(login="ada", user_id=1, state="approved")]
+            if pull.number == 5
+            else [],
+        )
 
     with (
         patch("openswe.human_review.routes.GitHubClient.as_user", as_user),
-        patch.object(RepoClient, "info", info),
-        patch("openswe.human_review.routes.latest_review_states", states),
+        patch(
+            "openswe.human_review.routes.accessible_repo_full_names",
+            AsyncMock(return_value={"o/r"}),
+        ),
+        patch("openswe.human_review.queue.list_open_pull_requests", search),
+        patch.object(PullRequestClient, "load", load),
     ):
         result = await api_review_assignments(page=1, session={"sub": "ada"})
-    assert [row.number for row in result.pull_requests] == [1]
+        assert [row.number for row in result.pull_requests] == [1, 7, 8]
+        filtered = await api_review_assignments(repo="o/hidden", page=1, session={"sub": "ada"})
+        assert filtered.pull_requests == []
 
 
 @asynccontextmanager

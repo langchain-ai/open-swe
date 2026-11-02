@@ -9,6 +9,10 @@ import { useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect } from "react"
 import { toast } from "sonner"
 
+import { useSession } from "@/lib/session"
+import { useOpenPullRequests } from "@/features/reviews/lib/useOpenPullRequests"
+import { usePullRequestDetails } from "@/features/reviews/lib/usePullRequestDetails"
+import { standingReview } from "@/features/reviews/lib/reviewers"
 import { pullRequestKey } from "@/features/reviews/lib/status"
 import { parsePullRequestSelection } from "@/features/reviews/search"
 import { warmReviewPage, type PullRequestRef } from "./queries"
@@ -30,16 +34,58 @@ export interface ReviewQueue {
 export function useReviewQueue(pr: PullRequestRef): ReviewQueue | null {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const queue = useSearch({
+  const explicit = useSearch({
     from: REVIEW_ROUTE,
     shouldThrow: false,
     select: (search) => search.queue,
   })
+  const login = useSession().data?.login ?? ""
+  const pending = useOpenPullRequests(
+    login,
+    [],
+    "updatedAt",
+    "desc",
+    "review-assigned"
+  )
+  const { hasNextPage, isFetching, fetchNextPage } = pending
+  useEffect(() => {
+    if (hasNextPage && !isFetching) void fetchNextPage()
+  }, [hasNextPage, isFetching, fetchNextPage])
+  const rows = pending.data?.pages.flatMap((page) => page.pullRequests) ?? []
+  const { all } = usePullRequestDetails(login, rows, rows)
+  const remaining = all
+    .filter((row) => {
+      if (row.state !== "open") return false
+      if (row.author?.toLowerCase() === login.toLowerCase()) return row.draft
+      const review = standingReview(row, login)
+      return (
+        row.draft === false &&
+        review !== "approved" &&
+        review !== "changes_requested"
+      )
+    })
+    .map(pullRequestKey)
   const current = pullRequestKey({
     repo: `${pr.owner}/${pr.repo}`,
     number: pr.number,
   }).toLowerCase()
-  const index = queue?.findIndex((key) => key.toLowerCase() === current) ?? -1
+  const liveKeys = new Set(remaining.map((key) => key.toLowerCase()))
+  const ordered = explicit
+    ? [
+        ...explicit.filter(
+          (key) =>
+            liveKeys.has(key.toLowerCase()) || key.toLowerCase() === current
+        ),
+        ...remaining.filter(
+          (key) =>
+            !explicit.some((entry) => entry.toLowerCase() === key.toLowerCase())
+        ),
+      ]
+    : [current, ...remaining.filter((key) => key.toLowerCase() !== current)]
+  const queue = ordered.some((key) => key.toLowerCase() === current)
+    ? ordered
+    : [current, ...ordered]
+  const index = queue.findIndex((key) => key.toLowerCase() === current)
   const nextKey = index < 0 ? undefined : queue?.[index + 1]
   const previous = parsePullRequestSelection(queue?.[index - 1])
   const next = parsePullRequestSelection(nextKey)
@@ -47,7 +93,12 @@ export function useReviewQueue(pr: PullRequestRef): ReviewQueue | null {
     const upcoming = parsePullRequestSelection(nextKey)
     if (upcoming) warmReviewPage(queryClient, upcoming)
   }, [queryClient, nextKey])
-  if (!queue || index < 0) return null
+  if (
+    pending.isPending ||
+    pending.isError ||
+    pending.data?.pages.some((page) => page.incomplete)
+  )
+    return null
   const open = (target: PullRequestRef) =>
     void navigate({
       to: REVIEW_ROUTE,

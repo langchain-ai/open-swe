@@ -194,6 +194,7 @@ class OpenPullRequest(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
     draft: bool | None = None
+    author: str | None = None
     details_loading: bool = False
     additions: int | None = None
     deletions: int | None = None
@@ -950,6 +951,9 @@ class PullRequestClient:
             created_at=_as_optional_str(source.get("created_at")),
             updated_at=_as_optional_str(source.get("updated_at")),
             draft=_as_optional_bool(source.get("draft")),
+            author=_as_optional_str(source["user"].get("login"))
+            if isinstance(source.get("user"), Mapping)
+            else None,
             details_loading=not details,
             additions=_as_optional_int(source.get("additions")),
             deletions=_as_optional_int(source.get("deletions")),
@@ -1044,7 +1048,7 @@ async def list_open_pull_requests(
     sort: str = "updated",
     direction: str = "desc",
     page: int = 1,
-    scope: Literal["mine", "review-requested"] = "mine",
+    scope: Literal["mine", "review-requested", "drafts"] = "mine",
 ) -> OpenPullRequests:
     """Read the open PRs ``login`` authored or is asked to review, with current-head checks."""
     if not _OWNER_PATTERN.fullmatch(login):
@@ -1059,8 +1063,10 @@ async def list_open_pull_requests(
         raise HTTPException(422, "repository must be owner/repo")
     if sort not in {"created", "updated"} or direction not in {"asc", "desc"}:
         raise HTTPException(422, "invalid PR sort")
-    qualifier = "author" if scope == "mine" else "review-requested"
+    qualifier = "author" if scope in {"mine", "drafts"} else "review-requested"
     query = f"is:pr is:open {qualifier}:{login}"
+    if scope == "drafts":
+        query += " draft:true"
     for name in repositories:
         query += f" repo:{name}"
     try:

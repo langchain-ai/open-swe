@@ -1043,6 +1043,7 @@ export interface ReviewListPayload {
 }
 
 export interface OpenPullRequest {
+  author?: string | null
   detailsLoading?: boolean
   detailsError?: boolean
   repo: string

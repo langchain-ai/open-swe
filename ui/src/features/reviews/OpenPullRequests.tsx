@@ -31,6 +31,7 @@ import {
   pullRequestStatusQuery,
   refreshPullRequest,
 } from "./lib/cache"
+import { standingReview } from "./lib/reviewers"
 import { dateLabel } from "./lib/dateLabel"
 import { readPreference, writePreference } from "./lib/preferences"
 import { pullRequestKey, statusLabels } from "./lib/status"
@@ -140,11 +141,28 @@ export function OpenPullRequests({
   // have to pull the rest of the pages in before they can answer at all.
   const needsMorePages =
     query.hasNextPage &&
-    (Boolean(filter?.length) || Boolean(search) || requested >= rows.length)
+    (scope === "review-assigned" ||
+      Boolean(filter?.length) ||
+      Boolean(search) ||
+      requested >= rows.length)
   useEffect(() => {
     if (needsMorePages && !isFetching) void fetchNextPage()
   }, [needsMorePages, isFetching, fetchNextPage])
   const matchingRows = rows
+    .filter((pr) => {
+      if (scope !== "review-assigned") return true
+      const live =
+        queryClient.getQueryData<OpenPullRequest | null>(
+          pullRequestStatusQuery(login, pr).queryKey
+        ) ?? pr
+      if (live.author?.toLowerCase() === login.toLowerCase()) return live.draft
+      const review = standingReview(live, login)
+      return (
+        live.draft === false &&
+        review !== "approved" &&
+        review !== "changes_requested"
+      )
+    })
     .filter(
       (pr) =>
         !leftOpenList(
@@ -240,23 +258,6 @@ export function OpenPullRequests({
       search: { queue },
     })
 
-  const githubLink =
-    scope === "review-assigned" &&
-    latest &&
-    !query.hasNextPage &&
-    !query.isFetching &&
-    !detailsLoading &&
-    visible.length === filtered.length ? (
-      <div className="py-space-4 text-center">
-        <Button
-          variant="underlined"
-          onClick={() => onFiltersChange({ github: true, pr: undefined })}
-        >
-          Show my GitHub review requests
-        </Button>
-      </div>
-    ) : null
-
   const card = (pr: OpenPullRequest) => {
     const key = pullRequestKey(pr)
     return (
@@ -307,7 +308,7 @@ export function OpenPullRequests({
             <div className="flex items-center gap-space-2 text-xs text-secondary">
               <span>
                 {scope === "review-assigned"
-                  ? "Assigned to you by Open SWE"
+                  ? "Requested reviews · Your drafts · Speculative reviews"
                   : "GitHub review requests"}
               </span>
               {scope === "review-requested" && (
@@ -318,7 +319,7 @@ export function OpenPullRequests({
                     onFiltersChange({ github: undefined, pr: undefined })
                   }
                 >
-                  Back to Open SWE assignments
+                  Back to full review queue
                 </Button>
               )}
               {firstInQueue && (
@@ -512,10 +513,9 @@ export function OpenPullRequests({
                           : scope === "mine"
                             ? "No open PRs found"
                             : scope === "review-assigned"
-                              ? "No Open SWE assignments. You’re all caught up."
+                              ? "No pending reviews or drafts. You’re all caught up."
                               : "No pending GitHub review requests"
                       }
-                      action={githubLink || undefined}
                     />
                   )
                 ) : (
@@ -523,7 +523,6 @@ export function OpenPullRequests({
                     rows={visible}
                     available={matchingRows.length}
                     compact={railed}
-                    footer={githubLink}
                     // Unclamped: asking for more rows than are loaded is what
                     // makes the next GitHub page arrive, and reaching the end
                     // again is the only other thing that would grow it.

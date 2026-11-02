@@ -217,6 +217,23 @@ class PullRequest(Base):
             return list(rows)
 
     @classmethod
+    async def review_candidates(cls, repositories: set[str], login: str) -> list[Self]:
+        """Open, reviewed PRs in repositories the viewer can access."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(cls)
+                .join(cls.repository)
+                .where(
+                    Repository.key.in_(repositories),
+                    cls.state == "open",
+                    func.lower(cls.author) != login.lower(),
+                    cls.reviews.any(),
+                )
+                .order_by(cls.updated_at.desc(), cls.id.desc())
+            )
+            return list(rows)
+
+    @classmethod
     async def search(
         cls, query: str, *, repositories: Sequence[str], limit: int = 50, offset: int = 0
     ) -> list[Self]:
