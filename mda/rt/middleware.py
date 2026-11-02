@@ -107,7 +107,7 @@ from rt.offload import OFFLOADING_KEY, RequestedOffload
 from rt.outbox import OUTBOX_KEY, carry
 from rt.remote_files import RemoteFiles, RunArtifacts
 from rt.sandbox_setup import sandbox_setup
-from rt.tools import STATE_KEY, cited, run_id, tool_report
+from rt.tools import STATE_KEY, ToolExecutions, cited, run_id, tool_report
 from rt.tracing import MIDDLEWARE_TRACE_POLICY, TurnTrace
 
 logger = logging.getLogger(__name__)
@@ -737,11 +737,7 @@ async def reported(
     request: ToolCallRequest,
     handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
 ) -> ToolMessage | Command:
-    """Run ``request``, telling the backend's transcript it started and how it ended.
-
-    The reports go out alongside the call rather than before it. A ``task`` call's
-    subagent runs here, so every call made within it names the ``task`` call.
-    """
+    """Report a tool call and checkpoint the actual nested executions with its result."""
     tool_call_id = request.tool_call.get("id")
     if not tool_call_id:
         return await handler(request)
@@ -752,8 +748,9 @@ async def reported(
         tool_call_id=tool_call_id,
     )
     backend.outbox.started(report)
+    executions = ToolExecutions()
     try:
-        with subagent_of(tool_call_id), reporting(tool_call_id):
+        with subagent_of(tool_call_id), reporting(tool_call_id), executions.collecting():
             result = await handler(request)
     except asyncio.CancelledError, GraphBubbleUp:
         # A stopped call stays open, as it does in-process, and so does one paused for
@@ -765,7 +762,22 @@ async def reported(
         )
         backend.outbox.finished(report, failure)
         raise
-    backend.outbox.finished(report, _tool_message(result, tool_call_id))
+    message = executions.attach(_tool_message(result, tool_call_id))
+    backend.outbox.finished(report, message)
+    if isinstance(result, ToolMessage):
+        return message
+    if executions.executed and isinstance(result.update, Mapping):
+        messages = result.update.get("messages")
+        result = dataclasses.replace(
+            result,
+            update={
+                **result.update,
+                "messages": [
+                    message if isinstance(m, ToolMessage) and m.tool_call_id == tool_call_id else m
+                    for m in (messages if isinstance(messages, list) else [])
+                ],
+            },
+        )
     return result
 
 
