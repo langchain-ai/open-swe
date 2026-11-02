@@ -1108,13 +1108,12 @@ async def _send_message(
     result = reply.result
     mode = "steered" if result.steered else "queued" if result.queued else "started"
     if isinstance(caller_thread_id, str) and caller_thread_id != thread_id:
-        from openswe.slack.routed_work import track_routed_work
-        from openswe.slack.thinking import sync_slack_background_status
+        from openswe.slack.routed_work import RoutedWork
 
-        client = langgraph_client()
+        work = RoutedWork(caller_thread_id)
         try:
-            await track_routed_work(client, caller_thread_id, thread_id)
-            await sync_slack_background_status(client, caller_thread_id, resume=True)
+            await work.track(thread_id)
+            await work.sync_slack_status()
         except Exception:
             logger.exception(
                 "Could not track routed thread progress",

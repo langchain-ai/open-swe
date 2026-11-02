@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from openswe.review.session import ReviewSessionMetadata
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.records import lookup_slack_link_thread_id
-from openswe.slack.routed_work import delegated_work_active
+from openswe.slack.routed_work import RoutedWork
 from openswe.source_context import SourceContext
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
 from openswe.threads import index
@@ -453,8 +453,8 @@ async def attach_task_workers(
             return
         async with semaphore:
             try:
-                summary["waitingForDelegatedWork"] = await delegated_work_active(
-                    client, thread_id, prune=False
+                summary["waitingForDelegatedWork"] = await RoutedWork(thread_id).delegated_active(
+                    prune=False
                 )
             except Exception:
                 logger.exception(

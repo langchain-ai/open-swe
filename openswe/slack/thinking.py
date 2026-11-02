@@ -23,11 +23,7 @@ from openswe.slack.client import (
 )
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
 from openswe.slack.records import lookup_slack_thread_id, store_slack_run_mapping
-from openswe.slack.routed_work import (
-    delegated_work_active,
-    routed_work_active,
-    routed_work_origins,
-)
+from openswe.slack.routed_work import RoutedWork
 from openswe.source_context import SourceContext
 from openswe.tasks.store import TaskMembership, sidebar_memberships
 from openswe.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY
@@ -400,7 +396,7 @@ async def show_slack_thinking_status(
             last_known = location
             if not is_code_channel_session(last_known[1]) and (
                 await _task_has_active_runs(client, thread_id)
-                or await delegated_work_active(client, thread_id)
+                or await RoutedWork(thread_id).delegated_active()
             ):
                 await restore_slack_thinking_status(*last_known)
 
@@ -415,7 +411,7 @@ async def show_slack_thinking_status(
                 await client.runs.join(run_thread_id or thread_id, run_id)
                 while run_thread_id is None and (
                     await _task_has_active_runs(client, thread_id)
-                    or await delegated_work_active(client, thread_id)
+                    or await RoutedWork(thread_id).delegated_active()
                 ):
                     await asyncio.sleep(_STATUS_REFRESH_SECONDS)
                 break
@@ -543,7 +539,7 @@ async def _settle_slack_thinking_status(
             metadata = thread_metadata(await client.threads.get(thread_id))
         if await _task_has_active_runs(client, thread_id):
             return True
-        if await delegated_work_active(client, thread_id, metadata=metadata):
+        if await RoutedWork(thread_id).delegated_active(metadata=metadata):
             return await restore_slack_thinking_status(channel_id, thread_ts)
         waiting = bool(metadata.get(RUNNING_BACKGROUND_TASKS_KEY))
         if not waiting:
@@ -575,22 +571,6 @@ async def _settle_slack_thinking_status(
             "Could not settle Slack status", extra={"agent_thread_id": thread_id}, exc_info=True
         )
         return False
-
-
-async def sync_routed_slack_status(client: LangGraphClient, destination: str) -> None:
-    try:
-        for origin in await routed_work_origins(client, destination):
-            try:
-                await routed_work_active(client, origin)
-                await sync_slack_background_status(client, origin, resume=True)
-            except NotFoundError:
-                logger.warning(
-                    "Routed origin thread is missing", extra={"origin_thread_id": origin}
-                )
-    except Exception:
-        logger.exception(
-            "Could not settle routed Slack progress", extra={"destination_thread_id": destination}
-        )
 
 
 async def sync_slack_background_status(

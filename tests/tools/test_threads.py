@@ -1197,7 +1197,13 @@ async def test_public_worker_can_only_reply_to_its_owners_relaying_private_threa
     )
 
     if allowed:
-        assert result == {"success": True, "mode": "started", "run_id": "report-run"}
+        assert result == {
+            "success": True,
+            "mode": "started",
+            "run_id": "report-run",
+            "recipient_thread_id": "coordinator",
+            "web_url": None,
+        }
     else:
         assert result == {
             "success": False,
