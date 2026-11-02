@@ -32,11 +32,9 @@ from runtime_api.catalog import LoopRules
 
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
-from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
-from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     ExcludeToolsMiddleware,
@@ -93,18 +91,6 @@ async def _workspace(backend: SandboxBackendProtocol, cfg: RunConfig) -> PlanWor
 
 
 async def _ensure_scout_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBackendProtocol:
-    repo_name = cfg.repo.name if cfg.repo else ""
-    repositories = [repo_name] if repo_name else None
-    token, expires_at = await get_github_app_installation_token_with_expiry(
-        repositories=repositories
-    )
-    if not token:
-        raise RuntimeError(
-            f"GitHub App installation token unavailable for scout thread {thread_id}"
-        )
-    cache_github_token_for_thread(
-        thread_id, token, expires_at=expires_at, is_bot_token=True, repositories=repositories
-    )
     # Like the reviewer's, a scout sandbox holds only a checkout every run re-derives.
     return await ensure_sandbox_for_thread(
         thread_id,
