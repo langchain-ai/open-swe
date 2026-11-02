@@ -42,14 +42,18 @@ class WorkRunState:
                 return self.thread
             runtime = RUNTIMES.runs_on(self.thread.runtime)
             run = await runtime.latest_run(self.thread.thread_id)
-            status = (
-                await runtime.status(self.thread.thread_id)
-                if run is not None
-                else self.thread.status
-            )
-            if run is None and unstarted_is_idle and channel_of(self.thread.metadata) is not None:
-                status = "idle"
+            channel = channel_of(self.thread.metadata)
+            if run is None and channel is not None:
+                status = "idle" if unstarted_is_idle else self.thread.status
+            else:
+                status = await runtime.status(self.thread.thread_id)
             patch: dict[str, JsonValue] = {"work_run_synced": True}
+            if (
+                run is None
+                and status == "idle"
+                and self.thread.metadata.get("latest_run_status") in {"pending", "running"}
+            ):
+                patch["latest_run_status"] = None
             if run is not None:
                 patch.update(latest_run_id=run.run_id, latest_run_status=run.status)
                 if run.active:

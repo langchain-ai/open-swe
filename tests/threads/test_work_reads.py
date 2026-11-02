@@ -170,11 +170,20 @@ async def test_receipts_require_a_person_session_read_access_and_work(
         assert response.status_code == 409
 
 
-@pytest.mark.parametrize("experience", ["agent_workspace", "coding"])
-async def test_detail_only_marks_coding_viewed(
-    work: WorkRuntime, monkeypatch: pytest.MonkeyPatch, experience: str
+@pytest.mark.parametrize(
+    ("experience", "transcript", "expected_viewed"),
+    [("agent_workspace", "v2", False), ("agent_workspace", None, True), ("coding", "v2", True)],
+)
+async def test_detail_keeps_explicit_work_receipts_and_legacy_read_fallback(
+    work: WorkRuntime,
+    monkeypatch: pytest.MonkeyPatch,
+    experience: str,
+    transcript: str | None,
+    expected_viewed: bool,
 ) -> None:
-    await THREADS.update("work", {"experience": experience, "last_viewed_run_id": "older"})
+    await THREADS.update(
+        "work", {"experience": experience, "transcript": transcript, "last_viewed_run_id": "older"}
+    )
     thread = await THREADS.get("work")
     assert thread is not None
     client = Mock()
@@ -186,16 +195,32 @@ async def test_detail_only_marks_coding_viewed(
     monkeypatch.setattr(handlers, "attach_task_workers", AsyncMock())
     monkeypatch.setattr(handlers, "attach_subagents", AsyncMock())
     result = await handlers.get_dashboard_thread("work", "test-user")
-    assert result["viewed"] is (experience == "coding")
+    assert result["viewed"] is expected_viewed
     current = await THREADS.get("work")
     assert current is not None
-    assert current.metadata["last_viewed_run_id"] == ("R1" if experience == "coding" else "older")
+    assert current.metadata["last_viewed_run_id"] == ("R1" if expected_viewed else "older")
     assert ("latestRunId" in result) is (experience == "agent_workspace")
 
 
-async def test_no_run_preserves_work_classification_and_does_not_ack(work: WorkRuntime) -> None:
+@pytest.mark.parametrize("channel", [None, "linear"])
+async def test_missing_runtime_settles_work_without_marking_it_read(
+    work: WorkRuntime, channel: str | None
+) -> None:
     work.run = None
-    await THREADS.update("work", {"latest_run_status": "running"})
+    await THREADS.update("work", {"channel": channel, "latest_run_status": "running"})
+    await index.set_status("work", "busy")
+    assert await status.refresh_thread_status("work") == ("busy" if channel else "idle")
+    assert await status.refresh_thread_status("work", unstarted_is_idle=True) == "idle"
+    thread = await THREADS.get("work")
+    assert thread is not None
+    result = await summary._thread_summary(thread.as_langgraph(), bridge_status=False)
+    assert result["status"] == "idle"
+    assert thread.metadata["last_viewed_at_ms"] == 123
+
+
+async def test_no_run_keeps_terminal_identity_without_acknowledging(work: WorkRuntime) -> None:
+    work.run = None
+    await THREADS.update("work", {"latest_run_status": "success"})
     result = await routes.api_mark_thread_viewed(
         "work", routes.ThreadViewedBody(run_id="R1"), {"sub": "test-user"}
     )
@@ -203,5 +228,5 @@ async def test_no_run_preserves_work_classification_and_does_not_ack(work: WorkR
     thread = await THREADS.get("work")
     assert thread is not None
     result = await summary._thread_summary(thread.as_langgraph(), bridge_status=False)
-    assert result["status"] == "running"
+    assert result["status"] == "finished"
     assert thread.metadata["latest_run_id"] == "R1"

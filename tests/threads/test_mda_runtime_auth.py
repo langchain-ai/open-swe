@@ -67,6 +67,7 @@ async def test_a_missing_thread_reads_as_none(mda: runtimes.MdaRuntime) -> None:
     )
 
     assert await threads.get("t1") is None
+    assert await threads.latest_run("t1") is None
 
 
 @pytest.mark.parametrize("queued_status", ["pending", "interrupted"])

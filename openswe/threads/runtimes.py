@@ -186,9 +186,12 @@ class _SdkThreads:
         return "idle" if thread is None else thread.status
 
     async def latest_run(self, thread_id: str) -> MdaRun | None:
-        runs = await self.client.runs.list(thread_id, limit=1)
-        if runs and runs[0]["status"] in {"pending", "interrupted"}:
-            runs = await self.client.runs.list(thread_id, status="running", limit=1) or runs
+        try:
+            runs = await self.client.runs.list(thread_id, limit=1)
+            if runs and runs[0]["status"] in {"pending", "interrupted"}:
+                runs = await self.client.runs.list(thread_id, status="running", limit=1) or runs
+        except NotFoundError:
+            return None
         return MdaRun.model_validate(runs[0]) if runs else None
 
     async def run_error(self, thread_id: str) -> str | None:
@@ -536,12 +539,16 @@ class _MdaThreads(_SdkThreads):
 
     async def latest_run(self, thread_id: str) -> MdaRun | None:
         response = await self.reads.get(f"/threads/{thread_id}/runs", params={"limit": 1})
+        if response.status_code == httpx.codes.NOT_FOUND:
+            return None
         response.raise_for_status()
         runs = _runs.validate_python(response.json())
         if runs and runs[0].status in {"pending", "interrupted"}:
             response = await self.reads.get(
                 f"/threads/{thread_id}/runs", params={"status": "running", "limit": 1}
             )
+            if response.status_code == httpx.codes.NOT_FOUND:
+                return None
             response.raise_for_status()
             runs = _runs.validate_python(response.json()) or runs
         return runs[0] if runs else None
