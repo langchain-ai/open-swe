@@ -1,7 +1,7 @@
 import { useMemo } from "react"
 
 import type { OpenPullRequest } from "@/lib/api"
-import type { ReviewsSearch } from "../search"
+import type { ReviewsSearch } from "@/features/reviews/search"
 import { PullRequestActions } from "./PullRequestActions"
 import { ReviewPage } from "@/features/reviews/page/ReviewPage"
 

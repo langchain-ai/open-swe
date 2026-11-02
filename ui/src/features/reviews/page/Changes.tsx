@@ -21,8 +21,11 @@ import type {
 } from "@pierre/diffs/react"
 import type { CodeView as CoreCodeView } from "@pierre/diffs"
 
-import type { ReviewsSearch } from "../search"
-import { formatScrollAnchor, parseScrollAnchor } from "../lib/scrollAnchor"
+import type { ReviewsSearch } from "@/features/reviews/search"
+import {
+  formatScrollAnchor,
+  parseScrollAnchor,
+} from "@/features/reviews/lib/scrollAnchor"
 import { useResolvedTheme } from "@/lib/theme"
 import {
   buildDiffOptions,
