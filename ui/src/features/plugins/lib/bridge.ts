@@ -11,6 +11,9 @@ import type {
   CommitWire,
   CursorWire,
   DocumentScope,
+  DraftImage,
+  FrontendReviewInbox,
+  FrontendReviewsApi,
   GitHubRepositoryApi,
   HostApi,
   HostContext,
@@ -34,6 +37,7 @@ import type {
 import { RpcTarget } from "capnweb"
 import type { RpcStub } from "capnweb"
 
+import type { ImageChunk } from "@/features/agents/lib/types"
 import type {
   DocumentTarget,
   InstalledPlugin,
@@ -116,8 +120,8 @@ export interface BridgeHost {
   provideTools: (offer: AgentToolOffer, run: ToolRunner) => () => void
   /** Chooses the chat the dock shows. */
   chooseChat: (chat: ChatTarget) => void
-  /** Opens the dock, with `draft` in its composer. */
-  openChat: (draft: string | null) => void
+  /** Opens the dock, with `draft` and `images` in its composer. */
+  openChat: (draft: string | null, images: Array<ImageChunk>) => void
   /** What the person has open, as the plugin describes it, for the agent's next messages. */
   shareContext: (context: SharedContext) => void
   /** Calls `onChange` whenever anyone writes to `target`; returns the unsubscribe. */
@@ -277,11 +281,62 @@ function cursor(value: unknown, name: string): CursorWire | undefined {
   }
 }
 const ROOM = /^[A-Za-z0-9._:@/-]{1,200}$/
+const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const MEDIA_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,119}$/
 const BRANCH = /^[A-Za-z0-9._/-]{1,200}$/
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 
 const repositoryName = (value: unknown, name = "repository") =>
   pathName(value, name, REPOSITORY).toLowerCase()
+
+function pullNumber(value: unknown): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > 2 ** 31 - 1
+  )
+    invalid("pull must be a pull request number")
+  return value
+}
+
+function reviewScope(value: unknown): "review-requested" | "mine" {
+  if (value !== "review-requested" && value !== "mine")
+    invalid('scope must be "review-requested" or "mine"')
+  return value
+}
+
+// What the dock's composer takes itself: five images of up to 10 MB.
+const MAX_DRAFT_IMAGES = 5
+const MAX_DRAFT_IMAGE_BASE64 = Math.ceil((10 * 1024 * 1024) / 3) * 4
+const DRAFT_IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+])
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/
+
+function draftImages(value: unknown): Array<ImageChunk> {
+  // Plugins built before draft images send none.
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value) || value.length > MAX_DRAFT_IMAGES)
+    invalid(`images must be a list of at most ${MAX_DRAFT_IMAGES}`)
+  return value.map((item: unknown, index): ImageChunk => {
+    const image: Partial<DraftImage> = record(item, `images[${index}]`)
+    const mimeType = text(image.mimeType, "mimeType", 20)
+    if (!DRAFT_IMAGE_TYPES.has(mimeType))
+      invalid("images must be PNG, JPEG, WebP or GIF")
+    const base64 = text(image.base64, "base64", MAX_DRAFT_IMAGE_BASE64)
+    if (!BASE64.test(base64)) invalid("base64 must be base64-encoded bytes")
+    return {
+      kind: "image",
+      base64,
+      mimeType,
+      fileName: text(image.name, "name", 200),
+    }
+  })
+}
 
 function scopeOf(value: unknown): string | null {
   const scope = value === undefined ? {} : record(value, "scope")
@@ -707,6 +762,30 @@ export class PluginHostApi extends RpcTarget implements HostApi {
     )
   }
 
+  frontendReviews(repository: string): Promise<FrontendReviewsApi> {
+    return this.#budget.run(() => {
+      this.#require("frontend-reviews")
+      return new FrontendReviewsTarget(
+        this.#host().plugin.id,
+        this.#budget,
+        repositoryName(repository),
+        this.#budget.claim()
+      )
+    })
+  }
+
+  frontendReviewInbox(
+    scope: "review-requested" | "mine"
+  ): Promise<FrontendReviewInbox> {
+    return this.#budget.run(() => {
+      this.#require("frontend-reviews")
+      return pluginsApi.frontendReviewInbox(
+        this.#host().plugin.id,
+        reviewScope(scope)
+      )
+    })
+  }
+
   provideTools(
     json: string,
     run: (tool: string, argumentsJson: string) => Promise<string>
@@ -772,10 +851,13 @@ export class PluginHostApi extends RpcTarget implements HostApi {
     })
   }
 
-  openChat(draft: string | null): Promise<void> {
+  openChat(draft: string | null, images?: Array<DraftImage>): Promise<void> {
     return this.#budget.run(() => {
       this.#require("agent")
-      this.#host().openChat(optionalText(draft, "draft", 20_000) ?? null)
+      this.#host().openChat(
+        optionalText(draft, "draft", 20_000) ?? null,
+        draftImages(images)
+      )
     })
   }
 
@@ -1052,6 +1134,63 @@ class RepositoryTarget extends RpcTarget implements GitHubRepositoryApi {
         draft: fields.draft === true,
       })
     })
+  }
+
+  [Symbol.dispose](): void {
+    this.#release()
+  }
+}
+
+class FrontendReviewsTarget extends RpcTarget implements FrontendReviewsApi {
+  #plugin: string
+  #budget: SessionBudget
+  #repository: string
+  #release: () => void
+
+  constructor(
+    plugin: string,
+    budget: SessionBudget,
+    repository: string,
+    release: () => void
+  ) {
+    super()
+    this.#plugin = plugin
+    this.#budget = budget
+    this.#repository = repository
+    this.#release = release
+  }
+
+  list(pull: number) {
+    return this.#budget.run(() =>
+      pluginsApi.frontendReviews(
+        this.#plugin,
+        this.#repository,
+        pullNumber(pull)
+      )
+    )
+  }
+
+  get(pull: number, run: string) {
+    return this.#budget.run(() =>
+      pluginsApi.frontendReview(
+        this.#plugin,
+        this.#repository,
+        pullNumber(pull),
+        pathName(run, "run", RUN_ID)
+      )
+    )
+  }
+
+  media(pull: number, run: string, name: string): Promise<Blob | null> {
+    return this.#budget.run(() =>
+      pluginsApi.frontendReviewMedia(
+        this.#plugin,
+        this.#repository,
+        pullNumber(pull),
+        pathName(run, "run", RUN_ID),
+        pathName(name, "name", MEDIA_NAME)
+      )
+    )
   }
 
   [Symbol.dispose](): void {

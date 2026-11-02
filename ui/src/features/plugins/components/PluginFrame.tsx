@@ -15,6 +15,7 @@ import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFrame"
+import type { ImageChunk } from "@/features/agents/lib/types"
 import type {
   DocumentTarget,
   InstalledPlugin,
@@ -94,7 +95,7 @@ export function PluginFrame({
   pickRepositories: (pick: RepositoryPick) => Promise<Array<string>>
   provideTools: (offer: AgentToolOffer, run: ToolRunner) => () => void
   chooseChat: (chat: ChatTarget) => void
-  openChat: (draft: string | null) => void
+  openChat: (draft: string | null, images: Array<ImageChunk>) => void
   shareContext: (context: SharedContext) => void
 }) {
   const session = useSession()

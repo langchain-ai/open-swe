@@ -1,0 +1,13 @@
+@layer theme, base, langchain-ds-base, components, langchain-ds-components, utilities, langchain-ds-utilities;
+
+@import "@langchain/macaw-components/styles.css";
+@import "tailwindcss";
+@config "../tailwind.config.mjs";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+html,
+body {
+  background: var(--surface-level-1);
+  color: var(--text-primary);
+}

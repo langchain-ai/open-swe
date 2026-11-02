@@ -78,7 +78,7 @@ The backend never runs middleware around a model call; the only middleware objec
 - Structured logging: static message, values in `extra`.
   Avoid standard `LogRecord` field names in `extra`.
 - Web plugins (`plugins/`, served by `openswe/plugins/`) run in a sandboxed frame whose policy blocks their requests and reach the backend only through the generic `/plugins/{id}/...` API.
-  Never add backend code for one plugin; grow that API (storage, GitHub, rooms, people, threads), checking both the installation's grant and the person's own access.
+  Never add backend code for one plugin; grow that API (storage, GitHub, rooms, people, threads, and first-party services such as frontend reviews), checking both the installation's grant and the person's own access.
 - Prefer exposing UI write operations as authorized agent tools.
   Whenever adding or changing a setting, add or update its authorized agent tool alongside the UI, reusing the same validation and permission checks.
   Keep the tool guidance and `openswe/resources/default_prompt.md` dashboard settings map current with those changes.

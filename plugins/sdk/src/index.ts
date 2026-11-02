@@ -2,6 +2,7 @@ export * from "./protocol"
 export {
   Collection,
   connect,
+  FrontendReviews,
   GitHubRepository,
   HostError,
   LiveRoom,

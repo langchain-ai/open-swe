@@ -5,9 +5,13 @@ from datetime import timedelta
 from uuid import UUID
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import text
 
 from openswe.database import postgres
+from openswe.frontend_review.models import FrontendReviewMedia, FrontendReviewRun
+from openswe.frontend_review.schemas import FrontendReport, FrontendScenario
+from openswe.github.pull_requests import PullRequest
 from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.plugins import installed as installed_module
 from openswe.plugins import records as records_module
@@ -28,6 +32,10 @@ from openswe.plugins.records import (
     PluginNameTaken,
 )
 from openswe.plugins.rooms import Room
+from openswe.plugins.routes import (
+    api_plugin_frontend_review_media,
+    api_plugin_frontend_reviews,
+)
 from openswe.ui_invalidations.topics import _readable_plugin_documents
 from openswe.users import User
 
@@ -250,6 +258,79 @@ async def test_plugin_reaches_only_repositories_the_person_shared_and_can_read(
         plugin.require(PluginPermission.GITHUB_WRITE)
     with pytest.raises(PluginPermissionDenied):
         await plugin.room("draft", "acme/app")
+
+
+async def _capture(owner: str, repo: str, number: int) -> FrontendReviewRun:
+    """A finished capture of ``owner/repo#number`` with one screenshot, ``before.png``."""
+    pull = await PullRequest(owner=owner, repo=repo, number=number).ensure()
+    report = FrontendReport(
+        summary="One page captured.",
+        scenarios=[
+            FrontendScenario(
+                id="home", title="Home", path="/", status="complete", before_url="before.png"
+            )
+        ],
+    )
+    run = FrontendReviewRun(
+        pull_request_id=pull.id,
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        base_url="https://base.example.com",
+        head_url="https://head.example.com",
+        paths=["/"],
+        auth_mode="none",
+        status="complete",
+        report=report.model_dump(mode="json"),
+    )
+    async with postgres.session() as session:
+        session.add(run)
+        await session.flush()
+        session.add(
+            FrontendReviewMedia(
+                run_id=run.id, name="before.png", content_type="image/png", content=b"png"
+            )
+        )
+    return run
+
+
+async def test_captures_reach_an_app_only_from_repositories_shared_and_readable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada = await _person("ada", "1")
+    app = await _capture("acme", "app", 7)
+    secret = await _capture("acme", "secret", 7)
+    installation_id = await _install(ada, _bundle(permissions=["frontend-reviews"]))
+    await PluginInstallations.share(installation_id, ada, ["acme/app", "acme/secret"])
+    plugin = _installed(await PluginInstallations.get(installation_id, ada), ada)
+
+    async def readable(_login: str, repository: str) -> bool:
+        return repository != "acme/secret"
+
+    monkeypatch.setattr(installed_module, "can_read_repository", readable)
+
+    [run] = (await api_plugin_frontend_reviews("Acme", "App", 7, plugin)).runs
+    assert run.id == app.id
+    assert run.report is not None and run.report.scenarios[0].before_url == "before.png"
+    media = await api_plugin_frontend_review_media("acme", "app", 7, app.id, "before.png", plugin)
+    assert media.body == b"png"
+    assert media.headers["cache-control"] == "private, no-store"
+    assert media.headers["content-security-policy"] == "default-src 'none'"
+    # Media is found only under its own pull request's capture.
+    with pytest.raises(HTTPException) as missing:
+        await api_plugin_frontend_review_media("acme", "app", 7, secret.id, "before.png", plugin)
+    assert missing.value.status_code == 404
+    # Shared but no longer readable: GitHub access is checked on every call.
+    with pytest.raises(HTTPException) as unreadable:
+        await api_plugin_frontend_reviews("acme", "secret", 7, plugin)
+    assert unreadable.value.status_code == 403
+
+    other = await _install(ada, _bundle(name="notes", permissions=["storage"]))
+    await PluginInstallations.share(other, ada, ["acme/app"])
+    with pytest.raises(HTTPException) as denied:
+        await api_plugin_frontend_reviews(
+            "acme", "app", 7, _installed(await PluginInstallations.get(other, ada), ada)
+        )
+    assert denied.value.status_code == 403
 
 
 async def test_compacting_a_room_keeps_what_came_after() -> None:

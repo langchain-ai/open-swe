@@ -12,7 +12,9 @@ import {
   type CommitRequest,
   type CursorWire,
   type DocumentScope,
+  type DraftImage,
   type FieldPath,
+  type FrontendReviewsApi,
   type GitHubRepositoryApi,
   type HostApi,
   type HostContext,
@@ -84,6 +86,7 @@ export class PluginHost {
   private readonly profiles = new Map<string, Person>()
   private readonly collections = new Map<string, Collection<string, never>>()
   private readonly repositoryClients = new Map<string, GitHubRepository>()
+  private readonly frontendReviewClients = new Map<string, FrontendReviews>()
 
   private constructor(
     private readonly api: RpcStub<HostApi>,
@@ -209,6 +212,22 @@ export class PluginHost {
     return found
   }
 
+  /** Visual captures of one shared repository's pull requests, read as the person. */
+  frontendReviews(repository: string): FrontendReviews {
+    const id = repository.toLowerCase()
+    let found = this.frontendReviewClients.get(id)
+    if (!found) {
+      found = new FrontendReviews(this.api.frontendReviews(repository))
+      this.frontendReviewClients.set(id, found)
+    }
+    return found
+  }
+
+  /** Open pull requests with captures in the repositories the person shared. */
+  frontendReviewInbox(scope: "review-requested" | "mine") {
+    return settle(this.api.frontendReviewInbox(scope))
+  }
+
   /** The agent in the dock beside the plugin, which the person chats with. */
   readonly agent = {
     /**
@@ -254,9 +273,22 @@ export class PluginHost {
       settle(
         this.api.shareContext(JSON.stringify(context), options.label ?? null)
       ),
-    /** Opens the dock on the chosen chat, with `draft` in its composer for the person to send. */
-    open: (options: { draft?: string } = {}) =>
-      settle(this.api.openChat(options.draft ?? null)),
+    /**
+     * Opens the dock on the chosen chat, with `draft` and `images` in its
+     * composer; nothing is sent until the person checks it and presses Send.
+     */
+    open: async (
+      options: {
+        draft?: string
+        images?: Array<{ name: string; blob: Blob }>
+      } = {}
+    ) =>
+      settle(
+        this.api.openChat(
+          options.draft ?? null,
+          await Promise.all((options.images ?? []).map(draftImage))
+        )
+      ),
   }
 
   /** Joins a live room; leave it with the returned room's `leave()`. */
@@ -404,6 +436,49 @@ export class GitHubRepository {
   }
   openPull(draft: PullRequestDraft) {
     return settle(this.stub.openPull(draft))
+  }
+}
+
+/** One shared repository's pull request captures; see `host.frontendReviews`. */
+export class FrontendReviews {
+  constructor(private readonly stub: RpcStub<FrontendReviewsApi>) {}
+
+  list(pull: number) {
+    return settle(this.stub.list(pull))
+  }
+  get(pull: number, run: string) {
+    return settle(this.stub.get(pull, run))
+  }
+  /** A capture's media as a Blob, for `URL.createObjectURL`; the frame loads none itself. */
+  media(pull: number, run: string, name: string) {
+    return settle(this.stub.media(pull, run, name))
+  }
+}
+
+const DRAFT_IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+])
+
+async function draftImage(image: {
+  name: string
+  blob: Blob
+}): Promise<DraftImage> {
+  if (!DRAFT_IMAGE_TYPES.has(image.blob.type))
+    throw new HostError(
+      `${image.name} is not a PNG, JPEG, WebP or GIF image`,
+      400
+    )
+  const bytes = new Uint8Array(await image.blob.arrayBuffer())
+  let binary = ""
+  for (let start = 0; start < bytes.length; start += 0x8000)
+    binary += String.fromCharCode(...bytes.subarray(start, start + 0x8000))
+  return {
+    name: image.name,
+    mimeType: image.blob.type as DraftImage["mimeType"],
+    base64: btoa(binary),
   }
 }
 

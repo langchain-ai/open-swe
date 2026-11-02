@@ -1293,6 +1293,44 @@
         "title": "ChallengeResponse",
         "type": "object"
       },
+      "ChangedRegion": {
+        "properties": {
+          "height": {
+            "exclusiveMinimum": 0.0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "pixels": {
+            "minimum": 0.0,
+            "title": "Pixels",
+            "type": "integer"
+          },
+          "width": {
+            "exclusiveMinimum": 0.0,
+            "title": "Width",
+            "type": "integer"
+          },
+          "x": {
+            "minimum": 0.0,
+            "title": "X",
+            "type": "integer"
+          },
+          "y": {
+            "minimum": 0.0,
+            "title": "Y",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height",
+          "pixels"
+        ],
+        "title": "ChangedRegion",
+        "type": "object"
+      },
       "ChatBody": {
         "properties": {
           "name": {
@@ -2398,6 +2436,40 @@
         "title": "DesktopHandoffExchange",
         "type": "object"
       },
+      "DifferenceMetrics": {
+        "properties": {
+          "changed_pixels": {
+            "minimum": 0.0,
+            "title": "Changed Pixels",
+            "type": "integer"
+          },
+          "changed_ratio": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Changed Ratio",
+            "type": "number"
+          },
+          "threshold": {
+            "default": 0,
+            "maximum": 255.0,
+            "minimum": 0.0,
+            "title": "Threshold",
+            "type": "integer"
+          },
+          "total_pixels": {
+            "exclusiveMinimum": 0.0,
+            "title": "Total Pixels",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "changed_pixels",
+          "total_pixels",
+          "changed_ratio"
+        ],
+        "title": "DifferenceMetrics",
+        "type": "object"
+      },
       "DocumentModel": {
         "properties": {
           "document": {
@@ -2892,6 +2964,492 @@
           "intent"
         ],
         "title": "FixIntent",
+        "type": "object"
+      },
+      "FrontendReport": {
+        "properties": {
+          "ai_review_status": {
+            "default": "not_run",
+            "enum": [
+              "not_run",
+              "running",
+              "complete",
+              "failed"
+            ],
+            "title": "Ai Review Status",
+            "type": "string"
+          },
+          "assessment_error": {
+            "anyOf": [
+              {
+                "maxLength": 3000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assessment Error"
+          },
+          "assessment_thread_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assessment Thread Id"
+          },
+          "build_verification": {
+            "default": "unverified",
+            "enum": [
+              "unverified",
+              "verified"
+            ],
+            "title": "Build Verification",
+            "type": "string"
+          },
+          "production_url": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Production Url"
+          },
+          "scenarios": {
+            "items": {
+              "$ref": "#/components/schemas/FrontendScenario"
+            },
+            "maxItems": 10,
+            "title": "Scenarios",
+            "type": "array"
+          },
+          "summary": {
+            "maxLength": 12000,
+            "title": "Summary",
+            "type": "string"
+          },
+          "video_status": {
+            "default": "unavailable",
+            "enum": [
+              "unavailable",
+              "recorded"
+            ],
+            "title": "Video Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary"
+        ],
+        "title": "FrontendReport",
+        "type": "object"
+      },
+      "FrontendReviewInbox": {
+        "properties": {
+          "incomplete": {
+            "title": "Incomplete",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FrontendReviewInboxItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "incomplete"
+        ],
+        "title": "FrontendReviewInbox",
+        "type": "object"
+      },
+      "FrontendReviewInboxItem": {
+        "properties": {
+          "pr": {
+            "$ref": "#/components/schemas/OpenPullRequest"
+          },
+          "requested_reviewers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requested Reviewers",
+            "type": "array"
+          },
+          "requested_teams": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requested Teams",
+            "type": "array"
+          },
+          "run": {
+            "$ref": "#/components/schemas/FrontendReviewView"
+          }
+        },
+        "required": [
+          "pr",
+          "run",
+          "requested_reviewers",
+          "requested_teams"
+        ],
+        "title": "FrontendReviewInboxItem",
+        "type": "object"
+      },
+      "FrontendReviewRuns": {
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/FrontendReviewView"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs"
+        ],
+        "title": "FrontendReviewRuns",
+        "type": "object"
+      },
+      "FrontendReviewView": {
+        "properties": {
+          "auth_mode": {
+            "enum": [
+              "dummy",
+              "none"
+            ],
+            "title": "Auth Mode",
+            "type": "string"
+          },
+          "base_sha": {
+            "title": "Base Sha",
+            "type": "string"
+          },
+          "base_url": {
+            "title": "Base Url",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "head_sha": {
+            "title": "Head Sha",
+            "type": "string"
+          },
+          "head_url": {
+            "title": "Head Url",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Paths",
+            "type": "array"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FrontendReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "complete",
+              "blocked",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "auth_mode",
+          "base_url",
+          "head_url",
+          "paths",
+          "base_sha",
+          "head_sha",
+          "created_at",
+          "updated_at",
+          "error",
+          "report"
+        ],
+        "title": "FrontendReviewView",
+        "type": "object"
+      },
+      "FrontendScenario": {
+        "properties": {
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Actions",
+            "type": "array"
+          },
+          "after_error": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Error"
+          },
+          "after_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Url"
+          },
+          "after_video_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Video Url"
+          },
+          "annotations": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewAnnotation"
+            },
+            "maxItems": 100,
+            "title": "Annotations",
+            "type": "array"
+          },
+          "before_error": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Error"
+          },
+          "before_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Url"
+          },
+          "before_video_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Video Url"
+          },
+          "diff_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diff Url"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "maxLength": 3000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 2160.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "id": {
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "interaction": {
+            "default": false,
+            "title": "Interaction",
+            "type": "boolean"
+          },
+          "layout_warnings": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Layout Warnings",
+            "type": "array"
+          },
+          "mask_rects": {
+            "items": {
+              "$ref": "#/components/schemas/Rectangle"
+            },
+            "maxItems": 100,
+            "title": "Mask Rects",
+            "type": "array"
+          },
+          "mask_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask Url"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DifferenceMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "min_region_pixels": {
+            "default": 4,
+            "minimum": 1.0,
+            "title": "Min Region Pixels",
+            "type": "integer"
+          },
+          "path": {
+            "maxLength": 500,
+            "title": "Path",
+            "type": "string"
+          },
+          "regions": {
+            "items": {
+              "$ref": "#/components/schemas/ChangedRegion"
+            },
+            "maxItems": 100,
+            "title": "Regions",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "blocked",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tile_size": {
+            "default": 32,
+            "maximum": 256.0,
+            "minimum": 1.0,
+            "title": "Tile Size",
+            "type": "integer"
+          },
+          "title": {
+            "maxLength": 200,
+            "title": "Title",
+            "type": "string"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 3840.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "path",
+          "status"
+        ],
+        "title": "FrontendScenario",
         "type": "object"
       },
       "FunctionCallItem": {
@@ -5432,7 +5990,8 @@
           "github:read",
           "github:write",
           "agent",
-          "realtime"
+          "realtime",
+          "frontend-reviews"
         ],
         "title": "PluginPermission",
         "type": "string"
@@ -6654,6 +7213,38 @@
         "title": "ReasoningParam",
         "type": "object"
       },
+      "Rectangle": {
+        "properties": {
+          "height": {
+            "exclusiveMinimum": 0.0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "width": {
+            "exclusiveMinimum": 0.0,
+            "title": "Width",
+            "type": "integer"
+          },
+          "x": {
+            "minimum": 0.0,
+            "title": "X",
+            "type": "integer"
+          },
+          "y": {
+            "minimum": 0.0,
+            "title": "Y",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "title": "Rectangle",
+        "type": "object"
+      },
       "RefResponse": {
         "properties": {
           "sha": {
@@ -7276,6 +7867,50 @@
           "cancelled"
         ],
         "type": "string"
+      },
+      "ReviewAnnotation": {
+        "properties": {
+          "body": {
+            "maxLength": 3000,
+            "title": "Body",
+            "type": "string"
+          },
+          "height": {
+            "exclusiveMinimum": 0.0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "title": {
+            "maxLength": 200,
+            "title": "Title",
+            "type": "string"
+          },
+          "width": {
+            "exclusiveMinimum": 0.0,
+            "title": "Width",
+            "type": "integer"
+          },
+          "x": {
+            "minimum": 0.0,
+            "title": "X",
+            "type": "integer"
+          },
+          "y": {
+            "minimum": 0.0,
+            "title": "Y",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height",
+          "title",
+          "body"
+        ],
+        "title": "ReviewAnnotation",
+        "type": "object"
       },
       "ReviewChat": {
         "properties": {
@@ -16810,6 +17445,333 @@
           }
         ],
         "summary": "Api Put Plugin Document",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/frontend-reviews": {
+      "get": {
+        "description": "Open pull requests with captures, in the repositories the person shared with the app.",
+        "operationId": "api_plugin_frontend_review_inbox_dashboard_api_plugins__installation_id__frontend_reviews_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "review-requested",
+              "enum": [
+                "review-requested",
+                "mine"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FrontendReviewInbox"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Frontend Review Inbox",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/frontend-reviews/{owner}/{repo}/{number}": {
+      "get": {
+        "description": "The pull request's latest captures, newest first.",
+        "operationId": "api_plugin_frontend_reviews_dashboard_api_plugins__installation_id__frontend_reviews__owner___repo___number__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FrontendReviewRuns"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Frontend Reviews",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/frontend-reviews/{owner}/{repo}/{number}/{run_id}": {
+      "get": {
+        "operationId": "api_plugin_frontend_review_dashboard_api_plugins__installation_id__frontend_reviews__owner___repo___number___run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FrontendReviewView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Frontend Review",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/frontend-reviews/{owner}/{repo}/{number}/{run_id}/media/{name}": {
+      "get": {
+        "description": "A capture's screenshot or recording, as bytes the frame shows from a Blob.",
+        "operationId": "api_plugin_frontend_review_media_dashboard_api_plugins__installation_id__frontend_reviews__owner___repo___number___run_id__media__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/png": {},
+              "video/mp4": {},
+              "video/webm": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Frontend Review Media",
         "tags": [
           "dashboard",
           "plugins"

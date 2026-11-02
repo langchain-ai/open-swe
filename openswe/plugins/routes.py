@@ -20,7 +20,7 @@ from urllib.parse import quote
 from uuid import UUID
 
 import httpx2
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import (
     BaseModel,
@@ -36,6 +36,14 @@ from pydantic import (
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP, session_is_admin
 from openswe.dashboard.oauth import session_user_id
+from openswe.frontend_review.inbox import ReviewInbox
+from openswe.frontend_review.schemas import FrontendReviewInbox, FrontendReviewView
+from openswe.frontend_review.service import (
+    get_review,
+    list_reviews,
+    media_for_review,
+    review_view,
+)
 from openswe.github.http import GitHubError, GitHubSignInRequired, GraphQLError
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.plugins.installed import (
@@ -1113,3 +1121,74 @@ async def api_plugin_room_presence(
         joined = await plugin.room(room, body.repository)
     await joined.announce(body.client, body.presence)
     return Response(status_code=204)
+
+
+# ---- Frontend reviews ----------------------------------------------------------
+
+PullNumber = Annotated[int, Path(ge=1, le=2**31 - 1)]
+
+
+class FrontendReviewRuns(BaseModel):
+    runs: list[FrontendReviewView]
+
+
+@router.get("/{installation_id}/frontend-reviews")
+async def api_plugin_frontend_review_inbox(
+    plugin: PluginDep, scope: Literal["review-requested", "mine"] = "review-requested"
+) -> FrontendReviewInbox:
+    """Open pull requests with captures, in the repositories the person shared with the app."""
+    with _as_http():
+        plugin.require(PluginPermission.FRONTEND_REVIEWS)
+        return await ReviewInbox(plugin.login, list(plugin.installation.repositories)).read(scope)
+
+
+@router.get("/{installation_id}/frontend-reviews/{owner}/{repo}/{number}")
+async def api_plugin_frontend_reviews(
+    owner: str, repo: str, number: PullNumber, plugin: PluginDep
+) -> FrontendReviewRuns:
+    """The pull request's latest captures, newest first."""
+    with _as_http():
+        plugin.require(PluginPermission.FRONTEND_REVIEWS)
+        owner, repo = (await plugin.repository(_repository(owner, repo))).split("/")
+    return FrontendReviewRuns(
+        runs=[review_view(run) for run in await list_reviews(owner, repo, number)]
+    )
+
+
+@router.get("/{installation_id}/frontend-reviews/{owner}/{repo}/{number}/{run_id}")
+async def api_plugin_frontend_review(
+    owner: str, repo: str, number: PullNumber, run_id: UUID, plugin: PluginDep
+) -> FrontendReviewView:
+    with _as_http():
+        plugin.require(PluginPermission.FRONTEND_REVIEWS)
+        owner, repo = (await plugin.repository(_repository(owner, repo))).split("/")
+    run = await get_review(owner, repo, number, run_id)
+    if run is None:
+        raise HTTPException(404, "capture not found")
+    return review_view(run)
+
+
+@router.get(
+    "/{installation_id}/frontend-reviews/{owner}/{repo}/{number}/{run_id}/media/{name}",
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}, "video/webm": {}, "video/mp4": {}}}},
+)
+async def api_plugin_frontend_review_media(
+    owner: str, repo: str, number: PullNumber, run_id: UUID, name: str, plugin: PluginDep
+) -> Response:
+    """A capture's screenshot or recording, as bytes the frame shows from a Blob."""
+    with _as_http():
+        plugin.require(PluginPermission.FRONTEND_REVIEWS)
+        owner, repo = (await plugin.repository(_repository(owner, repo))).split("/")
+    asset = await media_for_review(owner, repo, number, run_id, name)
+    if asset is None:
+        raise HTTPException(404, "media not found")
+    return Response(
+        asset.content,
+        media_type=asset.content_type,
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Security-Policy": "default-src 'none'",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

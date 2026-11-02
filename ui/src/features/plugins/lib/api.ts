@@ -1,6 +1,8 @@
 import type {
   Commit,
   CursorWire,
+  FrontendReviewInbox,
+  FrontendReviewRun,
   JsonObject,
   PluginPermission,
   PullRequest,
@@ -140,10 +142,39 @@ function plugin(id: string): string {
   return `/plugins/${segment(id)}`
 }
 
-function repo(id: string, repository: string): string {
+function ownerAndName(repository: string): string {
   const [owner = "", name = "", ...rest] = repository.split("/")
   if (rest.length) throw new UnsafePathError("repository must be owner/repo")
-  return `${plugin(id)}/github/${segment(owner)}/${segment(name)}`
+  return `${segment(owner)}/${segment(name)}`
+}
+
+function repo(id: string, repository: string): string {
+  return `${plugin(id)}/github/${ownerAndName(repository)}`
+}
+
+function frontendReviews(id: string, repository: string, pull: number): string {
+  return `${plugin(id)}/frontend-reviews/${ownerAndName(repository)}/${pull}`
+}
+
+/** Bytes the backend serves, `null` for the statuses that mean there are none. */
+async function blobOrNull(
+  path: string,
+  missing: ReadonlyArray<number>
+): Promise<Blob | null> {
+  const requestId = newRequestId()
+  const res = await fetch(dashboardApiUrl(path), {
+    credentials: "include",
+    headers: {
+      [REQUEST_ID_HEADER]: requestId,
+      ...dashboardForwardedHeaders(),
+    },
+  }).catch((cause: unknown) => {
+    throw networkError(cause, requestId)
+  })
+  if (missing.includes(res.status)) return null
+  if (!res.ok)
+    throw new DashboardRequestError(res.status, res.statusText, requestId)
+  return res.blob()
 }
 
 function document(id: string, collection: string, key: string): string {
@@ -380,30 +411,40 @@ export const pluginsApi = {
       )
     )?.text ?? null,
   /** An image in the repository as bytes, `null` when absent or not an image. */
-  image: async (
+  image: (id: string, repository: string, path: string, ref: string) =>
+    blobOrNull(
+      `${repo(id, repository)}/image${query({ path, ref })}`,
+      [404, 415]
+    ),
+  /** Open pull requests with captures, in the repositories shared with the app. */
+  frontendReviewInbox: (id: string, scope: "review-requested" | "mine") =>
+    agentsRequest<FrontendReviewInbox>(
+      `${plugin(id)}/frontend-reviews${query({ scope })}`
+    ),
+  frontendReviews: async (id: string, repository: string, pull: number) =>
+    (
+      await agentsRequest<{ runs: Array<FrontendReviewRun> }>(
+        frontendReviews(id, repository, pull)
+      )
+    ).runs,
+  frontendReview: (id: string, repository: string, pull: number, run: string) =>
+    orNull(
+      agentsRequest<FrontendReviewRun>(
+        `${frontendReviews(id, repository, pull)}/${segment(run)}`
+      )
+    ),
+  /** A capture's screenshot or recording as bytes, `null` when absent. */
+  frontendReviewMedia: (
     id: string,
     repository: string,
-    path: string,
-    ref: string
-  ): Promise<Blob | null> => {
-    const requestId = newRequestId()
-    const res = await fetch(
-      dashboardApiUrl(`${repo(id, repository)}/image${query({ path, ref })}`),
-      {
-        credentials: "include",
-        headers: {
-          [REQUEST_ID_HEADER]: requestId,
-          ...dashboardForwardedHeaders(),
-        },
-      }
-    ).catch((cause: unknown) => {
-      throw networkError(cause, requestId)
-    })
-    if (res.status === 404 || res.status === 415) return null
-    if (!res.ok)
-      throw new DashboardRequestError(res.status, res.statusText, requestId)
-    return res.blob()
-  },
+    pull: number,
+    run: string,
+    name: string
+  ) =>
+    blobOrNull(
+      `${frontendReviews(id, repository, pull)}/${segment(run)}/media/${segment(name)}`,
+      [404]
+    ),
   history: async (
     id: string,
     repository: string,

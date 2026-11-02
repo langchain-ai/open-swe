@@ -8,6 +8,7 @@ import { SubagentThreadView } from "@/features/agents/components/subagents/Subag
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { ThreadSourceProvider } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import { useAgentThread } from "@/features/agents/lib/queries"
+import type { ComposerDraft } from "@/features/agents/lib/types"
 import {
   ensureThreadLoad,
   threadDetailFailed,
@@ -20,7 +21,7 @@ export function AgentThreadPage(props: {
   active?: boolean
   /** Show this subagent's transcript instead of the thread's own. */
   subagentId?: string
-  composerDraft?: { key: number; text: string }
+  composerDraft?: ComposerDraft
   /** False when the thread is embedded in a page that names the tab itself. */
   ownsTitle?: boolean
 }) {
@@ -51,7 +52,7 @@ function AgentThreadContent({
   threadId: string
   active?: boolean
   subagentId?: string
-  composerDraft?: { key: number; text: string }
+  composerDraft?: ComposerDraft
   ownsTitle?: boolean
 }) {
   const threadQuery = useAgentThread(threadId)

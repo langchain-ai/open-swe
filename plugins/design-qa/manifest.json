@@ -1,0 +1,8 @@
+{
+  "name": "design-qa",
+  "displayName": "Design QA",
+  "version": "0.1.0",
+  "description": "Compare the saved before and after screenshots of your pull requests, and ask the agent about a change.",
+  "sidebar": { "label": "Design QA", "icon": "kanban" },
+  "permissions": ["frontend-reviews", "agent"]
+}

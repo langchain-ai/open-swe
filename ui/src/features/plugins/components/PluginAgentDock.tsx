@@ -6,6 +6,7 @@ import { toast } from "sonner"
 
 import { AgentThreadPage } from "@/features/agents/components/AgentThreadPage"
 import { EmbeddedThreadContext } from "@/features/agents/lib/embeddedThread"
+import type { ComposerDraft } from "@/features/agents/lib/types"
 import type { InstalledPlugin } from "@/features/plugins/lib/api"
 import { pluginsApi } from "@/features/plugins/lib/api"
 import type {
@@ -41,7 +42,7 @@ export function PluginAgentDock({
 }: {
   plugin: InstalledPlugin
   chat: ChatTarget
-  draft: { key: number; text: string } | undefined
+  draft: ComposerDraft | undefined
   /** `null` until the plugin's frame offers any. */
   tools: ProvidedTools | null
   /** What the plugin last said the person has open; each message carries it. */

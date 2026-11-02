@@ -63,6 +63,7 @@ export type PluginPermission =
   | "github:write"
   | "agent"
   | "realtime"
+  | "frontend-reviews"
 
 export type Theme = "light" | "dark"
 
@@ -323,6 +324,123 @@ export type RoomEvent =
   | { type: "synced"; seq: number }
   | { type: "presence"; client: string; presence: Uint8Array }
 
+/** Where a pull request's visual capture stands. */
+export type FrontendRunStatus =
+  | "pending"
+  | "running"
+  | "complete"
+  | "blocked"
+  | "failed"
+
+export interface PixelRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** What the AI assessment noted about one area of a scenario's screenshots. */
+export interface FrontendAnnotation extends PixelRect {
+  title: string
+  body: string
+}
+
+/** One page or interaction state, captured on the base preview and the pull request's. */
+export interface FrontendScenario {
+  id: string
+  title: string
+  path: string
+  status: "complete" | "blocked" | "failed"
+  /** The `*_url` fields name the scenario's media; read one with `frontendReviews(repository).media()`. */
+  before_url: string | null
+  after_url: string | null
+  diff_url: string | null
+  mask_url: string | null
+  before_video_url: string | null
+  after_video_url: string | null
+  width: number | null
+  height: number | null
+  metrics: {
+    changed_pixels: number
+    total_pixels: number
+    changed_ratio: number
+    threshold: number
+  } | null
+  regions: Array<PixelRect & { pixels: number }>
+  annotations: FrontendAnnotation[]
+  mask_rects: PixelRect[]
+  tile_size: number
+  min_region_pixels: number
+  interaction: boolean
+  /** The replay steps that reached an interaction state. */
+  actions: string[]
+  before_error: string | null
+  after_error: string | null
+  layout_warnings: string[]
+  error: string | null
+}
+
+export interface FrontendReport {
+  production_url: string | null
+  summary: string
+  ai_review_status: "not_run" | "running" | "complete" | "failed"
+  /** The private thread the AI assessment ran in, for `nav.openThread`. */
+  assessment_thread_id: string | null
+  assessment_error: string | null
+  build_verification: "unverified" | "verified"
+  video_status: "unavailable" | "recorded"
+  scenarios: FrontendScenario[]
+}
+
+/** One immutable capture of a pull request's base and head previews. */
+export interface FrontendReviewRun {
+  id: string
+  status: FrontendRunStatus
+  auth_mode: "dummy" | "none"
+  base_url: string
+  head_url: string
+  paths: string[]
+  base_sha: string
+  head_sha: string
+  created_at: string
+  updated_at: string
+  error: string | null
+  report: FrontendReport | null
+}
+
+/** An open pull request as GitHub lists it, with its current head. */
+export interface OpenPullRequest {
+  repo: string
+  number: number
+  title: string
+  draft: boolean | null
+  createdAt: string | null
+  updatedAt: string | null
+  headSha: string | null
+  headRef: string | null
+}
+
+export interface FrontendReviewInboxItem {
+  pr: OpenPullRequest
+  /** The pull request's latest capture. */
+  run: FrontendReviewRun
+  requested_reviewers: string[]
+  requested_teams: string[]
+}
+
+export interface FrontendReviewInbox {
+  items: FrontendReviewInboxItem[]
+  /** Whether GitHub left some repositories' pull requests out. */
+  incomplete: boolean
+}
+
+/** An image to put in the dock's composer beside the draft, base64-encoded. */
+export interface DraftImage {
+  name: string
+  mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+  base64: string
+}
+
 /** Something the plugin ends by disposing it. */
 export interface Subscription extends RpcTarget {}
 
@@ -354,6 +472,15 @@ export interface HostApi extends RpcTarget {
   collection(name: string, scope: DocumentScope): Promise<CollectionApi>
   /** One repository the person shared, acting with their own GitHub access. */
   github(repository: string): Promise<GitHubRepositoryApi>
+  /** Visual captures of the pull requests of one repository the person shared. */
+  frontendReviews(repository: string): Promise<FrontendReviewsApi>
+  /**
+   * Open pull requests with captures, in the repositories the person shared:
+   * those asking them (or a team of theirs) for review, or their own.
+   */
+  frontendReviewInbox(
+    scope: "review-requested" | "mine"
+  ): Promise<FrontendReviewInbox>
   /**
    * Offers the agent in the dock tools, as JSON text of
    * `{ tools: [{ name, description, parameters }], instructions }`, in place
@@ -373,8 +500,11 @@ export interface HostApi extends RpcTarget {
    * shows `label` (at most 120 characters) beside it.
    */
   shareContext(json: string, label: string | null): Promise<void>
-  /** Opens the dock on the chosen chat, with `draft` in its composer for the person to send. */
-  openChat(draft: string | null): Promise<void>
+  /**
+   * Opens the dock on the chosen chat, with `draft` and `images` in its
+   * composer for the person to check and send; at most 5 images of 10 MB each.
+   */
+  openChat(draft: string | null, images: DraftImage[]): Promise<void>
   /** Joins a live room, scoped like documents; dispose the room to leave it. */
   joinRoom(
     scope: RoomScope,
@@ -411,6 +541,14 @@ export interface GitHubRepositoryApi extends RpcTarget {
   commit(request: CommitWire): Promise<string>
   findPull(head: string): Promise<PullRequest | null>
   openPull(draft: PullRequestDraft): Promise<PullRequest>
+}
+
+export interface FrontendReviewsApi extends RpcTarget {
+  /** The pull request's latest captures, newest first. */
+  list(pull: number): Promise<FrontendReviewRun[]>
+  get(pull: number, run: string): Promise<FrontendReviewRun | null>
+  /** A capture's media as a Blob, by the name a scenario gives it; `null` when absent. */
+  media(pull: number, run: string, name: string): Promise<Blob | null>
 }
 
 /** One live room this plugin joined. */

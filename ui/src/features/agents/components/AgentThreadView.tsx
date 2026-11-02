@@ -29,6 +29,7 @@ import { formatRelativeTime } from "@/lib/utils"
 import type {
   AgentPullRequest,
   AgentThread,
+  ComposerDraft,
   ImageChunk,
   Message,
   ThreadFixScope,
@@ -99,7 +100,7 @@ import {
 
 interface AgentThreadViewProps {
   thread: AgentThread
-  composerDraft?: { key: number; text: string }
+  composerDraft?: ComposerDraft
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
@@ -423,7 +424,7 @@ export function AgentThreadView({
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
         text: composerDraft.text,
-        images: [],
+        images: [...(composerDraft.images ?? [])],
         replacesSuggestion: true,
       }))
     }

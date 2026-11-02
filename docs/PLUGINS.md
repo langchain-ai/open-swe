@@ -108,6 +108,7 @@ The manifest is a JSON script inside the bundle, read when a version is publishe
 | `github:read` | read repository info, refs, trees, files, history and pull requests |
 | `github:write` | create branches, commit files and open pull requests (also allows reads) |
 | `agent` | an agent the person chats with in a dock beside the plugin, with tools the plugin provides |
+| `frontend-reviews` | read the visual captures of pull requests in its repositories: screenshots, recordings and AI assessments |
 
 The person approves these permissions when they add the app.
 If a newer version asks for more, the install stays where it is until they approve them.
@@ -394,6 +395,9 @@ await host.agent.share(
 )
 
 await host.agent.open({ draft: "> the passage the person selected\n\n" }) // the person presses Send
+
+// Images go in the composer beside the draft, for the person to check before sending.
+await host.agent.open({ draft: "What changed here?", images: [{ name: "after.png", blob }] })
 ```
 
 - **Chats** are yours to scope.
@@ -413,6 +417,26 @@ await host.agent.open({ draft: "> the passage the person selected\n\n" }) // the
   After 20 runs your results started since the person last wrote, the agent waits for them, and their next message brings it what you returned.
 - **Results are data.**
   The agent treats them as your plugin's, not as instructions from the person, so a document can't steer it.
+- **Images** in a draft are PNG, JPEG, WebP or GIF Blobs: at most 5, of 10 MB each, as the composer takes them itself.
+  Nothing is sent until the person presses Send, and they can remove any image first.
+
+### Frontend reviews
+
+With the `frontend-reviews` permission, a plugin reads the visual captures Open SWE keeps for pull requests: a run's before and after screenshots of each page or interaction state, their pixel comparison, and the AI assessment.
+Captures are written only by Open SWE, never by plugins.
+
+```ts
+const reviews = host.frontendReviews("acme/app")
+const [latest] = await reviews.list(12)                 // the PR's latest captures, newest first
+const run = await reviews.get(12, latest.id)              // or null
+const shot = await reviews.media(12, run!.id, run!.report!.scenarios[0].after_url!) // Blob, or null
+const inbox = await host.frontendReviewInbox("review-requested") // or "mine"
+```
+
+- A scenario's `before_url`, `after_url`, `diff_url`, `mask_url` and `*_video_url` name its media; read each with `media()`.
+- The inbox lists open pull requests with captures in the repositories the person shared: those asking them, or a team of theirs, for review, or their own.
+  `incomplete` says GitHub's first page of results left older ones out.
+- Every call needs the repository shared with the plugin and the person's own read access, like GitHub calls.
 
 ### Errors
 

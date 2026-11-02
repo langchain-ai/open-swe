@@ -12,6 +12,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react"
 import { SideSheet } from "@/components/SideSheet"
 import { RightPanelShell } from "@/features/agents/components/panel/RightPanelShell"
 import { RIGHT_PANEL_SHEET_CLASS_NAME } from "@/features/agents/components/panel/rightPanelLayout"
+import type { ComposerDraft, ImageChunk } from "@/features/agents/lib/types"
 import { PluginAgentDock } from "@/features/plugins/components/PluginAgentDock"
 import type { ProvidedTools } from "@/features/plugins/components/PluginAgentDock"
 import { PluginView } from "@/features/plugins/components/PluginView"
@@ -228,7 +229,7 @@ function useAgentDock(plugin: InstalledPlugin, onScreen: () => boolean) {
     name: "default",
     repository: null,
   })
-  const [draft, setDraft] = useState<{ key: number; text: string }>()
+  const [draft, setDraft] = useState<ComposerDraft>()
   const [tools, setTools] = useState<ProvidedTools | null>(null)
   const [context, setContext] = useState<SharedContext | null>(null)
   const [threadId, setThreadId] = useState<string | null>(null)
@@ -260,10 +261,15 @@ function useAgentDock(plugin: InstalledPlugin, onScreen: () => boolean) {
           ? prev
           : next
       ),
-    openChat: (text: string | null) => {
+    openChat: (text: string | null, images: Array<ImageChunk>) => {
       if (!onScreen()) return
       setOpen(true)
-      if (text) setDraft((prev) => ({ key: (prev?.key ?? 0) + 1, text }))
+      if (text || images.length)
+        setDraft((prev) => ({
+          key: (prev?.key ?? 0) + 1,
+          text: text ?? "",
+          images,
+        }))
     },
   }
 }

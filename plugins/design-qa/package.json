@@ -1,0 +1,34 @@
+{
+  "name": "openswe-plugin-design-qa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Design QA: inspect the saved visual captures of your pull requests in Open SWE",
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@langchain/macaw-components": "file:../../ui/vendor/macaw/langchain-macaw-components-2.0.0-alpha.0.tgz",
+    "@langchain/macaw-tokens": "file:../../ui/vendor/macaw/langchain-macaw-tokens-2.0.0-alpha.0.tgz",
+    "@openswe/plugin-sdk": "file:../sdk",
+    "@phosphor-icons/react": "^2.1.10",
+    "@tanstack/react-query": "^5.102.8",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.3.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.1.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.2",
+    "vite-plugin-singlefile": "^2.3.4",
+    "vitest": "^4.1.11"
+  }
+}

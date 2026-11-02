@@ -38,6 +38,8 @@ class PluginPermission(StrEnum):
     """Chat with an agent in a dock beside the plugin, which can call tools the plugin provides."""
     REALTIME = "realtime"
     """Join live rooms: broadcast updates and presence to others with the same access."""
+    FRONTEND_REVIEWS = "frontend-reviews"
+    """Read the visual captures of pull requests in its repositories: screenshots and assessments."""
 
 
 SidebarIcon = Literal[

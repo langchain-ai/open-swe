@@ -24,6 +24,11 @@ export const PERMISSION_COPY: Record<
     description:
       "Share live edits, cursors and who is viewing with everyone using it on the same repository.",
   },
+  "frontend-reviews": {
+    label: "Read visual captures",
+    description:
+      "See the before and after screenshots and AI assessments saved for pull requests in the repositories you share.",
+  },
   agent: {
     label: "Work with an agent",
     description:
