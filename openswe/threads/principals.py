@@ -26,14 +26,15 @@ from openswe.api_keys.deps import api_key_from_token, bind_audit_key
 from openswe.api_keys.models import ApiKey
 from openswe.audit_logs.middleware import bind_actor
 from openswe.audit_logs.models import AuditLogEnrichments
-from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import bind_audit_session, optional_session
+from openswe.dashboard.principal import DashboardPrincipal
 from openswe.federation.github_oidc import (
     GitHubActionsClaims,
     InvalidFederatedToken,
     looks_federated,
     verify,
 )
+from openswe.threads.identity import ThreadIdentity
 from openswe.threads.summary import _assert_thread_postable, assert_thread_readable
 from openswe.utils.json_types import JsonObject
 from openswe.workspaces.store import WORKSPACES
@@ -100,16 +101,14 @@ class Principal:
             kind="person",
             login=login,
             email=email,
-            admin=is_admin(email, login=login),
+            admin=ThreadIdentity(login).is_admin(email),
         )
 
     @classmethod
     def of_person(cls, session: dict[str, Any]) -> Principal:
-        login = session.get("sub")
-        if not isinstance(login, str) or not login.strip():
-            raise HTTPException(401, "session carries no user")
+        principal = DashboardPrincipal.from_session(session)
         email = session.get("email")
-        return cls.of_login(login.strip(), email if isinstance(email, str) else None)
+        return cls.of_login(principal.subject.strip(), email if isinstance(email, str) else None)
 
     @property
     def machine(self) -> bool:
@@ -126,7 +125,7 @@ class Principal:
         """The identity a run records as having sent its opening message."""
         if self.machine:
             return f"system:{self.started_by_id.replace(':', '/')}"
-        return f"github:{self.person}"
+        return ThreadIdentity(self.person).sender_id
 
     def authorize(self, requested: ThreadType) -> None:
         """Refuse a kind of thread this principal may not create."""
@@ -213,6 +212,12 @@ async def require_principal(request: Request) -> Principal:
     session = optional_session(request)
     if session is None:
         raise HTTPException(401, _UNAUTHENTICATED, headers={"WWW-Authenticate": "Bearer"})
+    from openswe.dashboard.principal import DashboardPrincipal
+
+    dashboard = DashboardPrincipal.from_session(session)
+    if request.url.path.startswith("/dashboard/api/"):
+        dashboard.authorize_path(request.url.path, request.method)
+    await dashboard.authorize()
     principal = Principal.of_person(session)
     bind_audit_session(request, session)
     return principal

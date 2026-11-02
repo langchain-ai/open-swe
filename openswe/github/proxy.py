@@ -160,6 +160,13 @@ async def refresh_proxy_token(
     record = _PROXY_TOKEN_EXPIRY.get(thread_id)
     if record is None:
         return False
+    from openswe.sandboxes.lifecycle import SandboxCredentialPolicy, get_sandbox_metadata
+    from openswe.tasks.schemas import ThreadMetadata
+
+    metadata = await get_sandbox_metadata(thread_id)
+    if not await SandboxCredentialPolicy(ThreadMetadata.model_validate(metadata)).allows_github():
+        _PROXY_TOKEN_EXPIRY.pop(thread_id, None)
+        return False
     _expires, _recorded, recorded_repositories, recorded_permissions = _unpack_proxy_token_record(
         record
     )

@@ -11,7 +11,7 @@ reference ``users.id`` instead of a provider-specific handle.
 import logging
 from collections.abc import Collection, Iterable
 from datetime import datetime
-from typing import Literal, Self
+from typing import TYPE_CHECKING, Literal, Self
 from uuid import UUID, uuid7
 
 from sqlalchemy import (
@@ -33,13 +33,20 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.input_messages import PersonIdentity, split_person_id
-from openswe.users.authorization import UnauthorizedUser, is_authorized_github_login
+from openswe.users.authorization import (
+    AccountConflict,
+    UnauthorizedUser,
+    is_authorized_github_login,
+)
 from openswe.users.preferences import UserPreferences, UserPreferencesPatch
 from openswe.utils.json_types import JsonObject
 
+if TYPE_CHECKING:
+    from openswe.dashboard.langsmith_login import LangSmithAccount
+
 logger = logging.getLogger(__name__)
 
-Provider = Literal["github", "slack"]
+Provider = Literal["github", "slack", "langsmith"]
 
 
 class UserIdentity(Base):
@@ -116,6 +123,16 @@ class User(Base):
             "",
         )
 
+    @staticmethod
+    def key_id(key: str) -> UUID | None:
+        if not key.startswith("user:"):
+            return None
+        try:
+            return UUID(key.removeprefix("user:"))
+        except ValueError:
+            logger.debug("Ignoring an invalid canonical user key")
+            return None
+
     @classmethod
     async def get(cls, user_id: UUID) -> Self | None:
         async with postgres.session() as session:
@@ -146,7 +163,10 @@ class User(Base):
             return await session.scalar(
                 cls._with_identities(select(cls))
                 .join(cls.identities)
-                .where(func.lower(UserIdentity.email) == email.strip().lower())
+                .where(
+                    UserIdentity.provider != "langsmith",
+                    func.lower(UserIdentity.email) == email.strip().lower(),
+                )
                 .order_by(UserIdentity.last_seen_at.desc())
                 .limit(1)
             )
@@ -160,6 +180,9 @@ class User(Base):
         people come into being when they sign in, so an unknown identity resolves
         to ``None`` and the caller decides what that means.
         """
+        if person["id"].startswith("user:"):
+            user_id = cls.key_id(person["id"])
+            return await cls.get(user_id) if user_id is not None else None
         platform, external_id = split_person_id(person)
         if platform == "slack" and external_id:
             return await cls.for_identity("slack", external_id)
@@ -384,6 +407,9 @@ class User(Base):
         """The person behind a mutable handle; the most recently seen one wins."""
         if not postgres.configured():
             return None
+        if login.startswith("user:"):
+            user_id = cls.key_id(login)
+            return await cls.get(user_id) if user_id is not None else None
         async with postgres.session() as session:
             return await session.scalar(
                 cls._with_identities(select(cls))
@@ -408,6 +434,7 @@ class User(Base):
         display_name: str = "",
         avatar_url: str = "",
         admin: bool | None = None,
+        authorization: LangSmithAccount | None = None,
     ) -> Self:
         """Get or create the person behind a provider account, in one transaction.
 
@@ -418,7 +445,13 @@ class User(Base):
         """
         async with postgres.session() as session:
             user_id = await cls._claim(
-                session, provider, external_id, login=login, email=email, team_id=team_id
+                session,
+                provider,
+                external_id,
+                login=login,
+                email=email,
+                team_id=team_id,
+                authorization=authorization,
             )
             await session.execute(
                 update(cls)
@@ -445,6 +478,8 @@ class User(Base):
         team_id: str = "",
     ) -> Self:
         """Attach another provider account to this person, taking it over if needed."""
+        if provider == "langsmith" or any(i.provider == "langsmith" for i in self.identities):
+            raise UnauthorizedUser("LangSmith accounts cannot be linked to other identities")
         cls = type(self)
         async with postgres.session() as session:
             upsert = insert(UserIdentity).values(
@@ -490,7 +525,7 @@ class User(Base):
         listed = select(UserIdentity.user_id).where(
             or_(
                 (UserIdentity.provider == "github") & func.lower(UserIdentity.login).in_(wanted),
-                func.lower(UserIdentity.email).in_(wanted),
+                (UserIdentity.provider != "langsmith") & func.lower(UserIdentity.email).in_(wanted),
             )
         )
         async with postgres.session() as session:
@@ -514,6 +549,7 @@ class User(Base):
         login: str,
         email: str,
         team_id: str,
+        authorization: LangSmithAccount | None = None,
     ) -> UUID:
         """The id of the person owning this identity, creating them when new.
 
@@ -522,6 +558,10 @@ class User(Base):
         and rolled back when the identity upsert reports that a concurrent first
         sign in already claimed it.
         """
+        if provider == "langsmith":
+            if authorization is None or authorization.sub != external_id:
+                raise UnauthorizedUser("LangSmith sign in requires an authorized account")
+            authorization.require_allowed_org()
         owner = await session.scalar(
             select(UserIdentity.user_id).where(
                 UserIdentity.provider == provider,
@@ -530,7 +570,9 @@ class User(Base):
         )
         speculative = uuid7() if owner is None else None
         if speculative is not None:
-            await _authorize(provider, login)
+            if provider != "langsmith":
+                await _authorize(provider, login)
+            await cls._require_single_login_kind(session, provider, email)
             await session.execute(insert(cls).values(id=speculative))
         upsert = insert(UserIdentity).values(
             user_id=owner or speculative,
@@ -558,6 +600,34 @@ class User(Base):
                 extra={"user_provider": provider, "user_id": str(claimed)},
             )
         return claimed
+
+    @staticmethod
+    async def _require_single_login_kind(
+        session: AsyncSession, provider: Provider, email: str
+    ) -> None:
+        """Refuse a new GitHub or LangSmith person whose email already signs in the other way."""
+        wanted = email.strip().lower()
+        if provider not in ("github", "langsmith") or not wanted:
+            return
+        other = (
+            UserIdentity.provider == "github"
+            if provider == "langsmith"
+            else UserIdentity.provider == "langsmith"
+        )
+        if await session.scalar(
+            select(UserIdentity.user_id)
+            .where(other, func.lower(UserIdentity.email) == wanted)
+            .limit(1)
+        ):
+            logger.warning(
+                "Refused a second account for the same email",
+                extra={"user_provider": provider},
+            )
+            raise AccountConflict(
+                "This email already has an Open SWE account that signs in with "
+                + ("GitHub" if provider == "langsmith" else "LangSmith")
+                + "; sign in with that instead"
+            )
 
     @classmethod
     async def _load(cls, session: AsyncSession, user_id: UUID) -> Self | None:

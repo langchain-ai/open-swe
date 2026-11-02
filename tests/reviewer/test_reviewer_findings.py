@@ -22,6 +22,7 @@ from openswe.review.findings import (
     review_id_for_finding,
     surface_state_of,
     thread_ids_for_finding,
+    update_finding_fields,
 )
 from openswe.thread_ids import mda_successor_thread_id
 
@@ -169,6 +170,100 @@ async def test_concurrent_append_finding_preserves_distinct_findings() -> None:
     assert first["created"] is True
     assert second["created"] is True
     assert {finding["id"] for finding in persisted} == {"f_a", "f_b"}
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_finding_events_capture_changes_without_duplicate_or_noop_events() -> None:
+    from sqlalchemy import text
+
+    from openswe.database import connection
+
+    with patch("openswe.review.findings.get_client", return_value=_metadata_client()):
+        await append_finding("tid", _f(id="f_a"))
+        await append_finding("tid", _f(id="f_duplicate"))
+        await update_finding_fields("tid", "f_a", {"status": "resolved"})
+        await update_finding_fields("tid", "f_a", {"status": "resolved"})
+
+    async with connection() as conn:
+        rows = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT event_type, payload, pull_request_id FROM event_log "
+                        "WHERE source = 'reviewer' ORDER BY received_at"
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+    assert [row["event_type"] for row in rows] == ["finding.created", "finding.updated"]
+    assert rows[0]["payload"]["finding"]["description"] == "boom"
+    assert rows[1]["payload"]["finding"]["status"] == "resolved"
+    assert rows[1]["payload"]["changed_fields"] == ["status"]
+    assert all(row["pull_request_id"] is not None for row in rows)
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.parametrize("status", ["success", "error", "timeout", "interrupted"])
+@pytest.mark.parametrize("carried", [False, True])
+async def test_review_run_events_are_linked_and_deduplicated(status: str, carried: bool) -> None:
+    from runtime_api.loop import RunStarted
+    from sqlalchemy import text
+
+    from openswe.agent_api.reviewer import ReviewerParts
+    from openswe.agent_api.tokens import RunSettings
+    from openswe.database import connection
+    from openswe.review.events import ReviewEvents
+    from openswe.threads import index
+
+    with patch("openswe.review.findings.get_client", return_value=_metadata_client()):
+        await append_finding("tid", _f(id="f_a"))
+    await index.create(
+        "tid",
+        runtime="mda",
+        metadata={"kind": "reviewer", "pr": {"owner": "acme", "name": "app", "number": 1}},
+    )
+    parts = ReviewerParts()
+    for _ in range(2):
+        await parts.started(
+            {
+                "configurable": {
+                    "thread_id": "tid",
+                    "run_id": "delivery-run" if carried else "run-1",
+                    "invocation_id": "invocation-1",
+                    "repo": {"owner": "acme", "name": "app"},
+                    "pr_number": 1,
+                }
+            },
+            RunSettings(),
+            RunStarted(run_id="run-1", invocation_id="invocation-1"),
+            carried=carried,
+        )
+        await ReviewEvents.completed("tid", "run-1", status)
+    async with connection() as conn:
+        rows = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT event_type, payload, pull_request_id FROM event_log "
+                        "WHERE source = 'reviewer' AND event_type LIKE 'run.%' ORDER BY received_at"
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+    terminal = (
+        "run.completed"
+        if status == "success"
+        else "run.canceled"
+        if status == "interrupted"
+        else "run.failed"
+    )
+    assert [row["event_type"] for row in rows] == ["run.started", terminal]
+    assert all(row["payload"]["run_id"] == "run-1" for row in rows)
+    assert all(row["pull_request_id"] is not None for row in rows)
 
 
 @pytest.mark.usefixtures("registry_db")

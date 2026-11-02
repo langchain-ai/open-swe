@@ -38,6 +38,11 @@ function ExperimentsPage() {
       </SettingsSection>
       <SettingsSection title="Agent">
         <ProfileSwitchRow
+          field="goal_mode"
+          label="Goal mode"
+          description="Open SWE keeps working without messaging you until it is blocked on you, or its pull request has passing checks, a few rounds of Open SWE review with the obvious findings fixed, and a walkthrough of the latest version."
+        />
+        <ProfileSwitchRow
           field="experimental_conditional_approval"
           label="Conditional approval"
           description="For pull requests you author, let Open SWE request approval of a succinct condition instead of showing the full diff when its review covers everything else. Off by default."
@@ -45,7 +50,7 @@ function ExperimentsPage() {
         <ProfileSwitchRow
           field="experimental_memory"
           label="Memory"
-          description="Threads you start include what your workspace's curator learned from everyone's threads, and what you offer the workspace to remember in your private threads applies to your own runs until the curator processes it."
+          description="Threads you start include what your workspace's curator learned from everyone's memories, in place of your own memories it superseded."
         />
         <ProfileSwitchRow
           field="experimental_background_callbacks"

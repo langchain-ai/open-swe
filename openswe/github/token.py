@@ -8,7 +8,7 @@ from typing import Any
 from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
-from openswe.credential_scope import private_credential_login
+from openswe.credential_scope import GitHubCredentialScope
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.thread_token import (
     cache_github_token_for_thread,
@@ -97,11 +97,15 @@ async def resolve_github_token(
 ) -> tuple[str, str | None]:
     """Use workspace bot auth publicly and the verified owner's OAuth privately."""
     cfg = RunConfig.from_config(config)
-    login = await private_credential_login(config, thread_id=thread_id)
+    if cfg.auth_provider == "langsmith":
+        return "", None
+    scope = await GitHubCredentialScope.for_thread(config, thread_id=thread_id)
     await invalidate_cached_github_token(thread_id)
-    if login is None:
+    if scope.kind == "system":
         return await _resolve_bot_installation_token(thread_id)
-    user_token = await _resolve_dashboard_user_token(thread_id, login)
+    if scope.login is None:
+        raise RuntimeError("Personal GitHub credentials require a login")
+    user_token = await _resolve_dashboard_user_token(thread_id, scope.login)
     if user_token is None:
-        raise GitHubUserAuthRequired(cfg.source or "private", login)
+        raise GitHubUserAuthRequired(cfg.source or "private", scope.login)
     return user_token

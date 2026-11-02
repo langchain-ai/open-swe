@@ -72,6 +72,8 @@ async def langsmith_login(
     desktop_port: int | None = Query(default=None, ge=1024, le=65535),
     session: dict[str, Any] = SESSION_DEP,
 ) -> RedirectResponse:
+    if session.get("provider", "github") != "github":
+        raise HTTPException(400, "Your LangSmith login is already connected")
     nonce = new_state_nonce()
     nonce_hash = hash_state_nonce(nonce)
     state = issue_state(
@@ -134,7 +136,9 @@ async def langsmith_callback(
         response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
         _clear_state_cookie(response)
         return response
-    session = require_session(request)
+    session = await require_session(request)
+    if session.get("provider", "github") != "github":
+        raise HTTPException(400, "Your LangSmith login is already connected")
     cookie_nonce = request.cookies.get(LANGSMITH_STATE_COOKIE_NAME)
     if not cookie_nonce or not hmac.compare_digest(hash_state_nonce(cookie_nonce), nonce_hash):
         raise HTTPException(400, "oauth state mismatch — please retry")
@@ -151,6 +155,8 @@ async def langsmith_desktop_exchange(
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, bool]:
     """Finish a desktop LangSmith connection with the app's own session."""
+    if session.get("provider", "github") != "github":
+        raise HTTPException(400, "Your LangSmith login is already connected")
     claims = redeem_connect_handoff(provider="langsmith", code=body.code, verifier=body.verifier)
     nonce_hash = claims.get("nonce_hash")
     code = claims.get("code")

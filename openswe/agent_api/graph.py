@@ -885,6 +885,7 @@ async def managed_sandbox(
     return await ManagedSandbox.for_thread(
         cfg.thread_id,
         cfg.workspace_slug,
+        allow_github=cfg.auth_provider != "langsmith",
         github_repositories=repositories,
         github_permissions=permissions,
     )
@@ -1248,6 +1249,8 @@ class TokenRun:
 
     async def refresh_github_proxy(self, _request: RunRequest) -> GitHubProxyRefreshed:
         cfg = RunConfig.from_config(self.config)
+        if cfg.auth_provider == "langsmith":
+            return GitHubProxyRefreshed()
         # Where MDA may write the sandbox's proxy, a review's narrowing decides that it does
         # not, as it does for the catalog. Otherwise it keeps the thread's own scope.
         repositories, permissions = (

@@ -381,6 +381,11 @@ ENV.var(
     secret=True,
 )
 ENV.var(
+    "LANGSMITH_LOGIN_ORG_ID",
+    "Organization allowed to sign in to Agent Workspace with LangSmith. Unset disables "
+    "LangSmith login without affecting personal LangSmith connections.",
+)
+ENV.var(
     "LMT_TENANT_ID",
     "Optional LangSmith workspace to pin Managed Tools to. Unset uses the workspace each "
     "person chose when connecting LangSmith.",

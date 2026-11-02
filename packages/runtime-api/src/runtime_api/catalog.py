@@ -182,6 +182,19 @@ class CliResultRules(BaseModel):
     max_nudges: int = 2
 
 
+class WorkStateRules(BaseModel):
+    """The person wants the run to keep working until it calls ``tool`` to say it is blocked
+    or complete. An answer that neither calls it nor starts a wait in ``waits`` is sent
+    back, ``nudge`` up to ``max_nudges`` times."""
+
+    tool: str
+    # Tools whose successful call wakes the thread again later, so ending the run is fine.
+    waits: list[str] = []
+    nudge: list[str] = []
+    nudge_sender: str = ""
+    max_nudges: int = 5
+
+
 class RoutingRules(BaseModel):
     """How the run picks the route of each model call."""
 
@@ -206,6 +219,7 @@ class LoopRules(BaseModel):
     routing: RoutingRules | None = None
     reply: ReplyRules | None = None
     cli_result: CliResultRules | None = None
+    work_state: WorkStateRules | None = None
     # Whether the thread may belong to a task, as its coordinator or a worker.
     task_coordination: bool = False
     # Whether the run may wait on a call its client runs itself.

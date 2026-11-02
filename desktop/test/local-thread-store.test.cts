@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { LocalThreadStore } = require("../src/local-thread-store.cjs");
+const { LocalThreadStore } = require("../build/local-thread-store.cjs");
 
 const BRIDGE_ID = "0123456789abcdef0123456789abcdef";
 

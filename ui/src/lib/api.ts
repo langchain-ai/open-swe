@@ -325,6 +325,7 @@ export interface Profile {
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
+  goal_mode?: boolean
   experimental_fleet?: boolean
   experimental_conditional_approval?: boolean
   experimental_memory?: boolean
@@ -344,6 +345,7 @@ export interface ProfileUpdate {
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
+  goal_mode?: boolean
   experimental_fleet?: boolean
   experimental_conditional_approval?: boolean
   experimental_memory?: boolean
@@ -1054,6 +1056,7 @@ export interface OpenPullRequest {
   deletions: number | null
   mergeable: boolean | null
   mergeState: string
+  autoMerge?: boolean
   headSha: string | null
   headRef: string | null
   reviewDecision: "approved" | "changes_requested" | "none" | null
@@ -1091,7 +1094,12 @@ export type PullRequestActionName =
   | "update-branch"
 
 export type PullRequestActionRequest =
-  | { action: "merge"; sha: string | null; merge_method: MergeMethod }
+  | {
+      action: "merge"
+      sha: string | null
+      merge_method: MergeMethod
+      auto_merge?: boolean
+    }
   | { action: "close"; reason?: string }
   | { action: "mark-ready" }
   | { action: "update-branch"; sha: string | null }
@@ -1900,6 +1908,9 @@ export const api = {
       action: "merge",
       sha: pr.headSha,
       merge_method: method,
+      ...(pr.ci === "pending" && pr.mergeState === "blocked"
+        ? { auto_merge: true }
+        : {}),
     }),
   closePullRequest: (
     pr: OpenPullRequest,
