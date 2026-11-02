@@ -29,9 +29,8 @@ from openswe.slack.dm import DmOrigin, note_for_concierge, send_dm_with_location
 from openswe.slack.payloads import SlackButtonValue, SlackInteraction, SlackMessage
 from openswe.slack.responses import WebhookResponse, accepted, ignored
 from openswe.slack.thread_owner import wake_thread_owner
+from openswe.threads.store import THREADS
 from openswe.users import User
-from openswe.utils.json_types import thread_metadata
-from openswe.utils.thread_ops import langgraph_client
 from openswe.webhooks import common
 
 if TYPE_CHECKING:
@@ -102,8 +101,10 @@ class ReadinessCard(BaseModel):
         if self.origin_channel and self.origin_thread:
             await wake_thread_owner(self.origin_channel, self.origin_thread, slack_user_id, event)
         elif self.thread_id:
-            thread = await langgraph_client().threads.get(self.thread_id)
-            configurable = follow_up_configurable(thread_metadata(thread), self.thread_id)
+            thread = await THREADS.get(self.thread_id)
+            if thread is None:
+                raise ValueError("The original review-request conversation no longer exists.")
+            configurable = follow_up_configurable(thread.metadata, self.thread_id)
             await dispatch_agent_run(
                 self.thread_id,
                 event,

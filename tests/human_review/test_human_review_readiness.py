@@ -224,11 +224,14 @@ async def test_readiness_click_binds_source_and_rolls_back_failed_mutations(scen
         patch.object(readiness.event_claims, "release", AsyncMock()),
         patch.object(readiness, "wake_thread_owner", AsyncMock()) as wake,
         patch.object(readiness, "dispatch_agent_run", AsyncMock()) as dispatch,
-        patch.object(readiness, "langgraph_client") as client,
+        patch.object(
+            readiness.THREADS,
+            "get",
+            AsyncMock(
+                return_value=MagicMock(metadata={"source": "web", "github_login": "requester"})
+            ),
+        ),
     ):
-        client.return_value.threads.get = AsyncMock(
-            return_value={"metadata": {"source": "web", "github_login": "requester"}}
-        )
         tasks = BackgroundTasks()
         await readiness.handle_button(interaction, value, tasks)
         await tasks()
