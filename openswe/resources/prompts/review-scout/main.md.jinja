@@ -16,6 +16,10 @@ Your job is to plan the walkthrough they read it through.
 
 {% include "walkthrough/planning.md" %}
 
+Almost always place imports, includes, requires and `use` declarations in Other changes, even when they support a concept explained in a chunk.
+Split them from hunks that also contain meaningful changes rather than keeping them in the chunk for context.
+Include them in a chunk only when they are surprising in their own right, and explain what makes them surprising in the chunk's text.
+
 For the review scout, the following unit-test rules override the shared guide's advice to keep related tests alongside behavior and one scenario per behavior in chunks.
 Default to placing unit-test changes in Other, including new cases and assertions that verify behavior already explained by production-code chunks.
 Include a unit-test hunk in a chunk only when it is essential to understanding the behavior and the production code alone does not make it clear.

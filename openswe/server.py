@@ -186,6 +186,7 @@ from openswe.tools import (
     delete_organization_skill,
     delete_user_skill,
     delete_workspace,
+    discover_managed_tools,
     dismiss_human_review_request,
     execute_database_sql,
     expedite_pr_approval,
@@ -655,6 +656,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "execute_database_sql",
         "read_user_settings",
         "connect_managed_tools",
+        "discover_managed_tools",
         "save_user_settings",
         "remember",
         "forget",
@@ -754,6 +756,7 @@ AGENT_TOOLS: Final = (
     read_user_settings,
     request_pr_review,
     connect_managed_tools,
+    discover_managed_tools,
     recreate_sandbox,
     report_platform_issue,
     schedule_thread_wakeup,
@@ -1987,7 +1990,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         *(() if goal_mode else (report_work_state,)),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
-        *(() if managed_gateway else (connect_managed_tools,)),
+        *(() if managed_gateway else (connect_managed_tools, discover_managed_tools)),
         *(
             ()
             if sandbox_file_downloads
