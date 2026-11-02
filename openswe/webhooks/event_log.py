@@ -142,6 +142,7 @@ class EventRefs(BaseModel):
     """External identifiers a delivery names, resolved into row links on insert."""
 
     github_repository: str = ""
+    github_owner: str = ""
     github_user_id: str = ""
     pull_request_number: int | None = None
     slack_user_id: str = ""
@@ -175,8 +176,14 @@ class EventRefs(BaseModel):
                 ),
                 None,
             )
+        owner = (
+            (delivery.repository.owner if delivery.repository else None)
+            or delivery.organization
+            or (delivery.installation.account if delivery.installation else None)
+        )
         return cls(
             github_repository=delivery.repository.full_name if delivery.repository else "",
+            github_owner=owner.login if owner else "",
             github_user_id=str(delivery.sender.id)
             if delivery.sender and delivery.sender.id
             else "",
@@ -215,10 +222,16 @@ class EventRefs(BaseModel):
 
 class _GitHubAccount(BaseModel):
     id: int | None = None
+    login: str = ""
+
+
+class _GitHubInstallation(BaseModel):
+    account: _GitHubAccount | None = None
 
 
 class _GitHubRepository(BaseModel):
     full_name: str = ""
+    owner: _GitHubAccount | None = None
 
 
 class _GitHubPullRequest(BaseModel):
@@ -237,6 +250,8 @@ class _GitHubCheck(BaseModel):
 class _GitHubDelivery(BaseModel):
     repository: _GitHubRepository | None = None
     sender: _GitHubAccount | None = None
+    organization: _GitHubAccount | None = None
+    installation: _GitHubInstallation | None = None
     pull_request: _GitHubPullRequest | None = None
     issue: _GitHubIssue | None = None
     check_run: _GitHubCheck | None = None

@@ -1,4 +1,4 @@
-"""GitHub webhook events are dropped for repos no workspace owns when policy says so."""
+"""GitHub webhook events are dropped for repos outside the allowlist or that no workspace owns."""
 
 from typing import Any
 
@@ -7,7 +7,9 @@ import pytest
 
 from openswe.github import forwarding
 from openswe.github import routes as github_routes
+from openswe.github import webhook as github_service
 from openswe.webhooks import common as webhook_common
+from openswe.webhooks.event_log import EventLog
 from openswe.workspaces.routing import WorkspaceLookupError
 from tests.conftest import post_signed_github_webhook, register_github_logins
 
@@ -26,6 +28,33 @@ def _unowned_repo_issue_comment_payload() -> dict[str, Any]:
         "repository": {"owner": {"login": "acme"}, "name": "unowned"},
         "sender": {"login": "octocat"},
     }
+
+
+async def test_repo_outside_allowed_orgs_is_dropped_before_logging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+
+    async def fail_if_called(*args: object, **kwargs: object) -> None:
+        raise AssertionError("an outside repository's delivery must not be processed")
+
+    monkeypatch.setattr(EventLog, "record", fail_if_called)
+    monkeypatch.setattr(github_routes, "repo_is_routable", fail_if_called)
+    monkeypatch.setattr(github_service, "process_github_pr_walkthrough", fail_if_called)
+
+    response = await _post_github_webhook(
+        "pull_request",
+        {
+            "action": "opened",
+            "pull_request": {"number": 7, "head": {"sha": "head"}, "base": {"sha": "base"}},
+            "repository": {"owner": {"login": "Joshluxr"}, "name": "tester"},
+            "sender": {"login": "octocat"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ignored", "reason": "Repository not in allowlist"}
 
 
 async def test_unowned_repo_is_ignored_when_policy_is_ignore(
