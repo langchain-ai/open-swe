@@ -1,4 +1,5 @@
 import logging
+from typing import Literal
 
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, ValidationError
@@ -16,6 +17,7 @@ from openswe.walkthrough.record import WalkthroughView
 logger = logging.getLogger(__name__)
 
 ASSISTANT_ID = "review-scout"
+_ACTIVE_STATUSES = frozenset({"running", "pending"})
 _FAILED_STATUSES = frozenset({"error", "timeout"})
 _SENDER_ID = "system:review-scout"
 _HEAD_METADATA_KEY = "scout_head_sha"
@@ -25,6 +27,11 @@ class _ScoutRun(BaseModel):
     run_id: str
     status: str = ""
     metadata: dict[str, object] = {}
+
+    @property
+    def head_sha(self) -> str | None:
+        head = self.metadata.get(_HEAD_METADATA_KEY)
+        return head if isinstance(head, str) else None
 
 
 _PLAN_CHUNK_TOOL = "walkthrough_plan_chunk"
@@ -98,6 +105,18 @@ class ScoutProgress(BaseModel):
     recent: list[ScoutAction]
 
 
+class ScoutStatus(BaseModel):
+    """The latest scout run, read against the head the review page shows.
+
+    ``outdated`` is a run still working on an older head, which will not plan this one;
+    ``finished`` is a run on this head that ended without failing.
+    """
+
+    state: Literal["idle", "running", "outdated", "failed", "finished"]
+    head_sha: str | None = None
+    error: str | None = None
+
+
 class ReviewScoutTarget(BaseModel):
     """The pull request head a scout run describes."""
 
@@ -137,7 +156,7 @@ class ReviewScoutTarget(BaseModel):
                 return None
             for raw in runs:
                 run = _ScoutRun.model_validate(raw)
-                if run.metadata.get(_HEAD_METADATA_KEY) == self.head_sha:
+                if run.head_sha == self.head_sha:
                     return run.run_id
         return None
 
@@ -160,25 +179,30 @@ class ReviewScoutTarget(BaseModel):
             recent=[call.action() for call in calls[-_RECENT_ACTIONS:]],
         )
 
-    async def last_failure(self) -> str | None:
-        """The error that ended the latest scout run on this head, when it failed."""
+    async def status(self) -> ScoutStatus:
+        """Where the latest scout run stands for this head."""
         client = dispatch_client()
         thread_id = await self.current_thread_id()
         try:
             runs = await client.runs.list(thread_id, limit=1)
         except NotFoundError:
-            return None
+            return ScoutStatus(state="idle")
         if not runs:
-            return None
+            return ScoutStatus(state="idle")
         run = _ScoutRun.model_validate(runs[0])
-        if (
-            run.status not in _FAILED_STATUSES
-            or run.metadata.get(_HEAD_METADATA_KEY) != self.head_sha
-        ):
-            return None
-        if run.status == "timeout":
-            return "The review scout run timed out."
-        return await thread_run_error(thread_id) or "The review scout run ended with an error."
+        if run.status in _ACTIVE_STATUSES:
+            state = "running" if run.head_sha == self.head_sha else "outdated"
+            return ScoutStatus(state=state, head_sha=run.head_sha)
+        if run.head_sha != self.head_sha:
+            return ScoutStatus(state="idle", head_sha=run.head_sha)
+        if run.status not in _FAILED_STATUSES:
+            return ScoutStatus(state="finished", head_sha=run.head_sha)
+        error = (
+            "The review scout run timed out."
+            if run.status == "timeout"
+            else await thread_run_error(thread_id) or "The review scout run ended with an error."
+        )
+        return ScoutStatus(state="failed", head_sha=run.head_sha, error=error)
 
     async def start(self) -> str:
         """The scout run for this head, started when none is already running.
