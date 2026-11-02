@@ -1,3 +1,4 @@
+import type { Experience } from "@/lib/experience"
 import type {
   AgentPullRequestContextResponse,
   ThreadFixScope,
@@ -152,6 +153,7 @@ export type ThreadScope = "all" | "interactive" | "automation" | "bot"
 export type ThreadSortBy = "created_at" | "updated_at"
 
 export interface ThreadsPageParams {
+  experience?: Experience
   hierarchy?: boolean
   limit?: number
   offset?: number
@@ -309,6 +311,7 @@ async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
 
 function buildThreadsPageQuery(params: ThreadsPageParams): string {
   const search = new URLSearchParams()
+  if (params.experience) search.set("experience", params.experience)
   if (params.hierarchy != null)
     search.set("hierarchy", String(params.hierarchy))
   if (params.limit != null) search.set("limit", String(params.limit))
@@ -334,12 +337,14 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
 }
 
 function buildReposQuery(params: {
+  experience?: Experience
   includeResolved?: boolean
   includeAutomations?: boolean
   owned?: boolean
   excludeSources?: Array<string>
 }): string {
   const search = new URLSearchParams()
+  if (params.experience) search.set("experience", params.experience)
   if (params.includeResolved != null)
     search.set("include_resolved", String(params.includeResolved))
   if (params.includeAutomations != null) {
@@ -370,6 +375,7 @@ export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
   listThreadRepos: (
     params: {
+      experience?: Experience
       includeResolved?: boolean
       includeAutomations?: boolean
       owned?: boolean
@@ -379,7 +385,10 @@ export const agentsApi = {
     agentsRequest<Array<SidebarRepo>>(
       `/threads/repos${buildReposQuery(params)}`
     ),
-  listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
+  listPinnedThreads: (experience?: Experience) =>
+    agentsRequest<Array<AgentThread>>(
+      `/threads/pinned${experience ? `?experience=${experience}` : ""}`
+    ),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
   shareThreadWithWorkspace: (threadId: string) =>

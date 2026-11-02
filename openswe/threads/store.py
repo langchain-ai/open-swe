@@ -1,11 +1,11 @@
 """Threads as the backend reads and changes them: the PostgreSQL index and its runtimes.
 
-The index answers every thread read; each runtime that keeps a thread holds a copy
-of its metadata for its runs and traces, and runs its state and commands. Backend
+The index answers every thread read; the runtime a thread runs on holds a copy of
+its metadata for its runs and traces, and runs its state and commands. Backend
 code calls this directly; the thread router serves the Agent Server's thread API
 from it for every other client. A thread an MDA channel owns is read there as
 LangSmith Studio reads it, and changed only as the backend acting in its
-conversation: its metadata is copied only here, and a command that adds to it
+conversation: its metadata stays in the index, and a command that adds to it
 reaches MDA through MDA's trusted-backend ingress.
 """
 
@@ -80,7 +80,7 @@ def _json_reply(status: int, payload: object) -> CommandReply:
 
 
 class _MetadataCopies:
-    """Copies of thread metadata to the runtimes that keep each thread, made in the background.
+    """Copies of thread metadata to the runtime each thread runs on, made in the background.
 
     Reads come from the index and a runtime's copy only feeds its traces, so a write
     answers without waiting on the runtimes; one thread's copies still land in order.
@@ -110,21 +110,20 @@ class _MetadataCopies:
     ) -> None:
         if after is not None:
             await asyncio.wait([after])
-        # A channel's thread on MDA is the channel's; this deployment's copy feeds the traces here.
-        copies = (
-            [RUNTIMES.local] if channel_of(thread.metadata) else RUNTIMES.copies(thread.runtime)
-        )
-        for runtime in copies:
-            try:
-                await runtime.update(
-                    thread.thread_id, for_mda(patch) if runtime is not RUNTIMES.local else patch
-                )
-            except Exception:
-                logger.warning(
-                    "Copying thread metadata to its runtime failed",
-                    extra={"thread_id": thread.thread_id},
-                    exc_info=True,
-                )
+        # A channel's thread on MDA is the channel's; the backend writes nothing there.
+        if channel_of(thread.metadata) is not None:
+            return
+        try:
+            if thread.runtime == "mda":
+                await RUNTIMES.mda.update(thread.thread_id, for_mda(patch))
+            else:
+                await RUNTIMES.local.update(thread.thread_id, patch)
+        except Exception:
+            logger.warning(
+                "Copying thread metadata to its runtime failed",
+                extra={"thread_id": thread.thread_id},
+                exc_info=True,
+            )
 
 
 class ThreadStore:
@@ -175,7 +174,6 @@ class ThreadStore:
             metadata={**metadata, "title": title, RUNTIME_METADATA_KEY: MDA_RUNTIME},
             if_exists="do_nothing",
         )
-        await RUNTIMES.local.create(thread_id, thread.metadata)
         await RUNTIMES.mda.create(thread_id, for_mda(thread.metadata))
         return thread
 
@@ -189,8 +187,10 @@ class ThreadStore:
 
     async def delete(self, thread: IndexedThread) -> None:
         await self.copies.settled(thread.thread_id)
-        for runtime in reversed(RUNTIMES.copies(thread.runtime)):
-            await runtime.delete(thread.thread_id)
+        await RUNTIMES.runs_on(thread.runtime).delete(thread.thread_id)
+        if thread.runtime == "mda":
+            # MDA threads made before the Agent Server was sealed kept a copy here too.
+            await RUNTIMES.local.delete(thread.thread_id)
         await index.delete(thread.thread_id)
 
     async def state(self, thread_id: str) -> dict[str, JsonValue] | None:

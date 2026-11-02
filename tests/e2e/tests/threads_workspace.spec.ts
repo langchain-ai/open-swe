@@ -72,6 +72,9 @@ function deferred() {
 async function loginAs(page: Page) {
   const response = await page.request.post("/control/login", { data: USER });
   expect(response.ok()).toBeTruthy();
+  await page.addInitScript((login) => {
+    localStorage.setItem(`open-swe.desktop.experience:${login}`, "coding");
+  }, USER.login);
 }
 
 function baseMetadata(
@@ -340,11 +343,6 @@ async function cleanupFixtures(request: APIRequestContext) {
   if (createdThreadIds.size > 0) {
     const login = await request.post("/control/login", { data: USER });
     expect(login.ok(), await login.text()).toBeTruthy();
-    const profile = await request.put("/dashboard/api/profile", {
-      data: { experimental_fleet: false },
-      headers: SAME_ORIGIN_HEADERS,
-    });
-    expect(profile.ok(), await profile.text()).toBeTruthy();
   }
   for (const threadId of createdThreadIds) {
     const pinResponse = await request.delete(
@@ -399,13 +397,34 @@ test.describe("threads workspace", () => {
     page,
     request,
   }) => {
-    await seedThreads(request, workspaceThreads());
+    await seedThreads(
+      request,
+      workspaceThreads().map((thread) => ({
+        ...thread,
+        metadata: { ...thread.metadata, experience: "agent_workspace" },
+      })),
+    );
     await loginAs(page);
-    const profile = await page.request.put("/dashboard/api/profile", {
-      data: { experimental_fleet: true },
-      headers: SAME_ORIGIN_HEADERS,
-    });
-    expect(profile.ok(), await profile.text()).toBeTruthy();
+    await page.addInitScript((login) => {
+      localStorage.setItem(
+        `open-swe.desktop.experience:${login}`,
+        "agent_workspace",
+      );
+      Object.defineProperty(window, "openSweDesktop", {
+        value: {
+          isDesktop: true,
+          setAppearance: () => Promise.resolve(),
+          onCommand: () => () => {},
+          setCommands: () => Promise.resolve(),
+          getUpdateState: () => Promise.resolve({ status: "idle" }),
+          onUpdateState: () => () => {},
+          listProjects: () => Promise.resolve([]),
+          onProjectsChanged: () => () => {},
+          listLocalThreads: () => Promise.resolve([]),
+          onLocalThreadsChanged: () => () => {},
+        },
+      });
+    }, USER.login);
     await page.goto("/agents");
     await dismissOnboardingIfShown(page);
     const sidebar = page.locator("[data-sidebar-frame]");
@@ -703,6 +722,9 @@ test.describe("threads workspace", () => {
       data: ADMIN_USER,
     });
     expect(loginResponse.ok()).toBeTruthy();
+    await page.addInitScript((login) => {
+      localStorage.setItem(`open-swe.desktop.experience:${login}`, "coding");
+    }, ADMIN_USER.login);
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/agents");
     await dismissOnboardingIfShown(page);

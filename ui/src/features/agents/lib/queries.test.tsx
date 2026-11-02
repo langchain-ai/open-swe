@@ -1,9 +1,11 @@
-import { invalidationTopic, queryTopics } from "@/lib/invalidations/topics"
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
+
+import { desktopExperience } from "@/lib/experience"
+import { invalidationTopic, queryTopics } from "@/lib/invalidations/topics"
 
 import { agentsApi } from "./api"
 import {
@@ -44,6 +46,20 @@ import type {
   WorkflowPushApprovalsResponse,
 } from "./types"
 
+vi.mock("@/lib/experience", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/experience")>()
+  return {
+    ...actual,
+    useDesktopExperience: () => {
+      const state = actual.useDesktopExperience()
+      return {
+        ...state,
+        experience: window.openSweDesktop ? state.experience : undefined,
+      }
+    },
+  }
+})
+
 const params: ThreadsPageParams = {
   limit: 100,
   offset: 0,
@@ -63,6 +79,8 @@ afterEach(() => {
   for (const client of clients) client.clear()
   clients.length = 0
   vi.restoreAllMocks()
+  Reflect.deleteProperty(window, "openSweDesktop")
+  localStorage.clear()
 })
 
 function testClient() {
@@ -908,6 +926,37 @@ describe("optimistic thread mutations", () => {
     hasMore: false,
   })
 
+  it("appends a new pin without reordering after the server refresh", async () => {
+    const existing = { ...thread, id: "existing-pin" }
+    const request = deferred<void>()
+    vi.spyOn(agentsApi, "pinThread").mockReturnValue(request.promise)
+    const listPins = vi
+      .spyOn(agentsApi, "listPinnedThreads")
+      .mockResolvedValueOnce([existing])
+      .mockResolvedValue([existing, thread])
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.detail(thread.id), thread)
+    const { result } = renderHook(
+      () => ({
+        pins: useSidebarPinnedThreads(),
+        mutation: usePinAgentThread(),
+      }),
+      { wrapper: wrapperFor(client) }
+    )
+    await waitFor(() => expect(result.current.pins.data).toEqual([existing]))
+
+    act(() =>
+      result.current.mutation.mutate({ threadId: thread.id, pinned: true })
+    )
+    await waitFor(() =>
+      expect(result.current.pins.data).toEqual([existing, thread])
+    )
+    await act(async () => request.resolve(undefined))
+    await waitFor(() => expect(listPins).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.pins.isFetching).toBe(false))
+    expect(result.current.pins.data).toEqual([existing, thread])
+  })
+
   it("renames across detail, pinned, and page caches and rolls back on failure", async () => {
     const request = deferred<AgentThread>()
     vi.spyOn(agentsApi, "renameThread").mockReturnValue(request.promise)
@@ -1173,5 +1222,74 @@ describe("sidebar task families", () => {
     await vi.waitFor(() =>
       expect(result.current.items[0]?.taskWorkers?.[1]?.status).toBe("finished")
     )
+  })
+})
+
+describe("desktop experience segregation", () => {
+  it("scopes list requests before paging and keeps pins, active injection and workers isolated across switches", async () => {
+    Object.defineProperty(window, "openSweDesktop", {
+      configurable: true,
+      value: {},
+    })
+    const coding = optimisticThread("legacy-coding", {
+      prompt: "Legacy coding",
+    })
+    const work = {
+      ...optimisticThread("work", { prompt: "Work" }),
+      experience: "agent_workspace" as const,
+      taskWorkers: [coding],
+    }
+    const listPages = vi
+      .spyOn(agentsApi, "listThreadsPage")
+      .mockImplementation(async (request) => ({
+        ...page,
+        items: request?.experience === "agent_workspace" ? [work] : [coding],
+      }))
+    const listPins = vi
+      .spyOn(agentsApi, "listPinnedThreads")
+      .mockResolvedValue([coding, work])
+    const client = testClient()
+    client.setQueryData(["session"], { login: "mode-test" })
+    client.setQueryData(agentThreadKeys.detail(coding.id), coding)
+    const { result } = renderHook(
+      () => ({
+        recents: useSidebarRecents({ repoMode: false }),
+        pins: useSidebarPinnedThreads(),
+        active: useSidebarActiveThread({
+          activeThreadId: coding.id,
+          loadedThreads: [],
+        }),
+      }),
+      { wrapper: wrapperFor(client) }
+    )
+    await waitFor(() =>
+      expect(result.current.recents.items.map((thread) => thread.id)).toEqual([
+        work.id,
+      ])
+    )
+    expect(listPages).toHaveBeenCalledWith(
+      expect.objectContaining({ experience: "agent_workspace", offset: 0 })
+    )
+    expect(listPins).toHaveBeenCalledWith("agent_workspace")
+    expect(result.current.pins.data?.map((thread) => thread.id)).toEqual([
+      work.id,
+    ])
+    expect(result.current.pins.data?.[0]?.taskWorkers).toEqual([])
+    expect(result.current.active).toBeUndefined()
+    act(() => desktopExperience.write("mode-test", "coding"))
+    expect(result.current.recents.items).toEqual([])
+    expect(result.current.pins.data).toBeUndefined()
+    await waitFor(() =>
+      expect(result.current.recents.items.map((thread) => thread.id)).toEqual([
+        coding.id,
+      ])
+    )
+    expect(listPages).toHaveBeenCalledWith(
+      expect.objectContaining({ experience: "coding", offset: 0 })
+    )
+    expect(result.current.pins.data?.map((thread) => thread.id)).toEqual([
+      coding.id,
+    ])
+    expect(result.current.active?.id).toBe(coding.id)
   })
 })

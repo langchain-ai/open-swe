@@ -120,6 +120,32 @@ def test_review_chat_is_hidden_without_hiding_normal_pr_threads():
 
 
 @pytest.mark.parametrize(
+    ("is_im", "thread_ts", "listed"),
+    [(True, "0", False), (True, "123.456", True), (False, "0", True)],
+)
+def test_only_concierge_dms_are_unlisted(is_im: bool, thread_ts: str, listed: bool):
+    metadata = {
+        "source": "slack",
+        "visibility": "private",
+        "owner_login": "alice",
+        "source_context": {
+            "slack_thread": {
+                "channel_id": "D123" if is_im else "C123",
+                "thread_ts": thread_ts,
+                "channel_context": {"is_im": is_im},
+            }
+        },
+    }
+    assert (
+        listing._metadata_matches_filters(metadata, resolved=None, source=None, query=None)
+        is listed
+    )
+    assert summary.thread_is_readable(metadata, "alice")
+    assert summary.thread_is_promptable(metadata, "alice")
+    assert not summary.thread_is_readable(metadata, "bob")
+
+
+@pytest.mark.parametrize(
     "operation",
     [
         handlers.get_dashboard_thread_state,

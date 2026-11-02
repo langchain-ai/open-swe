@@ -55,6 +55,13 @@ class SlackThreadRef(BaseModel):
             return self.channel_id, self.thread_ts
         return None
 
+    @property
+    def is_concierge(self) -> bool:
+        """Whether this is the single conversation for a bot DM."""
+        from openswe.slack.dm import is_concierge_thread
+
+        return is_concierge_thread(self.channel_context, self.thread_ts)
+
     def is_at(self, channel_id: str, thread_ts: str) -> bool:
         return self.channel_id == channel_id and self.thread_ts == thread_ts
 

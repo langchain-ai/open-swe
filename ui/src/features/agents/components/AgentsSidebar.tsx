@@ -34,6 +34,8 @@ import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
 import type { DesktopUpdateState } from "@/desktop"
 import { api, type SessionUser } from "@/lib/api"
 import { useProfile } from "@/lib/profile"
+import { desktopExperience, useDesktopExperience } from "@/lib/experience"
+import { ExperienceSelector } from "@/components/ExperienceSelector"
 import { AgentWorkspaceProvider } from "@/features/agents/lib/agentWorkspace"
 import type {
   PullRequestSnapshot,
@@ -190,7 +192,8 @@ export function AgentsSidebar({
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
   const profile = useProfile()
-  const agentWorkspaceEnabled = profile.data?.experimental_fleet === true
+  const { experience } = useDesktopExperience()
+  const agentWorkspaceEnabled = experience === "agent_workspace"
   const newThreadShortcut = useShortcutLabel("mod+n")
   const concierge = useQuery({
     queryKey: ["concierge", user?.login],
@@ -658,19 +661,7 @@ export function AgentsSidebar({
           className="flex min-w-0 items-center gap-space-2 font-heading text-sm font-medium tracking-tight text-primary"
         >
           <LogoMark alt="" className="size-5 shrink-0" />
-          {agentWorkspaceEnabled ? (
-            <span
-              className="flex min-w-0 flex-col gap-0.5"
-              aria-label="LangSmith Agent Workspace"
-            >
-              <span className="text-sm font-semibold">LangSmith</span>
-              <span className="text-xxs font-normal tracking-normal text-tertiary">
-                Agent Workspace
-              </span>
-            </span>
-          ) : (
-            "Open SWE"
-          )}
+          Open SWE
         </Link>
         <div className="flex shrink-0 items-center gap-space-1">
           <IconButton
@@ -688,9 +679,14 @@ export function AgentsSidebar({
         </div>
       </div>
 
+      <ExperienceSelector onNavigate={layout.closeOnMobile} />
+
       {agentWorkspaceEnabled && (
         <AgentWorkspaceThreadList
-          items={allItems}
+          items={[
+            ...pinnedItems,
+            ...sortSidebarThreads(threadItems, "updated"),
+          ]}
           activeThreadId={activeThreadId}
           compact={prefs.compact}
           onNavigate={layout.closeOnMobile}
@@ -1359,7 +1355,7 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
-  const agentWorkspaceEnabled = useProfile().data?.experimental_fleet === true
+  const { experience, select: selectExperience } = useDesktopExperience()
   // `useMutation` returns a fresh object every render; only `mutate` is stable,
   // and an unstable command array re-registers on every commit.
   const pinThread = usePinAgentThread().mutate
@@ -1370,6 +1366,15 @@ export function AgentsShell({
   const activeThread = useActiveAgentThread(activeThreadId, {
     enabled: Boolean(activeThreadId),
   })
+  const threadExperience = activeThread
+    ? desktopExperience.thread(activeThread)
+    : undefined
+  useEffect(() => {
+    if (threadExperience) selectExperience(threadExperience)
+  }, [selectExperience, threadExperience])
+  const agentWorkspaceEnabled = Boolean(
+    experience && (threadExperience ?? experience) === "agent_workspace"
+  )
   const sidebarCommands = useMemo(() => {
     const commands = [
       {
@@ -1449,7 +1454,10 @@ export function AgentsShell({
               activeThreadId={activeThreadId}
               layout={layout}
             />
-            <main className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1">
+            <main
+              key={experience}
+              className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1"
+            >
               {children}
             </main>
           </div>

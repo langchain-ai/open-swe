@@ -1,8 +1,8 @@
 """Where a thread's runs live: this deployment's Agent Server, or Managed Deep Agents.
 
-Both keep a copy of the thread's metadata for their runs and traces; the index in
-PostgreSQL answers every thread read. A thread starts on the local Agent Server,
-which also runs the graphs Managed Deep Agents does not host.
+The index in PostgreSQL answers every thread read. Every new thread is created and
+run on MDA; the local Agent Server keeps only the threads made before that, for
+reads, and refuses to create any thread or run (``openswe.threads.local_writes``).
 
 MDA scopes threads by owner. The backend reads through a second client that also
 says ``x-auth-scheme: langsmith``, as LangSmith Studio does, so it can read the
@@ -558,10 +558,6 @@ class Runtimes:
 
     def runs_on(self, runtime: Runtime) -> _SdkThreads:
         return self.mda if runtime == "mda" else self.local
-
-    def copies(self, runtime: Runtime) -> list[_SdkThreads]:
-        """Every runtime that keeps a copy of a thread on ``runtime``."""
-        return [self.local, self.mda] if runtime == "mda" else [self.local]
 
 
 RUNTIMES: Final = Runtimes()

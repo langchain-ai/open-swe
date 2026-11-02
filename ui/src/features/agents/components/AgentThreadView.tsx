@@ -238,7 +238,6 @@ export function AgentThreadView({
   const canMove =
     (runsElsewhere || Boolean(window.openSweDesktop)) &&
     thread.sandboxBridgeClient !== "cli" &&
-    Boolean(thread.repoFullName) &&
     thread.visibility === "private" &&
     ownsThread
   // The review page shows its PR's status itself; don't poll it a second time here.

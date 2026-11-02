@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from openswe.review.session import ReviewSessionMetadata
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.records import lookup_slack_link_thread_id
+from openswe.source_context import SourceContext
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
 from openswe.threads import index
 from openswe.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
@@ -816,9 +817,11 @@ async def _pinned_thread_summaries(
         for thread in threads:
             thread_id = _thread_id(thread)
             metadata = _thread_metadata(thread)
+            slack_thread = SourceContext.from_metadata(metadata).slack_thread
             if (
                 thread_id
                 and thread_is_readable(metadata, login, email)
+                and not (slack_thread is not None and slack_thread.is_concierge)
                 and (experience is None or metadata.get("experience", "coding") == experience)
             ):
                 threads_by_id[thread_id] = thread
