@@ -1,10 +1,10 @@
 # Open SWE on Managed Deep Agents
 
 Open SWE's coding agent, pull request reviewer and review scout, packaged as one [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) project with a single graph, `open-swe`.
-Each run's context names the Open SWE graph it plays (`agent`, `reviewer` or `review-scout`); the factory in `agent.py` builds that graph's deep agent from it.
+Each run's context names the kind of run it is (`agent`, `reviewer` or `review-scout`); the factory in `agent.py` builds the deep agent for that kind from it.
 
 The model loop, its checkpoints, every tool call and the middleware around them run here.
-The backend works out each run's catalog as it starts the run (`openswe/agent_api/run_start.py`): its operations, its models and the rules of its middleware.
+The backend resolves each run's catalog as it starts the run, from the thread's settings, the workspace's defaults, the sender's access and the integrations their credentials reach (`openswe/agent_api/run_catalog.py`): its operations, its models and the rules of its middleware.
 Every call MDA makes on the backend, the loop's and the tools', is a named endpoint of the typed API in `packages/runtime-api` (`runtime_api`), under `POST /agent-api/{endpoint}`, which both sides import, answered from the run token and the request on whichever backend replica it lands.
 Each endpoint declares how long it may take and when it is sent again after a failed delivery.
 Every call is authenticated with the run token.

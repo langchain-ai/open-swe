@@ -55,12 +55,11 @@ class CallerHungUpError(ConnectionError):
 
 def _graphs() -> Mapping[str, Api]:
     # The webapp must not import the agent stack at startup.
-    from openswe.agent_api.hosted import hosted_graphs
+    from openswe.agent_api.hosted import run_kinds
     from openswe.agent_api.run_calls import TokenRun
 
     return {
-        assistant_id: partial(TokenRun.answer, parts)
-        for assistant_id, parts in hosted_graphs().items()
+        assistant_id: partial(TokenRun.answer, kind) for assistant_id, kind in run_kinds().items()
     }
 
 

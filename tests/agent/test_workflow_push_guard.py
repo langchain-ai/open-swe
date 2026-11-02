@@ -14,7 +14,7 @@ from langchain_core.messages import ToolMessage
 from runtime_api.operations import ShellVerdict
 
 from openswe.agent_api.run_calls import TokenRun
-from openswe.agent_api.run_parts import RunParts
+from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.tokens import RemoteRun
 from openswe.middleware import workflow_push_guard as guard
 from openswe.sandboxes import connect, state
@@ -741,7 +741,7 @@ async def test_check_shell_inspects_workflow_pushes_in_the_threads_sandbox(
 
 
 async def _check_shell(command: str) -> ShellVerdict:
-    class Parts(RunParts):
+    class Parts(RunKind):
         assistant_id = "agent"
         shell_guards = (guard.WorkflowPushGuardMiddleware(),)
 

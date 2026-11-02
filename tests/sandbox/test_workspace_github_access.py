@@ -14,7 +14,7 @@ import pytest
 from deepagents.backends.protocol import ExecuteResponse
 from runtime_api.connections import ConnectionRef
 
-from openswe.agent_api.hosted import hosted_graphs
+from openswe.agent_api.hosted import run_kinds
 from openswe.agent_api.run_calls import TokenRun
 from openswe.agent_api.run_sandbox import RunSandbox
 from openswe.agent_api.runs import run_config
@@ -284,7 +284,7 @@ async def test_a_replaced_sandbox_reconnects_on_the_authenticated_run_scope(
         "get_sandbox_metadata",
         AsyncMock(return_value={"sandbox_id": "sandbox", "sandbox_owner": "mda"}),
     )
-    parts = hosted_graphs()[kind]
+    parts = run_kinds()[kind]
     run = RemoteRun(
         thread_id="thread",
         assistant_id=kind,
@@ -322,7 +322,7 @@ async def test_mda_alone_writes_the_proxy_of_its_sandbox_where_the_token_reaches
     monkeypatch.setattr(lifecycle, "get_sandbox_metadata", metadata)
     monkeypatch.setattr("openswe.sandboxes.managed.get_sandbox_metadata", metadata)
     monkeypatch.setattr(lifecycle, "load_workspace", AsyncMock(return_value=None))
-    parts = hosted_graphs()[kind]
+    parts = run_kinds()[kind]
     run = RemoteRun(
         thread_id="thread",
         assistant_id=kind,
@@ -369,7 +369,7 @@ async def test_without_mda_github_proxy_a_review_refreshes_on_its_threads_scope(
     monkeypatch.setattr(lifecycle, "load_workspace", AsyncMock(return_value=None))
     run = RemoteRun(thread_id="thread", assistant_id=kind, configurable={})
 
-    await TokenRun.answer(hosted_graphs()[kind], run, "refresh_github_proxy", {})
+    await TokenRun.answer(run_kinds()[kind], run, "refresh_github_proxy", {})
 
     assert injected_auth(github) == [
         "x-access-token:repos:11;actions=read,checks=read,contents=read,issues=read,"

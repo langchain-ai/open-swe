@@ -19,9 +19,9 @@ from runtime_api.operations import (
     ToolEvidence,
 )
 
-from openswe.agent_api.agent import AgentParts
+from openswe.agent_api.agent import AgentKind
 from openswe.agent_api.run_calls import TokenRun
-from openswe.agent_api.run_start import StartingRun
+from openswe.agent_api.run_catalog import RunCatalog
 from openswe.agent_api.tokens import RemoteRun
 from openswe.incidents import runtime, service, turns
 from openswe.incidents.models import Incident, IncidentPolicy
@@ -32,7 +32,7 @@ from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.slack.channels import SlackChannel
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 from tests.agent.test_agent_assembly_context import (
-    _plan_agent,
+    _agent_catalog,
 )
 from tests.agent.test_agent_assembly_context import saved_thread_scope as saved_thread_scope
 
@@ -93,7 +93,7 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     with patch(
         "openswe.server.load_mcp_tools", AsyncMock(return_value=[remote, *status_page_tools])
     ) as mcps:
-        result = await _plan_agent(_incident_config())
+        result = await _agent_catalog(_incident_config())
     surface = cast(ToolSurface, result["surface"])
     mcps.assert_awaited_once()
     # System runs load the instance tier and the default workspace's, never a person's.
@@ -148,7 +148,7 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
 async def test_forged_incident_source_on_a_normal_thread_is_refused(saved_thread_scope):
     saved_thread_scope.update(source="slack", visibility="public")
     with pytest.raises(PermissionError, match="not an incident"):
-        await _plan_agent(_incident_config())
+        await _agent_catalog(_incident_config())
 
 
 @pytest.mark.parametrize("requested_action", [False, True])
@@ -176,11 +176,11 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     stamped = RemoteRun(
         thread_id="thread-ctx", assistant_id="agent", configurable=dict(config["configurable"])
     )
-    planned = await _plan_agent(config)
+    planned = await _agent_catalog(config)
     surface = cast(ToolSurface, planned["surface"])
     await surface.prepare()
-    parts = AgentParts()
-    starting = StartingRun(parts, stamped, surface, config)
+    parts = AgentKind()
+    starting = RunCatalog(parts, stamped, surface, config)
     run = stamped.model_copy(update={"settings": starting.settings()})
 
     # The Slack context the model is sent is evidence the report can cite.
@@ -241,7 +241,7 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
         assert latest.report.summary == "Errors reported [slack:1.0]"
     posted.assert_awaited_once()
     assert posted.await_args.args[:2] == ("C1", "0")
-    catalog = starting.catalog()
+    catalog = starting.build()
     offered = {spec.name for spec in catalog.operations} - set(catalog.excluded)
     assert {"record_incident_report", "search_incidents"} <= offered
     assert ("open_pull_request" in offered) is requested_action

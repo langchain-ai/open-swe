@@ -1,4 +1,4 @@
-"""The calls an Open SWE graph's MDA run makes on the backend, each answered from the
+"""The calls an Open SWE run on MDA makes on the backend, each answered from the
 run's token and the request alone, on whichever replica it lands.
 
 MDA keeps the model loop, its checkpoints, every tool call, and the middleware around
@@ -129,9 +129,9 @@ from openswe.agent_api import file_calls
 from openswe.agent_api.caller_trace import traced_under
 from openswe.agent_api.operations import Operation
 from openswe.agent_api.report_receipts import Recorded, Recording, ReportReceipts
-from openswe.agent_api.run_parts import RunParts
+from openswe.agent_api.run_catalog import chosen_model
+from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.run_sandbox import RunSandbox
-from openswe.agent_api.run_start import chosen_model
 from openswe.agent_api.run_state import (
     as_list,
     as_messages,
@@ -250,11 +250,11 @@ async def _wrap(
 class TokenRun:
     """One call of an MDA run, answered from its token and the request alone.
 
-    The graph's ``RunParts`` build what the call needs.
+    The run's ``RunKind`` builds what the call needs.
     """
 
-    def __init__(self, parts: RunParts, run: RemoteRun, run_id: str | None) -> None:
-        self.parts = parts
+    def __init__(self, kind: RunKind, run: RemoteRun, run_id: str | None) -> None:
+        self.kind = kind
         self.run = run
         self.run_id = run_id
         self.config = self._config()
@@ -262,11 +262,11 @@ class TokenRun:
 
     @classmethod
     async def answer(
-        cls, parts: RunParts, run: RemoteRun, endpoint: str, raw: JsonValue
+        cls, kind: RunKind, run: RemoteRun, endpoint: str, raw: JsonValue
     ) -> JsonValue:
         """Answer one call the MDA run makes (``runtime_api``)."""
         raw_id = raw.get("run_id") if isinstance(raw, Mapping) else None
-        call = cls(parts, run, raw_id if isinstance(raw_id, str) else None)
+        call = cls(kind, run, raw_id if isinstance(raw_id, str) else None)
         if endpoint != PREPARE.name:
             return await CALLS.dispatch(endpoint, call, raw)
         # Preparing reads the same thread from many places; one read serves them.
@@ -290,10 +290,10 @@ class TokenRun:
 
     @property
     def _sandbox(self) -> RunSandbox:
-        return RunSandbox(self.config, reviews=self.parts.reviews)
+        return RunSandbox(self.config, reviews=self.kind.reviews)
 
     async def _ready(self, _runtime: Runtime) -> None:
-        await self.parts.credentials(self.config)
+        await self.kind.credentials(self.config)
 
     async def in_run[T](self, name: str, work: Callable[[], Awaitable[T]]) -> T:
         """``work`` as this run, with its credentials ready in this process."""
@@ -306,7 +306,7 @@ class TokenRun:
 
     async def thread_files(self) -> BackendProtocol:
         if self._files is None:
-            files = await self.parts.files(self.config)
+            files = await self.kind.files(self.config)
             if files is None:
                 raise RuntimeError("This run has no files on the backend")
             self._files = files
@@ -316,7 +316,7 @@ class TokenRun:
         """Every skill the run may load: each store's skill folders and their ``SKILL.md``."""
 
         async def listed() -> RunSkills:
-            stores = await self.parts.skills(self.config)
+            stores = await self.kind.skills(self.config)
             return RunSkills() if stores is None else await stores.listed()
 
         return await in_graph_context(
@@ -355,7 +355,7 @@ class TokenRun:
         call answers, so the next call may reach another process.
         """
         state: dict[str, object] = {**held, "messages": list(messages)}
-        carried = [m for m in self.parts.reporters if isinstance(m, CarriedAcrossProcesses)]
+        carried = [m for m in self.kind.reporters if isinstance(m, CarriedAcrossProcesses)]
 
         async def reported(runtime: Runtime) -> T:
             for middleware in carried:
@@ -371,7 +371,7 @@ class TokenRun:
     async def model_result(self, request: ModelResult) -> Done:
         """Let the transcript and usage see the response MDA's model gave."""
         response = messages_from_dict(request.response)
-        observers = [m for m in self.parts.reporters if isinstance(m, _MODEL_OBSERVERS)]
+        observers = [m for m in self.kind.reporters if isinstance(m, _MODEL_OBSERVERS)]
 
         async def respond(_request: ModelRequest) -> ModelResponse:
             return ModelResponse(result=response)
@@ -397,7 +397,7 @@ class TokenRun:
         its loop keeps the sandbox's GitHub token fresh (``refresh_github_proxy``).
         """
         started = datetime.now(UTC)
-        preparation = await self.parts.preparation(
+        preparation = await self.kind.preparation(
             self.config, self.run.settings, sandbox_id=request.sandbox_id
         )
         if request.in_sandbox:
@@ -407,7 +407,7 @@ class TokenRun:
         if events := _carried_events(self.config):
             # The events this run was started to carry are its input: it holds them now.
             await ThreadInbox(self.run.thread_id).receive(events=events)
-        state = call_state(request, self.parts.restore)
+        state = call_state(request, self.kind.restore)
 
         async def prepared(runtime: Runtime) -> Prepared:
             result = await run_hooks(preparation, "before_agent", state, runtime)
@@ -420,7 +420,7 @@ class TokenRun:
                 if expires_at is None
                 else GitHubProxyRefreshed(expires_at=expires_at),
                 notices=notices,
-                sender=self.parts.sender(self.config, self.run.settings),
+                sender=self.kind.sender(self.config, self.run.settings),
             )
 
         emitted: list[object] = []
@@ -453,7 +453,7 @@ class TokenRun:
             queue_run_notice(self.run.thread_id, notice.kind, notice.data)
 
         async def record(_state: dict[str, object], _runtime: Runtime) -> None:
-            await self.parts.started(self.config, self.run.settings, request, carried=carried)
+            await self.kind.started(self.config, self.run.settings, request, carried=carried)
 
         await self._reporting(
             request, "run_started", record, messages=messages_from_dict(request.humans)
@@ -461,7 +461,7 @@ class TokenRun:
         return Done()
 
     def _tool_recorders(self) -> list[RecordsRemoteTools]:
-        return [m for m in self.parts.reporters if isinstance(m, RecordsRemoteTools)]
+        return [m for m in self.kind.reporters if isinstance(m, RecordsRemoteTools)]
 
     async def tool_started(self, request: ToolCallReport) -> Done:
         tool_call = ToolCall(
@@ -499,14 +499,14 @@ class TokenRun:
             next((t for t in client.tools if t.name == request.name), None) if client else None
         )
         return await Operation(
-            offered or await self.parts.tool(self.config, request.name), request
+            offered or await self.kind.tool(self.config, request.name), request
         ).run(
             config=self.config,
             state=self._operation_state(request),
-            guards=ShellGuards(self.parts.shell_guards),
+            guards=ShellGuards(self.kind.shell_guards),
             client=client,
             ready=self._ready,
-            notify=not self.parts.reviews,
+            notify=not self.kind.reviews,
         )
 
     def _operation_state(self, request: RunOperation) -> dict[str, object]:
@@ -516,7 +516,7 @@ class TokenRun:
         }
         if request.messages is not None:
             state["messages"] = messages_from_dict(request.messages)
-        self.parts.restore(state)
+        self.kind.restore(state)
         return state
 
     async def _tool_set(self) -> ToolSet:
@@ -555,7 +555,7 @@ class TokenRun:
 
     async def check_shell(self, request: ShellCheck) -> ShellVerdict:
         """Whether the push and pull request guards let ``request``'s command run as it is."""
-        guards = ShellGuards(self.parts.shell_guards)
+        guards = ShellGuards(self.kind.shell_guards)
         return await self.in_run("check_shell", lambda: guards.verdict(request))
 
     async def sandbox_replaced(self, _request: RunRequest) -> Done:
@@ -619,7 +619,7 @@ class TokenRun:
 
     async def reply_on_behalf(self, request: ReplyOnBehalf) -> Done:
         """Post the model's final answer for it, after it ignored the reply tool."""
-        state = call_state(request, self.parts.restore)
+        state = call_state(request, self.kind.restore)
 
         async def post() -> None:
             result = await send_slack_reply(request.text, "final", state=state)
@@ -634,7 +634,7 @@ class TokenRun:
     async def run_ended(self, request: RunEnded) -> Done:
         """Record the run's end: its transcript turn and its usage."""
         self._as_invocation(request.invocation_id)
-        reporters = self.parts.reporters
+        reporters = self.kind.reporters
 
         async def ended(state: dict[str, object], runtime: Runtime) -> None:
             await run_hooks(reporters, "after_agent", state, runtime)
@@ -660,7 +660,7 @@ class TokenRun:
         return Done()
 
     async def _incident(self) -> IncidentSession:
-        incident = await self.parts.incident(self.config)
+        incident = await self.kind.incident(self.config)
         if incident is None:
             raise RefusedCallError("This run investigates no incident")
         return incident
@@ -730,7 +730,7 @@ class TokenRun:
             try:
                 with traced_under(item.trace):
                     answered = await TokenRun.answer(
-                        self.parts, self.run, item.endpoint, item.request.model_dump(mode="json")
+                        self.kind, self.run, item.endpoint, item.request.model_dump(mode="json")
                     )
             except BaseException as exc:
                 if claim is not None:

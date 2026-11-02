@@ -152,12 +152,12 @@ async def test_a_run_holds_the_events_it_was_started_with_once_prepared(
     from runtime_api.loop import Prepare
 
     from openswe.agent_api.run_calls import TokenRun
-    from openswe.agent_api.run_parts import RunParts
+    from openswe.agent_api.run_kinds import RunKind
     from openswe.agent_api.tokens import RemoteRun
     from openswe.database import postgres
     from openswe.webhooks.event_matches import EventMatch
 
-    class Parts(RunParts):
+    class Parts(RunKind):
         assistant_id = "agent"
 
     carried = EventMatch(

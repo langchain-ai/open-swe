@@ -1,8 +1,8 @@
-"""What the backend works out for a run as it starts it: the catalog MDA builds the run
-from, and the settings its later calls read from its token.
+"""The catalog MDA builds a run from, and the settings its later calls read from its token.
 
-The graph's parts work out the run's tools, models, subagents and loop rules
-(``RunParts.plan``). The catalog lists every tool but the run's integrations, which
+Both are resolved once, as the backend starts the run, from what only the backend holds:
+the run's kind resolves its tools, models, subagents and loop rules (``RunKind.catalog``),
+and the backend adds the sandbox MDA keeps for the thread and a grant of each operation. The catalog lists every tool but the run's integrations, which
 the context names only: every tool is kept by digest (``run_tool_sets``), which
 ``tool_specs``, ``search_tools`` and ``resolve_tool`` read.
 """
@@ -29,7 +29,7 @@ from runtime_api.catalog import (
 from openswe.agent_api.connections import operation_connections
 from openswe.agent_api.git_metadata import trace_actor
 from openswe.agent_api.operations import Injections
-from openswe.agent_api.run_parts import RunParts
+from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.run_sandbox import RunSandbox
 from openswe.agent_api.runs import run_config
 from openswe.agent_api.shell_guards import ShellGuards
@@ -103,34 +103,34 @@ def chosen_model(model_id: str, effort: object) -> ModelSpec:
 
 @dataclass(frozen=True)
 class RunStart:
-    """What the backend works out for a run as it starts it."""
+    """What the backend resolves for a run as it starts it."""
 
     catalog: Catalog
     settings: RunSettings
 
 
-class StartingRun:
-    """A run as its graph's parts work it out, before MDA starts it."""
+class RunCatalog:
+    """A run's catalog as its kind resolves it, before MDA starts the run."""
 
     def __init__(
-        self, parts: RunParts, run: RemoteRun, surface: ToolSurface, config: RunnableConfig
+        self, kind: RunKind, run: RemoteRun, surface: ToolSurface, config: RunnableConfig
     ) -> None:
-        self.parts = parts
+        self.kind = kind
         self.run = run
         self.surface = surface
         self.config = config
 
     @classmethod
-    async def of(cls, parts: RunParts, run: RemoteRun) -> StartingRun:
-        # Worked out from the run as dispatch stamped it, never from the settings it decides.
+    async def of(cls, kind: RunKind, run: RemoteRun) -> RunCatalog:
+        # Resolved from the run as dispatch stamped it, never from the settings it decides.
         config = run_config(run, settled=False)
         surface = ToolSurface()
-        await parts.plan(config, surface)
+        await kind.catalog(config, surface)
         await surface.prepare()
-        return cls(parts, run, surface, config)
+        return cls(kind, run, surface, config)
 
     async def start(self) -> RunStart:
-        """What ``run``'s MDA graph is built from, and the settings its calls read."""
+        """What MDA builds the run from, and the settings its calls read."""
         tools, catalog = await asyncio.gather(self.tool_set().keep(), self.granted())
         settings = self.settings().model_copy(update={"tools": tools})
         return RunStart(catalog=catalog, settings=settings)
@@ -188,7 +188,7 @@ class StartingRun:
             vision=None if models.vision is None else spec(models.vision),
         )
 
-    def catalog(self) -> Catalog:
+    def build(self) -> Catalog:
         surface = self.surface
         tools = self._backend_tools()
         excluded = self._excluded()
@@ -200,11 +200,11 @@ class StartingRun:
         }
         # Integrations stay on the backend, which finds them for the run's search and its
         # code mode: listing hundreds of them would put about a megabyte in every run's
-        # context. The graph's own tools stay listed, so the model knows them unsearched.
+        # context. The run's own tools stay listed, so the model knows them unsearched.
         withheld = from_code_only & set(surface.integration_names)
         searches = surface.code_mode or bool(withheld)
         offered = tools.keys() | _FILE_TOOLS | ({SEARCH_TOOLS} if searches else set())
-        # Code mode calls tools past the model's list, so what the graph excludes stays out.
+        # Code mode calls tools past the model's list, so what the run excludes stays out.
         from_code = offered - excluded if surface.code_mode else frozenset()
         return Catalog(
             operations=[spec for spec in self._specs() if spec.name not in withheld],
@@ -229,7 +229,7 @@ class StartingRun:
             files=FilesSpec(
                 backend_paths=list(surface.backend_paths),
                 artifacts_root=surface.artifacts_root,
-                guards=["shell_commands"] if ShellGuards(self.parts.shell_guards).active else [],
+                guards=["shell_commands"] if ShellGuards(self.kind.shell_guards).active else [],
                 checks=list(surface.file_checks),
             ),
             incident_evidence=surface.loop.incident,
@@ -245,11 +245,11 @@ class StartingRun:
     async def granted(self) -> Catalog:
         """The catalog, with who the run acts for, the sandbox MDA creates for it, and the
         grant of each operation to the run."""
-        sandbox = await RunSandbox(self.config, reviews=self.parts.reviews).managed()
+        sandbox = await RunSandbox(self.config, reviews=self.kind.reviews).managed()
         spec = (
             None if sandbox is None else SandboxSpec.model_validate(sandbox.model_dump(mode="json"))
         )
-        catalog = self.catalog()
+        catalog = self.build()
         loop = catalog.loop
         if spec is not None and spec.github_proxy is not None:
             # MDA puts a fresh token in this sandbox's proxy config itself, before each command.

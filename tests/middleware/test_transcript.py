@@ -682,14 +682,14 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
     from langchain_core.messages import messages_to_dict
 
     from openswe.agent_api.run_calls import TokenRun
-    from openswe.agent_api.run_parts import RunParts
+    from openswe.agent_api.run_kinds import RunKind
     from openswe.agent_api.tokens import RemoteRun
 
     engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
     # No replica began the run's turn before its start was reported.
     monkeypatch.setattr(mw, "run_turn", AsyncMock(return_value=None))
 
-    class Reporting(RunParts):
+    class Reporting(RunKind):
         assistant_id = "agent"
         reporters = (mw.TranscriptMiddleware(),)
 

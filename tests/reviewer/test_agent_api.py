@@ -14,9 +14,9 @@ from runtime_api.operations import OPERATION, OperationResult, RunOperation
 from starlette.types import Message, Receive, Scope, Send
 
 from openswe.agent_api import server
-from openswe.agent_api.agent import AgentParts
+from openswe.agent_api.agent import AgentKind
 from openswe.agent_api.run_calls import TokenRun
-from openswe.agent_api.run_parts import RunParts
+from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.server import RunTokenMiddleware
 from openswe.agent_api.tokens import (
     RemoteRun,
@@ -38,14 +38,14 @@ RUN = RemoteRun(
 )
 
 
-class _NeverPlanned(AgentParts):
+class _NeverPlanned(AgentKind):
     """The coding agent, whose calls after its start never work its plan out again."""
 
-    async def plan(self, config: RunnableConfig, surface: ToolSurface) -> None:
+    async def catalog(self, config: RunnableConfig, surface: ToolSurface) -> None:
         raise AssertionError("Only starting a run plans it")
 
 
-class _Offering(RunParts):
+class _Offering(RunKind):
     """A graph whose runs' operations reach ``tools``, put to ``shell_guards`` first."""
 
     assistant_id = "agent"
@@ -318,7 +318,7 @@ async def test_a_closed_walkthroughs_next_turn_still_retires_its_rules(
     monkeypatch.setattr(agent, "load_thread_settings", AsyncMock(return_value={}))
     turn = AgentTurnSettings(title_model_id="openai:gpt-6-luna", review_guide_closed=True)
 
-    prepared = await agent.AgentParts().preparation(
+    prepared = await agent.AgentKind().preparation(
         {"configurable": {"thread_id": "thread-1"}}, RunSettings(agent=turn), sandbox_id="sandbox-1"
     )
 
@@ -354,7 +354,7 @@ async def test_task_context_rechecks_membership_and_cancellation(
     monkeypatch.setattr(task_coordination, "maybe_refresh_proxy_token", AsyncMock())
     monkeypatch.setattr(store.TaskMembership, "context_for_thread", membership)
     monkeypatch.setattr(store.TaskDelegation, "get", AsyncMock(return_value=delegation))
-    parts = AgentParts()
+    parts = AgentKind()
     run = RUN.model_copy(update={"assistant_id": "agent"})
 
     absent = await TokenRun.answer(parts, run, "task_context", {"run_id": "run-1"})
@@ -512,7 +512,7 @@ async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
 async def test_remote_prompts_include_deployment_context(
     monkeypatch: pytest.MonkeyPatch, environment: str
 ) -> None:
-    from openswe.agent_api.run_start import StartingRun
+    from openswe.agent_api.run_catalog import RunCatalog
     from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent
 
     monkeypatch.setenv("OPENSWE_ENV", environment)
@@ -521,7 +521,7 @@ async def test_remote_prompts_include_deployment_context(
         models=SurfaceModels(main=model, subagent=model, use_gateway=False),
         subagents=[SurfaceSubagent("worker", "worker", "subagent instructions")],
     )
-    catalog = StartingRun(RunParts(), RUN, surface, {}).catalog()
+    catalog = RunCatalog(RunKind(), RUN, surface, {}).build()
     # MDA puts the deployment's context ahead of the main prompt it renders.
     main_context = catalog.loop.deployment_prompt
     subagent_prompt = catalog.subagents[0].system_prompt
@@ -552,7 +552,7 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import openswe.reviewer as reviewer
-    from openswe.agent_api.reviewer import ReviewerParts
+    from openswe.agent_api.reviewer import ReviewerKind
     from openswe.github.thread_token import (
         invalidate_cached_github_token,
         resolve_thread_github_token,
@@ -565,7 +565,7 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
     monkeypatch.setattr(reviewer, "get_github_app_installation_token_with_expiry", mint)
     await invalidate_cached_github_token(RUN.thread_id)
     run = RUN.model_copy(update={"configurable": {**RUN.configurable, "source": "github"}})
-    call = TokenRun(ReviewerParts(), run, "run-1")
+    call = TokenRun(ReviewerKind(), run, "run-1")
 
     # Whatever call of the run lands here first readies its token before its work.
     token = await call.in_run("operation", lambda: resolve_thread_github_token(call.config))
@@ -583,7 +583,7 @@ async def test_reviewer_runs_record_transcript_model_and_usage(
     from langchain_core.messages import AIMessage, HumanMessage, messages_to_dict
 
     import openswe.reviewer as reviewer
-    from openswe.agent_api.reviewer import ReviewerParts
+    from openswe.agent_api.reviewer import ReviewerKind
     from openswe.database import analytics
     from openswe.sandboxes.managed import ManagedSandbox
     from openswe.transcript.snapshot import load_snapshot
@@ -614,7 +614,7 @@ async def test_reviewer_runs_record_transcript_model_and_usage(
         usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
     )
 
-    parts = ReviewerParts()
+    parts = ReviewerKind()
     await TokenRun.answer(
         parts, run, "prepare", {"run_id": run_id, "messages": messages_to_dict([asked])}
     )
@@ -848,7 +848,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     monkeypatch.setenv("LANGCHAIN_REVISION_ID", "current-backend-sha")
     from langchain_core.tools import StructuredTool
 
-    from openswe.agent_api.run_start import StartingRun
+    from openswe.agent_api.run_catalog import RunCatalog
     from openswe.mcp.models import MCPToolProvenance
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware
     from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent
@@ -859,8 +859,8 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
 
         return StructuredTool.from_function(coroutine=run, name=name, description=name)
 
-    class Coordinator(RunParts):
-        async def plan(self, config: RunnableConfig, surface: ToolSurface) -> None:
+    class Coordinator(RunKind):
+        async def catalog(self, config: RunnableConfig, surface: ToolSurface) -> None:
             # What the planner decides for the run, such as the sender's draft preference.
             config["configurable"]["draft_prs"] = False
             search = integration("mcp_search")
@@ -891,7 +891,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
             surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
 
     parts = Coordinator()
-    started = await (await StartingRun.of(parts, RUN)).start()
+    started = await (await RunCatalog.of(parts, RUN)).start()
     catalog = started.catalog.model_dump(mode="json")
 
     assert isinstance(catalog, dict)
@@ -1069,7 +1069,7 @@ async def test_the_files_api_reaches_the_threads_files_as_the_run() -> None:
             seen.append(RunConfig.from_runtime().thread_id)
             return ExecuteResponse(output=f"ran {command}", exit_code=0)
 
-    class OnTheMachine(RunParts):
+    class OnTheMachine(RunKind):
         async def files(self, config: RunnableConfig) -> BackendProtocol:  # noqa: ARG002
             return Machine()
 
@@ -1313,7 +1313,7 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     from runtime_api.workers import Adopt
 
     from openswe.agent_api import async_workers
-    from openswe.agent_api.run_start import RunStart, StartingRun
+    from openswe.agent_api.run_catalog import RunCatalog, RunStart
     from openswe.prompts import prompt
 
     coordinator = RemoteRun(
@@ -1331,7 +1331,7 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     planned = Catalog(skill_sources=["/skills/worker/"])
     started = RunStart(catalog=planned, settings=RunSettings(draft_prs=True))
     starting = AsyncMock(return_value=MagicMock(start=AsyncMock(return_value=started)))
-    monkeypatch.setattr(StartingRun, "of", starting)
+    monkeypatch.setattr(RunCatalog, "of", starting)
 
     # The worker's first message: the assignment its launch rendered.
     assignment = prompt(

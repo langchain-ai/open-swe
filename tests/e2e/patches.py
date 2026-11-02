@@ -364,19 +364,19 @@ def _answer_every_call_on_a_fresh_replica() -> None:
     from langchain_core.runnables import RunnableConfig
     from pydantic import JsonValue
 
-    from openswe.agent_api.hosted import hosted_graphs
+    from openswe.agent_api.hosted import run_kinds
     from openswe.agent_api.run_calls import TokenRun
-    from openswe.agent_api.run_parts import RunParts
-    from openswe.agent_api.run_start import StartingRun
+    from openswe.agent_api.run_catalog import RunCatalog
+    from openswe.agent_api.run_kinds import RunKind
     from openswe.agent_api.tokens import RemoteRun
     from openswe.run_config import RunConfig
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     answer = TokenRun.answer
-    starting = StartingRun.of
+    starting = RunCatalog.of
 
     async def answer_call(
-        cls: type[TokenRun], parts: RunParts, run: RemoteRun, endpoint: str, raw: JsonValue
+        cls: type[TokenRun], parts: RunKind, run: RemoteRun, endpoint: str, raw: JsonValue
     ) -> JsonValue:
         calling = _calling.set(endpoint)
         try:
@@ -384,7 +384,7 @@ def _answer_every_call_on_a_fresh_replica() -> None:
         finally:
             _calling.reset(calling)
 
-    async def start(cls: type[StartingRun], parts: RunParts, run: RemoteRun) -> StartingRun:
+    async def start(cls: type[RunCatalog], parts: RunKind, run: RemoteRun) -> RunCatalog:
         # A dispatch can run in the context of a call it was made from, such as an operation.
         calling = _calling.set("start")
         try:
@@ -402,11 +402,11 @@ def _answer_every_call_on_a_fresh_replica() -> None:
 
         return recorded
 
-    for parts in hosted_graphs().values():
+    for parts in run_kinds().values():
         parts.plan = recording(parts.plan)
 
     TokenRun.answer = classmethod(answer_call)
-    StartingRun.of = classmethod(start)
+    RunCatalog.of = classmethod(start)
 
 
 async def _unavailable_scout_sandbox(_thread_id: str, _cfg: object) -> object:

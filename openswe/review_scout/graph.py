@@ -303,7 +303,7 @@ def scout_sandbox(thread_id: str, cfg: RunConfig) -> BackendProtocol:
     )
 
 
-async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> None:
+async def review_scout_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     """Work out a scout run into ``surface``: its tools, models, subagents and loop rules."""
     cfg = RunConfig.from_config(config)
     if cfg.thread_id is None:

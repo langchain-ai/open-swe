@@ -1000,7 +1000,7 @@ def reviewer_sandbox(thread_id: str, cfg: RunConfig) -> BackendProtocol:
     )
 
 
-async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
+async def reviewer_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     """Work out a review run into ``surface``: its tools, models, subagents and loop rules."""
     cfg = RunConfig.from_config(config)
     if cfg.thread_id is None:

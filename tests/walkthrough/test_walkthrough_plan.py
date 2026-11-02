@@ -504,7 +504,7 @@ async def test_a_head_change_during_planning_ends_the_scout(
 
     from runtime_api.operations import OperationResult, RunOperation
 
-    from openswe.agent_api.review_scout import ReviewScoutParts
+    from openswe.agent_api.review_scout import ReviewScoutKind
     from openswe.agent_api.run_calls import TokenRun
     from openswe.agent_api.tokens import RemoteRun
     from openswe.database import postgres
@@ -538,7 +538,7 @@ async def test_a_head_change_during_planning_ends_the_scout(
     )
     result = OperationResult.model_validate(
         await TokenRun.answer(
-            ReviewScoutParts(), run, "operation", operation.model_dump(mode="json")
+            ReviewScoutKind(), run, "operation", operation.model_dump(mode="json")
         )
     )
     # The scout's loop ends the run before its next model call once this is set.

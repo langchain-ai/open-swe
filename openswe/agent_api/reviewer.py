@@ -9,7 +9,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from runtime_api.loop import RunStarted
 
-from openswe.agent_api.run_parts import RunParts
+from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.tokens import RunSettings
 from openswe.github.thread_token import get_github_token
 from openswe.middleware.record_run_usage import record_run_usage
@@ -19,8 +19,8 @@ from openswe.review.events import ReviewEvents
 from openswe.reviewer import (
     PrepareReviewerRunMiddleware,
     ensure_reviewer_github_token,
-    plan_reviewer,
     resolve_reviewer_models,
+    reviewer_catalog,
     reviewer_sandbox,
     reviewer_tools,
 )
@@ -35,15 +35,15 @@ def _tools_by_name() -> dict[str, BaseTool]:
     return {tool.name: tool for tool in reviewer_tools()}
 
 
-class ReviewerParts(RunParts):
+class ReviewerKind(RunKind):
     """The pull request reviewer's pieces."""
 
     assistant_id = "reviewer"
     reviews = True
     reporters = (TranscriptMiddleware(), record_run_usage)
 
-    async def plan(self, config: RunnableConfig, surface: ToolSurface) -> None:
-        await plan_reviewer(config, surface)
+    async def catalog(self, config: RunnableConfig, surface: ToolSurface) -> None:
+        await reviewer_catalog(config, surface)
 
     async def preparation(
         self, config: RunnableConfig, settings: RunSettings, *, sandbox_id: str | None

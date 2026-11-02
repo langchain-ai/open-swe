@@ -7,7 +7,7 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 
 from openswe import reviewer
-from openswe.agent_api.reviewer import ReviewerParts
+from openswe.agent_api.reviewer import ReviewerKind
 from openswe.agent_api.tokens import RunSettings
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 
@@ -44,7 +44,7 @@ def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
 
 async def _planned_prepare(config: RunnableConfig) -> AgentMiddleware:
     """The reviewer's run preparation, as its run's turn sets it up for ``config``."""
-    preparation = await ReviewerParts().preparation(config, RunSettings(), sandbox_id=None)
+    preparation = await ReviewerKind().preparation(config, RunSettings(), sandbox_id=None)
     return next(m for m in preparation if isinstance(m, reviewer.PrepareReviewerRunMiddleware))
 
 

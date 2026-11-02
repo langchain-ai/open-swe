@@ -1,10 +1,11 @@
-"""What an Open SWE graph's MDA runs are answered with: the pieces each call builds
-from the run's token alone.
+"""The kinds of run Open SWE starts on Managed Deep Agents: the coding agent, the pull
+request reviewer and the review scout, each named by the run token's assistant id.
 
-Each graph names its own: how starting a run works out its catalog, what readies each
-turn and what its start records, the recorders that hear of its replies and tool calls,
-the guards on its shell commands, and how it reaches its tools by name, the thread's
-files, its skills, its incident and its GitHub credentials.
+MDA plays every kind with its one graph. Each kind names, for the backend: the catalog
+it resolves from the backend's data as a run starts, what readies each turn and what
+its start records, the recorders that hear of its replies and tool calls, the guards on
+its shell commands, and how it reaches its tools by name, the thread's files, its
+skills, its incident and its GitHub credentials.
 """
 
 from collections.abc import Sequence
@@ -22,12 +23,15 @@ from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.skill_store.run_skills import RunSkillStores
 
 
-class RunParts:
-    """A graph's pieces, built per call from its run's token; a graph overrides its own."""
+class RunKind:
+    """A kind of run, as the backend answers its calls: each kind overrides its own.
 
-    # The graph its runs play, as dispatch names it.
+    Everything here is built per call from the run's token and the request.
+    """
+
+    # The kind, as dispatch names it.
     assistant_id: ClassVar[str]
-    # Whether the graph reviews a pull request: it reaches only that repository, read-only,
+    # Whether the kind reviews a pull request: it reaches only that repository, read-only,
     # and tells the pull request itself when its sandbox is gone.
     reviews: ClassVar[bool] = False
     # What records the run's replies, tool calls and end: its transcript and usage. Each
@@ -36,8 +40,10 @@ class RunParts:
     # The guards on the shell commands the run's tools run.
     shell_guards: Sequence[AgentMiddleware] = ()
 
-    async def plan(self, config: RunnableConfig, surface: ToolSurface) -> None:
-        """Work out a starting run's tools, models, subagents and loop rules into ``surface``."""
+    async def catalog(self, config: RunnableConfig, surface: ToolSurface) -> None:
+        """Resolve a starting run's tools, models, subagents and loop rules into ``surface``,
+        from what only the backend holds: the thread's settings, the workspace's defaults,
+        the sender's access, and the integrations their credentials reach."""
         raise NotImplementedError
 
     def restore(self, state: dict[str, object]) -> None:
@@ -54,7 +60,7 @@ class RunParts:
         return ()
 
     def sender(self, config: RunnableConfig, settings: RunSettings) -> RunSender | None:  # noqa: ARG002
-        """Who the run's invocation is attributed to; None where the graph records no start."""
+        """Who the run's invocation is attributed to; None where the kind records no start."""
         return None
 
     async def started(

@@ -7,7 +7,7 @@ from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.review_scout import graph as scout
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
-from tests.agent.test_agent_assembly_context import _base_config, _plan_agent
+from tests.agent.test_agent_assembly_context import _base_config, _agent_catalog
 from tests.agent.test_agent_assembly_context import saved_thread_scope as saved_thread_scope
 
 _PLANNERS = ["main", "reviewer", "review-scout"]
@@ -15,11 +15,11 @@ _PLANNERS = ["main", "reviewer", "review-scout"]
 
 async def _planned(kind: str) -> ToolSurface:
     if kind == "main":
-        planned = (await _plan_agent())["surface"]
+        planned = (await _agent_catalog())["surface"]
         assert isinstance(planned, ToolSurface)
         return planned
     module = reviewer if kind == "reviewer" else scout
-    plan = reviewer.plan_reviewer if kind == "reviewer" else scout.plan_review_scout
+    plan = reviewer.reviewer_catalog if kind == "reviewer" else scout.review_scout_catalog
     surface = ToolSurface()
     with patch.object(
         module, "cached_workspace_settings", AsyncMock(return_value=WorkspaceSettings({}))

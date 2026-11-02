@@ -115,12 +115,12 @@ async def test_only_a_review_skips_the_lost_sandbox_notice(
     from runtime_api.loop import SandboxGone
 
     from openswe.agent_api import run_sandbox
-    from openswe.agent_api.hosted import hosted_graphs
+    from openswe.agent_api.hosted import run_kinds
     from openswe.agent_api.run_calls import TokenRun
     from openswe.agent_api.tokens import RemoteRun
 
     run = TokenRun(
-        hosted_graphs()[assistant_id],
+        run_kinds()[assistant_id],
         RemoteRun(thread_id="thread-1", assistant_id=assistant_id, configurable={}, expires_at=0),
         "run-1",
     )

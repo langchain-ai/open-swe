@@ -7,11 +7,11 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 
-from openswe.agent_api.run_parts import RunParts
+from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.tokens import RunSettings
 from openswe.review_scout.graph import (
     PrepareReviewScoutRunMiddleware,
-    plan_review_scout,
+    review_scout_catalog,
     scout_sandbox,
     scout_tools,
 )
@@ -31,14 +31,14 @@ def _thread_id(config: RunnableConfig) -> str:
     return thread_id
 
 
-class ReviewScoutParts(RunParts):
+class ReviewScoutKind(RunKind):
     """The review scout's pieces."""
 
     assistant_id = "review-scout"
     reviews = True
 
-    async def plan(self, config: RunnableConfig, surface: ToolSurface) -> None:
-        await plan_review_scout(config, surface)
+    async def catalog(self, config: RunnableConfig, surface: ToolSurface) -> None:
+        await review_scout_catalog(config, surface)
 
     async def preparation(
         self, config: RunnableConfig, settings: RunSettings, *, sandbox_id: str | None

@@ -9,13 +9,13 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from runtime_api.operations import OperationResult, RunOperation
 
 from openswe.agent_api.run_calls import TokenRun
-from openswe.agent_api.run_parts import RunParts
+from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.tokens import RemoteRun
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.openai_responses.client_tools import PENDING_ARTIFACT_KEY, ClientToolSpec
 
 
-class _Parts(RunParts):
+class _Parts(RunKind):
     assistant_id = "agent"
 
 

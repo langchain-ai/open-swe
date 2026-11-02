@@ -1,7 +1,7 @@
 """What starting an Open SWE agent run works out, and what preparing its turns does.
 
 Resolves the run's models, builds the curated tool list plus optional integrations,
-and sets the rules MDA's middleware follows around each model call (``plan_agent``).
+and sets the rules MDA's middleware follows around each model call (``agent_catalog``).
 All per-thread state lives in the sandbox + thread metadata; the agent itself is
 stateless.
 """
@@ -706,7 +706,7 @@ ADMIN_TOOLS = (
 )
 
 
-# Every tool the agent may offer; each run's plan offers those it keeps (``plan_agent``),
+# Every tool the agent may offer; each run's plan offers those it keeps (``agent_catalog``),
 # and a call answered without the plan finds its tool here by name.
 AGENT_TOOLS: Final = (
     http_request,
@@ -1724,7 +1724,7 @@ async def record_agent_run(
         await asyncio.gather(*recording)
 
 
-async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
+async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     """Work out an agent run into ``surface``: its tools, models, subagents and loop rules."""
     configurable = config.get("configurable") or {}
     cfg = RunConfig.parse(configurable)

@@ -14,7 +14,7 @@ from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.mcp.runtime import MCPTools
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_runtime import ToolSurface
-from openswe.server import plan_agent
+from openswe.server import agent_catalog
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-5.6-sol",
@@ -103,7 +103,7 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
         config["configurable"]["github_login"] = github_login
         config["configurable"]["plan_mode"] = initial_plan_mode
         surface = ToolSurface()
-        await plan_agent(config, surface)
+        await agent_catalog(config, surface)
 
     tool_names = {
         tool.name if hasattr(tool, "name") else tool.__name__ for tool in surface.base_tools

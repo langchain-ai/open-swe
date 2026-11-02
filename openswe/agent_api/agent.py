@@ -9,7 +9,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from runtime_api.loop import RunSender, RunStarted
 
-from openswe.agent_api.run_parts import RunParts
+from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.tokens import RunSettings
 from openswe.github.thread_token import get_github_token
 from openswe.github.token import resolve_github_token
@@ -31,11 +31,11 @@ from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.server import (
     PrepareAgentRunMiddleware,
     ThreadFiles,
+    agent_catalog,
     agent_sender,
     agent_tools_by_name,
     client,
     integration_tools,
-    plan_agent,
     record_agent_run,
 )
 from openswe.skill_store.run_skills import RunSkillStores
@@ -47,15 +47,15 @@ logger = logging.getLogger(__name__)
 _TRANSCRIPT: Final = TranscriptMiddleware()
 
 
-class AgentParts(RunParts):
+class AgentKind(RunKind):
     """The coding agent's pieces."""
 
     assistant_id = "agent"
     reporters = (_TRANSCRIPT, record_run_usage)
     shell_guards = (PullRequestCreationGuardMiddleware(), WorkflowPushGuardMiddleware())
 
-    async def plan(self, config: RunnableConfig, surface: ToolSurface) -> None:
-        await plan_agent(config, surface)
+    async def catalog(self, config: RunnableConfig, surface: ToolSurface) -> None:
+        await agent_catalog(config, surface)
 
     async def preparation(
         self, config: RunnableConfig, settings: RunSettings, *, sandbox_id: str | None
