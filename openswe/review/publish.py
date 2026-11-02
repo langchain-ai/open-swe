@@ -697,7 +697,7 @@ async def post_pull_request_review(
                     error_kind = "unresolved_anchor"
                 for error in error_messages:
                     message = error.get("message") if isinstance(error, dict) else error
-                    if isinstance(message, str) and "on your own pull request" in message:
+                    if isinstance(message, str) and "your own pull request" in message:
                         error_kind = "self_review"
                         break
             return {
