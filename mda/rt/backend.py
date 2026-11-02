@@ -20,7 +20,7 @@ import os
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Final, Literal, cast
+from typing import Final, cast
 from weakref import WeakKeyDictionary
 
 import httpx2
@@ -46,6 +46,7 @@ from runtime_api.loop import VISIBLE_FROM, RunCall
 from runtime_api.tool_search import TOOL_SPECS, ToolNames
 from runtime_api.workers import ADOPT, Adopt
 
+from rt.kinds import KINDS, Graph
 from rt.outbox import Outbox
 from rt.tracing import TurnTrace
 
@@ -216,9 +217,6 @@ def _call_failure(response: httpx2.Response) -> CallFailure | None:
         return None
 
 
-Graph = Literal["agent", "reviewer", "review-scout"]
-
-
 class Run:
     """One run of a graph, as the backend knows it: what it calls with, what it was
     planned with, and what it has told the backend.
@@ -229,6 +227,8 @@ class Run:
     """
 
     def __init__(self, context: RunContext) -> None:
+        # What every run of its kind does, whatever its catalog says.
+        self._kind = KINDS[context.graph]
         # Dispatch sends the catalog it planned the run with in every run's context.
         self._carried = context.catalog
         self._token = context.run_token
@@ -283,7 +283,7 @@ class Run:
         """The catalog the run started with: its coordinator's, for a launched worker."""
         if self._planned is None:
             if self._carried is not None:
-                self._planned = Catalog.model_validate(self._carried)
+                self._planned = self._kind.applied(Catalog.model_validate(self._carried))
             elif self.has_run:
                 raise BackendCallError("The run started without its catalog")
             else:
@@ -305,7 +305,7 @@ class Run:
         )
         self._token, self._worker_grant = adopted.run_token, None
         self.invocation_id = adopted.invocation_id
-        self.adopted = adopted.catalog
+        self.adopted = self._kind.applied(adopted.catalog)
         # Resolved under the coordinator's grants.
         self.backend_tools.clear()
 

@@ -1,9 +1,9 @@
 """What threads remember, and the prompt each workspace's curator distils from it.
 
-A personal memory applies to the runs of the person who saved it at once. Every
-memory also waits for the curator of the workspace it was saved in, which may fold
-what many people's threads learned into the workspace's prompt. The curator never
-reads a memory saved in a private thread unless its person agreed to share it.
+Every memory waits for the curator of the workspace it was saved in, which may restate
+what many people's threads learned in the workspace's prompt. A personal memory also
+applies to its person's runs at once, until a line there supersedes it. Memories
+saved in private threads before every memory reached the curator stay held from it.
 """
 
 import hashlib
@@ -13,7 +13,7 @@ from typing import Final, Literal, Self
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel
-from sqlalchemy import ForeignKey, and_, delete, func, or_, select, update
+from sqlalchemy import ForeignKey, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,9 +23,10 @@ from openswe.database.orm import NOW, Base
 from openswe.users.models import User
 from openswe.workspaces.rows import WorkspaceRow
 
+# A personal memory applies to its person; a workspace one only reaches the curator.
 Scope = Literal["personal", "workspace"]
-Status = Literal["pending", "held", "adopted", "declined"]
-Decision = Literal["adopted", "declined"]
+Status = Literal["pending", "held", "adopted", "superseded", "declined"]
+Decision = Literal["adopted", "superseded", "declined"]
 Withdrawal = Literal["deleted", "requested"]
 
 # The thread metadata key naming the workspace a curator thread curates; nobody posts there.
@@ -95,26 +96,22 @@ class WorkspacePromptVersion(Base):
 
 
 class PersonalMemory(BaseModel):
-    """A memory that reaches its person's runs: a personal one, or a workspace one they
-    saved that the curator has not processed yet."""
+    """A memory that reaches its person's runs."""
 
     id: UUID
-    scope: Scope
     body: str
 
     @property
     def line(self) -> str:
-        """The memory as its person's block lists it, with the id and scope that forget it."""
-        if self.scope == "workspace":
-            return f"{self.body} (workspace memory {self.id}, awaiting the curator)"
+        """The memory as its person's block lists it, with the id that forgets it."""
         return f"{self.body} (memory {self.id})"
 
 
 class CuratedMemory(BaseModel):
-    """A memory as the curator sees it: never who saved it, and never what a private
-    thread said unless its person agreed to share it."""
+    """A memory as the curator sees it: never who saved it, nor what a held one says."""
 
     id: UUID
+    # Personal memories already apply to their person, until a line in the prompt supersedes one.
     scope: Scope
     status: Status
     saved_at: datetime
@@ -122,7 +119,7 @@ class CuratedMemory(BaseModel):
     # can count how many people say a thing without learning who they are.
     person: str | None
     from_private_thread: bool
-    # None for a memory from a private thread whose person kept it to themselves.
+    # None for a held memory.
     body: str | None
     # Where the curator can look for evidence; None for a private thread.
     thread_id: str | None
@@ -171,15 +168,12 @@ class Memories:
         workspace: str | None,
         thread_id: str | None,
         from_private_thread: bool,
-        shared: bool,
     ) -> MemoryRow:
-        """Keep a memory; one from a private thread its person did not share is held from
-        the curator, and a workspace one never takes effect without it.
+        """Keep a memory for the curator; a workspace one never takes effect without it.
 
         A personal memory keeps the workspace it was saved in when there is one, for that
         workspace's curator; a workspace memory needs it.
         """
-        held = from_private_thread and not shared
         async with postgres.session() as session:
             workspace_id = (
                 await session.scalar(select(WorkspaceRow.id).where(WorkspaceRow.slug == workspace))
@@ -194,7 +188,6 @@ class Memories:
                 workspace_id=workspace_id,
                 thread_id=thread_id,
                 from_private_thread=from_private_thread,
-                status="held" if held else "pending",
                 created_by=person,
                 updated_by=person,
             )
@@ -202,60 +195,49 @@ class Memories:
         return row
 
     async def personal(
-        self, person: UUID | None, *, unprocessed_in: str | None = None
+        self, person: UUID | None, *, curated_in: str | None = None
     ) -> list[PersonalMemory]:
         """``person``'s personal memories, newest first; none for no person.
 
-        With ``unprocessed_in``, also the workspace memories they saved for that workspace
-        that the curator has not adopted or declined yet: until it does, they apply to their
-        person as if personal. Only those saved in the person's own private thread, which
-        passed the bar a personal memory must: one from a shared thread may carry text
-        someone else put there, and only the curator may pass that on.
+        With ``curated_in``, the workspace whose curated prompt the run reads, leaving out
+        the memories its curator superseded: that prompt carries them now. Without it, as for
+        a person who does not read that prompt, they keep applying rather than disappear.
         """
         if person is None or not postgres.configured():
             return []
-        scopes = MemoryRow.scope == "personal"
-        if unprocessed_in is not None:
-            scopes = or_(
-                scopes,
-                and_(
-                    MemoryRow.scope == "workspace",
-                    MemoryRow.status.in_(("pending", "held")),
-                    MemoryRow.from_private_thread.is_(True),
-                    MemoryRow.workspace_id
-                    == select(WorkspaceRow.id)
-                    .where(WorkspaceRow.slug == unprocessed_in)
-                    .scalar_subquery(),
-                ),
+        conditions = [
+            MemoryRow.scope == "personal",
+            MemoryRow.created_by == person,
+            MemoryRow.withdrawal_requested.is_(False),
+        ]
+        if curated_in is not None:
+            conditions.append(
+                or_(
+                    MemoryRow.status != "superseded",
+                    MemoryRow.workspace_id.is_distinct_from(
+                        select(WorkspaceRow.id)
+                        .where(WorkspaceRow.slug == curated_in)
+                        .scalar_subquery()
+                    ),
+                )
             )
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(MemoryRow)
-                .where(
-                    scopes,
-                    MemoryRow.created_by == person,
-                    MemoryRow.withdrawal_requested.is_(False),
-                )
+                .where(*conditions)
                 .order_by(MemoryRow.created_at.desc())
                 .limit(_PERSONAL_LIMIT)
             )
-            return [
-                PersonalMemory.model_validate({"id": row.id, "scope": row.scope, "body": row.body})
-                for row in rows
-            ]
+            return [PersonalMemory.model_validate({"id": row.id, "body": row.body}) for row in rows]
 
-    async def withdraw(self, memory_id: UUID, person: UUID, scope: Scope) -> Withdrawal | None:
-        """Take back one of ``person``'s memories in ``scope``; None when they saved no such one.
+    async def withdraw(self, memory_id: UUID, person: UUID) -> Withdrawal | None:
+        """Take back one of ``person``'s memories; None when they saved no such one.
 
-        One the curator never saw, held from a private thread, is simply deleted. Any other
-        goes back to the curator, adopted or not, since only it may change the workspace's
+        One the curator never saw, held from it, is simply deleted. Any other
+        goes back to the curator, decided or not, since only it may change the workspace's
         prompt; a personal one stops applying to its person at once.
         """
-        mine = (
-            MemoryRow.id == memory_id,
-            MemoryRow.scope == scope,
-            MemoryRow.created_by == person,
-        )
+        mine = (MemoryRow.id == memory_id, MemoryRow.created_by == person)
         async with postgres.session() as session:
             if await session.scalar(
                 delete(MemoryRow).where(*mine, MemoryRow.status == "held").returning(MemoryRow.id)

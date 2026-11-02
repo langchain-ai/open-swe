@@ -1,10 +1,10 @@
 # Open SWE on Managed Deep Agents
 
 Open SWE's coding agent, pull request reviewer and review scout, packaged as one [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) project with a single graph, `open-swe`.
-Each run's context names the Open SWE graph it plays (`agent`, `reviewer` or `review-scout`); the factory in `agent.py` builds that graph's deep agent from it.
+Each run's context names the kind of run it is (`agent`, `reviewer` or `review-scout`); the factory in `agent.py` builds the deep agent for that kind from it.
 
 The model loop, its checkpoints, every tool call and the middleware around them run here.
-The backend works out each run's catalog as it starts the run (`openswe/agent_api/graph.py`): its operations, its models and the rules of its middleware.
+The backend resolves each run's catalog as it starts the run, from the thread's settings, the workspace's defaults, the sender's access and the integrations their credentials reach (`openswe/agent_api/run_catalog.py`): its operations, its models and the rules of its middleware.
 Every call MDA makes on the backend, the loop's and the tools', is a named endpoint of the typed API in `packages/runtime-api` (`runtime_api`), under `POST /agent-api/{endpoint}`, which both sides import, answered from the run token and the request on whichever backend replica it lands.
 Each endpoint declares how long it may take and when it is sent again after a failed delivery.
 Every call is authenticated with the run token.
@@ -58,7 +58,7 @@ Every call is authenticated with the run token.
   Tool errors become results.
   Where the catalog lists the checks, a file posing as an image is not attached and reading a file loads the `AGENTS.md` files above it (`rt/validate_image_reads.py`, `rt/subdir_agents.py`).
   Commands get the backend's five-minute default timeout and a client-side deadline past it.
-  The transcript hears of every call alongside it (`tool_started`, `tool_result`); each phase and reply waits for the reports made before it.
+  The transcript hears of every call alongside it (`tool_started`, `tool_result`); each reply waits for the reports made before it.
   Code mode's calls skip the checks.
 - **Skills:** the backend lists the skills a run may see (`runtime_api.skills`): a person's own only on a run that acts for them.
   `rt/skills.py` keeps them as read-only files, lists them in the system prompt of the agent's and its subagents' model calls with deepagents' skills middleware, listing them again every run, started before `prepare`, so a public thread never keeps a person's skills from a run that acted for them, and answers `read_file` and the other file tools on their paths.
@@ -69,22 +69,23 @@ Every call is authenticated with the run token.
   - `prepare`: before the run, on the backend: the turn's prompt, model and route, from what the run token says starting the run decided, never planning the run again.
     It writes the graph state the loop reads.
     The run then reports its start (`run_started`), behind which the backend opens the transcript turn and records the thread's model and usage, none of which the first model call waits for.
-    The reviewer and the scout still prepare from their plan;
+    The reviewer and the scout prepare from it too;
   - **Git evidence** (`rt/git_evidence.py`): the sandbox's checkouts are fingerprinted (`rt/sandbox_scripts/git_trace.py`) as the turn starts and before a model call that follows a file or shell tool, each in the background; a tool that may change a checkout waits only for the turn's first fingerprint.
     With the pull requests the run's operations open, they name the turn's `ls_git_repo` and `ls_git_branch` in its trace, reconciled after the run ends, so neither the run's end nor the thread's next message waits for the last fingerprint or the trace's update.
     A turn whose tools changed nothing waits for no fingerprint;
   - `inbox`, before each model call: only what was sent to the thread while the run worked (queued follow-ups and notes, event matches, task messages), read as the catalog's `InboxSpec` says.
     Once the model call goes ahead, the run hands the items back through `inbox_received`, alongside the call as the transcript's reports go, and the next read names what that receipt holds until the backend took it, so the backend receives it before reading; a run that ends first leaves them owed.
     A run started to carry events receives them at `prepare`;
-  - `RunLoop` (`rt/loop.py`), around each model call, as the catalog's `LoopRules` say: it ends the run where a rule says to (a scout with nothing to plan, a client's call still pending), adds the task context (`task_context`) and keeps the GitHub proxy the backend writes fresh (`refresh_github_proxy`), both asked while the inbox is read, picks the route (`route_model` classifies a request) and the model (`model_choice` for one a person asked for), and assembles the system prompt and tool list.
+  - `RunLoop` (`rt/loop.py`), around each model call, as the run's `LoopRules` say: the catalog's for the coding agent, whose rules depend on the run, and those of its kind (`rt/kinds.py`) for the reviewer and the scout, which every run of theirs follows: it ends the run where a rule says to (a scout with nothing to plan, a client's call still pending), adds the task context (`task_context`) and an incident run's instructions (`incident_context`, which also checks the incident still wants the run and records the evidence people's messages carry) and keeps the GitHub proxy the backend writes fresh (`refresh_github_proxy`), both asked while the inbox is read, picks the route (`route_model` classifies a request) and the model (`model_choice` for one a person asked for), and assembles the system prompt and tool list.
     After an answer that calls no tool it asks again for the CLI result and the Slack reply the run owes, then posts the answer itself (`reply_on_behalf`).
     At the end it asks for the graph's own end-of-run work (`step_limit_reached`, `settle_review_check`, `finish_scout_plan`) and reports the run ended (`run_ended`: transcript, usage), and the run ends without waiting for either;
   - `model_result` (`ReportRepliesMiddleware`): the transcript and usage see each response;
   - **Reports:** the reports (`run_started`, `tool_started`, `tool_result`, `model_result`, `inbox_received`, `run_ended`) and the notices whose answer the run never reads (`sandbox_unreachable` and the end-of-run work) go through the run's outbox (`rt/outbox.py`): in the order they were made, batched into one `reports` call (`runtime_api.reports`) with whatever else waits, and sent again until the backend says it took them.
     Each carries a key unique in the thread, and the backend records a key once (`agent_report_receipt`), so a resend after a lost answer records nothing twice.
     What the backend has not taken rides in the run's graph state (`open_swe_outbox`), written with the reply, tool result or hook that made it, so a restarted process, or the thread's next run, sends it first.
-    A phase waits for the reports before it for up to five minutes, except `prepare`, which nothing an earlier run left unsent changes; `run_ended` goes out after them;
-  - a run whose catalog names no loop rules (a requested conversation offload, an incident run) hands `before_model`, `after_model` and `after_agent` to the graph's own middleware on the backend instead.
+    `run_ended` goes out after them;
+  - a run started only to offload the conversation (`LoopRules.offload_conversation`) summarizes it before its first model call, as MDA's summarization would but whatever its length, and ends (`rt/offload.py`);
+  - an incident run's tool results are recorded as evidence its report may cite (`record_evidence`), kept per run in PostgreSQL so any backend replica answers the run's calls.
 - **Subagents:** MDA runs `task` and its subagents.
   `RuntimeToolsMiddleware` reports each call to a tool MDA runs itself through `tool_started` and `tool_result`, so the transcript records the `task` call.
   Every call made from inside a subagent names the `task` call it runs in (`namespace`), and subagents hand their replies to `model_result` too.

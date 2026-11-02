@@ -37,7 +37,7 @@ from contextvars import ContextVar
 from typing import Annotated, Final, NotRequired, cast
 
 import httpx
-from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware import async_subagents
 from langchain.agents.middleware.types import (
     AgentMiddleware,
@@ -69,11 +69,8 @@ from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
 from pydantic import BaseModel, JsonValue, TypeAdapter
 from runtime_api.catalog import InboxSpec
-from runtime_api.endpoint import Endpoint, call
+from runtime_api.endpoint import call
 from runtime_api.loop import (
-    AFTER_AGENT,
-    AFTER_MODEL,
-    BEFORE_MODEL,
     INBOX,
     PREPARE,
     RUN_STARTED,
@@ -85,7 +82,6 @@ from runtime_api.loop import (
     PhaseResult,
     Prepare,
     Prepared,
-    RunCall,
     RunStarted,
 )
 from runtime_api.workers import LAUNCH_WORKER, WORKER_LAUNCHED, Launch, Launched
@@ -105,8 +101,9 @@ from rt.git_evidence import turn_git
 from rt.loop import RunLoop
 from rt.managed_sandbox import OpenedSandbox
 from rt.models import build_model
+from rt.offload import OFFLOADING_KEY, RequestedOffload
 from rt.outbox import OUTBOX_KEY, carry
-from rt.remote_files import RemoteFiles
+from rt.remote_files import RemoteFiles, RunArtifacts
 from rt.sandbox_setup import sandbox_setup
 from rt.tools import STATE_KEY, cited, run_id, tool_report
 from rt.tracing import MIDDLEWARE_TRACE_POLICY, TurnTrace
@@ -118,10 +115,6 @@ _json_object = TypeAdapter(dict[str, JsonValue])
 _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 _json_content = TypeAdapter(str | list[JsonValue])
 
-# Graph state MDA's own middleware reads: a requested offload's summarization
-# event, which MDA's summarization then applies to every model call.
-_MDA_STATE_KEYS: Final = frozenset({"_summarization_event"})
-_MESSAGE_KEY: Final = "__lc_message__"
 DISPLAY_DESCRIPTION: Final = "display_description"
 LAUNCH_WORKER_TOOL: Final = "start_async_task"
 # deepagents' tools for the tasks it tracks; Open SWE's task tools track its workers.
@@ -180,17 +173,6 @@ class _RunConfigurable(BaseModel):
     thread_id: str
 
 
-def _decode(value: object) -> object:
-    """A state value from the backend, with its messages rebuilt."""
-    if isinstance(value, Mapping):
-        if set(value) == {_MESSAGE_KEY} and isinstance(value[_MESSAGE_KEY], dict):
-            return messages_from_dict([value[_MESSAGE_KEY]])[0]
-        return {k: _decode(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_decode(v) for v in value]
-    return value
-
-
 def _held(update: Mapping[str, object] | None) -> Mapping[str, object]:
     held = (update or {}).get(STATE_KEY)
     return held if isinstance(held, Mapping) else {}
@@ -200,11 +182,8 @@ def _apply(reply: PhaseResult) -> dict[str, object]:
     for event in reply.events:
         get_stream_writer()(event)
     update: dict[str, object] = {}
-    held = {k: v for k, v in reply.update.items() if k not in _MDA_STATE_KEYS}
-    if held:
-        update[STATE_KEY] = held
-    for key in _MDA_STATE_KEYS & reply.update.keys():
-        update[key] = _decode(reply.update[key])
+    if reply.update:
+        update[STATE_KEY] = dict(reply.update)
     if reply.messages:
         update["messages"] = messages_from_dict(reply.messages)
     if reply.jump_to:
@@ -340,10 +319,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return self._backend.run.catalog.inbox
 
     @property
-    def _loop(self) -> RunLoop | None:
-        """What happens around each model call; None hands each phase to the backend, for
-        the runs it still answers from their plan."""
-        return self._run_loop if RunLoop.runs(self._backend.run.catalog) else None
+    def _loop(self) -> RunLoop:
+        """What happens around each model call."""
+        return self._run_loop
 
     def _invocation(self) -> str:
         if (invocation_id := self._backend.invocation_id) is not None:
@@ -448,10 +426,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             ),
         )
         # What the backend's preparation writes wins over where a turn starts from.
-        starting = self._loop.starting() if self._loop is not None else {}
-        if self._loop is not None:
-            prepared.update.update(self._loop.prepared(prepared))
-        update = _apply(prepared.model_copy(update={"update": {**starting, **prepared.update}}))
+        prepared.update.update(self._loop.prepared(prepared))
+        update = _apply(
+            prepared.model_copy(update={"update": {**self._loop.starting(), **prepared.update}})
+        )
         self._backend.outbox.notify(RUN_STARTED, self._started(state, prepared))
         update = {**update, "open_swe_prepared_for": invocation}
         if opened.workspace_lost:
@@ -496,13 +474,37 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return await self._open_sandbox(runtime)
 
     @hook_config(can_jump_to=["end"])
-    async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+    async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
         self._backend.outbox.adopt(state)
+        if self._loop.rules.offload_conversation:
+            return self._carrying(state, await self._offload(state, runtime))
         return self._carrying(state, await self._before_model(state))
+
+    async def _offload(self, state: RunState, runtime: Runtime) -> dict[str, object]:
+        """Summarize the conversation now, as the run was asked to, and end the run."""
+        # Where MDA's own summarization keeps the history: the sandbox, or else the run's
+        # artifacts root on the backend, never the root of a person's machine.
+        files = (
+            getattr(runtime, "backend", None)
+            if self._in_sandbox
+            else RunArtifacts(
+                self._backend, run_id, lambda: self._backend.run.catalog.files.artifacts_root
+            )
+        )
+        if not isinstance(files, BackendProtocol):
+            raise BackendCallError("The run has no files to offload the conversation to")
+        update, outcome = await RequestedOffload(
+            self._models.get(self._backend.run), files
+        ).offload(state, runtime)
+        return {
+            **update,
+            STATE_KEY: {**_held(update), OFFLOADING_KEY: outcome},
+            "jump_to": "end",
+        }
 
     async def _before_model(self, state: RunState) -> dict[str, object] | None:
         # What the loop asks the backend that the inbox does not change goes alongside it.
-        asked = self._loop.ask(state) if self._loop is not None else None
+        asked = self._loop.ask(state)
         try:
             inbox = await self._read_inbox()
             # The phase sees what the inbox brought, as the model will.
@@ -511,11 +513,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 "messages": [*state["messages"], *messages_from_dict(inbox.messages)],
                 STATE_KEY: {**state.get(STATE_KEY, {}), **inbox.update},
             }
-            planned = (
-                await self._loop.before_model(with_inbox, asked)
-                if self._loop is not None
-                else await self._phase(BEFORE_MODEL, run_call(RunCall, run_id(), with_inbox))
-            )
+            planned = await self._loop.before_model(with_inbox, asked)
         finally:
             if asked is not None:
                 await asked.close()
@@ -545,14 +543,6 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             run_id=run_id(), spec=self._inbox, received=self._backend.outbox.receiving()
         )
         return await call(self._backend, INBOX, read)
-
-    async def _phase[Call: RunCall, Result: PhaseResult](
-        self, endpoint: Endpoint[Call, Result], request: Call
-    ) -> Result:
-        await self._backend.outbox.drain()
-        # A backend it cannot reach fails the run, as any failure there does, so every
-        # surface reports it and the person can send the message again.
-        return await call(self._backend, endpoint, request)
 
     async def awrap_model_call(
         self,
@@ -636,8 +626,6 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return self._carrying(state, await self._after_model(state))
 
     async def _after_model(self, state: RunState) -> dict[str, object] | None:
-        if self._loop is None:
-            return _apply(await self._phase(AFTER_MODEL, run_call(RunCall, run_id(), state)))
         last = state["messages"][-1] if state["messages"] else None
         # Only an answer that calls no tool may owe a reply or a CLI result.
         if not self._loop.looks_at_answers or (isinstance(last, AIMessage) and last.tool_calls):
@@ -652,13 +640,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     async def _after_agent(self, state: RunState) -> dict[str, object] | None:
         run = self._backend.run
         try:
-            if self._loop is not None:
-                self._loop.after_agent(state)
-                # Not before the backend took the run's reports: once the run is done, its
-                # completion closes the transcript turn, and a report after that is lost.
-                await self._backend.outbox.drain()
-                return None
-            return _apply(await self._phase(AFTER_AGENT, run_call(RunCall, run_id(), state)))
+            self._loop.after_agent(state)
+            # Not before the backend took the run's reports: once the run is done, its
+            # completion closes the transcript turn, and a report after that is lost.
+            await self._backend.outbox.drain()
+            return None
         except BackendCallError:
             logger.warning("The backend's end-of-run hooks failed", exc_info=True)
             return None

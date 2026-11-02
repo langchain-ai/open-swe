@@ -27,7 +27,7 @@ from openswe.github.queue import NativeCandidate, NativeEntry, NativeQueueSnapsh
 from openswe.github.repositories import Repository
 from openswe.merge_queue.admission import ADMISSION_MAX_AGE, Admission, QueuePolicy
 from openswe.merge_queue.configuration import QueueConfiguration
-from openswe.merge_queue.dispatch import WorkflowPolicy
+from openswe.merge_queue.dispatch import DispatchEnvelope, WorkflowPolicy
 from openswe.merge_queue.git import Candidate
 from openswe.merge_queue.models import (
     Attempt,
@@ -123,6 +123,12 @@ class NativeWork:
     request: ValidationRequest
     run_id: int | None
     dispatch: bool = False
+
+
+@dataclass(frozen=True)
+class NativeCheckUpdate:
+    envelope: DispatchEnvelope
+    state: Literal["recovering", "cancelled"]
 
 
 class MergeQueue(Record):
@@ -560,6 +566,100 @@ class MergeQueue(Record):
                     raise ValueError("Invalid saved validation run")
                 history.append(NativeWork(batch, attempt, request, run_id))
             return history
+
+    @asynccontextmanager
+    async def native_check_update(
+        self, snapshot: NativeQueueSnapshot, lease: Lease
+    ) -> AsyncIterator[NativeCheckUpdate | None]:
+        """Acknowledge one report only after delivery; fence it against policy changes."""
+        async with asyncio.timeout(5), self._locked(lease) as (session, queue, now):
+            if queue.mode != "native" or snapshot.branch != queue.target_branch:
+                raise ValueError("Queue is not reporting this native target")
+            rows = (
+                await session.execute(
+                    select(Attempt, Batch)
+                    .join(Batch, Attempt.batch_id == Batch.id)
+                    .where(
+                        Batch.queue_id == queue.id,
+                        select(Evidence.id)
+                        .where(Evidence.attempt_id == Attempt.id, Evidence.key == "native-request")
+                        .exists(),
+                        ~select(Evidence.id)
+                        .where(Evidence.attempt_id == Attempt.id, Evidence.key == "check-cancelled")
+                        .exists(),
+                    )
+                    .order_by((Batch.state == "active").desc(), Attempt.created_at)
+                    .limit(100)
+                )
+            ).all()
+            current_shas = (
+                {entry.head_sha for entry in snapshot.queue.entries.nodes}
+                if snapshot.queue
+                else set()
+            )
+            for attempt, batch in rows:
+                references = {
+                    row.key: row.reference
+                    for row in await session.scalars(
+                        select(Evidence).where(Evidence.attempt_id == attempt.id)
+                    )
+                }
+                request = ValidationRequest.model_validate(references["native-request"])
+                expired = min(attempt.deadline, batch.deadline) <= now
+                current = request.candidate_sha in current_shas
+                superseded = batch.policy.get("superseded_attempts", 0)
+                if type(superseded) is not int:
+                    raise ValueError("Invalid workflow policy attempt boundary")
+                # A superseded check on a live SHA can still be used by its replacement.
+                if current and (
+                    batch.state != "active"
+                    or attempt.number <= superseded
+                    or attempt.state == "cancelled"
+                ):
+                    continue
+                if (
+                    not current
+                    and snapshot.queue
+                    and len(snapshot.candidates) != len(snapshot.queue.entries.nodes)
+                ):
+                    continue
+                state: Literal["recovering", "cancelled"]
+                if not current or expired:
+                    state = "cancelled"
+                elif batch.state == "active" and attempt.state == "failed" and not queue.paused:
+                    state = "recovering"
+                else:
+                    continue
+                if f"check-{state}" in references:
+                    continue
+                if attempt.state == "running" and state == "cancelled":
+                    attempt.state, attempt.finished_at = (
+                        "timed_out" if expired else "cancelled",
+                        now,
+                    )
+                if attempt.deadline <= now - timedelta(days=1):
+                    await self._save_evidence(
+                        session, attempt, "check-cancelled", {"reported": False}
+                    )
+                    continue
+                policy = references.get("workflow-policy", {})
+                envelope = DispatchEnvelope.model_validate(
+                    {
+                        "contract": request,
+                        "expires_at": attempt.deadline,
+                        "workflow_policy_revision": policy.get("revision"),
+                        "workflow_digest": policy.get("digest"),
+                    }
+                )
+                yield NativeCheckUpdate(envelope, state)
+                await self._save_evidence(
+                    session,
+                    attempt,
+                    f"check-{state}",
+                    {"reported": attempt.deadline > now - timedelta(days=1)},
+                )
+                return
+            yield None
 
     async def record_native_landing(self, work: NativeWork, lease: Lease) -> None:
         async with self._locked(lease) as (session, _, now):

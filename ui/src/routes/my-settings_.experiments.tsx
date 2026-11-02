@@ -18,11 +18,6 @@ function ExperimentsPage() {
     >
       <SettingsSection title="Interface">
         <StreamPreference />
-        <ProfileSwitchRow
-          field="experimental_fleet"
-          label="LangSmith Agent Workspace"
-          description="Use LangSmith Agent Workspace for your Open SWE agents, with one list of pinned, recent, and archived chats."
-        />
       </SettingsSection>
       <SettingsSection title="Slack">
         <ProfileSwitchRow
@@ -45,9 +40,14 @@ function ExperimentsPage() {
       </SettingsSection>
       <SettingsSection title="Agent">
         <ProfileSwitchRow
+          field="goal_mode"
+          label="Goal mode"
+          description="Open SWE keeps working without messaging you until it is blocked on you, or its pull request has passing checks, a few rounds of Open SWE review with the obvious findings fixed, and a walkthrough of the latest version."
+        />
+        <ProfileSwitchRow
           field="experimental_memory"
           label="Memory"
-          description="Threads you start include what your workspace's curator learned from everyone's threads, and what you offer the workspace to remember in your private threads applies to your own runs until the curator processes it."
+          description="Threads you start include what your workspace's curator learned from everyone's memories, in place of your own memories it superseded."
         />
         <ProfileSwitchRow
           field="experimental_background_callbacks"

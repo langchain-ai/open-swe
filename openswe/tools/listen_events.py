@@ -13,6 +13,7 @@ from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
 from openswe.run_config import RunConfig
 from openswe.slack.client import parse_github_pr_url
+from openswe.threads.identity import ThreadIdentity
 from openswe.tools.access import resolve_access
 from openswe.webhooks.event_log import ADMIN_ONLY_SOURCES, RETAINED_DAYS, EventLog, WebhookSource
 from openswe.webhooks.event_matches import MultitaskStrategy
@@ -39,6 +40,8 @@ _CARRIED_CONFIG_KEYS = frozenset(
         "workspace",
         "environment",
         "github_login",
+        "user_id",
+        "auth_provider",
         "github_user_id",
         "user_email",
         "repo",
@@ -184,12 +187,24 @@ async def list_event_types(
     source: WebhookSource | None = None, event_type: str = ""
 ) -> dict[str, object]:
     """Implement the `list_event_types` tool."""
+    cfg = RunConfig.from_runtime()
+    access = await resolve_access(cfg)
+    user = (
+        await ThreadIdentity(
+            f"user:{cfg.user_id}" if cfg.user_id else cfg.github_login or ""
+        ).user()
+        if access.private and access.owner
+        else None
+    )
+    workspace_id = await WORKSPACES.id_for_slug(cfg.workspace_slug or DEFAULT_WORKSPACE_SLUG)
     since = datetime.now(UTC) - timedelta(days=RETAINED_DAYS)
     kinds = await EventLog.kinds(
         since,
         source=source,
         event_type=event_type.strip(),
-        admin=(await resolve_access()).admin_thread,
+        admin=access.admin_thread,
+        viewer_id=user.id if user else None,
+        workspace_id=workspace_id,
     )
     return {
         "since": since.isoformat(),

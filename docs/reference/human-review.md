@@ -10,6 +10,16 @@ One request per pull request is open at a time, whatever its kind.
 Asking for an expedited review of a pull request with an open standard request replaces it; asking for a standard review while an expedited card is open returns its link and reports that it already satisfies the review request.
 The agent must tell the requester review is in progress, not cancel the card to switch to standard review unless the requester explicitly asks.
 
+## Admin event log
+
+Human-review activity is retained for 14 days in `event_log` under the admin-only `human_review` source.
+Admin threads can discover it with `list_event_types` and subscribe with `listen_events(sources=["human_review"], ...)`; wildcard subscriptions and non-admin threads cannot see it.
+
+Events cover request creation and committed state changes (including expedited votes, reviewer picks, acceptance, expiry, release, card delivery and supplementary review progress), request outcomes, assignment decisions and agent wakes, GitHub review request outcomes, pick/reminder delivery, snoozes and declines, and deadline scheduling and execution.
+Payloads carry the request ID and PR URL, with repository/workspace/PR links resolved on insert.
+Run configuration and DM bodies are not logged.
+Only successful transactions emit state-change events; event-log failures do not prevent review operations.
+
 ## Configuration
 
 `.open-swe/settings.json` in the repository:

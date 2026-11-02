@@ -3,8 +3,10 @@ import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import { BrainIcon } from "@phosphor-icons/react/dist/ssr/Brain"
 import { useEffect, useRef, useState } from "react"
 
+import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { cn, formatElapsed } from "@/lib/utils"
 import { ElapsedSeconds } from "./ElapsedSeconds"
+import { Thought } from "./thought"
 
 function reasoningDuration(elapsedMs: number | null): string | undefined {
   if (elapsedMs === null) return undefined
@@ -12,23 +14,10 @@ function reasoningDuration(elapsedMs: number | null): string | undefined {
   return `Reasoned for ${formatElapsed(elapsedMs)}`
 }
 
-const MAX_PREVIEW_LENGTH = 200
-
-/** The thought's first line as plain text; the row's own truncation handles overflow. */
-function thoughtPreview(text: string): string {
-  const firstLine = text.split("\n").find((line) => line.trim()) ?? ""
-  // Underscores are emphasis only at a word edge; inside a name they are the name.
-  return firstLine
-    .replace(/^\s*#+\s*/, "")
-    .replace(/[*`]/g, "")
-    .replace(/(^|\W)_+|_+(?=\W|$)/g, "$1")
-    .trim()
-    .slice(0, MAX_PREVIEW_LENGTH)
-}
-
 /**
  * Renders a model's reasoning ("thinking") tokens. While the reasoning is live
- * it streams in muted gray text under a shimmering "Thinking…" header; once the
+ * it streams in muted gray text under a shimmering header naming the current
+ * thought ("Thinking…" until the model gives one); once the
  * reasoning ends it auto-collapses into a brain-icon toggle that previews the
  * reasoning and that the user can expand on demand; how long it took is the tooltip.
  */
@@ -56,11 +45,13 @@ export function ReasoningBlock({
     }
   }, [isLive])
 
-  const trimmed = text.trim()
-  if (!trimmed && !isLive) return null
+  const thought = new Thought(text)
+  if (!thought.text && !isLive) return null
 
   const expanded = isLive || userExpanded
-  const label = thoughtPreview(trimmed) || "Reasoning"
+  const liveLabel = thought.heading ? `${thought.heading}...` : "Thinking..."
+  const label = thought.preview || "Reasoning"
+  const body = thought.bodyUnder(isLive ? thought.heading : thought.preview)
 
   return (
     <div className="my-space-1">
@@ -68,7 +59,7 @@ export function ReasoningBlock({
         color="secondary"
         variant="plain"
         size="sm"
-        aria-label={isLive ? "Thinking..." : label}
+        aria-label={isLive ? liveLabel : label}
         title={isLive ? undefined : reasoningDuration(elapsedMs)}
         type="button"
         onClick={() => {
@@ -80,7 +71,7 @@ export function ReasoningBlock({
       >
         {isLive ? (
           <>
-            <span className="shimmer-text">Thinking...</span>
+            <span className="shimmer-text">{liveLabel}</span>
             <ElapsedSeconds />
           </>
         ) : (
@@ -105,9 +96,13 @@ export function ReasoningBlock({
           </>
         )}
       </Button>
-      {expanded && trimmed && (
-        <div className="ms-space-1 mt-space-1 border-s border-subtle ps-space-3 text-xs leading-5 break-words whitespace-pre-wrap text-secondary">
-          {trimmed}
+      {expanded && body && (
+        <div className="ms-space-1 mt-space-1 border-s border-subtle ps-space-3">
+          <Markdown
+            content={body}
+            isLive={isLive}
+            className="text-xs leading-5 text-secondary"
+          />
         </div>
       )}
     </div>

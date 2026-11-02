@@ -16,7 +16,7 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import Awaitable, Mapping, Sequence
+from collections.abc import Awaitable, Collection, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Final
 from xml.etree import ElementTree
@@ -34,16 +34,17 @@ from langgraph.config import get_stream_writer
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
-    Catalog,
     CliResultRules,
     LoopRules,
     ModelSpec,
     ReplyRules,
     RunModels,
+    WorkStateRules,
 )
 from runtime_api.endpoint import call
 from runtime_api.loop import (
     FINISH_SCOUT_PLAN,
+    INCIDENT_CONTEXT,
     MODEL_CHOICE,
     REFRESH_GITHUB_PROXY,
     REPLY_ON_BEHALF,
@@ -68,7 +69,6 @@ from runtime_api.loop import (
 from runtime_api.operations import RunRequest
 
 from rt.backend import (
-    BackendCallError,
     OpenSweBackend,
     RunLocal,
     human_messages,
@@ -235,14 +235,14 @@ def _normalized(route: str) -> str:
 class _Turn:
     """What happened since the last thing a person said."""
 
-    def __init__(self, messages: Sequence[AnyMessage], guard: str) -> None:
+    def __init__(self, messages: Sequence[AnyMessage], guards: Collection[str]) -> None:
         self.messages = list(messages)
         for index in range(len(self.messages) - 1, -1, -1):
             message = self.messages[index]
             if (
                 isinstance(message, HumanMessage)
                 and not _dynamic_context(message)
-                and _system_sender(message) != guard
+                and _system_sender(message) not in guards
             ):
                 self.messages = self.messages[index + 1 :]
                 break
@@ -306,25 +306,15 @@ class RunLoop:
         self._chosen: RunLocal[dict[tuple[str, str | None], ModelSpec]] = RunLocal(dict)
         self._guidance = RunLocal(_RunGuidance)
 
-    @staticmethod
-    def runs(catalog: Catalog) -> bool:
-        """Whether a run planned with ``catalog`` runs its loop here, not in the backend's phases."""
-        return catalog.loop is not None and catalog.models is not None
-
     @property
     def rules(self) -> LoopRules:
         """The run's rules; a launched worker's own once it adopted its run, not its coordinator's."""
-        rules = self._backend.run.catalog.loop
-        if rules is None:
-            raise BackendCallError("The run's catalog names no loop rules")
-        return rules
+        return self._backend.run.catalog.loop
 
     @property
-    def _models(self) -> RunModels:
-        models = self._backend.run.catalog.models
-        if models is None:
-            raise BackendCallError("The run's catalog names no models")
-        return models
+    def _models(self) -> RunModels | None:
+        """The run's models; None calls the graph's own."""
+        return self._backend.run.catalog.models
 
     def starting(self) -> dict[str, JsonValue]:
         """The held state a turn starts from: nothing asked again yet, and answers going
@@ -407,6 +397,13 @@ class RunLoop:
         current = {**held, **update}
         model = await self._model_for(current)
         system_prompt, workspace_prompt, thread_prompt = self._system_prompt(current)
+        if self.rules.incident:
+            incident = await call(
+                self._backend,
+                INCIDENT_CONTEXT,
+                Routed(run_id=run_id(), humans=human_messages(messages)),
+            )
+            system_prompt = f"{system_prompt}\n\n{incident.instructions}"
         return BeforeModel(
             update=update,
             messages=_json_dicts.validate_python(messages_to_dict(added)),
@@ -416,9 +413,11 @@ class RunLoop:
                 thread_prompt=thread_prompt,
                 hidden_tools=self._hidden(current),
                 model=model,
-                vision=None if model.reads_images else self._models.vision,
-                fallback=model.fallback,
-                use_gateway=self._models.use_gateway,
+                vision=None
+                if self._models is None or (model is not None and model.reads_images)
+                else self._models.vision,
+                fallback=None if model is None else model.fallback,
+                use_gateway=self._models is not None and self._models.use_gateway,
             ),
         )
 
@@ -502,19 +501,22 @@ class RunLoop:
             chosen[key] = await call(self._backend, MODEL_CHOICE, choice)
         return chosen[key]
 
-    async def _model_for(self, held: Mapping[str, object]) -> ModelSpec:
+    async def _model_for(self, held: Mapping[str, object]) -> ModelSpec | None:
         """The run's own model, a route's, or the one a person asked for."""
         requested = held.get("requested_model")
         if isinstance(requested, str) and requested:
             return await self._chosen_model(requested, held.get("requested_effort"))
+        models = self._models
+        if models is None:
+            return None
         route = held.get("model_route")
-        routed = self._models.routes.get(_normalized(route)) if isinstance(route, str) else None
+        routed = models.routes.get(_normalized(route)) if isinstance(route, str) else None
         if routed is not None and route != "default":
             return routed
         selected = held.get("selected_model_id")
-        if isinstance(selected, str) and selected and selected != self._models.model.model_id:
+        if isinstance(selected, str) and selected and selected != models.model.model_id:
             return await self._chosen_model(selected, held.get("selected_effort"))
-        return self._models.model
+        return models.model
 
     def _system_prompt(self, held: Mapping[str, object]) -> tuple[str, str, str]:
         """The prompt every thread shares, the part its workspace's threads share, and the
@@ -543,8 +545,21 @@ class RunLoop:
                 hidden.update(tools)
         return sorted(hidden)
 
+    @property
+    def _guards(self) -> set[str]:
+        """The senders of the loop's own nudges, which do not start a new turn."""
+        rules = self.rules
+        return {
+            sender
+            for sender in (
+                rules.reply.nudge_sender if rules.reply else "",
+                rules.work_state.nudge_sender if rules.work_state else "",
+            )
+            if sender
+        }
+
     async def after_model(self, state: Mapping[str, object]) -> PhaseResult:
-        """Ask again for the CLI result, then the reply, an answer without either owes."""
+        """Ask again for the CLI result, unfinished work, then the reply an answer owes."""
         messages = state.get("messages")
         last = messages[-1] if isinstance(messages, list) and messages else None
         if not isinstance(last, AIMessage) or last.tool_calls:
@@ -553,6 +568,10 @@ class RunLoop:
         update: dict[str, JsonValue] = {}
         if self.rules.cli_result is not None:
             asked = self._cli_result(self.rules.cli_result, state, held, update)
+            if asked is not None:
+                return asked
+        if self.rules.work_state is not None:
+            asked = self._work_state(self.rules.work_state, state, held, update)
             if asked is not None:
                 return asked
         if self.rules.reply is not None:
@@ -580,7 +599,7 @@ class RunLoop:
         held: Mapping[str, object],
         update: dict[str, JsonValue],
     ) -> PhaseResult | None:
-        turn = _Turn(_messages(state), self.rules.reply.nudge_sender if self.rules.reply else "")
+        turn = _Turn(_messages(state), self._guards)
         call_ids = {
             str(tool_call.get("id"))
             for tool_call in turn.calls()
@@ -604,6 +623,38 @@ class RunLoop:
             jump_to="model",
         )
 
+    def _work_state(
+        self,
+        rules: WorkStateRules,
+        state: Mapping[str, object],
+        held: Mapping[str, object],
+        update: dict[str, JsonValue],
+    ) -> PhaseResult | None:
+        """Send the model back to work until it says it is blocked or complete, or waits."""
+        turn = _Turn(_messages(state), self._guards)
+        call_ids = {
+            str(tool_call.get("id"))
+            for tool_call in turn.calls()
+            if tool_call.get("name") in {rules.tool, *rules.waits}
+        }
+        if turn.succeeded(call_ids):
+            update["work_state_nudges"] = 0
+            return None
+        nudges = held.get("work_state_nudges")
+        asked = nudges if isinstance(nudges, int) else 0
+        if asked >= rules.max_nudges:
+            logger.warning(
+                "Run ended without a work state after every nudge",
+                extra={"work_state_tool": rules.tool, "work_state_attempts": asked},
+            )
+            update["work_state_nudges"] = 0
+            return None
+        return PhaseResult(
+            update={**update, "work_state_nudges": asked + 1},
+            messages=self._nudge(rules.nudge, state),
+            jump_to="model",
+        )
+
     async def _reply(
         self,
         rules: ReplyRules,
@@ -613,7 +664,7 @@ class RunLoop:
     ) -> PhaseResult:
         if held.get("reply_surface") != "slack":
             return PhaseResult(update=update)
-        turn = _Turn(_messages(state), rules.nudge_sender)
+        turn = _Turn(_messages(state), self._guards)
         if self._replied(rules, turn):
             return PhaseResult(update={**update, "reply_nudges": 0})
         nudges = held.get("reply_nudges")

@@ -29,6 +29,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, Self
 from urllib.parse import urlparse
+from uuid import UUID
 
 from langgraph.types import Durability
 from langgraph_sdk import get_client
@@ -162,6 +163,9 @@ async def _dispatch_input(
             if slack_thread.thread_ts:
                 channel["thread_id"] = slack_thread.thread_ts
             channels.append(channel)
+    if not sender_id and cfg.auth_provider == "langsmith" and cfg.user_id:
+        sender_id = f"user:{cfg.user_id}"
+        sender = {"id": sender_id}
     if not sender_id and login:
         sender_id = f"github:{login}"
         sender = {"id": sender_id, "github_login": login}
@@ -295,11 +299,23 @@ def thread_workspace(metadata: Mapping[str, Any]) -> str | None:
 
 def follow_up_configurable(metadata: Mapping[str, Any], thread_id: str) -> dict[str, Any]:
     """Config for a system-started run that continues a thread where its last run left off."""
-    configurable: dict[str, Any] = {"thread_id": thread_id}
+    configurable: dict[str, Any] = {
+        "thread_id": thread_id,
+        "experience": metadata.get("experience", "coding"),
+    }
     for key in ("source", "repo", "github_login", "started_by_id", "triggering_user_email"):
         value = metadata.get(key)
         if value is not None:
             configurable["user_email" if key == "triggering_user_email" else key] = value
+    owner = metadata.get("owner_login")
+    if isinstance(owner, str) and owner.startswith("user:"):
+        configurable.update(
+            user_id=owner.removeprefix("user:"),
+            auth_provider="langsmith",
+            repo_explicitly_none=True,
+        )
+        configurable.pop("github_login", None)
+        configurable.pop("repo", None)
     workspace = thread_workspace(metadata)
     if workspace is not None:
         configurable["workspace"] = workspace
@@ -346,7 +362,9 @@ async def _run_user_metadata(
     if cfg.background_task_completion:
         return metadata
     try:
-        if (source or cfg.source) in {"dashboard", "web"} and cfg.github_login:
+        if cfg.auth_provider == "langsmith" and cfg.user_id:
+            user = await User.get(UUID(cfg.user_id))
+        elif (source or cfg.source) in {"dashboard", "web"} and cfg.github_login:
             user = await User.for_login("github", cfg.github_login)
         elif cfg.slack_thread and cfg.slack_thread.triggering_user_id:
             user = await User.for_identity("slack", cfg.slack_thread.triggering_user_id)
