@@ -322,8 +322,8 @@ Which conversations go where (`mda_can_start` in `openswe/slack/mda_forwarding.p
 
 | Goes to MDA | Stays on the backend, and why |
 |---|---|
-| A person's @mention of Open SWE in a channel, as a new message or in a thread Open SWE isn't in yet | Code channels (one session per channel), which MDA can't hold yet |
-| A person's DM to Open SWE (a thread per message) | Bots' messages, breakouts, `/btw`, slash commands |
+| An @mention of Open SWE in a channel, by a person or a bot on Open SWE's allow-list, as a new message or in a thread Open SWE isn't in yet | Code channels (one session per channel), which MDA can't hold yet |
+| A person's DM to Open SWE (a thread per message) | Breakouts, `/btw`, slash commands |
 | A kitchen channel's untagged messages, each Slack thread its own conversation, routed to the channel's workspace | Every conversation the backend already holds, a concierge DM included: one never moves |
 | A new concierge DM, as one conversation on one thread | Review cards, Explain this and every other click but the three to the left |
 | Every later message in those conversations, and Slack's Stop | Reactions (`:x:` stop, feedback), edits and `thread_broadcast` replies: Trigger Server doesn't take them. In MDA's conversations these do nothing yet; Slack's Stop works |

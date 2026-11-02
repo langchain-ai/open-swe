@@ -25,6 +25,7 @@ from openswe.slack import failures as slack_failures
 from openswe.slack import mda_forwarding
 from openswe.slack import routes as slack_routes
 from openswe.slack import webhook as slack_service
+from openswe.slack.allowed_bots import AllowedSlackBot
 from openswe.slack.dm import CONCIERGE_TS
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
@@ -220,6 +221,60 @@ async def test_the_connect_prompt_is_posted_once_per_slack_event(
     assert tasks.tasks == []
 
 
+def _allowed_bot_mention() -> dict[str, JsonValue]:
+    """A mention of Open SWE by another Slack app's bot."""
+    return _mention(user="UBOT", bot_id="B1", app_id="A2", text="<@BOT> run the release")
+
+
+async def test_an_allowed_bots_mention_starts_an_mda_conversation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bot = AllowedSlackBot(
+        team_id="T1",
+        bot_id="B1",
+        user_id="UBOT",
+        app_id="A2",
+        name="release-bot",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    monkeypatch.setattr(slack_routes, "resolve_allowed_slack_bot", AsyncMock(return_value=bot))
+    startable = AsyncMock(return_value=_MDA_THREAD)
+    monkeypatch.setattr(mda_forwarding, "startable_thread", startable)
+    tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_allowed_bot_mention(), dict(_SLACK_HEADERS))),
+        cast(BackgroundTasks, tasks),
+    )
+
+    assert response["status"] == "accepted"
+    assert startable.await_args.kwargs["can_start"] is True
+    # A bot links no account, and no person owns the conversation it started.
+    cast(AsyncMock, slack_service.account_link_needed).assert_not_awaited()
+    cast(AsyncMock, mda_forwarding.claim_conversation).assert_awaited_once_with(
+        "A1", "T1", "C1", "1786573369.551099", owner_login=None
+    )
+    [(task, _args)] = tasks.tasks
+    assert task is mda_forwarding.forward_to_trigger_server
+    # The run MDA asks for is built for the bot, as the backend builds it.
+    request = cast(AsyncMock, mda_forwarding.remember).await_args.args[0]
+    assert (request.triggering_bot_id, request.triggering_bot_app_id) == ("B1", "A2")
+
+
+async def test_a_bot_off_the_allow_list_starts_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_routes, "resolve_allowed_slack_bot", AsyncMock(return_value=None))
+    tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_allowed_bot_mention(), dict(_SLACK_HEADERS))),
+        cast(BackgroundTasks, tasks),
+    )
+
+    assert response == {"status": "ignored", "reason": "Event from a bot"}
+    assert tasks.tasks == []
+    cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()
+
+
 async def test_every_other_conversation_stays_on_the_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -341,7 +396,6 @@ def test_a_claimed_conversations_stub_has_not_started(
 
 _PLAIN: dict[str, JsonValue] = {
     "subtype": "",
-    "from_bot": False,
     "code_channel": False,
     "breakout": False,
 }
@@ -353,7 +407,6 @@ _PLAIN: dict[str, JsonValue] = {
         ({}, True),
         ({"subtype": "file_share"}, True),
         ({"subtype": "thread_broadcast"}, False),
-        ({"from_bot": True}, False),
         ({"code_channel": True}, False),
         ({"breakout": True}, False),
     ],
