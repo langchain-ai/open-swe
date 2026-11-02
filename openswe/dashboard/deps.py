@@ -6,13 +6,13 @@ from fastapi import Depends, HTTPException
 
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import require_session
+from openswe.dashboard.principal import DashboardPrincipal
 from openswe.dashboard.repo_access import require_repo_access_for_user
 
 
 def session_is_admin(session: dict[str, Any]) -> bool:
-    if session.get("provider", "github") != "github":
-        return False
-    return is_admin(session.get("email"), login=session.get("sub"))
+    login = DashboardPrincipal.from_session(session).github_login
+    return login is not None and is_admin(session.get("email"), login=login)
 
 
 def require_admin(session: dict[str, Any]) -> dict[str, Any]:

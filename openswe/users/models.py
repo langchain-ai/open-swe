@@ -478,8 +478,10 @@ class User(Base):
         team_id: str = "",
     ) -> Self:
         """Attach another provider account to this person, taking it over if needed."""
-        if provider == "langsmith" or any(i.provider == "langsmith" for i in self.identities):
-            raise UnauthorizedUser("LangSmith accounts cannot be linked to other identities")
+        if provider == "langsmith" or (
+            provider == "github" and any(i.provider == "langsmith" for i in self.identities)
+        ):
+            raise UnauthorizedUser("LangSmith accounts link GitHub only by proving it")
         cls = type(self)
         async with postgres.session() as session:
             upsert = insert(UserIdentity).values(
@@ -505,6 +507,87 @@ class User(Base):
         if stored is None:
             raise RuntimeError(f"user {self.id} vanished during link")
         return stored
+
+    async def join_github(self, external_id: str, *, login: str, email: str) -> Self:
+        """Join this LangSmith person and a GitHub account they proved, returning who holds both.
+
+        A GitHub account someone already used keeps its person, so their threads and
+        settings carry over: this person's LangSmith and other identities, and its
+        LangSmith login grant, move there. Otherwise the account joins this person.
+        """
+        from openswe.dashboard.oauth_credentials import OAuthCredential
+
+        if not any(i.provider == "langsmith" for i in self.identities):
+            raise UnauthorizedUser("Only LangSmith accounts link a GitHub account")
+        cls = type(self)
+        async with postgres.session() as session:
+            owner = await session.scalar(
+                select(UserIdentity.user_id).where(
+                    UserIdentity.provider == "github", UserIdentity.external_id == external_id
+                )
+            )
+            target = owner or self.id
+            if target != self.id:
+                if await session.scalar(
+                    select(UserIdentity.user_id).where(
+                        UserIdentity.user_id == target, UserIdentity.provider == "langsmith"
+                    )
+                ):
+                    raise AccountConflict(
+                        "This GitHub account is already linked to another LangSmith account"
+                    )
+                await session.execute(
+                    update(UserIdentity)
+                    .where(UserIdentity.user_id == self.id, UserIdentity.provider != "github")
+                    .values(user_id=target)
+                )
+                await session.execute(
+                    delete(OAuthCredential).where(
+                        OAuthCredential.user_id == target,
+                        OAuthCredential.provider == "langsmith_login",
+                    )
+                )
+                await session.execute(
+                    update(OAuthCredential)
+                    .where(
+                        OAuthCredential.user_id == self.id,
+                        OAuthCredential.provider == "langsmith_login",
+                    )
+                    .values(user_id=target)
+                )
+                logger.info(
+                    "Moved a LangSmith sign-in to the person owning its GitHub account",
+                    extra={"from_user_id": str(self.id), "user_id": str(target)},
+                )
+            await session.execute(
+                delete(UserIdentity).where(
+                    UserIdentity.user_id == target,
+                    UserIdentity.provider == "github",
+                    UserIdentity.external_id != external_id,
+                )
+            )
+            upsert = insert(UserIdentity).values(
+                user_id=target, provider="github", external_id=external_id, login=login, email=email
+            )
+            await session.execute(
+                upsert.on_conflict_do_update(
+                    index_elements=[UserIdentity.provider, UserIdentity.external_id],
+                    set_={
+                        "last_seen_at": func.clock_timestamp(),
+                        **_known(login=login, email=email),
+                    },
+                )
+            )
+            await session.flush()
+            stored = await cls._load(session, target)
+        if stored is None:
+            raise RuntimeError(f"user {target} vanished while linking GitHub")
+        return stored
+
+    @property
+    def session_login(self) -> str:
+        """The ``sub`` of this person's LangSmith session: their GitHub login once linked."""
+        return self.github_login or f"user:{self.id}"
 
     async def rename(self, display_name: str) -> None:
         """Replace a person's display name, for the one backfill that knows better."""
@@ -572,7 +655,6 @@ class User(Base):
         if speculative is not None:
             if provider != "langsmith":
                 await _authorize(provider, login)
-            await cls._require_single_login_kind(session, provider, email)
             await session.execute(insert(cls).values(id=speculative))
         upsert = insert(UserIdentity).values(
             user_id=owner or speculative,
@@ -600,34 +682,6 @@ class User(Base):
                 extra={"user_provider": provider, "user_id": str(claimed)},
             )
         return claimed
-
-    @staticmethod
-    async def _require_single_login_kind(
-        session: AsyncSession, provider: Provider, email: str
-    ) -> None:
-        """Refuse a new GitHub or LangSmith person whose email already signs in the other way."""
-        wanted = email.strip().lower()
-        if provider not in ("github", "langsmith") or not wanted:
-            return
-        other = (
-            UserIdentity.provider == "github"
-            if provider == "langsmith"
-            else UserIdentity.provider == "langsmith"
-        )
-        if await session.scalar(
-            select(UserIdentity.user_id)
-            .where(other, func.lower(UserIdentity.email) == wanted)
-            .limit(1)
-        ):
-            logger.warning(
-                "Refused a second account for the same email",
-                extra={"user_provider": provider},
-            )
-            raise AccountConflict(
-                "This email already has an Open SWE account that signs in with "
-                + ("GitHub" if provider == "langsmith" else "LangSmith")
-                + "; sign in with that instead"
-            )
 
     @classmethod
     async def _load(cls, session: AsyncSession, user_id: UUID) -> Self | None:

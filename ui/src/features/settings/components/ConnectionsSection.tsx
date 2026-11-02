@@ -2,11 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 
 import type { LangSmithConnectionStatus, SessionUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { api, connectService } from "@/lib/api"
+import { api, connectService, hasLinkedGitHub } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 
 function StatusPill({ connected }: { connected: boolean }) {
@@ -65,6 +66,62 @@ function SlackRow({ user }: { user: SessionUser }) {
             <span className="text-xxs text-secondary">
               Sign in with Slack unavailable
             </span>
+          )}
+        </div>
+      }
+    />
+  )
+}
+
+/** Link (or relink) the signed-in person's GitHub account, which unlocks coding features. */
+export function LinkGitHubButton({
+  user,
+  size = "xs",
+  className,
+}: {
+  user: SessionUser
+  size?: "xs" | "sm" | "md"
+  className?: string
+}) {
+  const qc = useQueryClient()
+  const [connecting, setConnecting] = useState(false)
+  const linked = !!user.github_login
+  return (
+    <Button
+      size={size}
+      color={linked ? "secondary" : "primary"}
+      variant={linked ? "outlined" : "normal"}
+      leftDecorator={GithubLogoIcon}
+      className={className}
+      onClick={() => {
+        setConnecting(true)
+        void connectService("github", window.location.href)?.finally(() => {
+          setConnecting(false)
+          void qc.invalidateQueries({ queryKey: ["session"] })
+        })
+      }}
+      disabled={connecting}
+    >
+      {connecting ? "Redirecting…" : linked ? "Relink" : "Link GitHub"}
+    </Button>
+  )
+}
+
+function GitHubRow({ user }: { user: SessionUser }) {
+  const linked = !!user.github_login
+  return (
+    <SettingsRow
+      label="GitHub"
+      description={
+        linked
+          ? `Linked to @${user.github_login}. Coding features act as this account.`
+          : "Link your GitHub account to use coding features and return to your existing coding threads."
+      }
+      control={
+        <div className="flex items-center gap-space-2">
+          <StatusPill connected={linked} />
+          {user.auth_provider === "langsmith" && (
+            <LinkGitHubButton user={user} />
           )}
         </div>
       }
@@ -167,7 +224,8 @@ function LangSmithRow({ user }: { user: SessionUser }) {
 export function ConnectionsSection({ user }: { user: SessionUser }) {
   return (
     <SettingsSection title="Accounts">
-      {user.auth_provider !== "langsmith" && <SlackRow user={user} />}
+      <GitHubRow user={user} />
+      {hasLinkedGitHub(user) && <SlackRow user={user} />}
       <LangSmithRow user={user} />
     </SettingsSection>
   )

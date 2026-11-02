@@ -16,7 +16,7 @@ const SESSION_COOKIE_NAME = "osw_session";
 const LOGIN_PATH = "/dashboard/api/auth/login";
 const DESKTOP_EXCHANGE_PATH = "/dashboard/api/auth/desktop/exchange";
 const DESKTOP_ENVIRONMENTS_PATH = "/dashboard/api/desktop/environments";
-const CONNECT_PROVIDERS = new Set(["slack", "langsmith"]);
+const CONNECT_PROVIDERS = new Set(["slack", "langsmith", "github"]);
 
 function resolveAppRuntime({ argv, isPackaged, appDataPath }) {
   const isDevelopment = !isPackaged || argv.includes("--dev");

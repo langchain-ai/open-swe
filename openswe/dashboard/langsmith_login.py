@@ -3,6 +3,7 @@
 import logging
 import secrets
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode, urlparse
@@ -250,18 +251,13 @@ class LangSmithLogin:
         from openswe.dashboard.principal import DashboardPrincipal
         from openswe.users import User
 
-        user_id = User.key_id(key)
-        if user_id is None:
+        user = await User.for_login("github", key)
+        if user is None:
             return None
-        user = await User.get(user_id)
-        identity = (
-            next((item for item in user.identities if item.provider == "langsmith"), None)
-            if user
-            else None
-        )
+        identity = next((item for item in user.identities if item.provider == "langsmith"), None)
         if identity is None:
             return None
-        principal = DashboardPrincipal("langsmith", key, user_id, identity.external_id)
+        principal = DashboardPrincipal("langsmith", key, user.id, identity.external_id)
         return await self.authorize_session(principal)
 
     async def credential(self, key: str) -> OAuthCredential:
@@ -348,7 +344,9 @@ class LangSmithLogin:
 
     async def authorize_session(self, principal: DashboardPrincipal) -> str:
         self.require_configured()
-        await principal.user()
+        user = await principal.user()
+        if user is not None:
+            principal = replace(principal, subject=f"user:{user.id}", user_id=user.id)
         key = principal.subject
         credential = await self.credential(key)
         try:
