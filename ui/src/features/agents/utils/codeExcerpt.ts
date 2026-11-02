@@ -107,6 +107,11 @@ function selectedLines(snippet: string): string {
     : snippet
 }
 
+/** The lines the person selected, without the context around them. */
+export function excerptSelection(excerpt: CodeExcerpt): string {
+  return selectedLines(excerpt.snippet)
+}
+
 export function parseExcerpts(content: string): {
   excerpts: Array<ParsedCodeExcerpt>
   text: string

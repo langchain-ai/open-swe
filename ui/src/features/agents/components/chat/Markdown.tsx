@@ -7,7 +7,6 @@ import { Component, createElement, memo, useMemo, useState } from "react"
 import { ChatCenteredTextIcon } from "@phosphor-icons/react/dist/ssr/ChatCenteredText"
 import { LightbulbIcon } from "@phosphor-icons/react/dist/ssr/Lightbulb"
 import { WarningOctagonIcon } from "@phosphor-icons/react/dist/ssr/WarningOctagon"
-import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
 import {
   Streamdown,
   defaultRemarkPlugins,
@@ -18,6 +17,7 @@ import type { IconComponent } from "@langchain/macaw-components/Icon"
 import type { Components, ExtraProps } from "streamdown"
 import "streamdown/styles.css"
 import { cn } from "@/lib/utils"
+import { ExpandableImage } from "@/components/ImageLightbox"
 import { PreviewablePullRequestLink } from "@/features/agents/components/PullRequestPreview"
 import { CodeBlock } from "./CodeBlock"
 import { MermaidDiagram } from "./MermaidDiagram"
@@ -38,7 +38,6 @@ interface MarkdownProps {
    * leave it as-is.
    */
   transformImageUrl?: (src: string) => string
-  enlargeImages?: boolean
   className?: string
 }
 
@@ -235,14 +234,15 @@ const COMPONENTS: Components = {
     node: _node,
     ...props
   }: ExtraProps & ComponentProps<"code">) => <code {...props} />,
-  img: ({ src, alt }: ExtraProps & ComponentProps<"img">) => (
-    <img
-      src={typeof src === "string" ? src : undefined}
-      alt={alt ?? ""}
-      loading="lazy"
-      className="border border-subtle"
-    />
-  ),
+  img: ({ src, alt }: ExtraProps & ComponentProps<"img">) =>
+    typeof src === "string" ? (
+      <ExpandableImage
+        src={src}
+        alt={alt ?? ""}
+        loading="lazy"
+        className="border border-subtle"
+      />
+    ) : null,
   a: ({
     node: _node,
     children,
@@ -298,41 +298,8 @@ export const Markdown = memo(function Markdown({
   content,
   isLive = false,
   transformImageUrl,
-  enlargeImages = false,
   className,
 }: MarkdownProps) {
-  const [image, setImage] = useState<{ src: string; alt: string } | null>(null)
-  const components = useMemo(
-    () =>
-      enlargeImages
-        ? {
-            ...COMPONENTS,
-            img: ({ src, alt }: ExtraProps & ComponentProps<"img">) => (
-              <img
-                src={typeof src === "string" ? src : undefined}
-                alt={alt ?? ""}
-                loading="lazy"
-                role="button"
-                tabIndex={0}
-                aria-label={`Enlarge ${alt || "image"}`}
-                className="cursor-zoom-in border border-subtle focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
-                onClick={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  if (typeof src === "string") setImage({ src, alt: alt ?? "" })
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault()
-                    event.currentTarget.click()
-                  }
-                }}
-              />
-            ),
-          }
-        : COMPONENTS,
-    [enlargeImages]
-  )
   const urlTransform = useMemo(() => {
     if (!transformImageUrl) return undefined
     return (
@@ -359,7 +326,7 @@ export const Markdown = memo(function Markdown({
           isAnimating={isLive}
           shikiTheme={SHIKI_THEME}
           className="streamdown-agent max-w-full min-w-0 space-y-0"
-          components={components}
+          components={COMPONENTS}
           remarkPlugins={REMARK_PLUGINS}
           allowedTags={ALLOWED_TAGS}
           urlTransform={urlTransform}
@@ -367,26 +334,6 @@ export const Markdown = memo(function Markdown({
           {content}
         </Streamdown>
       </MarkdownErrorBoundary>
-      <Dialog
-        open={image !== null}
-        onOpenChange={(open) => {
-          if (!open) setImage(null)
-        }}
-      >
-        <DialogContent
-          title={image?.alt || "Image preview"}
-          className="h-[calc(100dvh-2rem)] w-[95vw] max-w-[95vw]"
-          childrenClassName="flex-1 items-center justify-center"
-        >
-          {image && (
-            <img
-              src={image.src}
-              alt={image.alt}
-              className="h-full min-h-0 w-full object-contain"
-            />
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   )
 })

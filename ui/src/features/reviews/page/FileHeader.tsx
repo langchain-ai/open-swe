@@ -15,6 +15,7 @@ import { isRenderable } from "./diffEntries"
 import { useEntry, useMarkers } from "./entries"
 import { findingGroupColor, findingTarget, threadTarget } from "./findings"
 import type { PullRequestRef } from "./queries"
+import { quoteFromPage } from "@/features/agents/components/composer/ComposerAttachments"
 import { isCollapsed, isRead, useReviewPage } from "./store"
 import { Tag } from "./Tag"
 import { plural, splitPath } from "./text"
@@ -44,7 +45,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
   )
   const markViewed = useReviewPage((state) => state.markViewed)
   const toggleCollapsed = useReviewPage((state) => state.toggleCollapsed)
-  const askInChat = useReviewPage((state) => state.askInChat)
+  const attachToChat = useReviewPage((state) => state.attachToChat)
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const showFinding = useReviewPage((state) => state.showFinding)
   const { findings, threads } = useMarkers(path)
@@ -178,7 +179,15 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         size="xs"
         color="secondary"
         variant="plain"
-        onClick={() => askInChat(`About \`${path}\` in this pull request: `)}
+        onClick={() =>
+          attachToChat([
+            quoteFromPage({
+              label: "Ask",
+              location: path,
+              comment: `About \`${path}\` in this pull request.`,
+            }),
+          ])
+        }
         aria-label={`Ask Open SWE about ${path}`}
         className={onHover}
       >

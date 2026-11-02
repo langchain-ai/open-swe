@@ -5,7 +5,7 @@ import type { SelectedLineRange } from "@pierre/diffs"
 
 import type { PullRequestReviewEvent } from "@/lib/api"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
-import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
+import type { ComposerAttachment } from "@/features/agents/components/composer/ComposerAttachments"
 import type { DiffSide } from "@/features/reviews/lib/chatDiffActions"
 import { rangeBounds } from "@/features/reviews/lib/lineRange"
 import {
@@ -68,8 +68,8 @@ interface PullRequestState {
   replyDrafts: ReadonlyMap<number, string>
   /** Pending review comments being edited, by comment id, with the edited text. */
   pendingEdits: ReadonlyMap<number, string>
-  /** Code attached to the next chat message, shown as chips above the composer. */
-  chatExcerpts: ReadonlyArray<CodeExcerpt>
+  /** What the reader attached to the next chat message, shown as cards in the composer. */
+  chatAttachments: ReadonlyArray<ComposerAttachment>
   expandedFinding: string | null
   /** Threads on the diff the reader opened or folded, against their default. */
   threadsOpen: ReadonlyMap<number, boolean>
@@ -148,9 +148,10 @@ interface ReviewPageActions {
   askInChat: (text: string) => void
   sendInChat: (text: string) => void
   clearChatQuestion: () => void
-  attachToChat: (excerpts: ReadonlyArray<CodeExcerpt>) => void
-  removeChatExcerpt: (index: number) => void
-  clearChatExcerpts: () => void
+  /** Adds cards to the next chat message and opens the chat. */
+  attachToChat: (attachments: ReadonlyArray<ComposerAttachment>) => void
+  removeChatAttachment: (index: number) => void
+  clearChatAttachments: () => void
   showOpenConversations: () => void
   showFindings: () => void
   /** Whether the event was waiting, consuming it so it's handled once. */
@@ -204,8 +205,13 @@ function readViewed(pr: PullRequestRef, headSha: string | null): Set<string> {
   }
 }
 
-function excerptKey(excerpt: CodeExcerpt): string {
-  return `${excerpt.path}:${excerpt.lineLabel}`
+/** Attaching the same lines or quote twice adds one card. */
+function attachmentKey(attachment: ComposerAttachment): string | null {
+  if (attachment.kind === "code")
+    return `code:${attachment.excerpt.path}:${attachment.excerpt.lineLabel}`
+  if (attachment.kind === "reply")
+    return `reply:${attachment.label}:${attachment.reply.selection}:${attachment.reply.comment}`
+  return null
 }
 
 /** Whether the entry was marked viewed: its whole file, or its own slice of it. */
@@ -279,7 +285,7 @@ function freshPullRequest(pr: PullRequestRef | null): PullRequestState {
     composerText: "",
     replyDrafts: new Map(),
     pendingEdits: new Map(),
-    chatExcerpts: [],
+    chatAttachments: [],
     expandedFinding: null,
     threadsOpen: new Map(),
   }
@@ -508,20 +514,24 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       get().focusChat()
     },
     clearChatQuestion: () => set({ chatQuestion: undefined }),
-    attachToChat: (excerpts) => {
-      const known = new Set(get().chatExcerpts.map(excerptKey))
+    attachToChat: (attachments) => {
+      const known = new Set(get().chatAttachments.map(attachmentKey))
       set({
-        chatExcerpts: [
-          ...get().chatExcerpts,
-          ...excerpts.filter((item) => !known.has(excerptKey(item))),
+        chatAttachments: [
+          ...get().chatAttachments,
+          ...attachments.filter((item) => {
+            const key = attachmentKey(item)
+            return key === null || !known.has(key)
+          }),
         ],
       })
+      get().focusChat()
     },
-    removeChatExcerpt: (index) =>
+    removeChatAttachment: (index) =>
       set({
-        chatExcerpts: get().chatExcerpts.filter((_, i) => i !== index),
+        chatAttachments: get().chatAttachments.filter((_, i) => i !== index),
       }),
-    clearChatExcerpts: () => set({ chatExcerpts: [] }),
+    clearChatAttachments: () => set({ chatAttachments: [] }),
     setEntryOrder: (entryOrder) => set({ entryOrder }),
     setFileFilter: (fileFilter) => set({ fileFilter }),
     setFindOpen: (findOpen) => set({ findOpen }),
