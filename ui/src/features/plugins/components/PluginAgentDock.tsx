@@ -234,9 +234,10 @@ function useAnsweredCalls(
       toast.error(`Couldn't send ${name}'s answer to the agent`, {
         description: error instanceof Error ? error.message : undefined,
       })
-      retry.current = setTimeout(() => setRetries((n) => n + 1), 5_000)
     } finally {
       busy.current = false
+      if (retry.current) clearTimeout(retry.current)
+      retry.current = setTimeout(() => setRetries((n) => n + 1), 5_000)
     }
   })
   useEffect(() => {
