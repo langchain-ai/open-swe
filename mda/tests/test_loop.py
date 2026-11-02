@@ -157,6 +157,20 @@ async def test_an_incident_run_asks_for_its_incident_before_each_model_call(
     ]
 
 
+async def test_what_the_client_says_about_its_tools_follows_the_system_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rules = LoopRules(client_tools=True, client_prompt="The Docs plugin is open beside you.")
+    backend, _ = _backend(monkeypatch, {}, rules)
+
+    planned = await RunLoop(backend).before_model(
+        _state(HumanMessage(content="Tighten the intro", id="human-1"))
+    )
+
+    assert planned.call is not None
+    assert planned.call.system_prompt.endswith("The Docs plugin is open beside you.")
+
+
 async def test_failed_task_context_preserves_error_and_cleans_up_refresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

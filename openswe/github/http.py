@@ -15,6 +15,7 @@ use the typed async SDK in ``openswe.github.sdk``. This helper centralises:
 """
 
 import asyncio
+import base64
 import io
 import logging
 import random
@@ -713,6 +714,88 @@ class RepoClient:
             params["sha"] = ref
         return await self.get("commits", params)
 
+    async def file_history(self, path: str, ref: str, *, limit: int) -> list[dict[str, Any]]:
+        """The latest ``limit`` commits on ``ref`` that touched ``path``, newest first."""
+        payload = await self.get(
+            "commits", {"path": path, "sha": ref, "per_page": str(min(limit, _PAGE_SIZE))}
+        )
+        if not isinstance(payload, list):
+            raise ValueError("GitHub answered the commit list without a list")
+        return [commit for commit in payload if isinstance(commit, dict)]
+
+    async def commit_sha(self, ref: str) -> str:
+        """The SHA of the commit ``ref`` (a branch, tag or SHA) names."""
+        response = await self.github.request(
+            "GET",
+            f"repos/{self.full_name}/commits/{quote(ref, safe='')}",
+            headers={"Accept": "application/vnd.github.sha"},
+        )
+        sha = response.text.strip()
+        if len(sha) != 40:
+            raise ValueError("GitHub answered the commit without a SHA")
+        return sha
+
+    async def tree(self, sha: str) -> RepoTree:
+        """Every file and directory in commit ``sha``, recursively."""
+        return RepoTree.model_validate(await self.get(f"git/trees/{sha}", {"recursive": "1"}))
+
+    async def create_branch(self, name: str, sha: str) -> None:
+        """Create branch ``name`` pointing at commit ``sha``."""
+        await self.post("git/refs", {"ref": f"refs/heads/{name}", "sha": sha})
+
+    async def delete_branch(self, name: str) -> None:
+        """Delete branch ``name``; GitHub closes any open pull request from it."""
+        await self.delete(f"git/refs/heads/{quote(name, safe='/')}")
+
+    async def commit_files(
+        self,
+        *,
+        branch: str,
+        expected_head: str,
+        message: str,
+        additions: Mapping[str, str],
+        deletions: Sequence[str] = (),
+    ) -> str:
+        """Commit text files onto ``branch`` and return the new commit's SHA.
+
+        GitHub refuses the commit when ``branch`` no longer points at
+        ``expected_head``, so a concurrent push is never overwritten.
+        """
+        headline, _, body = message.strip().partition("\n")
+        data = await self.github.graphql(
+            "mutation($input:CreateCommitOnBranchInput!)"
+            "{createCommitOnBranch(input:$input){commit{oid}}}",
+            {
+                "input": {
+                    "branch": {"repositoryNameWithOwner": self.full_name, "branchName": branch},
+                    "expectedHeadOid": expected_head,
+                    "message": {"headline": headline, "body": body.strip()},
+                    "fileChanges": {
+                        "additions": [
+                            {"path": path, "contents": base64.b64encode(text.encode()).decode()}
+                            for path, text in additions.items()
+                        ],
+                        "deletions": [{"path": path} for path in deletions],
+                    },
+                }
+            },
+        )
+        commit = (data.get("createCommitOnBranch") or {}).get("commit") or {}
+        oid = commit.get("oid")
+        if not isinstance(oid, str):
+            raise ValueError("GitHub answered the commit without its SHA")
+        return oid
+
+    async def open_pull_request(
+        self, *, head: str, base: str, title: str, body: str, draft: bool
+    ) -> dict[str, Any]:
+        payload = await self.post(
+            "pulls", {"head": head, "base": base, "title": title, "body": body, "draft": draft}
+        )
+        if not isinstance(payload, dict):
+            raise ValueError("GitHub answered the new pull request without an object")
+        return payload
+
     async def delete_review_comment(self, comment_id: int) -> None:
         await self.delete(f"pulls/comments/{comment_id}")
 
@@ -983,6 +1066,20 @@ async def or_none[T](read: Awaitable[T]) -> T | None:
 
 def _json_or_none(response: httpx2.Response) -> object:
     return None if response.status_code == 204 or not response.content else response.json()
+
+
+class TreeEntry(BaseModel):
+    path: str
+    type: Literal["blob", "tree", "commit"]
+    size: int | None = None
+
+
+class RepoTree(BaseModel):
+    """A commit's tree; ``truncated`` when GitHub left entries out of a very large one."""
+
+    sha: str
+    tree: list[TreeEntry]
+    truncated: bool
 
 
 class _WorkflowRun(BaseModel):

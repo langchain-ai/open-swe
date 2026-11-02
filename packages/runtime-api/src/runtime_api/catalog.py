@@ -224,6 +224,8 @@ class LoopRules(BaseModel):
     task_coordination: bool = False
     # Whether the run may wait on a call its client runs itself.
     client_tools: bool = False
+    # What the client says about the tools it runs, after every call's system prompt.
+    client_prompt: str = ""
     # Whether the backend gives the sandbox's GitHub proxy a fresh token before each model call.
     refresh_github_proxy: bool = False
     # Whether the run investigates an incident: before each model call the backend checks the

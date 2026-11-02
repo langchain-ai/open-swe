@@ -70,6 +70,11 @@ const NAV: Array<NavGroup> = [
         icon: LinkIcon,
       },
       {
+        to: "/my-settings/plugins",
+        label: "Apps",
+        icon: PuzzlePieceIcon,
+      },
+      {
         to: "/my-settings/claude-code",
         label: "Claude Code",
         icon: TerminalWindowIcon,
