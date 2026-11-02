@@ -77,6 +77,15 @@ test("syncs changed bundles to the current account, retries failures, and reconc
   assert.equal(requests.length, 6);
   assert.deepEqual(inventories.at(-1)!.names, []);
   assert.equal(inventories[0].source_id, inventories.at(-1)!.source_id);
+  await fs.mkdir(path.join(directory, "references"), { recursive: true });
+  await fs.writeFile(path.join(directory, "SKILL.md"), "Corrected skill");
+  await fs.writeFile(
+    path.join(directory, "references/checklist.md"),
+    "Check permissions.",
+  );
+  await sync.sync();
+  assert.equal(requests.length, 7);
+  assert.deepEqual(inventories.at(-1)!.names, ["review"]);
 });
 
 test("discovers standard .agents skills but gives the requested .agent root priority", async (t) => {

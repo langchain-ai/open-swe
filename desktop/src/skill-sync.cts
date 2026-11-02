@@ -205,6 +205,11 @@ class SkillSync {
     if (!response.ok)
       throw new Error(`Skill inventory rejected (${response.status})`);
     this.inventories.set(inventoryKey, inventory);
+    const prefix = `${inventoryKey}\n`;
+    for (const key of this.uploaded.keys()) {
+      if (key.startsWith(prefix) && !seen.has(key.slice(prefix.length)))
+        this.uploaded.delete(key);
+    }
   }
 }
 
