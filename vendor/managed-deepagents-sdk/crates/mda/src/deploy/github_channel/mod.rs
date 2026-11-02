@@ -779,6 +779,11 @@ pub(crate) fn run_setup(env: &mut dyn SetupEnv, channel: &GitHubChannel) -> Resu
     for warning in &report.warnings {
         env.warning(warning)?;
     }
+    if env.interactive() {
+        for warning in &report.installation_warnings {
+            env.warning(warning)?;
+        }
+    }
     for note in &report.notes {
         env.info(note)?;
     }
