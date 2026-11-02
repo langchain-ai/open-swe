@@ -22,6 +22,7 @@ from typing import Final, TypeVar
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core import exceptions as core_exceptions
 from langchain_core.callbacks import AsyncCallbackHandler, BaseCallbackHandler
 from langchain_core.callbacks.manager import AsyncCallbackManager
 from langchain_core.language_models import BaseChatModel
@@ -70,15 +71,31 @@ _SDK_RETRIES: Final = {
 }
 _RETRIES_OFF: Final = dict(_SDK_RETRIES.values())
 _TRANSIENT_STATUS: Final = frozenset({408, 409, 429})
+# langchain-core's provider-independent errors, which say whether a retry can help.
+_MODEL_ERROR: type[Exception] | None = getattr(core_exceptions, "ModelError", None)
+# Transient failures by (root package, class name), matched anywhere in the MRO.
+# Narrower than httpx's `TransportError`, whose `UnsupportedProtocol`,
+# `LocalProtocolError` and `ProxyError` fail the same way on every attempt.
 _TRANSIENT_ERRORS: Final = frozenset(
     {
-        ("httpx", "TransportError"),
-        ("httpx2", "TransportError"),
+        *(
+            (package, name)
+            for package in ("httpx", "httpx2")
+            for name in ("TimeoutException", "NetworkError", "RemoteProtocolError")
+        ),
+        *(
+            (package, name)
+            for package in ("httpcore", "httpcore2")
+            for name in ("ReadError", "RemoteProtocolError")
+        ),
         ("openai", "APIConnectionError"),
         ("anthropic", "APIConnectionError"),
         ("fireworks", "APIConnectionError"),
     }
 )
+# An in-band error after a stream started, so it carries no status. Exact type:
+# its status-bearing subclasses keep their status's verdict.
+_STREAM_ERROR: Final = ("openai", "APIError")
 # Bindings nest a few deep at most; the bound stops a self-referencing chain.
 _MAX_BINDINGS: Final = 10
 
@@ -198,21 +215,61 @@ class _ModelOutput(AsyncCallbackHandler):
 
 
 def _status(error: Exception) -> int | None:
-    code = getattr(error, "status_code", None)
-    if not isinstance(code, int):
-        code = getattr(error, "code", None)
-    return code if isinstance(code, int) else None
+    for code in (
+        getattr(error, "status_code", None),
+        getattr(error, "code", None),
+        getattr(getattr(error, "response", None), "status_code", None),
+    ):
+        if isinstance(code, int) and not isinstance(code, bool):
+            return code
+    return None
+
+
+def _named(cls: type) -> tuple[str, str]:
+    return cls.__module__.split(".")[0], cls.__name__
+
+
+def _verdict(error: BaseException, *, raised: bool) -> bool | None:
+    """Whether ``error`` alone is transient, or ``None`` if it doesn't say."""
+    if isinstance(error, GraphBubbleUp):
+        return False
+    if _MODEL_ERROR is not None and isinstance(error, _MODEL_ERROR):
+        return bool(getattr(error, "is_retryable", False))
+    if not isinstance(error, Exception):
+        return None
+    if (status := _status(error)) is not None:
+        return status in _TRANSIENT_STATUS or 500 <= status < 600  # noqa: PLR2004
+    # A bare TimeoutError or ConnectionError counts only as the raised error: one
+    # raised while handling a timeout has it as context, so a permanent failure
+    # would look transient.
+    if (
+        _named(type(error)) == _STREAM_ERROR
+        or any(_named(cls) in _TRANSIENT_ERRORS for cls in type(error).__mro__)
+        or (raised and isinstance(error, TimeoutError | ConnectionError))
+    ):
+        return True
+    return None
 
 
 def _transient(error: Exception) -> bool:
-    if isinstance(error, GraphBubbleUp):
-        return False
-    if (status := _status(error)) is not None:
-        return status in _TRANSIENT_STATUS or 500 <= status < 600  # noqa: PLR2004
-    return isinstance(error, TimeoutError) or any(
-        (cls.__module__.split(".")[0], cls.__name__) in _TRANSIENT_ERRORS
-        for cls in type(error).__mro__
-    )
+    """Whether ``error`` or what it wraps (group members, causes) is transient."""
+    pending: list[tuple[BaseException, bool]] = [(error, True)]
+    seen: set[int] = set()
+    while pending:
+        current, raised = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        verdict = _verdict(current, raised=raised)
+        if verdict is not None:
+            if verdict:
+                return True
+            continue
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend((member, False) for member in current.exceptions)
+        if (cause := current.__cause__ or current.__context__) is not None:
+            pending.append((cause, False))
+    return False
 
 
 def _retry_after(error: Exception) -> float | None:
@@ -232,8 +289,9 @@ def _retry_after(error: Exception) -> float | None:
             return None
         if when.tzinfo is None:
             when = when.replace(tzinfo=UTC)
-        return max(0.0, (when - datetime.now(UTC)).total_seconds())
-    return max(0.0, seconds) if math.isfinite(seconds) else None
+        seconds = (when - datetime.now(UTC)).total_seconds()
+    # A zero or past hint says nothing about how long to wait.
+    return seconds if math.isfinite(seconds) and seconds > 0 else None
 
 
 class ModelCallTimeoutMiddleware(AgentMiddleware):

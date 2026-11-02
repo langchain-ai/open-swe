@@ -454,7 +454,7 @@ async def test_provider_http_retries_are_owned_by_model_middleware(
             )
         return httpx2.Response(
             status,
-            headers={"retry-after": "0"},
+            headers={"retry-after": "0.001"},
             json={"error": {"message": "provider error", "type": "test", "code": None}},
         )
 
@@ -500,7 +500,8 @@ async def test_provider_http_retries_are_owned_by_model_middleware(
 
 
 @pytest.mark.parametrize(
-    "retry_after,budget,expected_attempts", [("61", 60.0, 1), ("0.03", 0.05, 2)]
+    "retry_after,budget,expected_attempts",
+    [("61", 60.0, 1), ("0.03", 0.05, 2), ("0", 0.05, 1)],
 )
 async def test_retry_after_beyond_sleep_budget_is_not_retried_early(
     retry_after: str, budget: float, expected_attempts: int
@@ -614,3 +615,42 @@ async def test_streamed_partial_output_is_superseded_on_retry_or_fallback(
                 for message, _ in chunks
             )
         assert f"attempt-{expected}" not in superseded
+
+
+def _caused_by(error: Exception, cause: Exception) -> Exception:
+    error.__cause__ = cause
+    return error
+
+
+@pytest.mark.parametrize(
+    "error,retried",
+    [
+        (ExceptionGroup("task group", [httpx.ConnectError("reset")]), True),
+        (_caused_by(RuntimeError("wrapped"), httpx.ReadError("dropped")), True),
+        (
+            openai.APIError("overloaded", httpx2.Request("POST", "https://x.invalid"), body=None),
+            True,
+        ),
+        (httpx.UnsupportedProtocol("bad scheme"), False),
+    ],
+)
+async def test_transient_errors_are_found_where_providers_wrap_them(
+    monkeypatch: pytest.MonkeyPatch, error: Exception, retried: bool
+) -> None:
+    monkeypatch.setattr("managed_deepagents.model_calls.random.uniform", lambda *args: 0.0)
+    monkeypatch.setattr(
+        "managed_deepagents.model_calls.get_stream_writer", lambda: lambda event: None
+    )
+    handler = AsyncMock(side_effect=[error, ModelResponse(result=[AIMessage(content="ok")])])
+    request = ModelRequest(
+        model=ChatOpenAI(model="test", api_key="test", max_retries=0),
+        messages=[HumanMessage(content="go")],
+    )
+
+    if retried:
+        await ModelRetriesMiddleware().awrap_model_call(request, handler)
+    else:
+        with pytest.raises(type(error)):
+            await ModelRetriesMiddleware().awrap_model_call(request, handler)
+
+    assert handler.await_count == (2 if retried else 1)
