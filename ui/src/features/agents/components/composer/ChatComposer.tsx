@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query"
 import { PlusIcon, XIcon } from "@langchain/macaw-components/icons"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Banner } from "@langchain/macaw-components/Banner"
@@ -66,7 +67,8 @@ import type { PassageReply } from "@/features/agents/utils/passageReply"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
-import type { SlackChannelOption } from "@/lib/api"
+import { api } from "@/lib/api"
+import type { SlackChannelOption, SlackUserOption } from "@/lib/api"
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import {
   rankSlackChannels,
@@ -254,7 +256,8 @@ export function buildCommandItems(
   includeModelCommand = true,
   includeOffloadCommand = false,
   slackChannels: Array<SlackChannelOption> = [],
-  recentSlackChannels: ReadonlyArray<string> = []
+  recentSlackChannels: ReadonlyArray<string> = [],
+  slackUsers: Array<SlackUserOption> = []
 ): Array<ComposerCommandItem> {
   const query = trigger.query.toLowerCase()
 
@@ -307,16 +310,36 @@ export function buildCommandItems(
     ]
   }
 
-  return mentionPaths
+  const paths: Array<ComposerCommandItem> = mentionPaths
     .filter((path) => !query || path.toLowerCase().includes(query))
-    .slice(0, MAX_MENTION_SUGGESTIONS)
     .map((path) => ({
       id: `path:${path}`,
-      type: "path" as const,
+      type: "path",
       path,
       label: path.slice(path.lastIndexOf("/") + 1),
       description: path,
     }))
+  const people: Array<ComposerCommandItem> = slackUsers
+    .filter((user) =>
+      [user.name, user.display_name, user.real_name].some((name) =>
+        name.toLowerCase().includes(query)
+      )
+    )
+    .slice(
+      0,
+      paths.length > 0 ? MAX_MENTION_SUGGESTIONS / 2 : MAX_MENTION_SUGGESTIONS
+    )
+    .map((user) => ({
+      id: `user:${user.id}`,
+      type: "slack-user",
+      userId: user.id,
+      label: `@${user.display_name || user.name}`,
+      description:
+        user.real_name && user.real_name !== user.display_name
+          ? `${user.real_name} · @${user.name}`
+          : `@${user.name}`,
+    }))
+  return [...people, ...paths].slice(0, MAX_MENTION_SUGGESTIONS)
 }
 
 /** Prompt editor with autocomplete, model selection, attachments, and send/stop controls. */
@@ -464,6 +487,12 @@ export const ChatComposer = memo(function ChatComposer({
   const slackChannels = useSlackChannelDirectory(
     trigger?.kind === "slack-channel"
   ).data?.channels
+  const slackUsers = useQuery({
+    queryKey: ["slackUsers"],
+    queryFn: api.listSlackUsers,
+    enabled: trigger?.kind === "path",
+    staleTime: 300_000,
+  })
   const recentSlackChannels = useRecentSlackChannels()
   const skillNames = useMemo(
     () => new Set(skills.map((skill) => skill.name)),
@@ -479,7 +508,8 @@ export const ChatComposer = memo(function ChatComposer({
             models.length > 0,
             canOffload,
             slackChannels,
-            recentSlackChannels
+            recentSlackChannels,
+            slackUsers.data?.users
           )
         : [],
     [
@@ -490,11 +520,12 @@ export const ChatComposer = memo(function ChatComposer({
       canOffload,
       slackChannels,
       recentSlackChannels,
+      slackUsers.data,
     ]
   )
   const menuOpen =
     trigger !== null &&
-    commandItems.length > 0 &&
+    (commandItems.length > 0 || trigger.kind === "path") &&
     dismissedTriggerKey !== triggerKey
   const activeItem =
     commandItems.find((item) => item.id === activeItemId) ??
@@ -620,6 +651,7 @@ export const ChatComposer = memo(function ChatComposer({
       if (
         item.type === "path" ||
         item.type === "skill" ||
+        item.type === "slack-user" ||
         item.type === "slack-channel"
       ) {
         if (item.type === "slack-channel")
@@ -632,7 +664,9 @@ export const ChatComposer = memo(function ChatComposer({
             ? mentionReplacementText(item.path)
             : item.type === "slack-channel"
               ? `${slackChannelReference(item.channelId, item.name)} `
-              : `/${item.name} `
+              : item.type === "slack-user"
+                ? `<@${item.userId}> `
+                : `/${item.name} `
         )
         applyPrompt(next.text, next.cursor)
         return
@@ -654,6 +688,10 @@ export const ChatComposer = memo(function ChatComposer({
 
   const handleCommandKeyDown = useCallback(
     (key: ComposerCommandKey, event: KeyboardEvent): boolean => {
+      if (menuOpen && key === "Escape") {
+        setDismissedTriggerKey(triggerKey)
+        return true
+      }
       if (menuOpen && activeItem) {
         switch (key) {
           case "ArrowDown":
@@ -672,9 +710,6 @@ export const ChatComposer = memo(function ChatComposer({
           case "Enter":
           case "Tab":
             selectCommandItem(activeItem)
-            return true
-          case "Escape":
-            setDismissedTriggerKey(triggerKey)
             return true
         }
       }
@@ -940,6 +975,15 @@ export const ChatComposer = memo(function ChatComposer({
             items={commandItems}
             onHighlight={setActiveItemId}
             onSelect={selectCommandItem}
+            emptyStateText={
+              trigger.kind === "path"
+                ? slackUsers.isPending
+                  ? "Loading people…"
+                  : slackUsers.isError
+                    ? "Could not load Slack people. Type @ again to retry."
+                    : "No matching people or files."
+                : undefined
+            }
             triggerKind={trigger.kind}
           />
         )}
