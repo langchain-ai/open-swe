@@ -4991,6 +4991,17 @@
             ],
             "title": "Experimental Background Callbacks"
           },
+          "experimental_classify": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Classify"
+          },
           "experimental_memory": {
             "anyOf": [
               {

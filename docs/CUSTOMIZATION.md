@@ -203,7 +203,7 @@ GitHub operations are handled by `gh` inside the sandbox.
 
 `classify` asks TypeSafe's System One model questions about a state and returns typed answers with calibrated probabilities, typically in 70–500ms.
 It goes through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models) with the same LangSmith gateway key and TypeSafe provider secret as Auto model routing, so it needs no key of its own.
-Code mode offers it as `tools.classify`; it is kept off the model's tool list and found with `search_tools`.
+It is an experiment: each person turns it on under **Settings → Experiments → Classify tool**, and their runs then offer it to code mode as `tools.classify`, kept off the model's tool list and found with `search_tools`.
 
 Each question is a `choice` (one label from up to 255), a `noul` (the probability of yes), or a `score` (an expected level on an ordered rubric).
 Every answer comes from the options supplied, and `choice` and `score` answers carry a `confidence` to gate actions on.
