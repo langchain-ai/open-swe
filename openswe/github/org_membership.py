@@ -21,6 +21,10 @@ _MEMBERSHIP_REQUEST_TIMEOUT = 5.0
 OPEN_SWE_GITHUB_LOGINS: frozenset[str] = frozenset(
     {"open-swe[bot]", "open-swe-preview[bot]", "openswe-dev[bot]"}
 )
+# GraphQL names a GitHub App author by its slug, without the ``[bot]`` REST adds.
+OPEN_SWE_AUTHOR_LOGINS: frozenset[str] = OPEN_SWE_GITHUB_LOGINS | {
+    login.removesuffix("[bot]") for login in OPEN_SWE_GITHUB_LOGINS
+}
 INTERNAL_BOT_LOGINS: frozenset[str] = frozenset(
     OPEN_SWE_GITHUB_LOGINS
     | {

@@ -43,6 +43,7 @@ from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
+from openswe.github.org_membership import OPEN_SWE_AUTHOR_LOGINS
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
@@ -600,12 +601,13 @@ async def prepare_reviewer_run(
                 sandbox_backend = await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
             except SandboxUnreachableError as exc:
                 # This run dies without a sandbox. Say so on the PR instead of leaving
-                # it looking unreviewed.
-                await post_sandbox_unreachable_notification(
-                    config or {},
-                    sandbox_id=exc.sandbox_id,
-                    handed_to_mda=isinstance(exc, SandboxHandedOverError),
-                )
+                # it looking unreviewed, unless it is a shadow nobody on the PR knows of.
+                if not cfg.review_shadow:
+                    await post_sandbox_unreachable_notification(
+                        config or {},
+                        sandbox_id=exc.sandbox_id,
+                        handed_to_mda=isinstance(exc, SandboxHandedOverError),
+                    )
                 raise
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
             repo_ready = await prepare_review_repo(
@@ -702,7 +704,16 @@ async def prepare_reviewer_run(
                 pr_number=pr_number,
                 token=github_token,
             )
-            await reconcile_findings_with_review_threads(thread_id, threads)
+            if cfg.review_shadow:
+                # Open SWE's own threads are the control reviewer's, which a shadow must not see.
+                threads = [
+                    thread
+                    for thread in threads
+                    if not (comments := thread.get("comments"))
+                    or str(comments[0].get("author") or "").lower() not in OPEN_SWE_AUTHOR_LOGINS
+                ]
+            else:
+                await reconcile_findings_with_review_threads(thread_id, threads)
             block = _format_pr_review_threads(threads)
             if block:
                 logger.info(

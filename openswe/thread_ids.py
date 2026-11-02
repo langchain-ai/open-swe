@@ -13,6 +13,7 @@ __all__ = [
     "mda_successor_thread_id",
     "pr_comment_thread_id",
     "review_chat_thread_id",
+    "review_shadow_thread_id",
     "reviewer_thread_id",
     "slack_thread_id",
     "thread_id_from_branch",
@@ -34,6 +35,10 @@ def reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
 
 def review_scout_thread_id(owner: str, repo: str, pr_number: int) -> str:
     return _url_uuid(f"{owner}/{repo}/pr/{pr_number}/review-scout")
+
+
+def review_shadow_thread_id(owner: str, repo: str, pr_number: int) -> str:
+    return _url_uuid(f"{owner}/{repo}/pr/{pr_number}/reviewer-shadow")
 
 
 def pr_comment_thread_id(owner: str, repo: str, pr_number: int) -> str:

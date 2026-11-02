@@ -9,6 +9,7 @@ Dashboard paths are relative to the active deployment's base URL shown in **Dash
 
 Default agent model and reasoning effort come from workspace settings, changed by a workspace admin.
 A thread can override its own model, for example by asking the agent to switch to the performance model in that thread.
+Shadow reviews (experimental) run a second reviewer on another model over a sample of pull requests without posting anything; an admin sets them under **Defaults** (`/admin`), overrides them on a workspace's page, or uses `manage_review_shadow`.
 
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work.
 - **Settings → General** (`/my-settings`): theme, thread defaults (visibility, workspace, follow-up behavior), and notifications.

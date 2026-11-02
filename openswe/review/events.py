@@ -25,7 +25,8 @@ class ReviewEvents:
 
     @classmethod
     def from_config(cls, cfg: RunConfig) -> Self | None:
-        if not cfg.thread_id or not cfg.repo or cfg.pr_number is None:
+        # A shadow review is an experiment nobody on the pull request knows of.
+        if not cfg.thread_id or not cfg.repo or cfg.pr_number is None or cfg.review_shadow:
             return None
         return cls(cfg.thread_id, PullRequestKey.of(cfg.repo.owner, cfg.repo.name, cfg.pr_number))
 

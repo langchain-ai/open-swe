@@ -84,6 +84,10 @@ class GitHubPROrIssueRef(BaseModel):
     repo: Repo | None = None
 
 
+# Where a review run publishes: to the pull request, an eval's snapshot, or a shadow's record.
+type ReviewDestination = Literal["github", "eval", "shadow"]
+
+
 class RunConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -178,6 +182,8 @@ class RunConfig(BaseModel):
     eval: bool | None = None
     reviewer_eval: bool | None = None
     reviewer_eval_severity_threshold: str | None = None
+    # A shadow review, which records what it would publish (``openswe.review.shadow``).
+    review_shadow: bool | None = None
 
     # Background jobs
     watch_key: str | None = None
@@ -292,6 +298,15 @@ class RunConfig(BaseModel):
     @property
     def is_eval(self) -> bool:
         return self.eval is True or self.reviewer_eval is True
+
+    @property
+    def review_destination(self) -> ReviewDestination:
+        """Where a review run's ``publish_review`` goes."""
+        if self.is_eval:
+            return "eval"
+        if self.review_shadow:
+            return "shadow"
+        return "github"
 
     @property
     def slack_ask_mode(self) -> bool:
