@@ -331,7 +331,7 @@ def _serialize_pr_details(payload: dict[str, Any]) -> dict[str, Any]:
     state = payload.get("state")
     if payload.get("merged"):
         state = "merged"
-    elif payload.get("draft"):
+    elif state != "closed" and payload.get("draft"):
         state = "draft"
     return {
         "state": state if isinstance(state, str) else "open",
