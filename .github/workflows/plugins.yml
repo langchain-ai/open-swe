@@ -1,0 +1,29 @@
+name: Plugins
+
+# Checks the apps in plugins/ and builds each into the one HTML file published to Open SWE.
+
+on:
+  pull_request:
+    paths:
+      - "plugins/**"
+      - "ui/vendor/macaw/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/plugins.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile --filter "{./plugins/**}..."
+      - run: pnpm --filter "./plugins/**" run --if-present typecheck
+      - run: pnpm --filter "./plugins/**" run --if-present test
+      - run: pnpm --filter "./plugins/**" run --if-present build
