@@ -526,7 +526,9 @@ def _reply_blocks(
     return [*block_payload(body), *actions]
 
 
-def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[str, Any]]:
+def build_workflow_approval_blocks(
+    message: str, fingerprint: str, *, thread_id: str | None = None
+) -> list[dict[str, Any]]:
     return [
         {"type": "section", "text": {"type": "mrkdwn", "text": message}},
         {
@@ -545,6 +547,7 @@ def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[
                             "type": "workflow_push_approval",
                             "action": "approve",
                             "fingerprint": fingerprint,
+                            "thread_id": thread_id or "",
                         }
                     ),
                     "action_id": "open_swe_option_select_approve",
@@ -558,6 +561,7 @@ def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[
                             "type": "workflow_push_approval",
                             "action": "reject",
                             "fingerprint": fingerprint,
+                            "thread_id": thread_id or "",
                         }
                     ),
                     "action_id": "open_swe_option_select_reject",

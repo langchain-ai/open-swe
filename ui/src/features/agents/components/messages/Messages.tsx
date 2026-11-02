@@ -45,7 +45,7 @@ function QueuedMessages({
         return (
           <div
             key={message.id}
-            className="ml-auto max-w-[85%] rounded-xl border border-dashed border-default bg-surface-level-2 px-space-3 py-space-2 text-sm text-primary shadow-sm"
+            className="ml-auto max-w-[85%] rounded-xl border border-dashed border-default bg-user-message px-space-3 py-space-2 text-sm text-primary shadow-sm"
             data-testid="queued-message"
             data-queued-pending={message.pending ? "true" : "false"}
             data-waits-for-agent={message.waitsForAgent ? "true" : undefined}
@@ -112,6 +112,7 @@ export const Messages = memo(function MessagesComponent({
   isStreaming,
   streamIsLoading,
   isThinking,
+  isWaitingForDelegatedWork = false,
   settingUpSandbox,
   isOffloading = false,
   reconnectLabel = null,
@@ -264,6 +265,7 @@ export const Messages = memo(function MessagesComponent({
               isActive={
                 !!reconnectLabel ||
                 isOffloading ||
+                isWaitingForDelegatedWork ||
                 (!!(isThinking || streamIsLoading || isStreaming) &&
                   !(
                     isStreaming &&
@@ -276,7 +278,11 @@ export const Messages = memo(function MessagesComponent({
               }
               label={
                 reconnectLabel ??
-                (isOffloading ? "Offloading conversation..." : activityLabel)
+                (isOffloading
+                  ? "Offloading conversation..."
+                  : isWaitingForDelegatedWork
+                    ? "Waiting for delegated work…"
+                    : activityLabel)
               }
               since={workingSince}
             />

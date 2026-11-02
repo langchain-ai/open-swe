@@ -1,6 +1,6 @@
 import {
-  desktopExperience,
-  useDesktopExperience,
+  experienceStore,
+  useExperience,
   type Experience,
 } from "@/lib/experience"
 import {
@@ -233,7 +233,7 @@ function setAgentThreadPinned(
       if (pinned)
         return isPinned ||
           !thread ||
-          !desktopExperience.includes(thread, experience)
+          !experienceStore.includes(thread, experience)
           ? prev
           : [...prev, thread]
       return isPinned
@@ -725,13 +725,13 @@ function sidebarPageParams({
 }
 
 export function useSidebarPinnedThreads({ enabled = true } = {}) {
-  const { experience } = useDesktopExperience()
+  const { experience } = useExperience()
   return useQuery({
     queryKey: experience
       ? [...agentThreadKeys.pinned, experience]
       : agentThreadKeys.pinned,
     queryFn: () => agentsApi.listPinnedThreads(experience),
-    select: (threads) => desktopExperience.filter(threads, experience),
+    select: (threads) => experienceStore.filter(threads, experience),
     enabled,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
@@ -762,7 +762,7 @@ export function useSidebarRepos({
   includeClaudeCode?: boolean
   enabled?: boolean
 }) {
-  const { experience } = useDesktopExperience()
+  const { experience } = useExperience()
   const params = {
     includeAutomations,
     includeResolved,
@@ -801,7 +801,7 @@ function useFetchedSidebarThread(
   threadId: string | undefined,
   enabled: boolean
 ): AgentThread | undefined {
-  const { experience } = useDesktopExperience()
+  const { experience } = useExperience()
   return useQuery({
     queryKey: agentThreadKeys.sidebarActive(threadId ?? ""),
     queryFn: () => agentsApi.getThread(threadId!, { markViewed: false }),
@@ -852,7 +852,7 @@ export function useSidebarActiveThread({
   loadedThreads: Array<AgentThread>
   enabled?: boolean
 }): AgentThread | undefined {
-  const { experience } = useDesktopExperience()
+  const { experience } = useExperience()
   const active = useCachedAgentThread(activeThreadId)
   const rootId =
     (active?.taskMembership?.role === "worker"
@@ -869,8 +869,8 @@ export function useSidebarActiveThread({
     enabled && !listed && !rootDetail
   )
   const row = listed ?? rootDetail ?? fetched ?? active
-  return row && desktopExperience.includes(row, experience)
-    ? desktopExperience.filter(
+  return row && experienceStore.includes(row, experience)
+    ? experienceStore.filter(
         [
           mergeTaskFamily(
             row,
@@ -889,7 +889,7 @@ function useSidebarThreadPages(
   enabled: boolean
 ) {
   const hydrated = useSidebarPrefsHydrated()
-  const { experience } = useDesktopExperience()
+  const { experience } = useExperience()
   const query = useInfiniteThreadsPages(
     { ...params, ...(experience ? { experience } : {}) },
     {
@@ -898,7 +898,7 @@ function useSidebarThreadPages(
     }
   )
   return {
-    items: desktopExperience.filter(
+    items: experienceStore.filter(
       query.data?.pages.flatMap((page) => page.items) ?? [],
       experience
     ),
@@ -1032,10 +1032,12 @@ export function useAgentThread(threadId: string) {
     // its stop button — believing the run already ended.
     refetchInterval: (current) =>
       current.state.data?.experience === "agent_workspace"
-        ? current.state.data.status === "running"
+        ? current.state.data.status === "running" ||
+          current.state.data.waitingForDelegatedWork
           ? 2000
           : 10_000
-        : current.state.data?.status === "running"
+        : current.state.data?.status === "running" ||
+            current.state.data?.waitingForDelegatedWork
           ? 3000
           : false,
     refetchOnWindowFocus: (current) =>

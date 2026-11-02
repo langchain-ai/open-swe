@@ -408,7 +408,10 @@ ENV.var(
     "`preview` also lets startup drop superseded migration revisions and turns off reviewer auto-assignment.",
 )
 ENV.var(
-    "POSTHOG_API_KEY", "Optional PostHog project API key for server-side usage capture.", default=""
+    "POSTHOG_API_KEY",
+    "Optional PostHog project API key; public by design, it is also served to the dashboard "
+    "for browser capture.",
+    default="",
 )
 ENV.var("POSTHOG_HOST", "PostHog ingestion host.", default="https://us.i.posthog.com")
 ENV.var("DD_ENV", "Shared Datadog and analytics environment.", default="production")
