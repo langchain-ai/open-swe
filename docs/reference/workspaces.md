@@ -134,8 +134,8 @@ Deployment-wide `SANDBOX_CREATE_EXTRA_JSON` remains an operator-controlled defau
 
 Federated authority is included when a new sandbox is created and preserved while GitHub and tool credentials refresh.
 Workspace image builders use the workspace's same explicit creation settings.
-Saving or removing a profile does not modify existing sandboxes: start a new thread or explicitly recreate its sandbox to apply changes.
-Recreation discards the old sandbox's filesystem, so preserve work first; removing cloud trust or the governed tag in LangSmith is the separate revocation mechanism for existing sandboxes.
+Saving or removing a profile does not modify existing sandboxes: start a new thread to apply changes.
+Removing cloud trust or the governed tag in LangSmith is the separate revocation mechanism for existing sandboxes.
 
 ### Sandbox LangSmith access
 

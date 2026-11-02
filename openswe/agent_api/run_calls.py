@@ -65,7 +65,6 @@ from runtime_api.loop import (
     ROUTE_MODEL,
     RUN_ENDED,
     RUN_STARTED,
-    SANDBOX_REPLACED,
     SANDBOX_UNREACHABLE,
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
@@ -558,11 +557,6 @@ class TokenRun:
         guards = ShellGuards(self.kind.shell_guards)
         return await self.in_run("check_shell", lambda: guards.verdict(request))
 
-    async def sandbox_replaced(self, _request: RunRequest) -> Done:
-        """Connect again to the thread's sandbox, which MDA replaced with a fresh one."""
-        await self._sandbox.reconnect()
-        return Done()
-
     async def sandbox_unreachable(self, request: SandboxGone) -> Done:
         """A tool MDA ran in the sandbox found it gone; the run ends once the person knows."""
         await self._sandbox.tell_gone(sandbox_id=request.sandbox_id, reason=request.reason)
@@ -778,7 +772,6 @@ CALLS.serve(REPORTS, TokenRun.reports)
 CALLS.serve(OPERATION, TokenRun.operation)
 CALLS.serve(CHECK_SHELL, TokenRun.check_shell)
 CALLS.serve(RECORD_EVIDENCE, TokenRun.record_evidence)
-CALLS.serve(SANDBOX_REPLACED, TokenRun.sandbox_replaced)
 CALLS.serve(SANDBOX_UNREACHABLE, TokenRun.sandbox_unreachable)
 CALLS.serve(file_api.LS, file_calls.files_ls)
 CALLS.serve(file_api.READ, file_calls.files_read)

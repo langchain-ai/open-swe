@@ -412,11 +412,7 @@ def get_or_create_sandbox_backend_proxy(
 
 
 async def get_sandbox_metadata(thread_id: str) -> dict[str, Any]:
-    """Fetch sandbox metadata from the live thread.
-
-    Never from the run config: a run queued before ``recreate_sandbox`` carries
-    the sandbox the thread has since left.
-    """
+    """Fetch sandbox metadata from the live thread, never from a queued run's config."""
     # A failed lookup must not read as "unbound": the caller would create a
     # replacement and bind it over the thread's real sandbox.
     thread = await THREADS.get(thread_id)

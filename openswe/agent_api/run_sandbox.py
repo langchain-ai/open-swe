@@ -3,17 +3,14 @@
 from datetime import datetime
 
 from langchain_core.runnables import RunnableConfig
-from langgraph.runtime import Runtime
 from runtime_api.loop import Prepare
 
-from openswe.agent_api.runs import in_graph_context
 from openswe.github.app import PermissionMap
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.run_config import RunConfig
 from openswe.sandboxes.lifecycle import (
     bind_mda_sandbox,
-    reconnect_replaced_sandbox,
     refresh_thread_github_proxy,
 )
 from openswe.sandboxes.managed import ManagedSandbox
@@ -77,22 +74,6 @@ class RunSandbox:
             backend = sandbox.current
             if isinstance(backend, TimeoutLangSmithSandbox):
                 await backend.ensure_git_identity()
-
-    async def reconnect(self) -> None:
-        """Connect again to the sandbox, which MDA replaced with a fresh one."""
-
-        async def reconnect(_runtime: Runtime) -> None:
-            if self._cfg.thread_id is None:
-                raise ValueError("This run has no thread")
-            repositories, permissions = self._github_scope()
-            await reconnect_replaced_sandbox(
-                self._cfg.thread_id,
-                workspace_slug=self._cfg.workspace_slug,
-                github_proxy_repositories=repositories,
-                github_proxy_permissions=permissions,
-            )
-
-        await in_graph_context({**self.config, "run_name": "sandbox"}, reconnect)
 
     async def refresh_github_proxy(self, *, narrowed: bool) -> datetime | None:
         """Give the sandbox's GitHub proxy a fresh token, narrowed as the run reaches GitHub

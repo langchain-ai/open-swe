@@ -68,7 +68,6 @@ All task threads share one mutable sandbox but have separate conversations and c
 Coordinate ownership of files before concurrent edits.
 Checkout operations, branch changes, dependency installs, formatting, and test processes can affect other workers.
 Ask the coordinator before changing a checkout or shared state another worker is using.
-Do not recreate the shared sandbox from a worker; ask the coordinator for help.
 These role instructions are behavioral guidance, not an isolation boundary.
 
 Resolve repository setup before launching concurrent inspection.

@@ -49,8 +49,7 @@ class ManagedSandbox(BaseModel):
     ) -> ManagedSandbox | None:
         """The sandbox the thread's MDA run declares, or ``None`` when the backend keeps its own.
 
-        New threads and MDA's own get MDA's sandbox, created from the replacement
-        ``recreate_sandbox`` asked for if any. A thread the backend gave a sandbox before
+        New threads and MDA's own get MDA's sandbox. A thread the backend gave a sandbox before
         MDA owned them keeps it until it is gone, when this run starts in MDA's
         instead; bridged threads run on the user's machine. A task worker shares its
         coordinator's MDA sandbox once the backend has attached it there, which checks that
@@ -78,7 +77,7 @@ class ManagedSandbox(BaseModel):
             and not await hand_gone_sandbox_to_mda(thread_id, metadata.sandbox_id)
         ):
             return None
-        config = await SandboxCreateConfig.for_thread(raw, workspace_slug)
+        config = await SandboxCreateConfig.resolve(workspace_slug)
         return cls(
             create=config.langsmith_options(),
             thread_id=owner,

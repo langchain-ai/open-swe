@@ -1,14 +1,12 @@
 import asyncio
 import base64
 import gc
-import json
 import threading
 import weakref
 from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import agent
@@ -50,9 +48,8 @@ from managed_deepagents import _sandbox_proxy as mda_sandbox_proxy
 from managed_deepagents import browser as mda_browser
 from managed_deepagents import runtime as mda_runtime
 from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_async
-from managed_deepagents.sandbox import SandboxDefinition, SandboxReplacement
+from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import BaseModel, JsonValue
-from rt import backend as rt_backend
 from rt.backend import Run, current_run
 from rt.managed_sandbox import PROXY_WRITE_BACKOFF_SECONDS, definition, opened_sandbox
 from rt.outbox import Outbox
@@ -595,45 +592,6 @@ async def test_deleted_bound_workspace_recovers_under_its_name_and_reports_loss(
     client.delete_sandbox.assert_not_called()
 
 
-@pytest.mark.parametrize("bound", [False, True])
-async def test_explicit_recreation_can_replace_a_failed_uncached_sandbox(
-    monkeypatch: pytest.MonkeyPatch, bound: bool
-) -> None:
-    monkeypatch.setenv("MDA_DEPLOYMENT_NAME", "open-swe-mda-prod")
-    monkeypatch.delenv("LANGSMITH_DEPLOYMENT_NAME", raising=False)
-    spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
-    assert spec is not None
-    bound_name = (
-        "original-legacy-suffix"
-        if bound
-        else mda_runtime._managed_sandbox_name("open-swe-mda-prod", "thread:thread-1")
-    )
-    sandbox = definition(spec.create, None, bound_name if bound else None)
-    monkeypatch.setattr(mda_runtime, "_managed_sandboxes", {})
-    client = MagicMock()
-    client.get_sandbox.return_value = MagicMock(status="failed")
-    fresh = MagicMock(status="running")
-    fresh.name = bound_name
-    fresh.id = "fresh-id"
-    client.create_sandbox.return_value = fresh
-    resolved = MagicMock(spec=SandboxBackendProtocol)
-    monkeypatch.setattr(mda_runtime, "_sandbox_client_for", lambda sandbox: client)
-    monkeypatch.setattr(mda_runtime, "LangSmithSandbox", lambda **kwargs: resolved)
-    backend = mda_runtime._managed_sandbox_backend(sandbox, _thread("thread-1"))
-
-    with pytest.raises(RuntimeError, match="not usable"):
-        await backend.aopen()
-    client.create_sandbox.assert_not_called()
-    replacement = await backend.areplace()
-
-    assert replacement.new_name == bound_name
-    assert replacement.old_name.startswith(f"{bound_name}-old-")
-    assert client.update_sandbox.call_args.args == (bound_name,)
-    assert client.create_sandbox.call_args.kwargs["name"] == bound_name
-    assert await backend.aopen() == resolved.id
-    client.delete_sandbox.assert_not_called()
-
-
 @pytest.fixture
 def sandbox_commands() -> list[str]:
     """Each command that reached a sandbox."""
@@ -804,138 +762,6 @@ async def test_a_run_writes_its_sandboxs_proxy_config_again_until_the_sandbox_ap
     hooks = [hook for hook, _, _ in backend_calls]
     # The backend's part, asked for once, is kept for the second try.
     assert hooks.count("sandbox_proxy") == 1
-
-
-# The cloud identity rule of the sandbox recreate_sandbox asks for, which applies only at create.
-_CLOUD_RULE: dict[str, JsonValue] = {
-    "name": "aws",
-    "type": "aws",
-    "aws": {"role_arn": "arn:aws:iam::123456789012:role/ReadOnly"},
-}
-
-
-@pytest.fixture
-def replacements(
-    monkeypatch: pytest.MonkeyPatch,
-    proxy_writes: list[tuple[str, object]],
-    operation_contents: dict[str, str],
-) -> list[SandboxDefinition]:
-    """Each sandbox a run's recreate_sandbox replaced the thread's with, under its name; the
-    backend answers it with a sandbox from another snapshot that carries a cloud identity rule."""
-    monkeypatch.setenv("MDA_DEV_MDA__GITHUB_TOKEN", "app-token")
-    create = SandboxCreate(
-        snapshot_id="b",
-        fs_capacity_bytes=1,
-        idle_ttl_seconds=60,
-        delete_after_stop_seconds=60,
-        extra_fields={"proxy_config": {"rules": [_CLOUD_RULE]}},
-    )
-    operation_contents["recreate_sandbox"] = json.dumps(
-        {"success": True, "replace": create.model_dump(mode="json")}
-    )
-    replaced: list[SandboxDefinition] = []
-
-    def replace(
-        sandbox: SandboxDefinition,
-        replacement: SandboxDefinition,
-        *args: object,
-        **kwargs: object,
-    ) -> tuple[StateBackend, SandboxReplacement]:
-        replaced.append(replacement)
-        fake = MagicMock(spec=StateBackend)
-        fake.id = "sandbox-thread-1"
-        return fake, SandboxReplacement(
-            old_name="sandbox-thread-1-old-0a1b", new_name="sandbox-thread-1", old_stopped=True
-        )
-
-    monkeypatch.setattr(mda_runtime, "_replace_managed_sandbox", replace)
-    return replaced
-
-
-def _replacing_run(monkeypatch: pytest.MonkeyPatch, *after: ToolCall) -> dict[str, object]:
-    """A run whose model asks for a fresh sandbox, then makes each call in ``after``."""
-
-    def replies() -> Iterator[AIMessage]:
-        for call in (ToolCall(name="recreate_sandbox", args={}, id="recreate"), *after):
-            yield AIMessage(content="", tool_calls=[call])
-        yield AIMessage(content="done")
-
-    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=replies()))
-    github = ConnectionRef(slug="mda/github-token", owner="agent")
-    return _context(
-        "agent", "token-1", _catalog("recreate_sandbox", "g1", snapshot="a", github_proxy=github)
-    )
-
-
-async def test_a_replacement_sandbox_is_created_with_the_backends_rules_then_written_whole(
-    monkeypatch: pytest.MonkeyPatch,
-    backend_calls: BackendCalls,
-    proxy_writes: list[tuple[str, object]],
-    replacements: list[SandboxDefinition],
-) -> None:
-    """recreate_sandbox's replacement is created from the backend's create fields, its
-    cloud identity rule among them, which applies only at create: never with the proxy
-    config MDA last wrote, which would take their place. MDA then writes its whole config
-    on the new sandbox, the backend's part asked for again."""
-    await _run(InMemoryStore(), "thread-1", _replacing_run(monkeypatch))
-
-    [replacement] = replacements
-    assert "proxy_config" not in replacement.options
-    assert replacement.options["_openswe_no_manage_proxy"] is True
-    assert replacement.options["_openswe_create_fields"] == {
-        "proxy_config": {"rules": [_CLOUD_RULE]}
-    }
-    assert replacement.options["snapshot_id"] == "b"
-    proxy_hooks = {"prepare", "sandbox_replaced", "sandbox_proxy", "proxy_config"}
-    assert [hook for hook, _, _ in backend_calls if hook in proxy_hooks] == [
-        "sandbox_proxy",
-        "proxy_config",
-        "prepare",
-        "sandbox_replaced",
-        "sandbox_proxy",
-        "proxy_config",
-    ]
-    assert [name for name, _ in proxy_writes] == ["sandbox-thread-1", "sandbox-thread-1"]
-    assert proxy_writes[1][1] == proxy_writes[0][1]
-
-
-async def test_a_replacement_mda_cannot_write_on_keeps_the_config_it_was_created_with(
-    monkeypatch: pytest.MonkeyPatch,
-    backend_calls: BackendCalls,
-    proxy_writes: list[tuple[str, object]],
-    sandbox_commands: list[str],
-    replacements: list[SandboxDefinition],
-) -> None:
-    """The backend's part follows the thread's rules, which the replacement may change, so
-    where MDA cannot ask for it again, the new sandbox's commands get none of the old sandbox's
-    part: the sandbox keeps the config it was created with until a later write lands."""
-    # The fixture's client, whose post answers every call.
-    sent = cast("AsyncMock", rt_backend.httpx2.AsyncClient().post)
-    answer = sent.side_effect
-    asked: list[str] = []
-
-    async def post(url: str, **kwargs: object) -> httpx2.Response:
-        response = await answer(url, **kwargs)
-        if url.endswith("/sandbox_proxy"):
-            asked.append(url)
-            if len(asked) > 1:
-                failure = {"error": "RuntimeError", "message": "The workspace is gone"}
-                return httpx2.Response(500, request=response.request, json=failure)
-        return response
-
-    sent.side_effect = post
-
-    await _run(
-        InMemoryStore(),
-        "thread-1",
-        _replacing_run(monkeypatch, ToolCall(name="execute", args={"command": "ls"}, id="ls")),
-    )
-
-    assert len(replacements) == 1
-    assert len(asked) == 2
-    assert "ls" in sandbox_commands
-    # Only the write before the run prepared, on the old sandbox.
-    assert [name for name, _ in proxy_writes] == ["sandbox-thread-1"]
 
 
 @pytest.mark.parametrize("code_mode", [False, True])
