@@ -21,6 +21,7 @@ from managed_deepagents._channels.runtime import (
     is_json_value,
     json_copy,
 )
+from managed_deepagents._channels.target import channel_target
 from managed_deepagents._identity_runtime import _field
 from managed_deepagents.run_context import ChannelContext
 
@@ -177,6 +178,7 @@ def resolve_channel_info(
         provider=binding["provider"],
         event=binding.get("event"),
         raw_event=binding.get("raw_event"),
+        channel_target=channel_target(binding),
     )
 
 
@@ -228,6 +230,7 @@ def runtime_channel(
         target=binding["target"],
         transport=cast("ChannelMessagingAdapter | None", transport),
         start_thread=start_thread,
+        channel_target=channel_target(binding),
     )
 
 

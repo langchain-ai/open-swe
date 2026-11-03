@@ -975,7 +975,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         Every such thread of the channel's is owned by one key, so Stop and the
         buttons in the conversation that started a run reach it there. Its
         status shows in that conversation; it answers there only with
-        ``deliver_to``. An ephemeral thread is deleted once its run ends,
+        ``auto_post``. An ephemeral thread is deleted once its run ends,
         unless the run waits on a decision.
         """
         owner = handler_threads_key(channel_name)

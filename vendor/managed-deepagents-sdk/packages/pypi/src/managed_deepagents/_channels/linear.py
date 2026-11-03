@@ -19,6 +19,7 @@ from typing_extensions import TypeIs
 
 from managed_deepagents._channel_icon import validate_channel_icon_path
 from managed_deepagents._channels.actor import endpoint_actor
+from managed_deepagents._channels.auto_post import channel_auto_post
 from managed_deepagents._channels.http import HttpChannel, channel_thread_id, http_channel
 from managed_deepagents._channels.http.provider import (
     EventFinished,
@@ -108,7 +109,8 @@ def linear_channel(
     on_event: LinearHandlers | None = None,
     app: LinearAppOptions | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
-    reply: ChannelReply = "auto",
+    auto_post: bool | None = None,
+    reply: ChannelReply | None = None,
     sessions: bool = True,
     ignore_bots: bool = True,
     on_finish: EventFinished[LinearEvent, LinearChannelThread] | None = None,
@@ -138,10 +140,11 @@ def linear_channel(
             run and starts after it, ``interrupt`` cancels the run, keeping its
             progress, and starts at once, ``rollback`` cancels it and discards
             its progress, and ``reject`` starts nothing.
-        reply: Whether the channel posts the run's final answer, as a comment
-            or the session's response: ``"auto"`` (the default) or ``"none"``,
-            to leave replying to the agent. Session acknowledgements, Stop and
-            error notices still post.
+        auto_post: Whether the channel posts the run's final answer, as a
+            comment or the session's response: ``True`` (the default) or
+            ``False``, to leave replying to the agent. Session
+            acknowledgements, Stop and error notices still post.
+        reply: Deprecated: ``auto_post``. ``"none"`` is ``auto_post=False``.
         sessions: Answer Linear agent sessions, which open when someone
             mentions the app or delegates an issue to it. Without a handler, a
             new session runs with Linear's prompt for it (``promptContext``), and
@@ -220,7 +223,7 @@ def linear_channel(
         # mda deploy sets up the Linear app from this.
         provider_config=cast("dict[str, JsonValue]", app_setup),
         multitask_strategy=multitask_strategy,
-        reply=reply,
+        auto_post=channel_auto_post(auto_post, reply, label="channels.linear(...)"),
     )
     channel.paused_notice = _notify_paused
     # Deploy provides the app's token at this name.
