@@ -20,6 +20,7 @@ from rt.routing import Route, RouteClassifier
 from rt.tools import STATE_KEY
 from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
+    JOINED_TASK_CONTEXT,
     Catalog,
     LoopRules,
     ModelSpec,
@@ -226,12 +227,15 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     # A task the thread joined mid-run, as its first worker's launch said, joins the
     # conversation and leaves the system prompt, and the cache with it, as it was.
     joined = '<dynamic-context kind="task" id="task-2">Ship login</dynamic-context>'
-    backend.run.joined_task(joined)
-    moved = await loop.before_model(seen)
+    held = seen[STATE_KEY]
+    assert isinstance(held, dict)
+    moved = await loop.before_model({**seen, STATE_KEY: {**held, JOINED_TASK_CONTEXT: joined}})
     assert moved.call is not None
     assert moved.call.system_prompt == planned.call.system_prompt
     assert [message.content for message in messages_from_dict(moved.messages)] == [joined]
     assert [name for name, _ in calls] == ["refresh_github_proxy"]
+    # The next run's catalog carries it, so a new turn starts without it.
+    assert loop.starting()[JOINED_TASK_CONTEXT] is None
 
 
 async def test_a_run_context_summarized_away_is_sent_again(

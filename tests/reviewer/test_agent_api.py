@@ -224,12 +224,14 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
 ) -> None:
     from unittest.mock import AsyncMock
 
-    from runtime_api.endpoint import UnknownEndpointError
+    from langchain_core.messages import HumanMessage, messages_to_dict
 
     from openswe.agent_api import agent
     from openswe.agent_api import graph as graph_module
     from openswe.agent_api.graph import RemoteGraph
     from openswe.agent_api.tokens import AgentTurnSettings, RunSettings
+    from openswe.middleware.model_selection import RouteSelection
+    from openswe.middleware.task_coordination import TaskCoordinationMiddleware
     from openswe.sandboxes.tool_runtime import ToolSurface
     from openswe.utils.model import provider_model_kwargs
 
@@ -265,10 +267,18 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
         github_proxy_repositories=None,
         github_proxy_permissions=None,
     )
-    # The run classifies its route itself, and its catalog carries its task's context.
-    for gone in ("route_model", "task_context"):
-        with pytest.raises(UnknownEndpointError):
-            await graph.api(run, gone, {"run_id": "run-1"})
+    # Deprecated: an MDA deployment from before classifying routes and reading the task's
+    # context from its catalog still asks, and is answered.
+    monkeypatch.setattr(
+        "openswe.middleware.model_selection._select_jev_route",
+        AsyncMock(return_value=RouteSelection("fast")),
+    )
+    monkeypatch.setattr(TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None))
+    asked = messages_to_dict([HumanMessage(content="Fix the login", id="human-1")])
+    route = await graph.api(run, "route_model", {"run_id": "run-1", "humans": asked})
+    context = await graph.api(run, "task_context", {"run_id": "run-1"})
+    assert route == {"route": "fast", "persist": True}
+    assert context == {"instructions": None, "message": None}
 
     # A task worker works in its coordinator's sandbox, so it keeps that one's token fresh,
     # with the coordinator's own scope.
@@ -758,6 +768,56 @@ async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
     )
     assert isinstance(unplanned, dict) and unplanned["status"] == "error"
     assert "drafts" not in str(unplanned["content"])
+
+
+async def test_an_operation_that_joins_a_task_hands_the_run_its_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from langchain_core.tools import tool
+    from runtime_api.catalog import JOINED_TASK_CONTEXT
+
+    from openswe.agent_api import agent
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.middleware.task_coordination import TaskCoordinationMiddleware
+
+    @tool
+    def manage_baby_sit(pr_url: str) -> str:
+        """Watch a pull request."""
+        return f"watching {pr_url}"
+
+    @tool
+    def draft_preference(note: str) -> str:
+        """Say something."""
+        return note
+
+    tools = {tool.name: tool for tool in (manage_baby_sit, draft_preference)}
+    monkeypatch.setattr(agent, "agent_tools_by_name", lambda: tools)
+    monkeypatch.setattr(agent, "resolve_github_token", AsyncMock())
+    coordination = MagicMock(context_message=MagicMock(return_value="<task>Watch it</task>"))
+    for_thread = AsyncMock(return_value=coordination)
+    monkeypatch.setattr(TaskCoordinationMiddleware, "for_thread", for_thread)
+    graph = RemoteGraph("agent", AsyncMock(), agent.AgentParts())
+    run = RUN.model_copy(update={"assistant_id": "agent"}).granting()
+
+    async def operate(name: str, arguments: dict[str, JsonValue]) -> JsonValue:
+        call = {"run_id": "run-1", "name": name, "arguments": arguments, "request_id": name}
+        return await graph.api(run, "operation", {**call, "grant": run.grant(name)})
+
+    watched = await operate("manage_baby_sit", {"pr_url": "https://github.com/a/b/pull/1"})
+    other = await operate("draft_preference", {"note": "hi"})
+
+    # A baby-sit watch can make the thread a task's coordinator after its catalog was planned.
+    assert isinstance(watched, dict)
+    assert watched["state"] == {JOINED_TASK_CONTEXT: "<task>Watch it</task>"}
+    assert isinstance(other, dict) and other["state"] == {}
+    for_thread.assert_awaited_once_with(run.thread_id)
+
+    # A thread in no task, or a read that fails, hands nothing back.
+    for_thread.side_effect = RuntimeError("database down")
+    failed = await operate("manage_baby_sit", {"pr_url": "https://github.com/a/b/pull/1"})
+    assert isinstance(failed, dict) and failed["state"] == {}
 
 
 async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_call() -> None:
@@ -1862,6 +1922,20 @@ async def test_a_registered_worker_tells_its_coordinators_run_the_task_it_now_co
     for_thread.assert_awaited_once_with("coordinator")
     assert reply.task_context == coordination.context_message()
     assert reply.task_context is not None and str(task.id) in reply.task_context
+
+    # The worker is registered either way: a failed read only leaves the context out.
+    for_thread.side_effect = RuntimeError("database down")
+    again = await async_workers.launched(
+        coordinator,
+        Launched(
+            tool_call_id="call-1",
+            instructions="Fix login",
+            worker_thread_id="worker",
+            worker_run_id="run-1",
+        ),
+    )
+    assert again.worker == {"worker_thread_id": "worker"}
+    assert again.task_context is None
 
 
 async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_settled(

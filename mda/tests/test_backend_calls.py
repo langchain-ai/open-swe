@@ -77,9 +77,10 @@ from rt.managed_sandbox import declared_sandbox
 from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware, turn_trace
 from rt.model_calls import MODEL_OUTAGE_MESSAGE, model_call_guards
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
-from rt.tools import operation_tool
+from rt.tools import STATE_KEY, operation_tool
 from rt.tracing import TurnTrace
 from runtime_api.catalog import (
+    JOINED_TASK_CONTEXT,
     Catalog,
     FilesSpec,
     InboxSpec,
@@ -1800,6 +1801,43 @@ async def test_a_run_without_an_mda_sandbox_offloads_a_large_result_to_its_own_f
     assert (tmp_path / "large_tool_results" / "c1").read_text() == "x" * 100_000
 
 
+@pytest.mark.parametrize("bundled", [True, False])
+async def test_the_skills_open_swe_ships_are_served_from_this_deployment(
+    monkeypatch: pytest.MonkeyPatch, bundled: bool
+) -> None:
+    from deepagents.middleware.skills import SkillsState
+    from rt.skills import RunSkillsMiddleware, SkillFiles
+    from runtime_api.skills import BUNDLED_SKILLS, RunSkills, SkillFile
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    sources = ["/organization-skills/", *([BUNDLED_SKILLS] if bundled else [])]
+    backend = _run_backend(catalog=Catalog(skill_sources=sources))
+    asked: list[dict[str, JsonValue]] = []
+
+    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        asked.append(body)
+        deploy = "---\nname: deploy\ndescription: Ship it\n---\n\nRun make deploy.\n"
+        return RunSkills(
+            files=[SkillFile(path="/organization-skills/deploy/SKILL.md", content=deploy)]
+        )
+
+    _answering(monkeypatch, backend, answer)
+    skill_files = SkillFiles(backend, lambda: "run-1")
+    empty = cast(SkillsState, {"messages": []})
+
+    listed = await RunSkillsMiddleware(backend, skill_files).abefore_agent(empty, MagicMock(), {})
+
+    # The backend leaves out what this deployment serves, and lists only PostgreSQL's skills.
+    assert [body["served"] for body in asked] == [[BUNDLED_SKILLS]]
+    assert listed is not None
+    names = {skill["name"] for skill in listed["skills_metadata"]}
+    shipped = {"baby-sit", "html-artifacts", "linear-tickets", "workspaces"}
+    assert names == ({"deploy"} | shipped if bundled else {"deploy"})
+    if bundled:
+        read = await skill_files.aread(f"{BUNDLED_SKILLS}baby-sit/SKILL.md")
+        assert read.error is None
+
+
 async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1900,7 +1938,7 @@ async def _launch_worker(
     also: Sequence[ToolCall] = (),
     task_context: str | None = None,
     backend: OpenSweBackend | None = None,
-) -> tuple[list[ToolMessage], list[tuple[str, dict[str, object]]]]:
+) -> tuple[list[ToolMessage], list[tuple[str, dict[str, object]]], Mapping[str, object]]:
     """Run a coordinator that launches a worker through deepagents' ``start_async_task``;
     registering it answers with ``task_context``."""
     from deepagents.middleware import async_subagents
@@ -1950,7 +1988,22 @@ async def _launch_worker(
     model = _ToolCallingModel(
         messages=iter([AIMessage("", tool_calls=[launch, *also]), AIMessage("Launched.")])
     )
-    graph = create_agent(model, middleware=[AsyncWorkerLaunchMiddleware(backend), launches])
+
+    held: dict[str, object] = {}
+
+    class HeldState(AgentMiddleware[RunState]):
+        """Keeps the run's held state as the model call after the launch sees it."""
+
+        state_schema = RunState
+
+        async def abefore_model(self, state: RunState, runtime: object) -> None:
+            held.update(state.get(STATE_KEY, {}))
+
+    # Middleware types are invariant in the state they extend; a graph merges them all.
+    middleware = cast(
+        list[AgentMiddleware], [HeldState(), AsyncWorkerLaunchMiddleware(backend), launches]
+    )
+    graph = create_agent(model, middleware=middleware)
     values = await graph.ainvoke(
         {"messages": [("user", "fix login in the background")]},
         {
@@ -1962,7 +2015,8 @@ async def _launch_worker(
     )
     # Open SWE's task messages report the worker; deepagents does not poll it too.
     assert not values.get("async_tasks")
-    return [m for m in values["messages"] if isinstance(m, ToolMessage)], calls
+    messages = [m for m in values["messages"] if isinstance(m, ToolMessage)]
+    return messages, calls, held
 
 
 async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_token(
@@ -1972,7 +2026,7 @@ async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_toke
     client.threads.create = AsyncMock(return_value={"thread_id": "worker-thread"})
     client.runs.create = AsyncMock(return_value={"run_id": "worker-run"})
 
-    results, calls = await _launch_worker(
+    results, calls, _ = await _launch_worker(
         monkeypatch,
         client,
         also=[
@@ -2034,12 +2088,11 @@ async def test_a_coordinators_first_worker_tells_its_run_the_task_it_joined(
     backend = _run_backend("coordinator-token", catalog=COORDINATOR_CATALOG)
     joined = '<dynamic-context kind="task" id="task-1">Fix login</dynamic-context>'
 
-    await _launch_worker(monkeypatch, client, task_context=joined, backend=backend)
+    _, _, held = await _launch_worker(monkeypatch, client, task_context=joined, backend=backend)
 
-    # The run's later model calls tell the model the task; its role stays as planned.
-    loop = backend.run.catalog.loop
-    assert loop is not None
-    assert loop.task_context == TaskContext(instructions=_ROLE, message=joined)
+    # The run's later model calls tell the model the task, from its checkpoint: a run
+    # resumed elsewhere still knows it.
+    assert held == {JOINED_TASK_CONTEXT: joined}
 
 
 def _mda_error(status: int) -> APIStatusError:
@@ -2067,7 +2120,7 @@ async def test_a_worker_launch_mda_failed_to_start_is_made_again_while_it_may_pa
     )
     client.runs.create = AsyncMock(side_effect=[*failures, {"run_id": "worker-run"}])
 
-    [result], calls = await _launch_worker(monkeypatch, client)
+    [result], calls, _ = await _launch_worker(monkeypatch, client)
 
     attempts = [body for hook, body in calls if hook == "launch_worker"]
     # Every attempt is the same launch, so one launch still registers one worker.

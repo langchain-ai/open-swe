@@ -123,12 +123,24 @@ async def launched(run: RemoteRun, body: Launched) -> Worker:
         worker = service.worker_reply(replay.task, replay.delegation)
     else:
         await launched_run.settle_if_ended()
-    # The coordinator's run was planned before its thread joined the task.
-    coordination = await TaskCoordinationMiddleware.for_thread(run.thread_id)
     return Worker(
-        worker=_json_object.validate_python(worker),
-        task_context=coordination.context_message() if coordination is not None else None,
+        worker=_json_object.validate_python(worker), task_context=await _task_context(run)
     )
+
+
+async def _task_context(run: RemoteRun) -> str | None:
+    """The context of the task the coordinator's thread now belongs to: its run was planned
+    before. The worker is registered whatever happens here, so a failure only leaves it out."""
+    try:
+        coordination = await TaskCoordinationMiddleware.for_thread(run.thread_id)
+    except Exception:
+        logger.warning(
+            "Could not read the task a coordinator joined",
+            extra={"coordinator_thread_id": run.thread_id},
+            exc_info=True,
+        )
+        return None
+    return coordination.context_message() if coordination is not None else None
 
 
 async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:
