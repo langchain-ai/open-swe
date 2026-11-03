@@ -17,8 +17,7 @@ from dataclasses import dataclass
 from typing import Final, cast
 
 from managed_deepagents import (
-    ChannelRunInput,
-    ChannelRunOptions,
+    ChannelRun,
     LinearChannelThread,
     LinearEventResult,
     LinearIssueCreateEvent,
@@ -208,16 +207,17 @@ async def start_automations(
             msg_id=f"msg_{event.delivery_id}_automations_plan",
         )
     ).runs
-    runs: list[tuple[ChannelRunInput, ChannelRunOptions]] = []
+    runs: list[ChannelRun] = []
     for planned in planned_runs:
         if planned is None:
             continue
-        options: ChannelRunOptions = {
+        run: ChannelRun = {
+            "input": planned.input,
             "thread": {"mode": "persistent", "id": str(planned.thread_id)},
             "context": planned.context,
             "metadata": planned.metadata,
         }
         if planned.webhook:
-            options["webhook"] = planned.webhook
-        runs.append((planned.input, options))
+            run["webhook"] = planned.webhook
+        runs.append(run)
     return runs or None
