@@ -276,38 +276,60 @@ async def test_freshness_conflict_shows_the_model_images_posted_meanwhile(
     assert result[1] == image
 
 
-async def test_code_channel_reply_stays_in_user_started_thread(
+@pytest.mark.parametrize(
+    ("reply_thread_ts", "requested_ts", "expected_ts"),
+    [("9.000", None, "9.000"), ("", "11.000", "11.000"), ("9.000", "11.000", "11.000")],
+)
+async def test_unthreaded_session_reply_goes_to_the_chosen_thread(
     monkeypatch: pytest.MonkeyPatch,
+    reply_thread_ts: str,
+    requested_ts: str | None,
+    expected_ts: str,
 ) -> None:
     async def active_thread(_client: Any, thread_id: str, _fallback: Any) -> dict[str, str]:
         assert thread_id == "thread-code"
         return {"channel_id": "C-code", "thread_ts": "0"}
 
     async def post(_channel_id: str, _thread_ts: str, _message: str, **kwargs: Any) -> str:
-        assert kwargs["post_thread_ts"] == "9.000"
+        assert kwargs["post_thread_ts"] == expected_ts
         return "10.000"
 
+    slack_thread = {"channel_id": "C-code", "thread_ts": "0"}
+    if reply_thread_ts:
+        slack_thread["reply_thread_ts"] = reply_thread_ts
     monkeypatch.setattr(
         slack_reply_tool,
         "get_config",
-        lambda: {
-            "configurable": {
-                "thread_id": "thread-code",
-                "slack_thread": {
-                    "channel_id": "C-code",
-                    "thread_ts": "0",
-                    "reply_thread_ts": "9.000",
-                },
-            }
-        },
+        lambda: {"configurable": {"thread_id": "thread-code", "slack_thread": slack_thread}},
     )
     monkeypatch.setattr(slack_reply_tool, "get_active_slack_thread", active_thread)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    assert await slack_reply_tool.slack_reply("threaded", "final") == {
+    assert await slack_reply_tool.slack_reply("threaded", "final", thread_ts=requested_ts) == {
         "success": True,
         "message_ts": "10.000",
     }
+
+
+async def test_thread_ts_is_rejected_in_an_ordinary_slack_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def active_thread(_client: Any, _thread_id: str, _fallback: Any) -> dict[str, str]:
+        return {"channel_id": "C1", "thread_ts": "5.000"}
+
+    async def post(*_args: Any, **_kwargs: Any) -> str:
+        raise AssertionError("must not post")
+
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_config",
+        lambda: {"configurable": {"thread_id": "t", "slack_thread": {"channel_id": "C1"}}},
+    )
+    monkeypatch.setattr(slack_reply_tool, "get_active_slack_thread", active_thread)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    result = await slack_reply_tool.slack_reply("hi", "final", thread_ts="6.000")
+    assert isinstance(result, dict) and result["success"] is False
 
 
 @pytest.mark.parametrize("slack_error", ["channel_not_found", "not_in_channel"])

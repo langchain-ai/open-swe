@@ -84,11 +84,18 @@ async def slack_reply(
     *,
     option_user_id: str | None = None,
     preserve_github_links: bool = False,
+    thread_ts: str | None = None,
 ) -> dict[str, Any] | list[dict[str, object]]:
     """Implement the `slack_reply` tool."""
     with github_link_delivery(preserve_github_links):
         result = await send_slack_reply(
-            message, response_type, options, blocks, state, option_user_id=option_user_id
+            message,
+            response_type,
+            options,
+            blocks,
+            state,
+            option_user_id=option_user_id,
+            thread_ts=thread_ts,
         )
     image_urls = result.pop("image_urls", None)
     if not image_urls:
@@ -115,8 +122,14 @@ async def send_slack_reply(
     state: dict[str, Any] | None = None,
     *,
     option_user_id: str | None = None,
+    thread_ts: str | None = None,
 ) -> dict[str, Any]:
     """Post a reply in the run's Slack thread."""
+    if thread_ts is not None and not re.fullmatch(r"\d+\.\d+", thread_ts):
+        return {
+            "success": False,
+            "error": "thread_ts must be a Slack message timestamp such as 1700000000.000100",
+        }
     if option_user_id is not None and (
         not re.fullmatch(r"[UW][A-Z0-9]+", option_user_id) or not options or blocks is not None
     ):
@@ -151,8 +164,8 @@ async def send_slack_reply(
         active["reply_thread_ts"] = slack_thread["reply_thread_ts"]
 
     channel_id = active.get("channel_id")
-    thread_ts = active.get("thread_ts")
-    if not channel_id or not thread_ts:
+    session_ts = active.get("thread_ts")
+    if not channel_id or not session_ts:
         if await _already_moved_to_dashboard(client, thread_id):
             return _dashboard_handoff(thread_id)
         return {
@@ -165,14 +178,21 @@ async def send_slack_reply(
 
     from openswe.slack.code_channels import is_code_channel_session
 
-    reply_thread_ts = active.get("reply_thread_ts")
+    unthreaded_session = is_code_channel_session(str(session_ts))
+    if thread_ts is not None and not unthreaded_session:
+        return {
+            "success": False,
+            "error": "thread_ts is only accepted in a concierge DM or code channel",
+            "hint": "This conversation is already a Slack thread; retry without thread_ts.",
+        }
+    reply_thread_ts = thread_ts or active.get("reply_thread_ts")
     post_thread_ts = (
         str(reply_thread_ts)
-        if is_code_channel_session(str(thread_ts)) and isinstance(reply_thread_ts, str)
-        else str(thread_ts)
+        if unthreaded_session and isinstance(reply_thread_ts, str)
+        else str(session_ts)
     )
 
-    async with slack_thread_mutation_lock(client, channel_id, thread_ts):
+    async with slack_thread_mutation_lock(client, channel_id, session_ts):
         if state and run_id:
             conflict = await _stale_reply_guard(state, channel_id, post_thread_ts, run_id)
             if conflict is not None:
@@ -200,23 +220,19 @@ async def send_slack_reply(
         try:
             message_ts = await _post_and_store_mapping(
                 channel_id,
-                thread_ts,
+                session_ts,
                 message,
                 blocks=slack_blocks,
                 usage=usage,
                 post_thread_ts=post_thread_ts,
-                agent_thread_id=(
-                    None
-                    if is_code_channel_session(str(thread_ts))
-                    else str(thread_id or "") or None
-                ),
+                agent_thread_id=(None if unthreaded_session else str(thread_id or "") or None),
                 run_id=run_id,
                 triggering_user_id=_triggering_user_id(cfg),
             )
         except SlackRequestError as exc:
             if exc.code == "thread_not_found":
                 moved = bool(thread_id) and await move_thread_to_dashboard(
-                    client, str(thread_id), str(channel_id), str(thread_ts)
+                    client, str(thread_id), str(channel_id), str(session_ts)
                 )
                 return _dashboard_handoff(thread_id) if moved else _dashboard_handoff_failed()
             return {
@@ -226,11 +242,11 @@ async def send_slack_reply(
                 "message_chars": len(message),
                 "hint": _slack_reply_failure_hint(exc.code),
             }
-        if message_ts and cfg.source == "slack" and not is_code_channel_session(str(thread_ts)):
+        if message_ts and cfg.source == "slack" and not unthreaded_session:
             try:
                 await _handle_kickoff(
                     str(channel_id),
-                    str(thread_ts),
+                    str(session_ts),
                     message_ts,
                     response_type=response_type,
                     eligible=cfg.slack_kickoff_eligible is True and not cfg.slack_breakout,
@@ -238,11 +254,11 @@ async def send_slack_reply(
             except Exception:
                 logger.exception(
                     "Could not update Slack investigation kickoff state",
-                    extra={"slack_channel": channel_id, "slack_thread_ts": thread_ts},
+                    extra={"slack_channel": channel_id, "slack_thread_ts": session_ts},
                 )
-    if run_id and not is_code_channel_session(str(thread_ts)):
+    if run_id and not unthreaded_session:
         # Slack drops the status when the app posts.
-        await restore_slack_thinking_status(str(channel_id), str(thread_ts))
+        await restore_slack_thinking_status(str(channel_id), str(session_ts))
     return {"success": True, "message_ts": message_ts}
 
 
