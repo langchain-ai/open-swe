@@ -215,7 +215,9 @@ class DesktopHandoffExchange(BaseModel):
 @router.post("/auth/desktop/exchange")
 async def auth_desktop_exchange(body: DesktopHandoffExchange) -> dict[str, object]:
     token = redeem_desktop_handoff(code=body.code, verifier=body.verifier)
-    await DashboardPrincipal.from_session(decode_session(token)).authorize()
+    await DashboardPrincipal.from_session(decode_session(token)).authorize(
+        path="/dashboard/api/auth/desktop/exchange"
+    )
     return {
         "session": token,
         "expires_in": SESSION_TTL_SECONDS,
@@ -271,6 +273,11 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
         "login": principal.subject,
         "auth_provider": principal.provider,
         "github_login": principal.github_login,
+        "requires_github_link": (
+            await user.requires_github_link()
+            if principal.provider == "langsmith" and user is not None
+            else False
+        ),
         "display_name": user.display_name if user else "",
         "email": session.get("email") or (user.email or None if user else None),
         "avatar_url": session.get("avatar_url"),

@@ -1,4 +1,6 @@
 import { Card } from "@langchain/macaw-components/Card"
+import { Button } from "@langchain/macaw-components/Button"
+import { api } from "@/lib/api"
 import { Text } from "@langchain/macaw-components/Text"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 
@@ -16,15 +18,30 @@ export function GitHubLinkPrompt({ user }: { user: SessionUser }) {
         <GithubLogoIcon size={32} weight="regular" aria-hidden />
         <div className="flex flex-col gap-space-2">
           <Text as="h1" variant="h3">
-            Link GitHub to start coding
+            {user.requires_github_link
+              ? "Return to your existing account"
+              : "Link GitHub to start coding"}
           </Text>
           <Text as="p" variant="sm" color="secondary">
-            Coding agents clone repositories, push branches and open pull
-            requests as you. Link your GitHub account to use them and return to
-            your existing coding threads.
+            {user.requires_github_link
+              ? "Your email matches an existing Open SWE account. Link the GitHub account you used before to verify ownership and restore your threads and settings."
+              : "Coding agents clone repositories, push branches and open pull requests as you. Link your GitHub account to use them and return to your existing coding threads."}
           </Text>
         </div>
         <LinkGitHubButton user={user} size="md" />
+        {user.requires_github_link && (
+          <Button
+            color="secondary"
+            variant="plain"
+            size="sm"
+            onClick={async () => {
+              await api.logout()
+              window.location.assign("/login")
+            }}
+          >
+            Sign out
+          </Button>
+        )}
       </Card>
     </div>
   )
