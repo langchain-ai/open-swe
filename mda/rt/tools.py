@@ -1,4 +1,5 @@
-"""The run's tools, each one calling an operation of the Open SWE backend for its work.
+"""The run's tools, each one calling an operation of the Open SWE backend for its work,
+or run here where the backend marks it and this runtime has it (``rt.local_tools``).
 
 They carry the names, descriptions and argument schemas the backend gives its
 operations, so the prompts, the transcript and the dashboard see what an
@@ -52,6 +53,7 @@ from rt.backend import (
     reported_call,
 )
 from rt.git_evidence import turn_git
+from rt.local_tools import run_locally, runs_locally
 
 logger = logging.getLogger(__name__)
 
@@ -261,6 +263,18 @@ async def _operate(
     return _result(answer, tool_call_id, spec.name)
 
 
+async def _run_locally(
+    backend: OpenSweBackend,
+    spec: ToolSpec,
+    arguments: Mapping[str, JsonValue],
+    runtime: ToolRuntime,
+    tool_call_id: str,
+    credentials: dict[str, str],
+) -> ToolMessage | Command:
+    answer = await run_locally(spec, backend.run, arguments, runtime, credentials)
+    return _result(answer, tool_call_id, spec.name)
+
+
 async def called(
     backend: OpenSweBackend,
     name: str,
@@ -332,7 +346,8 @@ async def run_operation(
     except UnreadConnectionError as exc:
         make = exc.result
     else:
-        make = partial(_operate, backend, spec, arguments, runtime, credentials=credentials)
+        run = _run_locally if runs_locally(spec, backend.run, runtime) else _operate
+        make = partial(run, backend, spec, arguments, runtime, credentials=credentials)
     return await called(backend, spec.name, arguments, runtime, make, cites_evidence=cites_evidence)
 
 
