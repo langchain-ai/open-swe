@@ -460,6 +460,45 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
     )
 
 
+@pytest.mark.parametrize("style", ["bare", "angle", "slack", "markdown"])
+async def test_dashboard_review_links_get_a_label_and_github_companion(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, style: str
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example/prefix/")
+    target = "https://openswe.example/prefix/agents/reviews/acme/app/7"
+    github = "https://github.com/acme/app/pull/7"
+    link = {
+        "bare": target,
+        "angle": f"<{target}>",
+        "slack": f"<{target}|{target}>",
+        "markdown": f"[{target}]({target})",
+    }[style]
+    untouched = f"`{target}` https://foreign.example/agents/reviews/acme/app/7 {target}?diff=split"
+    await slack_utils.post_slack_top_level_message_with_ts(
+        "C1", f"{link}\n{untouched}", blocks=block_payload([markdown(link), section(link)])
+    )
+    payload = slack_api.calls[-1][1]
+    expected = (
+        f"[app#7]({target})[↗]({github})"
+        if style == "markdown"
+        else f"<{target}|app#7> (<{github}|GitHub>)"
+    )
+    assert payload["text"] == f"{link}\n{untouched}"
+    assert payload["blocks"][0]["text"] == (
+        f"<{target}|app#7> (<{github}|GitHub>)"
+        if style in {"angle", "slack"}
+        else f"[app#7]({target})[↗]({github})"
+    )
+    assert payload["blocks"][1]["text"]["text"] == expected
+    assert await review_links.pr_review_links(payload["text"], payload["blocks"]) == (
+        payload["text"],
+        payload["blocks"],
+    )
+    standalone = await review_links.pr_review_links(f"{link}\n{untouched}", None)
+    assert standalone == (f"{expected}\n{untouched}", None)
+    assert await review_links.pr_review_links(*standalone) == standalone
+
+
 @pytest.mark.parametrize("fail", [False, True])
 async def test_direct_github_reply_override_is_scoped_to_one_delivery(
     slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, fail: bool
