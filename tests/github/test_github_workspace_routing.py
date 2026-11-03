@@ -43,6 +43,7 @@ async def test_unowned_repo_is_not_ignored_for_workspace_when_policy_unset(
     monkeypatch.delenv("OPEN_SWE_UNASSIGNED_REPO_WORKSPACE", raising=False)
     prepare = AsyncMock(return_value=None)
     monkeypatch.setattr(github_webhooks, "prepare_github_issue_run", prepare)
+    monkeypatch.setattr(github_webhooks, "conversation_started", AsyncMock(return_value=False))
     register_github_logins(monkeypatch, "octocat")
 
     delivered = await deliver_github_event(
@@ -52,7 +53,8 @@ async def test_unowned_repo_is_not_ignored_for_workspace_when_policy_unset(
     assert delivered.facts.routable is True
     assert delivered.issue_run is not None
     assert prepare.await_args is not None
-    assert prepare.await_args.args[1] == "issue_comment"
+    # A new conversation runs in the workspace that owns the repository.
+    assert prepare.await_args.kwargs["workspace"] is None
 
 
 async def test_unreadable_workspace_list_fails_the_delivery(

@@ -63,7 +63,7 @@ class SystemIdentity(TypedDict):
 
 class InputMessageContext(TypedDict):
     sender_id: str
-    surface: Literal["linear", "slack", "web"]
+    surface: Literal["github", "linear", "slack", "web"]
     kind: Literal["human", "system"]
     channel_id: NotRequired[str]
     data: NotRequired[EnvelopeData]

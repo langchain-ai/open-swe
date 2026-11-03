@@ -199,6 +199,7 @@ async def test_gate_blocks_non_member_on_public_issue(monkeypatch, registry_db) 
 
     prepare = AsyncMock()
     monkeypatch.setattr(github_webhooks, "prepare_github_issue_run", prepare)
+    monkeypatch.setattr(github_webhooks, "conversation_started", AsyncMock(return_value=False))
 
     delivered = await deliver_github_event(
         monkeypatch,

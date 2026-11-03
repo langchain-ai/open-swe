@@ -36,7 +36,12 @@ class ChannelCall:
 @cache
 def _handlers() -> Handlers[ChannelCall]:
     # Imported on the first call, so the webapp doesn't load every channel at startup.
-    from runtime_api.github import ACT_ON_GITHUB_DELIVERY, RECORD_GITHUB_DELIVERY
+    from runtime_api.github import (
+        ACT_ON_GITHUB_DELIVERY,
+        GITHUB_AUTOMATION_RULES,
+        GITHUB_ISSUE_FACTS,
+        RECORD_GITHUB_DELIVERY,
+    )
     from runtime_api.linear import (
         LINEAR_AUTOMATION_RULES,
         LINEAR_SESSION_FACTS,
@@ -57,6 +62,8 @@ def _handlers() -> Handlers[ChannelCall]:
 
     handlers = Handlers[ChannelCall]()
     handlers.serve(RECORD_GITHUB_DELIVERY, github.record_github_delivery)
+    handlers.serve(GITHUB_AUTOMATION_RULES, github.github_automation_rules)
+    handlers.serve(GITHUB_ISSUE_FACTS, github.github_issue_facts)
     handlers.serve(ACT_ON_GITHUB_DELIVERY, github.act_on_github_delivery)
     handlers.serve(RECORD_LINEAR_DELIVERY, linear.record_linear_delivery)
     handlers.serve(LINEAR_SESSION_FACTS, linear.linear_session_facts)

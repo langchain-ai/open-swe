@@ -44,3 +44,14 @@ def test_a_body_is_fenced_as_the_backend_fences_it(body: str, registered: bool) 
     assert _MDA.fence(body, registered=registered) == comments.fence_github_comment_body(
         body, registered=registered
     )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Crash on <login>",
+        f"{comments.UNTRUSTED_GITHUB_COMMENT_OPEN_TAG}x{comments.UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG}",
+    ],
+)
+def test_a_title_is_sanitized_as_the_backend_sanitizes_it(body: str) -> None:
+    assert _MDA.sanitize(body) == comments.sanitize_github_comment_body(body)

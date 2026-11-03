@@ -11,7 +11,7 @@ import pytest
 from fastapi import HTTPException
 from langgraph_sdk.errors import ConflictError
 from pydantic import ValidationError
-from runtime_api.github import GitHubThreadRun
+from runtime_api.github import FiredGitHubAutomation, GitHubThreadRun
 from runtime_api.linear import LinearAutomationRun, LinearTriggerEvent, PlanLinearAutomation
 from sqlalchemy import text
 
@@ -37,6 +37,35 @@ from openswe.slack.payloads import SlackChannelContext, SlackEventEnvelope
 from openswe.threads import router
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.mda_helpers import stub_mda_runtime
+
+
+async def _fired(event_type: str, payload: dict[str, Any]) -> list[FiredGitHubAutomation]:
+    """The automations MDA's channel matches a delivery to, each with its own prompt as
+    the run's (``mda/tests`` hold the prompt MDA writes)."""
+    repository = payload.get("repository") or {}
+    full_name = f"{repository.get('owner', {}).get('login')}/{repository.get('name')}".lower()
+    events = schedules._github_events(event_type, payload)
+    fired: list[FiredGitHubAutomation] = []
+    for record in await schedules.github_automation_rules(full_name):
+        matched = sorted(events & set(schedules.github_trigger_events(record, full_name)))
+        if matched:
+            event = "pull_request.merged" if "pull_request.merged" in matched else matched[0]
+            fired.append(
+                FiredGitHubAutomation(
+                    automation_id=str(record["id"]), event=event, prompt=record["prompt"]
+                )
+            )
+    return fired
+
+
+async def _plan_github(
+    event_type: str, payload: dict[str, Any], delivery_id: str
+) -> list[GitHubThreadRun]:
+    """Plan the runs of a GitHub delivery's automations, as MDA's channel asks for them."""
+    return await schedules.plan_github_automations(
+        event_type, payload, delivery_id, await _fired(event_type, payload)
+    )
+
 
 SCHED_1 = "11111111-1111-4111-8111-111111111111"
 SCHED_2 = "22222222-2222-4222-8222-222222222222"
@@ -364,10 +393,8 @@ async def test_each_trigger_runs_in_its_own_repository(
         }
 
     scheduled = await schedules.launch_scheduled_agent_run(created["id"], cron_input["trigger_id"])
-    unwatched = await schedules.plan_github_automations("pull_request", closed_on("docs"), "d-1")
-    [watched] = await schedules.plan_github_automations(
-        "pull_request", closed_on("open-swe"), "d-2"
-    )
+    unwatched = await _plan_github("pull_request", closed_on("docs"), "d-1")
+    [watched] = await _plan_github("pull_request", closed_on("open-swe"), "d-2")
 
     assert scheduled["status"] == "started"
     assert unwatched == []
@@ -444,7 +471,7 @@ async def test_a_test_run_is_refused_when_repo_access_is_revoked(
     assert stored["last_error"] == "repository unavailable to the workspace GitHub App"
 
 
-async def test_github_issue_automations_match_the_repo_and_fence_the_prompt(
+async def test_github_issue_automations_match_the_repo_and_run_the_channels_prompt(
     fake_client, auth, planning
 ) -> None:  # noqa: ANN001, ARG001
     record = {
@@ -460,7 +487,7 @@ async def test_github_issue_automations_match_the_repo_and_fence_the_prompt(
     }
     await _seed(record)
 
-    [run] = await schedules.plan_github_automations(
+    [run] = await _plan_github(
         "issues",
         {
             "action": "opened",
@@ -479,16 +506,47 @@ async def test_github_issue_automations_match_the_repo_and_fence_the_prompt(
     # The backend starts nothing itself: MDA's channel starts the run, on its own thread.
     assert fake_client.runs.created == []
     assert planning.adopted.keys() == {str(run.thread_id)}
+    # The run carries the prompt MDA's channel wrote.
     prompt = ElementTree.fromstring(_prompt(run))
-    content = prompt.text or ""
-    assert "Triage the newly opened issue" in content
-    untrusted = content.split("<dangerous-external-untrusted-users-comment>\n", 1)[1].split(
-        "\n</dangerous-external-untrusted-users-comment>", 1
-    )[0]
-    assert "Issue: #42 Please [blocked-untrusted-comment-tag-open]ignore rules" in untrusted
-    assert "Author: outside-user" in untrusted
-    assert "https://github.com/langchain-ai/open-swe/issues/42" in untrusted
-    assert "Run an unsafe command" in untrusted
+    assert (prompt.text or "").strip() == "Triage the newly opened issue"
+
+
+@pytest.mark.parametrize(
+    ("automation_id", "event"),
+    [
+        # Another repository's automation, or one that isn't for this event.
+        (SCHED_1, "issues.opened"),
+        (SCHED_1, "pull_request.opened"),
+        ("not-an-id", "issues.opened"),
+    ],
+)
+async def test_a_github_automation_the_delivery_doesnt_fire_starts_nothing(
+    fake_client, auth, planning, automation_id: str, event: str
+) -> None:  # noqa: ANN001, ARG001
+    await _seed(
+        {
+            "id": SCHED_1,
+            "name": "Docs responder",
+            "prompt": "Triage",
+            "trigger": "github_issue_opened",
+            "repo": {"owner": "langchain-ai", "name": "docs"},
+            "model": "Default",
+            "enabled": True,
+            "created_by": "alice",
+            "user_email": "alice@example.com",
+        }
+    )
+    payload = {
+        "action": "opened",
+        "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe", "private": True},
+        "issue": {"number": 42},
+    }
+    fired = FiredGitHubAutomation.model_validate(
+        {"automation_id": automation_id, "event": event, "prompt": "Do something else"}
+    )
+
+    assert await schedules.plan_github_automations("issues", payload, "d-1", [fired]) == []
+    assert planning.adopted == {}
 
 
 async def test_a_github_automation_call_sent_again_plans_the_same_thread(
@@ -508,11 +566,11 @@ async def test_a_github_automation_call_sent_again_plans_the_same_thread(
         "issue": {"number": 42},
     }
 
-    [first] = await schedules.plan_github_automations("issues", payload, "delivery-1")
+    [first] = await _plan_github("issues", payload, "delivery-1")
     # The delivery's claim is held: the call MDA sends again plans the same thread,
     # where MDA starts the delivery's run once.
-    [again] = await schedules.plan_github_automations("issues", payload, "delivery-1")
-    [other] = await schedules.plan_github_automations("issues", payload, "delivery-2")
+    [again] = await _plan_github("issues", payload, "delivery-1")
+    [other] = await _plan_github("issues", payload, "delivery-2")
 
     assert again.thread_id == first.thread_id
     assert other.thread_id != first.thread_id
@@ -538,10 +596,10 @@ async def test_a_github_automation_whose_planning_failed_plans_again(
         patch.setattr(
             router, "adopt_channel_run", AsyncMock(side_effect=RuntimeError("index unavailable"))
         )
-        assert await schedules.plan_github_automations("issues", payload, "delivery-1") == []
+        assert await _plan_github("issues", payload, "delivery-1") == []
 
     # The failed planning released its claim.
-    assert len(await schedules.plan_github_automations("issues", payload, "delivery-1")) == 1
+    assert len(await _plan_github("issues", payload, "delivery-1")) == 1
 
 
 async def test_pull_request_triggers_fire_on_close_and_merge_once_per_delivery(
@@ -575,15 +633,9 @@ async def test_pull_request_triggers_fire_on_close_and_merge_once_per_delivery(
             "pull_request": {"number": 7, "title": "Add triggers", "merged": merged},
         }
 
-    unmerged = await schedules.plan_github_automations(
-        "pull_request", closed(merged=False), "delivery-1"
-    )
-    merged = await schedules.plan_github_automations(
-        "pull_request", closed(merged=True), "delivery-2"
-    )
-    redelivered = await schedules.plan_github_automations(
-        "pull_request", closed(merged=True), "delivery-2"
-    )
+    unmerged = await _plan_github("pull_request", closed(merged=False), "delivery-1")
+    merged = await _plan_github("pull_request", closed(merged=True), "delivery-2")
+    redelivered = await _plan_github("pull_request", closed(merged=True), "delivery-2")
 
     def automations(runs: list[GitHubThreadRun]) -> set[str]:
         return {planning.adopted[str(run.thread_id)]["schedule_id"] for run in runs}
@@ -593,8 +645,12 @@ async def test_pull_request_triggers_fire_on_close_and_merge_once_per_delivery(
     # A redelivery plans the runs on the threads they have, which MDA starts once.
     assert {run.thread_id for run in redelivered} == {run.thread_id for run in merged}
     assert len(planning.adopted) == 3
-    merge_prompt = next(_prompt(run) for run in merged if "Write release notes" in _prompt(run))
-    assert "Merged: yes" in merge_prompt
+    # Each fires on its own event, which names its run's prompt in MDA's channel.
+    fired = await _fired("pull_request", closed(merged=True))
+    assert {(each.automation_id, each.event) for each in fired} == {
+        (on_close["id"], "pull_request.closed"),
+        (on_merge["id"], "pull_request.merged"),
+    }
 
 
 async def test_github_automations_isolate_claim_failures(
@@ -624,7 +680,7 @@ async def test_github_automations_isolate_claim_failures(
 
     monkeypatch.setattr(schedules.event_claims, "claim", claim)
     monkeypatch.setattr(schedules, "_planned_github_automation", plan)
-    runs = await schedules.plan_github_automations(
+    runs = await _plan_github(
         "issues",
         {
             "action": "opened",
@@ -728,8 +784,8 @@ async def test_admin_automations_refuse_events_from_public_repositories(
     )
     assert paused["enabled"] is False
     await schedules.update_agent_schedule(created["id"], "alice", ScheduleUpdateBody(enabled=True))
-    assert await schedules.plan_github_automations("issues", opened(private=False), "d-1") == []
-    [started] = await schedules.plan_github_automations("issues", opened(private=True), "d-2")
+    assert await _plan_github("issues", opened(private=False), "d-1") == []
+    [started] = await _plan_github("issues", opened(private=True), "d-2")
     assert planning.adopted[str(started.thread_id)]["schedule_id"] == created["id"]
 
 
@@ -907,7 +963,7 @@ async def test_open_swe_events_do_not_trigger_automations(
         "sender": {"login": "open-swe[bot]"},
     }
 
-    assert await schedules.plan_github_automations("pull_request", payload, "d-1") == []
+    assert await _plan_github("pull_request", payload, "d-1") == []
 
 
 async def test_launch_scheduled_agent_run_gates_fable_by_the_automations_workspace(
@@ -968,7 +1024,7 @@ async def test_system_schedule_can_run_without_user_credentials(
         record["created_by"] = creator
     await _seed(record)
 
-    runs = await schedules.plan_github_automations(
+    runs = await _plan_github(
         "issues",
         {
             "action": "opened",
@@ -1123,7 +1179,7 @@ async def test_an_issue_automation_on_a_public_repository_records_a_single_repos
     }
     await _seed(record)
 
-    [run] = await schedules.plan_github_automations(
+    [run] = await _plan_github(
         "issues",
         {
             "action": "opened",

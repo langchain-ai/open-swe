@@ -1,14 +1,18 @@
 """Deliver a GitHub event as MDA's GitHub channel does, against the real app.
 
 MDA's handler (``mda/rt/github.py``) logs each delivery on the backend, routes it
-with ``mda/rt/github_routes.py``, and asks the backend to run the work it routes
-to, and to plan the runs of its automations and an issue's. This does the same, each call signed with the
-service secret as MDA signs it. The backend runs its work after answering, which
-an in-process client waits for, so a test sees its effects once this returns.
+with ``mda/rt/github_routes.py``, asks for the repository's automations and, for
+an issue mention, who is an Open SWE user, writes the runs' prompts, and asks the
+backend to run the work it routes to and to sign the runs. This does the same,
+each call signed with the service secret as MDA signs it, but writes a stand-in
+for each prompt (``mda/tests`` hold MDA's to the backend's). The backend runs its
+work after answering, which an in-process client waits for, so a test sees its
+effects once this returns.
 """
 
 import importlib.util
 import json
+import re
 import sys
 import uuid
 from collections.abc import Mapping
@@ -23,12 +27,20 @@ from pydantic import BaseModel
 from runtime_api.endpoint import Endpoint
 from runtime_api.github import (
     ACT_ON_GITHUB_DELIVERY,
+    GITHUB_AUTOMATION_RULES,
+    GITHUB_ISSUE_FACTS,
+    LOGIN_PATTERN,
     RECORD_GITHUB_DELIVERY,
+    REPOSITORY_PATTERN,
     ActOnGitHubDelivery,
+    FiredGitHubAutomation,
+    GitHubAutomationRulesRequest,
     GitHubDelivery,
     GitHubDeliveryFacts,
+    GitHubIssueFactsRequest,
     GitHubIssueRunRequest,
     GitHubThreadRun,
+    GitHubTriggerEvent,
     PlannedGitHubIssueRun,
 )
 from standardwebhooks import Webhook
@@ -39,6 +51,8 @@ if TYPE_CHECKING:
     import pytest
 
 SERVICE_SECRET = "6d" * 32  # noqa: S105 - test value
+# The stand-in for the input MDA writes for an issue mention's run.
+ISSUE_RUN_INPUT: dict[str, Any] = {"messages": [{"role": "user", "content": "The issue"}]}
 
 
 def _mda_routes() -> ModuleType:
@@ -64,9 +78,11 @@ class GitHubDelivered:
     work: tuple[str, ...]
     # The issue run the backend planned; ``None`` when the delivery routes to none.
     issue_run: PlannedGitHubIssueRun | None
-    # Whether the delivery may fire automations, and the runs the backend planned for them.
+    # Whether the delivery may fire automations, the ones the repository's rules
+    # matched, and the runs the backend planned for them.
     automations: bool = False
     automation_runs: tuple[GitHubThreadRun, ...] = ()
+    fired: tuple[FiredGitHubAutomation, ...] = ()
     # Whether the delivery is a pull request comment to route, and the run the
     # backend planned for it on the pull request's own thread.
     comment: bool = False
@@ -94,6 +110,16 @@ async def _call[Request: BaseModel, Response: BaseModel](
     )
     response.raise_for_status()
     return endpoint.response.model_validate(response.json())
+
+
+async def call_as_mda[Request: BaseModel, Response: BaseModel](
+    app: ASGIApp, endpoint: Endpoint[Request, Response], request: Request, *, secret: str
+) -> Response:
+    """One call of MDA's channel on ``app``, signed with ``secret``."""
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        return await _call(client, endpoint, request, f"msg_{uuid.uuid4()}", secret)
 
 
 async def deliver_as_mda(
@@ -126,15 +152,22 @@ async def deliver_as_mda(
             client, RECORD_GITHUB_DELIVERY, delivery, f"msg_{delivery_id}_record", secret
         )
         routed = MDA_ROUTES.route(event_type, delivery.payload, facts, from_app=from_app)
+        fired = (
+            await _fired(client, event_type, delivery.payload, delivery_id, secret)
+            if routed.automations
+            else []
+        )
+        issue_run = (
+            await _issue_run(
+                client, delivery.payload, delivery_id, secret, thread_id or uuid.uuid4(), waiting
+            )
+            if routed.issue_run
+            else None
+        )
         planned = None
         automation_runs: list[GitHubThreadRun] = []
         comment_run = None
-        if routed.work or routed.comment or routed.automations or routed.issue_run:
-            issue_run = (
-                GitHubIssueRunRequest(thread_id=thread_id or uuid.uuid4(), waiting=waiting)
-                if routed.issue_run
-                else None
-            )
+        if routed.work or routed.comment or fired or issue_run:
             acted = await _call(
                 client,
                 ACT_ON_GITHUB_DELIVERY,
@@ -143,7 +176,7 @@ async def deliver_as_mda(
                     work=list(routed.work),
                     comment=routed.comment,
                     mentioned=routed.mentioned,
-                    automations=routed.automations,
+                    automations=fired,
                     issue_run=issue_run,
                 ),
                 f"msg_{delivery_id}_act",
@@ -158,9 +191,90 @@ async def deliver_as_mda(
         issue_run=planned,
         automations=routed.automations,
         automation_runs=tuple(automation_runs),
+        fired=tuple(fired),
         comment=routed.comment,
         comment_run=comment_run,
     )
+
+
+def _fields(value: object) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _trigger_events(event_type: str, payload: Mapping[str, Any]) -> set[GitHubTriggerEvent]:
+    action = payload.get("action")
+    if event_type == "issues":
+        return {"issues.opened"} if action == "opened" else set()
+    if action == "opened":
+        return {"pull_request.opened"}
+    if action != "closed":
+        return set()
+    if _fields(payload.get("pull_request")).get("merged") is True:
+        return {"pull_request.closed", "pull_request.merged"}
+    return {"pull_request.closed"}
+
+
+async def _fired(
+    client: httpx.AsyncClient,
+    event_type: str,
+    payload: Mapping[str, Any],
+    delivery_id: str,
+    secret: str,
+) -> list[FiredGitHubAutomation]:
+    """The repository's automations the delivery fires, as MDA matches them."""
+    events = _trigger_events(event_type, payload)
+    repository = _fields(payload.get("repository"))
+    full_name = f"{_fields(repository.get('owner')).get('login')}/{repository.get('name')}"
+    if not events or not re.fullmatch(REPOSITORY_PATTERN, full_name):
+        return []
+    subject = _fields(payload.get("issue" if event_type == "issues" else "pull_request"))
+    rules = await _call(
+        client,
+        GITHUB_AUTOMATION_RULES,
+        GitHubAutomationRulesRequest(
+            repository=full_name,
+            author=str(_fields(subject.get("user")).get("login") or ""),
+        ),
+        f"msg_{delivery_id}_automations",
+        secret,
+    )
+    fired: list[FiredGitHubAutomation] = []
+    for automation in rules.automations:
+        matched = sorted(events & set(automation.events))
+        if matched:
+            event = "pull_request.merged" if "pull_request.merged" in matched else matched[0]
+            fired.append(
+                FiredGitHubAutomation(
+                    automation_id=automation.id, event=event, prompt=automation.prompt
+                )
+            )
+    return fired
+
+
+async def _issue_run(
+    client: httpx.AsyncClient,
+    payload: Mapping[str, Any],
+    delivery_id: str,
+    secret: str,
+    thread_id: uuid.UUID,
+    waiting: bool,
+) -> GitHubIssueRunRequest:
+    """The issue mention's run, as MDA asks the backend to sign it; the backend checks
+    the sender itself, so this asks it whatever the facts say."""
+    if waiting:
+        return GitHubIssueRunRequest(thread_id=thread_id, waiting=True)
+    sender = str(_fields(payload.get("sender")).get("login") or "")
+    workspace = None
+    if re.fullmatch(LOGIN_PATTERN, sender):
+        facts = await _call(
+            client,
+            GITHUB_ISSUE_FACTS,
+            GitHubIssueFactsRequest(thread_id=thread_id, sender=sender, logins=[sender]),
+            f"msg_{delivery_id}_issue",
+            secret,
+        )
+        workspace = facts.thread_workspace if facts.conversation_started else None
+    return GitHubIssueRunRequest(thread_id=thread_id, input=ISSUE_RUN_INPUT, workspace=workspace)
 
 
 async def deliver_github_event(

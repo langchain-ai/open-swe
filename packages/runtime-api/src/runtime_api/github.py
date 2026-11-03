@@ -8,18 +8,27 @@ answers only what needs its data, its GitHub App or its signing key:
 - ``record_github_delivery``: logs the delivery, and says whether a workspace owns
   its repository, whether the allowlist takes it, whether automatic review is on
   for it, and the handles that mention Open SWE.
+- ``github_automation_rules``: the automations with a GitHub trigger on the
+  delivery's repository, and whether the issue's or pull request's author is an
+  Open SWE user; the channel matches them and writes each match's prompt.
+- ``github_issue_facts``: for an ``@openswe`` mention on an issue, which of the
+  people its prompt quotes are Open SWE users, whether the sender's email is known,
+  whether a run already took the issue in, and the thread's workspace; the channel
+  writes the run's input.
 - ``act_on_github_delivery``: runs the work the channel chose for the delivery (a
-  review, a CI wakeup, ...), once per delivery, after it answers; plans the runs of
-  the automations the delivery fires, each on a thread of its own; routes a pull
-  request comment, planning its run when it goes to the pull request's own thread;
-  and for an ``@openswe`` mention on an issue, plans the run it starts on the
-  issue's conversation. The channel starts the planned runs.
+  review, a CI wakeup, ...), once per delivery, after it answers; claims and signs
+  the runs of the automations the channel matched, each on a thread of its own;
+  routes a pull request comment, planning its run when it goes to the pull
+  request's own thread; and for an issue mention, checks the sender again, indexes
+  the issue's thread and signs the run the channel wrote. The channel starts the
+  planned runs.
 
-So a delivery takes at most two calls.
+So a delivery takes two calls, and one that mentions Open SWE on an issue or fires
+automations a call or two more.
 """
 
 import json
-from typing import Final, Literal, Self
+from typing import Annotated, Final, Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, Field, JsonValue, field_validator, model_validator
@@ -28,6 +37,15 @@ from runtime_api.endpoint import CHANNEL_API_PREFIX, Endpoint
 
 # GitHub's deliveries are at most 25 MB; anything near this is no event Open SWE acts on.
 MAX_PAYLOAD_CHARS: Final = 5_000_000
+# Well above a written prompt: an automation's own is at most 20,000 characters, and
+# the issue or pull request it quotes is a GitHub body, at most 65,536.
+MAX_AUTOMATION_PROMPT_CHARS: Final = 100_000
+# ``owner/name``, as GitHub spells a repository.
+REPOSITORY_PATTERN: Final = r"^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$"
+# A GitHub login, such as ``octocat`` or ``openswe[bot]``.
+LOGIN_PATTERN: Final = r"^[A-Za-z0-9-]{1,39}(\[bot\])?$"
+# More people than one issue's comments name; a longer list is no issue's.
+MAX_LOGINS: Final = 500
 
 
 class GitHubDelivery(BaseModel):
@@ -85,13 +103,89 @@ type GitHubWorkName = Literal[
 ]
 
 
+# The GitHub events an automation's trigger fires on.
+GitHubTriggerEvent = Literal[
+    "issues.opened", "pull_request.opened", "pull_request.closed", "pull_request.merged"
+]
+
+type _Login = Annotated[str, Field(pattern=LOGIN_PATTERN)]
+
+
+class GitHubAutomationRulesRequest(BaseModel):
+    """The automations an issue or pull request event on ``repository`` may fire."""
+
+    repository: str = Field(pattern=REPOSITORY_PATTERN)
+    # Who opened the issue or pull request, whose words the prompt quotes.
+    author: str = Field(default="", max_length=64)
+
+
+class GitHubAutomation(BaseModel):
+    id: str = Field(min_length=1)
+    # What the automation asks its run to do, which the channel's prompt leads with.
+    prompt: str
+    # The events its triggers on the repository fire on.
+    events: list[GitHubTriggerEvent]
+
+
+class GitHubAutomationRules(BaseModel):
+    """The enabled automations with a GitHub trigger on the repository."""
+
+    automations: list[GitHubAutomation]
+    # Whether the author is an Open SWE user: otherwise the channel fences the issue
+    # or pull request it quotes as untrusted.
+    author_registered: bool = False
+
+
+class FiredGitHubAutomation(BaseModel):
+    """An automation the channel matched a delivery to, the event it fires on, and the
+    prompt the channel wrote for its run."""
+
+    automation_id: str = Field(min_length=1)
+    event: GitHubTriggerEvent
+    prompt: str = Field(min_length=1, max_length=MAX_AUTOMATION_PROMPT_CHARS)
+
+
+class GitHubIssueFactsRequest(BaseModel):
+    """What Open SWE knows about an ``@openswe`` mention on an issue."""
+
+    # The issue's conversation thread.
+    thread_id: UUID
+    # Who mentioned Open SWE, as the delivery's sender.
+    sender: _Login
+    # The people whose words the run's prompt quotes, the sender among them.
+    logins: list[_Login] = Field(max_length=MAX_LOGINS)
+
+
+class GitHubIssueFacts(BaseModel):
+    # Whether a run on the issue's thread already took the issue in: the mention is a
+    # follow-up, not the issue itself.
+    conversation_started: bool
+    # Whether Open SWE knows the sender's email, which the run acts on GitHub as.
+    sender_email_known: bool
+    # Those of ``logins`` who are Open SWE users, lowercased: anyone else's words are
+    # fenced as untrusted.
+    trusted: list[str]
+    # The workspace the thread started in, which a follow-up stays in.
+    thread_workspace: str | None = None
+
+
 class GitHubIssueRunRequest(BaseModel):
-    """An ``@openswe`` mention on an issue: plan the run it starts on the issue's thread."""
+    """An ``@openswe`` mention on an issue: sign the run it starts on the issue's thread."""
 
     # The issue's conversation thread, which the channel starts the run on.
     thread_id: UUID
     # The thread waits on an interrupt: the backend only says whether Open SWE would act.
     waiting: bool = False
+    # The run's input, which the channel wrote; none while the thread waits.
+    input: dict[str, JsonValue] | None = None
+    # The workspace the run works in; ``None`` for the one that owns the repository.
+    workspace: str | None = None
+
+    @model_validator(mode="after")
+    def _written(self) -> Self:
+        if not self.waiting and self.input is None:
+            raise ValueError("a run that starts needs its input")
+        return self
 
 
 class ActOnGitHubDelivery(GitHubDelivery):
@@ -104,8 +198,8 @@ class ActOnGitHubDelivery(GitHubDelivery):
     comment: bool = False
     # Whether that comment mentions Open SWE.
     mentioned: bool = False
-    # The delivery may fire automations: an issue opened, a pull request opened or closed.
-    automations: bool = False
+    # The automations the channel matched the delivery to, with their prompts.
+    automations: list[FiredGitHubAutomation] = Field(default=[], max_length=100)
     issue_run: GitHubIssueRunRequest | None = None
 
     @model_validator(mode="after")
@@ -116,7 +210,8 @@ class ActOnGitHubDelivery(GitHubDelivery):
 
 
 class GitHubIssueRun(BaseModel):
-    input: dict[str, JsonValue]
+    """The signed run, which starts with the input the channel wrote."""
+
     context: dict[str, JsonValue]
     metadata: dict[str, JsonValue]
     webhook: str | None = None
@@ -146,9 +241,9 @@ class GitHubDeliveryActed(BaseModel):
 
     # The issue's run, when the call asked for one.
     issue_run: PlannedGitHubIssueRun | None = None
-    # A run per automation the delivery fires, each claimed once per delivery. A call
-    # sent again plans the runs it already claimed on the same threads, where the
-    # channel starts each delivery's run once.
+    # A run per automation the channel matched that starts, each claimed once per
+    # delivery. A call sent again plans the runs it already claimed on the same
+    # threads, where the channel starts each delivery's run once.
     automations: list[GitHubThreadRun] = []
     # A comment's run on the pull request's own thread, the channel's. A comment the
     # backend starts a run for itself, on the agent's thread or one the backend
@@ -165,13 +260,31 @@ RECORD_GITHUB_DELIVERY: Final = Endpoint(
     delivery="idempotent",
     prefix=CHANNEL_API_PREFIX,
 )
+GITHUB_AUTOMATION_RULES: Final = Endpoint(
+    "github_automation_rules",
+    GitHubAutomationRulesRequest,
+    GitHubAutomationRules,
+    seconds=60.0,
+    # Only reads.
+    delivery="idempotent",
+    prefix=CHANNEL_API_PREFIX,
+)
+GITHUB_ISSUE_FACTS: Final = Endpoint(
+    "github_issue_facts",
+    GitHubIssueFactsRequest,
+    GitHubIssueFacts,
+    seconds=60.0,
+    # Only reads.
+    delivery="idempotent",
+    prefix=CHANNEL_API_PREFIX,
+)
 ACT_ON_GITHUB_DELIVERY: Final = Endpoint(
     "act_on_github_delivery",
     ActOnGitHubDelivery,
     GitHubDeliveryActed,
     # Each automation's planning signs a run; a repository rarely fires more than a few at once.
     seconds=120.0,
-    # The work is claimed once per delivery ID, but planning an issue's run reacts to
-    # the comment and indexes the thread, so a call isn't sent again blindly.
+    # The work is claimed once per delivery ID, but planning an issue's run indexes
+    # the thread and marks it busy, so a call isn't sent again blindly.
     prefix=CHANNEL_API_PREFIX,
 )

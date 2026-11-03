@@ -48,7 +48,6 @@ from openswe.github.comments import (
     build_pr_prompt,  # noqa: F401
     derive_pr_state,  # noqa: F401
     extract_pr_context,  # noqa: F401
-    fetch_issue_comments,  # noqa: F401
     fetch_pr_comments_since_last_tag,  # noqa: F401
     fetch_pr_event_comments,  # noqa: F401
     format_github_comment_body_for_prompt,
@@ -196,7 +195,6 @@ __all__ = [
     "GH_PR_WATCH_TOGGLE_ACTIONS",
     "SUPPORTED_GH_COMMENT_ACTIONS",
     "SUPPORTED_GH_ISSUE_ACTIONS",
-    "build_github_issue_comments_text",
     "build_queued_finding_reply_prompt",
     "build_reviewer_configurable",
     "draft_review_enabled_for_author",
@@ -242,7 +240,6 @@ __all__ = [
     "extract_repo_from_text",
     "fetch_github_pr_metadata",
     "fetch_image_block",
-    "fetch_issue_comments",
     "fetch_pr_comments_since_last_tag",
     "fetch_pr_event_comments",
     "fetch_pr_review_threads",
@@ -344,16 +341,6 @@ PUBLIC_REPO_ORG_GATE: str = ENV.PUBLIC_REPO_ORG_GATE.get().strip()
 
 ALLOWED_GITHUB_REPOS: frozenset[str] = frozenset(
     repo.strip().lower() for repo in ENV.ALLOWED_GITHUB_REPOS.get().split(",") if repo.strip()
-)
-
-_GITHUB_BOT_MESSAGE_PREFIXES = (
-    "🔐 **GitHub Authentication Required**",
-    "✅ **Pull Request Created**",
-    "✅ **Pull Request Updated**",
-    "**Pull Request Created**",
-    "**Pull Request Updated**",
-    "🤖 **Agent Response**",
-    "❌ **Agent Error**",
 )
 
 
@@ -1067,23 +1054,6 @@ SUPPORTED_GH_COMMENT_ACTIONS = {
     "pull_request_review_comment": frozenset(["created", "edited"]),
     "pull_request_review": frozenset(["submitted", "edited"]),
 }
-
-
-def build_github_issue_comments_text(
-    comments: list[dict[str, Any]], *, trusted: Collection[str]
-) -> str:
-    lines: list[str] = []
-    for comment in comments:
-        body = comment.get("body", "")
-        if not body or any(body.startswith(prefix) for prefix in _GITHUB_BOT_MESSAGE_PREFIXES):
-            continue
-        author = comment.get("author", "unknown")
-        formatted_body = format_github_comment_body_for_prompt(author, body, trusted=trusted)
-        lines.append(f"\n**{author}:**\n{formatted_body}\n")
-
-    if not lines:
-        return ""
-    return "\n\n## Comments:\n" + "".join(lines)
 
 
 async def authorize_github_thread(thread_id: str, github_login: str) -> JsonObject:

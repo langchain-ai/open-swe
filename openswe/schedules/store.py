@@ -12,12 +12,12 @@ import re
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, get_args
 
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, Field, TypeAdapter, field_validator
-from runtime_api.github import GitHubThreadRun
+from runtime_api.github import FiredGitHubAutomation, GitHubThreadRun, GitHubTriggerEvent
 from runtime_api.linear import TEAM_KEY_PATTERN, LinearAutomationRun, PlanLinearAutomation
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -36,7 +36,6 @@ from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.database import postgres
 from openswe.database.postgres import transaction
 from openswe.dispatch import create_durable_run
-from openswe.github.comments import fence_github_comment_body
 from openswe.github.http import github_reauth_message
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.repo_names import normalize_repo_full_name
@@ -62,16 +61,8 @@ logger = logging.getLogger(__name__)
 _AGENT_ASSISTANT_ID = "agent"
 AGENT_SCHEDULE_JOB_KIND = "agent_schedule"
 _CRON_FIELD_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
-GitHubEvent = Literal[
-    "issues.opened", "pull_request.opened", "pull_request.closed", "pull_request.merged"
-]
-# How a run's prompt names each GitHub event; "closed" also fires for merges.
-GITHUB_EVENT_DESCRIPTIONS: dict[GitHubEvent, str] = {
-    "issues.opened": "an issue was opened",
-    "pull_request.opened": "a pull request was opened",
-    "pull_request.closed": "a pull request was closed",
-    "pull_request.merged": "a pull request was merged",
-}
+# "closed" also fires for merges.
+GitHubEvent = GitHubTriggerEvent
 SlackTriggerEvent = Literal["message.posted"]
 SLACK_EVENT_DESCRIPTIONS: dict[SlackTriggerEvent, str] = {
     "message.posted": "a message was posted",
@@ -1151,78 +1142,63 @@ def _github_events(event_type: str, payload: dict[str, Any]) -> set[GitHubEvent]
     return set()
 
 
-async def _github_event_prompt(
-    record: dict[str, Any], event_type: str, payload: dict[str, Any], event: GitHubEvent
-) -> str:
-    subject_value = payload.get("issue" if event_type == "issues" else "pull_request")
-    subject: dict[str, Any] = subject_value if isinstance(subject_value, dict) else {}
-    author_value = subject.get("user")
-    author: dict[str, Any] = author_value if isinstance(author_value, dict) else {}
-    login = str(author.get("login") or "")
-    lines = [
-        f"{'Issue' if event_type == 'issues' else 'Pull request'}: "
-        f"#{subject.get('number', '')} {subject.get('title', '')}",
-        f"URL: {subject.get('html_url', '')}",
-        f"Author: {login}",
-    ]
-    if event_type == "pull_request":
-        base_value, head_value = subject.get("base"), subject.get("head")
-        base: dict[str, Any] = base_value if isinstance(base_value, dict) else {}
-        head: dict[str, Any] = head_value if isinstance(head_value, dict) else {}
-        lines += [
-            f"Base: {base.get('ref', '')}  Head: {head.get('ref', '')}",
-            f"Merged: {'yes' if subject.get('merged') is True else 'no'}",
-        ]
-    context = "\n".join(lines) + f"\n\n{subject.get('body') or ''}"
-    registered = bool(await User.known_logins([login]))
-    return prompt(
-        "runs/github-automation-event",
-        prompt=record["prompt"],
-        event_description=GITHUB_EVENT_DESCRIPTIONS[event],
-        event_context=fence_github_comment_body(context, registered=registered),
-    )
-
-
-async def _github_trigger_matches(
-    repo_full_name: str, events: set[GitHubEvent]
-) -> list[tuple[dict[str, Any], GitHubEvent]]:
-    """Enabled automations with a GitHub trigger on this repository for one of ``events``."""
+async def github_automation_rules(repo_full_name: str) -> list[dict[str, Any]]:
+    """The enabled automations with a GitHub trigger on ``repo_full_name`` (lowercased),
+    for MDA's channel to match."""
     async with transaction() as conn:
-        records = await _load_records(
+        return await _load_records(
             conn,
             "WHERE a.enabled AND a.id IN (SELECT automation_id FROM automation_trigger "
             "WHERE kind = 'github' AND match_key = :repo)",
             {"repo": repo_full_name},
         )
-    matches: list[tuple[dict[str, Any], GitHubEvent]] = []
-    for record in records:
-        # Only this repository's triggers: another GitHub trigger on the same
-        # automation configures events for its own repository.
-        configured = {
-            event
-            for trigger in record.get("triggers") or []
-            if trigger.get("kind") == "github"
-            and str((trigger.get("config") or {}).get("repo") or "").lower() == repo_full_name
-            for event in (trigger.get("config") or {}).get("events") or []
-        }
-        fired = sorted(event for event in events if event in configured)
-        if fired:
-            # The most specific event names the run: a merge over a plain close.
-            matches.append(
-                (record, "pull_request.merged" if "pull_request.merged" in fired else fired[0])
-            )
-    return matches
+
+
+def github_trigger_events(record: dict[str, Any], repo_full_name: str) -> list[GitHubEvent]:
+    """The events the automation's GitHub triggers on ``repo_full_name`` fire on.
+
+    Only this repository's triggers: another GitHub trigger on the same automation
+    configures events for its own repository.
+    """
+    configured = {
+        event
+        for trigger in record.get("triggers") or []
+        if trigger.get("kind") == "github"
+        and str((trigger.get("config") or {}).get("repo") or "").lower() == repo_full_name
+        for event in (trigger.get("config") or {}).get("events") or []
+    }
+    return sorted(configured & set(get_args(GitHubTriggerEvent)))
+
+
+async def _fired_github_automation(
+    fired: FiredGitHubAutomation, repo_full_name: str
+) -> dict[str, Any] | None:
+    """The automation the channel matched, when it is enabled and fires on ``fired.event``
+    in the repository, so a call can't start another automation."""
+    try:
+        automation_id = uuid.UUID(fired.automation_id)
+    except ValueError:
+        return None
+    async with transaction() as conn:
+        records = await _load_records(conn, "WHERE a.enabled AND a.id = :id", {"id": automation_id})
+    if not records or fired.event not in github_trigger_events(records[0], repo_full_name):
+        return None
+    return records[0]
 
 
 async def plan_github_automations(
-    event_type: str, payload: dict[str, Any], delivery_id: str
+    event_type: str,
+    payload: dict[str, Any],
+    delivery_id: str,
+    fired: Sequence[FiredGitHubAutomation],
 ) -> list[GitHubThreadRun]:
-    """The run of every automation a GitHub delivery fires, for MDA's channel to start.
+    """The run of every automation MDA's channel matched a GitHub delivery to.
 
-    Each automation is claimed once per delivery, and its run planned on a thread of
-    its own for that delivery. A call sent again for a delivery plans the runs it
-    already claimed again, on the same threads, where the channel starts each
-    delivery's run once.
+    The channel matches and writes each run's prompt; each automation must be
+    enabled and fire on the event in the delivery's repository. Each is claimed once
+    per delivery, and its run planned on a thread of its own for that delivery. A
+    call sent again for a delivery plans the runs it already claimed again, on the
+    same threads, where the channel starts each delivery's run once.
     """
     events = _github_events(event_type, payload)
     if not events:
@@ -1257,20 +1233,20 @@ async def plan_github_automations(
         )
         return []
     full_name = f"{owner_login}/{repo_name}".lower()
-    matches = await _github_trigger_matches(full_name, events)
-    if not matches:
-        logger.info(
-            "No GitHub automations matched the delivery",
-            extra={"github_delivery": delivery_id, "github_repo": full_name},
-        )
-        return []
     # Pull request events on a public repository run only for org members; issue
     # automations keep firing for any author, as before, with a narrowed token.
     if event_type == "pull_request" and await enforce_public_repo_org_gate(payload, event_type):
         return []
     runs: list[GitHubThreadRun] = []
     private = repo_private_from_payload(payload)
-    for record, event in matches:
+    for each in fired:
+        record = await _fired_github_automation(each, full_name) if each.event in events else None
+        if record is None:
+            logger.warning(
+                "GitHub automation the channel matched doesn't fire on the delivery",
+                extra={"schedule_id": each.automation_id, "github_delivery": delivery_id},
+            )
+            continue
         schedule_id = record["id"]
         if record.get("admin_thread") is True and private is not True:
             # Saving refuses this, but a repository can go public afterwards.
@@ -1299,7 +1275,7 @@ async def plan_github_automations(
                 thread_id=str(
                     uuid.uuid5(_GITHUB_AUTOMATION_THREADS, f"{schedule_id}/{delivery_id}")
                 ),
-                prompt=await _github_event_prompt(record, event_type, payload, event),
+                prompt=each.prompt,
                 # An outsider can open an issue on a public repository, so the
                 # run it starts reaches only that repository.
                 token_repositories=event_token_repositories(

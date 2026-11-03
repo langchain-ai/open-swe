@@ -4,14 +4,19 @@ Open SWE's GitHub App delivers its webhooks to the MDA deployment's GitHub
 channel, which verifies each delivery and decides there what it starts. It asks
 here only for what needs Open SWE's data, its App or its signing key: to log each
 delivery and say what Open SWE knows about its repository
-(``record_github_delivery``); then, in one call (``act_on_github_delivery``), to run
-the work it chose, as the backend's own webhook ran it, and to plan the runs the
-channel starts: each automation's the delivery fires, on a thread of its own
-(``openswe.schedules.store``), a pull request comment's when it goes to the pull
-request's own thread, and the run an ``@openswe`` mention on an issue starts on
-the channel's thread. Each run carries the backend's run-complete webhook. A
-comment's run on the agent's thread, or on a thread the backend owns, the
-backend still starts itself.
+(``record_github_delivery``); the repository's automations, which the channel
+matches and writes each run's prompt for (``github_automation_rules``); for an
+``@openswe`` mention on an issue, who among the people its prompt quotes is an
+Open SWE user, and what the issue's thread already holds
+(``github_issue_facts``), from which the channel writes the run's input; then, in
+one call (``act_on_github_delivery``), to run the work it chose, as the backend's
+own webhook ran it, and to plan the runs the channel starts: each automation's
+the channel matched, on a thread of its own (``openswe.schedules.store``), a pull
+request comment's when it goes to the pull request's own thread, and the issue
+mention's on the channel's thread. Each run carries the backend's run-complete
+webhook. A comment's run on the agent's thread, or on a thread the backend owns,
+the backend still writes and starts itself: it reads the pull request's comments
+with the person's token and keeps a private thread's to its owner's.
 """
 
 import json
@@ -24,9 +29,14 @@ from uuid import UUID
 from pydantic import JsonValue
 from runtime_api.github import (
     ActOnGitHubDelivery,
+    GitHubAutomation,
+    GitHubAutomationRules,
+    GitHubAutomationRulesRequest,
     GitHubDelivery,
     GitHubDeliveryActed,
     GitHubDeliveryFacts,
+    GitHubIssueFacts,
+    GitHubIssueFactsRequest,
     GitHubIssueRun,
     GitHubIssueRunRequest,
     GitHubThreadRun,
@@ -52,6 +62,7 @@ from openswe.threads.router import (
 )
 from openswe.threads.runtimes import RUNTIMES
 from openswe.ui_invalidations import Topic
+from openswe.users import User
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.workspaces.routing import repo_is_routable
@@ -237,19 +248,19 @@ async def _accept_work(call: ChannelCall, work: ActOnGitHubDelivery) -> None:
     )
 
 
-async def _prepare_run(plan: ActOnGitHubDelivery, thread_id: str) -> GitHubIssueRun | None:
-    prepared = await service.prepare_github_issue_run(
+async def _prepare_run(
+    plan: ActOnGitHubDelivery, request: GitHubIssueRunRequest
+) -> GitHubIssueRun | None:
+    thread_id = str(request.thread_id)
+    configurable = await service.prepare_github_issue_run(
         cast(_Payload, plan.payload),
-        plan.event,
         thread_id,
+        workspace=request.workspace,
         adopt=lambda thread: adopt_channel_run(thread, CHANNEL),
     )
-    if prepared is None:
+    if configurable is None:
         return None
-    return GitHubIssueRun(
-        input=cast(dict[str, JsonValue], prepared.input),
-        **await _signed(plan, thread_id, prepared.configurable, source="github_issue"),
-    )
+    return GitHubIssueRun(**await _signed(plan, thread_id, configurable, source="github_issue"))
 
 
 async def _signed(
@@ -291,12 +302,12 @@ async def _plan_issue_run(
 ) -> PlannedGitHubIssueRun:
     """The run an ``@openswe`` mention on an issue starts on the channel's thread.
 
-    The channel decided the mention is one; this checks the commenter and the
-    public-repo gate, reacts to the comment, builds the prompt, indexes the thread
-    and signs the run. While the thread waits it only says whether Open SWE acts.
+    The channel decided the mention is one and wrote the run's input; this checks
+    the commenter and the public-repo gate again, since the channel's choice gives
+    no access, indexes the thread and signs the run. While the thread waits it only
+    says whether Open SWE acts.
     """
     payload = cast(_Payload, plan.payload)
-    thread_id = str(request.thread_id)
     fields = {"github_event": plan.event, "github_delivery": plan.delivery_id}
     if plan.event == "issue_comment":
         sender_login = str((payload.get("sender") or {}).get("login") or "")
@@ -305,12 +316,48 @@ async def _plan_issue_run(
     if not await _gated(payload, plan.event):
         return _no_run("The public-repo gate refused the sender", **fields)
     if request.waiting:
-        # Nothing starts while the thread waits; no reaction or metadata either.
+        # Nothing starts while the thread waits; no metadata either.
         return PlannedGitHubIssueRun(starts=True)
-    run = await _prepare_run(plan, thread_id)
+    run = await _prepare_run(plan, request)
     if run is None:
-        return _no_run("no run prepared", **fields, agent_thread_id=thread_id)
+        return _no_run("no run prepared", **fields, agent_thread_id=str(request.thread_id))
     return PlannedGitHubIssueRun(starts=True, run=run)
+
+
+async def github_issue_facts(
+    _call: ChannelCall, request: GitHubIssueFactsRequest
+) -> GitHubIssueFacts:
+    """Who among the people an issue mention quotes is an Open SWE user, and what its
+    thread already holds, for the channel to write the run's input."""
+    thread_id = str(request.thread_id)
+    started = await service.conversation_started(thread_id)
+    return GitHubIssueFacts(
+        conversation_started=started,
+        sender_email_known=bool(await User.email_for_login(request.sender)),
+        trusted=sorted(await User.known_logins(request.logins)),
+        thread_workspace=await common.get_thread_workspace(thread_id) if started else None,
+    )
+
+
+async def github_automation_rules(
+    _call: ChannelCall, request: GitHubAutomationRulesRequest
+) -> GitHubAutomationRules:
+    """The repository's enabled GitHub automations, for the channel to match a delivery to."""
+    repository = request.repository.lower()
+    records = await schedules.github_automation_rules(repository)
+    if not records:
+        return GitHubAutomationRules(automations=[])
+    return GitHubAutomationRules(
+        author_registered=bool(request.author and await User.known_logins([request.author])),
+        automations=[
+            GitHubAutomation(
+                id=str(record["id"]),
+                prompt=str(record["prompt"]),
+                events=schedules.github_trigger_events(record, repository),
+            )
+            for record in records
+        ],
+    )
 
 
 async def act_on_github_delivery(
@@ -321,7 +368,7 @@ async def act_on_github_delivery(
         await _accept_work(call, act)
     automations = (
         await schedules.plan_github_automations(
-            act.event, cast(_Payload, act.payload), act.delivery_id
+            act.event, cast(_Payload, act.payload), act.delivery_id, act.automations
         )
         if act.automations
         else []

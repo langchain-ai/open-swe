@@ -24,7 +24,6 @@ __all__ = [
     "derive_pr_state",
     "extract_pr_context",
     "fetch_github_thread_participants",
-    "fetch_issue_comments",
     "fetch_pr_branch",
     "fetch_pr_comments_since_last_tag",
     "fetch_pr_event_comments",
@@ -320,39 +319,6 @@ async def fetch_github_thread_participants(
         and login.strip()
         and not login.lower().endswith("[bot]")
     }
-
-
-async def fetch_issue_comments(
-    repo_config: dict[str, str], issue_number: int, *, token: str | None = None
-) -> list[dict[str, Any]]:
-    """Fetch all comments for a GitHub issue."""
-    owner = repo_config.get("owner", "")
-    repo = repo_config.get("name", "")
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
-    ) as http_client:
-        comments = await _fetch_paginated(
-            http_client,
-            f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments",
-            headers,
-        )
-
-    return [
-        {
-            "body": comment.get("body", ""),
-            "author": comment.get("user", {}).get("login", "unknown"),
-            "created_at": comment.get("created_at", ""),
-            "comment_id": comment.get("id"),
-        }
-        for comment in comments
-    ]
 
 
 async def fetch_pr_comments_since_last_tag(

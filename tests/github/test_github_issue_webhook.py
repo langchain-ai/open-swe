@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import httpx2
 import pytest
 from langgraph_sdk.errors import NotFoundError
-from runtime_api.github import GitHubThreadRun
+from runtime_api.github import FiredGitHubAutomation, GitHubThreadRun
 
 from openswe.github import channel as github_channel
 from openswe.github import webhook as github_webhooks
@@ -123,12 +123,28 @@ async def test_github_webhook_plans_issue_automation_for_external_author(
     )
 
     async def fake_plan(
-        event_type: str, payload: dict[str, object], delivery_id: str
+        event_type: str,
+        payload: dict[str, object],
+        delivery_id: str,
+        fired: list[FiredGitHubAutomation],
     ) -> list[GitHubThreadRun]:
         called["event_type"] = event_type
         called["payload"] = payload
         called["delivery_id"] = delivery_id
+        called["fired"] = fired
         return [run]
+
+    triage = {
+        "id": "00000000-0000-4000-8000-0000000000a1",
+        "prompt": "Triage it",
+        "triggers": [
+            {
+                "kind": "github",
+                "config": {"repo": "langchain-ai/open-swe", "events": ["issues.opened"]},
+            }
+        ],
+    }
+    monkeypatch.setattr(schedules, "github_automation_rules", AsyncMock(return_value=[triage]))
 
     async def reject_external_author(
         payload: dict[str, object], event_type: str
@@ -157,6 +173,9 @@ async def test_github_webhook_plans_issue_automation_for_external_author(
     assert delivered.automation_runs == (run,)
     assert called["event_type"] == "issues"
     assert called["delivery_id"] == "delivery-1"
+    assert called["fired"] == [
+        FiredGitHubAutomation(automation_id=triage["id"], event="issues.opened", prompt="Triage it")
+    ]
     assert called.get("gate_calls", 0) == 0
 
 
@@ -702,28 +721,19 @@ async def test_process_github_pr_review_skips_only_empty_untagged_approvals(
         dispatch.assert_not_awaited()
 
 
-def test_a_github_issue_followup_keeps_the_threads_workspace(monkeypatch) -> None:
+@pytest.mark.parametrize(("workspace", "runs_in"), [("core", "core"), (None, "oss")])
+def test_a_github_issue_run_works_in_its_threads_workspace_else_the_repositorys(
+    monkeypatch, workspace: str | None, runs_in: str
+) -> None:
     """A follow-up lands in the thread's workspace even if the repository is preferred elsewhere."""
-
-    async def fake_react_to_github_comment(*args: object, **kwargs: object) -> bool:
-        return True
-
     monkeypatch.setattr(
         webhook_common,
         "get_or_resolve_thread_github_token",
-        lambda thread_id, email: asyncio.sleep(0, result="user-token"),
-    )
-    monkeypatch.setattr(
-        webhook_common, "get_github_app_installation_token", lambda: asyncio.sleep(0, result=None)
-    )
-    monkeypatch.setattr(github_webhooks, "_conversation_started", AsyncMock(return_value=True))
-    monkeypatch.setattr(
-        webhook_common, "get_thread_workspace", lambda thread_id: asyncio.sleep(0, result="core")
+        lambda thread_id, email: asyncio.sleep(0, result="app-token"),
     )
     monkeypatch.setattr(
         webhook_common, "workspace_for_repo_config", lambda repo: asyncio.sleep(0, result="oss")
     )
-    monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react_to_github_comment)
     monkeypatch.setattr(
         webhook_common,
         "upsert_agent_thread_metadata",
@@ -732,35 +742,54 @@ def test_a_github_issue_followup_keeps_the_threads_workspace(monkeypatch) -> Non
     monkeypatch.setattr(
         User, "email_for_login", lambda login: asyncio.sleep(0, result="octocat@example.com")
     )
-    monkeypatch.setattr(
-        User, "known_logins", lambda logins: asyncio.sleep(0, result=frozenset({"octocat"}))
-    )
 
-    run = asyncio.run(
+    configurable = asyncio.run(
         github_webhooks.prepare_github_issue_run(
             {
                 "issue": {
                     "id": 12345,
                     "number": 42,
                     "title": "Fix the flaky test",
-                    "body": "The test is failing intermittently.",
                     "html_url": "https://github.com/langchain-ai/open-swe/issues/42",
                 },
-                "comment": {
-                    "id": 999,
-                    "body": "@openswe please handle this",
-                    "user": {"login": "octocat"},
-                },
                 "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
-                "sender": {"login": "octocat"},
+                "sender": {"login": "octocat", "id": 7},
             },
-            "issue_comment",
             "thread-1",
+            workspace=workspace,
         )
     )
 
-    assert run is not None
-    assert run.configurable["workspace"] == "core"
+    assert configurable is not None
+    assert configurable["workspace"] == configurable["environment"] == runs_in
+    assert configurable["github_issue"] == {
+        "id": "12345",
+        "number": 42,
+        "title": "Fix the flaky test",
+        "url": "https://github.com/langchain-ai/open-swe/issues/42",
+    }
+    assert (configurable["github_login"], configurable["github_user_id"]) == ("octocat", 7)
+
+
+def test_a_github_issue_run_needs_the_senders_email(monkeypatch) -> None:
+    upsert = AsyncMock(return_value=True)
+    monkeypatch.setattr(webhook_common, "upsert_agent_thread_metadata", upsert)
+    monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value=None))
+
+    configurable = asyncio.run(
+        github_webhooks.prepare_github_issue_run(
+            {
+                "issue": {"id": 1, "number": 42},
+                "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+                "sender": {"login": "stranger"},
+            },
+            "thread-1",
+            workspace=None,
+        )
+    )
+
+    assert configurable is None
+    upsert.assert_not_awaited()
 
 
 def _thread_not_on_mda() -> NotFoundError:
@@ -787,7 +816,7 @@ async def test_an_issue_thread_continues_only_once_a_run_took_the_issue(
     )
     monkeypatch.setattr(github_webhooks.THREADS, "state", read)
 
-    assert await github_webhooks._conversation_started("thread-1") is started
+    assert await github_webhooks.conversation_started("thread-1") is started
 
 
 @pytest.mark.parametrize(
@@ -808,36 +837,23 @@ def test_a_new_issue_thread_on_a_public_repository_records_a_single_repository_s
         captured["token_repositories"] = kwargs.get("token_repositories")
         return persisted
 
-    async def fake_react_to_github_comment(*args: object, **kwargs: object) -> bool:
-        return True
-
-    async def fake_fetch_issue_comments(*args: object, **kwargs: object) -> list[object]:
-        return []
-
     monkeypatch.setattr(
         webhook_common,
         "get_or_resolve_thread_github_token",
-        lambda thread_id, email: asyncio.sleep(0, result="user-token"),
+        lambda thread_id, email: asyncio.sleep(0, result="app-token"),
     )
-    monkeypatch.setattr(
-        webhook_common, "get_github_app_installation_token", lambda: asyncio.sleep(0, result=None)
-    )
-    monkeypatch.setattr(github_webhooks, "_conversation_started", AsyncMock(return_value=False))
     monkeypatch.setattr(
         webhook_common, "workspace_for_repo_config", lambda repo: asyncio.sleep(0, result="oss")
     )
     monkeypatch.setattr(webhook_common, "upsert_agent_thread_metadata", fake_upsert)
-    monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react_to_github_comment)
-    monkeypatch.setattr(webhook_common, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(
         User, "email_for_login", lambda login: asyncio.sleep(0, result="octocat@example.com")
     )
-    monkeypatch.setattr(User, "known_logins", lambda logins: asyncio.sleep(0, result=frozenset()))
     repository: dict[str, object] = {"owner": {"login": "langchain-ai"}, "name": "open-swe"}
     if private is not None:
         repository["private"] = private
 
-    run = asyncio.run(
+    configurable = asyncio.run(
         github_webhooks.prepare_github_issue_run(
             {
                 "issue": {
@@ -850,10 +866,10 @@ def test_a_new_issue_thread_on_a_public_repository_records_a_single_repository_s
                 "repository": repository,
                 "sender": {"login": "octocat"},
             },
-            "issues",
             "thread-1",
+            workspace=None,
         )
     )
 
     assert captured["token_repositories"] == scope
-    assert (run is not None) is prepared
+    assert (configurable is not None) is prepared

@@ -9,7 +9,16 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from pydantic import JsonValue
-from runtime_api.github import ACT_ON_GITHUB_DELIVERY, RECORD_GITHUB_DELIVERY, ActOnGitHubDelivery
+from runtime_api.github import (
+    ACT_ON_GITHUB_DELIVERY,
+    GITHUB_AUTOMATION_RULES,
+    GITHUB_ISSUE_FACTS,
+    RECORD_GITHUB_DELIVERY,
+    ActOnGitHubDelivery,
+    GitHubAutomationRulesRequest,
+    GitHubIssueFactsRequest,
+    GitHubIssueRunRequest,
+)
 from standardwebhooks import Webhook
 
 from openswe import dispatch
@@ -17,9 +26,16 @@ from openswe.agent_api.tokens import verify_runtime_token
 from openswe.github import channel
 from openswe.github import webhook as github_webhooks
 from openswe.mda_channels import api
+from openswe.users import User
 from openswe.webhooks import common as webhook_common
 from tests.conftest import register_github_logins
-from tests.github_channel import SERVICE_SECRET, GitHubDelivered, deliver_as_mda
+from tests.github_channel import (
+    ISSUE_RUN_INPUT,
+    SERVICE_SECRET,
+    GitHubDelivered,
+    call_as_mda,
+    deliver_as_mda,
+)
 from tests.mda_helpers import mda_starts, stub_mda_runtime
 
 THREAD = uuid.UUID("00000000-0000-4000-8000-0000000000aa")
@@ -58,6 +74,10 @@ def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setattr(channel.Topic.PULL_REQUESTS, "invalidate", AsyncMock())
     monkeypatch.setattr(channel, "repo_is_routable", AsyncMock(return_value=True))
     monkeypatch.setattr(channel.schedules, "plan_github_automations", AsyncMock(return_value=[]))
+    monkeypatch.setattr(channel.schedules, "github_automation_rules", AsyncMock(return_value=[]))
+    monkeypatch.setattr(github_webhooks, "conversation_started", AsyncMock(return_value=False))
+    monkeypatch.setattr(webhook_common, "get_thread_workspace", AsyncMock(return_value="team-a"))
+    monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value="ada@example.com"))
     monkeypatch.setattr(
         webhook_common, "enforce_public_repo_org_gate", AsyncMock(return_value=None)
     )
@@ -69,15 +89,13 @@ def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
 
 @pytest.fixture
 def prepared(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
-    """The issue run ``process_github_issue`` would start, and the thread the channel adopts."""
-    run = github_webhooks.GitHubIssueRun(
-        thread_id=str(THREAD),
-        input={"messages": [{"role": "user", "content": "Fix the crash"}]},
-        configurable={"source": "github", "github_login": "ada", "repo": {"owner": "acme"}},
-    )
+    """The issue run's configurable, and the thread the channel adopts."""
+    run = {"source": "github", "github_login": "ada", "repo": {"owner": "acme"}}
 
     async def adopt_then_prepare(
-        *_args: object, adopt: Callable[[str], Awaitable[None]] | None = None
+        *_args: object,
+        workspace: str | None,
+        adopt: Callable[[str], Awaitable[None]] | None = None,
     ) -> object:
         # The real one adopts the thread before it writes the thread's metadata.
         if adopt is not None and prepare.return_value is not None:
@@ -261,10 +279,11 @@ async def test_an_issue_mention_starts_a_run_on_the_channels_thread(
     assert delivered.issue_run is not None and delivered.issue_run.starts
     run = delivered.issue_run.run
     assert run is not None
-    assert run.input == {"messages": [{"role": "user", "content": "Fix the crash"}]}
     prepared.assert_awaited_once()
     assert prepared.await_args is not None
-    assert prepared.await_args.args[1:] == (event, str(THREAD))
+    assert prepared.await_args.args[1:] == (str(THREAD),)
+    # A new conversation: the repository's own workspace.
+    assert prepared.await_args.kwargs["workspace"] is None
     # The run completes through the backend's run-complete webhook.
     assert run.webhook == webhook
     channel.adopt_channel_run.assert_awaited_once_with(str(THREAD), "github")  # type: ignore[attr-defined]
@@ -279,7 +298,7 @@ async def test_an_issue_mention_starts_a_run_on_the_channels_thread(
     # The attribution the run's hooks read rides in its token.
     assert token.metadata["ls_attribution_identifier"] == "ada"
     # MDA starts the run: the answer sets none of the metadata keys MDA keeps.
-    metadata = mda_starts(run.model_dump())["metadata"]
+    metadata = mda_starts({"input": ISSUE_RUN_INPUT, **run.model_dump()})["metadata"]
     assert metadata == run.metadata
     assert metadata["channel"] == "github"
     assert metadata["github_delivery"] == "delivery-1"
@@ -391,3 +410,85 @@ async def test_a_waiting_thread_is_only_asked_whether_open_swe_acts(
     # No reaction, metadata or run token while the thread waits.
     prepared.assert_not_awaited()
     channel.adopt_channel_run.assert_not_awaited()  # type: ignore[attr-defined]
+
+
+async def test_a_follow_up_stays_in_the_workspace_its_thread_started_in(
+    app: FastAPI, prepared: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(github_webhooks, "conversation_started", AsyncMock(return_value=True))
+
+    delivered = await _deliver(app, "issue_comment", _comment_payload())
+
+    assert delivered.issue_run is not None and delivered.issue_run.starts
+    assert prepared.await_args is not None
+    assert prepared.await_args.kwargs["workspace"] == "team-a"
+
+
+async def test_an_issue_run_needs_the_input_the_channel_wrote() -> None:
+    with pytest.raises(ValueError, match="needs its input"):
+        GitHubIssueRunRequest(thread_id=THREAD)
+
+
+@pytest.mark.parametrize("started", [True, False])
+async def test_issue_facts_say_who_is_a_user_and_what_the_thread_holds(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, started: bool
+) -> None:
+    monkeypatch.setattr(github_webhooks, "conversation_started", AsyncMock(return_value=started))
+    register_github_logins(monkeypatch, "ada", "Carol")
+
+    facts = await call_as_mda(
+        app,
+        GITHUB_ISSUE_FACTS,
+        GitHubIssueFactsRequest(
+            thread_id=THREAD, sender="ada", logins=["ada", "bob", "carol", "x[bot]"]
+        ),
+        secret=SERVICE_SECRET,
+    )
+
+    assert facts.trusted == ["ada", "carol"]
+    assert (facts.conversation_started, facts.sender_email_known) == (started, True)
+    # Only a follow-up reads the workspace its thread started in.
+    assert facts.thread_workspace == ("team-a" if started else None)
+
+
+async def test_issue_facts_refuse_a_login_github_cant_spell(app: FastAPI) -> None:
+    with pytest.raises(ValueError, match="logins"):
+        GitHubIssueFactsRequest(thread_id=THREAD, sender="ada", logins=["../etc"])
+    with pytest.raises(httpx.HTTPStatusError):
+        await call_as_mda(
+            app,
+            GITHUB_ISSUE_FACTS,
+            GitHubIssueFactsRequest.model_construct(thread_id=THREAD, sender="a b", logins=[]),
+            secret=SERVICE_SECRET,
+        )
+
+
+async def test_automation_rules_name_each_automations_events_on_the_repository(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = {
+        "id": "00000000-0000-4000-8000-0000000000a1",
+        "prompt": "Triage it",
+        "triggers": [
+            {"kind": "github", "config": {"repo": "Acme/API", "events": ["issues.opened"]}},
+            # Another repository's trigger configures its own events.
+            {"kind": "github", "config": {"repo": "acme/web", "events": ["pull_request.opened"]}},
+            {"kind": "linear", "config": {"team": "ENG", "events": ["issue.created"]}},
+        ],
+    }
+    rules = AsyncMock(return_value=[record])
+    monkeypatch.setattr(channel.schedules, "github_automation_rules", rules)
+    register_github_logins(monkeypatch, "bob")
+
+    answer = await call_as_mda(
+        app,
+        GITHUB_AUTOMATION_RULES,
+        GitHubAutomationRulesRequest(repository="Acme/API", author="Bob"),
+        secret=SERVICE_SECRET,
+    )
+
+    rules.assert_awaited_once_with("acme/api")
+    assert answer.author_registered is True
+    assert [(rule.id, rule.prompt, rule.events) for rule in answer.automations] == [
+        (record["id"], "Triage it", ["issues.opened"])
+    ]

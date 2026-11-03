@@ -14,10 +14,15 @@ _SANITIZED_OPEN_TAG: Final = "[blocked-untrusted-comment-tag-open]"
 _SANITIZED_CLOSE_TAG: Final = "[blocked-untrusted-comment-tag-close]"
 
 
+def sanitize(body: str) -> str:
+    """``body`` without the reserved tags, which only the fence may write."""
+    return body.replace(OPEN_TAG, _SANITIZED_OPEN_TAG).replace(CLOSE_TAG, _SANITIZED_CLOSE_TAG)
+
+
 def fence(body: str, *, registered: bool) -> str:
     """``body`` without the reserved tags, fenced as untrusted unless its author is an
     Open SWE user."""
-    sanitized = body.replace(OPEN_TAG, _SANITIZED_OPEN_TAG).replace(CLOSE_TAG, _SANITIZED_CLOSE_TAG)
+    sanitized = sanitize(body)
     if registered:
         return sanitized
     return f"{OPEN_TAG}\n{sanitized}\n{CLOSE_TAG}"

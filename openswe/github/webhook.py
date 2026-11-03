@@ -4,8 +4,7 @@ Helpers and constants stay in common.py; they are accessed through the module
 object (``common.X``) so tests that monkeypatch them keep working.
 """
 
-from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import Any, Final, Protocol
 
 from langgraph_sdk.errors import NotFoundError
@@ -24,7 +23,6 @@ from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import settle_pull_request, settle_repository
 from openswe.input_messages import (
     EnvelopeData,
-    FieldValue,
     PersonIdentity,
     RunInput,
     SystemIdentity,
@@ -61,63 +59,6 @@ async def _trusted_authors(*logins: str, comments: Iterable[dict[str, Any]] = ()
     """Lowercased logins, among the people in this event, who are known Open SWE users."""
     return await User.known_logins(
         [*logins, *(str(comment.get("author") or "") for comment in comments)]
-    )
-
-
-def build_github_issue_prompt(
-    repo_config: dict[str, str],
-    issue_number: int,
-    issue_id: str,
-    title: str,
-    body: str,
-    comments: list[dict[str, Any]],
-    *,
-    github_login: str,
-    issue_author: str = "",
-    issue_url: str = "",
-    trusted: Collection[str],
-) -> str:
-    """Build the user prompt for a GitHub issue-triggered run."""
-    triggered_by_line = f"## Triggered by: {github_login}\n\n" if github_login else ""
-    issue_url_line = f"## Issue URL: {issue_url}\n\n" if issue_url else ""
-    comments_text = common.build_github_issue_comments_text(comments, trusted=trusted)
-    sanitized_title = common.sanitize_github_comment_body(title)
-    formatted_body = common.format_github_comment_body_for_prompt(
-        issue_author or github_login, body, trusted=trusted
-    )
-    return prompt(
-        "runs/github-issue",
-        repository=f"{repo_config.get('owner')}/{repo_config.get('name')}",
-        triggered_by_line=triggered_by_line,
-        issue_number=issue_number,
-        issue_id=issue_id,
-        issue_url_line=issue_url_line,
-        title=sanitized_title,
-        body=formatted_body,
-        comments=comments_text,
-    )
-
-
-def build_github_issue_followup_prompt(
-    github_login: str, comment_body: str, *, trusted: Collection[str]
-) -> str:
-    """Build the prompt for a follow-up GitHub issue comment."""
-    body = common.format_github_comment_body_for_prompt(github_login, comment_body, trusted=trusted)
-    return f"**{github_login}:**\n{body}"
-
-
-def build_github_issue_update_prompt(
-    github_login: str, title: str, body: str, *, trusted: Collection[str]
-) -> str:
-    """Build the prompt for a follow-up GitHub issue title/body update."""
-    sanitized_title = common.sanitize_github_comment_body(title)
-    formatted_body = common.format_github_comment_body_for_prompt(
-        github_login, body, trusted=trusted
-    )
-    return (
-        f"**{github_login}:** updated the GitHub issue title/body.\n\n"
-        f"Title: {sanitized_title}\n\n"
-        f"Description:\n{formatted_body}"
     )
 
 
@@ -184,70 +125,6 @@ def _github_webhook_run_input(content: str, *, data: EnvelopeData) -> RunInput:
             ),
         ]
     }
-
-
-def _github_issue_run_input(
-    prompt: str,
-    comments: list[dict[str, Any]],
-    *,
-    issue_author: str,
-    description: str,
-    trigger_login: str,
-    trigger_user_id: object,
-    issue_data: Mapping[str, FieldValue | None],
-    trusted: Collection[str],
-) -> RunInput:
-    actor: SystemIdentity = {
-        "id": "system:github-webhook",
-        "display_name": "GitHub webhook",
-        "platform": "github",
-    }
-    messages = [
-        system_introduction(actor),
-        system_input(
-            prompt,
-            {
-                "sender_id": actor["id"],
-                "surface": "github",
-                "kind": "system",
-                "data": {"issue": issue_data},
-            },
-        ),
-    ]
-    # The run describes the trigger sender itself; only replayed authors nobody
-    # resolves need an introduction here.
-    introduced: set[str] = {_github_person(trigger_login, trigger_user_id)["id"]}
-    source_messages = [
-        {"author": issue_author or trigger_login, "body": description, "type": "description"},
-        *comments,
-    ]
-    for comment in source_messages:
-        author = str(comment.get("author") or "unknown")
-        person = _github_person(
-            author, trigger_user_id if author == trigger_login else comment.get("author_id")
-        )
-        if person["id"] not in introduced:
-            messages.append(person_introduction(person))
-            introduced.add(person["id"])
-        body = common.format_github_comment_body_for_prompt(
-            author, str(comment.get("body", "")), trusted=trusted
-        )
-        messages.append(
-            human_input(
-                body,
-                {
-                    "sender_id": person["id"],
-                    "surface": "github",
-                    "kind": "human",
-                    "data": {
-                        "message_type": str(comment.get("type", "comment")),
-                        "created_at": str(comment.get("created_at", "")),
-                        "comment_id": str(comment.get("comment_id", "")),
-                    },
-                },
-            )
-        )
-    return {"messages": messages}
 
 
 def _pr_data(
@@ -1639,16 +1516,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     await common.store_current_reviewer_run_id(thread_id, run)
 
 
-@dataclass(frozen=True)
-class GitHubIssueRun:
-    """An issue run, prepared: its thread's metadata is written, the run is not started."""
-
-    thread_id: str
-    input: RunInput
-    configurable: dict[str, JsonValue]
-
-
-async def _conversation_started(thread_id: str) -> bool:
+async def conversation_started(thread_id: str) -> bool:
     """Whether a run on the issue's thread already took the issue in.
 
     Not whether the thread is indexed: ``adopt`` indexes it before its first run
@@ -1665,15 +1533,19 @@ async def _conversation_started(thread_id: str) -> bool:
 
 async def prepare_github_issue_run(
     payload: dict[str, Any],
-    event_type: str,
     thread_id: str,
+    *,
+    workspace: str | None,
     adopt: Callable[[str], Awaitable[None]] | None = None,
-) -> GitHubIssueRun | None:
-    """Prepare the run an issue or issue comment that tagged @open-swe starts, or None.
+) -> dict[str, Any] | None:
+    """Index the thread an issue mention starts its run on, and the run's configurable.
 
-    ``thread_id`` is the issue's thread, which MDA's GitHub channel owns. ``adopt``
-    indexes it as the channel's before its metadata is written, so the write
-    doesn't create it.
+    MDA's GitHub channel writes the run's input; this checks the issue and its
+    sender, and writes the thread's metadata. ``thread_id`` is the issue's thread,
+    which the channel owns. ``adopt`` indexes it as the channel's before its
+    metadata is written, so the write doesn't create it. ``workspace`` is the one
+    the thread started in, for a follow-up; ``None`` for the repository's own.
+    ``None`` when the run can't start.
     """
     issue = payload.get("issue", {})
     repo = payload.get("repository", {})
@@ -1681,139 +1553,25 @@ async def prepare_github_issue_run(
         "owner": repo.get("owner", {}).get("login", ""),
         "name": repo.get("name", ""),
     }
-
     issue_id = str(issue.get("id", ""))
     issue_number = issue.get("number")
     github_login = payload.get("sender", {}).get("login", "")
-    github_user_id = payload.get("sender", {}).get("id")
-    issue_url = issue.get("html_url", "") or issue.get("url", "")
-    title = issue.get("title", "No title")
-    description = issue.get("body") or "No description"
-    issue_author = issue.get("user", {}).get("login", "")
-
-    common.logger.info(
-        "Processing GitHub issue: event=%s, issue=%s, repo=%s/%s",
-        event_type,
-        issue_number,
-        repo_config.get("owner"),
-        repo_config.get("name"),
-    )
-
     if not issue_id or not issue_number:
         common.logger.warning("Missing GitHub issue id/number, skipping")
         return None
-
-    email = await User.email_for_login(github_login) or ""
-    if not email:
+    if not await User.email_for_login(github_login):
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
         return None
-
-    existing_thread = await _conversation_started(thread_id)
-    github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
-    app_token = await common.get_github_app_installation_token()
-    reaction_token = github_token or app_token
-    comment = payload.get("comment", {})
-    comment_id = comment.get("id")
-    if event_type == "issue_comment" and comment_id:
-        if not reaction_token:
-            common.logger.warning(
-                "No GitHub token available to react to issue comment %s", comment_id
-            )
-        else:
-            try:
-                reacted = await common.react_to_github_comment(
-                    repo_config,
-                    comment_id,
-                    event_type="issue_comment",
-                    token=reaction_token,
-                )
-            except GitHubAuthError:
-                github_token = await common.refresh_thread_github_token_after_401(thread_id, email)
-                reaction_token = github_token or app_token
-                reacted = False
-                if reaction_token:
-                    try:
-                        reacted = await common.react_to_github_comment(
-                            repo_config,
-                            comment_id,
-                            event_type="issue_comment",
-                            token=reaction_token,
-                        )
-                    except GitHubAuthError:
-                        common.logger.warning(
-                            "Re-auth still produced 401 reacting to issue comment %s",
-                            comment_id,
-                        )
-                        reacted = False
-            if not reacted:
-                common.logger.warning("Failed to react to GitHub issue comment %s", comment_id)
-
-    comments: list[dict[str, Any]] = []
-    comment_login = str(comment.get("user", {}).get("login") or github_login)
-    trusted = await _trusted_authors(github_login, issue_author, comment_login)
-    if existing_thread:
-        if event_type == "issue_comment":
-            prompt = build_github_issue_followup_prompt(
-                comment_login, comment.get("body", ""), trusted=trusted
-            )
-        else:
-            prompt = build_github_issue_update_prompt(
-                github_login, title, description, trusted=trusted
-            )
-    else:
-        try:
-            comments = await common.fetch_issue_comments(
-                repo_config, issue_number, token=github_token or app_token
-            )
-        except GitHubAuthError:
-            github_token = await common.refresh_thread_github_token_after_401(thread_id, email)
-            comments = await common.fetch_issue_comments(
-                repo_config, issue_number, token=github_token or app_token
-            )
-        if comment_id and not any(item.get("comment_id") == comment_id for item in comments):
-            comments.append(
-                {
-                    "body": comment.get("body", ""),
-                    "author": comment.get("user", {}).get("login", "unknown"),
-                    "created_at": comment.get("created_at", ""),
-                    "comment_id": comment_id,
-                }
-            )
-            comments.sort(key=lambda item: item.get("created_at", ""))
-
-        trusted = await _trusted_authors(github_login, issue_author, comments=comments)
-        prompt = build_github_issue_prompt(
-            repo_config,
-            issue_number,
-            issue_id,
-            title,
-            description,
-            comments,
-            github_login=github_login,
-            issue_author=issue_author,
-            issue_url=issue_url,
-            trusted=trusted,
-        )
-    # A follow-up stays in the workspace its thread started in, even if the
-    # repository has since been preferred by another workspace.
-    workspace = (
-        await common.get_thread_workspace(thread_id) if existing_thread else None
-    ) or await common.workspace_for_repo_config(repo_config)
-    configurable: dict[str, Any] = {
-        "source": "github",
-        "github_login": github_login,
-        "github_user_id": github_user_id,
-        "repo": repo_config,
-        "github_issue": {
-            "id": issue_id,
-            "number": issue_number,
-            "title": title,
-            "url": issue_url,
-        },
-        "workspace": workspace,
-        "environment": workspace,
+    # The thread's App token, cached for the backend's own GitHub calls on it.
+    await common.get_or_resolve_thread_github_token(thread_id, "")
+    workspace = workspace or await common.workspace_for_repo_config(repo_config)
+    title = issue.get("title", "No title")
+    github_issue = {
+        "id": issue_id,
+        "number": issue_number,
+        "title": title,
+        "url": issue.get("html_url", "") or issue.get("url", ""),
     }
-
     token_repositories = common.event_thread_token_repositories(repo_config, payload)
     if adopt is not None:
         await adopt(thread_id)
@@ -1822,8 +1580,8 @@ async def prepare_github_issue_run(
         source="github",
         repo_config=repo_config,
         github_login=github_login,
-        title=title or (f"Issue #{issue_number}" if issue_number else "GitHub issue"),
-        source_context=SourceContext.parse({"github_issue": configurable["github_issue"]}),
+        title=title or f"Issue #{issue_number}",
+        source_context=SourceContext.parse({"github_issue": github_issue}),
         workspace=workspace,
         token_repositories=token_repositories,
     )
@@ -1833,41 +1591,15 @@ async def prepare_github_issue_run(
             extra={"agent_thread_id": thread_id},
         )
         return None
-
-    if existing_thread:
-        sender_login = (
-            comment.get("user", {}).get("login", github_login) or github_login
-            if event_type == "issue_comment"
-            else github_login
-        )
-        run_input = _github_human_run_input(
-            sender_login,
-            prompt,
-            user_id=github_user_id,
-            data={
-                "issue": {"id": issue_id, "number": issue_number, "url": issue_url},
-                "event_type": event_type,
-                "comment_id": comment_id or "",
-            },
-        )
-    else:
-        run_input = _github_issue_run_input(
-            prompt,
-            comments,
-            trusted=trusted,
-            issue_author=issue_author,
-            description=description,
-            trigger_login=github_login,
-            trigger_user_id=github_user_id,
-            issue_data={
-                "id": issue_id,
-                "number": issue_number,
-                "url": issue_url,
-                "repository": f"{repo_config.get('owner')}/{repo_config.get('name')}",
-                "title": title,
-            },
-        )
-    return GitHubIssueRun(thread_id=thread_id, input=run_input, configurable=configurable)
+    return {
+        "source": "github",
+        "github_login": github_login,
+        "github_user_id": payload.get("sender", {}).get("id"),
+        "repo": repo_config,
+        "github_issue": github_issue,
+        "workspace": workspace,
+        "environment": workspace,
+    }
 
 
 class _PullRequestNumber(BaseModel):
