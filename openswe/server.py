@@ -1786,7 +1786,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     # stay off the critical path during worker load and retry storms.
     settings: WorkspaceSettings | None = None
     routing_defaults: dict[str, tuple[str, str | None]]
-    (settings, profile), admin_thread, tool_access = await asyncio.gather(
+    (settings, profile), admin_thread, tool_access, sender_preferences = await asyncio.gather(
         _timed(
             thread_id,
             "factory.settings_defaults",
@@ -1801,6 +1801,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         ),
         _timed(thread_id, "factory.admin_thread", _admin_thread(config, profile_login)),
         _timed(thread_id, "factory.tool_access", resolve_access(cfg, login=profile_login)),
+        User.preferences_for_login(profile_login or ""),
     )
     model_defaults = settings.default_model_pair("agent")
     routing_defaults = dict(settings.agent_routing_models)
@@ -1888,7 +1889,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
-    sender_preferences = await User.preferences_for_login(profile_login or "")
     goal_mode = sender_preferences.goal_mode
     work_state_tool = _registered_tool_name(report_work_state)
     configurable["draft_prs"] = sender_draft_prs

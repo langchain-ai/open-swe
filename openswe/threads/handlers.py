@@ -203,8 +203,10 @@ async def get_dashboard_thread(
             latest_run_id=latest_run_id,
         )
     with phase(record, "subagents"):
-        await attach_subagents([summary])
-    await attach_task_workers(client, [summary], login, email)
+        await asyncio.gather(
+            attach_subagents([summary]),
+            attach_task_workers(client, [summary], login, email),
+        )
     return summary
 
 
