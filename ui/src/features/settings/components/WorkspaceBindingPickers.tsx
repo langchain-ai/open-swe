@@ -6,6 +6,7 @@ import {
   SlackChannelIcon,
 } from "@/components/SlackChannelCombobox"
 import { type WorkspaceOption } from "@/lib/api"
+import { RepositoryLabels } from "@/lib/repo"
 import { useRepos } from "@/lib/profile"
 import {
   rankSlackChannels,
@@ -55,13 +56,17 @@ export function RepositoryPicker({
 }: BindingPickerProps) {
   const repos = useRepos()
   const repositories = repos.data?.repositories ?? []
+  const labels = new RepositoryLabels([
+    ...repositories.map((repo) => repo.full_name),
+    ...selected,
+  ])
   const reposByName = new Map(
     repositories.map((repo) => [repo.full_name, repo])
   )
   const owners = ownersOf(workspaces, (workspace) => workspace.repos)
   const items: Array<PickerItem> = repositories.map((repo) => ({
     id: repo.full_name,
-    label: repo.full_name,
+    label: labels.label(repo.full_name),
     meta: `${repo.private ? "Private" : "Public"}${repo.archived ? " archive" : ""}`,
     icon: repo.private ? (
       <LockSimpleIcon size={14} weight="regular" />

@@ -3,6 +3,7 @@ import { Button } from "@langchain/macaw-components/Button"
 import { Input } from "@langchain/macaw-components/Input"
 import { Typeahead } from "@langchain/macaw-components/Typeahead"
 
+import { RepositoryLabels } from "@/lib/repo"
 import type { Repository } from "@/lib/api"
 
 /** `owner/repo` entry with an Add button, plus a picker over installed repos. */
@@ -21,6 +22,7 @@ export function AddRepositoryField({
   canAdd: boolean
   onAdd: () => void
 }) {
+  const labels = new RepositoryLabels(suggestions.map((repo) => repo.full_name))
   const privateRepos = new Set(
     suggestions.filter((r) => r.private).map((r) => r.full_name)
   )
@@ -58,11 +60,17 @@ export function AddRepositoryField({
           className="w-full"
           emptyText="No matches"
           options={suggestions.map((r) => r.full_name)}
+          getOptionLabel={(name) => labels.label(name)}
+          filterOptions={(options, { inputValue }) =>
+            options.filter((name) =>
+              name.toLowerCase().includes(inputValue.trim().toLowerCase())
+            )
+          }
           placeholder="Search installed repos…"
           renderOption={(fullName) => (
             <>
               <span className="min-w-0 flex-1 truncate" title={fullName}>
-                {fullName}
+                {labels.label(fullName)}
               </span>
               {privateRepos.has(fullName) && (
                 <Badge color="secondary" size="xxs">

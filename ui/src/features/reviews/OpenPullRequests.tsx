@@ -15,6 +15,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 
 import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
+import { RepositoryLabels } from "@/lib/repo"
 import { useRepos } from "@/lib/profile"
 import { expiresInBrowser } from "@/lib/query"
 import {
@@ -227,6 +228,7 @@ export function OpenPullRequests({
   const queue = (filter?.length ? filtered : matchingRows)
     .map(pullRequestKey)
     .slice(0, REVIEW_QUEUE_LIMIT)
+  const repoLabels = new RepositoryLabels(repoNames)
   const firstInQueue = parsePullRequestSelection(queue[0])
   const reviewOneByOne = () =>
     firstInQueue &&
@@ -335,7 +337,9 @@ export function OpenPullRequests({
                 disableCloseOnSelect
                 size="sm"
                 className="h-6 flex-nowrap"
-                renderTags={selectionSummary}
+                renderTags={(values) =>
+                  selectionSummary(values.map((name) => repoLabels.label(name)))
+                }
                 aria-label="Filter by repository"
                 placeholder="All repositories"
                 emptyText={
@@ -346,6 +350,12 @@ export function OpenPullRequests({
                       : "No matches"
                 }
                 options={repoNames}
+                getOptionLabel={(name) => repoLabels.label(name)}
+                filterOptions={(options, { inputValue }) =>
+                  options.filter((name) =>
+                    name.toLowerCase().includes(inputValue.trim().toLowerCase())
+                  )
+                }
                 value={repo}
                 onChange={(chosen) =>
                   onFiltersChange({ repo: chosen.length ? chosen : undefined })

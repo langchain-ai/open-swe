@@ -617,9 +617,9 @@ describe("My PRs", () => {
       expect.stringContaining("Filter by repository")
     )
     expect(within(section()).queryAllByRole("listitem")).toHaveLength(0)
-    expect(await repoOptions()).toEqual(["acme/app", "acme/other"])
-    searchRepos("other")
-    expect(repoListOptions()).toEqual(["acme/other"])
+    expect(await repoOptions()).toEqual(["app", "other"])
+    searchRepos("acme/other")
+    expect(repoListOptions()).toEqual(["other"])
   })
 
   it("keeps the review verdict while GitHub decides whether the branch merges", async () => {
