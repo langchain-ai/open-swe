@@ -7,4 +7,4 @@
 1175 4ae7cba34ee5abe902d19bab9533b5ef098940be feat(channels): let Slack handlers take edits, deletions and reactions
 1212 d53181fc6a1344b350113c2376824a554f8f9461 feat(channels): Slack code channels
 1218 8a41f58a8efdaada4b52ceea00918287f3146e41 feat(channels): give a runtime channel a typed target
-1222 f682afc2a761b4b8e36ac21ad9b0aa3c70636488 feat(channels): Slack code channel view clicks reach the interaction handler
+1222 750f37feb1691ccd1e3efd46dcf902952fd7555e feat(channels): Slack code channel view clicks reach the interaction handler
