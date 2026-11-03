@@ -61,6 +61,9 @@ class ToolSpec(BaseModel):
     # The connections its tool reads its credentials from, which the runtime reads as
     # the run and sends with each call of it (``RunOperation.credentials``).
     connections: list[ConnectionRef] = []
+    # Whether the runtime runs the tool itself, as this spec describes it, rather than
+    # calling the operation; a runtime that cannot run it calls the operation.
+    runtime_runs: bool = False
 
 
 class McpServerSpec(BaseModel):

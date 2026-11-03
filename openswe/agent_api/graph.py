@@ -258,6 +258,7 @@ from openswe.server import (
     code_name,
     code_only,
     direct_and_from_code,
+    runtime_runs,
 )
 from openswe.slack.channel_moves import prepare_channel_move, record_channel_move
 from openswe.slack.tools.reply import send_slack_reply
@@ -438,6 +439,8 @@ class RunSession:
 
     def _specs(self) -> list[ToolSpec]:
         tools = self._backend_tools()
+        # A bridged client's own tool of the same name is the client's to run.
+        clients = {spec.name for spec in RunConfig.from_config(self.config).client_tools}
         return [
             ToolSpec(
                 name=described.name,
@@ -447,7 +450,9 @@ class RunSession:
                 reads_all=injections.reads_all,
                 code_name=code_name(described.name),
                 seconds=call_seconds(described.name),
-                connections=operation_connections(described.name, self.config),
+                connections=(connections := operation_connections(described.name, self.config)),
+                runtime_runs=described.name not in clients
+                and runtime_runs(described.name, connections),
             )
             for described in self.surface.catalog()
             if described.name in tools

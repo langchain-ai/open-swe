@@ -36,6 +36,7 @@ from runtime_api.catalog import (
     ReplyRules,
     RoutingRules,
 )
+from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import QUICK_CALL_SECONDS
 from runtime_api.loop import RunSender, RunStarted
 
@@ -1041,6 +1042,35 @@ def call_seconds(name: str) -> float | None:
 def code_only(name: str) -> bool:
     """Whether code mode offers a tool only from code, keeping its schema off the model's list."""
     return callable_from_code(name) and name not in _DIRECT_IN_CODE_MODE
+
+
+# Tools that read nothing of the backend's, which MDA runs itself from their spec
+# (``mda/rt/local_tools.py``). The backend keeps their implementations, for runtimes
+# that call them as operations and for its own MCP server.
+_RUNTIME_TOOLS = frozenset(
+    {
+        "fetch_url",
+        "http_request",
+        "slack_no_reply_needed",
+        "suggest_task",
+        "cli_result",
+        "record_human_input",
+        "note_on_diff",
+        "propose_review_comment",
+        "propose_pr_review",
+    }
+)
+
+
+def runtime_runs(name: str, connections: Sequence[ConnectionRef]) -> bool:
+    """Whether the run's runtime runs a tool itself rather than calling its operation.
+
+    ``web_search`` only where its key is the deployment's connection, which the runtime
+    reads; the backend's own key stays here.
+    """
+    if name == "web_search":
+        return any(ref.owner == "agent" for ref in connections)
+    return name in _RUNTIME_TOOLS
 
 
 def _integration_middleware(

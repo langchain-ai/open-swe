@@ -794,6 +794,33 @@ async def test_a_model_failure_leaves_its_code_for_the_failure_reply(
     assert _failure_reason_code({"error": "ValueError"}, metadata, "run-1") is None
 
 
+@pytest.mark.parametrize("exa_connection", [None, "open-swe-exa"])
+async def test_the_runtime_runs_only_the_backends_own_tools_that_read_nothing_of_it(
+    monkeypatch: pytest.MonkeyPatch, exa_connection: str | None
+) -> None:
+    from openswe.agent_api.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+    from openswe.tools import fetch_url, http_request, publish_artifact, web_search
+
+    if exa_connection is None:
+        monkeypatch.delenv("MDA_EXA_CONNECTION", raising=False)
+    else:
+        monkeypatch.setenv("MDA_EXA_CONNECTION", exa_connection)
+    surface = ToolSurface(base_tools=[web_search, fetch_url, http_request, publish_artifact])
+    await surface.prepare()
+    # A bridged client's tool of the same name is the client's to run.
+    client = {"kind": "function", "name": "http_request", "parameters": {"type": "object"}}
+    config = {"configurable": {"client_tools": [client]}}
+
+    specs = RunSession(surface, config, None, started_here=True).tool_set().tools
+
+    # web_search only with its key in the deployment's connection, which the runtime reads.
+    assert {spec.name for spec in specs if spec.runtime_runs} == {
+        "fetch_url",
+        *(() if exa_connection is None else ("web_search",)),
+    }
+
+
 @pytest.mark.parametrize("additional", [True, {"type": "string"}, False, None])
 async def test_operation_respects_open_tool_argument_schemas(additional: JsonValue) -> None:
     from langchain_core.tools import StructuredTool
