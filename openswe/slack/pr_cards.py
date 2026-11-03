@@ -17,17 +17,9 @@ from urllib.parse import quote
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel
-from sqlalchemy import ForeignKey, Index, delete, select
-from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from openswe.database import postgres
-from openswe.database.orm import NOW, Base
-from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_request_status import OpenPullRequest, PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
-from openswe.github.repositories import Repository
-from openswe.jobs import queue
 from openswe.slack.blocks import (
     CONTAINER_TITLE_MAX_CHARS,
     MARKDOWN_TEXT_MAX_CHARS,
@@ -44,7 +36,6 @@ from openswe.slack.blocks import (
     mrkdwn,
     section,
 )
-from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     fetch_slack_thread_message_by_ts,
     parse_github_pr_url,
@@ -54,12 +45,11 @@ from openswe.slack.http import SlackRequestError
 from openswe.slack.markdown import markdown_blocks
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_review_url
+from openswe.webhooks.event_listeners import EventHandler, EventListener
 
 logger = logging.getLogger(__name__)
 
 LIVE_FOR: Final = timedelta(days=3)
-REFRESH_JOB: Final = "slack_pr_card_refresh"
-EXPIRE_JOB: Final = "slack_pr_card_expire"
 MAX_CARDS: Final = 10
 # Webhooks arrive in bursts (a push sets off every check); one redraw covers a burst.
 _REFRESH_DELAY: Final = timedelta(seconds=5)
@@ -403,11 +393,9 @@ class CardedMessage:
             return
         try:
             person = await User.for_identity("slack", requester) if requester else None
-            await SlackPullRequestCard.record(
+            await SlackPullRequestCards.track(
                 self.cards,
-                channel_id,
-                thread_ts,
-                message_ts,
+                CardPlacement(channel_id=channel_id, thread_ts=thread_ts, message_ts=message_ts),
                 live_until=self.live_until,
                 by=person.id if person else None,
             )
@@ -437,158 +425,66 @@ class CardedMessage:
         }
 
 
-class SlackPullRequestCard(Base):
-    """A posted card Open SWE redraws when its pull request changes, until ``live_until``."""
+class CardPlacement(BaseModel):
+    """Where a posted card sits: its Slack message."""
 
-    __tablename__ = "slack_pull_request_card"
-    __table_args__ = (
-        Index(
-            "slack_pull_request_card_message",
-            "channel_id",
-            "message_ts",
-            "pull_request_id",
-            unique=True,
-        ),
-        Index("slack_pull_request_card_live", "pull_request_id", "live_until"),
-    )
+    channel_id: str
+    thread_ts: str
+    message_ts: str
 
-    pull_request_id: Mapped[UUID] = mapped_column(ForeignKey("pull_request.id", ondelete="CASCADE"))
-    channel_id: Mapped[str] = mapped_column(ForeignKey("slack_channel.id"))
-    thread_ts: Mapped[str]
-    message_ts: Mapped[str]
-    live_until: Mapped[datetime]
-    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
-    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
-    created_by: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), default=None
-    )
-    updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
-    updated_by: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), default=None
-    )
-    pull_request: Mapped[PullRequest] = relationship(init=False, lazy="joined")
 
-    @property
-    def live(self) -> bool:
-        return self.live_until > datetime.now(UTC)
+class SlackPullRequestCards(EventHandler):
+    """Redraws posted cards when their pull request changes, and once more when they expire."""
+
+    name = "slack_pr_card"
+    state = CardPlacement
+    delay = _REFRESH_DELAY
 
     @classmethod
-    async def record(
+    async def track(
         cls,
         cards: Sequence[tuple[UUID, PullRequestCard]],
-        channel_id: str,
-        thread_ts: str,
-        message_ts: str,
+        placement: CardPlacement,
         *,
         live_until: datetime,
         by: UUID | None,
     ) -> None:
-        async with postgres.session() as session:
-            await SlackChannel.ensure(session, channel_id)
-            await session.execute(
-                insert(cls)
-                .values(
-                    [
-                        {
-                            "id": card_id,
-                            "pull_request_id": card.record.id,
-                            "channel_id": channel_id,
-                            "thread_ts": thread_ts,
-                            "message_ts": message_ts,
-                            "live_until": live_until,
-                            "created_by": by,
-                            "updated_by": by,
-                        }
-                        for card_id, card in cards
-                    ]
-                )
-                .on_conflict_do_nothing()
-            )
-        for card_id, _ in cards:
-            await queue.schedule(
-                EXPIRE_JOB,
-                {"card_id": str(card_id)},
-                due_at=live_until,
-                key=f"{EXPIRE_JOB}:{card_id}",
+        for card_id, card in cards:
+            await EventListener.start(
+                cls,
+                placement,
+                card.record.id,
+                expires_at=live_until,
+                by=by,
+                listener_id=card_id,
             )
 
-    @classmethod
-    async def pull_request_changed(cls, key: PullRequestKey) -> None:
-        """Queue one redraw of the pull request's live cards, if it has any."""
-        if not postgres.configured():
-            return
-        number = int(key.rsplit("/", 1)[1])
-        try:
-            async with postgres.session() as session:
-                pull_request_id = await session.scalar(
-                    select(cls.pull_request_id)
-                    .join(PullRequest, PullRequest.id == cls.pull_request_id)
-                    .join(Repository, Repository.id == PullRequest.repository_id)
-                    .where(
-                        Repository.key == key.repo_full_name,
-                        PullRequest.number == number,
-                        cls.live_until > datetime.now(UTC),
-                    )
-                    .limit(1)
-                )
-            if pull_request_id is None:
-                return
-            job_key = f"{REFRESH_JOB}:{pull_request_id}"
-            # A redraw still waiting will read this change too; one already running may not.
-            waiting = await queue.get(job_key)
-            if waiting is not None and waiting.claim_token is None:
-                return
-            await queue.schedule(
-                REFRESH_JOB,
-                {"pull_request_id": str(pull_request_id)},
-                due_at=datetime.now(UTC) + _REFRESH_DELAY,
-                key=job_key,
-            )
-        except Exception:
-            logger.exception("Could not queue a Slack PR card redraw", extra={"pr_key": key})
+    async def heard(self, listeners: Sequence[EventListener]) -> None:
+        drawn = await PullRequestCard.read(listeners[0].pull_request)
+        for listener in listeners:
+            await self.show(listener, drawn)
 
-    @classmethod
-    async def refresh(cls, pull_request_id: UUID) -> int:
-        """Redraw every live card of the pull request; how many were redrawn."""
-        async with postgres.session() as session:
-            cards = list(
-                await session.scalars(
-                    select(cls).where(
-                        cls.pull_request_id == pull_request_id,
-                        cls.live_until > datetime.now(UTC),
-                    )
-                )
-            )
-        if not cards:
-            return 0
-        drawn = await PullRequestCard.read(cards[0].pull_request)
-        for card in cards:
-            await card.show(drawn)
-        return len(cards)
+    async def expired(self, listener: EventListener) -> None:
+        await self.show(listener, await PullRequestCard.read(listener.pull_request))
 
-    @classmethod
-    async def expire(cls, card_id: UUID) -> None:
-        """Draw the card one last time, saying it no longer updates."""
-        async with postgres.session() as session:
-            card = await session.get(cls, card_id)
-        if card is None:
-            return
-        await card.show(await PullRequestCard.read(card.pull_request))
-
-    async def show(self, drawn: PullRequestCard) -> None:
-        """Put ``drawn`` in place of this card in its Slack message, leaving the rest alone."""
+    async def show(self, listener: EventListener, drawn: PullRequestCard) -> None:
+        """Put ``drawn`` in place of the listener's card, leaving the rest of its message alone."""
+        placement = listener.state_as(CardPlacement)
         message = await fetch_slack_thread_message_by_ts(
-            self.channel_id, self.thread_ts, self.message_ts
+            placement.channel_id, placement.thread_ts, placement.message_ts
         )
         blocks = message.get("blocks") if message is not None else None
         text = message.get("text") if message is not None else None
         if not isinstance(blocks, list) or not isinstance(text, str):
             logger.info(
                 "Slack PR card message is gone or unreadable",
-                extra={"slack_channel": self.channel_id, "slack_message_ts": self.message_ts},
+                extra={
+                    "slack_channel": placement.channel_id,
+                    "slack_message_ts": placement.message_ts,
+                },
             )
             return
-        block_id = f"{_BLOCK_ID_PREFIX}{self.id}"
+        block_id = f"{_BLOCK_ID_PREFIX}{listener.id}"
         mine = next(
             (
                 index
@@ -598,20 +494,16 @@ class SlackPullRequestCard(Base):
             None,
         )
         if mine is None:
-            await self.forget()
+            await listener.forget()
             return
         updated = list(blocks)
-        updated[mine] = block_payload([drawn.block(self.id, live_until=self.live_until)])[0]
+        updated[mine] = block_payload([drawn.block(listener.id, live_until=listener.expires_at)])[0]
         try:
-            await update_slack_message(self.channel_id, self.message_ts, text, blocks=updated)
+            await update_slack_message(
+                placement.channel_id, placement.message_ts, text, blocks=updated
+            )
         except SlackRequestError as exc:
             if exc.code in {"message_not_found", "channel_not_found", "cant_update_message"}:
-                await self.forget()
+                await listener.forget()
                 return
             raise
-
-    async def forget(self) -> None:
-        """Stop tracking a card whose message or blocks are gone."""
-        async with postgres.session() as session:
-            await session.execute(delete(type(self)).where(type(self).id == self.id))
-        await queue.cancel_key(f"{EXPIRE_JOB}:{self.id}")

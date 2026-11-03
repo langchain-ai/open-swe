@@ -1,7 +1,7 @@
-"""Track live Slack PR cards.
+"""Add event listeners.
 
-Each pull request card Open SWE posts in a Slack message is redrawn from its pull
-request's webhooks until ``live_until``.
+Python code that follows a pull request's events until it expires, one row per
+thing followed, for every feature: a live Slack PR card is the first.
 """
 
 from alembic import op
@@ -16,13 +16,12 @@ def upgrade() -> None:
     op.execute("SET LOCAL lock_timeout = '5s'")
     op.execute(
         """
-        CREATE TABLE slack_pull_request_card (
+        CREATE TABLE event_listener (
             id uuid PRIMARY KEY,
+            handler text NOT NULL,
             pull_request_id uuid NOT NULL REFERENCES pull_request (id) ON DELETE CASCADE,
-            channel_id text NOT NULL REFERENCES slack_channel (id),
-            thread_ts text NOT NULL,
-            message_ts text NOT NULL,
-            live_until timestamptz NOT NULL,
+            handler_state jsonb NOT NULL,
+            expires_at timestamptz NOT NULL,
             created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             created_by uuid REFERENCES users (id) ON DELETE SET NULL,
@@ -31,12 +30,7 @@ def upgrade() -> None:
         """
     )
     op.execute(
-        "CREATE UNIQUE INDEX slack_pull_request_card_message "
-        "ON slack_pull_request_card (channel_id, message_ts, pull_request_id)"
-    )
-    op.execute(
-        "CREATE INDEX slack_pull_request_card_live "
-        "ON slack_pull_request_card (pull_request_id, live_until)"
+        "CREATE INDEX event_listener_pull_request ON event_listener (pull_request_id, expires_at)"
     )
 
 

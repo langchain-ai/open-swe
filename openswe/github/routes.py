@@ -9,7 +9,6 @@ from openswe.human_review.completed_reviews import CompletedReview
 from openswe.merge_queue.controller import wake_native_queue
 from openswe.review_guide.launch import notify_pr_updated
 from openswe.schedules import store as schedules
-from openswe.slack.pr_cards import SlackPullRequestCard
 from openswe.ui_invalidations import Topic
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
@@ -70,7 +69,6 @@ async def github_webhook(
     )
     if refs.pull_request is not None:
         await Topic.PULL_REQUESTS.invalidate(key=refs.pull_request)
-        background_tasks.add_task(SlackPullRequestCard.pull_request_changed, refs.pull_request)
     if event_type in {"installation", "installation_repositories"}:
         await forget_cached_repos()
     common.logger.info(
