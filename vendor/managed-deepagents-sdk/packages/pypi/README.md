@@ -596,9 +596,10 @@ A handler gets the `SlackMessageEvent` (`text`, `user_id`, `channel_id`,
 `message_ts`, `thread_ts`, `files`, Slack's own event as `payload`, `actor`,
 and `team_id`, the workspace your app is installed in) and its
 `SlackChannelThread` (`id`, `source_thread_key`, `channel.name`). `await
-thread.state()` reads the thread's state values, such as its `messages`, as its
-last run left them, or `None` before any run; in a code channel it is the
-channel's one thread. It
+thread.get_state()` reads the thread's state as Agent Server's
+`threads.get_state` does (its `values`, such as `messages`, as its last run left
+them, `next`, `tasks` and `interrupts`), or `None` before any run; in a code
+channel it is the channel's one thread. It
 returns the run's input, as `agent.invoke` takes it, or, to also set run
 options such as `context`, `metadata` or `webhook`, a list of runs, as
 `[{"input": ..., "context": ...}]`, as the GitHub and Linear handlers do.
