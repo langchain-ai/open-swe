@@ -54,10 +54,10 @@ async def start_trigger_thread(
     post in. Trigger follows the thread. Returns it, unless Trigger cannot name it.
     """
     route = _trigger_route(target)
-    address = dict(route["address"])
+    # Another conversation is named by its id alone: none of the origin's
+    # address, such as its code channel flag, applies there.
+    address = {"conversation_id": conversation_id} if conversation_id else dict(route["address"])
     address.pop("thread_id", None)
-    if conversation_id:
-        address["conversation_id"] = conversation_id
     result = await client.post_action(
         route["channel_id"],
         {
