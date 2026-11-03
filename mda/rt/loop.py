@@ -35,6 +35,7 @@ from langgraph.config import get_stream_writer
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
+    JOINED_TASK_CONTEXT,
     Catalog,
     CliResultRules,
     LoopRules,
@@ -42,6 +43,7 @@ from runtime_api.catalog import (
     ReplyRules,
     RunModels,
     TaskContext,
+    kept_route,
 )
 from runtime_api.endpoint import call
 from runtime_api.loop import (
@@ -225,10 +227,6 @@ def _moment(value: object) -> datetime | None:
         return None
 
 
-def _normalized(route: str) -> str:
-    return "fast" if route == "fast_alt" else route
-
-
 class _Turn:
     """What happened since the last thing a person said."""
 
@@ -322,7 +320,8 @@ class RunLoop:
     def starting(self) -> dict[str, JsonValue]:
         """The held state a turn starts from: nothing asked again yet, and answers going
         where the turn was asked from."""
-        update: dict[str, JsonValue] = {}
+        # A task joined in an earlier run is in this run's catalog.
+        update: dict[str, JsonValue] = {JOINED_TASK_CONTEXT: None}
         if self.rules.reply is not None:
             update.update(reply_surface=self.rules.reply.surface, reply_nudges=0)
         if self.rules.cli_result is not None:
@@ -356,7 +355,7 @@ class RunLoop:
             update = await asked.answers()
         finally:
             await asked.close()
-        context = self.rules.task_context or TaskContext()
+        context = self._task_context(held)
         messages = _messages(state)
         visible = _visible(state)
         guidance = self._guidance.get(self._backend.run)
@@ -450,6 +449,14 @@ class RunLoop:
             return {}
         return _github_proxy_due(prepared.github_proxy, datetime.now(UTC))
 
+    def _task_context(self, held: Mapping[str, object]) -> TaskContext:
+        """The thread's role and task: the catalog's, or the task it joined since."""
+        context = self.rules.task_context or TaskContext()
+        joined = held.get(JOINED_TASK_CONTEXT)
+        if isinstance(joined, str) and joined:
+            return context.model_copy(update={"message": joined})
+        return context
+
     def classify_ahead(self, state: Mapping[str, object]) -> asyncio.Task[Route] | None:
         """Start classifying the turn's route while the run prepares, where the thread's
         held state leaves its route to the classifier."""
@@ -460,12 +467,11 @@ class RunLoop:
     def _classifies(self, held: Mapping[str, object]) -> bool:
         rules = self.rules.routing
         requested = held.get("requested_model")
-        stored = held.get("model_route")
         return (
             rules is not None
             and rules.mode == "auto"
             and not (isinstance(requested, str) and requested)
-            and not (isinstance(stored, str) and stored)
+            and kept_route(held.get("model_route")) is None
             and held.get("model_route_attempted_for") != run_id()
         )
 
@@ -515,14 +521,14 @@ class RunLoop:
         if rules is None:
             return None
         requested = held.get("requested_model")
-        stored = held.get("model_route")
+        stored = kept_route(held.get("model_route"))
         persist = True
         if isinstance(requested, str) and requested:
             route = "default"
         elif rules.mode is None:
             route = "default"
-        elif isinstance(stored, str) and stored:
-            route = _normalized(stored)
+        elif stored is not None:
+            route = stored
         elif rules.mode == "fast":
             route = "fast"
         elif held.get("model_route_attempted_for") == run_id():
@@ -549,9 +555,9 @@ class RunLoop:
         requested = held.get("requested_model")
         if isinstance(requested, str) and requested:
             return await self._chosen_model(requested, held.get("requested_effort"))
-        route = held.get("model_route")
-        routed = self._models.routes.get(_normalized(route)) if isinstance(route, str) else None
-        if routed is not None and route != "default":
+        route = kept_route(held.get("model_route"))
+        routed = self._models.routes.get(route) if route not in (None, "default") else None
+        if routed is not None:
             return routed
         selected = held.get("selected_model_id")
         if isinstance(selected, str) and selected and selected != self._models.model.model_id:

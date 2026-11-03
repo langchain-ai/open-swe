@@ -38,7 +38,7 @@ class _Classifier:
 def _gateway(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "gateway-key")
     monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", "https://gateway.invalid/")
-    monkeypatch.setattr("rt.routing.TypeSafeClassifier", _Classifier)
+    monkeypatch.setattr("runtime_api.classifier.TypeSafeClassifier", _Classifier)
     monkeypatch.setattr(_Classifier, "answer", _Answer("fast", 0.9))
     monkeypatch.setattr(_Classifier, "asked", [])
 

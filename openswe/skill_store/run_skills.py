@@ -1,7 +1,7 @@
 """The skills a run may load, by where it reads each store (``runtime_api.skills``)."""
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path, PurePosixPath
 from typing import Final, Self
 
@@ -9,7 +9,7 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol
 from deepagents.backends.state import StateBackend
-from runtime_api.skills import RunSkills, SkillFile
+from runtime_api.skills import BUNDLED_SKILLS, RunSkills, SkillFile
 
 from openswe.credential_scope import private_credential_login
 from openswe.sandboxes.read_only_backend import ReadOnlyBackend
@@ -19,7 +19,10 @@ logger = logging.getLogger(__name__)
 
 USER_SKILLS_ROUTE: Final = "/skills/"
 ORGANIZATION_SKILLS_ROUTE: Final = "/organization-skills/"
-BUNDLED_SKILLS_ROUTE: Final = "/bundled-skills/"
+BUNDLED_SKILLS_ROUTE: Final = BUNDLED_SKILLS
+# Deprecated: the runtime ships its own copy (``mda/bundled_skills``); this one lists them
+# for an MDA deployment from before. ``tests/agent/test_mda_bundled_skills.py`` keeps them
+# alike until it goes.
 BUNDLED_SKILLS_DIR: Final = Path(__file__).resolve().parent.parent / "bundled_skills"
 _SKILL_FILE: Final = "SKILL.md"
 
@@ -52,11 +55,14 @@ class RunSkillStores:
             login = None
         return cls(login)
 
-    async def listed(self) -> RunSkills:
-        """Every source's skill folders and their ``SKILL.md``."""
+    async def listed(self, served: Collection[str] = ()) -> RunSkills:
+        """Every source's skill folders and their ``SKILL.md``, but those of the sources the
+        runtime ``served`` itself."""
         files = CompositeBackend(default=ReadOnlyBackend(StateBackend()), routes=self.routes)
         folders: list[str] = []
         for source in self.sources:
+            if source in served:
+                continue
             listing = await files.als(source)
             folders += [entry["path"] for entry in listing.entries or [] if entry.get("is_dir")]
         paths = [str(PurePosixPath(folder) / _SKILL_FILE) for folder in folders]

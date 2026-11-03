@@ -74,7 +74,7 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
 
 async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:
     from runtime_api.operations import RunRequest
-    from runtime_api.skills import RunSkills
+    from runtime_api.skills import BUNDLED_SKILLS, RunSkills, SkillsRequest
 
     from openswe.agent_api.agent import AGENT
     from openswe.agent_api.tokens import RemoteRun
@@ -100,6 +100,13 @@ async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatc
     assert "Do it." in personal.content
     # The runtime answers reads of skills itself; the files API serves none of them.
     assert not set(surface.skill_sources) & set(surface.backend_paths)
+    # A runtime from before serving the bundled skills itself still has them listed.
+    assert any(f.path.startswith(BUNDLED_SKILLS) for f in listed.files)
+
+    # A runtime that serves them gets PostgreSQL's skills alone.
+    served = SkillsRequest(served=[BUNDLED_SKILLS]).model_dump()
+    own = RunSkills.model_validate(await AGENT.api(run, "skills", served))
+    assert own.files and not any(f.path.startswith(BUNDLED_SKILLS) for f in own.files)
 
 
 @pytest.mark.parametrize("profile", [None, {"experimental_monitor": False}])

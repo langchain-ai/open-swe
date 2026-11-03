@@ -71,6 +71,7 @@ from langgraph.types import Command
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 from runtime_api import files as file_api
 from runtime_api.catalog import (
+    JOINED_TASK_CONTEXT,
     SEARCH_TOOLS,
     Catalog,
     FilesSpec,
@@ -78,6 +79,7 @@ from runtime_api.catalog import (
     RunModels,
     SandboxSpec,
     SubagentSpec,
+    TaskContext,
     ToolSpec,
 )
 from runtime_api.endpoint import Handlers, UnknownEndpointError
@@ -115,12 +117,14 @@ from runtime_api.loop import (
     PREPARE,
     REFRESH_GITHUB_PROXY,
     REPLY_ON_BEHALF,
+    ROUTE_MODEL,
     RUN_ENDED,
     RUN_STARTED,
     SANDBOX_REPLACED,
     SANDBOX_UNREACHABLE,
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
+    TASK_CONTEXT,
     TOOL_RESULT,
     TOOL_STARTED,
     BeforeModel,
@@ -139,6 +143,8 @@ from runtime_api.loop import (
     Prepared,
     ReplyOnBehalf,
     Report,
+    Route,
+    Routed,
     RunCall,
     RunEnded,
     RunNotice,
@@ -163,7 +169,7 @@ from runtime_api.operations import (
 )
 from runtime_api.reports import REPORTED, REPORTS, Reports, ReportsTaken
 from runtime_api.sandbox_proxy import SANDBOX_PROXY, SandboxProxy, SandboxProxyRequest
-from runtime_api.skills import SKILLS, RunSkills
+from runtime_api.skills import SKILLS, RunSkills, SkillsRequest
 from runtime_api.slack import (
     SLACK_MOVE,
     SLACK_MOVED,
@@ -223,6 +229,7 @@ from openswe.github.proxy import proxy_token_recorded, proxy_token_set_since
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
 from openswe.middleware.client_tools import ClientToolsMiddleware
+from openswe.middleware.model_selection import classify_route
 from openswe.middleware.notify_step_limit import notify_step_limit
 from openswe.middleware.prepare_run import BasePrepareRunMiddleware
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
@@ -971,12 +978,13 @@ class TokenRun:
     async def _session(self) -> RunSession:
         return await self.graph.session(self.run, self.run_id)
 
-    async def skills(self, _request: RunRequest) -> RunSkills:
-        """Every skill the run may load: each store's skill folders and their ``SKILL.md``."""
+    async def skills(self, request: SkillsRequest) -> RunSkills:
+        """Every skill the run may load but those the runtime serves itself: each store's
+        skill folders and their ``SKILL.md``."""
 
         async def listed() -> RunSkills:
             stores = await self.parts.skills(self.config)
-            return RunSkills() if stores is None else await stores.listed()
+            return RunSkills() if stores is None else await stores.listed(request.served)
 
         return await in_graph_context(
             {**self.config, "run_name": "skills"}, lambda _runtime: listed()
@@ -1170,7 +1178,7 @@ class TokenRun:
         offered = (
             next((t for t in client.tools if t.name == request.name), None) if client else None
         )
-        return await run_operation(
+        result = await run_operation(
             offered or await self.parts.tool(self.config, request.name),
             request,
             config=self.config,
@@ -1180,6 +1188,25 @@ class TokenRun:
             ready=self._ready,
             assistant_id=self.graph.assistant_id,
         )
+        if request.name not in _JOINS_TASK or result.status == "error":
+            return result
+        joined = await self._task_context_message()
+        if joined is None:
+            return result
+        return result.model_copy(update={"state": {**result.state, JOINED_TASK_CONTEXT: joined}})
+
+    async def _task_context_message(self) -> str | None:
+        """The context of the task the run's thread belongs to now, if it belongs to one."""
+        try:
+            coordination = await TaskCoordinationMiddleware.for_thread(self.run.thread_id)
+        except Exception:
+            logger.warning(
+                "Could not read the task the thread joined",
+                extra={"agent_thread_id": self.run.thread_id},
+                exc_info=True,
+            )
+            return None
+        return coordination.context_message() if coordination is not None else None
 
     async def _tool_set(self) -> ToolSet:
         if self.run.settings.tools is None:
@@ -1233,6 +1260,22 @@ class TokenRun:
             reason=request.reason,
         )
         return Done()
+
+    async def route_model(self, request: Routed) -> Route:
+        """Deprecated: an MDA deployment from before it classified routes itself asks here."""
+        selection = await classify_route(messages_from_dict(request.humans))
+        return Route(route=selection.route, persist=selection.persist)
+
+    async def task_context(self, _request: RunRequest) -> TaskContext:
+        """Deprecated: an MDA deployment from before ``LoopRules.task_context`` asks here."""
+
+        async def read() -> TaskContext:
+            coordination = await TaskCoordinationMiddleware.for_thread(self.run.thread_id)
+            return TaskContext() if coordination is None else coordination.task_context()
+
+        return await in_graph_context(
+            {**self.config, "run_name": "task_context"}, lambda _runtime: read()
+        )
 
     async def model_choice(self, request: ChosenModel) -> ModelSpec:
         return chosen_model(request.model_id, request.effort)
@@ -1656,6 +1699,9 @@ async def _download(run: ReachesFiles, request: DownloadRequest) -> TransferRepl
     )
 
 
+# Operations that can make the run's thread a task's coordinator mid-run, after its catalog
+# was planned without the task: their answer hands the run the task's context.
+_JOINS_TASK: Final = frozenset({"manage_baby_sit"})
 # Calls any run answers from its token and request: what it reads and what it reports.
 RUN_CALLS: Final = Handlers[TokenRun]()
 RUN_CALLS.serve(BROWSER, TokenRun.browser)
@@ -1668,7 +1714,9 @@ RUN_CALLS.serve(INBOX_RECEIVED, TokenRun.inbox_received)
 RUN_CALLS.serve(MODEL_RESULT, TokenRun.model_result)
 RUN_CALLS.serve(TOOL_STARTED, TokenRun.tool_started)
 RUN_CALLS.serve(TOOL_RESULT, TokenRun.tool_result)
+RUN_CALLS.serve(ROUTE_MODEL, TokenRun.route_model)
 RUN_CALLS.serve(MODEL_CHOICE, TokenRun.model_choice)
+RUN_CALLS.serve(TASK_CONTEXT, TokenRun.task_context)
 RUN_CALLS.serve(REFRESH_GITHUB_PROXY, TokenRun.refresh_github_proxy)
 RUN_CALLS.serve(SANDBOX_PROXY, TokenRun.sandbox_proxy)
 RUN_CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)
