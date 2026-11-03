@@ -649,7 +649,7 @@ run it returns:
 ```python
 def on_reaction(event: SlackActivityEvent, thread: SlackChannelThread):
     if event.reaction == "thumbsup" and not event.removed:
-        return (f"<@{event.user_id}> liked: {event.text}", {"multitask_strategy": "enqueue"})
+        return [{"input": f"<@{event.user_id}> liked: {event.text}", "multitask_strategy": "enqueue"}]
     return None
 
 
@@ -670,6 +670,10 @@ message: `action_id` is the shortcut's `callback_id`, `user_id` the person who u
 and `payload` Slack's interaction payload, with its `response_url` to answer
 them. Trigger Server forwards it wherever a person used it, as a mention. Your
 app defines its shortcuts in its own settings; it needs the `commands` scope.
+
+A `channel` handler takes a change to a channel itself: created, renamed,
+archived, unarchived or deleted (`type` is Slack's event, `group_*` for a private
+channel), with `channel_id` and `team_id`. It names no message or thread.
 
 `event.actor` is the Slack user who sent the message, as Trigger Server read
 it from Slack's signed request: a `SlackActor` with `id` and `team_id`.
