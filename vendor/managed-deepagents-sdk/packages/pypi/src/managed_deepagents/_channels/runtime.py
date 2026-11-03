@@ -79,6 +79,7 @@ class ChannelPost(Protocol):
         new_thread: Literal[True],
         run: ChannelRunResult | None = None,
         hand_off: bool = False,
+        to: ChannelTarget | None = None,
     ) -> Awaitable[PostedChannelThread]: ...
 
     def __call__(
@@ -88,6 +89,7 @@ class ChannelPost(Protocol):
         new_thread: bool = False,
         run: ChannelRunResult | None = None,
         hand_off: bool = False,
+        to: ChannelTarget | None = None,
     ) -> Awaitable[PostedChannelMessage]:
         """Post in this thread, or with ``new_thread=True`` at top level.
 
@@ -97,20 +99,56 @@ class ChannelPost(Protocol):
         channel handler's run input. ``hand_off=True`` moves this conversation
         there instead: replies, Stop and decision buttons in the new provider
         thread reach this run's thread, with its history, and the old provider
-        thread no longer has a thread; not with ``run``. Only Trigger channels
-        that name the new thread support it. ``new_thread``, ``run`` and
-        ``hand_off`` are experimental and may change in a minor release.
+        thread no longer has a thread; not with ``run``. ``to`` starts the new
+        thread in another conversation of this channel, such as another Slack
+        channel the app is in: a ``ChannelTarget`` of the origin's provider with
+        no thread. Only Trigger channels that name the new thread support it.
+        ``new_thread``, ``run``, ``hand_off`` and ``to`` are experimental and
+        may change in a minor release.
         """
         ...
 
 
 StartThread = Callable[..., Awaitable[PostedChannelThread]]
-"""``(message, run, *, hand_off=False)``: post at top level and start the new thread."""
+"""``(message, run, *, hand_off=False, to=None)``: post at top level and start the new thread."""
 
 
 @dataclass(frozen=True)
 class RuntimeChannel(ChannelInfo):
     post: ChannelPost | None = None
+
+
+async def _start_new_thread(
+    start_thread: StartThread | None,
+    message: ChannelMessage,
+    run: ChannelRunResult | None,
+    *,
+    hand_off: bool,
+    to: ChannelTarget | None,
+) -> PostedChannelThread:
+    """A ``new_thread=True`` post, with its options checked."""
+    if start_thread is None:
+        raise ValueError("this channel cannot start a new thread")
+    if hand_off and run is not None:
+        raise ValueError("a post that hands off the thread starts no run")
+    where: dict[str, object] = {}
+    if hand_off:
+        where["hand_off"] = True
+    if to is not None:
+        where["to"] = to
+    return await start_thread(message, None if hand_off else run, **where)
+
+
+def _check_in_thread_post(
+    run: ChannelRunResult | None, *, hand_off: bool, to: ChannelTarget | None
+) -> None:
+    """Refuse the options only a ``new_thread=True`` post takes."""
+    if run is not None:
+        raise ValueError("a post starts a run only with new_thread=True")
+    if hand_off:
+        raise ValueError("a post hands off the thread only with new_thread=True")
+    if to is not None:
+        raise ValueError("a post goes to another conversation only with new_thread=True")
 
 
 def create_runtime_channel(
@@ -149,21 +187,13 @@ def create_runtime_channel(
         new_thread: bool = False,
         run: ChannelRunResult | None = None,
         hand_off: bool = False,
+        to: ChannelTarget | None = None,
     ) -> PostedChannelMessage:
         validate_message(message)
         copied = cast("ChannelMessage", json_copy(cast("JsonValue", message)))
         if new_thread:
-            if start_thread is None:
-                raise ValueError("this channel cannot start a new thread")
-            if hand_off and run is not None:
-                raise ValueError("a post that hands off the thread starts no run")
-            if hand_off:
-                return await start_thread(copied, None, hand_off=True)
-            return await start_thread(copied, run)
-        if run is not None:
-            raise ValueError("a post starts a run only with new_thread=True")
-        if hand_off:
-            raise ValueError("a post hands off the thread only with new_thread=True")
+            return await _start_new_thread(start_thread, copied, run, hand_off=hand_off, to=to)
+        _check_in_thread_post(run, hand_off=hand_off, to=to)
         result = transport.post(
             message=copied,
             target=json_copy(bound_target),
