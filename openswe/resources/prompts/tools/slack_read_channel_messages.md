@@ -3,7 +3,8 @@ Read the most recent top-level messages in a public Slack channel.
 Use this to see what a channel has been talking about — the conversation around a request that names something you cannot otherwise see ("this error", "that PR", "the thing we discussed").
 Provide the channel_id and optionally how many messages to read (default 30, newest last).
 
-Available in private assistant threads, or for bot-triggered Slack runs in their current public channel only.
+Reads are authorized in private assistant threads, or for bot-triggered Slack runs in their current public channel only.
+The tool remains bound on human-triggered public Slack turns but refuses channel-history reads.
 Use recent alerts to locate earlier investigations before investigating a repeated failure.
 
 Public channels only: this reads with the workspace bot's own access rather than the asker's, so a private channel, a DM, or a channel shared with another organization is refused.
