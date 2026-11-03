@@ -10,7 +10,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import posixpath
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from functools import partial
@@ -20,17 +19,28 @@ from langchain_core.tools import StructuredTool
 from langgraph.runtime import Runtime
 from langsmith import tracing_context
 from managed_deepagents import ManagedToolRuntime
-from managed_deepagents.browser import BrowserMiddleware, BrowserState, _Session
-from pydantic import JsonValue, TypeAdapter
+from managed_deepagents.browser import (
+    BrowserMiddleware,
+    BrowserState,
+    _reply,  # noqa: PLC2701 - notes a remade browser
+    _Session,
+)
+from pydantic import JsonValue
 from runtime_api.endpoint import call
 from runtime_api.loop import BROWSER, BrowserReport
-from runtime_api.mcp_secrets import SESSION_FILE, McpResult
 
 from rt.backend import OpenSweBackend
+from rt.session_handoff import HeldSessions
 from rt.tools import run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
+
+_INSTALLED = "Session installed."
+_SESSION_HOSTS = re.compile(
+    r"(?:(?:beta|eu|apac|aws|dev)\.)?smith\.langchain\.com"
+    r"|pr-[0-9]+(?:-fe)?\.review\.smith\.langchain\.com"
+)
 
 
 class ReportedBrowserMiddleware(BrowserMiddleware):
@@ -52,11 +62,11 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
         if isinstance(run, StructuredTool) and run.coroutine is not None:
             run.coroutine = partial(self._run_with_session, run.coroutine)
             if isinstance(run.args_schema, dict):
-                run.args_schema["properties"]["session_file"] = {
+                run.args_schema["properties"]["session_handle"] = {
                     "type": "string",
-                    "description": "Private MCP session_file to install; do not read or inline it.",
+                    "description": "An MCP result's session_handle: signs the browser in.",
                 }
-            self._arguments["browser_run"].add("session_file")
+            self._arguments["browser_run"].add("session_handle")
         # (browser name, whether it is opened) already reported, or being reported.
         self._reported: set[tuple[str, bool]] = set()
         self._reporting: dict[tuple[str, bool], asyncio.Task[None]] = {}
@@ -65,41 +75,28 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
         self,
         original: Callable[..., Awaitable[object]],
         runtime: ManagedToolRuntime,
-        session_file: str | None = None,
+        session_handle: str | None = None,
         **arguments: object,
     ) -> object:
-        if session_file is None:
+        if session_handle is None:
             return await original(runtime=runtime, **arguments)
         if arguments.get("code") or arguments.get("actions"):
             return "Install the session separately from browser code or actions."
-        if not SESSION_FILE.fullmatch(session_file):
-            return "Invalid private MCP session file."
-        files = self._files(runtime)
-        try:
-            with tracing_context(enabled=False):
-                [saved] = await files.adownload_files([session_file])
-                if saved.error or saved.content is None:
-                    raise ValueError("Session file unavailable")
-                payload = TypeAdapter(dict[str, JsonValue]).validate_json(saved.content)
-                data = McpResult(payload.get("content"), payload.get("artifact")).session()
-                host, key, session = data["host"], data["storage_key"], data["session"]
-                if not isinstance(host, str) or not re.fullmatch(
-                    r"(?:(?:beta|eu|apac|aws|dev)\.)?smith\.langchain\.com"
-                    r"|pr-[0-9]+(?:-fe)?\.review\.smith\.langchain\.com",
-                    host,
-                ):
-                    raise ValueError("Invalid session host")
-                if not isinstance(key, str) or not isinstance(session, dict):
-                    raise ValueError("Invalid browser session")
-                result, _ = await self._call(runtime, partial(self._install, host, key, session))
-                if result != "Session installed.":
-                    raise ValueError("Browser installation failed")
-                return result
-        except Exception:
-            logger.warning("Private browser session installation failed")
-            return "Could not install the private browser session; credentials were not returned."
-        finally:
-            await files.adelete(posixpath.dirname(session_file))
+        held = HeldSessions.of(self._backend)
+        data = held.pop(session_handle, None) if held is not None else None
+        if data is None:
+            return "Unknown or used session_handle; mint a new session in this turn."
+        host, key, session = data.get("host"), data.get("storage_key"), data.get("session")
+        if not isinstance(host, str) or not _SESSION_HOSTS.fullmatch(host):
+            return "The session's host is not a LangSmith site."
+        if not isinstance(key, str) or not isinstance(session, dict):
+            return "The MCP result held no browser session."
+        with tracing_context(enabled=False):
+            content, box = await self._call(runtime, partial(self._install, host, key, session))
+        if content != _INSTALLED:
+            logger.warning("Could not install a held browser session")
+            content = "Could not install the browser session."
+        return _reply(runtime, "browser_run", content, box)
 
     async def _install(
         self, host: str, key: str, value: dict[str, JsonValue], session: _Session
@@ -114,7 +111,7 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
             f"localStorage.setItem({json.dumps(key)}, {json.dumps(json.dumps(value))}); }})()"
         )
         await page.goto(f"https://{host}")
-        return "Session installed."
+        return _INSTALLED
 
     async def abefore_agent(self, state: BrowserState, runtime: Runtime) -> None:
         if not self._enabled:

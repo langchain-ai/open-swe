@@ -121,7 +121,7 @@ async def test_a_server_tool_gets_the_arguments_langchain_names_for_itself(
         arguments: Mapping[str, object],
         tool_call_id: str,
         *,
-        sandbox: object = None,
+        held: object = None,
     ) -> ToolMessage:
         sent.append(arguments)
         return ToolMessage(content="ok", tool_call_id=tool_call_id)

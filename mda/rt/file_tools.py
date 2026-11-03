@@ -38,7 +38,6 @@ from langsmith.sandbox import SandboxRetryableConnectionError
 from pydantic import JsonValue
 from runtime_api.catalog import FilesSpec
 from runtime_api.endpoint import call
-from runtime_api.mcp_secrets import SECRETS_MARKER
 from runtime_api.operations import CHECK_SHELL, ShellCheck
 
 from rt.backend import OpenSweBackend, RunLocal
@@ -230,13 +229,6 @@ class FileToolsMiddleware(AgentMiddleware):
 
     async def _screened(self, request: ToolCallRequest) -> ToolCallRequest | ToolMessage:
         """``request`` as the guards let it run, an approved push as they fixed it, or their refusal."""
-        if SECRETS_MARKER in json.dumps(request.tool_call["args"]):
-            return ToolMessage(
-                content="Private MCP session files are only installed with browser_run session_file.",
-                tool_call_id=request.tool_call.get("id") or "",
-                name=request.tool_call["name"],
-                status="error",
-            )
         command = request.tool_call["args"].get("command")
         if (
             request.tool_call["name"] != "execute"

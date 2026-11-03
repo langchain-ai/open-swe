@@ -21,7 +21,7 @@ from langchain.mcp import as_langchain_tool
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from langsmith import tracing_context
 from runtime_api.catalog import McpServerSpec
-from runtime_api.mcp_secrets import McpResult
+from runtime_api.mcp_secrets import HELD_SESSIONS, McpResult
 
 from mcp.shared.exceptions import MCPError
 from mcp.types import Tool
@@ -30,7 +30,6 @@ from openswe.mcp.models import CONNECTION_OWNERS, MCPConnection, MCPScope, MCPTo
 from openswe.mcp.oauth import MCPOAuthError, connection_auth
 from openswe.mcp.transport import MCPDiscoveryError, mcp_http_client
 from openswe.prompts import prompt
-from openswe.run_config import RunConfig
 from openswe.utils.startup_trace import asubphase
 
 if TYPE_CHECKING:
@@ -288,14 +287,7 @@ def _wrap_tool(
                     )
                 except ToolException as exc:
                     raise ToolException(McpResult.scrub(str(exc))) from None
-                result = McpResult(content, artifact)
-                sandbox = None
-                if result.secrets and (thread_id := RunConfig.from_runtime().thread_id):
-                    # Lazy: the dashboard webapp imports this module without the agent stack.
-                    from openswe.sandboxes.state import get_sandbox_backend
-
-                    sandbox = await get_sandbox_backend(thread_id)
-                protected = await result.protect(sandbox)
+                protected = McpResult(content, artifact).withheld(HELD_SESSIONS.get())
             is_error = False
             return protected
         except ToolException:

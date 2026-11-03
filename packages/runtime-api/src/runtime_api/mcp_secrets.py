@@ -1,38 +1,27 @@
-"""Credential-free MCP results and private sandbox handoffs."""
+"""Credential-free MCP results, and the browser sessions they carried.
+
+The model sees an MCP result with its credentials redacted. A browser session in it
+is held under an opaque handle, out of the thread's history, traces and sandbox,
+until ``browser_run`` installs it.
+"""
 
 import json
 import re
-from collections.abc import Sequence
-from typing import Final, Protocol
+from contextvars import ContextVar
+from typing import Final
+from uuid import uuid4
 
 from pydantic import JsonValue, TypeAdapter
 
-SECRETS_MARKER: Final = "open-swe-secrets-"
-SESSION_FILE: Final = re.compile(rf"/tmp/{SECRETS_MARKER}[A-Za-z0-9]+/response\.json")
+type Sessions = dict[str, dict[str, JsonValue]]
+
+# The sessions a backend operation's MCP calls held back, for the run to keep.
+HELD_SESSIONS: ContextVar[Sessions | None] = ContextVar("held_mcp_sessions", default=None)
 _TOKEN_KEYS: Final = frozenset({"access_token", "refresh_token"})
 _MIN_SECRET: Final = 16
 _JWT = re.compile(r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}")
 _TOKEN = re.compile(r"""(?i)["']?(?:access|refresh)[_-]token["']?\s*[:=]\s*["']?([^\s,"'}]+)""")
 _json = TypeAdapter(JsonValue)
-
-
-class Execution(Protocol):
-    @property
-    def output(self) -> str: ...
-
-    @property
-    def exit_code(self) -> int | None: ...
-
-
-class Upload(Protocol):
-    @property
-    def error(self) -> str | None: ...
-
-
-class SecretSandbox(Protocol):
-    async def aexecute(self, command: str) -> Execution: ...
-
-    async def aupload_files(self, files: list[tuple[str, bytes]]) -> Sequence[Upload]: ...
 
 
 class McpResult:
@@ -94,32 +83,19 @@ class McpResult:
             value = value.replace(secret, "[REDACTED]")
         return value
 
-    async def protect(self, sandbox: SecretSandbox | None) -> tuple[object, object]:
-        """The response for the model; credentials go to a private sandbox file it names."""
+    def withheld(self, held: Sessions | None) -> tuple[object, object]:
+        """The response for the model; a browser session in it goes to ``held`` under a handle."""
         if not self.secrets or not isinstance(self.original, dict):
             return self.content, self.artifact
-        if sandbox is None:
-            raise ValueError("Cannot retain MCP credentials without a sandbox")
-        made = await sandbox.aexecute(
-            f"umask 077; d=$(mktemp -d /tmp/{SECRETS_MARKER}XXXXXXXXXXXX) && "
-            'touch "$d/response.json" && printf %s "$d/response.json"'
-        )
-        path = made.output.strip()
-        if made.exit_code != 0 or not SESSION_FILE.fullmatch(path):
-            raise ValueError("Cannot create private MCP response file")
-        uploaded = await sandbox.aupload_files([(path, json.dumps(self.original).encode())])
-        if len(uploaded) != 1 or uploaded[0].error:
-            raise ValueError("Cannot save private MCP response file")
         content = self.redacted(self.original["content"])
-        note: JsonValue = {"type": "text", "text": json.dumps({"session_file": path})}
-        blocks = [*content, note] if isinstance(content, list) else [content, note]
-        return blocks, self.redacted(self.original["artifact"])
-
-    def session(self) -> dict[str, JsonValue]:
-        found = self._session(self.original)
-        if found is None:
-            raise ValueError("No browser session in MCP response")
-        return found
+        artifact = self.redacted(self.original["artifact"])
+        session = self._session(self.original)
+        if held is None or session is None:
+            return content, artifact
+        handle = uuid4().hex
+        held[handle] = session
+        note: JsonValue = {"type": "text", "text": json.dumps({"session_handle": handle})}
+        return [*content, note] if isinstance(content, list) else [content, note], artifact
 
     def _session(self, value: JsonValue) -> dict[str, JsonValue] | None:
         if isinstance(value, str):
