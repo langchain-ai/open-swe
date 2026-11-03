@@ -237,7 +237,11 @@ export function AgentsHome({
   // Memoized: a fresh array fed straight into the pick below reads as a
   // mutation to the React Compiler and costs the component its optimization.
   const workspaceRepos = useMemo(() => accessibleRepos ?? [], [accessibleRepos])
-  const repo = pickComposerRepo({
+  // Working in a repository needs GitHub; until it is linked the picker asks
+  // for it, and runs go to a task folder whatever was remembered or linked.
+  const gitHubLinkUser =
+    session.data && !hasLinkedGitHub(session.data) ? session.data : undefined
+  const pickedRepo = pickComposerRepo({
     override: repoSelection,
     userDefault: userDefaultRepo,
     userWorkspaceDefault: selectedWorkspace
@@ -248,6 +252,7 @@ export function AgentsHome({
         ?.default_repo ?? null,
     offered: workspaceRepos,
   })
+  const repo = gitHubLinkUser ? null : pickedRepo
   const selectWorkspace = (slug: string | null) => {
     setWorkspaceOverride(slug)
   }
@@ -698,6 +703,7 @@ export function AgentsHome({
               repos={workspaceRepos}
               selectedRepo={repo}
               onRepoChange={optimisticDraftThread ? undefined : selectRepo}
+              gitHubLinkUser={gitHubLinkUser}
               runTarget={runTarget}
               onRunTargetChange={
                 !optimisticDraftThread && isDesktop && cloudEnabled

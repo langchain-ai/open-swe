@@ -278,6 +278,30 @@ describe("ChatComposer options", () => {
     expect(await screen.findByRole("button", { name: "main" })).toBeTruthy()
   })
 
+  it("asks someone without GitHub to link it before choosing a repository", async () => {
+    const onRepoChange = vi.fn()
+    renderComposer(false, {
+      repos: [{ full_name: "acme/api" }],
+      onRepoChange,
+      gitHubLinkUser: {
+        login: "ada",
+        auth_provider: "langsmith",
+        github_login: null,
+        email: "ada@example.com",
+        avatar_url: null,
+        is_admin: false,
+      },
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Select repository" }))
+
+    expect(
+      await screen.findByText("Link GitHub to work in a repository")
+    ).toBeTruthy()
+    expect(screen.queryByText("acme/api")).toBeNull()
+    expect(onRepoChange).not.toHaveBeenCalled()
+  })
+
   it("offers attachments without a plan-mode toggle", async () => {
     renderComposer(false)
 
