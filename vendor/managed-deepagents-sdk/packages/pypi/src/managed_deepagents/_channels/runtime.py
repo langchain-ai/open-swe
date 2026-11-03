@@ -78,6 +78,7 @@ class ChannelPost(Protocol):
         *,
         new_thread: Literal[True],
         run: ChannelRunResult | None = None,
+        hand_off: bool = False,
     ) -> Awaitable[PostedChannelThread]: ...
 
     def __call__(
@@ -86,20 +87,25 @@ class ChannelPost(Protocol):
         *,
         new_thread: bool = False,
         run: ChannelRunResult | None = None,
+        hand_off: bool = False,
     ) -> Awaitable[PostedChannelMessage]:
         """Post in this thread, or with ``new_thread=True`` at top level.
 
         A top-level post starts a new provider thread in the same conversation,
         which replies continue, also without a mention in Slack's thread mode.
         It returns the thread's ``thread_id``. ``run`` starts a run in it with a
-        channel handler's run input. Only Trigger channels that name the new
-        thread support it. ``new_thread`` and ``run`` are experimental and may
-        change in a minor release.
+        channel handler's run input. ``hand_off=True`` moves this conversation
+        there instead: replies, Stop and decision buttons in the new provider
+        thread reach this run's thread, with its history, and the old provider
+        thread no longer has a thread; not with ``run``. Only Trigger channels
+        that name the new thread support it. ``new_thread``, ``run`` and
+        ``hand_off`` are experimental and may change in a minor release.
         """
         ...
 
 
-StartThread = Callable[[ChannelMessage, "ChannelRunResult | None"], Awaitable[PostedChannelThread]]
+StartThread = Callable[..., Awaitable[PostedChannelThread]]
+"""``(message, run, *, hand_off=False)``: post at top level and start the new thread."""
 
 
 @dataclass(frozen=True)
@@ -142,18 +148,24 @@ def create_runtime_channel(
         *,
         new_thread: bool = False,
         run: ChannelRunResult | None = None,
+        hand_off: bool = False,
     ) -> PostedChannelMessage:
         validate_message(message)
+        copied = cast("ChannelMessage", json_copy(cast("JsonValue", message)))
         if new_thread:
             if start_thread is None:
                 raise ValueError("this channel cannot start a new thread")
-            return await start_thread(
-                cast("ChannelMessage", json_copy(cast("JsonValue", message))), run
-            )
+            if hand_off and run is not None:
+                raise ValueError("a post that hands off the thread starts no run")
+            if hand_off:
+                return await start_thread(copied, None, hand_off=True)
+            return await start_thread(copied, run)
         if run is not None:
             raise ValueError("a post starts a run only with new_thread=True")
+        if hand_off:
+            raise ValueError("a post hands off the thread only with new_thread=True")
         result = transport.post(
-            message=cast("ChannelMessage", json_copy(cast("JsonValue", message))),
+            message=copied,
             target=json_copy(bound_target),
             **({"new_thread": bool(schedule["new_thread"])} if schedule is not None else {}),
         )
