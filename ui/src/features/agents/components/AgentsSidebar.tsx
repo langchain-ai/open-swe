@@ -638,7 +638,7 @@ export function AgentsSidebar({
   return (
     <SidebarFrame
       {...layout}
-      className="border-r border-default bg-surface-level-2"
+      className="border-r border-muted bg-surface-level-2"
     >
       <div
         className={cn(
@@ -673,10 +673,7 @@ export function AgentsSidebar({
         <Link
           to="/agents"
           onClick={layout.closeOnMobile}
-          className={cn(
-            NAV_ROW_CLASS,
-            "group bg-surface-level-3 hover:bg-surface-level-4"
-          )}
+          className={cn(NAV_ROW_CLASS, "group")}
         >
           <PlusIcon size={20} className="-mx-0.5" />
           New
@@ -719,13 +716,13 @@ export function AgentsSidebar({
       <div className="relative flex min-h-0 flex-1 flex-col">
         {scrollEdges.top && (
           <>
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-floating-bar border-t border-default" />
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-floating-bar border-t border-muted" />
             <div className="pointer-events-none absolute inset-x-0 top-0 z-sticky-header h-3 bg-gradient-to-b from-surface-level-2 to-transparent" />
           </>
         )}
         {scrollEdges.bottom && (
           <>
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-floating-bar border-b border-default" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-floating-bar border-b border-muted" />
             <div className="pointer-events-none absolute inset-x-0 bottom-0 z-sticky-header h-3 bg-gradient-to-t from-surface-level-2 to-transparent" />
           </>
         )}

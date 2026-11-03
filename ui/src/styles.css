@@ -92,17 +92,31 @@ body.version-mismatch {
     --color-user-message: var(--bg-user-message);
 }
 
-/* Macaw's dark canvas (neutral-25) is near-black and harsh behind long
-   transcripts. Lift it just above the sidebar so the rail reads as recessed,
-   and raise elevated surfaces with it so the composer still sits on top.
-   User bubbles sit a step above the composer so they read as raised too. */
+/* Macaw's dark neutral ramp is slate pushed toward navy, which reads hazy at
+   this luminance. Draw dark surfaces from Macaw's untinted gray ramp instead,
+   starting the page at gray-25 (Macaw's own dark --background). The surface
+   end shifts down a step so page, rail and composer stay close in tone, and
+   borders sit a step lower than Macaw's so structure comes from fills. */
 html.dark,
 .dark[data-theme-scope] {
-    --bg-surface-level-1: color-mix(in oklch, var(--neutral-50) 55%, var(--neutral-100));
-    --bg-surface-level-1-hover: var(--neutral-100);
-    --bg-elevated: var(--neutral-100);
-    --bg-elevated-hover: color-mix(in oklch, var(--neutral-100), var(--neutral-200));
-    --bg-user-message: color-mix(in oklch, var(--neutral-100), var(--neutral-200));
+    --neutral-25: var(--gray-25);
+    --neutral-35: var(--gray-25);
+    --neutral-50: var(--gray-25);
+    --neutral-100: var(--gray-50);
+    --neutral-200: var(--gray-100);
+    --neutral-300: var(--gray-200);
+    --neutral-400: var(--gray-300);
+    --neutral-500: var(--gray-500);
+    --neutral-600: var(--gray-600);
+    --neutral-700: var(--gray-700);
+    --neutral-800: var(--gray-800);
+    --neutral-900: var(--gray-900);
+    --neutral-950: var(--gray-950);
+    --bg-elevated: var(--gray-100);
+    --bg-elevated-hover: var(--gray-200);
+    --bg-user-message: var(--gray-100);
+    --border-default: var(--gray-200);
+    --border-subtle: var(--gray-100);
 }
 
 :root {
