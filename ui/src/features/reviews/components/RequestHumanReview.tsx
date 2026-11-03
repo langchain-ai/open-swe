@@ -45,7 +45,12 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
         permalink: result.permalink,
         blockers: [],
       }))
-      if (result.reused) return
+      if (result.reused) {
+        if (result.permalink) {
+          window.open(result.permalink, "_blank", "noopener,noreferrer")
+        }
+        return
+      }
       toast.success(
         `Asked ${result.channel_name ? `#${result.channel_name}` : "Slack"} to review ${pullRequestKey(pr)}`,
         result.permalink
