@@ -188,7 +188,7 @@ describe("OwnershipPicker", () => {
     expect(screen.getByRole("checkbox", { name: "internal-sdk" })).toBeTruthy()
     expect(screen.queryByRole("checkbox", { name: "public-docs" })).toBeNull()
     fireEvent.change(screen.getByLabelText("Search repositories"), {
-      target: { value: "org/public-docs" },
+      target: { value: "ORG Public_Docs" },
     })
     expect(screen.queryByRole("checkbox", { name: "internal-sdk" })).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "All" }))

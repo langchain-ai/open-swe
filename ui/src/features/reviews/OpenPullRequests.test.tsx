@@ -618,7 +618,7 @@ describe("My PRs", () => {
     )
     expect(within(section()).queryAllByRole("listitem")).toHaveLength(0)
     expect(await repoOptions()).toEqual(["app", "other"])
-    searchRepos("acme/other")
+    searchRepos("ACME OTHER")
     expect(repoListOptions()).toEqual(["other"])
   })
 

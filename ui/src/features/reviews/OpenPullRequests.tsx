@@ -352,9 +352,7 @@ export function OpenPullRequests({
                 options={repoNames}
                 getOptionLabel={(name) => repoLabels.label(name)}
                 filterOptions={(options, { inputValue }) =>
-                  options.filter((name) =>
-                    name.toLowerCase().includes(inputValue.trim().toLowerCase())
-                  )
+                  options.filter((name) => repoLabels.matches(name, inputValue))
                 }
                 value={repo}
                 onChange={(chosen) =>

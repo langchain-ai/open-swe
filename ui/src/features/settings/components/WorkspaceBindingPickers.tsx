@@ -87,6 +87,7 @@ export function RepositoryPicker({
       workspaceSlug={workspaceSlug}
       onChange={onChange}
       searchPlaceholder="Search repositories"
+      matchesItem={(item, search) => labels.matches(item.id, search)}
       filter={{
         label: "Exclude archived",
         matches: (item) => !reposByName.get(item.id)?.archived,

@@ -116,15 +116,15 @@ it("hides archives even in search until opted in, without clearing the selection
 it("keeps owners in mixed-org choices even when search narrows to one org", async () => {
   render(
     <RepoSelector
-      repos={[{ full_name: "org/app" }, { full_name: "other/app" }]}
+      repos={[{ full_name: "org/open-swe" }, { full_name: "other/app" }]}
       onRepoChange={vi.fn()}
     />,
     { wrapper: TooltipProvider }
   )
   fireEvent.click(screen.getByRole("button", { name: "Select repository" }))
   fireEvent.change(screen.getByPlaceholderText("Search repositories…"), {
-    target: { value: "org/" },
+    target: { value: "ORG Open_SWE" },
   })
-  expect(await screen.findByText("org/app")).toBeTruthy()
+  expect(await screen.findByText("org/open-swe")).toBeTruthy()
   expect(screen.queryByText("other/app")).toBeNull()
 })

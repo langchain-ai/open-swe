@@ -9,6 +9,13 @@ export class RepositoryLabels {
       owners.size === 1 ? (owners.values().next().value ?? null) : null
   }
 
+  matches(fullName: string, query: string): boolean {
+    return fullName
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]/gu, "")
+      .includes(query.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ""))
+  }
+
   label(fullName: string): string {
     const [owner, name] = fullName.split("/")
     return name && owner?.toLowerCase() === this.owner ? name : fullName

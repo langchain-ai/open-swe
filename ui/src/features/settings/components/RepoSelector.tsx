@@ -69,7 +69,7 @@ export function RepoSelector({
   const filteredRepos = (repos ?? []).filter(
     (repo) =>
       ((allowArchived && showArchived) || !repo.archived) &&
-      repo.full_name.toLowerCase().includes(query.trim().toLowerCase())
+      labels.matches(repo.full_name, query)
   )
 
   return (

@@ -62,9 +62,7 @@ export function AddRepositoryField({
           options={suggestions.map((r) => r.full_name)}
           getOptionLabel={(name) => labels.label(name)}
           filterOptions={(options, { inputValue }) =>
-            options.filter((name) =>
-              name.toLowerCase().includes(inputValue.trim().toLowerCase())
-            )
+            options.filter((name) => labels.matches(name, inputValue))
           }
           placeholder="Search installed repos…"
           renderOption={(fullName) => (
