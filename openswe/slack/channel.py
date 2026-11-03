@@ -284,12 +284,21 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
             request = await web_opening(request, BreakoutCommand.from_message(parsed), conversation)
         case "breakout":
             branches = await _branches(conversation, turn, owner_login)
-            opened = await _open_breakout(
+            opened, refusal = await _open_breakout(
                 request, BreakoutCommand.from_message(parsed), repo, branches=branches
             )
             if opened is None:
-                _no_run("breakout opened nothing", **fields)
-                return SlackTurnStarted()
+                if refusal is None:
+                    _no_run("breakout opened nothing", **fields)
+                    return SlackTurnStarted()
+                # The handler replies in the Slack thread, once per call.
+                if not await _first_decline(webhook_id, turn):
+                    _no_run("declined already", **fields)
+                    return SlackTurnStarted()
+                _no_run("declined: breakout", **fields)
+                return SlackTurnStarted(
+                    declined=SlackTurnDeclined(reason="breakout", message=refusal)
+                )
             request, repo = opened
         case "move":
             request = request.model_copy(
@@ -396,18 +405,26 @@ async def _open_breakout(
     repo: common.SlackRepoResolution | None,
     *,
     branches: bool,
-) -> tuple[SlackRequest, common.SlackRepoResolution | None] | None:
+) -> tuple[tuple[SlackRequest, common.SlackRepoResolution | None] | None, str | None]:
     """Open a breakout's new Slack thread: its first turn, which runs on the command's own
-    thread; ``None`` when the breakout told the sender why it opened nothing."""
+    thread, or ``None`` with why it opened nothing, which the Slack thread hears."""
     opened: list[tuple[SlackRequest, common.SlackRepoResolution | None]] = []
+    told: list[str] = []
 
     async def hand_to_mda(
         opening: SlackRequest, opening_repo: common.SlackRepoResolution | None
     ) -> None:
         opened.append((opening, opening_repo))
 
-    await process_slack_breakout(request, command, repo, hand_to_mda=hand_to_mda, branches=branches)
-    return opened[0] if opened else None
+    async def tell(_request: SlackRequest, text: str) -> None:
+        told.append(text)
+
+    await process_slack_breakout(
+        request, command, repo, hand_to_mda=hand_to_mda, branches=branches, tell=tell
+    )
+    if opened:
+        return opened[0], None
+    return None, told[-1] if told else None
 
 
 async def _notify_web_breakout(request: SlackRequest, webhook_id: str) -> None:

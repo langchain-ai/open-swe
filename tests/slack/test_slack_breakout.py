@@ -423,3 +423,23 @@ async def test_a_breakout_handed_to_mda_branches_off_the_conversations_thread(
     assert (opening.thread_id, opening.held_thread_id) == (side, "old-thread")
     # Its first turn still reads the Slack thread, for what the agent never got there.
     assert (opening.context_channel_id, opening.context_thread_ts) == ("C1", "100.0")
+
+
+@pytest.mark.asyncio
+async def test_a_breakout_that_opens_nothing_tells_whoever_asked_for_the_reason(monkeypatch):
+    posted = _patch_slack(monkeypatch)
+    told: list[str] = []
+
+    async def tell(_request: SlackRequest, text: str) -> None:
+        told.append(text)
+
+    await breakout.process_slack_breakout(
+        _request(), Command("fix it", "#nowhere"), None, hand_to_mda=AsyncMock(), tell=tell
+    )
+
+    # MDA's Slack channel replies in the thread with it, instead of a private notice.
+    assert told == [
+        "`#nowhere` is not a Slack channel. Pick one from Slack's autocomplete: "
+        "`/breakout #channel`."
+    ]
+    posted.ephemeral.assert_not_awaited()

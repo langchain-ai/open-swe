@@ -151,9 +151,13 @@ class SlackTurnDeclined(BaseModel):
     # ``external_channel``: Open SWE doesn't operate in a channel with external
     # participants. ``sign_in``: the person hasn't signed in to Open SWE with
     # GitHub; ``sign_in_again``: their GitHub sign-in is no longer valid.
-    reason: Literal["external_channel", "sign_in", "sign_in_again"]
+    # ``breakout``: a breakout opened nothing, as ``message`` says (such as a
+    # channel Open SWE isn't in).
+    reason: Literal["external_channel", "sign_in", "sign_in_again", "breakout"]
     # Where the person signs in, when the backend has a dashboard URL.
     settings_url: str | None = None
+    # What the Slack thread hears, for a ``breakout``.
+    message: str | None = Field(default=None, min_length=1, max_length=1000)
 
 
 class SlackTurnStart(BaseModel):
