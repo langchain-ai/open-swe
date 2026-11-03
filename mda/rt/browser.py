@@ -60,7 +60,14 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
         self._arguments.pop("browser_handoff", None)
         run = next((tool for tool in self.tools if tool.name == "browser_run"), None)
         if isinstance(run, StructuredTool) and run.coroutine is not None:
-            run.coroutine = partial(self._run_with_session, run.coroutine)
+            original = run.coroutine
+
+            async def run_with_session(
+                runtime: ManagedToolRuntime, session_handle: str | None = None, **arguments: object
+            ) -> object:
+                return await self._run_with_session(original, runtime, session_handle, **arguments)
+
+            run.coroutine = run_with_session
             if isinstance(run.args_schema, dict):
                 run.args_schema["properties"]["session_handle"] = {
                     "type": "string",
