@@ -44,6 +44,11 @@ def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block
     pr = approval.pull_request
     label = pr.label
     blocks = [section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}")]
+    if approval.approval_condition:
+        blocks.append(section(f"*Approval condition:* {escape(approval.approval_condition)}"))
+        blocks.append(
+            context(f"Already covered by auto-approval: {escape(approval.auto_approved)}")
+        )
     if approval.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(approval.tldr).splitlines())))
     return [*blocks, context(f"Author {author}")]
@@ -58,6 +63,7 @@ def _diff_sections(
         *_overflow_note(shown),
         *_diffstat("Tests", "test files", diff.tests),
         *_diffstat("Generated", "generated files", diff.generated),
+        *_condition_summary(diff),
         *_excluded_summary(diff),
     ]
     if diff_image_id:
@@ -103,12 +109,41 @@ def _diffstat(title: str, noun: str, files: list[ChangedFile]) -> list[Block]:
     return [context(heading + "\n".join(lines))]
 
 
+def _condition_summary(diff: ExpeditedDiff) -> list[Block]:
+    """The diffstat of what the condition covers, which the card never draws."""
+    if not diff.by_condition:
+        return []
+    stats: dict[str, list[int]] = {}
+    for entry in diff.by_condition:
+        counts = stats.setdefault(entry["path"], [0, 0])
+        counts[0] += entry["additions"]
+        counts[1] += entry["deletions"]
+    added = sum(counts[0] for counts in stats.values())
+    deleted = sum(counts[1] for counts in stats.values())
+    heading = (
+        f"*Covered by the condition above (not shown):* {len(stats)} "
+        f"{'file' if len(stats) == 1 else 'files'} +{added} −{deleted}. Open SWE's review "
+        "would approve these subject to human approval of the stated condition.\n"
+    )
+    budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
+    lines: list[str] = []
+    for path, (plus, minus) in list(stats.items())[:_MAX_FILE_SECTIONS]:
+        line = f"`{escape(path)}`  +{plus} −{minus}"
+        budget -= len(line) + 1
+        if budget < 0:
+            break
+        lines.append(line)
+    if len(lines) < len(stats):
+        lines.append(f"{len(stats) - len(lines)} more files on GitHub.")
+    return [context(heading + "\n".join(lines))]
+
+
 def _excluded_summary(diff: ExpeditedDiff) -> list[Block]:
     """One line per APPROVALS.md guideline the agent cited, naming the files it covers."""
-    if not diff.excluded:
+    if not diff.by_guideline:
         return []
     stats: dict[str, dict[str, list[int]]] = {}
-    for entry in diff.excluded:
+    for entry in diff.by_guideline:
         counts = stats.setdefault(entry["guideline"], {}).setdefault(entry["path"], [0, 0, 0])
         counts[0] += 1
         counts[1] += entry["additions"]
