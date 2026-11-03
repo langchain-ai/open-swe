@@ -4,10 +4,11 @@ from typing import Annotated, Literal, TypedDict
 
 from langchain.tools import ToolRuntime
 from pydantic import Field
+from runtime_api.catalog import kept_route
 
 from openswe.analytics.feedback import record_feedback_submission
 from openswe.audit_logs.tools import audit_tool
-from openswe.middleware.model_selection import ModelSelectionState, SelectedRoute, normalize_route
+from openswe.middleware.model_selection import ModelSelectionState
 from openswe.run_config import RunConfig
 from openswe.thread_feedback import FEEDBACK, Feedback
 from openswe.utils.langsmith import create_langsmith_thread_feedback
@@ -33,8 +34,7 @@ async def submit_thread_feedback(
         raise ValueError("No active thread")
     normalized_comment = comment.strip()
     run_id = str(runtime.config.get("run_id") or cfg.run_id or "")
-    persisted_route = runtime.state.get("model_route") if runtime.state else None
-    route: SelectedRoute | None = normalize_route(persisted_route) if persisted_route else None
+    route = kept_route(runtime.state.get("model_route") if runtime.state else None)
     async with agent_thread_pr_state_lock(cfg.thread_id):
         record = await FEEDBACK.get(cfg.thread_id)
         record = record or Feedback(event_id=f"tool:{run_id}", answer_run_id=run_id)

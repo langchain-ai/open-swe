@@ -10,7 +10,7 @@ settings helpers serve both: ``chosen_model`` answers ``model_choice``.
 import inspect
 import logging
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
-from typing import Final, Literal, cast, get_args
+from typing import Final, Literal, cast
 from uuid import uuid4
 
 from langchain.agents.middleware import ModelCallLimitMiddleware
@@ -26,13 +26,12 @@ from langchain_quickjs import CodeInterpreterMiddleware
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from pydantic import JsonValue, TypeAdapter, ValidationError
-from runtime_api.catalog import ModelSpec, RunModels
+from runtime_api.catalog import ModelSpec, RunModels, kept_route
 from runtime_api.loop import BeforeModel, ModelCall, PhaseResult, RunCall
 
 from openswe.dashboard.options import model_supports_images
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.model_call_shape import CallShape, ShapesModelCalls
-from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.prompts import common_prompt
 from openswe.runtime.constants import DEFAULT_LLM_MAX_TOKENS
 from openswe.server import fallback_model_choice
@@ -44,8 +43,6 @@ logger = logging.getLogger(__name__)
 MESSAGE_KEY: Final = "__lc_message__"
 # Loop bookkeeping and code mode MDA's own middleware already does.
 _MDA_PHASES: Final = (ModelCallLimitMiddleware, CodeInterpreterMiddleware)
-# PersistedRoute is a union of literals: its arguments are the literals, not the names.
-_ROUTES: Final = frozenset(name for route in get_args(PersistedRoute) for name in get_args(route))
 
 _json = TypeAdapter(JsonValue)
 _json_object = TypeAdapter(dict[str, JsonValue])
@@ -209,12 +206,10 @@ class ModelChoices:
         requested = state.get("requested_model")
         if isinstance(requested, str) and requested:
             return chosen_model(requested, state.get("requested_effort"))
-        route = state.get("model_route")
-        if route in _ROUTES and route is not None:
-            selected_route = normalize_route(cast(PersistedRoute, route))
-            routed = self.models.routes.get(selected_route)
-            if routed is not None and selected_route != "default":
-                return routed
+        route = kept_route(state.get("model_route"))
+        routed = self.models.routes.get(route) if route not in (None, "default") else None
+        if routed is not None:
+            return routed
         selected = state.get("selected_model_id")
         if isinstance(selected, str) and selected and selected != self.models.model.model_id:
             return chosen_model(selected, state.get("selected_effort"))
