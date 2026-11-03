@@ -64,9 +64,9 @@ async def start_click(
 ) -> ChannelRunResult | None:
     actor = event.actor
     # The agent's buttons and the backend's cards sit on a message in a Slack
-    # thread; a click in a code channel's view has neither.
+    # thread.
     thread_ts, message_ts = event.thread_ts, event.message_ts
-    if actor is None or thread_ts is None:
+    if actor is None:
         return None
     value = _button(event.value) if message_ts is not None else None
     if (
