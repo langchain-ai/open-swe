@@ -599,6 +599,32 @@ describe("sidebar queries", () => {
     }
   )
 
+  it("does not reinsert an open concierge conversation into the sidebar", () => {
+    const opened = {
+      id: "concierge-thread",
+      concierge: true,
+    } as AgentThread
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.detail(opened.id), opened)
+    const { result } = renderHook(
+      () =>
+        useSidebarActiveThread({
+          activeThreadId: opened.id,
+          loadedThreads: [],
+        }),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+
+    expect(result.current).toBeUndefined()
+    expect(client.getQueryData(agentThreadKeys.detail(opened.id))).toEqual(
+      opened
+    )
+  })
+
   it("refetches detail after sidebar rerenders", async () => {
     const opened = { id: "opened-thread", status: "idle" } as AgentThread
     const updated = { ...opened, title: "Refreshed title" }
