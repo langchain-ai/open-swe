@@ -246,8 +246,15 @@ def test_a_message_the_backend_starts_nothing_for_starts_nothing(
             "👋 I couldn't resolve your GitHub account from Slack. Sign in with GitHub and "
             "connect your Slack account in your Open SWE settings, then tag me again.",
         ),
+        (
+            SlackTurnDeclined(
+                reason="breakout",
+                message="I can't post in <#C2>. Add me to that channel, then try again.",
+            ),
+            "I can't post in <#C2>. Add me to that channel, then try again.",
+        ),
     ],
-    ids=["sign-in", "sign-in-again", "no-dashboard-url"],
+    ids=["sign-in", "sign-in-again", "no-dashboard-url", "breakout"],
 )
 @pytest.mark.usefixtures("slack_reads")
 def test_a_message_the_backend_declines_gets_a_reply_and_no_run(
