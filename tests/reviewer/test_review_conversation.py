@@ -289,7 +289,11 @@ async def test_history_reads_every_timeline_page_and_folds_a_merges_close(
                     "message": "Add app",
                     "committedDate": "2026-01-01T00:00:00Z",
                     "url": "https://github.com/acme/app/commit/abc123",
-                    "author": {"user": None},
+                    "author": {
+                        "name": "dependabot[bot]",
+                        "avatarUrl": "https://avatars.example/d",
+                        "user": None,
+                    },
                 },
             },
             {
@@ -329,7 +333,12 @@ async def test_history_reads_every_timeline_page_and_folds_a_merges_close(
 
     commit, push, merged = (await api_get_review_history("acme", "app", 7, SESSION)).events
     assert isinstance(commit, ConversationCommit)
-    assert (commit.sha, commit.author) == ("abc123", None)
+    assert commit.author is not None
+    assert (commit.sha, commit.author.login, commit.author.bot) == (
+        "abc123",
+        "dependabot[bot]",
+        True,
+    )
     assert isinstance(push, HistoryForcePush)
     assert (push.ref, push.before, push.after, push.author and push.author.bot) == (
         "head",

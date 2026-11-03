@@ -59,8 +59,29 @@ class _Actor(BaseModel):
         )
 
 
+class _GitUser(BaseModel):
+    login: str
+    avatarUrl: str
+
+
 class _GitActor(BaseModel):
-    user: _Actor | None = None
+    """A commit's author; ``user`` is null when the email matches no account, as for most bots."""
+
+    name: str | None = None
+    avatarUrl: str = ""
+    user: _GitUser | None = None
+
+    @property
+    def author(self) -> ConversationAuthor | None:
+        login = self.user.login if self.user else self.name
+        if not login:
+            return None
+        # GraphQL types a commit's account as a User even for an App, so its login says it's a bot.
+        return ConversationAuthor(
+            login=login,
+            avatar_url=self.user.avatarUrl if self.user else self.avatarUrl,
+            bot=login.endswith("[bot]"),
+        )
 
 
 class _Oid(BaseModel):
@@ -80,10 +101,9 @@ class _CommitNode(BaseModel):
     commit: _Commit
 
     def event(self) -> ConversationCommit:
-        user = self.commit.author.user if self.commit.author else None
         return ConversationCommit(
             sha=self.commit.oid,
-            author=user.author if user else None,
+            author=self.commit.author.author if self.commit.author else None,
             created_at=self.commit.committedDate,
             message=self.commit.message,
             html_url=self.commit.url,

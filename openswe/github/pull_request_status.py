@@ -156,7 +156,7 @@ query PullRequestHistory($owner: String!, $repo: String!, $number: Int!, $cursor
               message
               committedDate
               url
-              author { user { __typename login avatarUrl } }
+              author { name avatarUrl user { login avatarUrl } }
             }
           }
           ... on HeadRefForcePushedEvent {
