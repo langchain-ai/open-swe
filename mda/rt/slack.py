@@ -10,7 +10,7 @@ threads.
 """
 
 from managed_deepagents import (
-    ChannelRunOptions,
+    ChannelRun,
     ChannelRunResult,
     SlackChannelThread,
     SlackMessageEvent,
@@ -32,11 +32,13 @@ async def start_turn(
     run = start.run
     if run is None:
         return None
-    options: ChannelRunOptions = {
+    started: ChannelRun = {
+        "input": run.input,
         "context": run.context,
         "metadata": run.metadata,
         "multitask_strategy": "interrupt" if start.interrupts else "enqueue",
     }
     if run.webhook:
-        options["webhook"] = run.webhook
-    return (run.input, options)
+        started["webhook"] = run.webhook
+    # A list carries the run's options; a dict alone would be the run's state.
+    return [started]

@@ -8,6 +8,7 @@ import pytest
 import rt.slack as slack
 from managed_deepagents import SlackChannelThread, SlackMessageEvent
 from managed_deepagents._channels.http.types import ChannelName
+from managed_deepagents._channels.run_input import RunChannel, normalize_run_inputs
 from pydantic import BaseModel
 from runtime_api.endpoint import Endpoint
 from runtime_api.slack import PLAN_SLACK_TURN, PlanSlackTurn, SlackTurnRun, SlackTurnStart
@@ -58,15 +59,20 @@ def test_a_message_redirects_the_work_in_progress_or_waits_as_the_backend_says(
     result = asyncio.run(slack.start_turn(_EVENT, _THREAD))
 
     assert asked == [PlanSlackTurn(thread_id=uuid.UUID(_THREAD.id), message_ts="171.2")]
-    assert result == (
-        _RUN.input,
+    assert result == [
         {
+            "input": _RUN.input,
             "context": _RUN.context,
             "metadata": _RUN.metadata,
             "multitask_strategy": strategy,
             "webhook": _RUN.webhook,
-        },
+        }
+    ]
+    # A list of one run, as a dict alone would be state: MDA starts it on the conversation.
+    [run] = normalize_run_inputs(
+        result, RunChannel(name="slack", provider="slack", conversation_thread_id=_THREAD.id)
     )
+    assert "thread" not in run
 
 
 def test_a_message_the_backend_starts_nothing_for_starts_nothing(
@@ -81,5 +87,7 @@ def test_the_channel_asks_its_handler_for_every_message() -> None:
     from channels.slack import channel  # noqa: PLC0415
 
     assert channel.multitask_strategy == "interrupt"
+    # The agent answers with Open SWE's Slack tools: the channel posts nothing itself.
+    assert channel.auto_post is False
     assert set(channel.on_event or {}) == {"mention", "directMessage", "message"}
     assert all(handler is slack.start_turn for handler in (channel.on_event or {}).values())
