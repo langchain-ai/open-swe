@@ -74,6 +74,8 @@ def decline_text(declined: SlackTurnDeclined) -> str:
     """What the Slack thread hears when the backend starts nothing for a message."""
     if declined.reason == "external_channel":
         return EXTERNAL_CHANNEL
+    if declined.reason == "breakout":
+        return declined.message or "Could not break out this thread; try again."
     # Without a dashboard URL the text names the settings page, since the person
     # must still be told why nothing started.
     settings = (

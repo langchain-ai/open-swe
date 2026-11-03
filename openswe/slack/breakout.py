@@ -39,6 +39,9 @@ _CHANNEL_MENTION_RE = re.compile(r"<#(?P<channel_id>[CG][A-Z0-9]+)(?:\|[^>]*)?>"
 _TITLE_MAX_CHARS = 160
 _CHANNEL_REJECTED = {"channel_not_found", "not_in_channel", "is_archived"}
 
+#: Tells the sender why a breakout opened nothing.
+type Tell = Callable[[SlackRequest, str], Awaitable[None]]
+
 #: Hands a new breakout thread's first turn to MDA's Slack channel.
 type HandToMda = Callable[[SlackRequest, common.SlackRepoResolution | None], Awaitable[None]]
 
@@ -122,22 +125,22 @@ def _post_failure(slack_error: str | None, target: str, fallback: str) -> str:
     return fallback
 
 
-async def _move(request: SlackRequest, target: str) -> None:
+async def _move(request: SlackRequest, target: str, tell: Tell) -> None:
     thread_id = request.thread_id
     if not thread_id or not await common.thread_exists(thread_id):
-        await _tell_sender(request, "There is nothing here to break out yet.")
+        await tell(request, "There is nothing here to break out yet.")
         return
     client = langgraph_client()
     metadata = thread_metadata(await client.threads.get(thread_id))
     if common.thread_is_private(metadata):
-        await _tell_sender(request, "Private threads cannot be broken out.")
+        await tell(request, "Private threads cannot be broken out.")
         return
     active = await get_active_slack_thread(client, thread_id)
     if not active or (active.get("channel_id"), active.get("thread_ts")) != (
         request.channel_id,
         request.thread_ts,
     ):
-        await _tell_sender(request, "This thread already moved to another Slack thread.")
+        await tell(request, "This thread already moved to another Slack thread.")
         return
 
     title = str(metadata.get("title") or "").strip() or "Untitled"
@@ -155,7 +158,7 @@ async def _move(request: SlackRequest, target: str) -> None:
             "Slack breakout move failed",
             extra={"agent_thread_id": thread_id, "move_error": result.get("error")},
         )
-        await _tell_sender(
+        await tell(
             request,
             _post_failure(
                 result.get("slack_error"), target, "Could not move this thread; try again."
@@ -174,6 +177,7 @@ async def _start(
     inherited_workspace: str | None = None,
     hand_to_mda: HandToMda | None = None,
     branches: bool = False,
+    tell: Tell,
 ) -> None:
     if (
         target != request.channel_id
@@ -182,7 +186,7 @@ async def _start(
     ):
         metadata = thread_metadata(await langgraph_client().threads.get(request.thread_id))
         if common.thread_is_private(metadata):
-            await _tell_sender(request, "Private threads cannot be broken out to another channel.")
+            await tell(request, "Private threads cannot be broken out to another channel.")
             return
     heading = BreakoutCommand.heading(command.instruction)
     root_text = await _root_text(request, heading)
@@ -196,7 +200,7 @@ async def _start(
         )
     except SlackRequestError as exc:
         logger.warning("Slack breakout root post failed", extra={"error": exc.code})
-        await _tell_sender(
+        await tell(
             request,
             _post_failure(exc.code, target, "Could not start a breakout thread; try again."),
         )
@@ -312,16 +316,18 @@ async def process_slack_breakout(
     *,
     hand_to_mda: HandToMda | None = None,
     branches: bool = False,
+    tell: Tell = _tell_sender,
 ) -> None:
     """Move this thread when bare; otherwise start a new one seeded with this thread's transcript.
 
     With ``hand_to_mda``, a new thread's first turn goes to MDA's Slack channel, which
     runs the new Slack thread from then on; moving a thread stays here. ``branches``
     says the channel starts that thread with what this conversation's thread holds.
+    ``tell`` gives the sender the reason when it opens nothing, privately by default.
     """
     try:
         if command.channel and not command.channel_id:
-            await _tell_sender(
+            await tell(
                 request,
                 f"`{command.channel}` is not a Slack channel. Pick one from Slack's "
                 "autocomplete: `/breakout #channel`.",
@@ -340,7 +346,7 @@ async def process_slack_breakout(
         )
         target = destination.channel_id
         if error := await destination.channel_error(request.channel_id):
-            await _tell_sender(request, error)
+            await tell(request, error)
             return
         if command.instruction:
             await _start(
@@ -351,9 +357,10 @@ async def process_slack_breakout(
                 inherited_workspace=destination.workspace if not command.channel_id else None,
                 hand_to_mda=hand_to_mda,
                 branches=branches,
+                tell=tell,
             )
         else:
-            await _move(request, target)
+            await _move(request, target, tell)
     except Exception:
         logger.exception("Slack breakout failed", extra={"agent_thread_id": request.thread_id})
-        await _tell_sender(request, "Could not break out this thread; try again.")
+        await tell(request, "Could not break out this thread; try again.")
