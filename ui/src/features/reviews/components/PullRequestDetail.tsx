@@ -16,6 +16,7 @@ import type {
   PullRequestPreview,
 } from "@/lib/api"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { PullRequestMarkdown } from "./PullRequestMarkdown"
 import { HumanInputText } from "./HumanInputCard"
 import { TextPopover } from "./TextPopover"
 import { PullRequestFiles } from "./PullRequestFiles"
@@ -475,6 +476,7 @@ export function PullRequestDetail({
   scrollAnchor?: string
   onPositionChange: (changes: { files?: Array<string>; at?: string }) => void
 }) {
+  const [owner = "", repo = ""] = pr.repo.split("/")
   const preview = useQuery(pullRequestPreviewQuery(pr))
   const data = preview.data
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -570,7 +572,10 @@ export function PullRequestDetail({
             <Section heading="Description">
               {data.body ? (
                 <div className="max-w-[72ch]">
-                  <Markdown content={data.body} />
+                  <PullRequestMarkdown
+                    pr={{ owner, repo, number: pr.number }}
+                    content={data.body}
+                  />
                 </div>
               ) : (
                 <p className="text-xs text-secondary">

@@ -2,14 +2,15 @@ import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Button } from "@langchain/macaw-components/Button"
 import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { useQuery } from "@tanstack/react-query"
-import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react"
+import { Fragment, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
-import { reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
+import type { ReviewUserRef } from "@/lib/api"
 import { cn, INHERITED_LINK } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { HumanInputText } from "@/features/reviews/components/HumanInputCard"
+import { PullRequestMarkdown } from "@/features/reviews/components/PullRequestMarkdown"
 import { PullRequestLabels } from "@/features/reviews/components/PullRequestLabels"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { ProfileLink } from "./notes/Byline"
@@ -161,11 +162,6 @@ function Description({
   labels: ReactNode
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  const { owner, repo, number } = pr
-  const proxyImage = useCallback(
-    (src: string) => reviewImageProxyUrl(owner, repo, number, src),
-    [owner, repo, number]
-  )
   const [overflows, setOverflows] = useState(false)
   const [expanded, setExpanded] = useState(false)
   useLayoutEffect(() => {
@@ -210,10 +206,9 @@ function Description({
         style={clamped ? { maxHeight: CLAMP_PX } : undefined}
       >
         {body.trim() ? (
-          <Markdown
+          <PullRequestMarkdown
+            pr={pr}
             content={linkGithubRefs(body, pr, pullRequests)}
-            transformImageUrl={proxyImage}
-            enlargeImages
           />
         ) : (
           <p className="text-secondary italic">No description.</p>
