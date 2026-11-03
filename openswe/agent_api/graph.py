@@ -166,6 +166,14 @@ from runtime_api.operations import (
 from runtime_api.reports import REPORTED, REPORTS, Reports, ReportsTaken
 from runtime_api.sandbox_proxy import SANDBOX_PROXY, SandboxProxy, SandboxProxyRequest
 from runtime_api.skills import SKILLS, RunSkills
+from runtime_api.slack import (
+    SLACK_MOVE,
+    SLACK_MOVED,
+    SlackMoved,
+    SlackMovePlan,
+    SlackMoveRequest,
+    SlackMoveResult,
+)
 from runtime_api.tool_search import (
     RESOLVE,
     SEARCH,
@@ -254,6 +262,7 @@ from openswe.server import (
     code_only,
     direct_and_from_code,
 )
+from openswe.slack.channel_moves import prepare_channel_move, record_channel_move
 from openswe.slack.tools.reply import send_slack_reply
 from openswe.threads.access import agent_version_metadata
 from openswe.threads.inbox import ThreadInbox
@@ -1291,6 +1300,14 @@ class TokenRun:
         await self.in_run("reply_on_behalf", post)
         return Done()
 
+    async def slack_move(self, request: SlackMoveRequest) -> SlackMovePlan:
+        """Check a move of the run's own Slack conversation into a new Slack thread."""
+        return await self.in_run("slack_move", lambda: prepare_channel_move(request))
+
+    async def slack_moved(self, request: SlackMoved) -> SlackMoveResult:
+        """Record where the run's thread went once MDA handed it to the new Slack thread."""
+        return await self.in_run("slack_moved", lambda: record_channel_move(request))
+
     async def run_ended(self, request: RunEnded) -> Done:
         """Record the run's end: its transcript turn and its usage."""
         self._as_invocation(request.invocation_id)
@@ -1653,6 +1670,8 @@ RUN_CALLS.serve(TASK_CONTEXT, TokenRun.task_context)
 RUN_CALLS.serve(REFRESH_GITHUB_PROXY, TokenRun.refresh_github_proxy)
 RUN_CALLS.serve(SANDBOX_PROXY, TokenRun.sandbox_proxy)
 RUN_CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)
+RUN_CALLS.serve(SLACK_MOVE, TokenRun.slack_move)
+RUN_CALLS.serve(SLACK_MOVED, TokenRun.slack_moved)
 RUN_CALLS.serve(RUN_STARTED, TokenRun.run_started)
 RUN_CALLS.serve(RUN_ENDED, TokenRun.run_ended)
 RUN_CALLS.serve(STEP_LIMIT_REACHED, TokenRun.step_limit_reached)

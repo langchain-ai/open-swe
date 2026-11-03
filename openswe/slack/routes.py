@@ -939,6 +939,14 @@ async def slack_webhook(
             and allowed_bot is None
             and mda_forwarding.trigger_server_takes(event.subtype)
         )
+        # A bare breakout moves this thread: in a conversation MDA holds, its run does.
+        moves_thread = (
+            message.action is SlackAction.BREAKOUT
+            and not breakout.instruction
+            and explicit_mention
+            and not (in_code_channel or in_dm_channel or in_concierge_mode)
+            and allowed_bot is None
+        )
         can_start = mda_forwarding.mda_can_start(
             subtype=event.subtype,
             code_channel=in_code_channel,
@@ -1063,6 +1071,9 @@ async def slack_webhook(
             if mda_thread_id is not None:
                 if in_concierge_mode:
                     await mda_forwarding.join_concierge(channel_id, root_ts, mda_thread_id)
+                if moves_thread and new_mda_thread_id is None:
+                    # The run on the conversation's thread moves it, through MDA.
+                    request = request.model_copy(update={"move_thread": True})
                 await mda_forwarding.remember(request, repo, original_message_ts)
                 return _hand_to_mda(
                     background_tasks,

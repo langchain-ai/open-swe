@@ -192,6 +192,21 @@ async def move_slack_thread(
             "hint": _slack_error_hint(exc.code),
         }
 
+    return await record_slack_move(client, thread_id, source, target_channel, new_ts)
+
+
+async def record_slack_move(
+    client: LangGraphClient,
+    thread_id: str,
+    source: Mapping[str, Any],
+    target_channel: str,
+    new_ts: str,
+) -> dict[str, Any]:
+    """Move the thread's Slack binding to the root at `new_ts`, which someone already posted.
+
+    `move_slack_thread` posts it with the bot token; a run MDA's Slack channel holds posts
+    it through MDA, which hands the thread to the new Slack thread (``channel_moves``).
+    """
     source_ref = SlackThreadRef.model_validate(dict(source))
     try:
         await rebind_slack_thread(

@@ -10,6 +10,11 @@ why it starts nothing, which the handler replies with.
 ``plan_slack_click`` does the same for a click on the agent's buttons. Every other
 click, and one in a conversation the backend holds, goes to ``act_on_slack_click``:
 the backend acts on it as it always has.
+
+A run on a conversation MDA's Slack channel holds moves it into a new Slack thread
+itself: the backend checks the move (``slack_move``), the run posts the new root
+through MDA, which hands the run's thread to it, and the backend records where the
+thread went (``slack_moved``). Both act on the run's own thread, from its token.
 """
 
 from typing import Annotated, Final, Literal
@@ -18,6 +23,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, JsonValue
 
 from runtime_api.endpoint import CHANNEL_API_PREFIX, Endpoint
+from runtime_api.operations import RunRequest
 
 
 class PlanSlackTurn(BaseModel):
@@ -169,3 +175,47 @@ ACT_ON_SLACK_CLICK: Final = Endpoint(
     # The backend acts once per webhook ID; one sent again changes nothing.
     prefix=CHANNEL_API_PREFIX,
 )
+
+
+class SlackMoveRequest(RunRequest):
+    """A move of the run's own Slack conversation into a new Slack thread."""
+
+    # What the new root says, as the agent's ``slack_move_thread`` writes it; None for a
+    # person's bare ``/breakout``, whose root names the thread instead.
+    message: str | None = None
+    channel_id: str | None = None
+
+
+class SlackMovePlan(BaseModel):
+    # The new root's text; None when ``result`` answers already.
+    root_text: str | None = None
+    # Whether the run posts the root through MDA, which hands its thread to the new Slack
+    # thread: the move stays in the conversation's own Slack channel. Otherwise the
+    # backend's ``slack_move_thread`` moves it, as before.
+    via_mda: bool = False
+    # The answer when the checks stopped the move, or when it finished one an earlier
+    # call left half done.
+    result: dict[str, JsonValue] | None = None
+
+
+class SlackMoved(RunRequest):
+    # The new root the run posted through MDA, in the conversation's own Slack channel.
+    thread_ts: Annotated[str, Field(pattern=r"^[0-9]+\.[0-9]+$")]
+    # Whether the old Slack thread says where the conversation went, as ``/breakout`` does.
+    mark_source: bool = False
+
+
+class SlackMoveResult(BaseModel):
+    # What ``slack_move_thread`` answers: ``success``, and where the thread went.
+    result: dict[str, JsonValue]
+
+
+#: On a run's last input message: a person's bare ``/breakout`` in the conversation, which
+#: the run moves before it calls the model.
+SLACK_MOVE_MARKER: Final = "open_swe_slack_move"
+
+SLACK_MOVE: Final = Endpoint(
+    "slack_move", SlackMoveRequest, SlackMovePlan, seconds=60.0, delivery="idempotent"
+)
+# Records the move once; the old Slack thread hears of it once.
+SLACK_MOVED: Final = Endpoint("slack_moved", SlackMoved, SlackMoveResult, seconds=60.0)

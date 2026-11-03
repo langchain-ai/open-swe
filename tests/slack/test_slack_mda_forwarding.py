@@ -12,7 +12,7 @@ import httpx2
 import pytest
 from fastapi import BackgroundTasks, FastAPI
 from pydantic import JsonValue
-from runtime_api.slack import SlackTurnDeclined
+from runtime_api.slack import SLACK_MOVE_MARKER, SlackTurnDeclined
 from standardwebhooks import Webhook
 from starlette.datastructures import URL
 from starlette.requests import Request
@@ -1770,3 +1770,72 @@ async def test_the_handler_finds_a_by_the_way_question_on_its_own_thread(
         "1.0",
     )
     assert question.message_ts == "1.2"
+
+
+async def test_a_bare_breakout_in_an_mda_conversation_is_handed_over_as_a_move(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
+    tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_mention(text="<@BOT> /breakout"), _SLACK_HEADERS)),
+        cast(BackgroundTasks, tasks),
+    )
+
+    assert response == {"status": "accepted", "message": "Slack message handed to MDA"}
+    [remembered, _repo, _ts] = cast(AsyncMock, mda_forwarding.remember).await_args.args
+    assert remembered.move_thread is True
+    assert remembered.thread_id == _MDA_THREAD
+    assert tasks.kwargs[0]["thread_id"] == _MDA_THREAD
+
+
+async def test_any_other_message_in_an_mda_conversation_is_no_move(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
+
+    await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_mention(text="<@BOT> fix it"), _SLACK_HEADERS)),
+        cast(BackgroundTasks, _FakeBackgroundTasks()),
+    )
+
+    [remembered, _repo, _ts] = cast(AsyncMock, mda_forwarding.remember).await_args.args
+    assert remembered.move_thread is False
+
+
+async def test_the_handler_gets_a_move_run_for_a_bare_breakout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MDA_SERVICE_SECRET", _SERVICE_SECRET)
+    monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-signing-key-0123456789abcdef")
+    request = SlackRequest(
+        channel_id="C1", thread_ts="1.2", thread_id=_MDA_THREAD, move_thread=True
+    )
+    monkeypatch.setattr(mda_forwarding, "recall", AsyncMock(return_value=(request, None)))
+    _prepared(monkeypatch)
+    app = FastAPI()
+    app.include_router(channel_api.router)
+
+    answered = await _plan(app)
+
+    [message] = answered.json()["run"]["input"]["messages"]
+    # MDA's run moves the thread before it calls the model.
+    assert message["additional_kwargs"] == {SLACK_MOVE_MARKER: True}
+
+
+@pytest.mark.parametrize("indexed", [False, True], ids=["new", "moved away"])
+async def test_a_conversation_that_moved_away_starts_on_the_backend(
+    monkeypatch: pytest.MonkeyPatch, indexed: bool
+) -> None:
+    monkeypatch.setattr(mda_forwarding, "lookup_slack_thread_id", AsyncMock(return_value=None))
+    known = AsyncMock(return_value=object() if indexed else None)
+    monkeypatch.setattr(mda_forwarding.index, "get", known)
+
+    thread_id = await _STARTABLE_THREAD(
+        app_id="A1", team_id="T1", channel_id="C1", root_ts="1.0", can_start=True
+    )
+
+    expected = mda_forwarding.mda_thread_id("A1", "T1", "C1", "1.0")
+    assert thread_id == (None if indexed else expected)
+    known.assert_awaited_once_with(expected)

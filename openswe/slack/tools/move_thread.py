@@ -1,5 +1,6 @@
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from langgraph.config import get_config
@@ -38,11 +39,23 @@ async def _finish_existing_move(
     }
 
 
-async def slack_move_thread(
-    message: str,
-    channel_id: str | None = None,
-) -> dict[str, Any]:
-    """Implement the `slack_move_thread` tool."""
+@dataclass(frozen=True)
+class CheckedMove:
+    """A move the checks let through: the thread, where it is, and where it goes."""
+
+    client: LangGraphClient
+    thread_id: str
+    active: Mapping[str, Any]
+    target_channel: str
+    message: str
+
+
+async def check_move(message: str, channel_id: str | None = None) -> CheckedMove | dict[str, Any]:
+    """The run's move once the checks pass, or the tool's answer when they don't.
+
+    The answer is an error, or a move an earlier call left unfinished, finished now.
+    The thread is the run's own, from its config.
+    """
     config = get_config()
     configurable = config.get("configurable", {})
     thread_id = configurable.get("thread_id")
@@ -99,5 +112,21 @@ async def slack_move_thread(
         return {"success": False, "error": "channel_id must be a Slack channel ID"}
     if error := await destination.channel_error(active_channel):
         return {"success": False, "error": error}
+    return CheckedMove(client, thread_id, active, target_channel, clean_message)
 
-    return await move_slack_thread(client, thread_id, active, target_channel, clean_message)
+
+async def slack_move_thread(
+    message: str,
+    channel_id: str | None = None,
+) -> dict[str, Any]:
+    """Implement the `slack_move_thread` tool."""
+    checked = await check_move(message, channel_id)
+    if not isinstance(checked, CheckedMove):
+        return checked
+    return await move_slack_thread(
+        checked.client,
+        checked.thread_id,
+        checked.active,
+        checked.target_channel,
+        checked.message,
+    )

@@ -37,6 +37,8 @@ class SlackRequest(BaseModel):
     inherited_workspace: str | None = None
     # A `/btw` question, answered on this request's thread rather than as a turn.
     by_the_way: str | None = None
+    # A bare `/breakout` in a conversation MDA's channel holds: the run moves the thread.
+    move_thread: bool = False
     # Guidance for this turn alone, from whatever stood in for a typed message.
     turn_context: str = ""
     treat_all_messages_as_mentions: bool = False

@@ -27,6 +27,7 @@ from managed_deepagents import EndpointAnswer, EndpointThread
 from managed_deepagents import JsonValue as AnswerJson
 from pydantic import JsonValue
 from runtime_api.slack import (
+    SLACK_MOVE_MARKER,
     ActOnSlackClick,
     OptionClick,
     PlanSlackClick,
@@ -43,6 +44,7 @@ from typing_extensions import TypedDict
 
 from openswe import event_claims
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
+from openswe.input_messages import RunInput
 from openswe.mda_channels.api import ChannelCall
 from openswe.mda_channels.auth import require_mda_channel
 from openswe.slack import mda_forwarding
@@ -379,6 +381,17 @@ async def _click_request(
     )
 
 
+def _mark_move(run_input: RunInput) -> None:
+    """Have the run move its thread before it calls the model: a bare ``/breakout``.
+
+    MDA's ``rt.slack_move`` moves it and ends the run; what it posts and where it goes,
+    the backend says as the run (``slack_move``).
+    """
+    messages = run_input["messages"]
+    if messages:
+        messages[-1].setdefault("additional_kwargs", {})[SLACK_MOVE_MARKER] = True
+
+
 async def _prepare_by_the_way(request: SlackRequest) -> service.SlackChannelRun | None:
     """A `/btw` question's run on its own thread. Its refusals and the prompt to connect an
     account reach the asker privately, as on the backend, so it never declines."""
@@ -408,6 +421,8 @@ async def _prepare_run(
         return SlackTurnStart()
     if isinstance(prepared, SlackTurnDeclined):
         return SlackTurnStart(declined=prepared)
+    if request.move_thread:
+        _mark_move(prepared.input)
 
     run_config = await prepare_durable_run(
         "agent",

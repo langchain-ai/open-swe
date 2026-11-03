@@ -248,7 +248,12 @@ async def startable_thread(
         return None
     if await lookup_slack_thread_id(channel_id, root_ts) is not None:
         return None
-    return mda_thread_id(app_id, team_id, channel_id, root_ts)
+    thread_id = mda_thread_id(app_id, team_id, channel_id, root_ts)
+    # A conversation that moved to another Slack thread took its thread along, and MDA
+    # handed it to that Slack thread, so this one starts on the backend again.
+    if await index.get(thread_id) is not None:
+        return None
+    return thread_id
 
 
 async def remember(
