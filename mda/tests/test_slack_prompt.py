@@ -170,10 +170,9 @@ def test_formats_cards_forwarded_messages_and_authors() -> None:
 
 def test_the_guidance_texts_match_the_backends() -> None:
     assert slack_prompt.thread_constant_context(
-        code_channel=True, review_guide=False, concierge=True, kitchen=False
+        review_guide=False, concierge=True, kitchen=False
     ) == "\n\n".join(
         [
-            slack_prompt.CODE_CHANNEL_CONTEXT,
             slack_prompt.CONCIERGE_CONTEXT,
             slack_prompt.NON_KITCHEN_CONTEXT,
         ]
@@ -274,14 +273,6 @@ async def test_reads_every_page_of_a_thread_oldest_first(slack: Any) -> None:
     assert api.calls[0] == ("conversations.replies", {"channel": "C1", "limit": 200, "ts": "1.0"})
 
 
-async def test_a_code_channel_session_reads_the_channel(slack: Any) -> None:
-    api = slack({"conversations.history": {"messages": [{"ts": "5.0"}]}})
-    assert await slack_prompt.slack_history("C9", slack_prompt.CODE_CHANNEL_SESSION_TS) == [
-        {"ts": "5.0"}
-    ]
-    assert api.calls == [("conversations.history", {"channel": "C9", "limit": 200})]
-
-
 async def test_a_failed_read_keeps_what_it_read(slack: Any) -> None:
     slack({"conversations.replies": ChannelError("channel_provider_rejected", "no")})
     assert await slack_prompt.slack_history("C1", "1.0") == []
@@ -354,10 +345,9 @@ async def test_resolves_linked_slack_messages(slack: Any) -> None:
     assert await slack_prompt.resolved_links([{"text": "no links"}], {}) == ("", [])
 
 
-async def test_a_permalink_is_none_for_a_code_channel_session(slack: Any) -> None:
+async def test_a_permalink_names_the_message(slack: Any) -> None:
     slack({"chat.getPermalink": {"permalink": "https://acme.slack.com/archives/C1/p1"}})
     assert await slack_prompt.permalink("C1", "1.0") == "https://acme.slack.com/archives/C1/p1"
-    assert await slack_prompt.permalink("C1", slack_prompt.CODE_CHANNEL_SESSION_TS) is None
 
 
 async def test_slack_files_are_fetched_with_the_bot_token_and_others_without(
