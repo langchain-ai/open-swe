@@ -6,6 +6,7 @@ With ``hand_off``, the new thread's conversation takes the run's own thread inst
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from typing import TYPE_CHECKING, cast
 
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from managed_deepagents._channels.trigger.client import TriggerClientLike
     from managed_deepagents._channels.types import (
         ChannelMessage,
+        ChannelTarget,
         JsonValue,
         PostedChannelThread,
     )
@@ -42,6 +44,7 @@ async def start_trigger_conversation(
     run: ChannelRunResult | None,
     *,
     hand_off: bool = False,
+    to: ChannelTarget | None = None,
 ) -> PostedChannelThread:
     """Post ``message`` at top level in the origin's conversation, and start ``run`` there.
 
@@ -51,12 +54,17 @@ async def start_trigger_conversation(
     checked before anything is posted.
     """
     text = require_text_content(message)
+    conversation_id = _conversation_of(origin, to) if to is not None else None
     run_input = normalize_run_input(run)
     caller = _run_caller() if run_input is not None else None
     source = _hand_off_source() if hand_off else None
     action_id = str(uuid.uuid4())
     started = await start_trigger_thread(
-        client, target=origin["target"], text=text, action_id=action_id
+        client,
+        target=origin["target"],
+        text=text,
+        action_id=action_id,
+        conversation_id=conversation_id,
     )
     if started is None:
         raise RuntimeError("Trigger did not name the new thread")
@@ -108,6 +116,22 @@ async def start_trigger_conversation(
         conversation = started["address"]["conversation_id"]
         posted["url"] = f"https://slack.com/archives/{conversation}/p{message_id.replace('.', '')}"
     return posted
+
+
+_SLACK_CONVERSATION_ID = re.compile(r"[CDG][A-Z0-9]+")
+
+
+def _conversation_of(origin: ChannelBinding, to: ChannelTarget) -> str:
+    """The conversation ``to`` names: another of the origin channel's, with no thread."""
+    if to.provider != origin["provider"] or to.channel not in {None, origin["name"]}:
+        raise ValueError("a new thread can go only to this channel's conversations")
+    if to.provider != "slack":
+        raise ValueError("a new thread can go to another conversation only on Slack")
+    if to.thread_ts is not None:
+        raise ValueError("a new thread's conversation names no thread")
+    if not _SLACK_CONVERSATION_ID.fullmatch(to.conversation_id):
+        raise ValueError("a Slack conversation id looks like C…, D… or G…")
+    return to.conversation_id
 
 
 def _hand_off_source() -> tuple[ManagedThread, ExecutionUser]:
