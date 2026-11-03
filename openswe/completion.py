@@ -49,7 +49,7 @@ from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
 from openswe.threads.status import refresh_thread_status
-from openswe.transcript.turns import TurnOutcome, settle_run_turn
+from openswe.transcript.turns import RUN_OUTCOMES, settle_run_turn
 from openswe.ui_invalidations import Topic
 from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from openswe.utils.json_types import thread_metadata
@@ -438,13 +438,8 @@ async def _settle_transcript_turn(thread_id: str, run_id: str | None, status: ob
     The middleware emits the same event with the same command id, so whichever
     of the two arrives second is deduplicated by its receipt.
     """
-    if status == "success":
-        outcome: TurnOutcome = "completed"
-    elif status == "interrupted":
-        outcome = "interrupted"
-    elif status in _TERMINAL_FAILURE_STATUSES:
-        outcome = "failed"
-    else:
+    outcome = RUN_OUTCOMES.get(status) if isinstance(status, str) else None
+    if outcome is None:
         return
     try:
         await settle_run_turn(
