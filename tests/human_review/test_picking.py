@@ -94,6 +94,7 @@ def test_off_shift_on_friday_evening_waits_for_monday_morning() -> None:
     assert hours.next_start(friday_evening) == datetime(2026, 10, 5, 13, tzinfo=UTC)
 
 
+@pytest.mark.parametrize("channel_only", [False, True])
 @pytest.mark.parametrize("codeowners", [CodeOwners.parse("* @ada @grace"), None])
 @pytest.mark.parametrize(
     ("profile", "classification", "skip_reason"),
@@ -121,6 +122,7 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
     user_records: FakeUserRecords,
     caplog: pytest.LogCaptureFixture,
     codeowners: CodeOwners | None,
+    channel_only: bool,
     profile: dict[str, object] | None,
     classification: str | None,
     skip_reason: str | None,
@@ -151,7 +153,16 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
         ChangedFile, "of_pull", AsyncMock(return_value=[ChangedFile(filename="app.py")])
     )
     monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=codeowners))
-    monkeypatch.setattr(picking, "_touched", AsyncMock(return_value=Counter(ada=10, grace=1)))
+    monkeypatch.setattr(
+        picking,
+        "_touched",
+        AsyncMock(return_value=Counter() if channel_only else Counter(ada=10, grace=1)),
+    )
+    monkeypatch.setattr(
+        picking.Candidates,
+        "review_channel_members",
+        AsyncMock(return_value=frozenset({"ada", "grace"}) if channel_only else frozenset()),
+    )
     monkeypatch.setattr(
         User,
         "for_login",
@@ -169,3 +180,45 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
         record for record in caplog.records if record.message == "Filtered reviewer candidates"
     )
     assert filtered.skipped == ({"ada": skip_reason} if skip_reason else {})
+
+
+@pytest.mark.parametrize("destination", ["primary", "copy", "unposted"])
+async def test_review_channel_members_include_later_pages_only_when_posted(
+    monkeypatch: pytest.MonkeyPatch, destination: str
+) -> None:
+    from openswe.github.repo_files import RepoSettings
+    from openswe.human_review import picking
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="author")
+    request = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="standard",
+        slack_channel_id="CREVIEW" if destination == "primary" else "CORIGIN",
+        slack_copy_channel_id="CREVIEW" if destination != "primary" else "",
+        slack_copy_ts="123.456" if destination == "copy" else "",
+    )
+    request.pull_request = pr
+    monkeypatch.setattr(
+        RepoSettings, "fetch", AsyncMock(return_value=RepoSettings(review_channel="review"))
+    )
+    monkeypatch.setattr(
+        picking.SlackChannel, "resolve", AsyncMock(return_value=MagicMock(id="CREVIEW"))
+    )
+    client = AsyncMock()
+    client.conversations_members.side_effect = [
+        {"members": ["UUNKNOWN"], "response_metadata": {"next_cursor": "next"}},
+        {"members": ["UADA"], "response_metadata": {"next_cursor": ""}},
+    ]
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=client)
+    context.__aexit__ = AsyncMock(return_value=False)
+    monkeypatch.setattr(picking.SlackClient, "bot", MagicMock(return_value=context))
+    ada = User(identities=[UserIdentity(provider="github", external_id="1", login="Ada")])
+    monkeypatch.setattr(
+        User,
+        "for_identity",
+        AsyncMock(side_effect=lambda _, member: ada if member == "UADA" else None),
+    )
+    members = await picking.Candidates.review_channel_members(request, MagicMock())
+    assert members == (frozenset() if destination == "unposted" else frozenset({"ada"}))
