@@ -9,6 +9,7 @@ import rt.images as images
 import rt.linear as linear
 import rt.linear_automations as automations
 from managed_deepagents import (
+    ChannelReplyResult,
     ChannelRun,
     LinearChannelThread,
     LinearIssueCreateEvent,
@@ -19,8 +20,9 @@ from managed_deepagents import (
     LinearSessionCreatedPayload,
     LinearSessionPromptedEvent,
     LinearSessionPromptedPayload,
+    reply,
 )
-from managed_deepagents._channels.http.endpoint import EndpointClient, EndpointDeclined
+from managed_deepagents._channels.http.endpoint import EndpointClient
 from managed_deepagents._channels.http.types import ChannelName
 from managed_deepagents._channels.run_input import normalize_run_inputs
 from pydantic import BaseModel, TypeAdapter
@@ -415,15 +417,16 @@ async def test_the_session_hears_why_nothing_started(
 
     result = await linear.start_session(_created(), _THREAD)
 
-    assert isinstance(result, EndpointDeclined)
-    assert told in result.message
+    assert isinstance(result, ChannelReplyResult)
+    assert result.message["type"] == "content"
+    assert told in str(result.message["content"])
 
 
 @pytest.mark.asyncio
 async def test_a_session_without_its_issue_is_told_so(backend: _Backend) -> None:
     result = await linear.start_session(_created(issue=None), _THREAD)
 
-    assert result == EndpointDeclined(linear.UNREADABLE_SESSION)
+    assert result == reply(linear.UNREADABLE_SESSION)
     assert backend.plans == []
 
 

@@ -99,6 +99,7 @@ if TYPE_CHECKING:
         HttpPostedMessage,
         JsonValue,
     )
+    from managed_deepagents._channels.reply import ChannelReplyResult
     from managed_deepagents._channels.resolve_user import ResolveUser
     from managed_deepagents._channels.run_input import ChannelRunResult
     from managed_deepagents._channels.types import ChannelReply
@@ -200,7 +201,7 @@ def linear_channel(
 
     async def run_input(
         message: HttpChannelInboundMessage, raw_event: JsonValue | None
-    ) -> ChannelRunResult | None:
+    ) -> ChannelRunResult | ChannelReplyResult | None:
         thread = LinearChannelThread(id=message["thread_id"], channel=ChannelName(name=name()))
         return await _handler_input(handlers, raw_event, thread)
 
@@ -630,8 +631,9 @@ async def _handler_input(
     handlers: Mapping[str, LinearEventCallback],
     raw_event: JsonValue | None,
     thread: LinearChannelThread,
-) -> ChannelRunResult | None:
-    """What the event's handler starts a run with; ``None`` when it skips or fails."""
+) -> ChannelRunResult | ChannelReplyResult | None:
+    """What the event's handler starts a run with, or the reply MDA posts instead;
+    ``None`` when it skips or fails."""
     event = _event(raw_event)
     if event is None:
         return None
@@ -645,19 +647,18 @@ async def _handler_input(
     )
     if outcome.type == "input":
         return outcome.input
+    # MDA posts a reply: a session hears it as its response.
+    if outcome.reply is not None:
+        return outcome.reply
     # A session that gets no run would wait for an answer that never comes,
     # whether it just opened or this is a follow-up in it. A handler that
-    # raised failed; one that returned nothing declined, and an endpoint may
-    # say why.
+    # raised failed; one that returned nothing declined.
     if isinstance(event, LinearSessionCreatedEvent | LinearSessionPromptedEvent):
         await _say(
             event.session_id,
             {"type": "error", "body": _ERROR_MESSAGE}
             if outcome.type == "failed"
-            else {
-                "type": "response",
-                "body": outcome.decline or "I'm not set up to work on this request.",
-            },
+            else {"type": "response", "body": "I'm not set up to work on this request."},
         )
     return None
 
