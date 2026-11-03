@@ -1441,8 +1441,10 @@ async def is_pr_diff_unchanged_since_last_review(
     head_sha: str,
     token: str,
 ) -> bool:
-    previous_diff = await _fetch_compare_diff(repo_config, base_ref, last_reviewed_sha, token=token)
-    current_diff = await _fetch_compare_diff(repo_config, base_ref, head_sha, token=token)
+    previous_diff, current_diff = await asyncio.gather(
+        _fetch_compare_diff(repo_config, base_ref, last_reviewed_sha, token=token),
+        _fetch_compare_diff(repo_config, base_ref, head_sha, token=token),
+    )
     if previous_diff is None or current_diff is None:
         return False
     return _normalized_diff_hash(previous_diff) == _normalized_diff_hash(current_diff)

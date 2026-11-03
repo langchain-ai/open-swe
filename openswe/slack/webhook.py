@@ -1189,16 +1189,18 @@ async def _process_slack_mention_impl(
         and is_dm_channel(channel_context)
         else None
     )
-    dm_origin_section = (
-        prompt(
+    dm_origin_section = ""
+    if dm_origin is not None:
+        origin_permalink, origin_thread_id = await asyncio.gather(
+            slack_utils.get_slack_permalink(*dm_origin.location),
+            common.lookup_slack_thread_id(*dm_origin.location),
+        )
+        dm_origin_section = prompt(
             "slack/dm-origin",
             origin=dm_origin,
-            permalink=await slack_utils.get_slack_permalink(*dm_origin.location) or "",
-            agent_thread_id=await common.lookup_slack_thread_id(*dm_origin.location) or "",
+            permalink=origin_permalink or "",
+            agent_thread_id=origin_thread_id or "",
         )
-        if dm_origin is not None
-        else ""
-    )
     turn_context = "\n\n".join(
         section
         for section in (

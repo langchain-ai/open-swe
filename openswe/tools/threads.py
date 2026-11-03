@@ -452,9 +452,17 @@ async def list_threads(
     if pr_ref:
         items = [item for item in items if _summary_matches_pr(item, pr_ref.url)]
     try:
-        results = [
-            await _compact_list_item(item) if compact else _list_item(item) for item in items
-        ]
+        if compact:
+            results = []
+            for start in range(0, len(items), 8):
+                async with asyncio.TaskGroup() as tasks:
+                    batch = [
+                        tasks.create_task(_compact_list_item(item))
+                        for item in items[start : start + 8]
+                    ]
+                results.extend(task.result() for task in batch)
+        else:
+            results = [_list_item(item) for item in items]
     except Exception:
         logger.exception("Could not load thread outcomes")
         return _failure("Could not list threads")
@@ -981,9 +989,11 @@ async def get_thread(
             pending_runs_task = tasks.create_task(
                 client.runs.list(thread_id, status="pending", limit=1000)
             )
+            runs = await runs_task
+            cost_task = tasks.create_task(_thread_cost(thread_id, runs[0] if runs else None))
         thread = thread_task.result()
         thread_state = state_task.result()
-        runs = runs_task.result()
+        cost = cost_task.result()
         plan_content = plan_content_task.result()
         plan_comments = plan_comments_task.result()
         approvals = approvals_task.result()
@@ -1006,7 +1016,6 @@ async def get_thread(
     can_delete_plan_comment = any(
         comment.get("author_login") == actor.login for comment in plan_comments
     )
-    cost = await _thread_cost(thread_id, latest_run)
     pr = summary.get("pr")
     pr_url = pr.get("url") if isinstance(pr, Mapping) else None
     links = {
