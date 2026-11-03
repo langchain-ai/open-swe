@@ -71,9 +71,9 @@ Anyone who can start a thread can move their own thread into or out of a project
 For a viewer, each thread sits in at most one sidebar folder, first match wins:
 
 1. its `project_id`, when the viewer is a member of that project;
-2. the project bound to its repository, when the viewer is a member;
-3. its repository;
-4. "No project".
+1. the project bound to its repository, when the viewer is a member;
+1. its repository;
+1. "No project".
 
 Deleting a project leaves its threads' `project_id` in place; an id that names no live project is treated as none.
 

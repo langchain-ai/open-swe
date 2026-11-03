@@ -62,5 +62,10 @@ async def test_a_repository_files_under_one_project_for_its_members(registry_db:
     started_there = {"project_id": str(project.id)}
     assert (await PROJECTS.filing_for("ada")).project_for(in_repo, "acme/docs") == str(project.id)
     assert (await PROJECTS.filing_for("ada")).project_for(started_there, "") == str(project.id)
+    # A LangSmith session's login is the person's ``user:<id>`` key.
+    langsmith_login = f"user:{ada.id}"
+    assert (await PROJECTS.filing_for(langsmith_login)).project_for(in_repo, "acme/docs") == str(
+        project.id
+    )
     assert (await PROJECTS.filing_for("bob")).project_for(in_repo, "acme/docs") is None
     assert (await PROJECTS.filing_for("bob")).project_for(started_there, "") is None

@@ -19,7 +19,7 @@ import type { DesktopProject } from "@/desktop"
 import { useLocalThreads } from "@/features/agents/lib/desktopLocal"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import {
-  claimFolder,
+  pickFolderForProject,
   useFolderProject,
 } from "@/features/projects/lib/desktopFolders"
 import {
@@ -88,8 +88,9 @@ export function CreateProjectDialog({
   }
 
   const addFolder = async () => {
-    const folder = await desktop?.addProject()
-    if (!folder) return
+    const picked = await pickFolderForProject()
+    if (!picked) return
+    const { folder, settle } = picked
     setError(null)
     if (folder.repo) {
       // A clone files through its repository, not through the folder.
@@ -99,8 +100,7 @@ export function CreateProjectDialog({
       return
     }
     if (folders.some((item) => item.cwd === folder.cwd)) return
-    if (!claims.current.has(folder.cwd))
-      claims.current.set(folder.cwd, claimFolder(folder.cwd))
+    claims.current.set(folder.cwd, settle)
     setFolders((current) => [...current, folder])
   }
 
