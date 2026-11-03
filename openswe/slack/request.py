@@ -25,6 +25,9 @@ class SlackRequest(BaseModel):
     # Open SWE wrote the request; ``user_id`` is only who the run acts for.
     trigger_system: SystemIdentity | None = None
     thread_id: str | None = None
+    # A branch's new thread starts with what this thread holds (MDA's Slack channel
+    # seeds it), so the Slack messages this thread holds stay out of the prompt.
+    held_thread_id: str = ""
     channel_context: SlackChannelContext | None = None
     team_id: str = ""
     reply_thread_ts: str = ""

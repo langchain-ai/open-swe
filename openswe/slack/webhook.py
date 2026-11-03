@@ -177,6 +177,15 @@ async def _slack_channel_identity(
     return channel
 
 
+def held_context_thread(request: SlackRequest, thread_id: str, *, exists: bool) -> str | None:
+    """The thread whose Slack context the run's thread already has: a branch's
+    conversation thread, which its new thread starts with, or the run's own thread once
+    it exists; ``None`` for a new thread that starts with nothing."""
+    if request.held_thread_id:
+        return request.held_thread_id
+    return thread_id if exists else None
+
+
 async def _dispatched_slack_context(client: Any, thread_id: str) -> tuple[set[str], set[str]]:
     """What the thread already holds: visible context hashes and replayed Slack ts.
 
@@ -928,9 +937,10 @@ async def _process_slack_mention_impl(
     )
     # The thread's state only matters once dispatching, but reading it is one of
     # the slowest lookups here and nothing below changes it before the run.
+    holder = held_context_thread(request, thread_id, exists=thread_record.exists)
     dispatched_context = asyncio.ensure_future(
-        _dispatched_slack_context(langgraph_client, thread_id)
-        if thread_record.exists and read is None
+        _dispatched_slack_context(langgraph_client, holder)
+        if holder is not None and read is None
         else _resolved((set[str](), set[str]()))
     )
     current_message = next(

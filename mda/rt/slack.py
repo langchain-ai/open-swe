@@ -18,6 +18,7 @@ handler replies with it in the Slack thread. A code channel's messages stay with
 the backend, which holds its one session.
 """
 
+import logging
 import re
 from collections.abc import Mapping
 from typing import Any, Final, Literal, cast
@@ -62,6 +63,8 @@ _REQUEST_SUBTYPES: Final = frozenset({"", "file_share", "thread_broadcast"})
 CONCIERGE_TS: Final = "0"
 _LEADING_MENTION: Final = re.compile(r"\s*<@([^>]+)>")
 _REVIEW_CARD_PREFIXES: Final = ("Review requested for ", "Expedited review requested for ")
+
+logger = logging.getLogger(__name__)
 
 type Kind = Literal["turn", "by_the_way", "breakout", "web", "move"]
 
@@ -150,7 +153,7 @@ async def start_turn(
         start = await ask_backend(START_SLACK_TURN, turn, msg_id=f"msg_{event.delivery_id}")
         if start.declined is not None:
             return reply(decline_text(start.declined))
-        return run_result(start)
+        return run_result(start, await _branch_seed(start, thread))
     return await _start_turn(
         event, thread, message, facts, parsed, turn, (bot_user_id, bot_username)
     )
@@ -468,13 +471,56 @@ def _clean_text(
     return slack_prompt.label_mentions(text, names, channel_names)
 
 
-def run_result(start: SlackTurnStart) -> ChannelRunResult | None:
-    """The run the backend built, as the channel starts it, or ``None``."""
+async def _branch_seed(
+    start: SlackTurnStart, thread: SlackChannelThread
+) -> Mapping[str, JsonValue] | None:
+    """What a branch's new thread starts with: the state values of the conversation's
+    thread, which the handler reads as the conversation's runs do; ``None`` for no branch,
+    or a thread no run started on yet.
+
+    The backend's prompt left out the Slack messages that thread holds. One that can't be
+    read starts the branch without them, so the question is still answered.
+    """
+    if start.run is None or not start.branches_conversation:
+        return None
+    try:
+        state = await thread.get_state()
+    except Exception as error:  # noqa: BLE001 - the branch is still answered
+        logger.warning(
+            "Could not read the conversation a Slack branch starts with (%s)",
+            type(error).__name__,
+        )
+        return None
+    values = state["values"] if state is not None else None
+    # Agent Server's state, as JSON.
+    return cast(Mapping[str, JsonValue], values) if isinstance(values, Mapping) and values else None
+
+
+def run_result(
+    start: SlackTurnStart, seed: Mapping[str, JsonValue] | None = None
+) -> ChannelRunResult | None:
+    """The run the backend built, as the channel starts it, or ``None``.
+
+    ``seed`` is what a branch's new thread starts with: the run's input follows its
+    messages.
+    """
     run = start.run
     if run is None:
         return None
+    run_input: dict[str, Any] = dict(run.input)
+    if seed:
+        held = seed.get("messages")
+        added = run_input.get("messages")
+        run_input = {
+            **seed,
+            **run_input,
+            "messages": [
+                *(held if isinstance(held, list) else []),
+                *(added if isinstance(added, list) else []),
+            ],
+        }
     started: ChannelRun = {
-        "input": run.input,
+        "input": run_input,
         "context": run.context,
         "metadata": run.metadata,
         "multitask_strategy": "interrupt" if start.interrupts else "enqueue",

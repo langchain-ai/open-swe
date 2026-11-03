@@ -3,7 +3,7 @@ from unittest.mock import ANY, AsyncMock
 
 import pytest
 
-from openswe.slack import breakout, breakout_links, forks
+from openswe.slack import breakout, breakout_links
 from openswe.slack.channels import SlackChannel
 from openswe.slack.parsed_message import ParsedSlackMessage
 from openswe.slack.request import SlackRequest
@@ -394,7 +394,7 @@ async def test_moving_a_thread_stays_on_the_backend_even_with_mda(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_breakout_handed_to_mda_runs_on_a_fork_of_the_conversations_thread(
+async def test_a_breakout_handed_to_mda_branches_off_the_conversations_thread(
     monkeypatch,
 ):
     _patch_slack(monkeypatch)
@@ -408,19 +408,18 @@ async def test_a_breakout_handed_to_mda_runs_on_a_fork_of_the_conversations_thre
     claim = AsyncMock()
     monkeypatch.setattr(breakout.mda_forwarding, "claim_side", claim)
     monkeypatch.setattr(breakout.service, "slack_login", AsyncMock(return_value="alice"))
-    fork = AsyncMock(return_value="forked-thread")
-    monkeypatch.setattr(forks, "fork_thread", fork)
     hand_to_mda = AsyncMock()
 
     await breakout.process_slack_breakout(
-        _request(), Command("fix it"), None, hand_to_mda=hand_to_mda
+        _request(), Command("fix it"), None, hand_to_mda=hand_to_mda, branches=True
     )
 
-    # It knows what the agent did in the conversation, and starts as the requester's.
-    fork.assert_awaited_once_with("old-thread", key="C1:105.0", login="alice")
-    bind.assert_awaited_once_with("C1", "200.0", "forked-thread")
-    claim.assert_awaited_once_with("forked-thread", owner_login="alice")
+    # A new thread of the channel's, as the requester's, which starts with what the
+    # conversation's thread holds: MDA's channel seeds it from there.
+    side = breakout.mda_forwarding.side_thread_id("C1", "105.0")
+    bind.assert_awaited_once_with("C1", "200.0", side)
+    claim.assert_awaited_once_with(side, owner_login="alice")
     [opening, _repo] = hand_to_mda.await_args.args
-    assert opening.thread_id == "forked-thread"
+    assert (opening.thread_id, opening.held_thread_id) == (side, "old-thread")
     # Its first turn still reads the Slack thread, for what the agent never got there.
     assert (opening.context_channel_id, opening.context_thread_ts) == ("C1", "100.0")
