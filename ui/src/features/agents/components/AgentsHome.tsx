@@ -722,7 +722,10 @@ export function AgentsHome({
               }
               onSubmit={handleSubmit}
               onStop={optimisticDraftThread ? stopPendingSubmit : undefined}
-              disabled={Boolean(submittedDraft)}
+              disabled={
+                Boolean(submittedDraft) ||
+                (agentWorkspace && profileQuery.isPending)
+              }
               busy={Boolean(optimisticDraftThread)}
               models={models}
               selection={activeSelection}
