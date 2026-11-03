@@ -15,8 +15,7 @@ from dataclasses import dataclass
 from typing import Self
 from uuid import UUID
 
-from langgraph_sdk.client import LangGraphClient
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, JsonValue
 
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.dispatch import create_durable_run
@@ -52,8 +51,6 @@ from openswe.threads.store import THREADS
 from openswe.threads.summary import DASHBOARD_SOURCE, thread_is_private
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_thread_url
-from openswe.utils.json_types import thread_metadata
-from openswe.utils.thread_ops import langgraph_client
 from openswe.webhooks.common import upsert_agent_thread_metadata
 
 logger = logging.getLogger(__name__)
@@ -262,12 +259,7 @@ class GuideLaunch:
             self.requester, self.pull_request, self.head.title
         )
         thread_id = (
-            await _fork(
-                langgraph_client(),
-                origin.source_thread_id,
-                self.login,
-                is_private=origin.is_private,
-            )
+            await _fork(origin.source_thread_id, self.login, is_private=origin.is_private)
             if origin.source_thread_id
             else str(uuid.uuid4())
         )
@@ -344,19 +336,12 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
     return await (launch.code_channel() if start.code_channel else launch.here())
 
 
-class _ThreadCopy(BaseModel):
-    thread_id: str
-    metadata: dict[str, object] = {}
-
-
 class _SourceMetadata(BaseModel):
     sandbox_id: str | None = None
-    proxy_config: object = Field(default=None, alias=SANDBOX_PROXY_CONFIG_METADATA_KEY)
+    proxy_config: JsonValue = Field(default=None, alias=SANDBOX_PROXY_CONFIG_METADATA_KEY)
 
 
-async def _fork(
-    client: LangGraphClient, source_thread_id: str, login: str, *, is_private: bool = False
-) -> str:
+async def _fork(source_thread_id: str, login: str, *, is_private: bool = False) -> str:
     """A copy of the asking thread that shares its sandbox, so the walkthrough knows its work.
 
     The copy keeps every checkpoint but none of the source's other metadata: its
@@ -364,14 +349,15 @@ async def _fork(
     from. It joins the source's sandbox as a guest, the way other threads borrow one.
     """
     try:
-        source = _SourceMetadata.model_validate(
-            thread_metadata(await client.threads.get(source_thread_id))
-        )
+        thread = await THREADS.get(source_thread_id)
+        if thread is None:
+            raise LookupError("the asking thread is not indexed")
+        source = _SourceMetadata.model_validate(thread.metadata)
         host = await sandbox_host_thread_id(source_thread_id)
-        copied = _ThreadCopy.model_validate(await client.threads.copy(source_thread_id))
-        await client.threads.update(
-            thread_id=copied.thread_id,
-            metadata={
+        copied = await THREADS.copy(thread)
+        await THREADS.update(
+            copied.thread_id,
+            {
                 **dict.fromkeys(copied.metadata),
                 "visibility": "private" if is_private else "public",
                 "owner_type": "user",

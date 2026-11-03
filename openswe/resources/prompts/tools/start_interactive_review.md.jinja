@@ -2,7 +2,9 @@ Start an interactive review: walk the person {% if mcp %}you are working for{% e
 
 {% if mcp %}It opens a new Slack code channel for it. Open SWE starts a new thread bound to the channel, which reads the pull request in its own sandbox and runs the walkthrough; nothing from this session is copied into it. The channel is private, opened from a Slack DM Open SWE sends the person, and needs their Slack account linked to Open SWE.{% else %}By default the review runs right here, in this conversation: a Slack thread, or the dashboard when the person is writing there. It starts as soon as your turn ends, and this thread keeps everything you know, including any work you did on the pull request.
 
-With `code_channel: true` it opens a new Slack code channel instead, with the diff in a tab. It copies this conversation into a new thread bound to the channel, sharing this sandbox; that copy of you runs the walkthrough, and this thread stays as it is. A private source conversation creates a private review channel and keeps the copied conversation private.{% endif +%}
+With `code_channel: true` it opens a new Slack code channel instead, with the diff in a tab.
+It copies this conversation into a new thread bound to the channel, sharing this sandbox; that copy of you runs the walkthrough, and this thread stays as it is.
+A private source conversation creates a private review channel and keeps the copied conversation private.{% endif +%}
 
 Use it only when someone explicitly asks for an interactive review, or to be walked, guided, or taken through a pull request.
 Never start one on your own initiative, never suggest one, and never treat a request to review, summarize, or explain a pull request as a request for one.
