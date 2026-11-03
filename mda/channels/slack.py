@@ -1,13 +1,13 @@
-"""Slack, through Open SWE's own Slack app: the conversations the backend hands to MDA.
+"""Slack, through Open SWE's own Slack app: the conversations MDA's channel holds.
 
-The app keeps its URLs at the backend's ``/webhooks/slack``, which forwards the new
+The app keeps its URLs at the backend's ``/webhooks/slack``, which forwards the
 conversations this channel can start (mentions, including allowed bots', DMs,
-kitchen channels, new concierge DMs), everything later in them and the clicks there, to LangSmith Trigger Server
-exactly as Slack sent it. This channel owns those
-conversations' threads; its handler asks the backend what each message starts, and
-whether it redirects the work in progress or waits its turn (``rt.slack``), and what a
-click starts (``rt.slack_clicks``). The backend
-gated the message already. The agent posts its own replies with Open SWE's Slack tools,
+kitchen channels, new concierge DMs, ``/btw`` questions and breakouts), everything
+later in them and the clicks there, to LangSmith Trigger Server exactly as Slack
+sent it. This channel owns those conversations' threads. Its handler decides what
+each message starts and builds the turn's prompt, asking the backend only for what
+needs Open SWE's records (``rt.slack``), and what a click starts
+(``rt.slack_clicks``). The agent posts its own replies with Open SWE's Slack tools,
 so the channel posts nothing itself.
 """
 
@@ -17,13 +17,13 @@ from rt.slack import start_turn
 from rt.slack_clicks import start_click, start_shortcut
 
 channel = channels.slack(
-    # The backend decides what reaches the channel, so every forwarded message counts.
+    # Every message reaches the handler, which decides what it starts.
     trigger_mode="all",
     auto_post=False,
     # No 👀 on the message that starts a run.
     reactions=False,
-    # Trigger Server forwards a bot's mention; the backend hands over only the bots on
-    # Open SWE's allow-list.
+    # Trigger Server forwards a bot's mention; the handler starts runs only for the bots
+    # on Open SWE's allow-list.
     allow_bot_triggers=True,
     # The handler picks each message's strategy; anything else redirects the work in progress.
     multitask_strategy="interrupt",

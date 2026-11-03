@@ -8,15 +8,49 @@ context blocks by it, so this writes byte for byte what the backend does:
 Standard library only, so that test can load it.
 """
 
+import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from html import escape
-from typing import Literal, NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict, cast
+from xml.etree import ElementTree
 
 type FieldValue = str | int | float | bool
 type FieldValues = Mapping[str, FieldValue | None]
 type EnvelopeData = Mapping[str, FieldValue | FieldValues | list[FieldValues]]
 type Content = str | list[dict[str, object]]
+
+
+class PersonIdentity(TypedDict):
+    """Everything the agent knows about one person, whichever surface they wrote on."""
+
+    id: str
+    display_name: NotRequired[str]
+    github_login: NotRequired[str]
+    slack_user_id: NotRequired[str]
+    commit_name: NotRequired[str]
+    commit_email: NotRequired[str]
+    email: NotRequired[str]
+    timezone: NotRequired[str]
+    open_swe_account: NotRequired[Literal["linked", "unlinked"]]
+    workspace_admin: NotRequired[Literal["yes", "no"]]
+    new_prs: NotRequired[Literal["as drafts", "ready for review"]]
+    standing_instructions: NotRequired[str]
+
+
+class ChannelIdentity(TypedDict):
+    """The conversation a message arrived in, with whatever stays true of it."""
+
+    id: str
+    platform: str
+    name: NotRequired[str]
+    thread_id: NotRequired[str]
+    topic: NotRequired[str]
+    purpose: NotRequired[str]
+    description: NotRequired[str]
+    default_repo: NotRequired[str]
+    web_url: NotRequired[str]
+    trace_url: NotRequired[str]
 
 
 class SystemIdentity(TypedDict):
@@ -29,7 +63,7 @@ class SystemIdentity(TypedDict):
 
 class InputMessageContext(TypedDict):
     sender_id: str
-    surface: Literal["linear"]
+    surface: Literal["linear", "slack", "web"]
     kind: Literal["human", "system"]
     channel_id: NotRequired[str]
     data: NotRequired[EnvelopeData]
@@ -45,6 +79,30 @@ class RunInput(TypedDict):
     messages: list[RunMessage]
 
 
+_PERSON_FIELDS = (
+    "display_name",
+    "github_login",
+    "slack_user_id",
+    "commit_name",
+    "commit_email",
+    "email",
+    "timezone",
+    "open_swe_account",
+    "workspace_admin",
+    "new_prs",
+    "standing_instructions",
+)
+_CHANNEL_FIELDS = (
+    "platform",
+    "name",
+    "thread_id",
+    "topic",
+    "purpose",
+    "description",
+    "default_repo",
+    "web_url",
+    "trace_url",
+)
 _SYSTEM_FIELDS = ("display_name", "platform", "sender_type", "content")
 
 
@@ -100,13 +158,102 @@ class Fields:
         return "\n".join(lines)
 
 
-def system_introduction(system: SystemIdentity) -> RunMessage:
-    entity_id = _validate_entity_id(system["id"])
-    fields = Fields({field: system.get(field) for field in _SYSTEM_FIELDS})
+def _entity_message(
+    identity: Mapping[str, object],
+    kind: Literal["person", "channel", "system"],
+    fields: tuple[str, ...],
+) -> RunMessage:
+    entity_id = _validate_entity_id(str(identity["id"]))
+    # Every identity field is a string, so each is a field value.
+    values = Fields({field: cast("str | None", identity.get(field)) for field in fields})
     return {
         "role": "user",
-        "content": fields.element("dynamic-context", {"kind": "system", "id": entity_id}),
+        "content": values.element("dynamic-context", {"kind": kind, "id": entity_id}),
     }
+
+
+def person_introduction(person: PersonIdentity) -> RunMessage:
+    return _entity_message(person, "person", _PERSON_FIELDS)
+
+
+def channel_introduction(channel: ChannelIdentity) -> RunMessage:
+    return _entity_message(channel, "channel", _CHANNEL_FIELDS)
+
+
+def system_introduction(system: SystemIdentity) -> RunMessage:
+    return _entity_message(system, "system", _SYSTEM_FIELDS)
+
+
+def _content_texts(content: object) -> list[str]:
+    values = content if isinstance(content, list) else [content]
+    return [
+        text
+        for value in values
+        if isinstance(text := (value.get("text") if isinstance(value, dict) else value), str)
+    ]
+
+
+def _input_message_elements(content: object) -> list[ElementTree.Element]:
+    elements: list[ElementTree.Element] = []
+    for text in _content_texts(content):
+        if "<input-message" not in text:
+            continue
+        try:
+            root = ElementTree.fromstring(text)
+        except ElementTree.ParseError:
+            continue
+        elements.extend([root] if root.tag == "input-message" else root.findall(".//input-message"))
+    return elements
+
+
+def input_message_timestamps(content: object) -> set[str]:
+    """Source-message timestamps the serialized envelopes in ``content`` carry."""
+    return {
+        timestamp
+        for message in _input_message_elements(content)
+        if (timestamp := message.get("timestamp"))
+    }
+
+
+def _dynamic_context(content: object) -> tuple[tuple[str, str], str] | None:
+    values = content if isinstance(content, list) else [content]
+    for value in values:
+        text = value.get("text") if isinstance(value, dict) else value
+        if not isinstance(text, str) or "<dynamic-context" not in text:
+            continue
+        try:
+            root = ElementTree.fromstring(text)
+        except ElementTree.ParseError:
+            continue
+        if root.tag != "dynamic-context":
+            continue
+        claimed_hash = root.attrib.pop("hash", None)
+        canonical = ElementTree.tostring(root, encoding="unicode")
+        context_hash = hashlib.sha256(canonical.encode()).hexdigest()
+        if claimed_hash is None or claimed_hash == context_hash:
+            key = (root.get("kind", ""), root.get("id") or context_hash)
+            return key, context_hash
+    return None
+
+
+def dynamic_context_hash(content: object) -> str | None:
+    """The hash the backend dedupes a context block by; ``None`` for any other content."""
+    context = _dynamic_context(content)
+    return context[1] if context else None
+
+
+def dynamic_context_hashes_from_messages(messages: object) -> set[str]:
+    """The hash of each context block's latest version among ``messages`` (JSON messages)."""
+    if not isinstance(messages, list | tuple):
+        return set()
+    latest: dict[tuple[str, str], str] = {}
+    for message in messages:
+        content = message.get("content") if isinstance(message, Mapping) else None
+        context = _dynamic_context(content)
+        if context is not None:
+            key, context_hash = context
+            latest[key] = context_hash
+    return set(latest.values())
 
 
 def _serialize_message(text: str, context: InputMessageContext) -> str:

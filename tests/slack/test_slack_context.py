@@ -575,7 +575,7 @@ async def test_slack_files_wait_for_the_sandbox_mda_opens_for_the_run(
 async def test_a_channel_run_does_not_wait_on_the_sandbox_for_slack_files(slack_file_mention):
     request, threads, captured = slack_file_mention
 
-    prepared = await slack_webhooks.prepare_slack_channel_run(request, None)
+    prepared, _ = await slack_webhooks.prepare_slack_channel_run(request, None)
 
     # MDA's channel starts the run; nothing holds up its answer for a sandbox.
     assert prepared is not None
@@ -807,7 +807,7 @@ def test_a_turn_built_for_mdas_slack_channel_says_why_instead_of_prompting(
         slack_webhooks, "build_settings_url", lambda: "https://openswe.test/settings"
     )
 
-    prepared = asyncio.run(
+    prepared, _ = asyncio.run(
         slack_webhooks.prepare_slack_channel_run(
             SlackRequest(
                 channel_id="C123",

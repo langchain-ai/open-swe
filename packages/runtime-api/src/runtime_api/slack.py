@@ -1,12 +1,13 @@
 """The calls MDA's Slack channel makes on the backend, with no run yet.
 
-The backend's ``/webhooks/slack`` gates each Slack message and forwards the ones
-MDA's conversations own to Trigger Server, remembering the request. The channel's
-handler then asks here what the message starts (``plan_slack_turn``): the backend
-builds the run from the request it remembered, as for its own Slack runs, signs
-its context, and says whether the message redirects the thread's work in
-progress or waits its turn behind it, which the channel starts the run with; or
-why it starts nothing, which the handler replies with.
+The channel's handler decides what a Slack message starts and builds its prompt
+from Slack; it asks here only for what needs Open SWE's data. First the facts its
+decision needs (``slack_message_facts``): where the message is, who sent it, who
+holds its conversation. Then the turn (``start_slack_turn``): the backend gates
+it, makes the conversation MDA's, records the thread, signs the run's context, and
+answers what the prompt needs from its records; or why it starts nothing, which
+the handler replies with. A ``/btw`` question, a breakout and a move are built
+whole here, as the backend always built them.
 ``plan_slack_click`` does the same for a click on the agent's buttons. Every other
 click, and one in a conversation the backend holds, goes to ``act_on_slack_click``:
 the backend acts on it as it always has.
@@ -26,18 +27,115 @@ from runtime_api.endpoint import CHANNEL_API_PREFIX, Endpoint
 from runtime_api.operations import RunRequest
 
 
-class PlanSlackTurn(BaseModel):
+class SlackMessage(BaseModel):
     """A Slack message the channel received, on its conversation's thread."""
 
     thread_id: UUID
+    # The app and workspace in Trigger Server's verified key.
+    app_id: str = Field(min_length=1, max_length=64)
+    team_id: str = Field(min_length=1, max_length=64)
+    channel_id: str = Field(min_length=1, max_length=64)
+    # Slack's ``channel_type``, such as ``im`` for a direct message.
+    channel_type: str = Field(default="", max_length=32)
     # Slack's timestamp of the message, which names it in its channel.
     message_ts: str = Field(min_length=1, max_length=64)
-    # The message's Slack address, to find a concierge DM's thread; empty from older deployments.
-    channel_id: str = Field(default="", max_length=64)
-    thread_ts: str = Field(default="", max_length=64)
+    # The Slack thread's first message; ``message_ts`` when it starts one.
+    thread_ts: str = Field(min_length=1, max_length=64)
+    # Slack's ``thread_ts``: empty for a message outside any Slack thread.
+    reply_thread_ts: str = Field(default="", max_length=64)
+    subtype: str = Field(default="", max_length=64)
+    # The person who sent it, as Trigger Server verified them; empty for a bot.
+    user_id: str = Field(default="", max_length=64)
+    # A bot's message: its bot and app.
+    bot_id: str = Field(default="", max_length=64)
+    bot_app_id: str = Field(default="", max_length=64)
+    text: str = Field(default="", max_length=40_000)
+    attachments: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=100)
+    # Whether it mentions Open SWE, as the channel's key says.
+    explicit_mention: bool = False
+
+
+class SlackMessageFactsRequest(SlackMessage):
+    # A ``/workspace:<name>`` tag the message carries, to check it names a workspace.
+    workspace_tag: str = Field(default="", max_length=128)
+
+
+class SlackMessageFacts(BaseModel):
+    """What deciding a Slack message needs from Open SWE's records."""
+
+    # ``external``: the channel has participants from outside the workspace;
+    # ``unverified``: Slack can't confirm it hasn't. Open SWE operates in neither.
+    channel: Literal["ok", "external", "unverified"] = "ok"
+    # A direct message with the app.
+    dm: bool = False
+    code_channel: bool = False
+    kitchen_channel: bool = False
+    # The sender turned concierge mode on: their DM is one conversation.
+    concierge: bool = False
+    # A bot's message: whether the bot is on Open SWE's allow-list, and its name there.
+    allowed_bot: bool = False
+    bot_name: str = ""
+    # An untagged reply the agent answers anyway, in a thread only one person talks in.
+    solo_followup: bool = False
+    # Who holds the Slack thread's conversation: MDA's channel, the backend, or nobody yet.
+    conversation: Literal["mda", "backend", "new"] = "new"
+    # Whether ``workspace_tag`` names a workspace.
+    workspace_known: bool = False
+
+
+class StartSlackTurn(SlackMessage):
+    """A message the handler decided starts a turn, with what it read from Slack."""
+
+    # ``turn``: a message in the conversation, whose prompt the handler builds.
+    # ``by_the_way``, ``breakout``, ``web`` and ``move`` (a bare ``/breakout``) are
+    # built here whole.
+    kind: Literal["turn", "by_the_way", "breakout", "web", "move"] = "turn"
+    # From ``slack_message_facts``, as the handler decided with them.
+    concierge: bool = False
+    kitchen_channel: bool = False
+    # A DM, a kitchen channel or a solo follow-up: every message counts as a request.
+    treat_all_messages_as_mentions: bool = False
+    # A ``/model:perf`` command, which redirects the work in progress.
+    performance_command: bool = False
+    # The request's text with the mention, a known workspace tag and the model command
+    # taken out, which titles a new thread.
+    clean_text: str = Field(default="", max_length=40_000)
+    workspace_tag: str = Field(default="", max_length=128)
+    # Whether the prompt carries images, which may need a model that reads them.
+    has_images: bool = False
+    # The people whose messages the prompt may quote, and who spoke in the Slack thread.
+    context_user_ids: list[str] = Field(default_factory=list, max_length=1000)
+    participant_user_ids: list[str] = Field(default_factory=list, max_length=1000)
+    # The Slack thread holds the agent's review request card.
+    review_card: bool = False
+    # A bare ``/breakout #channel``: the Slack channel it names.
+    move_channel_id: str = Field(default="", max_length=64)
+
+
+class SlackTurnPrompt(BaseModel):
+    """What the handler builds a turn's prompt with, from Open SWE's records."""
+
+    # The thread has had no turn yet.
+    first_turn: bool
+    # The sender's name, as Slack's profile has it.
+    sender_name: str = ""
+    # GitHub logins and person ids of the Slack users with an Open SWE account.
+    logins: dict[str, str] = Field(default_factory=dict)
+    person_ids: dict[str, str] = Field(default_factory=dict)
+    # A private thread: the Slack users whose messages the prompt may quote; ``None``
+    # when the thread isn't private.
+    promptable_user_ids: list[str] | None = None
+    # The conversation's channel, as its context block describes it.
+    channel: dict[str, JsonValue] = Field(default_factory=dict)
+    # Sections from Open SWE's records this turn adds, such as the pull request a
+    # review card asks about.
+    turn_sections: list[str] = Field(default_factory=list)
+    # A review guide's thread: its constant guidance is the guide's own.
+    review_guide: bool = False
 
 
 class SlackTurnRun(BaseModel):
+    # Empty for a ``turn``, whose prompt the handler builds.
     input: dict[str, JsonValue]
     context: dict[str, JsonValue]
     metadata: dict[str, JsonValue]
@@ -56,9 +154,8 @@ class SlackTurnDeclined(BaseModel):
 
 
 class SlackTurnStart(BaseModel):
-    # The run, or none: the message wasn't one the backend handed over, gating
-    # answered it already, gating declined it (``declined``), or building the run
-    # failed, which the Slack thread heard about.
+    # The run, or none: gating answered the message already, declined it
+    # (``declined``), or building the run failed, which the Slack thread heard about.
     run: SlackTurnRun | None = None
     # A mention, a direct message or an explicit request redirects the thread's
     # work in progress; any other follow-up waits for it, as on the backend's own
@@ -69,6 +166,11 @@ class SlackTurnStart(BaseModel):
     # Why no run starts, which the handler replies with in the Slack thread; set at
     # most once per webhook ID.
     declined: SlackTurnDeclined | None = None
+
+
+class SlackTurnStarted(SlackTurnStart):
+    # A ``turn``'s prompt facts, with its run.
+    prompt: SlackTurnPrompt | None = None
 
 
 class OptionClick(BaseModel):
@@ -144,16 +246,25 @@ class SlackClickActed(BaseModel):
     acted: bool = True
 
 
-PLAN_SLACK_TURN: Final = Endpoint(
-    "plan_slack_turn",
-    PlanSlackTurn,
-    SlackTurnStart,
-    # Building a turn reads the Slack thread and fetches its images.
+SLACK_MESSAGE_FACTS: Final = Endpoint(
+    "slack_message_facts",
+    SlackMessageFactsRequest,
+    SlackMessageFacts,
+    seconds=60.0,
+    # Reads, and notes a mention for later replies, which a call sent again repeats
+    # harmlessly. The backend answers 503 while it can't verify the message's channel.
+    delivery="idempotent",
+    prefix=CHANNEL_API_PREFIX,
+)
+
+START_SLACK_TURN: Final = Endpoint(
+    "start_slack_turn",
+    StartSlackTurn,
+    SlackTurnStarted,
+    # A breakout opens its Slack thread and reads it.
     seconds=120.0,
-    # Building the run takes the remembered request, so a call is sent again only
-    # where the backend never got it; one sent again under the same webhook ID
-    # builds the run again, but gets no decline a call answered already. The
-    # backend answers 503 while it can't verify the message's channel.
+    # One sent again under the same webhook ID builds the run again, but gets no
+    # decline a call answered already.
     prefix=CHANNEL_API_PREFIX,
 )
 

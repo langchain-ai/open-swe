@@ -1,68 +1,73 @@
-"""What MDA's Slack channel asks the backend: the Slack conversations it handed to MDA.
+"""What MDA's Slack channel asks the backend about the Slack conversations it holds.
 
-Open SWE's Slack app keeps its URLs at ``/webhooks/slack``, which forwards the
-conversations that belong to MDA to Trigger Server (``openswe.slack.mda_forwarding``).
-The deployment's Slack channel owns those conversations' threads and starts their
-runs; its handler asks ``plan_slack_turn`` (``runtime_api.slack``) what each message
-starts. The backend gated each message when Slack delivered it and remembered the
-request; here it builds the run from that request as it would for its own Slack
-runs, with the signed run token, and says whether the message redirects the
-thread's work in progress or waits its turn, or why it starts nothing, which the
-channel's handler replies with: a channel with external participants, or a person
-who must sign in first. ``plan_slack_click`` does the same for a click on the
-agent's buttons.
-
-``/slack/channel/events`` answers a deployment whose channel still names it as an
-endpoint, until every deployment runs the handler.
+The deployment's Slack channel decides what each message starts and builds its
+prompt from Slack (``rt.slack``). It asks here only for what needs Open SWE's
+records (``runtime_api.slack``): the facts deciding a message needs
+(``slack_message_facts``), then the turn (``start_slack_turn``). The backend gates
+the turn, makes a new conversation MDA's, records the thread, signs the run, and
+says whether the message redirects the thread's work in progress or waits its turn,
+or why it starts nothing, which the channel's handler replies with: a person who
+must sign in first. ``plan_slack_click`` does the same for a click on the agent's
+buttons.
 """
 
 import json
 import logging
 from datetime import timedelta
-from typing import Annotated, Final, Literal, cast
+from typing import Any, Final, Literal, cast
 from uuid import UUID, uuid7
 
-from fastapi import APIRouter, Depends, Header, HTTPException
-from managed_deepagents import EndpointAnswer, EndpointThread
-from managed_deepagents import JsonValue as AnswerJson
+from fastapi import HTTPException
 from pydantic import JsonValue
 from runtime_api.slack import (
     SLACK_MOVE_MARKER,
     ActOnSlackClick,
     OptionClick,
     PlanSlackClick,
-    PlanSlackTurn,
     RetryClick,
     SlackClickActed,
     SlackClickStart,
+    SlackMessage,
+    SlackMessageFacts,
+    SlackMessageFactsRequest,
     SlackTurnDeclined,
     SlackTurnRun,
-    SlackTurnStart,
+    SlackTurnStarted,
+    StartSlackTurn,
     WorkflowPushClick,
 )
-from typing_extensions import TypedDict
 
 from openswe import event_claims
+from openswe.dashboard.oauth import build_settings_url
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.input_messages import RunInput
 from openswe.mda_channels.api import ChannelCall
-from openswe.mda_channels.auth import require_mda_channel
 from openswe.slack import mda_forwarding
 from openswe.slack import webhook as service
+from openswe.slack.allowed_bots import resolve_allowed_slack_bot
 from openswe.slack.ask import by_the_way_request, prepare_ask_channel_run
+from openswe.slack.breakout import BreakoutCommand, process_slack_breakout, web_opening
 from openswe.slack.breakout_links import notify_web_breakout
-from openswe.slack.dm import CONCIERGE_TS
+from openswe.slack.client import SlackThreadMappingError
+from openswe.slack.dm import CONCIERGE_TS, is_dm_channel
+from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
 from openswe.slack.payloads import SlackChannelContext, SlackInteraction
+from openswe.slack.records import lookup_slack_thread_id
 from openswe.slack.request import SlackRequest
 from openswe.slack.retry import SlackRetry
+from openswe.slack.solo_threads import allow_solo_thread_followup, track_explicit_mention
+from openswe.slack.webhook import SlackTurnRead
 from openswe.threads import index
 from openswe.threads.router import channel_run_metadata, channel_run_starting
 from openswe.threads.runtimes import RUNTIMES
+from openswe.users import User
+from openswe.utils.thread_ops import langgraph_client as get_langgraph_client
 from openswe.webhooks import common
+from openswe.workspaces.routing import is_kitchen_channel
+from openswe.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)
 
-_MESSAGE_KEYS: Final = frozenset({"mention", "directMessage", "message"})
 #: A clicked message is acted on once; the claim outlives its buttons.
 _CLICK_SCOPE: Final = "slack_click"
 _CLICK_TTL: Final = timedelta(days=7)
@@ -79,139 +84,294 @@ _WORKFLOW_PUSH_RETRY: Final = (
     "do not alter workflow files before pushing."
 )
 
-router = APIRouter(prefix="/slack/channel", dependencies=[Depends(require_mda_channel)])
-
-
-class SlackChannelCall(TypedDict):
-    """What MDA's Slack channel POSTs: the event (MDA's ``SlackEndpointEvent``) and its thread.
-
-    The event stays a plain object here: its fields are read one by one below.
-    """
-
-    event: dict[str, JsonValue]
-    thread: EndpointThread
-
 
 def _no_run(reason: str, **fields: str) -> None:
     """Answer the channel that the event starts nothing, with one log line saying why."""
     logger.info(
-        "MDA's Slack channel endpoint answers no run",
+        "MDA's Slack channel starts no run",
         extra={"endpoint": "slack", "no_run_reason": reason, **fields},
     )
 
 
-@router.post("/events")
-async def slack_channel_event(
-    call: SlackChannelCall, webhook_id: Annotated[str, Header(alias="webhook-id")]
-) -> EndpointAnswer | None:
-    """The run a forwarded Slack message starts on the channel's thread, or ``None``.
+async def slack_message_facts(
+    _call: ChannelCall, message: SlackMessageFactsRequest
+) -> SlackMessageFacts:
+    """What deciding a Slack message needs from Open SWE's records, as Slack has it now.
 
-    For a deployment whose channel names this endpoint; ``plan_slack_turn`` answers
-    the handler that replaces it.
+    While Slack can't confirm the channel has no external participants the call fails
+    with a 503, so it is sent again.
     """
-    event, thread = call["event"], call["thread"]
-    key = event.get("key")
-    if key not in _MESSAGE_KEYS:
-        # Button clicks in MDA-owned threads aren't forwarded yet.
-        return _no_run("not a message", slack_channel_event=str(key))
-    try:
-        thread_id = str(UUID(thread["id"]))
-    except (KeyError, ValueError) as error:
-        raise HTTPException(status_code=422, detail="Invalid thread") from error
-    message_ts = event.get("messageTs")
-    if not isinstance(message_ts, str) or not message_ts:
-        raise HTTPException(status_code=422, detail="The event names no message")
-    run = (await _turn(thread_id, message_ts, webhook_id)).run
-    if run is None:
-        return None
-    answer: EndpointAnswer = {
-        "input": cast(dict[str, AnswerJson], run.input),
-        "context": cast(dict[str, AnswerJson], run.context),
-        "metadata": cast(dict[str, AnswerJson], run.metadata),
-    }
-    if run.webhook:
-        answer["webhook"] = run.webhook
-    return answer
+    channel_context = await common.resolve_slack_channel_context(
+        message.channel_id, use_cache=False
+    )
+    if not channel_context.allows_operations:
+        return SlackMessageFacts(channel=_refused(channel_context, message.channel_id))
+    dm = message.channel_type == "im" or is_dm_channel(channel_context)
+    code_channel = await common.is_code_channel(message.channel_id)
+    allowed_bot = (
+        await resolve_allowed_slack_bot(
+            message.team_id, message.bot_id, user_id=message.user_id, app_id=message.bot_app_id
+        )
+        if message.bot_id
+        else None
+    )
+    kitchen = not (code_channel or dm) and await is_kitchen_channel(message.channel_id)
+    concierge = dm and not code_channel and await User.concierge_mode_for_slack(message.user_id)
+    parsed = ParsedSlackMessage.parse(
+        message.text, common.SLACK_BOT_USER_ID, common.SLACK_BOT_USERNAME
+    )
+    solo_followup = False
+    if (
+        parsed.action is not SlackAction.BY_THE_WAY
+        and not (code_channel or dm or message.bot_id)
+        and message.subtype in {"", "file_share", "thread_broadcast"}
+        and (message.reply_thread_ts or message.explicit_mention)
+    ):
+        if message.explicit_mention:
+            track_explicit_mention(
+                get_langgraph_client(),
+                channel_id=message.channel_id,
+                thread_ts=message.thread_ts,
+                message_ts=message.message_ts,
+                user_id=message.user_id,
+            )
+        else:
+            solo_followup = await allow_solo_thread_followup(
+                get_langgraph_client(),
+                channel_id=message.channel_id,
+                thread_ts=message.thread_ts,
+                message_ts=message.message_ts,
+                user_id=message.user_id,
+                explicit_mention=False,
+            )
+    return SlackMessageFacts(
+        dm=dm,
+        code_channel=code_channel,
+        kitchen_channel=kitchen,
+        concierge=concierge,
+        allowed_bot=allowed_bot is not None,
+        bot_name=(allowed_bot.name.strip() or "Bot") if allowed_bot is not None else "",
+        solo_followup=solo_followup,
+        conversation=await _conversation(message, CONCIERGE_TS if concierge else message.thread_ts),
+        workspace_known=bool(message.workspace_tag)
+        and await WORKSPACES.get(message.workspace_tag) is not None,
+    )
 
 
-async def plan_slack_turn(call: ChannelCall, plan: PlanSlackTurn) -> SlackTurnStart:
-    """The run a forwarded Slack message starts, and whether it interrupts the thread's.
+def _refused(channel: SlackChannelContext, channel_id: str) -> Literal["external", "unverified"]:
+    """Why Open SWE doesn't operate in a channel; a 503 while Slack can't confirm it yet."""
+    if channel.is_ext_shared is True:
+        return "external"
+    if channel.is_pending_ext_shared is not True and channel.lookup_retry_after is not None:
+        logger.warning(
+            "Slack channel verification unavailable; MDA's Slack channel asks again",
+            extra={"slack_channel_id": channel_id},
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Slack channel verification is temporarily unavailable.",
+            headers={"Retry-After": str(channel.lookup_retry_after)},
+        )
+    return "unverified"
 
-    No run when the message wasn't one the backend handed over (the backend gates
-    every message before it forwards one), when gating posted the reply itself,
-    or when building the run failed, which the Slack thread hears about. When the
-    message's channel has external participants, or the person must sign in to
-    Open SWE first, the start says why instead (``declined``), and the channel's
-    handler replies with it. A call sent again under the same ``webhook-id`` gets
-    the run built again, but no decline it answered already. While Slack can't
-    confirm the channel has no external participants the call fails with a 503,
-    so it is sent again.
+
+async def _conversation(message: SlackMessage, root_ts: str) -> Literal["mda", "backend", "new"]:
+    """Who holds the conversation of the Slack thread at ``root_ts``."""
+    if await mda_forwarding.owned_thread(message.channel_id, root_ts) is not None:
+        return "mda"
+    if await lookup_slack_thread_id(message.channel_id, root_ts) is not None:
+        return "backend"
+    # A conversation that moved to another Slack thread took its thread along, and MDA
+    # handed it to that Slack thread, so this one starts on the backend again.
+    moved = mda_forwarding.mda_thread_id(
+        message.app_id, message.team_id, message.channel_id, root_ts
+    )
+    return "backend" if await index.get(moved) is not None else "new"
+
+
+async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurnStarted:
+    """The run a message MDA's Slack channel decided on starts, and whether it interrupts.
+
+    A new conversation becomes MDA's here, once its sender passed the account gate. For
+    a ``turn`` the channel built the prompt from Slack: the run's input is empty, and
+    ``prompt`` says what the prompt needs from Open SWE's records. A ``/btw`` question, a
+    breakout and a move are built whole, as the backend always built them. A call sent
+    again under the same ``webhook-id`` gets the run built again, but no decline it
+    answered already.
     """
     webhook_id = call.request.headers.get("webhook-id", "")
-    thread_id = str(plan.thread_id)
-    start = await _turn(
-        thread_id,
-        plan.message_ts,
-        webhook_id,
-        channel_id=plan.channel_id,
-        thread_ts=plan.thread_ts,
-        declines=True,
+    fields = {"agent_thread_id": str(turn.thread_id), "slack_message_ts": turn.message_ts}
+    channel_context = await common.resolve_slack_channel_context(turn.channel_id)
+    key_ts = CONCIERGE_TS if turn.concierge else turn.thread_ts
+    owner_login = None if turn.bot_id else await service.slack_login(turn.user_id)
+    parsed = ParsedSlackMessage.parse(
+        turn.text, common.SLACK_BOT_USER_ID, common.SLACK_BOT_USERNAME
     )
-    if start.declined is None:
-        return start
-    decline = f"{webhook_id}:{thread_id}:{plan.message_ts}"
-    if not await event_claims.claim(_DECLINE_SCOPE, decline, ttl=_DECLINE_TTL):
-        _no_run("declined already", agent_thread_id=thread_id, slack_message_ts=plan.message_ts)
-        return SlackTurnStart()
-    return start
-
-
-async def _turn(
-    thread_id: str,
-    message_ts: str,
-    webhook_id: str,
-    *,
-    channel_id: str = "",
-    thread_ts: str = "",
-    declines: bool = False,
-) -> SlackTurnStart:
-    """The run a remembered message starts. With ``declines``, why it starts nothing
-    when the person is told so: the channel's handler replies with it."""
-    fields = {"agent_thread_id": thread_id, "slack_message_ts": message_ts}
-    remembered = None
-    for candidate in await _remembered_in(thread_id, channel_id, thread_ts, message_ts):
-        remembered = await mda_forwarding.recall(candidate, message_ts, webhook_id)
-        if remembered is not None:
-            break
-    if remembered is None:
-        logger.warning(
-            "MDA's Slack channel asked about a message the backend didn't hand over",
-            extra=fields,
+    if turn.kind in {"by_the_way", "web"}:
+        # On a thread of its own, whoever holds the Slack thread it was asked in.
+        conversation = mda_forwarding.side_thread_id(turn.channel_id, turn.message_ts)
+        await mda_forwarding.claim_side(conversation, owner_login=owner_login)
+    elif (owned := await mda_forwarding.owned_thread(turn.channel_id, key_ts)) is not None:
+        conversation = owned
+    elif turn.kind == "breakout":
+        # Opens its own Slack thread, seeded from this one, whoever holds it.
+        try:
+            conversation = await common.resolve_slack_thread_id(
+                get_langgraph_client(), turn.channel_id, key_ts
+            )
+        except SlackThreadMappingError as exc:
+            raise HTTPException(
+                status_code=409, detail="The Slack thread belongs to another thread"
+            ) from exc
+    elif turn.kind == "move":
+        # Only a conversation this channel holds moves through MDA.
+        _no_run("a move outside an MDA conversation", **fields)
+        return SlackTurnStarted()
+    else:
+        declined = await _account_gate(turn, webhook_id, fields)
+        if declined is not None:
+            return declined
+        conversation = await _claim(turn, owner_login)
+    if turn.concierge:
+        # Each Slack thread of a concierge DM joins the DM's one conversation.
+        await mda_forwarding.join_concierge(turn.channel_id, turn.thread_ts, conversation)
+    request = SlackRequest(
+        channel_id=turn.channel_id,
+        channel_context=channel_context,
+        thread_ts=key_ts,
+        event_ts=turn.message_ts,
+        original_message_ts=turn.message_ts,
+        retry_message_ts=turn.message_ts,
+        # One per message, so a call sent again claims nothing twice.
+        event_id=f"mda-slack:{turn.channel_id}:{turn.message_ts}",
+        user_id=turn.user_id,
+        text=turn.text,
+        attachments=cast(list[dict[str, Any]], turn.attachments),
+        bot_user_id=common.SLACK_BOT_USER_ID,
+        thread_id=conversation,
+        treat_all_messages_as_mentions=turn.treat_all_messages_as_mentions,
+        kitchen_channel=turn.kitchen_channel,
+        explicit_mention=turn.explicit_mention,
+        concierge_mode=turn.concierge,
+        reply_thread_ts=turn.reply_thread_ts if turn.concierge else "",
+        team_id=turn.team_id,
+        triggering_bot_id=turn.bot_id,
+        triggering_bot_app_id=turn.bot_app_id if turn.bot_id else "",
+    )
+    repo = (
+        None
+        if turn.kind == "by_the_way"
+        else await common.get_slack_repo_config(
+            turn.channel_id,
+            key_ts,
+            slack_user_id=turn.user_id,
+            channel_context=channel_context,
+            thread_id=conversation,
         )
-        _no_run("not handed over", **fields)
-        return SlackTurnStart()
-    request, repo = remembered
-    if declines:
-        refused = await _refused_channel(request, fields)
-        if refused is not None:
-            return refused
-    run_thread = request.thread_id or thread_id
+    )
+    read: SlackTurnRead | None = None
+    match turn.kind:
+        case "by_the_way":
+            request = request.model_copy(update={"by_the_way": parsed.argument})
+        case "web":
+            request = await web_opening(request, BreakoutCommand.from_message(parsed), conversation)
+        case "breakout":
+            opened = await _open_breakout(request, BreakoutCommand.from_message(parsed), repo)
+            if opened is None:
+                _no_run("breakout opened nothing", **fields)
+                return SlackTurnStarted()
+            request, repo = opened
+        case "move":
+            request = request.model_copy(
+                update={"move_thread": True, "move_channel_id": turn.move_channel_id}
+            )
+        case "turn":
+            read = SlackTurnRead(
+                clean_text=turn.clean_text,
+                context_user_ids=turn.context_user_ids,
+                participant_user_ids=turn.participant_user_ids,
+                has_images=turn.has_images,
+                review_card=turn.review_card,
+            )
+    run_thread = request.thread_id or conversation
     try:
-        start = await _prepare_run(run_thread, request, repo, declines=declines)
+        start = await _prepare_run(run_thread, request, repo, declines=True, read=read)
     except Exception as exc:  # noqa: BLE001 - the person hears about it instead
-        # The request was taken: nothing else will tell the Slack thread.
         await service.notify_slack_processing_error(request, repo.repo if repo else None, exc)
         _no_run("building the run failed", **fields)
-        return SlackTurnStart()
+        return SlackTurnStarted()
     if start.declined is not None:
+        if not await _first_decline(webhook_id, turn):
+            _no_run("declined already", **fields)
+            return SlackTurnStarted()
         _no_run(f"declined: {start.declined.reason}", **fields)
     elif start.run is None:
         _no_run("no run prepared", **fields)
-    elif run_thread != thread_id:
+    elif run_thread != str(turn.thread_id):
         start.thread_id = UUID(run_thread)
     if start.run is not None and request.web_only:
         await _notify_web_breakout(request, webhook_id)
     return start
+
+
+async def _account_gate(
+    turn: StartSlackTurn, webhook_id: str, fields: dict[str, str]
+) -> SlackTurnStarted | None:
+    """Why a person who can't run starts no new conversation, before it is claimed, so it
+    stays unclaimed for whoever can. An allowed bot links no account."""
+    if turn.bot_id:
+        return None
+    needed = await service.account_link_needed(turn.user_id)
+    if needed is None:
+        return None
+    if not await _first_decline(webhook_id, turn):
+        _no_run("declined already", **fields)
+        return SlackTurnStarted()
+    _no_run("declined: sign in", **fields)
+    return SlackTurnStarted(
+        declined=SlackTurnDeclined(
+            reason="sign_in_again" if needed.reason == "revoked" else "sign_in",
+            settings_url=build_settings_url(),
+        )
+    )
+
+
+async def _first_decline(webhook_id: str, turn: StartSlackTurn) -> bool:
+    """Whether this call answers its message's decline: once per call, across its retries."""
+    decline = f"{webhook_id}:{turn.thread_id}:{turn.message_ts}"
+    return await event_claims.claim(_DECLINE_SCOPE, decline, ttl=_DECLINE_TTL)
+
+
+async def _claim(turn: StartSlackTurn, owner_login: str | None) -> str:
+    """Make a new conversation MDA's channel's: its thread."""
+    try:
+        if turn.concierge:
+            return await mda_forwarding.claim_concierge(
+                turn.app_id, turn.team_id, turn.channel_id, owner_login=owner_login
+            )
+        return await mda_forwarding.claim_conversation(
+            turn.app_id, turn.team_id, turn.channel_id, turn.thread_ts, owner_login=owner_login
+        )
+    except SlackThreadMappingError as exc:
+        raise HTTPException(
+            status_code=409, detail="The Slack thread belongs to another thread"
+        ) from exc
+
+
+async def _open_breakout(
+    request: SlackRequest, command: BreakoutCommand, repo: common.SlackRepoResolution | None
+) -> tuple[SlackRequest, common.SlackRepoResolution | None] | None:
+    """Open a breakout's new Slack thread: its first turn, which runs on the command's own
+    thread; ``None`` when the breakout told the sender why it opened nothing."""
+    opened: list[tuple[SlackRequest, common.SlackRepoResolution | None]] = []
+
+    async def hand_to_mda(
+        opening: SlackRequest, opening_repo: common.SlackRepoResolution | None
+    ) -> None:
+        opened.append((opening, opening_repo))
+
+    await process_slack_breakout(request, command, repo, hand_to_mda=hand_to_mda)
+    return opened[0] if opened else None
 
 
 async def _notify_web_breakout(request: SlackRequest, webhook_id: str) -> None:
@@ -219,52 +379,6 @@ async def _notify_web_breakout(request: SlackRequest, webhook_id: str) -> None:
     notice = f"{webhook_id}:{request.thread_id}"
     if await event_claims.claim(_WEB_BREAKOUT_SCOPE, notice, ttl=_DECLINE_TTL):
         await notify_web_breakout(request)
-
-
-async def _refused_channel(request: SlackRequest, fields: dict[str, str]) -> SlackTurnStart | None:
-    """No run when the message's channel isn't one Open SWE operates in, as Slack has it
-    now; ``None`` when it is.
-
-    A channel with external participants declines a mention or an explicit request, so
-    the person hears why, and starts nothing for any other message. One Slack can't
-    confirm yet fails the call with a 503, so MDA sends it again.
-    """
-    channel = await common.resolve_slack_channel_context(request.channel_id, use_cache=False)
-    if channel.allows_operations:
-        return None
-    if channel.is_ext_shared is True:
-        if request.explicit_mention or request.explicit_request:
-            _no_run("declined: external_channel", **fields)
-            return SlackTurnStart(declined=SlackTurnDeclined(reason="external_channel"))
-        _no_run("external channel", **fields)
-        return SlackTurnStart()
-    if channel.is_pending_ext_shared is not True and channel.lookup_retry_after is not None:
-        logger.warning(
-            "Slack channel verification unavailable; MDA's Slack channel asks again",
-            extra={**fields, "slack_channel_id": request.channel_id},
-        )
-        raise HTTPException(
-            status_code=503,
-            detail="Slack channel verification is temporarily unavailable.",
-            headers={"Retry-After": str(channel.lookup_retry_after)},
-        )
-    _no_run("channel not verified", **fields)
-    return SlackTurnStart()
-
-
-async def _remembered_in(
-    thread_id: str, channel_id: str, thread_ts: str, message_ts: str = ""
-) -> list[str]:
-    """The Slack thread's own thread, then a concierge DM's it is bound to, then the
-    message's own (a `/btw` question's or a new breakout's)."""
-    threads = [thread_id]
-    if channel_id and thread_ts:
-        owner = await mda_forwarding.owned_conversation(channel_id, thread_ts)
-        if owner is not None and owner not in threads:
-            threads.append(owner)
-    if channel_id and message_ts:
-        threads.append(mda_forwarding.side_thread_id(channel_id, message_ts))
-    return threads
 
 
 async def plan_slack_click(call: ChannelCall, plan: PlanSlackClick) -> SlackClickStart:
@@ -425,15 +539,19 @@ async def _prepare_run(
     repo: common.SlackRepoResolution | None,
     *,
     declines: bool = False,
-) -> SlackTurnStart:
+    read: SlackTurnRead | None = None,
+) -> SlackTurnStarted:
+    prompt = None
     if request.by_the_way is not None:
         prepared = await _prepare_by_the_way(request)
     else:
-        prepared = await service.prepare_slack_channel_run(request, repo, declines=declines)
+        prepared, prompt = await service.prepare_slack_channel_run(
+            request, repo, declines=declines, read=read
+        )
     if prepared is None:
-        return SlackTurnStart()
+        return SlackTurnStarted()
     if isinstance(prepared, SlackTurnDeclined):
-        return SlackTurnStart(declined=prepared)
+        return SlackTurnStarted(declined=prepared)
     if request.move_thread:
         _mark_move(prepared.input, request.move_channel_id)
 
@@ -465,4 +583,4 @@ async def _prepare_run(
         webhook=COMPLETION_WEBHOOK_URL or None,
     )
     await channel_run_starting(thread_id)
-    return SlackTurnStart(run=run, interrupts=prepared.interrupts)
+    return SlackTurnStarted(run=run, interrupts=prepared.interrupts, prompt=prompt)

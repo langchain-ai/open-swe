@@ -27,7 +27,6 @@ from openswe.review.eval_report_routes import router as reviewer_eval_report_rou
 from openswe.rollout_events import router as rollout_webhook_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
 from openswe.short_links.routes import router as short_link_router
-from openswe.slack.channel import router as slack_channel_router
 from openswe.slack.routes import router as slack_webhook_router
 from openswe.threads.plan_api import plan_router
 from openswe.threads.router import ThreadRouter
@@ -172,7 +171,6 @@ def create_app() -> FastAPI:
     app.include_router(mda_slack_channel_events_router)
     app.include_router(slack_webhook_router)
     app.include_router(health_router)
-    app.include_router(slack_channel_router)
     app.include_router(rollout_webhook_router)
     app.include_router(sandbox_tool_router)
     app.include_router(short_link_router)

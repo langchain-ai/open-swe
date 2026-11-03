@@ -14,7 +14,7 @@ from typing import Any, cast
 import httpx2
 from langchain_core.messages.content import create_text_block
 from pydantic import JsonValue
-from runtime_api.slack import SlackTurnDeclined
+from runtime_api.slack import SlackTurnDeclined, SlackTurnPrompt
 
 from openswe.dashboard.oauth import build_settings_url
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -769,6 +769,20 @@ class SlackChannelRun:
     interrupts: bool = True
 
 
+@dataclass(frozen=True)
+class SlackTurnRead:
+    """What MDA's Slack channel read from Slack for a turn whose prompt it builds."""
+
+    # The request's text as the prompt has it, which titles a new thread.
+    clean_text: str
+    # The people whose messages the prompt may quote, and who spoke in the Slack thread.
+    context_user_ids: list[str]
+    participant_user_ids: list[str]
+    has_images: bool = False
+    # The Slack thread holds the agent's review request card.
+    review_card: bool = False
+
+
 @dataclass
 class _ChannelRunCapture:
     run: SlackChannelRun | None = None
@@ -776,24 +790,34 @@ class _ChannelRunCapture:
     # record why (``declined``) instead of posting it.
     declines: bool = False
     declined: SlackTurnDeclined | None = None
+    # A turn whose prompt MDA's channel builds from what it read: the run's input
+    # stays empty, and ``prompt`` holds what the prompt needs from Open SWE's records.
+    read: SlackTurnRead | None = None
+    prompt: SlackTurnPrompt | None = None
 
 
 async def prepare_slack_channel_run(
-    request: SlackRequest, repo: common.SlackRepoResolution | None, *, declines: bool = False
-) -> SlackChannelRun | SlackTurnDeclined | None:
+    request: SlackRequest,
+    repo: common.SlackRepoResolution | None,
+    *,
+    declines: bool = False,
+    read: SlackTurnRead | None = None,
+) -> tuple[SlackChannelRun | SlackTurnDeclined | None, SlackTurnPrompt | None]:
     """The run a message in an MDA-owned Slack conversation starts, without starting it.
 
     Everything else happens as for the backend's own Slack runs (the gates, the
     account-link prompt, the thread's metadata, files staged in the sandbox);
     MDA's Slack channel starts the run and shows its status (``openswe.slack.channel``).
     With ``declines``, the account-link prompt isn't posted: the decline says why
-    nothing starts, and the channel's handler replies with it.
+    nothing starts, and the channel's handler replies with it. With ``read``, the
+    channel read Slack and builds the prompt itself: Slack isn't read here, and the
+    prompt's facts come back with the run.
     """
-    capture = _ChannelRunCapture(declines=declines)
+    capture = _ChannelRunCapture(declines=declines, read=read)
     await _process_slack_mention_impl(
         request, repo, inherited_workspace=request.inherited_workspace, channel_run=capture
     )
-    return capture.declined or capture.run
+    return capture.declined or capture.run, capture.prompt
 
 
 async def _process_slack_mention_impl(
@@ -827,6 +851,8 @@ async def _process_slack_mention_impl(
     concierge_mode = not request.web_only and (
         request.concierge_mode or is_concierge_thread(channel_context, thread_ts)
     )
+    # MDA's Slack channel read Slack already: it builds the prompt from what it read.
+    read = channel_run.read if channel_run is not None else None
 
     if not channel_id or not thread_ts or not event_ts:
         common.logger.warning(
@@ -885,7 +911,7 @@ async def _process_slack_mention_impl(
         slack_login(user_id, sender_profile) if allowed_bot is None else _resolved(None),
         common.ThreadRecord.read(thread_id),
         _resolved([])
-        if message_update
+        if message_update or read is not None
         else common.fetch_slack_thread_messages(
             request.context_channel_id or channel_id, context_thread_ts
         ),
@@ -904,7 +930,7 @@ async def _process_slack_mention_impl(
     # the slowest lookups here and nothing below changes it before the run.
     dispatched_context = asyncio.ensure_future(
         _dispatched_slack_context(langgraph_client, thread_id)
-        if thread_record.exists
+        if thread_record.exists and read is None
         else _resolved((set[str](), set[str]()))
     )
     current_message = next(
@@ -944,11 +970,15 @@ async def _process_slack_mention_impl(
         if message_update
         else context_messages
     )
-    context_user_ids = [
-        value
-        for value in (message.get("user") for message in context_messages)
-        if isinstance(value, str) and value
-    ]
+    context_user_ids = (
+        list(read.context_user_ids)
+        if read is not None
+        else [
+            value
+            for value in (message.get("user") for message in context_messages)
+            if isinstance(value, str) and value
+        ]
+    )
     message_texts = [
         text,
         common.format_slack_messages_for_prompt([*context_messages, *source_messages], {}),
@@ -966,14 +996,18 @@ async def _process_slack_mention_impl(
         _,
     ) = await asyncio.gather(
         # The sender's name came with their profile; Slack is asked only for the rest.
-        common.get_slack_user_names(
+        _resolved({})
+        if read is not None
+        else common.get_slack_user_names(
             [
                 named
                 for named in (*context_user_ids, *mentioned_user_ids)
                 if named != user_id or allowed_bot is not None or not user_name
             ]
         ),
-        _public_slack_channel_names(
+        _resolved({})
+        if read is not None
+        else _public_slack_channel_names(
             [
                 mentioned
                 for message_text in message_texts
@@ -986,6 +1020,8 @@ async def _process_slack_mention_impl(
     )
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
+    # A private thread's prompt quotes only the people who may prompt it.
+    promptable_user_ids: list[str] | None = None
     if common.thread_is_private(thread_metadata):
         context_messages = [
             message
@@ -996,6 +1032,11 @@ async def _process_slack_mention_impl(
         ]
         if not message_update:
             source_messages = context_messages
+        promptable_user_ids = [
+            context_user
+            for context_user in dict.fromkeys(context_user_ids)
+            if common.thread_is_promptable(thread_metadata, logins_by_user_id.get(context_user, ""))
+        ]
     parsed = ParsedSlackMessage.parse(text, bot_user_id, common.SLACK_BOT_USERNAME)
     performance_command = (
         parsed.performance_model
@@ -1030,17 +1071,27 @@ async def _process_slack_mention_impl(
         or "(no text in mention)"
     )
     # Auto-resolve cross-posted Slack message links in context
-    resolved_links_section, image_urls_from_links = await common.resolve_slack_links_in_context(
-        source_messages, user_names_by_id
+    resolved_links_section, image_urls_from_links = (
+        ("", [])
+        if read is not None
+        else await common.resolve_slack_links_in_context(source_messages, user_names_by_id)
     )
 
     clean_text = _label_slack_mentions(clean_text, user_names_by_id, channel_names_by_id)
     content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(clean_text))]
 
-    image_urls = common.dedupe_urls(
-        [url for msg in source_messages for url in common.extract_image_urls(msg.get("text", ""))]
-        + [url for msg in source_messages for url in slack_utils.slack_image_file_urls(msg)]
-        + image_urls_from_links
+    image_urls = (
+        []
+        if read is not None
+        else common.dedupe_urls(
+            [
+                url
+                for msg in source_messages
+                for url in common.extract_image_urls(msg.get("text", ""))
+            ]
+            + [url for msg in source_messages for url in slack_utils.slack_image_file_urls(msg)]
+            + image_urls_from_links
+        )
     )
 
     # A DM always answers on the person's own default model: a per-thread model
@@ -1085,7 +1136,7 @@ async def _process_slack_mention_impl(
             settings = await cached_workspace_settings(thread_workspace)
             thread_model_choice = settings.agent_routing_models["performance"]
 
-    if image_urls:
+    if image_urls or (read is not None and read.has_images):
         resolved_model_id = thread_model_choice[0] if thread_model_choice else None
         if resolved_model_id is None:
             thread_settings = await load_thread_settings(langgraph_client, thread_id)
@@ -1105,6 +1156,8 @@ async def _process_slack_mention_impl(
             )
             resolved_model_id = fallback_model_id
             image_model_override = (fallback_model_id, fallback_effort)
+    # MDA's Slack channel fetches the images of a prompt it builds.
+    if image_urls:
         common.logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
         async with httpx2.AsyncClient(
             transport=pooled_transport(), timeout=common.DEFAULT_HTTP_TIMEOUT
@@ -1166,13 +1219,17 @@ async def _process_slack_mention_impl(
         await HumanReviewRequest.card_in_thread(channel_id, thread_ts)
         if event_ts != thread_ts
         and context_thread_ts == thread_ts
-        and any(
-            slack_utils.is_own_slack_message(message, bot_user_id)
-            and isinstance(message.get("text"), str)
-            and message["text"].startswith(
-                ("Review requested for ", "Expedited review requested for ")
+        and (
+            read.review_card
+            if read is not None
+            else any(
+                slack_utils.is_own_slack_message(message, bot_user_id)
+                and isinstance(message.get("text"), str)
+                and message["text"].startswith(
+                    ("Review requested for ", "Expedited review requested for ")
+                )
+                for message in thread_messages
             )
-            for message in thread_messages
         )
         else None
     )
@@ -1218,15 +1275,18 @@ async def _process_slack_mention_impl(
         if dm_origin is not None
         else ""
     )
+    review_section = (
+        prompt("runs/slack-review-request", pull_request=review_card.pull_request)
+        if review_card is not None
+        else ""
+    )
     turn_context = "\n\n".join(
         section
         for section in (
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
             dm_origin_section,
             request.turn_context,
-            prompt("runs/slack-review-request", pull_request=review_card.pull_request)
-            if review_card is not None
-            else "",
+            review_section,
             resolved_links_section,
         )
         if section
@@ -1296,7 +1356,9 @@ async def _process_slack_mention_impl(
         user_email=user_email or "",
         # A DM offers its title on every message: the upsert keeps the first one
         # written, so a name Slack could not resolve earlier still lands later.
-        title=_slack_thread_title(clean_text, concierge_mode, user_name)
+        title=_slack_thread_title(
+            read.clean_text if read is not None else clean_text, concierge_mode, user_name
+        )
         if (is_first_mention or concierge_mode)
         else "",
         static_title=concierge_mode,
@@ -1305,7 +1367,15 @@ async def _process_slack_mention_impl(
         # Everyone who has spoken in the Slack thread keeps their Open SWE
         # participant credit, so a later message from any one of them refreshes
         # the whole set rather than only the latest sender.
-        slack_participant_user_ids=slack_participant_ids(context_messages)
+        slack_participant_user_ids=(
+            [
+                participant
+                for participant in read.participant_user_ids
+                if promptable_user_ids is None or participant in promptable_user_ids
+            ]
+            if read is not None
+            else slack_participant_ids(context_messages)
+        )
         if not is_first_mention
         else [],
         visibility=visibility,
@@ -1359,6 +1429,29 @@ async def _process_slack_mention_impl(
             explicit_request=request.explicit_request or performance_command,
         )
     )
+    if read is not None and channel_run is not None:
+        # MDA's Slack channel builds the prompt with these.
+        channel_run.prompt = SlackTurnPrompt(
+            first_turn=is_first_mention,
+            sender_name=user_name,
+            logins=logins_by_user_id,
+            person_ids=person_ids_by_user_id,
+            promptable_user_ids=promptable_user_ids,
+            channel=cast(dict[str, JsonValue], channel_identity),
+            turn_sections=[
+                section
+                for section in (dm_origin_section, request.turn_context, review_section)
+                if section
+            ],
+            review_guide=review_guide,
+        )
+        channel_run.run = SlackChannelRun(
+            input={"messages": []},
+            configurable=configurable,
+            trigger_ts=event_ts,
+            interrupts=explicitly_tagged,
+        )
+        return True
     visible_context_hashes, dispatched_timestamps = await dispatched_context
     # The run describes the sender and, on a follow-up, every linked person in
     # the Slack thread — the same set persisted as this thread's participants.

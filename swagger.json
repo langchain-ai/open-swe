@@ -944,7 +944,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Output"
                 },
                 "type": "object"
               },
@@ -1288,7 +1288,7 @@
           },
           "params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Output"
             },
             "title": "Params",
             "type": "object"
@@ -2038,49 +2038,6 @@
           "enabled"
         ],
         "title": "EnabledReviewRepoUpdate",
-        "type": "object"
-      },
-      "EndpointAnswer": {
-        "additionalProperties": false,
-        "description": "The run an endpoint answers with: its input, and the run options a handler\nmay set, all JSON. An endpoint answers ``null`` (or HTTP 204) instead to start\nnothing.\n\nExperimental: this may change in a minor release.",
-        "properties": {
-          "context": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
-            },
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
-                },
-                "type": "object"
-              }
-            ],
-            "title": "Input"
-          },
-          "metadata": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
-            },
-            "title": "Metadata",
-            "type": "object"
-          },
-          "webhook": {
-            "title": "Webhook",
-            "type": "string"
-          }
-        },
-        "required": [
-          "input"
-        ],
-        "title": "EndpointAnswer",
         "type": "object"
       },
       "EndpointRequest_SlackEndpointEvent_": {
@@ -2833,6 +2790,7 @@
         ],
         "type": "string"
       },
+      "JsonValue-Output": {},
       "LabelChange": {
         "properties": {
           "name": {
@@ -3577,7 +3535,7 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Output"
                 },
                 "type": "array"
               },
@@ -3806,7 +3764,7 @@
           },
           "settings": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Output"
             },
             "title": "Settings",
             "type": "object"
@@ -4339,7 +4297,7 @@
         "properties": {
           "annotations": {
             "items": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Output"
             },
             "title": "Annotations",
             "type": "array"
@@ -6199,7 +6157,7 @@
           },
           "tools": {
             "items": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Output"
             },
             "title": "Tools",
             "type": "array"
@@ -7457,27 +7415,6 @@
         "title": "SlackBotOption",
         "type": "object"
       },
-      "SlackChannelCall": {
-        "description": "What MDA's Slack channel POSTs: the event (MDA's ``SlackEndpointEvent``) and its thread.\n\nThe event stays a plain object here: its fields are read one by one below.",
-        "properties": {
-          "event": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
-            },
-            "title": "Event",
-            "type": "object"
-          },
-          "thread": {
-            "$ref": "#/components/schemas/EndpointThread"
-          }
-        },
-        "required": [
-          "event",
-          "thread"
-        ],
-        "title": "SlackChannelCall",
-        "type": "object"
-      },
       "SlackChannelDirectory": {
         "properties": {
           "channels": {
@@ -7611,7 +7548,7 @@
             "type": "string"
           },
           "payload": {
-            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Input"
+            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
           },
           "reaction": {
             "title": "Reaction",
@@ -7638,7 +7575,7 @@
             "type": "string"
           },
           "value": {
-            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Input"
+            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
           },
           "viewId": {
             "title": "Viewid",
@@ -8099,7 +8036,7 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Output"
                 },
                 "type": "array"
               },
@@ -8660,7 +8597,7 @@
           },
           "create_params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Output"
             },
             "title": "Create Params",
             "type": "object"
@@ -9734,7 +9671,7 @@
         "title": "_EndpointThreadChannel",
         "type": "object"
       },
-      "managed_deepagents___channels__types__JsonValue-Input": {
+      "managed_deepagents___channels__types__JsonValue": {
         "anyOf": [
           {
             "type": "boolean"
@@ -9750,44 +9687,13 @@
           },
           {
             "items": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Input"
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
             },
             "type": "array"
           },
           {
             "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Input"
-            },
-            "type": "object"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "managed_deepagents___channels__types__JsonValue-Output": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "type": "integer"
-          },
-          {
-            "type": "number"
-          },
-          {
-            "type": "string"
-          },
-          {
-            "items": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
-            },
-            "type": "array"
-          },
-          {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
             },
             "type": "object"
           },
@@ -9798,7 +9704,7 @@
       },
       "openswe__transcript__events__JsonObject": {
         "additionalProperties": {
-          "$ref": "#/components/schemas/pydantic__types__JsonValue"
+          "$ref": "#/components/schemas/JsonValue-Output"
         },
         "type": "object"
       },
@@ -23199,7 +23105,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Output"
                 }
               }
             },
@@ -23285,64 +23191,6 @@
             "content": {
               "application/json": {
                 "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Slack Channel Event"
-      }
-    },
-    "/slack/channel/events": {
-      "post": {
-        "description": "The run a forwarded Slack message starts on the channel's thread, or ``None``.\n\nFor a deployment whose channel names this endpoint; ``plan_slack_turn`` answers\nthe handler that replaces it.",
-        "operationId": "slack_channel_event_slack_channel_events_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "webhook-id",
-            "required": true,
-            "schema": {
-              "title": "Webhook-Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SlackChannelCall"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/EndpointAnswer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Slack Channel Event Slack Channel Events Post"
-                }
               }
             },
             "description": "Successful Response"
