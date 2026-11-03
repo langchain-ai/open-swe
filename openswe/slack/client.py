@@ -1836,10 +1836,7 @@ async def get_slack_permalink(channel_id: str, message_ts: str) -> str | None:
 
 
 async def resolve_slack_message_url(url: str) -> dict[str, Any] | None:
-    """Resolve a Slack message URL to its message content.
-
-    Returns a dict with keys: text, user, ts, channel_id, files, thread_ts (if threaded).
-    """
+    """Resolve a Slack message URL to its message content."""
     parsed = parse_slack_message_url(url)
     if not parsed:
         return None
@@ -1852,7 +1849,7 @@ async def resolve_slack_message_url(url: str) -> dict[str, Any] | None:
     result: dict[str, Any] = {
         "channel_id": channel_id,
         "ts": message.get("ts", message_ts),
-        "text": message.get("text", ""),
+        "text": message.get("text", "").strip() or _slack_card_text(message),
         "user": message.get("user", ""),
         "files": message.get("files", []),
     }
@@ -1865,12 +1862,7 @@ async def resolve_slack_links_in_context(
     context_messages: list[dict[str, Any]],
     user_names_by_id: dict[str, str],
 ) -> tuple[str, list[str]]:
-    """Resolve cross-posted Slack message links found in context messages.
-
-    Returns (resolved_links_section, image_urls) where resolved_links_section
-    is a formatted markdown string for the prompt, and image_urls is a list
-    of image URLs from resolved message attachments.
-    """
+    """Resolve cross-posted Slack links into prompt text and image URLs."""
     all_context_text = " ".join(msg.get("text", "") for msg in context_messages)
     slack_links = extract_slack_message_urls(all_context_text)
     if not slack_links:
@@ -1892,7 +1884,7 @@ async def resolve_slack_links_in_context(
                 if author_id and author == author_id:
                     extra_names = await get_slack_user_names([author_id])
                     author = extra_names.get(author_id, author_id)
-                resolved_text = resolved.get("text", "(empty message)")
+                resolved_text = resolved.get("text") or "(empty message)"
                 resolved_parts.append(
                     f"**{link_url}**\n  Author: {author}\n  Message: {resolved_text}"
                 )
