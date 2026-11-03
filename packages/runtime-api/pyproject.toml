@@ -5,6 +5,9 @@ description = "The typed contract between Open SWE's backend and its Managed Dee
 requires-python = ">=3.14"
 dependencies = [
     "pydantic>=2.11",
+    # Both sides build the run's chat models from the one table and builder (models.py).
+    "langchain>=1.4.7",
+    "langchain-openai>=1.7.3,<2.0.0",
 ]
 
 [build-system]

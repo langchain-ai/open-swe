@@ -104,8 +104,8 @@ ModelChoice("openai:gpt-6.1-sol", {"max_tokens": 128_000, "reasoning": {"effort"
 ModelChoice("google_genai:gemini-2.5-pro", {"temperature": 0, "max_tokens": 16_000})
 ```
 
-`provider_model_kwargs()` in `openswe/utils/model.py` builds those settings for a catalog model and effort.
-To change how a provider's chat model is built (its client, retries or gateway routing), edit `mda/rt/models.py`.
+`provider_model_kwargs()` in `packages/runtime-api/src/runtime_api/models.py` builds those settings for a catalog model and effort.
+To change how a provider's chat model is built (its client, retries or gateway routing), edit `make_model` there: the backend and the MDA runtime (`mda/rt/models.py`) both build their models with it, from the same model table.
 
 ### Using different models per context
 
@@ -175,7 +175,7 @@ Enable it either way:
 
 The instance toggle lives under **Admin → LLM Gateway**, and each workspace's settings page (**Workspaces → the workspace → LLM Gateway**) can override it; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset value inherits the env default).
 
-Routing is applied centrally in `make_model` (`openswe/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `openswe/utils/gateway.py`.
+Routing is applied centrally in `make_model` (`packages/runtime-api/src/runtime_api/models.py`), which resolves the effective on/off and wires the gateway's URL and key, on the backend and in the MDA runtime alike.
 **OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning.
 Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
 
