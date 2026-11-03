@@ -3,7 +3,7 @@ from unittest.mock import ANY, AsyncMock
 
 import pytest
 
-from openswe.slack import breakout, breakout_links
+from openswe.slack import breakout, breakout_links, forks
 from openswe.slack.channels import SlackChannel
 from openswe.slack.parsed_message import ParsedSlackMessage
 from openswe.slack.request import SlackRequest
@@ -391,3 +391,36 @@ async def test_moving_a_thread_stays_on_the_backend_even_with_mda(monkeypatch):
 
     move.assert_awaited_once()
     hand_to_mda.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_breakout_handed_to_mda_runs_on_a_fork_of_the_conversations_thread(
+    monkeypatch,
+):
+    _patch_slack(monkeypatch)
+    monkeypatch.setattr(
+        breakout, "post_slack_top_level_message_with_ts", AsyncMock(return_value="200.0")
+    )
+    monkeypatch.setattr(breakout, "dashboard_thread_url", lambda _thread_id: "")
+    monkeypatch.setattr(breakout.common, "get_slack_repo_config", AsyncMock(return_value=None))
+    bind = AsyncMock()
+    monkeypatch.setattr(breakout, "bind_slack_thread_id", bind)
+    claim = AsyncMock()
+    monkeypatch.setattr(breakout.mda_forwarding, "claim_side", claim)
+    monkeypatch.setattr(breakout.service, "slack_login", AsyncMock(return_value="alice"))
+    fork = AsyncMock(return_value="forked-thread")
+    monkeypatch.setattr(forks, "fork_thread", fork)
+    hand_to_mda = AsyncMock()
+
+    await breakout.process_slack_breakout(
+        _request(), Command("fix it"), None, hand_to_mda=hand_to_mda
+    )
+
+    # It knows what the agent did in the conversation, and starts as the requester's.
+    fork.assert_awaited_once_with("old-thread", key="C1:105.0", login="alice")
+    bind.assert_awaited_once_with("C1", "200.0", "forked-thread")
+    claim.assert_awaited_once_with("forked-thread", owner_login="alice")
+    [opening, _repo] = hand_to_mda.await_args.args
+    assert opening.thread_id == "forked-thread"
+    # Its first turn still reads the Slack thread, for what the agent never got there.
+    assert (opening.context_channel_id, opening.context_thread_ts) == ("C1", "100.0")

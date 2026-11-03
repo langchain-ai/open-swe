@@ -208,7 +208,7 @@ Setting that key turns the gateway on; `LANGSMITH_GATEWAY_ENABLED=true|false` fo
 Admins can also toggle the gateway per team in the dashboard.
 
 **Which model runs.**
-The deployment default comes from the supported-model list in `openswe/dashboard/options.py` (an Anthropic model when only an Anthropic key is configured, otherwise an OpenAI one); override it with `LLM_MODEL_ID` (`provider:model`) and `LLM_REASONING_EFFORT` (`low`, `medium`, `high`, `max`), and name a `LLM_FALLBACK_MODEL_ID` for when the primary provider fails.
+The deployment default comes from the supported-model list in `packages/runtime-api/src/runtime_api/models.py` (an Anthropic model when only an Anthropic key is configured, otherwise an OpenAI one); override it with `LLM_MODEL_ID` (`provider:model`) and `LLM_REASONING_EFFORT` (`low`, `medium`, `high`, `max`), and name a `LLM_FALLBACK_MODEL_ID` for when the primary provider fails.
 Admins set the instance default under **Admin → Defaults** and can override model and effort defaults per workspace.
 Users can override the model for an individual thread, for example by asking the agent to switch to the performance model there.
 Model ids and their providers are described in [CUSTOMIZATION.md](CUSTOMIZATION.md).

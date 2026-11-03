@@ -1,5 +1,6 @@
+from runtime_api.models import DEFAULT_LLM_MAX_TOKENS
+
 from openswe.runtime.constants import (
-    DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_LLM_MODEL_ID,
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,

@@ -7,6 +7,7 @@ failed, while the exception is intact, and left on the thread for the reply to r
 """
 
 import json
+from collections.abc import Mapping
 from typing import Any, Final
 
 _MAX_BODY_CHARS: Final = 2000
@@ -14,6 +15,11 @@ _MAX_BODY_CHARS: Final = 2000
 # Thread-metadata key holding the classification of the run's last model error,
 # written while the exception is intact and read back by the completion webhook.
 LAST_MODEL_ERROR_KEY: Final = "last_model_error"
+
+# The ``response_metadata`` key marking an answer the runtime wrote for a model call it
+# could not make (``outage`` or ``model_access``). It is final: the loop posts it as it
+# is instead of asking the model again for a reply it cannot give.
+MODEL_FAILURE_REPLY_KEY: Final = "open_swe_model_failure"
 
 # Exception class names, the only failure signal the run-completion webhook gets:
 # the platform serializes the class name but scrubs the message of any exception
@@ -36,6 +42,12 @@ _ERROR_TYPE_CODES: Final = {
     # Not raised: the stalled-run sweep names it when it fails a run that went silent.
     "RunStalledError": "run_stalled",
 }
+
+
+def is_model_failure_reply(message: object) -> bool:
+    """Whether ``message`` is the runtime's answer for a model call it could not make."""
+    metadata = getattr(message, "response_metadata", None)
+    return isinstance(metadata, Mapping) and bool(metadata.get(MODEL_FAILURE_REPLY_KEY))
 
 
 def code_for_error_type(error_type: str | None) -> str | None:

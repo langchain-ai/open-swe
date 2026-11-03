@@ -26,16 +26,14 @@ from langchain_quickjs import CodeInterpreterMiddleware
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from pydantic import JsonValue, TypeAdapter, ValidationError
-from runtime_api.catalog import ModelSpec, RunModels, kept_route
+from runtime_api.catalog import ModelSpec, RunModels
 from runtime_api.loop import BeforeModel, ModelCall, PhaseResult, RunCall
+from runtime_api.models import model_for
 
 from openswe.dashboard.options import model_supports_images
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.model_call_shape import CallShape, ShapesModelCalls
 from openswe.prompts import common_prompt
-from openswe.runtime.constants import DEFAULT_LLM_MAX_TOKENS
-from openswe.server import fallback_model_choice
-from openswe.utils.model import provider_model_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -170,31 +168,6 @@ async def run_hooks(
     return PhaseResult(update=json_state(update), messages=dump_messages(added), jump_to=jump_to)
 
 
-def model_spec(model_id: str, kwargs: Mapping[str, object]) -> ModelSpec:
-    """``model_id`` as the runtime calls it: whether it reads images, and its fallback."""
-    fallback = fallback_model_choice(model_id)
-    return ModelSpec(
-        model_id=model_id,
-        kwargs=_json_object.validate_python(dict(kwargs)),
-        reads_images=model_supports_images(model_id),
-        fallback=None
-        if fallback is None
-        else ModelSpec(
-            model_id=fallback.model_id,
-            kwargs=_json_object.validate_python(dict(fallback.kwargs)),
-            reads_images=model_supports_images(fallback.model_id),
-        ),
-    )
-
-
-def chosen_model(model_id: str, effort: object) -> ModelSpec:
-    """A model the run calls by id, such as one a person asked for, at ``effort``."""
-    kwargs = provider_model_kwargs(
-        model_id, effort if isinstance(effort, str) else None, max_tokens=DEFAULT_LLM_MAX_TOKENS
-    )
-    return model_spec(model_id, kwargs)
-
-
 class ModelChoices:
     """The model each call goes to: the run's own, a route's, or one the person asked for."""
 
@@ -203,17 +176,7 @@ class ModelChoices:
 
     def model_for(self, state: Mapping[str, object]) -> ModelSpec:
         """The model the graph's model selection would call next."""
-        requested = state.get("requested_model")
-        if isinstance(requested, str) and requested:
-            return chosen_model(requested, state.get("requested_effort"))
-        route = kept_route(state.get("model_route"))
-        routed = self.models.routes.get(route) if route not in (None, "default") else None
-        if routed is not None:
-            return routed
-        selected = state.get("selected_model_id")
-        if isinstance(selected, str) and selected and selected != self.models.model.model_id:
-            return chosen_model(selected, state.get("selected_effort"))
-        return self.models.model
+        return model_for(self.models, state)
 
     def vision_for(self, model: ModelSpec) -> ModelSpec | None:
         """What a call to ``model`` goes to instead once the conversation holds an image."""
@@ -223,18 +186,11 @@ class ModelChoices:
 
     def call(self, shaped: ModelCall, state: Mapping[str, object]) -> ModelCall:
         model = self.model_for(state)
-        vision = self.vision_for(model)
-        fallback = fallback_model_choice(model.model_id)
         return shaped.model_copy(
             update={
                 "model": model,
-                "vision": vision,
-                "fallback": None
-                if fallback is None
-                else ModelSpec(
-                    model_id=fallback.model_id,
-                    kwargs=_json_object.validate_python(dict(fallback.kwargs)),
-                ),
+                "vision": self.vision_for(model),
+                "fallback": model.fallback,
                 "use_gateway": self.models.use_gateway,
             }
         )
