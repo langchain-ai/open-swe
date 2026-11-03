@@ -59,6 +59,7 @@ export const agentThreadKeys = {
     includeAutomations: boolean
     owned: boolean
     includeClaudeCode: boolean
+    includeSlack: boolean
   }) => ["agent-threads", "lists", "repos", params] as const,
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
@@ -696,9 +697,14 @@ export const SIDEBAR_PAGE_SIZE = 10
 
 /** The sources the sidebar asks the server to leave out. */
 function excludedSources(
-  includeClaudeCode: boolean
+  includeClaudeCode: boolean,
+  includeSlack: boolean
 ): Pick<ThreadsPageParams, "excludeSources"> {
-  return includeClaudeCode ? {} : { excludeSources: [CLAUDE_CODE_SOURCE] }
+  const excludeSources = [
+    ...(!includeClaudeCode ? [CLAUDE_CODE_SOURCE] : []),
+    ...(!includeSlack ? ["slack" as const] : []),
+  ]
+  return excludeSources.length ? { excludeSources } : {}
 }
 
 function sidebarPageParams({
@@ -706,11 +712,13 @@ function sidebarPageParams({
   includeResolved,
   owned,
   includeClaudeCode,
+  includeSlack,
 }: {
   includeAutomations: boolean
   includeResolved: boolean
   owned: boolean
   includeClaudeCode: boolean
+  includeSlack: boolean
 }): Omit<ThreadsPageParams, "offset"> {
   return {
     limit: SIDEBAR_PAGE_SIZE,
@@ -718,7 +726,7 @@ function sidebarPageParams({
     ...(includeResolved ? {} : { resolved: false }),
     scope: includeAutomations ? "all" : "interactive",
     ...(owned ? { owned } : {}),
-    ...excludedSources(includeClaudeCode),
+    ...excludedSources(includeClaudeCode, includeSlack),
   }
 }
 
@@ -748,12 +756,14 @@ export function useSidebarRepos({
   includeResolved = false,
   owned = false,
   includeClaudeCode = true,
+  includeSlack = true,
   enabled = true,
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
   includeClaudeCode?: boolean
+  includeSlack?: boolean
   enabled?: boolean
 }) {
   const { experience } = useExperience()
@@ -765,11 +775,15 @@ export function useSidebarRepos({
   }
   const hydrated = useSidebarPrefsHydrated()
   return useQuery({
-    queryKey: agentThreadKeys.repos({ ...params, includeClaudeCode }),
+    queryKey: agentThreadKeys.repos({
+      ...params,
+      includeClaudeCode,
+      includeSlack,
+    }),
     queryFn: () =>
       agentsApi.listThreadRepos({
         ...params,
-        ...excludedSources(includeClaudeCode),
+        ...excludedSources(includeClaudeCode, includeSlack),
       }),
     enabled: enabled && hydrated,
     placeholderData: (previous, query) =>
@@ -908,6 +922,7 @@ export function sidebarRecentsParams({
   includeResolved = false,
   owned = false,
   includeClaudeCode = true,
+  includeSlack = true,
   sort = "created",
 }: {
   repoMode: boolean
@@ -915,6 +930,7 @@ export function sidebarRecentsParams({
   includeResolved?: boolean
   owned?: boolean
   includeClaudeCode?: boolean
+  includeSlack?: boolean
   sort?: ChatSort
 }): Omit<ThreadsPageParams, "offset"> {
   return {
@@ -923,6 +939,7 @@ export function sidebarRecentsParams({
       includeResolved,
       owned,
       includeClaudeCode,
+      includeSlack,
     }),
     ...(repoMode ? { ownerless: true } : {}),
     sortBy: sort === "created" ? "created_at" : "updated_at",
@@ -935,6 +952,7 @@ export function useSidebarRecents({
   includeResolved = false,
   owned = false,
   includeClaudeCode = true,
+  includeSlack = true,
   sort = "created",
   enabled = true,
 }: {
@@ -943,6 +961,7 @@ export function useSidebarRecents({
   includeResolved?: boolean
   owned?: boolean
   includeClaudeCode?: boolean
+  includeSlack?: boolean
   sort?: ChatSort
   enabled?: boolean
 }) {
@@ -953,6 +972,7 @@ export function useSidebarRecents({
       includeResolved,
       owned,
       includeClaudeCode,
+      includeSlack,
       sort,
     }),
     enabled
@@ -965,6 +985,7 @@ export function useSidebarRepoThreads({
   includeResolved = false,
   owned = false,
   includeClaudeCode = true,
+  includeSlack = true,
   sort = "created",
   enabled = true,
 }: {
@@ -973,6 +994,7 @@ export function useSidebarRepoThreads({
   includeResolved?: boolean
   owned?: boolean
   includeClaudeCode?: boolean
+  includeSlack?: boolean
   sort?: ChatSort
   enabled?: boolean
 }) {
@@ -983,6 +1005,7 @@ export function useSidebarRepoThreads({
         includeResolved,
         owned,
         includeClaudeCode,
+        includeSlack,
       }),
       ...(repoFullName ? { repo: repoFullName } : {}),
       sortBy: sort === "created" ? "created_at" : "updated_at",

@@ -35,12 +35,14 @@ async function recordedSidebarUrl({
   includeAutomations = false,
   includeResolved = false,
   includeClaudeCode = true,
+  includeSlack = true,
   repoMode = true,
   sort = "created",
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
   includeClaudeCode?: boolean
+  includeSlack?: boolean
   repoMode?: boolean
   sort?: ChatSort
 } = {}): Promise<string> {
@@ -52,6 +54,7 @@ async function recordedSidebarUrl({
         includeAutomations,
         includeResolved,
         includeClaudeCode,
+        includeSlack,
         sort,
       }),
       limit: SIDEBAR_PAGE_SIZE,
@@ -168,6 +171,16 @@ describe("apiWarmupScript", () => {
       name: "Claude Code sessions hidden",
       expected: { includeClaudeCode: false },
       prefs: { filters: { includeClaudeCode: false } },
+    },
+    {
+      name: "Slack threads hidden",
+      expected: { includeSlack: false },
+      prefs: { filters: { includeSlack: false } },
+    },
+    {
+      name: "Slack and Claude Code hidden",
+      expected: { includeSlack: false, includeClaudeCode: false },
+      prefs: { filters: { includeSlack: false, includeClaudeCode: false } },
     },
     {
       name: "sorted by last update",
