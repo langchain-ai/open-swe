@@ -62,10 +62,15 @@ _TOOL_MODULES = {
     "publish_artifact": ".publish_artifact",
     "remember": ".remember",
     "forget": ".remember",
+    "recall": ".remember",
     "list_memories": ".curator",
     "read_workspace_prompt": ".curator",
     "decide_memory": ".curator",
     "publish_workspace_prompt": ".curator",
+    "list_memory_triggers": ".curator",
+    "set_memory_trigger": ".curator",
+    "delete_memory_trigger": ".curator",
+    "link_memory_trigger": ".curator",
     "save_user_settings": ".save_user_settings",
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
@@ -155,10 +160,15 @@ __all__ = [
     "publish_artifact",
     "remember",
     "forget",
+    "recall",
     "list_memories",
     "read_workspace_prompt",
     "decide_memory",
     "publish_workspace_prompt",
+    "list_memory_triggers",
+    "set_memory_trigger",
+    "delete_memory_trigger",
+    "link_memory_trigger",
     "save_user_settings",
     "save_user_skill",
     "delete_user_skill",
@@ -222,9 +232,13 @@ if TYPE_CHECKING:
     from openswe.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
     from openswe.tools.curator import (
         decide_memory,
+        delete_memory_trigger,
+        link_memory_trigger,
         list_memories,
+        list_memory_triggers,
         publish_workspace_prompt,
         read_workspace_prompt,
+        set_memory_trigger,
     )
     from openswe.tools.discover_managed_tools import discover_managed_tools
     from openswe.tools.expedite_pr_approval import expedite_pr_approval
@@ -247,7 +261,7 @@ if TYPE_CHECKING:
     from openswe.tools.read_user_settings import read_user_settings
     from openswe.tools.record_human_input import record_human_input
     from openswe.tools.recreate_sandbox import recreate_sandbox
-    from openswe.tools.remember import forget, remember
+    from openswe.tools.remember import forget, recall, remember
     from openswe.tools.repair_data import execute_database_sql, write_database_rows
     from openswe.tools.reply_to_finding_thread import reply_to_finding_thread
     from openswe.tools.report_platform_issue import report_platform_issue

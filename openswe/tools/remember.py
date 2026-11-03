@@ -1,4 +1,5 @@
-"""Tools: keep a memory for the person a thread works for, and offer it to the curator."""
+"""Tools: keep a memory for the person a thread works for, offer it to the curator, and
+recall the memories a trigger holds back."""
 
 from uuid import UUID
 
@@ -6,7 +7,12 @@ from langgraph.config import get_config
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.agent_overrides import resolve_github_login
-from openswe.memories.store import MAX_MEMORY_CHARS, MEMORIES, UnknownWorkspaceError
+from openswe.memories.store import (
+    MAX_MEMORY_CHARS,
+    MEMORIES,
+    MemoryTrigger,
+    UnknownWorkspaceError,
+)
 from openswe.run_config import RunConfig
 from openswe.tools.access import Policy, access, resolve_access, unchanged
 from openswe.tools.mcp_exposure import expose_mcp
@@ -84,3 +90,27 @@ async def forget(memory_id: str) -> dict[str, object]:
             "leaves its prompt"
         ),
     }
+
+
+@expose_mcp()
+@access(_ANYWHERE)
+async def recall(trigger_slug: str) -> dict[str, object]:
+    """Implement the `recall` tool."""
+    try:
+        slug = MemoryTrigger.slug_of(trigger_slug)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    login = await resolve_github_login(as_json_object(get_config()))
+    person = await User.for_login("github", login) if login else None
+    if person is None:
+        return {"ok": False, "error": "Could not tell whose memories to recall."}
+    memories = await MEMORIES.recall(
+        person.id,
+        slug,
+        curated_in=(
+            RunConfig.from_runtime().workspace_slug
+            if person.typed_preferences.experimental_memory
+            else None
+        ),
+    )
+    return {"ok": True, "trigger_slug": slug, "memories": [memory.line for memory in memories]}

@@ -1,7 +1,7 @@
 Take back a memory the triggering person saved.
 
 Call this when they ask you to forget, stop following, or take back something they asked you to remember.
-Their memories are listed in their `person` block, each ending with its memory id.
+Their memories are listed in their `person` block, each ending with its memory id; those behind a trigger show their ids when `recall` loads them.
 To change one, forget it and `remember` the new wording.
 
 It stops reaching their runs at once.
