@@ -25,7 +25,6 @@ import httpx
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import NotFoundError
-from langsmith.utils import get_tracer_project
 from managed_deepagents._agent_auth import AgentAuth, AgentAuthContext
 from managed_deepagents._connections import (
     PLATFORM_API_URL_ENV,
@@ -428,9 +427,6 @@ class MdaRuntime:
             "context": context,
             "metadata": run_metadata,
         }
-        if not payload.get("langsmith_tracer"):
-            # Traced into this deployment's project, beside its in-process runs.
-            rewritten["langsmith_tracer"] = {"project_name": get_tracer_project()}
         if config:
             rewritten["config"] = config
         else:

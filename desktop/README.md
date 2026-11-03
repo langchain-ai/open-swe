@@ -90,7 +90,7 @@ This installs the desktop app and links `oswe` onto your `PATH`.
 The CLI updates with the app.
 If you installed the cask before it linked `oswe`, run `brew reinstall --cask open-swe-desktop` once to get the link (a plain `brew upgrade` skips auto-updating casks).
 
-To build and install from source, install Git, Node.js 22, and [Bun](https://bun.com/docs/installation), clone this repository, then run this from its root:
+To build and install from source, install Git, Node.js 26, and [Bun](https://bun.com/docs/installation), clone this repository, then run this from its root:
 
 ```bash
 make install-desktop

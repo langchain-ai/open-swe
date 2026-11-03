@@ -34,7 +34,7 @@ import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
 import type { DesktopUpdateState } from "@/desktop"
 import { api, hasLinkedGitHub, type SessionUser } from "@/lib/api"
 import { useProfile } from "@/lib/profile"
-import { desktopExperience, useDesktopExperience } from "@/lib/experience"
+import { experienceStore, useExperience } from "@/lib/experience"
 import { ExperienceSelector } from "@/components/ExperienceSelector"
 import { GitHubLinkPrompt } from "@/features/agents/components/GitHubLinkPrompt"
 import { AgentWorkspaceProvider } from "@/features/agents/lib/agentWorkspace"
@@ -102,6 +102,7 @@ import {
   cloudSidebarThread,
   DEFAULT_SIDEBAR_WORKSPACE_SLUG,
   groupRepoGroupsByWorkspace,
+  groupSidebarThreadsByDay,
   sidebarRepoKey,
   sortSidebarThreads,
   sidebarItemContains,
@@ -193,7 +194,7 @@ export function AgentsSidebar({
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
   const profile = useProfile()
-  const { experience } = useDesktopExperience()
+  const { experience } = useExperience()
   const agentWorkspaceEnabled = experience === "agent_workspace"
   const newThreadShortcut = useShortcutLabel("mod+n")
   const concierge = useQuery({
@@ -268,7 +269,7 @@ export function AgentsSidebar({
     includeResolved: agentWorkspaceEnabled || prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
     includeClaudeCode: prefs.filters.includeClaudeCode,
-    sort: agentWorkspaceEnabled ? "updated" : prefs.sortChats,
+    sort: repoMode ? prefs.sortChats : "updated",
     enabled: true,
   })
   const sidebarReposQuery = useSidebarRepos({
@@ -531,15 +532,17 @@ export function AgentsSidebar({
           { value: "list", label: "In one list" },
         ]}
       />
-      <MenuChoiceGroup<ChatSort>
-        label="Sort chats by"
-        value={prefs.sortChats}
-        onChange={(sortChats) => setView({ sortChats })}
-        options={[
-          { value: "created", label: "Created" },
-          { value: "updated", label: "Last updated" },
-        ]}
-      />
+      {repoMode && (
+        <MenuChoiceGroup<ChatSort>
+          label="Sort chats by"
+          value={prefs.sortChats}
+          onChange={(sortChats) => setView({ sortChats })}
+          options={[
+            { value: "created", label: "Created" },
+            { value: "updated", label: "Last updated" },
+          ]}
+        />
+      )}
       <DropdownMenuSeparator />
       <DropdownMenuGroup>
         <MenuCheckItem
@@ -646,10 +649,7 @@ export function AgentsSidebar({
   return (
     <SidebarFrame
       {...layout}
-      className={cn(
-        "border-r border-default bg-surface-level-2",
-        agentWorkspaceEnabled && "border-subtle"
-      )}
+      className="border-r border-default bg-surface-level-2"
     >
       <div
         className={cn(
@@ -925,8 +925,15 @@ export function AgentsSidebar({
               />
               {!sectionCollapsed("recents") && (
                 <>
-                  {recents.map((item) => (
-                    <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                  {groupSidebarThreadsByDay(recents).map((day) => (
+                    <div key={day.key}>
+                      <div className="px-space-2 pt-space-2 pb-space-1 text-xxs font-medium text-tertiary">
+                        {day.label}
+                      </div>
+                      {day.threads.map((item) => (
+                        <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                      ))}
+                    </div>
                   ))}
                   {recentsQuery.hasMore && (
                     <LoadMoreThreadsOnScroll
@@ -1356,7 +1363,7 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
-  const { experience, select: selectExperience } = useDesktopExperience()
+  const { experience, select: selectExperience } = useExperience()
   // `useMutation` returns a fresh object every render; only `mutate` is stable,
   // and an unstable command array re-registers on every commit.
   const pinThread = usePinAgentThread().mutate
@@ -1368,7 +1375,7 @@ export function AgentsShell({
     enabled: Boolean(activeThreadId),
   })
   const threadExperience = activeThread
-    ? desktopExperience.thread(activeThread)
+    ? experienceStore.thread(activeThread)
     : undefined
   useEffect(() => {
     if (threadExperience) selectExperience(threadExperience)

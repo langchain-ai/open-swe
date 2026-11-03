@@ -91,6 +91,7 @@ class ProfileUpdate(BaseModel):
     pr_failure_reactions: bool | None = None
     goal_mode: bool | None = None
     experimental_memory: bool | None = None
+    experimental_classify: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_background_callbacks: bool | None = Field(
@@ -409,6 +410,7 @@ async def put_my_profile(
             pr_failure_reactions=update.pr_failure_reactions,
             goal_mode=update.goal_mode,
             experimental_memory=update.experimental_memory,
+            experimental_classify=update.experimental_classify,
         ),
     )
     if preferences is None and (
@@ -416,6 +418,7 @@ async def put_my_profile(
         or update.pr_failure_reactions
         or update.goal_mode
         or update.experimental_memory
+        or update.experimental_classify
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)

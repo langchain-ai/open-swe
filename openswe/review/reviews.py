@@ -12,6 +12,7 @@ import logging
 import re
 import socket
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from html.parser import HTMLParser
 from typing import Any, Literal, Self
 from urllib.parse import urljoin, urlparse
 
@@ -39,6 +40,7 @@ from openswe.review.findings import (
     findings_by_thread,
     is_thread_resolved,
 )
+from openswe.review.reconcile import reconcile_linked_findings
 from openswe.review.session import PullRequestState, ReviewSession, now_ms
 from openswe.review_scout.launch import ReviewScoutTarget, ScoutProgress
 from openswe.thread_ids import reviewer_thread_id
@@ -326,12 +328,33 @@ def _user_ref(value: Any) -> dict[str, Any] | None:
     return {"login": login, "avatar_url": value.get("avatar_url")}
 
 
+class DescriptionReferences(HTMLParser):
+    def __init__(self, html: str):
+        super().__init__()
+        self.links: set[str] = set()
+        self.feed(html)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "a":
+            self.links.update(value for name, value in attrs if name == "href" and value)
+
+    def pull_request_numbers(self, owner: str, repo: str) -> list[int]:
+        prefix = f"https://github.com/{owner}/{repo}/pull/".lower()
+        return sorted(
+            {
+                int(href[len(prefix) :])
+                for href in self.links
+                if href.lower().startswith(prefix) and href[len(prefix) :].isdigit()
+            }
+        )
+
+
 def _serialize_pr_details(payload: dict[str, Any]) -> dict[str, Any]:
     labels = payload.get("labels")
     state = payload.get("state")
     if payload.get("merged"):
         state = "merged"
-    elif payload.get("draft"):
+    elif state != "closed" and payload.get("draft"):
         state = "draft"
     return {
         "state": state if isinstance(state, str) else "open",
@@ -669,15 +692,20 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     The reviewer graph is optional — a PR it has never run on still renders with
     its GitHub-sourced details, checks and diff, and no findings.
     """
-    async with GitHubClient.as_app() as github:
+    async with GitHubClient.as_app(owner, repo) as github:
         repository = github.repo(owner, repo)
-        pr_payload = await repository.pull_request(pr_number).pull()
+        pr_payload = await repository.pull_request(pr_number).pull(rendered_body=True)
         details = _serialize_pr_details(pr_payload)
+        details["description_pull_requests"] = DescriptionReferences(
+            pr_payload.get("body_html") or ""
+        ).pull_request_numbers(owner, repo)
 
         thread = await _reviewer_thread_for(owner, repo, pr_number)
-        stored = (
-            (await _thread_findings([thread])).get(thread.get("thread_id"), []) if thread else []
-        )
+        stored = (await _thread_findings([thread])).get(thread["thread_id"], []) if thread else []
+        if thread:
+            stored = await reconcile_linked_findings(
+                thread["thread_id"], repository.pull_request(pr_number), findings=stored
+            )
         summary = _thread_review_summary(thread, stored) if thread else None
         metadata = thread_metadata(thread) if thread else {}
         if not summary:

@@ -677,6 +677,12 @@ export function AgentsHome({
               </Banner>
             )}
             <AgentPromptBar
+              key={`${session.data?.user_id}:${agentWorkspace}`}
+              draftKey={
+                session.data?.user_id
+                  ? `${session.data.user_id}:new:${agentWorkspace}`
+                  : undefined
+              }
               activeRun={
                 optimisticDraftThread
                   ? { threadId: pendingThreadId ?? "", running: true }

@@ -347,6 +347,9 @@ async function shootCard(page: Page, name: string) {
 test.describe("Human review in Slack", () => {
   test.beforeEach(async ({ request }) => {
     await request.post("/control/reset");
+    await control(request, "/control/team-settings", {
+      expedited_review_enabled: false,
+    });
     await grantWrite(request);
   });
 

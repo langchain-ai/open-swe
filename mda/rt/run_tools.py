@@ -434,12 +434,31 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
                 logger.warning("QuickJS slot closed during eval", exc_info=True)
             await self._registry.aevict(slot_id)
             return ToolMessage(
-                content="Error: the code interpreter closed during eval. Its state has been "
-                "discarded. The code may have partially executed; host-tool calls are not retried.",
+                content=self._closed_eval_message(request.state),
                 tool_call_id=request.tool_call["id"],
                 name=_EVAL_TOOL,
                 status="error",
             )
+
+    def _closed_eval_message(self, state: Mapping[str, object]) -> str:
+        """Tell the model what its next eval starts from after the interpreter closed."""
+        if self._snapshot_for_eval(state) is None:
+            starts = (
+                "Your next eval starts a new interpreter with empty JavaScript state: "
+                "every variable from before the crash is lost."
+            )
+        else:
+            starts = (
+                "Your next eval starts a new interpreter that first tries to restore the "
+                "JavaScript state saved at the end of an earlier run, rolling back every "
+                "variable defined or changed since that save, including in this run. "
+                "If that restore fails, that eval says so and does not run its code."
+            )
+        return (
+            f"Error: the code interpreter closed during eval. {starts} The code may have "
+            "partially executed, and host-tool calls are not retried: external actions may "
+            "already have happened, so verify their effects before repeating any of them."
+        )
 
     async def aafter_agent(self, state: REPLState, runtime: Runtime) -> dict[str, object] | None:
         if not await self._runs_code():

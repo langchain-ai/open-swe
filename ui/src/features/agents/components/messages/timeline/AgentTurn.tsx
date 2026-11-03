@@ -446,6 +446,7 @@ export function AgentTurn({
       case "sql-item":
         return <SqlResultItem key={item.key} chunk={item.chunk} />
 
+      case "routed-message-item":
       case "tool-item":
         return (
           <ToolWorkEntry

@@ -8,6 +8,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Final
+from uuid import UUID
 
 from pydantic import JsonValue
 
@@ -39,6 +40,8 @@ from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
 from openswe.merge_queue.runtime import reconcile_queue
 from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
 from openswe.monitors.delivery import poll_monitors
+from openswe.notifications.service import JOB_KIND as NOTIFICATION_FALLBACK
+from openswe.notifications.service import AppNotification
 
 __all__ = ["WORKER"]
 from openswe.reconcile import reconcile_stale_runs
@@ -248,6 +251,13 @@ async def _wake_thread(job: Job) -> None:
         logger.exception("Thread wakeup failed", extra={"job_id": str(job.id)})
         return
     logger.info("Thread woken", extra={"job_id": str(job.id), "run_id": run_id})
+
+
+@WORKER.register(NOTIFICATION_FALLBACK)
+async def notification_fallback(job: Job) -> None:
+    await AppNotification.deliver_fallback(
+        UUID(str(job.payload["recipient_id"])), str(job.payload["key"])
+    )
 
 
 async def start_jobs() -> None:
