@@ -9,7 +9,7 @@ import rt.images as images
 import rt.linear as linear
 import rt.linear_automations as automations
 from managed_deepagents import (
-    ChannelRunOptions,
+    ChannelRun,
     LinearChannelThread,
     LinearIssueCreateEvent,
     LinearIssueCreatePayload,
@@ -22,6 +22,7 @@ from managed_deepagents import (
 )
 from managed_deepagents._channels.http.endpoint import EndpointClient, EndpointDeclined
 from managed_deepagents._channels.http.types import ChannelName
+from managed_deepagents._channels.run_input import normalize_run_inputs
 from pydantic import BaseModel, TypeAdapter
 from rt.intake import ask_backend, backend_endpoint
 from runtime_api.endpoint import Endpoint
@@ -233,15 +234,19 @@ async def test_a_session_turn_starts_the_run_the_backend_planned(
     )
     # Nothing named, nothing remembered: the instance's default, in the workspace that owns it.
     assert (plan.repository, plan.workspace) == ("acme/api", None)
-    assert isinstance(result, tuple)
-    run_input, options = result
+    # One run on the session's own thread: a list, as a dict alone would be state.
+    assert isinstance(result, list)
+    (run,) = cast(list[ChannelRun], result)
+    assert "thread" not in run
+    # MDA takes it, as the session's own run.
+    assert len(normalize_run_inputs(result, {"name": "linear", "provider": "linear"})) == 1
     # The run calls back with the context the backend signed, and completes through its webhook.
-    assert options == {
+    assert {key: value for key, value in run.items() if key != "input"} == {
         "context": _RUN.context,
         "metadata": _RUN.metadata,
         "webhook": _RUN.webhook,
     }
-    introduction, issue, human = cast(dict[str, list[dict[str, object]]], run_input)["messages"]
+    introduction, issue, human = cast(dict[str, list[dict[str, object]]], run["input"])["messages"]
     assert "system:linear-issue" in str(introduction["content"])
     # The issue's prompt names the repository the backend accepted, beside the image it shows.
     text, shown = cast(list[dict[str, str]], issue["content"])
@@ -516,15 +521,19 @@ async def test_an_issue_event_starts_the_automations_it_fires_on_threads_of_thei
         assert result is None
         return
     assert isinstance(result, list)
-    runs = cast(list[tuple[object, ChannelRunOptions]], result)
-    for (run_input, options), automation_id in zip(runs, started, strict=True):
-        assert run_input == {"messages": [{"role": "user", "content": automation_id}]}
+    runs = cast(list[ChannelRun], result)
+    # MDA takes every one of them, none on the issue's conversation.
+    assert len(normalize_run_inputs(result, {"name": "linear", "provider": "linear"})) == len(
+        started
+    )
+    for run, automation_id in zip(runs, started, strict=True):
+        assert run["input"] == {"messages": [{"role": "user", "content": automation_id}]}
         # Never the issue's conversation: a thread of its own, kept for the dashboard.
-        assert options["thread"] == {
+        assert run.get("thread") == {
             "mode": "persistent",
             "id": str(uuid.uuid5(uuid.NAMESPACE_URL, automation_id)),
         }
-        assert options["context"] == {"__run_token": "signed"}
+        assert run.get("context") == {"__run_token": "signed"}
 
 
 @pytest.mark.asyncio

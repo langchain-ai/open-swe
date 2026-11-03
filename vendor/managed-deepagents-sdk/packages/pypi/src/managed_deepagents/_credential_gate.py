@@ -19,7 +19,7 @@ import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from langchain.agents.middleware.types import (
     AgentMiddleware,
@@ -40,6 +40,7 @@ from managed_deepagents._agent_auth import (
     AgentAuth,
     AgentAuthContext,
 )
+from managed_deepagents._agent_auth_http import CredentialStoreUnavailableError
 from managed_deepagents._connection_authorization import (
     CredentialAuthorizationDeferredError,
     CredentialAuthorizationRequiredInterrupt,
@@ -62,6 +63,7 @@ from managed_deepagents._identity_runtime import (
     resolve_runtime_configurable,
 )
 from managed_deepagents._managed_tools import with_managed_runtime
+from managed_deepagents._telemetry.otel.context import LogAttributes, record_log
 
 if TYPE_CHECKING:
     from managed_deepagents.identity import RuntimeIdentity
@@ -70,6 +72,11 @@ CREDENTIAL_GATE_MIDDLEWARE_NAME = "mda-credential-gate"
 
 #: How long a caller's loaded tools stay cached.
 _TOOL_CACHE_TTL_SECONDS = 5 * 60
+#: Resolves a run's credential tools from its runtime.
+_LoadTools = Callable[[object], list[BaseTool]]
+_CREDENTIAL_UNAVAILABLE = (
+    "Credential verification is temporarily unavailable. No tool was executed. Please retry later."
+)
 
 
 class _BlockedRun(TypedDict):
@@ -112,62 +119,145 @@ def create_credential_gate_middleware(
     if not consumers:
         return None
 
-    class _CredentialGateMiddleware(AgentMiddleware[AgentState[Any], Any, Any]):
-        @property
-        def name(self) -> str:
-            return CREDENTIAL_GATE_MIDDLEWARE_NAME
+    return _CredentialGateMiddleware(consumers)
 
-        def before_agent(
-            self, state: AgentState[Any], runtime: Runtime[Any]
-        ) -> dict[str, Any] | None:
-            del state
-            blocked = _before_agent(consumers, runtime)
-            return dict(blocked) if blocked is not None else None
 
-        async def abefore_agent(
-            self, state: AgentState[Any], runtime: Runtime[Any]
-        ) -> dict[str, Any] | None:
-            del state
-            blocked = await asyncio.to_thread(_before_agent, consumers, runtime)
-            return dict(blocked) if blocked is not None else None
+class _CredentialGateMiddleware(AgentMiddleware[AgentState[Any], Any, Any]):
+    """Reuse loaded tools within one verified run without checkpointing credentials."""
 
-        def wrap_model_call(
-            self,
-            request: ModelRequest[Any],
-            handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
-        ) -> ModelCallResult[Any]:
-            return handler(_with_extra_tools(request, _tools_for(consumers, request)))
+    def __init__(self, consumers: Sequence[CredentialConsumer]) -> None:
+        self._consumers = consumers
+        self._lock = threading.Lock()
+        self._loaded: tuple[str, AgentAuthContext, list[BaseTool]] | None = None
 
-        async def awrap_model_call(
-            self,
-            request: ModelRequest[Any],
-            handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
-        ) -> ModelCallResult[Any]:
-            tools = await asyncio.to_thread(_tools_for, consumers, request)
-            return await handler(_with_extra_tools(request, tools))
+    def _tools(self, runtime: object) -> list[BaseTool]:
+        caller = _auth_context(runtime)
+        if caller is None:
+            return []
+        info = getattr(runtime, "execution_info", None)
+        run_id = info.run_id if info is not None else None
+        if not run_id:
+            return _load_all(self._consumers, caller.context)
+        with self._lock:
+            if self._loaded is not None and self._loaded[:2] == (run_id, caller.context):
+                resolve_user_connection_grants(
+                    AgentAuth(caller.context),
+                    [
+                        credential.slug
+                        for credential in _consumer_credentials(self._consumers, caller)
+                    ],
+                    interrupt=_interrupt,
+                )
+                return self._loaded[2]
+            tools = _load_all(self._consumers, caller.context)
+            self._loaded = (run_id, caller.context, tools)
+            return tools
 
-        def wrap_tool_call(
-            self,
-            request: ToolCallRequest,
-            handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
-        ) -> ToolMessage | Command[Any]:
-            return handler(_with_dynamic_tool(request, _tools_for(consumers, request)))
+    def _prepare(self, runtime: Runtime[Any]) -> dict[str, Any] | None:
+        with self._lock:
+            self._loaded = None
+        blocked = _before_agent(self._consumers, runtime, self._tools)
+        return dict(blocked) if blocked is not None else None
 
-        async def awrap_tool_call(
-            self,
-            request: ToolCallRequest,
-            handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
-        ) -> ToolMessage | Command[Any]:
-            tools = await asyncio.to_thread(_tools_for, consumers, request)
-            return await handler(_with_dynamic_tool(request, tools))
+    @property
+    def name(self) -> str:
+        return CREDENTIAL_GATE_MIDDLEWARE_NAME
 
-    hook_config(can_jump_to=["end"])(_CredentialGateMiddleware.before_agent)
-    hook_config(can_jump_to=["end"])(_CredentialGateMiddleware.abefore_agent)
-    return _CredentialGateMiddleware()
+    def before_agent(self, state: AgentState[Any], runtime: Runtime[Any]) -> dict[str, Any] | None:
+        del state
+        return self._prepare(runtime)
+
+    async def abefore_agent(
+        self, state: AgentState[Any], runtime: Runtime[Any]
+    ) -> dict[str, Any] | None:
+        del state
+        return await asyncio.to_thread(self._prepare, runtime)
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
+    ) -> ModelCallResult[Any]:
+        return handler(_with_extra_tools(request, _model_tools_for(self._tools, request)))
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+    ) -> ModelCallResult[Any]:
+        tools = await asyncio.to_thread(_model_tools_for, self._tools, request)
+        return await handler(_with_extra_tools(request, tools))
+
+    def wrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
+    ) -> ToolMessage | Command[Any]:
+        return _wrap_tool_call(self._tools, request, handler)
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
+    ) -> ToolMessage | Command[Any]:
+        return await _awrap_tool_call(self._tools, request, handler)
+
+
+hook_config(can_jump_to=["end"])(_CredentialGateMiddleware.before_agent)
+hook_config(can_jump_to=["end"])(_CredentialGateMiddleware.abefore_agent)
+
+
+def _wrap_tool_call(
+    load_tools: _LoadTools,
+    request: ToolCallRequest,
+    handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
+) -> ToolMessage | Command[Any]:
+    if request.tool is not None:
+        return handler(request)
+    try:
+        tools = load_tools(request.runtime)
+    except CredentialStoreUnavailableError as error:
+        _record_credential_unavailable(error, "tool_call")
+        return _credential_error_message(request)
+    return handler(_with_dynamic_tool(request, tools))
+
+
+async def _awrap_tool_call(
+    load_tools: _LoadTools,
+    request: ToolCallRequest,
+    handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
+) -> ToolMessage | Command[Any]:
+    if request.tool is not None:
+        return await handler(request)
+    try:
+        tools = await asyncio.to_thread(load_tools, request.runtime)
+    except CredentialStoreUnavailableError as error:
+        _record_credential_unavailable(error, "tool_call")
+        return _credential_error_message(request)
+    return await handler(_with_dynamic_tool(request, tools))
+
+
+def _record_credential_unavailable(
+    error: CredentialStoreUnavailableError,
+    stage: Literal["before_agent", "model_call", "tool_call"],
+) -> None:
+    attributes: LogAttributes = {"stage": stage, "error.kind": "credential_store_unavailable"}
+    if error.status is not None:
+        attributes["http.status_code"] = error.status
+    record_log("WARN", "credential store unavailable", attributes=attributes)
+
+
+def _credential_error_message(request: ToolCallRequest) -> ToolMessage:
+    return ToolMessage(
+        content=_CREDENTIAL_UNAVAILABLE,
+        tool_call_id=request.tool_call["id"],
+        name=request.tool_call["name"],
+        status="error",
+    )
 
 
 def _before_agent(
-    consumers: Sequence[CredentialConsumer], runtime: Runtime[Any]
+    consumers: Sequence[CredentialConsumer], runtime: Runtime[Any], load_tools: _LoadTools
 ) -> _BlockedRun | None:
     channel = channel_provider(_runtime_identity(runtime))
     if channel is not None:
@@ -202,9 +292,17 @@ def _before_agent(
             _warn_missing_optional_identity()
             return None
         return _sign_in_required(consumers)
-    _ensure_grants(consumers, caller)
-    _load_all(consumers, caller.context)
-    return None
+    blocked: _BlockedRun | None = None
+    try:
+        _ensure_grants(consumers, caller)
+        load_tools(runtime)
+    except CredentialStoreUnavailableError as error:
+        _record_credential_unavailable(error, "before_agent")
+        blocked = {
+            "messages": [{"role": "assistant", "content": _CREDENTIAL_UNAVAILABLE}],
+            "jump_to": "end",
+        }
+    return blocked
 
 
 def _ensure_grants(
@@ -251,13 +349,12 @@ def _consumer_credentials(
     return list(by_slug.values())
 
 
-def _tools_for(
-    consumers: Sequence[CredentialConsumer], request: ModelRequest[Any] | ToolCallRequest
-) -> list[BaseTool]:
-    caller = _auth_context(request.runtime)
-    if caller is None:
+def _model_tools_for(load_tools: _LoadTools, request: ModelRequest[Any]) -> list[BaseTool]:
+    try:
+        return load_tools(request.runtime)
+    except CredentialStoreUnavailableError as error:
+        _record_credential_unavailable(error, "model_call")
         return []
-    return _load_all(consumers, caller.context)
 
 
 def _load_all(

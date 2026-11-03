@@ -19,8 +19,7 @@ from uuid import UUID
 
 from langgraph_sdk.schema import MultitaskStrategy
 from managed_deepagents import (
-    ChannelRunInput,
-    ChannelRunOptions,
+    ChannelRun,
     GitHubChannelThread,
     GitHubEvent,
     GitHubEventResult,
@@ -109,28 +108,29 @@ async def on_installation_event(
     return None
 
 
-def _options(run: GitHubIssueRun | GitHubThreadRun) -> ChannelRunOptions:
-    options: ChannelRunOptions = {"context": run.context, "metadata": run.metadata}
+def _run(run: GitHubIssueRun | GitHubThreadRun) -> ChannelRun:
+    """The backend's planned run, on the event's conversation."""
+    started: ChannelRun = {"input": run.input, "context": run.context, "metadata": run.metadata}
     if run.webhook:
-        options["webhook"] = run.webhook
-    return options
+        started["webhook"] = run.webhook
+    return started
 
 
-def _issue_run(planned: PlannedGitHubIssueRun) -> tuple[ChannelRunInput, ChannelRunOptions]:
+def _issue_run(planned: PlannedGitHubIssueRun) -> ChannelRun:
     """The issue's run on its conversation, or, while it waits, what points it to the decision."""
     if planned.run is None:
-        return (ACTS_WHILE_WAITING, {})
-    return (planned.run.input, _options(planned.run))
+        return {"input": ACTS_WHILE_WAITING}
+    return _run(planned.run)
 
 
 def _thread_run(
     run: GitHubThreadRun, *, multitask_strategy: MultitaskStrategy | None = None
-) -> tuple[ChannelRunInput, ChannelRunOptions]:
+) -> ChannelRun:
     """A run on the thread the backend planned it on: an automation's, or the pull request's."""
-    options: ChannelRunOptions = {
-        **_options(run),
+    started: ChannelRun = {
+        **_run(run),
         "thread": {"mode": "persistent", "id": str(run.thread_id)},
     }
     if multitask_strategy is not None:
-        options["multitask_strategy"] = multitask_strategy
-    return (run.input, options)
+        started["multitask_strategy"] = multitask_strategy
+    return started

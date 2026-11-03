@@ -226,9 +226,9 @@ async def _deliver_answer(
 ) -> None:
     """Post a finished run's answers in the thread it opens, its origin, or ``deliver_to``."""
     binding = run.origin
-    # A channel declared with ``reply="none"`` leaves replying to the agent, as
-    # does a run its handler started with ``reply`` "none" or on a thread of its
-    # own choosing without ``deliver_to``.
+    # A channel declared with ``auto_post=False`` leaves replying to the agent,
+    # as does a run its handler started with ``auto_post`` False or on a thread
+    # of its own choosing without ``auto_post``.
     if binding is not None and not _replies(binding):
         return
     values = final.values if isinstance(final.values, Mapping) else {}
