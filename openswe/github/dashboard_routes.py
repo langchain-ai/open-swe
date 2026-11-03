@@ -65,12 +65,13 @@ async def api_allow_github_bot(
     body: AllowGitHubBot,
     admin: dict[str, Any] = ADMIN_DEP,
 ) -> AllowedGitHubBot:
-    if body.login in OPEN_SWE_GITHUB_LOGINS:
+    login = body.bot_login()
+    if login in OPEN_SWE_GITHUB_LOGINS:
         raise HTTPException(400, "Open SWE's own bots are always allowed.")
     actor = session_user_id(admin) or user_id_for_login(admin["sub"])
-    if not await AllowedGitHubBot.add(body.login, actor):
+    if not await AllowedGitHubBot.add(login, actor):
         raise HTTPException(409, "This bot is already allowed.")
-    bot = await AllowedGitHubBot.get(body.login)
+    bot = await AllowedGitHubBot.get(login)
     if bot is None:
         raise HTTPException(409, "This bot was removed meanwhile.")
     return bot

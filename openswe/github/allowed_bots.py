@@ -5,7 +5,8 @@ from datetime import datetime
 from typing import Self
 from uuid import UUID, uuid7
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import ForeignKey, ScalarSelect, delete, exists, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
@@ -24,13 +25,12 @@ class AllowGitHubBot(BaseModel):
 
     login: str
 
-    @field_validator("login")
-    @classmethod
-    def validate_login(cls, value: str) -> str:
-        value = value.strip().lower()
-        if not _BOT_LOGIN.fullmatch(value):
-            raise ValueError("Enter a GitHub App bot login, such as langsmith-engine[bot]")
-        return value
+    def bot_login(self) -> str:
+        """The normalized login, or a 400 when it does not name a GitHub App bot."""
+        login = self.login.strip().lower()
+        if not _BOT_LOGIN.fullmatch(login):
+            raise HTTPException(400, "Enter a GitHub App bot login, such as langsmith-engine[bot].")
+        return login
 
 
 class AllowedGitHubBotRow(Base):

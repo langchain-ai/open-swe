@@ -257,7 +257,7 @@ async def test_admin_allowed_github_bot_prs_are_treated_like_users(
     assert not await AllowedGitHubBot.author_allowed("LangSmith-Engine[bot]")
     assert (
         await client.post("/dashboard/api/github/allowed-bots", json={"login": "octocat"})
-    ).status_code == 422
+    ).status_code == 400
     response = await client.post(
         "/dashboard/api/github/allowed-bots", json={"login": " LangSmith-Engine[bot] "}
     )
