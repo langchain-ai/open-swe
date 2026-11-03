@@ -19,7 +19,7 @@ from uuid import UUID, uuid7
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import ForeignKey, delete, func, select
+from sqlalchemy import ForeignKey, delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, selectinload
