@@ -93,7 +93,7 @@ import {
   cloudSidebarThread,
   DEFAULT_SIDEBAR_WORKSPACE_SLUG,
   groupRepoGroupsByWorkspace,
-  groupSidebarThreadsByDay,
+  groupSidebarThreadsByAge,
   sidebarRepoKey,
   sortSidebarThreads,
   sidebarItemContains,
@@ -511,13 +511,14 @@ export function AgentsSidebar({
   const viewMenuItems = (
     <>
       <MenuChoiceGroup<OrganizeMode>
-        label="Organize sidebar"
+        label="Group by"
         value={prefs.organize}
         onChange={(organize) => setView({ organize })}
         options={[
-          { value: "workspace", label: "Workspaces" },
-          { value: "repo", label: "By repository" },
-          { value: "list", label: "In one list" },
+          { value: "date", label: "Date" },
+          { value: "repo", label: "Repository" },
+          { value: "workspace", label: "Workspace" },
+          { value: "none", label: "None" },
         ]}
       />
       {repoMode && (
@@ -571,6 +572,14 @@ export function AgentsSidebar({
       </DropdownMenuGroup>
     </>
   )
+
+  // Date mode gives each age bucket its own section; otherwise, and before any
+  // thread loads, one Recents section keeps the view menu reachable.
+  const ageGroups =
+    prefs.organize === "date" ? groupSidebarThreadsByAge(recents) : []
+  const recentGroups = ageGroups.length
+    ? ageGroups.map((group) => ({ ...group, key: `recents:${group.key}` }))
+    : [{ key: "recents", label: "Recents", threads: recents }]
 
   const noRepoGroup: HydratedRepoGroup = {
     key: NO_REPO_GROUP_KEY,
@@ -844,52 +853,51 @@ export function AgentsSidebar({
               </section>
             )}
 
-          {!repoMode && (
-            <section className="mb-space-3">
-              <SidebarSectionHeader
-                label="Recents"
-                collapsed={sectionCollapsed("recents")}
-                onToggleCollapsed={() => toggleSectionCollapsed("recents")}
-                menu={
-                  <SidebarSectionMenu label="Recents options">
-                    {viewMenuItems}
-                  </SidebarSectionMenu>
-                }
-                action={
-                  <SidebarSectionAction
-                    label="New thread"
-                    icon={PlusIcon}
-                    onClick={() => {
-                      layout.closeOnMobile()
-                      void navigate({ to: "/agents" })
-                    }}
-                  />
-                }
-              />
-              {!sectionCollapsed("recents") && (
-                <>
-                  {groupSidebarThreadsByDay(recents).map((day) => (
-                    <div key={day.key}>
-                      <div className="px-space-2 pt-space-2 pb-space-1 text-xxs font-medium text-tertiary">
-                        {day.label}
-                      </div>
-                      {day.threads.map((item) => (
-                        <SidebarThreadRow key={item.key} {...rowProps(item)} />
-                      ))}
-                    </div>
-                  ))}
-                  {recentsQuery.hasMore && (
-                    <LoadMoreThreadsOnScroll
-                      label="Load more threads"
-                      root={scrollViewport}
-                      loading={recentsQuery.isFetchingNextPage}
-                      onLoadMore={recentsQuery.fetchNextPage}
-                    />
-                  )}
-                </>
-              )}
-            </section>
-          )}
+          {!repoMode &&
+            recentGroups.map((group, index) => (
+              <section key={group.key} className="mb-space-3">
+                <SidebarSectionHeader
+                  label={group.label}
+                  collapsed={sectionCollapsed(group.key)}
+                  onToggleCollapsed={() => toggleSectionCollapsed(group.key)}
+                  menu={
+                    index === 0 && (
+                      <SidebarSectionMenu label="Recents options">
+                        {viewMenuItems}
+                      </SidebarSectionMenu>
+                    )
+                  }
+                  action={
+                    index === 0 && (
+                      <SidebarSectionAction
+                        label="New thread"
+                        icon={PlusIcon}
+                        onClick={() => {
+                          layout.closeOnMobile()
+                          void navigate({ to: "/agents" })
+                        }}
+                      />
+                    )
+                  }
+                />
+                {!sectionCollapsed(group.key) && (
+                  <>
+                    {group.threads.map((item) => (
+                      <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                    ))}
+                    {index === recentGroups.length - 1 &&
+                      recentsQuery.hasMore && (
+                        <LoadMoreThreadsOnScroll
+                          label="Load more threads"
+                          root={scrollViewport}
+                          loading={recentsQuery.isFetchingNextPage}
+                          onLoadMore={recentsQuery.fetchNextPage}
+                        />
+                      )}
+                  </>
+                )}
+              </section>
+            ))}
           {isEmpty && !cloudError && (
             <p className="px-space-2 py-space-5 text-center text-xs text-tertiary">
               {hasActiveFilters(prefs.filters)
