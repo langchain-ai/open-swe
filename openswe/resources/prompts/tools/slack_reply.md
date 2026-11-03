@@ -14,7 +14,8 @@ End the run by posting a concise final outcome here.
 Format `message` using standard Markdown: **bold**, _italic_, ~~strikethrough~~, [link text](url), and Markdown lists.
 Replies use Slack's native Markdown blocks.
 
-Slack delivery points each GitHub PR link at its Open SWE review page and adds a small ↗ link to GitHub after it, so write plain GitHub PR URLs.
+Slack delivery points each GitHub PR link at its Open SWE review page and adds a small ↗ link to GitHub after it, so write canonical GitHub PR URLs, not dashboard `/agents/reviews/...` URLs.
+Do not copy the dashboard review URL from an earlier reply; delivery creates the review link and its GitHub companion automatically.
 Set `preserve_github_links=true` only when the user wants plain GitHub links without the review page, for example to share the message outside Open SWE.
 It keeps GitHub URLs unchanged in both `message` and `blocks`, for this reply only.
 Do not use code blocks as a link-rewriting workaround.
