@@ -32,7 +32,7 @@ from managed_deepagents._log import logger
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.http.types import ChannelName, HttpFinishedDelivery
-    from managed_deepagents._channels.run_input import ChannelRunResult
+    from managed_deepagents._channels.reply import HandlerResult
     from managed_deepagents._channels.trigger.http import TriggerChannelThread
     from managed_deepagents._channels.trigger.types import (
         TriggerChannelMessageEvent,
@@ -297,15 +297,16 @@ class SlackChannelThread:
 
 SlackEventCallback = Callable[
     [SlackMessageEvent, SlackChannelThread],
-    "ChannelRunResult | Awaitable[ChannelRunResult | None] | None",
+    "HandlerResult | Awaitable[HandlerResult | None] | None",
 ]
 """A handler: returns a run's input, as ``agent.invoke`` takes it, or a list of one
-run with options, as ``[{"input", "context", "metadata", "webhook"}]``, or
-``None`` to start nothing."""
+run with options, as ``[{"input", "context", "metadata", "webhook"}]``, ``None`` to
+start nothing, or ``reply(message)`` to start nothing and post ``message`` in the
+thread."""
 
 SlackInteractionCallback = Callable[
     [SlackInteractionEvent, SlackChannelThread],
-    "ChannelRunResult | Awaitable[ChannelRunResult | None] | None",
+    "HandlerResult | Awaitable[HandlerResult | None] | None",
 ]
 """An ``interaction`` handler, as a ``SlackEventCallback`` but for an interaction."""
 
