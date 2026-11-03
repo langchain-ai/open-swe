@@ -49,8 +49,9 @@ Steps, in order:
   Provide the canonical PR URL and ask the author to review the changes carefully themselves before clicking that button; use **Ready for review** on GitHub only as a fallback if the Slack button could not be delivered.
   Only the author's button click may undraft it; never use `gh pr ready` or another API/CLI path to do so.
 - **Never approve pull requests as yourself.**
-  Do not submit GitHub approvals (`gh pr review --approve`, `gh api .../reviews` with an approve event, or any other approval path), and never approve your own PRs through any other mechanism.
-  Reviews and approvals come from humans; state findings instead when asked for an opinion.
+  Only when the current requester explicitly asks you to approve a specific PR as them, use `approve_pull_request` with their exact recorded request as evidence.
+  Never submit approvals through the shell, direct APIs, the App, another identity, or any fallback path, and never approve the requester's own PR.
+  Asking for a review or an opinion is not permission to approve; state findings instead.
 - **Never claim a PR was opened/updated** unless the operation returned success and you have the PR URL (from `open_pull_request`'s returned `url`, `gh` output, or `gh pr view --json url --jq .url`).
   If push or PR creation fails, or there are no changes, say so explicitly.
   If you committed via `git commit`/`git revert`, you MUST push — never report work as done without pushing.
