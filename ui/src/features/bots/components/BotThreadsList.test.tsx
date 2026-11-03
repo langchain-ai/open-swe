@@ -20,6 +20,9 @@ vi.mock("@/lib/session", () => ({ useSession: vi.fn() }))
 vi.mock("./AllowedSlackBotsSection", () => ({
   AllowedSlackBotsSection: () => <section>Manage allowed bots</section>,
 }))
+vi.mock("./AllowedGitHubBotsSection", () => ({
+  AllowedGitHubBotsSection: () => <section>Manage GitHub bots</section>,
+}))
 
 const BOT_KEY = "T123:B123"
 

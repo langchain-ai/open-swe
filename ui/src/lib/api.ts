@@ -382,6 +382,13 @@ export interface AllowedSlackBot {
   image_url: string
 }
 
+/** A GitHub App bot whose pull requests are treated like an Open SWE user's. */
+export interface AllowedGitHubBot {
+  login: string
+  created_by: string
+  created_at: string
+}
+
 /** What any signed-in user may see of an allowed bot; `key` is `team_id:bot_id`. */
 export interface AllowedSlackBotEntry {
   key: string
@@ -1720,6 +1727,18 @@ export const api = {
   removeAllowedSlackBot: (teamId: string, botId: string) =>
     request<{ ok: boolean }>(
       `/slack/allowed-bots/${encodeURIComponent(teamId)}/${encodeURIComponent(botId)}`,
+      { method: "DELETE" }
+    ),
+  listAllowedGitHubBots: () =>
+    request<AllowedGitHubBot[]>("/github/allowed-bots"),
+  allowGitHubBot: (body: { login: string }) =>
+    request<AllowedGitHubBot>("/github/allowed-bots", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  removeAllowedGitHubBot: (login: string) =>
+    request<{ ok: boolean }>(
+      `/github/allowed-bots/${encodeURIComponent(login)}`,
       { method: "DELETE" }
     ),
   saveInstanceSettings: (body: WorkspaceSettings) =>
