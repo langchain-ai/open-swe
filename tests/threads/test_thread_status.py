@@ -21,6 +21,7 @@ class _Runtime:
         self.statuses = statuses
         self.runs: dict[str, MdaRun] = {}
         self.errors: dict[str, str] = {}
+        self.unreachable = False
 
     async def status(self, thread_id: str) -> ThreadStatus | None:
         return self.statuses.get(thread_id)
@@ -29,6 +30,8 @@ class _Runtime:
         return self.runs.get(thread_id)
 
     async def run_error(self, thread_id: str) -> str | None:
+        if self.unreachable:
+            raise TimeoutError("MDA did not answer")
         return self.errors.get(thread_id)
 
     async def indexed(self, thread_id: str) -> index.IndexedThread | None:
@@ -157,6 +160,12 @@ async def test_a_run_that_failed_without_a_webhook_has_its_turn_failed_with_its_
     runtimes.runtime.errors[thread_id] = "BlockingError: Blocking call to os.getcwd"
     monkeypatch.setattr(status, "RUNTIMES", runtimes)
 
+    # A turn that could not be settled keeps the thread busy, so the next pass retries it.
+    runtimes.runtime.unreachable = True
+    assert await status.reconcile_busy_threads() == 0
+    assert (thread := await index.get(thread_id)) is not None and thread.status == "busy"
+
+    runtimes.runtime.unreachable = False
     assert await status.reconcile_busy_threads() == 1
 
     async with read_only_transaction() as conn:

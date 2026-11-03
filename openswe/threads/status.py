@@ -162,14 +162,9 @@ async def reconcile_busy_threads() -> int:
     unstarted = {thread.thread_id for thread in await index.busy_since(now - UNSTARTED_CHANNEL_RUN)}
     for thread in await index.busy_since(now - STALE_BUSY):
         try:
-            status = await refresh_thread_status(
-                thread.thread_id, unstarted_is_idle=thread.thread_id in unstarted
-            )
-            if status is None or status == "busy":
-                continue
-            settled += 1
-            # No webhook closed the turn, and a run that failed never reported its end
-            # itself: left open, it reads as working forever.
+            # The ended run's turn first: no webhook closed it, and a run that failed never
+            # reported its end itself. While the thread is still busy, the next reconcile
+            # tries again if this fails.
             runtime = RUNTIMES.runs_on(thread.runtime)
             run = await runtime.latest_run(thread.thread_id)
             if run is not None and (outcome := RUN_OUTCOMES.get(run.status)) is not None:
@@ -181,10 +176,15 @@ async def reconcile_busy_threads() -> int:
                     if outcome == "failed"
                     else None,
                 )
+            status = await refresh_thread_status(
+                thread.thread_id, unstarted_is_idle=thread.thread_id in unstarted
+            )
         except Exception:
             logger.warning(
                 "Could not settle a busy thread",
                 extra={"thread_id": thread.thread_id},
                 exc_info=True,
             )
+            continue
+        settled += status is not None and status != "busy"
     return settled
