@@ -12,6 +12,7 @@ so the channel posts nothing itself.
 """
 
 from managed_deepagents import channels
+from rt.intake import backend_endpoint
 from rt.slack import start_turn
 from rt.slack_clicks import start_click, start_shortcut
 
@@ -37,5 +38,8 @@ channel = channels.slack(
         "interaction": start_click,
         # Explain this: Trigger Server forwards message shortcuts as Slack sends them.
         "shortcut": start_shortcut,
+        # A channel's own changes keep the backend's channel, incident and review guide
+        # records, as /webhooks/slack does; they start no run.
+        "channel": backend_endpoint("/mda/slack/channel-events"),
     },
 )

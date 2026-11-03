@@ -1108,7 +1108,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -2046,7 +2046,7 @@
         "properties": {
           "context": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
             },
             "title": "Context",
             "type": "object"
@@ -2058,7 +2058,7 @@
               },
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
+                  "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
                 },
                 "type": "object"
               }
@@ -2067,7 +2067,7 @@
           },
           "metadata": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
             },
             "title": "Metadata",
             "type": "object"
@@ -2081,6 +2081,23 @@
           "input"
         ],
         "title": "EndpointAnswer",
+        "type": "object"
+      },
+      "EndpointRequest_SlackEndpointEvent_": {
+        "description": "What a channel POSTs its endpoint: the event, and the thread it belongs to.\n\nTypedDicts, so a receiver validates a request with pydantic, by the channel's\nevent keys, such as ``TypeAdapter(LinearEndpointRequest)``: the key picks the\npayload's type. TypeScript's ``LinearEndpointRequest<K>`` also narrows to one\nkey; in Python, a union alias can't take the key, so a receiver of one key\nnames it as ``EndpointRequest[EndpointEvent[Literal[key], Payload]]``, with the\npayload types the package exports, or narrows on ``request[\"event\"][\"key\"]``.\n\nExperimental: this may change in a minor release.",
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/SlackEndpointEvent"
+          },
+          "thread": {
+            "$ref": "#/components/schemas/EndpointThread"
+          }
+        },
+        "required": [
+          "event",
+          "thread"
+        ],
+        "title": "EndpointRequest",
         "type": "object"
       },
       "EndpointThread": {
@@ -2816,7 +2833,6 @@
         ],
         "type": "string"
       },
-      "JsonValue-Input": {},
       "LabelChange": {
         "properties": {
           "name": {
@@ -5886,7 +5902,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -5911,7 +5927,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -7446,7 +7462,7 @@
         "properties": {
           "event": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Input"
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
             },
             "title": "Event",
             "type": "object"
@@ -7555,6 +7571,112 @@
           "teamId"
         ],
         "title": "SlackEndpointActor",
+        "type": "object"
+      },
+      "SlackEndpointEvent": {
+        "description": "The event a Slack channel sends its endpoint: its key, delivery ID and\nSlack's own event as ``payload``, with the fields of ``SlackEndpointFields``.",
+        "properties": {
+          "actionId": {
+            "title": "Actionid",
+            "type": "string"
+          },
+          "actor": {
+            "$ref": "#/components/schemas/SlackEndpointActor"
+          },
+          "channelId": {
+            "title": "Channelid",
+            "type": "string"
+          },
+          "codeChannel": {
+            "title": "Codechannel",
+            "type": "boolean"
+          },
+          "deliveryId": {
+            "title": "Deliveryid",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/SlackEndpointFile"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "messageTs": {
+            "title": "Messagets",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Input"
+          },
+          "reaction": {
+            "title": "Reaction",
+            "type": "string"
+          },
+          "removed": {
+            "title": "Removed",
+            "type": "boolean"
+          },
+          "teamId": {
+            "title": "Teamid",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "threadTs": {
+            "title": "Threadts",
+            "type": "string"
+          },
+          "userId": {
+            "title": "Userid",
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Input"
+          },
+          "viewId": {
+            "title": "Viewid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "deliveryId",
+          "payload"
+        ],
+        "title": "SlackEndpointEvent",
+        "type": "object"
+      },
+      "SlackEndpointFile": {
+        "description": "A ``SlackFile`` as an endpoint is sent it.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mimetype": {
+            "title": "Mimetype",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "SlackEndpointFile",
         "type": "object"
       },
       "SlackTrigger": {
@@ -8850,7 +8972,7 @@
           },
           "create_params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Input"
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
             },
             "title": "Create Params",
             "type": "object"
@@ -9441,7 +9563,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -9612,7 +9734,7 @@
         "title": "_EndpointThreadChannel",
         "type": "object"
       },
-      "managed_deepagents___channels__types__JsonValue": {
+      "managed_deepagents___channels__types__JsonValue-Input": {
         "anyOf": [
           {
             "type": "boolean"
@@ -9628,13 +9750,44 @@
           },
           {
             "items": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Input"
             },
             "type": "array"
           },
           {
             "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Input"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "managed_deepagents___channels__types__JsonValue-Output": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
             },
             "type": "object"
           },
@@ -23111,6 +23264,43 @@
           }
         },
         "summary": "Resolve User"
+      }
+    },
+    "/mda/slack/channel-events": {
+      "post": {
+        "description": "Record a Slack channel's own change; ``None`` starts no run.",
+        "operationId": "slack_channel_event_mda_slack_channel_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointRequest_SlackEndpointEvent_"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Slack Channel Event"
       }
     },
     "/slack/channel/events": {

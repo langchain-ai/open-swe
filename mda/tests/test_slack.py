@@ -115,6 +115,13 @@ def test_the_channel_asks_its_handlers_for_every_message_and_click() -> None:
     assert channel.multitask_strategy == "interrupt"
     # The agent answers with Open SWE's Slack tools: the channel posts nothing itself.
     assert channel.auto_post is False
-    assert set(handlers) == {"mention", "directMessage", "message", "interaction", "shortcut"}
+    assert set(handlers) == {
+        "mention",
+        "directMessage",
+        "message",
+        "interaction",
+        "shortcut",
+        "channel",
+    }
     assert all(handlers[key] is slack.start_turn for key in ("mention", "directMessage", "message"))
     assert handlers["interaction"] is start_click
