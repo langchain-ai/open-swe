@@ -19,6 +19,10 @@ Set `preserve_github_links=true` only when the user wants plain GitHub links wit
 It keeps GitHub URLs unchanged in both `message` and `blocks`, for this reply only.
 Do not use code blocks as a link-rewriting workaround.
 
+To show a pull request as a card, put `{{pr-card https://github.com/OWNER/REPO/pull/NUMBER}}` on its own line where the card belongs.
+The card shows the PR's title, state, author, branches, diffstat, checks, reviews, unresolved conversations and mergeability, and stays current from GitHub for three days.
+Prefer a card over a bare link when a reply delivers a PR or reports on its status; up to ten per message, without repeating the card's details in prose.
+
 Show source code, diffs, commands, logs, and config in fenced code blocks rather than inline, and always give the fence a language identifier so Slack highlights it: ```python, ```typescript, ```sql, ```bash, ```json, ```yaml, or ```diff for a change (`+` lines render green, `-` lines red).
 Paste the code verbatim with its original whitespace, and keep each fence at the top level of the message rather than inside a list or quote, so it stays highlighted even in a long message.
 

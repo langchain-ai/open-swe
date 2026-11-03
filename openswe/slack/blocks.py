@@ -45,6 +45,7 @@ type TextObject = PlainText | Mrkdwn
 class SectionBlock(TypedDict):
     type: Literal["section"]
     text: TextObject
+    block_id: NotRequired[str]
 
 
 class MarkdownBlock(TypedDict):
@@ -55,6 +56,7 @@ class MarkdownBlock(TypedDict):
 class ContextBlock(TypedDict):
     type: Literal["context"]
     elements: list[TextObject]
+    block_id: NotRequired[str]
 
 
 class DividerBlock(TypedDict):

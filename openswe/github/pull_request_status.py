@@ -992,12 +992,15 @@ class PullRequestClient:
         details: bool = True,
         listed: Mapping[str, Any] | None = None,
         wanted: Collection[PullRequestState] = _ANY_STATE,
+        pull: Mapping[str, Any] | None = None,
     ) -> OpenPullRequest | None:
         """The PR's live status, or ``None`` when its state is not ``wanted``.
 
         Without ``details`` only ``listed`` (a search hit) is used, and nothing is read.
+        ``pull`` is a pull request the caller already read, so it is not read again.
         """
-        pull = await self.mergeable_pull() if details else None
+        if pull is None and details:
+            pull = await self.mergeable_pull()
         state = _live_state(pull) if pull is not None else "open"
         if state is None or state not in wanted:
             return None

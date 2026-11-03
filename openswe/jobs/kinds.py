@@ -59,6 +59,9 @@ from openswe.slack.channel_options import ensure_directory_sync, sync_directory
 from openswe.slack.mda_forwarding import SWEEP_JOB as SLACK_LOST_REQUESTS
 from openswe.slack.mda_forwarding import schedule_sweep as schedule_slack_lost_requests
 from openswe.slack.mda_forwarding import sweep_lost_requests
+from openswe.slack.pr_cards import EXPIRE_JOB as SLACK_PR_CARD_EXPIRE
+from openswe.slack.pr_cards import REFRESH_JOB as SLACK_PR_CARD_REFRESH
+from openswe.slack.pr_cards import SlackPullRequestCard
 from openswe.threads.index_import import import_agent_server_threads
 from openswe.threads.stalls import fail_stalled_runs
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
@@ -215,6 +218,20 @@ async def _slack_lost_requests(_job: Job) -> None:
     reported = await sweep_lost_requests()
     if reported:
         logger.info("Reported lost Slack messages", extra={"reported": reported})
+
+
+@WORKER.register(SLACK_PR_CARD_REFRESH)
+async def _slack_pr_card_refresh(job: Job) -> None:
+    pull_request_id = _text(job, "pull_request_id")
+    if pull_request_id is not None:
+        await SlackPullRequestCard.refresh(UUID(pull_request_id))
+
+
+@WORKER.register(SLACK_PR_CARD_EXPIRE)
+async def _slack_pr_card_expire(job: Job) -> None:
+    card_id = _text(job, "card_id")
+    if card_id is not None:
+        await SlackPullRequestCard.expire(UUID(card_id))
 
 
 @WORKER.register(REPORT_RECEIPT_PURGE)
