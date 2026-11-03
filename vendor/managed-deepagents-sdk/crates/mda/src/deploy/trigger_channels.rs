@@ -547,6 +547,13 @@ pub(crate) fn register(
     Ok(())
 }
 
+/// What a registered channel shows: that it is ready (unless Trigger Server
+/// says so itself), then Trigger Server's setup notes, such as what the
+/// user's own Slack app still needs for a feature the channel turned on.
+fn show_registered(ui: &mut (impl SetupUi + ?Sized), notes: &[ChannelSetupNote]) -> Result<()> {
+    channel_app::show_active(ui, READY, notes)
+}
+
 /// A setup request that might have succeeded when made again, and was not:
 /// Trigger Server or Slack was busy (a 5xx or 429), which is the server's
 /// failure, or the request got no answer, which a timeout already says.
@@ -557,13 +564,6 @@ fn transient_failure_category(error: anyhow::Error) -> anyhow::Error {
     } else {
         error
     }
-}
-
-/// What a registered channel shows: that it is ready (unless Trigger Server
-/// says so itself), then Trigger Server's setup notes, such as what the
-/// user's own Slack app still needs for a feature the channel turned on.
-fn show_registered(ui: &mut (impl SetupUi + ?Sized), notes: &[ChannelSetupNote]) -> Result<()> {
-    channel_app::show_active(ui, READY, notes)
 }
 
 const READY: &str =

@@ -50,7 +50,14 @@ from deepagents.middleware.async_subagents import (
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import AgentState, OmitFromInput, PrivateStateAttr
 from langchain.tools import BaseTool, tool
-from langchain_core.messages import BaseMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+    add_notification_metadata,
+    get_notification_metadata,
+)
 from langchain_core.messages.content import create_text_block
 from langgraph.config import get_config
 from langgraph.graph import START, StateGraph
@@ -72,7 +79,6 @@ from stagehand_middleware.facade import (
 )
 from stagehand_middleware.facade.tools import sanitize_error_message
 
-from managed_deepagents._channels.assistant_text import MDA_NOTIFICATION_KEY
 from managed_deepagents._managed_tools import ManagedToolRuntime  # noqa: TC001 - tool annotations
 from managed_deepagents.define_browser import BROWSER_TOOL_PREFIX
 from managed_deepagents.identity import ManagedServerInfo
@@ -144,6 +150,7 @@ _WAKE_TEXT: dict[BrowserHandoffStatus, str] = {
     ),
     "ended": "The browser handoff ended. Take a snapshot to see whether the user finished.",
 }
+_NOT_FROM_USER = "This is not a message from the user."
 _RELEASE_AFTER_S = 60.0  # a run that raises or interrupts never reaches aafter_agent
 #: Without a sandbox a saved file lives in thread state, which every later checkpoint carries.
 _MAX_SAVED_BYTES = 5_000_000
@@ -724,20 +731,30 @@ async def _handoff_status(pending: PendingBrowserHandoff) -> BrowserHandoffStatu
     return "ended" if time.time() >= pending["until"] else None
 
 
+_HANDOFF_SOURCE = "browser_handoff"
+"""``lc_source`` of a handoff notification; its ``lc_data`` is ``{"status": ...}``."""
+
+
 def _wake_message(status: BrowserHandoffStatus) -> dict[str, Any]:
-    """A notification in deepagents' task notification's shape: a user-role message
-    framed as a system notification. Its ``mda_notification`` tells clients how the
-    handoff ended, so they can tell it from the user's message."""
+    """A notification of how the handoff ended, with source ``"browser_handoff"``."""
+    message = add_notification_metadata(
+        HumanMessage(
+            f'<browser_handoff status="{status}">\n'
+            f"{_WAKE_TEXT[status]} {_NOT_FROM_USER}\n</browser_handoff>"
+        ),
+        source=_HANDOFF_SOURCE,
+        data={"status": status},
+    )
     return {
         "role": "user",
-        "content": f"[SYSTEM NOTIFICATION - NOT USER INPUT]\n{_WAKE_TEXT[status]}",
-        MDA_NOTIFICATION_KEY: {"type": "browser_handoff", "status": status},
+        "content": message.content,
+        "additional_kwargs": message.additional_kwargs,
     }
 
 
 def _is_handoff_notification(message: BaseMessage) -> bool:
-    notification = message.additional_kwargs.get(MDA_NOTIFICATION_KEY)
-    return isinstance(notification, dict) and notification.get("type") == "browser_handoff"
+    metadata = get_notification_metadata(message)
+    return metadata is not None and metadata["source"] == _HANDOFF_SOURCE
 
 
 async def _end_take(key: str, window: str) -> list[dict[str, str]] | str | None:
