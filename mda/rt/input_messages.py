@@ -206,6 +206,29 @@ def _input_message_elements(content: object) -> list[ElementTree.Element]:
     return elements
 
 
+def message_sender_id(
+    content: object, *, kind: Literal["human", "system"] | None = None
+) -> str | None:
+    for message in _input_message_elements(content):
+        sender = message.get("sender")
+        if sender and (kind is None or message.get("kind") == kind):
+            return sender
+    return None
+
+
+def _envelope_body(message: ElementTree.Element) -> str:
+    """The authored text of an envelope, accepting the stored ``<content>`` shape."""
+    return (message.text or "").strip() or (message.findtext("content") or "").strip()
+
+
+def input_message_text(content: object) -> str | None:
+    """The authored text carried by a serialized input message, when present."""
+    texts = [
+        body for message in _input_message_elements(content) if (body := _envelope_body(message))
+    ]
+    return "\n\n".join(texts) or None
+
+
 def input_message_timestamps(content: object) -> set[str]:
     """Source-message timestamps the serialized envelopes in ``content`` carry."""
     return {

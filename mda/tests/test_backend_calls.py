@@ -83,10 +83,12 @@ from runtime_api.catalog import (
     Catalog,
     FilesSpec,
     InboxSpec,
+    LoopRules,
     ModelSpec,
     RunModels,
     SandboxCreate,
     SandboxSpec,
+    TaskContext,
     ToolSpec,
 )
 from runtime_api.connections import ConnectionRef
@@ -1882,18 +1884,28 @@ class _ToolCallingModel(GenericFakeChatModel):
         return self
 
 
-COORDINATOR_CATALOG = Catalog(skill_sources=["/skills/coordinator/"])
+_ROLE = '<dynamic-context kind="run" id="task-role">You coordinate.</dynamic-context>'
+COORDINATOR_CATALOG = Catalog(
+    skill_sources=["/skills/coordinator/"],
+    loop=LoopRules(task_context=TaskContext(instructions=_ROLE)),
+)
 
 
 async def _launch_worker(
-    monkeypatch: pytest.MonkeyPatch, client: MagicMock, *, also: Sequence[ToolCall] = ()
+    monkeypatch: pytest.MonkeyPatch,
+    client: MagicMock,
+    *,
+    also: Sequence[ToolCall] = (),
+    task_context: str | None = None,
+    backend: OpenSweBackend | None = None,
 ) -> tuple[list[ToolMessage], list[tuple[str, dict[str, object]]]]:
-    """Run a coordinator that launches a worker through deepagents' ``start_async_task``."""
+    """Run a coordinator that launches a worker through deepagents' ``start_async_task``;
+    registering it answers with ``task_context``."""
     from deepagents.middleware import async_subagents
     from rt.middleware import AsyncWorkerLaunchMiddleware
 
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    backend = _run_backend("coordinator-token", catalog=COORDINATOR_CATALOG)
+    backend = backend or _run_backend("coordinator-token", catalog=COORDINATOR_CATALOG)
     calls: list[tuple[str, dict[str, object]]] = []
 
     async def post(
@@ -1908,7 +1920,10 @@ async def _launch_worker(
         calls.append((name, dict(body)))
         if name == "launch_worker":
             return {"grant": "worker-grant", "assignment": "Your assignment: Fix login"}
-        return {"worker": {"worker_thread_id": body["worker_thread_id"], "task_id": "task-1"}}
+        return {
+            "worker": {"worker_thread_id": body["worker_thread_id"], "task_id": "task-1"},
+            "task_context": task_context,
+        }
 
     monkeypatch.setattr(backend, "post", post)
     launches = async_subagents.AsyncSubAgentMiddleware(
@@ -2005,6 +2020,24 @@ async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_toke
     assert "worker-thread" in str(by_call["launch-1"].content)
     assert by_call["check-1"].status == by_call["update-1"].status == "error"
     client.runs.create.assert_awaited_once()
+
+
+async def test_a_coordinators_first_worker_tells_its_run_the_task_it_joined(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = MagicMock()
+    client.threads.create = AsyncMock(return_value={"thread_id": "worker-thread"})
+    client.runs.create = AsyncMock(return_value={"run_id": "worker-run"})
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    backend = _run_backend("coordinator-token", catalog=COORDINATOR_CATALOG)
+    joined = '<dynamic-context kind="task" id="task-1">Fix login</dynamic-context>'
+
+    await _launch_worker(monkeypatch, client, task_context=joined, backend=backend)
+
+    # The run's later model calls tell the model the task; its role stays as planned.
+    loop = backend.run.catalog.loop
+    assert loop is not None
+    assert loop.task_context == TaskContext(instructions=_ROLE, message=joined)
 
 
 def _mda_error(status: int) -> APIStatusError:

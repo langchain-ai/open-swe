@@ -59,3 +59,23 @@ def test_an_input_message_matches(content: object, kind: str) -> None:
     assert getattr(_MDA, write)(content, context) == getattr(input_messages, write)(
         content, context
     )
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        input_messages.human_input(
+            "Fix <it> & ship", {"sender_id": "slack:U1", "surface": "slack", "kind": "human"}
+        )["content"],
+        '<input-message sender="user-1" kind="human"><content>stored</content></input-message>',
+        '<input-message sender="system:x" kind="system">note</input-message>',
+        "plain text",
+    ],
+    ids=["written", "stored", "system", "plain"],
+)
+def test_reading_an_input_message_matches(content: object) -> None:
+    for kind in ("human", "system", None):
+        assert _MDA.message_sender_id(content, kind=kind) == input_messages.message_sender_id(
+            content, kind=kind
+        )
+    assert _MDA.input_message_text(content) == input_messages.input_message_text(content)

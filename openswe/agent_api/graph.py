@@ -12,16 +12,15 @@ import (``runtime_api``):
   lists every tool but the run's integrations, and the context names them only:
   every tool is kept by digest (``run_tool_sets``), which
   ``tool_specs``, ``search_tools`` and ``resolve_tool`` read
-- ``prepare`` readies the run's turn: its prompt, model and route, from what the
+- ``prepare`` readies the run's turn: its prompt and model, from what the
   token says starting the run decided (``RunSettings.agent``), without reaching the
   sandbox MDA keeps. The reviewer and the scout still prepare from their plan, the one
   call that plans the run again. What the turn's start records (its transcript turn,
   the thread's model and usage) is the ``run_started`` report, off the run's path
 - every other call is a ``TokenRun``, answered from the token and the request with
   the pieces the graph's ``RunParts`` build for it: the inbox and skills, the
-  named calls MDA's middleware makes around a model call (``route_model``,
-  ``model_choice``, ``task_context``, ``refresh_github_proxy``,
-  ``reply_on_behalf``) and at the run's end (``run_ended``,
+  named calls MDA's middleware makes around a model call (``model_choice``,
+  ``refresh_github_proxy``, ``reply_on_behalf``) and at the run's end (``run_ended``,
   ``step_limit_reached``, ``settle_review_check``, ``finish_scout_plan``), the
   reports of each reply and tool call, which arrive with those notices in ordered
   batches (``reports``) and are recorded once per key, the work of the run's tools (``operation``,
@@ -114,14 +113,12 @@ from runtime_api.loop import (
     PREPARE,
     REFRESH_GITHUB_PROXY,
     REPLY_ON_BEHALF,
-    ROUTE_MODEL,
     RUN_ENDED,
     RUN_STARTED,
     SANDBOX_REPLACED,
     SANDBOX_UNREACHABLE,
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
-    TASK_CONTEXT,
     TOOL_RESULT,
     TOOL_STARTED,
     BeforeModel,
@@ -139,15 +136,12 @@ from runtime_api.loop import (
     Prepared,
     ReplyOnBehalf,
     Report,
-    Route,
-    Routed,
     RunCall,
     RunEnded,
     RunNotice,
     RunStarted,
     SandboxGone,
     ScoutPlanEnd,
-    TaskContext,
     ToolCallReport,
     ToolResultReport,
 )
@@ -225,7 +219,6 @@ from openswe.github.proxy import proxy_token_recorded, proxy_token_set_since
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
 from openswe.middleware.client_tools import ClientToolsMiddleware
-from openswe.middleware.model_selection import classify_route
 from openswe.middleware.notify_step_limit import notify_step_limit
 from openswe.middleware.prepare_run import BasePrepareRunMiddleware
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
@@ -1231,32 +1224,19 @@ class TokenRun:
         )
         return Done()
 
-    async def route_model(self, request: Routed) -> Route:
-        """The route the person's latest request takes."""
-        selection = await classify_route(messages_from_dict(request.humans))
-        return Route(route=selection.route, persist=selection.persist)
-
     async def model_choice(self, request: ChosenModel) -> ModelSpec:
         return chosen_model(request.model_id, request.effort)
 
-    async def task_context(self, _request: RunRequest) -> TaskContext:
-        """The task the thread belongs to, as each model call tells the model."""
-
-        async def read() -> TaskContext:
-            coordination = await TaskCoordinationMiddleware.for_thread(self.run.thread_id)
-            if coordination is None:
-                return TaskContext()
-            return TaskContext(
-                instructions=coordination.instructions,
-                message=await coordination.context_message(),
-            )
-
-        return await in_graph_context(
-            {**self.config, "run_name": "task_context"}, lambda _runtime: read()
-        )
-
     async def refresh_github_proxy(self, _request: RunRequest) -> GitHubProxyRefreshed:
         cfg = RunConfig.from_config(self.config)
+        turn = self.run.settings.agent
+        if turn is not None and turn.coordinator_thread_id is not None:
+            # A task worker works in its coordinator's sandbox, whose token keeps the
+            # coordinator's own scope.
+            expires_at = await refresh_thread_github_proxy(
+                turn.coordinator_thread_id, workspace_slug=cfg.workspace_slug
+            )
+            return GitHubProxyRefreshed(expires_at=expires_at)
         # Where MDA may write the sandbox's proxy, a review's narrowing decides that it does
         # not, as it does for the catalog. Otherwise it keeps the thread's own scope.
         repositories, permissions = (
@@ -1664,9 +1644,7 @@ RUN_CALLS.serve(INBOX_RECEIVED, TokenRun.inbox_received)
 RUN_CALLS.serve(MODEL_RESULT, TokenRun.model_result)
 RUN_CALLS.serve(TOOL_STARTED, TokenRun.tool_started)
 RUN_CALLS.serve(TOOL_RESULT, TokenRun.tool_result)
-RUN_CALLS.serve(ROUTE_MODEL, TokenRun.route_model)
 RUN_CALLS.serve(MODEL_CHOICE, TokenRun.model_choice)
-RUN_CALLS.serve(TASK_CONTEXT, TokenRun.task_context)
 RUN_CALLS.serve(REFRESH_GITHUB_PROXY, TokenRun.refresh_github_proxy)
 RUN_CALLS.serve(SANDBOX_PROXY, TokenRun.sandbox_proxy)
 RUN_CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)

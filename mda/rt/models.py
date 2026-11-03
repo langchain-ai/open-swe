@@ -27,13 +27,21 @@ _DEFAULT_REQUEST_TIMEOUT_SECONDS: Final = 600.0
 _kwargs = TypeAdapter(dict[str, JsonValue])
 
 
+def gateway_api_key() -> str | None:
+    """The key this deployment calls the LangSmith LLM gateway with, if it has one."""
+    return os.environ.get("LANGSMITH_GATEWAY_API_KEY") or os.environ.get("LANGSMITH_API_KEY")
+
+
+def gateway_base_url() -> str:
+    return (os.environ.get("LANGSMITH_GATEWAY_BASE_URL") or _DEFAULT_GATEWAY_BASE_URL).rstrip("/")
+
+
 def _gateway_overrides(provider: str) -> dict[str, JsonValue]:
     path = _GATEWAY_PROVIDER_PATHS.get(provider)
-    api_key = os.environ.get("LANGSMITH_GATEWAY_API_KEY") or os.environ.get("LANGSMITH_API_KEY")
+    api_key = gateway_api_key()
     if path is None or not api_key:
         return {}
-    base = (os.environ.get("LANGSMITH_GATEWAY_BASE_URL") or _DEFAULT_GATEWAY_BASE_URL).rstrip("/")
-    return {"base_url": f"{base}{path}", "api_key": api_key}
+    return {"base_url": f"{gateway_base_url()}{path}", "api_key": api_key}
 
 
 @lru_cache(maxsize=32)

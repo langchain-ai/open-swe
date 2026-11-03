@@ -15,7 +15,6 @@ from typing import Final, Self
 
 import jwt
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
-from runtime_api.catalog import RoutingRules
 
 from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
@@ -62,8 +61,7 @@ class AgentTurnSettings(BaseModel):
     title_model_id: str
     title_effort: str | None = None
     use_gateway: bool = False
-    # How each call's route is picked, and the model and effort each route stands for.
-    routing: RoutingRules = RoutingRules()
+    # The model and effort each route stands for.
     route_models: dict[str, tuple[str, str | None]] = {}
     # Whether the opening message may ask for a model, and the one an earlier message did.
     offers_requested_models: bool = False
@@ -77,14 +75,14 @@ class AgentTurnSettings(BaseModel):
     review_guide: bool = False
     # Whether the thread had one that has closed: its guide stays, to retire its rules.
     review_guide_closed: bool = False
-    # Whether the thread is a task worker, which may use its coordinator's sandbox only once
-    # the backend has checked it may.
-    task_worker: bool = False
+    # A task worker's coordinator, whose sandbox the worker may use only once the backend has
+    # checked it may, and whose GitHub token its runs keep fresh.
+    coordinator_thread_id: str | None = None
 
     @property
     def reaches_sandbox(self) -> bool:
         """Whether preparing a turn connects to the thread's sandbox even where MDA keeps it."""
-        return self.review_guide or self.task_worker
+        return self.review_guide or self.coordinator_thread_id is not None
 
 
 class RunSettings(BaseModel):

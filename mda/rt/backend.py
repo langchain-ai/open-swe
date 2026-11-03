@@ -40,7 +40,7 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
 )
-from runtime_api.catalog import Catalog, ToolSpec
+from runtime_api.catalog import Catalog, TaskContext, ToolSpec
 from runtime_api.endpoint import Delivery, call
 from runtime_api.loop import VISIBLE_FROM, RunCall
 from runtime_api.tool_search import TOOL_SPECS, ToolNames
@@ -308,6 +308,22 @@ class Run:
         self.adopted = adopted.catalog
         # Resolved under the coordinator's grants.
         self.backend_tools.clear()
+
+    def joined_task(self, context: str) -> None:
+        """Tell the task's ``context`` from here on: the thread's first worker made it the
+        coordinator of a task, after its catalog was planned without one."""
+        catalog = self.catalog
+        if catalog.loop is None:
+            return
+        rules = catalog.loop.task_context or TaskContext()
+        loop = catalog.loop.model_copy(
+            update={"task_context": rules.model_copy(update={"message": context})}
+        )
+        joined = catalog.model_copy(update={"loop": loop})
+        if self.adopted is not None:
+            self.adopted = joined
+        else:
+            self._planned = joined
 
     def grant(self, name: str) -> str | None:
         """The grant to call operation ``name`` with: an adopted worker's own, not its coordinator's."""

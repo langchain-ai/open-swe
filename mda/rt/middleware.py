@@ -427,30 +427,38 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if state.get("open_swe_prepared_for") == invocation:
             await self._backend.run.load_tool_specs(run_id())
             return None, True
-        # Asking for the sandbox takes a round trip; reading the tool specs needs none of it.
+        # Asking for the sandbox takes a round trip; reading the tool specs needs none of
+        # it, and classifying the thread's route neither, which goes on while it prepares.
         opening = asyncio.create_task(self._opened(runtime))
+        classifying = self._loop.classify_ahead(state) if self._loop is not None else None
         try:
             await self._backend.run.load_tool_specs(run_id())
             opened = await opening
+            # Not behind the outbox: what an earlier run left unsent changes nothing here.
+            prepared = await call(
+                self._backend,
+                PREPARE,
+                run_call(
+                    Prepare,
+                    run_id(),
+                    state,
+                    in_sandbox=self._in_sandbox,
+                    sandbox_id=opened.sandbox_id,
+                    sandbox_error=opened.error,
+                ),
+            )
+            # What the backend's preparation writes wins over where a turn starts from.
+            starting = self._loop.starting() if self._loop is not None else {}
+            if self._loop is not None:
+                prepared.update.update(self._loop.prepared(prepared))
+                held = {**state.get(STATE_KEY, {}), **prepared.update}
+                prepared.update.update(
+                    await self._loop.routed(held, state["messages"], classifying)
+                )
         finally:
             opening.cancel()
-        # Not behind the outbox: what an earlier run left unsent changes nothing here.
-        prepared = await call(
-            self._backend,
-            PREPARE,
-            run_call(
-                Prepare,
-                run_id(),
-                state,
-                in_sandbox=self._in_sandbox,
-                sandbox_id=opened.sandbox_id,
-                sandbox_error=opened.error,
-            ),
-        )
-        # What the backend's preparation writes wins over where a turn starts from.
-        starting = self._loop.starting() if self._loop is not None else {}
-        if self._loop is not None:
-            prepared.update.update(self._loop.prepared(prepared))
+            if classifying is not None:
+                classifying.cancel()
         update = _apply(prepared.model_copy(update={"update": {**starting, **prepared.update}}))
         self._backend.outbox.notify(RUN_STARTED, self._started(state, prepared))
         update = {**update, "open_swe_prepared_for": invocation}
@@ -984,6 +992,8 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
             # reporting a failed launch would only start a second worker.
             logger.warning("The backend did not register a launched worker", exc_info=True)
             return _worker_message({"worker_thread_id": launched.thread_id}, tool_call_id)
+        if registered.task_context is not None:
+            self._backend.run.joined_task(registered.task_context)
         return _worker_message(registered.worker, tool_call_id)
 
 

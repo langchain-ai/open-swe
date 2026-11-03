@@ -118,50 +118,39 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
 ) -> None:
     from unittest.mock import AsyncMock
 
-    from langchain_core.messages import HumanMessage, messages_to_dict
+    from runtime_api.endpoint import UnknownEndpointError
 
     from openswe.agent_api import agent
     from openswe.agent_api import graph as graph_module
     from openswe.agent_api.graph import RemoteGraph
-    from openswe.middleware.model_selection import RouteSelection
-    from openswe.middleware.task_coordination import TaskCoordinationMiddleware
+    from openswe.agent_api.tokens import AgentTurnSettings, RunSettings
     from openswe.sandboxes.tool_runtime import ToolSurface
     from openswe.utils.model import provider_model_kwargs
 
     async def never_planned(config: object, surface: ToolSurface) -> None:
         raise AssertionError("A call around a model call never plans the run")
 
-    classify = AsyncMock(return_value=RouteSelection("fast"))
     refresh = AsyncMock(return_value=None)
-    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
     monkeypatch.setattr(graph_module, "refresh_thread_github_proxy", refresh)
-    monkeypatch.setattr(TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None))
     parts = agent.AgentParts()
     monkeypatch.setattr(
         parts, "credentials", AsyncMock(side_effect=AssertionError("No GitHub credentials needed"))
     )
     graph = RemoteGraph("agent", never_planned, parts)
     run = RUN.model_copy(update={"assistant_id": "agent"})
-    asked = messages_to_dict([HumanMessage(content="Fix the login", id="human-1")])
 
-    route = await graph.api(run, "route_model", {"run_id": "run-1", "humans": asked})
     chosen = await graph.api(
         run,
         "model_choice",
         {"run_id": "run-1", "model_id": "anthropic:claude-opus-5-5", "effort": "high"},
     )
-    context = await graph.api(run, "task_context", {"run_id": "run-1"})
     refreshed = await graph.api(run, "refresh_github_proxy", {"run_id": "run-1"})
 
-    assert route == {"route": "fast", "persist": True}
-    classify.assert_awaited_once_with("Fix the login")
     assert isinstance(chosen, dict)
     assert chosen["model_id"] == "anthropic:claude-opus-5-5"
     assert chosen["kwargs"] == provider_model_kwargs(
         "anthropic:claude-opus-5-5", "high", max_tokens=64_000
     )
-    # A thread in no task gets no task context.
-    assert context == {"instructions": None, "message": None}
     assert refreshed == {"expires_at": None}
     # The coding agent narrows its token no further than its thread does.
     refresh.assert_awaited_once_with(
@@ -170,6 +159,20 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
         github_proxy_repositories=None,
         github_proxy_permissions=None,
     )
+    # The run classifies its route itself, and its catalog carries its task's context.
+    for gone in ("route_model", "task_context"):
+        with pytest.raises(UnknownEndpointError):
+            await graph.api(run, gone, {"run_id": "run-1"})
+
+    # A task worker works in its coordinator's sandbox, so it keeps that one's token fresh,
+    # with the coordinator's own scope.
+    refresh.reset_mock()
+    turn = AgentTurnSettings(
+        title_model_id="anthropic:claude-haiku-5-5", coordinator_thread_id="owner"
+    )
+    worker = run.model_copy(update={"settings": RunSettings(agent=turn)})
+    await graph.api(worker, "refresh_github_proxy", {"run_id": "run-1"})
+    refresh.assert_awaited_once_with("owner", workspace_slug=None)
 
 
 async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_off_its_path(
@@ -180,7 +183,6 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     from unittest.mock import AsyncMock, MagicMock
 
     from langchain_core.messages import HumanMessage, messages_to_dict
-    from runtime_api.catalog import RoutingRules
 
     from openswe import server
     from openswe.agent_api import agent
@@ -226,10 +228,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     ):
         monkeypatch.setattr(server, name, AsyncMock(return_value=None))
     graph = RemoteGraph("agent", never_planned, agent.AgentParts())
-    turn = AgentTurnSettings(
-        title_model_id="openai:gpt-6-luna",
-        routing=RoutingRules(route_model_ids={"default": "openai:gpt-6.1-sol"}),
-    )
+    turn = AgentTurnSettings(title_model_id="openai:gpt-6-luna")
     run = RUN.model_copy(
         update={
             "assistant_id": "agent",
@@ -364,14 +363,16 @@ async def test_a_closed_walkthroughs_next_turn_still_retires_its_rules(
     assert not turn.reaches_sandbox
 
 
-async def test_task_context_rechecks_membership_and_cancellation(
+async def test_a_runs_task_context_is_worked_out_as_it_starts_and_a_cancelled_worker_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from unittest.mock import AsyncMock
     from uuid import uuid4
 
-    from openswe.agent_api.graph import RemoteGraph
+    from runtime_api.catalog import TaskContext
+
     from openswe.middleware import task_coordination
+    from openswe.middleware.task_coordination import TaskCoordinationMiddleware
     from openswe.tasks import store
 
     task = store.Task(title="Repair login", workspace_id=uuid4(), coordinator_thread_id="owner")
@@ -389,29 +390,32 @@ async def test_task_context_rechecks_membership_and_cancellation(
     )
     thread = AsyncMock(return_value={"metadata": {}})
     monkeypatch.setattr(task_coordination, "read_thread", thread)
-    monkeypatch.setattr(task_coordination, "maybe_refresh_proxy_token", AsyncMock())
     monkeypatch.setattr(store.TaskMembership, "context_for_thread", membership)
     monkeypatch.setattr(store.TaskDelegation, "get", AsyncMock(return_value=delegation))
-    graph = RemoteGraph("agent", AsyncMock())
-    run = RUN.model_copy(update={"assistant_id": "agent"})
 
-    absent = await graph.api(run, "task_context", {"run_id": "run-1"})
-    assert isinstance(absent, dict) and absent["message"] is None
+    async def task_context() -> TaskContext:
+        coordination = await TaskCoordinationMiddleware.for_thread(RUN.thread_id)
+        assert coordination is not None
+        return coordination.task_context()
+
+    absent = await task_context()
+    assert absent.message is None
 
     membership.return_value = context
-    joined = await graph.api(run, "task_context", {"run_id": "run-1"})
-    assert isinstance(joined, dict)
-    assert str(task.id) in str(joined["message"])
-    assert task.title in str(joined["message"])
-    assert joined["instructions"] != absent["instructions"]
+    joined = await task_context()
+    assert str(task.id) in str(joined.message)
+    assert task.title in str(joined.message)
+    assert joined.instructions != absent.instructions
 
+    # Planning a cancelled worker's run refuses to start it; its live runs are cancelled
+    # with it (``tasks.service.cancel_worker``).
     delegation.cancelled = True
     with pytest.raises(PermissionError, match="This worker was cancelled"):
-        await graph.api(run, "task_context", {"run_id": "run-1"})
+        await task_context()
 
     thread.side_effect = PermissionError("Thread access revoked")
     with pytest.raises(PermissionError, match="Thread access revoked"):
-        await graph.api(run, "task_context", {"run_id": "run-1"})
+        await task_context()
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -1523,6 +1527,9 @@ async def test_a_replayed_launch_reports_the_worker_it_registered_and_stops_the_
         AsyncMock(side_effect=store.WorkerAlreadyLaunchedError(task, first)),
     )
     monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
+    monkeypatch.setattr(
+        async_workers.TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None)
+    )
     client = MagicMock()
     client.runs.cancel = AsyncMock()
     mda = MagicMock(client=client)
@@ -1540,6 +1547,52 @@ async def test_a_replayed_launch_reports_the_worker_it_registered_and_stops_the_
 
     assert reply.worker["worker_thread_id"] == "first-worker"
     client.runs.cancel.assert_awaited_once_with("second-worker", "run-2")
+
+
+async def test_a_registered_worker_tells_its_coordinators_run_the_task_it_now_coordinates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+    from uuid import uuid7
+
+    from runtime_api.workers import Launched
+
+    from openswe.agent_api import async_workers
+    from openswe.middleware.task_coordination import TaskCoordinationMiddleware
+    from openswe.tasks import store
+    from openswe.threads import runtimes
+
+    coordinator = RemoteRun(thread_id="coordinator", assistant_id="agent", configurable={})
+    task = store.Task(title="Fix login", workspace_id=uuid7(), coordinator_thread_id="coordinator")
+    membership = store.TaskMembership(thread_id="coordinator", task_id=task.id, role="coordinator")
+    coordination = TaskCoordinationMiddleware(
+        "coordinator", True, store.TaskContext(task, membership)
+    )
+    for_thread = AsyncMock(return_value=coordination)
+    monkeypatch.setattr(async_workers.TaskCoordinationMiddleware, "for_thread", for_thread)
+    monkeypatch.setattr(
+        async_workers.service,
+        "register_async_worker",
+        AsyncMock(return_value={"worker_thread_id": "worker"}),
+    )
+    monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
+    client = MagicMock()
+    client.runs.get = AsyncMock(return_value={"run_id": "run-1", "status": "running"})
+    monkeypatch.setattr(runtimes.Runtimes, "mda", property(lambda self: MagicMock(client=client)))
+
+    reply = await async_workers.launched(
+        coordinator,
+        Launched(
+            tool_call_id="call-1",
+            instructions="Fix login",
+            worker_thread_id="worker",
+            worker_run_id="run-1",
+        ),
+    )
+
+    for_thread.assert_awaited_once_with("coordinator")
+    assert reply.task_context == coordination.context_message()
+    assert reply.task_context is not None and str(task.id) in reply.task_context
 
 
 async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_settled(
@@ -1560,6 +1613,9 @@ async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_set
         AsyncMock(return_value={"worker_thread_id": "worker"}),
     )
     monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
+    monkeypatch.setattr(
+        async_workers.TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None)
+    )
     client = MagicMock()
     mda = MagicMock(client=client)
     monkeypatch.setattr(runtimes.Runtimes, "mda", property(lambda self: mda))

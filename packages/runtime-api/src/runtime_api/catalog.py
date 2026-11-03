@@ -187,8 +187,19 @@ class RoutingRules(BaseModel):
 
     # None keeps the default route; "fast" never asks the classifier.
     mode: Literal["auto", "fast"] | None = None
-    # The model each route stands for, which the dashboard shows.
+    # The model each route stands for, which the dashboard shows, and the effort it runs at.
     route_model_ids: dict[str, str] = {}
+    route_efforts: dict[str, str | None] = {}
+
+
+class TaskContext(BaseModel):
+    """The task the thread belongs to, as each model call tells the model."""
+
+    # The thread's role in the task, added to the conversation when it differs from the
+    # role the model last saw there.
+    instructions: str | None = None
+    # The task's context, added to the conversation where the model no longer sees it.
+    message: str | None = None
 
 
 class LoopRules(BaseModel):
@@ -206,11 +217,14 @@ class LoopRules(BaseModel):
     routing: RoutingRules | None = None
     reply: ReplyRules | None = None
     cli_result: CliResultRules | None = None
-    # Whether the thread may belong to a task, as its coordinator or a worker.
-    task_coordination: bool = False
+    # The task the thread may belong to, as its coordinator or a worker, as the run
+    # started; None where it may not. A coordinator's first worker hands back the context
+    # of the task it then joined (``runtime_api.workers.Worker``).
+    task_context: TaskContext | None = None
     # Whether the run may wait on a call its client runs itself.
     client_tools: bool = False
-    # Whether the backend gives the sandbox's GitHub proxy a fresh token before each model call.
+    # Whether the backend gives the sandbox's GitHub proxy a fresh token before each model
+    # call: a task worker's, the token of its coordinator's sandbox.
     refresh_github_proxy: bool = False
     # What the run's end does besides recording it.
     at_end: list[Literal["settle_review_check", "finish_scout_plan"]] = []

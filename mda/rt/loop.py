@@ -2,7 +2,8 @@
 
 Before each call it ends the run where a rule says to, adds the thread's task
 context, keeps the sandbox's GitHub proxy fresh, picks the call's route and model, and
-assembles its system prompt and tool list. After an answer that calls no tool, it
+assembles its system prompt and tool list. A thread's route is classified here, once,
+alongside the run's preparation (``rt.routing``). After an answer that calls no tool, it
 asks again for the reply or CLI result the run owes. When the run ends, it asks
 for the graph's own end-of-run work and reports the end, neither of which the run
 waits for.
@@ -40,6 +41,7 @@ from runtime_api.catalog import (
     ModelSpec,
     ReplyRules,
     RunModels,
+    TaskContext,
 )
 from runtime_api.endpoint import call
 from runtime_api.loop import (
@@ -47,11 +49,9 @@ from runtime_api.loop import (
     MODEL_CHOICE,
     REFRESH_GITHUB_PROXY,
     REPLY_ON_BEHALF,
-    ROUTE_MODEL,
     RUN_ENDED,
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
-    TASK_CONTEXT,
     BeforeModel,
     ChosenModel,
     GitHubProxyRefreshed,
@@ -59,11 +59,8 @@ from runtime_api.loop import (
     PhaseResult,
     Prepared,
     ReplyOnBehalf,
-    Route,
-    Routed,
     RunEnded,
     ScoutPlanEnd,
-    TaskContext,
 )
 from runtime_api.operations import RunRequest
 
@@ -71,9 +68,9 @@ from rt.backend import (
     BackendCallError,
     OpenSweBackend,
     RunLocal,
-    human_messages,
     run_call,
 )
+from rt.routing import Route, RouteClassifier
 from rt.tools import STATE_KEY, run_id
 
 logger = logging.getLogger(__name__)
@@ -274,27 +271,22 @@ class _Turn:
 
 
 class Asked:
-    """The task context and GitHub token refresh a model call waits on, asked for at once."""
+    """The GitHub token refresh a model call waits on, asked for alongside the inbox."""
 
-    def __init__(
-        self, context: Awaitable[TaskContext], proxy: Awaitable[dict[str, JsonValue]]
-    ) -> None:
-        self._context = asyncio.ensure_future(context)
+    def __init__(self, proxy: Awaitable[dict[str, JsonValue]]) -> None:
         self._proxy = asyncio.ensure_future(proxy)
         self._answered = False
 
-    async def answers(self) -> tuple[TaskContext, dict[str, JsonValue]]:
+    async def answers(self) -> dict[str, JsonValue]:
         self._answered = True
-        return await self._context, await self._proxy
+        return await self._proxy
 
     async def close(self) -> None:
         """Stop what is still asked; what failed unread is logged."""
-        asked = (self._context, self._proxy)
-        for task in asked:
-            task.cancel()
-        for result in await asyncio.gather(*asked, return_exceptions=True):
-            if not self._answered and isinstance(result, Exception):
-                logger.warning("A call before the model call failed unread", exc_info=result)
+        self._proxy.cancel()
+        [result] = await asyncio.gather(self._proxy, return_exceptions=True)
+        if not self._answered and isinstance(result, Exception):
+            logger.warning("A call before the model call failed unread", exc_info=result)
 
 
 class RunLoop:
@@ -305,6 +297,7 @@ class RunLoop:
         # Models each run calls by id, such as one a person asked for, as the backend sets them.
         self._chosen: RunLocal[dict[tuple[str, str | None], ModelSpec]] = RunLocal(dict)
         self._guidance = RunLocal(_RunGuidance)
+        self._classifier = RouteClassifier()
 
     @staticmethod
     def runs(catalog: Catalog) -> bool:
@@ -346,7 +339,7 @@ class RunLoop:
         held = _held(state)
         if self._stops(held):
             return None
-        return Asked(self._task_context(), self._github_proxy(held))
+        return Asked(self._github_proxy(held))
 
     def _stops(self, held: Mapping[str, object]) -> bool:
         return any(held.get(key) for key in self.rules.stop_when)
@@ -358,11 +351,12 @@ class RunLoop:
         if self._stops(held) or self._awaits_client(state):
             return BeforeModel(jump_to="end")
         if asked is None:
-            asked = Asked(self._task_context(), self._github_proxy(held))
+            asked = Asked(self._github_proxy(held))
         try:
-            context, update = await asked.answers()
+            update = await asked.answers()
         finally:
             await asked.close()
+        context = self.rules.task_context or TaskContext()
         messages = _messages(state)
         visible = _visible(state)
         guidance = self._guidance.get(self._backend.run)
@@ -400,10 +394,7 @@ class RunLoop:
             )
         route = await self._route(held, [*visible, *added])
         if route is not None:
-            if route.persist:
-                update["model_route"] = route.route
-            else:
-                update["model_route_attempted_for"] = run_id()
+            update.update(self._kept(route))
         current = {**held, **update}
         model = await self._model_for(current)
         system_prompt, workspace_prompt, thread_prompt = self._system_prompt(current)
@@ -459,13 +450,65 @@ class RunLoop:
             return {}
         return _github_proxy_due(prepared.github_proxy, datetime.now(UTC))
 
-    async def _task_context(self) -> TaskContext:
-        if not self.rules.task_coordination:
-            return TaskContext()
-        return await call(self._backend, TASK_CONTEXT, RunRequest(run_id=run_id()))
+    def classify_ahead(self, state: Mapping[str, object]) -> asyncio.Task[Route] | None:
+        """Start classifying the turn's route while the run prepares, where the thread's
+        held state leaves its route to the classifier."""
+        if not self._classifies(_held(state)):
+            return None
+        return asyncio.ensure_future(self._classifier.classify(_messages(state)))
+
+    def _classifies(self, held: Mapping[str, object]) -> bool:
+        rules = self.rules.routing
+        requested = held.get("requested_model")
+        stored = held.get("model_route")
+        return (
+            rules is not None
+            and rules.mode == "auto"
+            and not (isinstance(requested, str) and requested)
+            and not (isinstance(stored, str) and stored)
+            and held.get("model_route_attempted_for") != run_id()
+        )
+
+    async def routed(
+        self,
+        held: Mapping[str, object],
+        messages: Sequence[BaseMessage],
+        classifying: asyncio.Task[Route] | None,
+    ) -> dict[str, JsonValue]:
+        """The held state the turn's route sets as the run starts, the routed model's id and
+        effort with it: the turn's start reports them, and its replies are signed with them.
+
+        ``held`` is the state the run's preparation left, which may have changed what
+        ``classify_ahead`` saw: a classification it no longer needs is stopped.
+        """
+        try:
+            route = await self._route(held, messages, classifying)
+        finally:
+            if classifying is not None:
+                classifying.cancel()
+        if route is None:
+            return {}
+        update = self._kept(route)
+        rules = self.rules.routing
+        model_id = rules.route_model_ids.get(route.route) if rules is not None else None
+        if rules is not None and route.route != "default" and model_id:
+            update.update(
+                selected_model_id=model_id, selected_effort=rules.route_efforts.get(route.route)
+            )
+        return update
+
+    @staticmethod
+    def _kept(route: Route) -> dict[str, JsonValue]:
+        """The route for the thread's later runs, or else for this run alone."""
+        if route.persist:
+            return {"model_route": route.route}
+        return {"model_route_attempted_for": run_id()}
 
     async def _route(
-        self, held: Mapping[str, object], messages: Sequence[BaseMessage]
+        self,
+        held: Mapping[str, object],
+        messages: Sequence[BaseMessage],
+        classifying: Awaitable[Route] | None = None,
     ) -> Route | None:
         """The route and whether it should be kept beyond this run."""
         rules = self.rules.routing
@@ -485,9 +528,8 @@ class RunLoop:
         elif held.get("model_route_attempted_for") == run_id():
             return None
         else:
-            asked = Routed(run_id=run_id(), humans=human_messages(messages))
-            routed = await call(self._backend, ROUTE_MODEL, asked)
-            route, persist = routed.route, routed.persist
+            classified = await (classifying or self._classifier.classify(messages))
+            route, persist = classified.route, classified.persist
         if rules.mode == "auto" or requested:
             model_id = requested if requested else rules.route_model_ids.get(route)
             if isinstance(model_id, str) and model_id:

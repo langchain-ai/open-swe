@@ -2,7 +2,7 @@
 
 The backend's prompts live in ``openswe/resources/prompts``; a prompt moves here
 when only a channel handler here writes it (AGENTS.md's exception for channel
-input). Rendered as the backend renders its own: the file stripped, Jinja with
+input), and the route classifier's are copied here (``rt.routing``). Rendered as the backend renders its own: the file stripped, Jinja with
 every variable required, the result stripped.
 """
 

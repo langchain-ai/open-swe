@@ -19,7 +19,7 @@ The backend is a set of stateless APIs MDA calls: typed endpoints at `/agent-api
 Shape new behavior to fit:
 
 - Control flow (when to nudge, route, stop, refresh) is middleware in `mda/rt`; checks around the file and shell tools go in `rt/file_tools.py`.
-- Work that needs the backend's credentials or data is a named `Endpoint` for that work (`route_model`, `task_context`), never a generic phase call or an untyped body.
+- Work that needs the backend's credentials or data is a named `Endpoint` for that work (`model_choice`, `refresh_github_proxy`), never a generic phase call or an untyped body.
 - Data fixed for a run is worked out once when the backend starts it and sent in the run context (`Catalog`, `openswe/agent_api/client.py`); a call that needs a fact derives it from the token.
 - State kept between calls lives in MDA's run state or PostgreSQL, never in backend memory.
 
@@ -48,7 +48,7 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
 - Model-facing prompts live in `openswe/resources/prompts/` as `<name>.md` or `<name>.md.jinja`, rendered with `prompt("<dir>/<name>")`.
   Never inline prompt text in Python.
   User-facing copy (UI labels, Slack/GitHub notifications) may stay inline.
-  Exception: a prompt only an MDA channel handler renders lives in `mda/prompts/`, rendered with `rt.prompts.prompt`.
+  Exception: a prompt only an MDA channel handler renders lives in `mda/prompts/`, rendered with `rt.prompts.prompt`; so do the route classifier's prompts, copies of the backend's that `tests/agent/test_mda_routing_prompts.py` keeps in step.
 - Internal agent notifications use `RunMessage` and the builders in `openswe/input_messages.py` (`system_input` or `build_input_messages`), not bare prose or feature-specific queue payloads.
   Preserve structured messages through delivery instead of wrapping their envelopes again.
   For model-only context, use the structured sender to exclude it from pending previews and the transcript; do not suppress ordinary human follow-ups or user-facing events.

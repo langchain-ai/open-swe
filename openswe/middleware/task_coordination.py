@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from langchain.agents.middleware import AgentState
 from langgraph.runtime import Runtime
+from runtime_api.catalog import TaskContext as LoopTaskContext
 
 from openswe.github.proxy import maybe_refresh_proxy_token
 from openswe.input_messages import (
@@ -58,19 +59,19 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
     def can_delegate(self) -> bool:
         return self.enabled and not self.is_worker
 
-    async def context_message(self) -> str | None:
-        """The task's context, as the model is told it; a worker's coordinator's proxy kept fresh."""
+    @property
+    def coordinator_thread_id(self) -> str | None:
+        """A worker's coordinator, whose sandbox the worker works in."""
+        return self.context.task.require_coordinator() if self.is_worker and self.context else None
+
+    def task_context(self) -> LoopTaskContext:
+        """The thread's role and task, as an MDA run's loop tells the model them."""
+        return LoopTaskContext(instructions=self.instructions, message=self.context_message())
+
+    def context_message(self) -> str | None:
+        """The task's context, as the model is told it."""
         if self.context is None:
             return None
-        if self.is_worker:
-            try:
-                await maybe_refresh_proxy_token(self.context.task.require_coordinator())
-            except Exception:
-                logger.warning(
-                    "Failed to refresh the task's GitHub proxy",
-                    exc_info=True,
-                    extra={"thread_id": self.thread_id},
-                )
         return prompt(
             "tasks/context",
             task_id=str(self.context.task.id),
@@ -83,12 +84,23 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
     ) -> dict[str, list[RunMessage]] | None:
         if self.context is None:
             self.context = await TaskMembership.context_for_thread(self.thread_id)
+        if (coordinator := self.coordinator_thread_id) is not None:
+            # A worker keeps its coordinator's sandbox token fresh, as an MDA run's
+            # ``refresh_github_proxy`` does.
+            try:
+                await maybe_refresh_proxy_token(coordinator)
+            except Exception:
+                logger.warning(
+                    "Failed to refresh the task's GitHub proxy",
+                    exc_info=True,
+                    extra={"thread_id": self.thread_id},
+                )
         visible = visible_dynamic_context_hashes(state)
         added: list[RunMessage] = [
             {"role": "user", "id": f"{prefix}{uuid4()}", "content": content}
             for prefix, content in (
                 ("task-role:", self.instructions),
-                ("task-context:", await self.context_message()),
+                ("task-context:", self.context_message()),
             )
             if content is not None and dynamic_context_hash(content) not in visible
         ]

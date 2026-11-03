@@ -2,9 +2,10 @@
 
 The runtime's middleware runs the loop: it nudges, routes, assembles each call
 and ends the run as the catalog's ``LoopRules`` say. It asks the backend only for
-what needs the backend's data or credentials, one named call each: the route a
-task takes, a model's settings, the task a thread belongs to, a fresh GitHub proxy
-token, a reply posted on the model's behalf, and what the end of the run records.
+what needs the backend's data or credentials, one named call each: a model's
+settings, a fresh GitHub proxy token, a reply posted on the model's behalf, and what
+the end of the run records. The runtime classifies each turn's route itself, and
+the catalog says which task the thread belongs to.
 The transcript and usage hear of the run's start, each reply and tool call, and the
 run's end.
 
@@ -180,11 +181,6 @@ class RunEnded(Report):
     replies: list[dict[str, JsonValue]] = []
 
 
-class Routed(RunRequest):
-    # The run's human messages, the latest of which the route is for.
-    humans: list[dict[str, JsonValue]] = []
-
-
 class ScoutPlanEnd(RunRequest):
     # What the people who asked for the pull request said, as the scout summarized it.
     human_input_summary: str = ""
@@ -238,29 +234,11 @@ class Done(BaseModel):
     """The backend did what it was asked; there is nothing more to say."""
 
 
-class Route(BaseModel):
-    # One of the routes ``RoutingRules.route_model_ids`` names, or ``default``.
-    route: str
-    # False when the classifier could not decide; the run uses the route for this
-    # call only, so a later turn classifies again instead of keeping a fallback.
-    persist: bool = True
-
-
 class ChosenModel(RunRequest):
     """A model the run calls by id, such as one a person asked for, at an effort."""
 
     model_id: str
     effort: str | None = None
-
-
-class TaskContext(BaseModel):
-    """The task the thread belongs to, as each model call tells the model."""
-
-    # The thread's role in the task, added to the conversation when it differs from the
-    # role the model last saw there.
-    instructions: str | None = None
-    # The task's context, added to the conversation where the model no longer sees it.
-    message: str | None = None
 
 
 class ReplyOnBehalf(RunCall):
@@ -295,15 +273,8 @@ SANDBOX_REPLACED = Endpoint("sandbox_replaced", RunRequest, Done, seconds=LOOP_C
 SANDBOX_UNREACHABLE = Endpoint("sandbox_unreachable", SandboxGone, Done, seconds=LOOP_CALL_SECONDS)
 # For the dashboard to show the thread's browser.
 BROWSER = Endpoint("browser", BrowserReport, Done, seconds=LOOP_CALL_SECONDS)
-# Classifies the task the conversation asks for; only reads, so it is safe to send again.
-ROUTE_MODEL = Endpoint(
-    "route_model", Routed, Route, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
-)
 MODEL_CHOICE = Endpoint(
     "model_choice", ChosenModel, ModelSpec, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
-)
-TASK_CONTEXT = Endpoint(
-    "task_context", RunRequest, TaskContext, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 # Mints a token and sets it on the sandbox, so sending it again only mints another.
 REFRESH_GITHUB_PROXY = Endpoint(

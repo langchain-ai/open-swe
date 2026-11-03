@@ -116,7 +116,7 @@ from openswe.middleware import (
 )
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
-from openswe.middleware.model_selection import ModelSelectionState, RoutingMode
+from openswe.middleware.model_selection import RoutingMode
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.require_cli_result import RequireCliResultMiddleware, cli_result_nudge
 from openswe.middleware.require_user_reply import (
@@ -1129,11 +1129,12 @@ def _make_model_or_defer(
 
 
 class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
-    """Ready an agent run's turn: its prompt, model and route, and who it speaks with.
+    """Ready an agent run's turn: its prompt and model, and who it speaks with.
 
     Built from what starting the run decided (``AgentTurnSettings``), so preparing a turn
-    plans nothing. A thread whose sandbox MDA keeps (``sandbox``, its name) is not reached here:
-    its work dir is the sandbox's own, and MDA readied the sandbox as it opened it.
+    plans nothing; the run classifies the thread's route itself, alongside it. A thread
+    whose sandbox MDA keeps (``sandbox``, its name) is not reached here: its work dir is
+    the sandbox's own, and MDA readied the sandbox as it opened it.
     """
 
     def __init__(
@@ -1168,9 +1169,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._draft_prs = cfg.draft_prs is True
         self._admin_workspaces = turn.admin_workspaces
         self._sole_writer = turn.sole_writer
-        self._model_selection = ModelSelectionMiddleware(
-            turn.routing.route_model_ids, routing_mode=turn.routing.mode
-        )
         self._routing_defaults = dict(turn.route_models)
         self._tool_catalog_note = catalog_note(turn.tool_discovery_failures)
 
@@ -1332,7 +1330,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
         requested_model: str | None = None
         requested_effort: str | None = None
-        if self._requested_models is not None and self._model_selection is not None:
+        if self._requested_models is not None:
             settings = (await load_thread_settings(client, self._thread_id)).copy()
             if not settings.get("model_handoff_complete"):
                 handoff_config = RunConfig.from_config(self._config)
@@ -1428,7 +1426,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 option = self._requested_models[requested_model]
                 requested_effort = settings.get("effort") or option["default_effort"]
                 decision.requested_effort = requested_effort
-                self._model_selection.use_requested_model(requested_model)
                 if decision.outcome != "reused_saved_choice":
                     decision.outcome = "accepted_request"
                     decision.reason = "validated_and_persisted"
@@ -1474,35 +1471,19 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         rendered_prompt = (
             asyncio.create_task(self._render_system_prompt(cfg)) if render_prompt else None
         )
-        # Reads only who the run is for, so it runs alongside routing and participants.
+        # Reads only who the run is for, so it runs alongside participants.
         recent_threads = asyncio.create_task(self._recent_threads(cfg))
+        # The run classifies the thread's route itself as it prepares; a dashboard switched
+        # back to Auto has it classify again.
+        reroute = (
+            not requested_model
+            and cfg.source == "dashboard"
+            and cfg.model_selection == "auto"
+            and cfg.model_selection_changed
+        )
         async with aphase(self._thread_id, "prepare.participants"):
-            attribution_model_id = self._model_id
-            attribution_effort = self._effort
-            attribution_route = None
-            persist_route = False
-            if self._model_selection is not None:
-                routing_state = cast(ModelSelectionState, state).copy()
-                if (
-                    cfg.source == "dashboard"
-                    and cfg.model_selection == "auto"
-                    and cfg.model_selection_changed
-                ):
-                    routing_state.pop("model_route", None)
-                    routing_state.pop("requested_model", None)
-                if requested_model:
-                    attribution_route = "default"
-                    persist_route = True
-                else:
-                    selection = await self._model_selection.select_route(routing_state)
-                    attribution_route = selection.route
-                    persist_route = selection.persist
-                if attribution_route != "default":
-                    attribution_model_id, attribution_effort = self._routing_defaults[
-                        attribution_route
-                    ]
-            configurable["resolved_agent_model_id"] = attribution_model_id
-            configurable["resolved_agent_effort"] = attribution_effort
+            configurable["resolved_agent_model_id"] = self._model_id
+            configurable["resolved_agent_effort"] = self._effort
             bot_id = (
                 cfg.slack_thread.triggering_bot_id
                 if self._source == "slack" and cfg.slack_thread
@@ -1554,10 +1535,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "work_dir": work_dir,
             "requested_model": requested_model,
             "requested_effort": requested_effort,
-            "selected_model_id": attribution_model_id,
-            "selected_effort": attribution_effort,
+            "selected_model_id": self._model_id,
+            "selected_effort": self._effort,
             **({"messages": added} if added else {}),
-            **({"model_route": attribution_route} if persist_route else {}),
+            **({"model_route": None} if reroute else {}),
             **system_prompt,
         }
 
@@ -2092,7 +2073,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         title_model_id=title_model_id,
         title_effort=title_effort,
         use_gateway=bool(use_gateway),
-        routing=RoutingRules(mode=model_routing_mode, route_model_ids=route_model_ids),
         route_models=routing_defaults,
         offers_requested_models=requested_models is not None,
         fable_enabled=fable_enabled,
@@ -2100,7 +2080,9 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         bridge_client=bridge_client,
         review_guide=guide is not None,
         review_guide_closed=walkthrough is not None and walkthrough.closed,
-        task_worker=task_coordination is not None and task_coordination.is_worker,
+        coordinator_thread_id=task_coordination.coordinator_thread_id
+        if task_coordination
+        else None,
         tool_discovery_failures=list(mcp_tools.failures) if isinstance(mcp_tools, MCPTools) else [],
     )
     configurable[AGENT_TURN_KEY] = turn.model_dump(mode="json")
@@ -2172,7 +2154,11 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         if incident_session is not None or cfg.offload_conversation
         else LoopRules(
             hidden_tools=sorted(excluded_tools),
-            routing=RoutingRules(mode=model_routing_mode, route_model_ids=route_model_ids),
+            routing=RoutingRules(
+                mode=model_routing_mode,
+                route_model_ids=route_model_ids,
+                route_efforts={route: effort for route, (_, effort) in routing_defaults.items()},
+            ),
             reply=ReplyRules(
                 tool=reply_tool,
                 no_reply_tool=no_reply_tool,
@@ -2184,9 +2170,9 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             cli_result=CliResultRules(tool=cli_result_tool, nudge=cli_result_nudge(cli_result_tool))
             if cli_result_required
             else None,
-            task_coordination=task_coordination is not None,
+            task_context=task_coordination.task_context() if task_coordination else None,
             client_tools=client_tools is not None,
-            refresh_github_proxy=not (task_coordination and task_coordination.is_worker),
+            refresh_github_proxy=True,
         )
     )
     surface.inbox = InboxSpec(
