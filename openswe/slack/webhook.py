@@ -1219,6 +1219,7 @@ async def _process_slack_mention_impl(
         "user_email": user_email,
         "source": "slack",
         "slack_kickoff_eligible": False,
+        "slack_action_token": request.action_token,
     }
     if review_guide:
         # The thread keeps the last run's configurable, which may be a click's.
@@ -1259,6 +1260,7 @@ async def _process_slack_mention_impl(
     if request.web_only:
         configurable.pop("slack_thread", None)
         configurable.pop("slack_breakout", None)
+        configurable.pop("slack_action_token", None)
         configurable.pop("admin_thread", None)
         configurable["source"] = "web"
     source_context = (

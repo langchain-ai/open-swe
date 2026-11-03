@@ -110,6 +110,7 @@ class SlackEvent(SlackPayload):
     bot_id: str = ""
     app_id: str = ""
     attachments: list[JsonObject] = Field(default_factory=list)
+    action_token: str = ""
     message: SlackMessage | None = None
     previous_message: SlackMessage | None = None
     reaction: str = ""

@@ -281,6 +281,7 @@ The app posts events to your deployment's URL, so it needs the same public URL a
                 "im:write",
                 "mpim:history",
                 "mpim:read",
+                "search:read.public",
                 "team:read",
                 "users:read",
                 "users:read.email"
@@ -319,6 +320,7 @@ The app posts events to your deployment's URL, so it needs the same public URL a
 
 </details>
 
+1. Optionally, turn on **Agents & AI Apps** in the app settings so Slack attaches a search grant to each mention and DM; the agent's `slack_search` tool needs it to search public channels.
 1. Install the app to your workspace.
 1. Add to the environment (step 6):
 
