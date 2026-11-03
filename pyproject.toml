@@ -144,6 +144,12 @@ allowed-unresolved-imports = [
 error-on-warning = false
 
 [[tool.ty.overrides]]
+include = ["openswe/tasks/schemas.py"]
+
+[tool.ty.overrides.rules]
+invalid-mutable-override = "ignore"
+
+[[tool.ty.overrides]]
 include = ["tests/**"]
 
 [tool.ty.overrides.rules]

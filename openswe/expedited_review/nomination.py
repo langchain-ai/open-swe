@@ -26,7 +26,7 @@ from openswe.github.http import GitHubClient, RepoFileUnreadableError, or_none
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.lifecycle import ReviewCard
-from openswe.human_review.requests import HumanReviewRequest
+from openswe.human_review.requests import ChannelChoice, HumanReviewRequest
 from openswe.human_review.standard import Origin, summary_line
 from openswe.review.approvals import AUTO_APPROVE_RULES_DIR, ApprovalPolicy
 from openswe.review.assessment_feedback import PublishedAssessment
@@ -255,7 +255,7 @@ class ExpeditedReviewNomination:
                 f"The configured review channel {review_channel!r} is unavailable to the bot. "
                 "Invite the bot to that channel or update `reviewChannel` in `.open-swe/settings.json`."
             )
-        broadcast_choice = (
+        broadcast_choice: list[ChannelChoice] = (
             [{"id": broadcast_target.id, "name": broadcast_target.name}]
             if broadcast_target is not None and broadcast_target.name
             else []

@@ -733,7 +733,7 @@ async def _thread_cost(thread_id: str, run: Any) -> dict[str, Any]:
         snapshot = await get_langsmith_thread_cost(
             thread_id,
             invocation_id,
-            **({"lookup_start": str(lookup_start)} if lookup_start else {}),
+            lookup_start=str(lookup_start) if lookup_start else None,
         )
     except LangSmithCostUnavailable:
         return {"status": "unavailable", "total_usd": None}
