@@ -2953,17 +2953,42 @@
         "type": "object"
       },
       "LinearDecline": {
-        "description": "An answer that starts nothing and has MDA's Linear channel tell the session why.",
+        "description": "An answer that starts nothing: MDA posts ``message`` to the session as its response.",
         "properties": {
-          "decline": {
-            "title": "Decline",
+          "message": {
+            "$ref": "#/components/schemas/LinearDeclineText"
+          },
+          "type": {
+            "const": "reply",
+            "title": "Type",
             "type": "string"
           }
         },
         "required": [
-          "decline"
+          "type",
+          "message"
         ],
         "title": "LinearDecline",
+        "type": "object"
+      },
+      "LinearDeclineText": {
+        "description": "The text a declined session hears, as an MDA ``ChannelMessage``.",
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "type": {
+            "const": "content",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "content"
+        ],
+        "title": "LinearDeclineText",
         "type": "object"
       },
       "LinearEndpointActor": {

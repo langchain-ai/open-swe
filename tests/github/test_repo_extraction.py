@@ -109,8 +109,12 @@ class TestLinearSessionRepository:
         with patch("openswe.webhooks.common.is_repo_allowed", return_value=False):
             chosen = await self._turn("repo:other-org/other-repo").repository(_NEW_THREAD, _ZHEN)
         assert chosen == {
-            "decline": "I'm not allowed to work in `other-org/other-repo`. Name a repository "
-            "Open SWE may work in, or ask your Open SWE admin to allow this one."
+            "type": "reply",
+            "message": {
+                "type": "content",
+                "content": "I'm not allowed to work in `other-org/other-repo`. Name a "
+                "repository Open SWE may work in, or ask your Open SWE admin to allow this one.",
+            },
         }
 
     @pytest.mark.asyncio

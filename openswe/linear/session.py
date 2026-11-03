@@ -14,7 +14,7 @@ its failures in the session.
 import asyncio
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Final, TypedDict, cast
+from typing import Final, Literal, TypedDict, cast
 
 import httpx2
 from langchain_core.messages.content import create_text_block
@@ -55,24 +55,32 @@ SESSION_EVENT_KEYS: frozenset[str] = frozenset(
 )
 
 
+class LinearDeclineText(TypedDict):
+    """The text a declined session hears, as an MDA ``ChannelMessage``."""
+
+    type: Literal["content"]
+    content: str
+
+
 class LinearDecline(TypedDict):
-    """An answer that starts nothing and has MDA's Linear channel tell the session why."""
+    """An answer that starts nothing: MDA posts ``message`` to the session as its response."""
 
-    decline: str
+    type: Literal["reply"]
+    message: LinearDeclineText
 
 
-NO_REPOSITORY: LinearDecline = {
-    "decline": (
-        "Which repository should I work in? Mention it as `repo:owner/name` or link it on "
-        "GitHub, or set a default repository in Open SWE settings."
-    )
-}
-UNREADABLE_SESSION: LinearDecline = {
-    "decline": (
-        "I couldn't read this Linear session, so I didn't start. Mention me on the issue "
-        "again; if it keeps happening, let your Open SWE admin know."
-    )
-}
+def _decline(text: str) -> LinearDecline:
+    return {"type": "reply", "message": {"type": "content", "content": text}}
+
+
+NO_REPOSITORY: LinearDecline = _decline(
+    "Which repository should I work in? Mention it as `repo:owner/name` or link it on "
+    "GitHub, or set a default repository in Open SWE settings."
+)
+UNREADABLE_SESSION: LinearDecline = _decline(
+    "I couldn't read this Linear session, so I didn't start. Mention me on the issue "
+    "again; if it keeps happening, let your Open SWE admin know."
+)
 
 
 def _sign_in(reason: common.AccountLinkReason) -> LinearDecline:
@@ -84,28 +92,22 @@ def _sign_in(reason: common.AccountLinkReason) -> LinearDecline:
     settings_url = build_settings_url()
     settings = f"[your Open SWE settings]({settings_url})" if settings_url else "Open SWE"
     if reason == "revoked":
-        return {
-            "decline": (
-                "Your GitHub sign-in to Open SWE is no longer valid, so I can't work as you. "
-                f"Sign in with GitHub again in {settings}, then mention me again."
-            )
-        }
-    return {
-        "decline": (
-            "I don't know who you are in Open SWE yet, so I can't work as you. Sign in "
-            f"with GitHub in {settings}, using the same email as your Linear account, "
-            "then mention me again."
+        return _decline(
+            "Your GitHub sign-in to Open SWE is no longer valid, so I can't work as you. "
+            f"Sign in with GitHub again in {settings}, then mention me again."
         )
-    }
+    return _decline(
+        "I don't know who you are in Open SWE yet, so I can't work as you. Sign in "
+        f"with GitHub in {settings}, using the same email as your Linear account, "
+        "then mention me again."
+    )
 
 
 def _not_allowed(repo: Mapping[str, str]) -> LinearDecline:
-    return {
-        "decline": (
-            f"I'm not allowed to work in `{repo['owner']}/{repo['name']}`. Name a repository "
-            "Open SWE may work in, or ask your Open SWE admin to allow this one."
-        )
-    }
+    return _decline(
+        f"I'm not allowed to work in `{repo['owner']}/{repo['name']}`. Name a repository "
+        "Open SWE may work in, or ask your Open SWE admin to allow this one."
+    )
 
 
 _SESSION_PAYLOADS: Final[

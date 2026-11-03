@@ -308,7 +308,7 @@ async def test_a_session_turn_the_backend_declines_tells_the_session_why(
     response = await _post(app, _call("AgentSessionEvent.created", payload))
     # MDA's channel starts nothing, and posts the text in the session.
     assert response.json() == NO_REPOSITORY
-    assert mda_declines(response.json()) == NO_REPOSITORY["decline"]
+    assert mda_declines(response.json()) == NO_REPOSITORY["message"]["content"]
 
 
 @pytest.mark.asyncio
@@ -334,7 +334,7 @@ async def test_a_session_it_cant_read_is_told_so(
         del payload["webhookTimestamp"]
     response = await _post(app, _call("AgentSessionEvent.created", payload))
     assert response.json() == UNREADABLE_SESSION
-    assert mda_declines(response.json()) == UNREADABLE_SESSION["decline"]
+    assert mda_declines(response.json()) == UNREADABLE_SESSION["message"]["content"]
     prepare.assert_not_awaited()
 
 
