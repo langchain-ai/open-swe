@@ -18,9 +18,9 @@ import httpx2
 from langchain_core.messages import HumanMessage
 from langchain_typesafe import Choice, TypeSafeClassifier
 from langchain_typesafe.client import TypeSafePermissionDeniedError
+from runtime_api.models import gateway_api_key, gateway_base_url
 
 from rt.input_messages import input_message_text, message_sender_id
-from rt.models import gateway_api_key, gateway_base_url
 from rt.prompts import prompt
 
 logger = logging.getLogger(__name__)

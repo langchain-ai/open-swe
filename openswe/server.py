@@ -104,8 +104,6 @@ from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
-    ModelErrorMiddleware,
-    ModelFallbackMiddleware,
     ModelSelectionMiddleware,
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
@@ -1910,18 +1908,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         max_tokens=DEFAULT_LLM_MAX_TOKENS,
     )
 
-    def make_fallback_model(primary_model_id: str) -> BaseChatModel | None:
-        fallback = fallback_model_choice(primary_model_id)
-        if fallback is None:
-            return None
-        logger.info(
-            "Configured model fallback",
-            extra={"primary_model_id": primary_model_id, "fallback_model_id": fallback.model_id},
-        )
-        return _make_model_or_defer(fallback.model_id, use_gateway=use_gateway, **fallback.kwargs)
-
-    fallback_middleware = ModelFallbackMiddleware(make_fallback_model(model_id))
-
     source = cfg.source or "dashboard"
     configurable["source"] = source
     configurable["resolved_agent_model_id"] = model_id
@@ -2137,9 +2123,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             notify_step_limit_reached,
             record_run_usage,
             model_selection,
-            fallback_middleware,
             *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
-            ModelErrorMiddleware(),
         ],
     )
     surface.base_tools = main_tools

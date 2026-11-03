@@ -21,6 +21,7 @@ import (``runtime_api``):
   the pieces the graph's ``RunParts`` build for it: the inbox and skills, the
   named calls MDA's middleware makes around a model call (``model_choice``,
   ``refresh_github_proxy``, ``reply_on_behalf``) and at the run's end (``run_ended``,
+  or ``model_failed`` when a model call fails it,
   ``step_limit_reached``, ``settle_review_check``, ``finish_scout_plan``), the
   reports of each reply and tool call, which arrive with those notices in ordered
   batches (``reports``) and are recorded once per key, the work of the run's tools (``operation``,
@@ -109,6 +110,7 @@ from runtime_api.loop import (
     INBOX,
     INBOX_RECEIVED,
     MODEL_CHOICE,
+    MODEL_FAILED,
     MODEL_RESULT,
     PREPARE,
     REFRESH_GITHUB_PROXY,
@@ -130,6 +132,7 @@ from runtime_api.loop import (
     InboxItems,
     InboxRead,
     InboxReceipt,
+    ModelFailed,
     ModelResult,
     PhaseResult,
     Prepare,
@@ -145,6 +148,7 @@ from runtime_api.loop import (
     ToolCallReport,
     ToolResultReport,
 )
+from runtime_api.model_errors import LAST_MODEL_ERROR_KEY
 from runtime_api.operations import (
     CHECK_SHELL,
     OPERATION,
@@ -259,6 +263,7 @@ from openswe.slack.channel_moves import prepare_channel_move, record_channel_mov
 from openswe.slack.tools.reply import send_slack_reply
 from openswe.threads.access import agent_version_metadata
 from openswe.threads.inbox import ThreadInbox
+from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_reads import shared_thread_reads
 
 logger = logging.getLogger(__name__)
@@ -1304,6 +1309,20 @@ class TokenRun:
             self.graph.end(self.run, self.run_id)
         return Done()
 
+    async def model_failed(self, request: ModelFailed) -> Done:
+        """Leave why a model call failed the run on its thread, for the failure reply."""
+        await langgraph_client().threads.update(
+            thread_id=self.run.thread_id,
+            metadata={
+                LAST_MODEL_ERROR_KEY: {
+                    "run_id": self.run_id,
+                    "error_type": request.error_type,
+                    "code": request.code,
+                }
+            },
+        )
+        return Done()
+
     async def step_limit_reached(self, _request: RunRequest) -> Done:
         await self.in_run("step_limit_reached", notify_step_limit)
         return Done()
@@ -1652,6 +1671,7 @@ RUN_CALLS.serve(SLACK_MOVE, TokenRun.slack_move)
 RUN_CALLS.serve(SLACK_MOVED, TokenRun.slack_moved)
 RUN_CALLS.serve(RUN_STARTED, TokenRun.run_started)
 RUN_CALLS.serve(RUN_ENDED, TokenRun.run_ended)
+RUN_CALLS.serve(MODEL_FAILED, TokenRun.model_failed)
 RUN_CALLS.serve(STEP_LIMIT_REACHED, TokenRun.step_limit_reached)
 RUN_CALLS.serve(SETTLE_REVIEW_CHECK, TokenRun.settle_review_check)
 RUN_CALLS.serve(FINISH_SCOUT_PLAN, TokenRun.finish_scout_plan)

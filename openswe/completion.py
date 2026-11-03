@@ -26,6 +26,7 @@ from typing import Any
 
 from langchain_core.messages import convert_to_messages
 from langgraph_sdk.client import LangGraphClient
+from runtime_api.model_errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 
 from openswe import event_claims
 from openswe.agent_cost import finalize_agent_invocation_usage
@@ -49,7 +50,6 @@ from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
 from openswe.threads.status import refresh_thread_status
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
-from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.langsmith import get_langsmith_error_url
 from openswe.utils.thread_ops import langgraph_client

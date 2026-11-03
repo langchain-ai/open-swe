@@ -1,115 +1,42 @@
-"""Supported models and reasoning efforts surfaced in the profile editor."""
+"""Supported models and reasoning efforts surfaced in the profile editor.
 
-from typing import NotRequired, TypedDict
+The table itself is shared with the MDA runtime (``runtime_api.models``); what the
+deployment and workspace choose from it is the backend's.
+"""
+
+from runtime_api.models import (
+    SUPPORTED_MODEL_IDS,
+    SUPPORTED_MODELS,
+    ModelOption,
+    model_context_window,
+    model_supports_effort,
+    model_supports_images,
+)
 
 from openswe.config import ENV
 
-
-class ModelOption(TypedDict):
-    id: str
-    label: str
-    efforts: list[str]
-    default_effort: str
-    supports_images: bool
-    context_window: int
-    can_be_default: NotRequired[bool]
-
-
-SUPPORTED_MODELS: list[ModelOption] = [
-    {
-        "id": "anthropic:claude-opus-5-5",
-        "label": "Opus 5.5",
-        "efforts": ["low", "medium", "high", "xhigh", "max"],
-        "default_effort": "high",
-        "supports_images": True,
-        "context_window": 1_000_000,
-    },
-    {
-        "id": "anthropic:claude-sonnet-5-5",
-        "label": "Sonnet 5.5",
-        "efforts": ["low", "medium", "high", "xhigh", "max"],
-        "default_effort": "high",
-        "supports_images": True,
-        "context_window": 1_000_000,
-    },
-    {
-        "id": "anthropic:claude-haiku-5-5",
-        "label": "Haiku 5.5",
-        "efforts": ["low", "medium", "high", "xhigh", "max"],
-        "default_effort": "medium",
-        "supports_images": True,
-        "context_window": 1_000_000,
-    },
-    {
-        "id": "anthropic:claude-fable-5-1",
-        "label": "Fable 5.1",
-        "efforts": ["low", "medium", "high", "xhigh", "max"],
-        "default_effort": "high",
-        "supports_images": True,
-        "context_window": 1_000_000,
-        "can_be_default": False,
-    },
-    {
-        "id": "openai:gpt-6-astra",
-        "label": "GPT-6 Astra",
-        "efforts": ["low", "medium", "high", "xhigh", "max"],
-        "default_effort": "low",
-        "supports_images": True,
-        # Codex serves OpenAI models with a smaller window than the public API.
-        "context_window": 272_000,
-    },
-    {
-        "id": "openai:gpt-6.1-sol",
-        "label": "GPT-6.1 Sol",
-        "efforts": ["none", "low", "medium", "high", "xhigh"],
-        "default_effort": "xhigh",
-        "supports_images": True,
-        "context_window": 272_000,
-    },
-    {
-        "id": "openai:gpt-6.1-terra",
-        "label": "GPT-6.1 Terra",
-        "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
-        "default_effort": "medium",
-        "supports_images": True,
-        "context_window": 272_000,
-    },
-    {
-        "id": "openai:gpt-6-luna",
-        "label": "GPT-6 Luna",
-        "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
-        "default_effort": "xhigh",
-        "supports_images": True,
-        "context_window": 272_000,
-    },
-    {
-        "id": "google_genai:gemini-4-argon",
-        "label": "Gemini 4 Argon",
-        "efforts": ["low", "medium", "high"],
-        "default_effort": "medium",
-        "supports_images": True,
-        "context_window": 1_048_576,
-    },
-    {
-        "id": "google_genai:gemini-3.8-flash",
-        "label": "Gemini 3.8 Flash",
-        "efforts": ["minimal", "low", "medium", "high"],
-        "default_effort": "medium",
-        "supports_images": True,
-        "context_window": 1_048_576,
-    },
-    {
-        "id": "fireworks:accounts/fireworks/models/kimi-k3",
-        "label": "Kimi K3",
-        # K3 always reasons and only accepts low/high/max — "medium" is rejected.
-        "efforts": ["low", "high", "max"],
-        "default_effort": "high",
-        "supports_images": False,
-        "context_window": 1_048_576,
-    },
+__all__ = [
+    "DEFAULT_MODEL_EFFORT",
+    "DEFAULT_MODEL_ID",
+    "DEPRECATED_MODEL_IDS",
+    "DEPRECATED_MODEL_REPLACEMENTS",
+    "FABLE_MODEL_IDS",
+    "NON_DEFAULT_MODEL_IDS",
+    "SUPPORTED_MODELS",
+    "SUPPORTED_MODEL_IDS",
+    "ModelOption",
+    "available_requested_models",
+    "default_model_pair",
+    "default_vision_model_pair",
+    "fable_disabled_fallback",
+    "gate_fable_model",
+    "model_context_window",
+    "model_supports_effort",
+    "model_supports_images",
+    "normalize_model_choice",
+    "provider_fallback_pair",
 ]
 
-SUPPORTED_MODEL_IDS: frozenset[str] = frozenset(m["id"] for m in SUPPORTED_MODELS)
 
 FABLE_MODEL_IDS: frozenset[str] = frozenset(
     m["id"] for m in SUPPORTED_MODELS if m["id"].startswith("anthropic:claude-fable")
@@ -181,27 +108,6 @@ DEFAULT_MODEL_ID: str = (
     else "openai:gpt-6.1-sol"
 )
 DEFAULT_MODEL_EFFORT: str = "medium"
-
-
-def model_supports_effort(model_id: str, effort: str) -> bool:
-    for m in SUPPORTED_MODELS:
-        if m["id"] == model_id:
-            return effort in m["efforts"]
-    return False
-
-
-def model_supports_images(model_id: str) -> bool:
-    for m in SUPPORTED_MODELS:
-        if m["id"] == model_id:
-            return m["supports_images"]
-    return False
-
-
-def model_context_window(model_id: str) -> int | None:
-    for m in SUPPORTED_MODELS:
-        if m["id"] == model_id:
-            return m["context_window"]
-    return None
 
 
 def _provider_of(model_id: str) -> str | None:

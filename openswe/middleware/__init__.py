@@ -6,8 +6,6 @@ _MIDDLEWARE_MODULES = {
     "DynamicToolMiddleware": ".dynamic_tools",
     "IntegrationGroup": ".dynamic_tools",
     "ExcludeToolsMiddleware": ".exclude_tools",
-    "ModelErrorMiddleware": ".model_errors",
-    "ModelFallbackMiddleware": ".model_fallback",
     "ModelSelectionMiddleware": ".model_selection",
     "notify_step_limit_reached": ".notify_step_limit",
     "PrepareRunState": ".prepare_run",
@@ -25,8 +23,6 @@ __all__ = [
     "DynamicToolMiddleware",
     "ExcludeToolsMiddleware",
     "IntegrationGroup",
-    "ModelErrorMiddleware",
-    "ModelFallbackMiddleware",
     "ModelSelectionMiddleware",
     "BasePrepareRunMiddleware",
     "PrepareRunState",
@@ -43,8 +39,6 @@ __all__ = [
 if TYPE_CHECKING:
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
     from openswe.middleware.exclude_tools import ExcludeToolsMiddleware
-    from openswe.middleware.model_errors import ModelErrorMiddleware
-    from openswe.middleware.model_fallback import ModelFallbackMiddleware
     from openswe.middleware.model_selection import ModelSelectionMiddleware
     from openswe.middleware.notify_step_limit import notify_step_limit_reached
     from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware

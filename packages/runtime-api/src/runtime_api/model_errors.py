@@ -1,19 +1,24 @@
-"""Structured detail and coarse classification for provider exceptions."""
+"""Why a model call failed, as the code a failure reply reads, and its detail for logs.
+
+The run-completion webhook only ever sees the exception's class name (the platform
+scrubs the message of any type outside its allowlist), so the classification that
+tells "provider overloaded" from every other ``APIError`` is made where the call
+failed, while the exception is intact, and left on the thread for the reply to read.
+"""
 
 import json
-import traceback
-from typing import Any
+from typing import Any, Final
 
-_MAX_BODY_CHARS = 2000
+_MAX_BODY_CHARS: Final = 2000
 
 # Thread-metadata key holding the classification of the run's last model error,
 # written while the exception is intact and read back by the completion webhook.
-LAST_MODEL_ERROR_KEY = "last_model_error"
+LAST_MODEL_ERROR_KEY: Final = "last_model_error"
 
 # Exception class names, the only failure signal the run-completion webhook gets:
 # the platform serializes the class name but scrubs the message of any exception
 # type outside its allowlist.
-_ERROR_TYPE_CODES = {
+_ERROR_TYPE_CODES: Final = {
     "RateLimitError": "provider_rate_limited",
     "OverloadedError": "provider_overloaded",
     "APIConnectionError": "provider_unavailable",
@@ -66,28 +71,12 @@ def classify_exception(exc: BaseException) -> str | None:
     return code_for_error_type(type(exc).__name__)
 
 
-def error_tracking_fields(exc: BaseException) -> dict[str, Any]:
-    """Datadog's standard ``error`` attributes for a log record.
-
-    Datadog Error Tracking groups an issue and renders a stack trace only from
-    ``error.kind``/``error.message``/``error.stack``; the ``exception`` key that
-    structlog's ``format_exc_info`` emits is ignored.
-    """
-    return {
-        "error": {
-            "kind": type(exc).__name__,
-            "message": str(exc),
-            "stack": "".join(traceback.format_exception(exc)),
-        }
-    }
-
-
 def exception_fields(exc: BaseException) -> dict[str, Any]:
     """Class, message, and any HTTP status / request id / response body on ``exc``.
 
     Provider SDKs put the useful part of a failure (``overloaded_error``, a
     rate-limit window, a rejected model id) in the response body, which
-    ``str(exc)`` frequently omits.
+    ``str(exc)`` frequently omits. For logs only: the body is bounded, never shown.
     """
     try:
         fields: dict[str, Any] = {"error_type": type(exc).__name__, "error_message": str(exc)}
