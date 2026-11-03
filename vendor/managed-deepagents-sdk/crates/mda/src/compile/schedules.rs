@@ -114,12 +114,12 @@ fn schedule_cron(
     }
     let mode = thread_mode(object.get("thread"), name)?;
     let mut schedule = json!({ "name": name });
-    let deliver_to = object.get("deliverTo").or_else(|| object.get("deliver_to"));
-    if let Some(deliver_to) = deliver_to {
+    let deliver_to = schedule_deliver_to(object, name)?;
+    if let Some(deliver_to) = &deliver_to {
         schedule["deliver_to"] = deliver_to.clone();
     }
     let opens_thread =
-        matches!(mode, ThreadMode::Ephemeral) && starts_conversation(deliver_to, channels);
+        matches!(mode, ThreadMode::Ephemeral) && starts_conversation(deliver_to.as_ref(), channels);
     if opens_thread {
         schedule["new_thread"] = Value::Bool(true);
     }
@@ -148,6 +148,63 @@ fn schedule_cron(
     }
 
     Ok(Value::Object(cron_entry))
+}
+
+/// Where the schedule posts its run's final answer, as the stored `deliver_to`:
+/// the deprecated `deliverTo` as written, or `autoPost` mapped to it. `false`
+/// posts nothing; a Slack target posts in its conversation, or in its thread.
+fn schedule_deliver_to(object: &Map<String, Value>, name: &str) -> Result<Option<Value>> {
+    let deliver_to = object.get("deliverTo").or_else(|| object.get("deliver_to"));
+    let auto_post = object.get("autoPost").or_else(|| object.get("auto_post"));
+    match (deliver_to, auto_post) {
+        (Some(_), Some(_)) => {
+            bail!("schedule '{name}' takes `autoPost` or `deliverTo`, not both")
+        }
+        (Some(deliver_to), None) => Ok(Some(deliver_to.clone())),
+        (None, None) | (None, Some(Value::Bool(false))) => Ok(None),
+        (None, Some(target)) => slack_target_deliver_to(target).map(Some).ok_or_else(|| {
+            anyhow!("schedule '{name}' autoPost must be false or a Slack target for now")
+        }),
+    }
+}
+
+/// A Slack target as the stored `deliver_to`, in the spelling the target uses.
+fn slack_target_deliver_to(target: &Value) -> Option<Value> {
+    let target = target.as_object()?;
+    if target.get("provider").and_then(Value::as_str) != Some("slack") {
+        return None;
+    }
+    let text = |key: &str| {
+        target
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+    };
+    let snake = target.contains_key("conversation_id");
+    let (conversation_key, thread_key, out_conversation, out_thread) = if snake {
+        (
+            "conversation_id",
+            "thread_ts",
+            "conversation_id",
+            "thread_id",
+        )
+    } else {
+        ("conversationId", "threadTs", "conversationId", "threadId")
+    };
+    let conversation = text(conversation_key)?;
+    let channel = match target.get("channel") {
+        None => "slack",
+        Some(channel) => channel.as_str().filter(|value| !value.trim().is_empty())?,
+    };
+    let to = match target.get(thread_key) {
+        None => json!({ "type": "provider_conversation", out_conversation: conversation }),
+        Some(_) => json!({
+            "type": "provider_thread",
+            out_conversation: conversation,
+            out_thread: text(thread_key)?,
+        }),
+    };
+    Some(json!({ "channel": channel, "to": to }))
 }
 
 /// Whether a run's `deliverTo` starts a conversation in a declared channel,
@@ -272,6 +329,67 @@ mod tests {
                 json!({ "name": "daily", "deliver_to": { "channel": "slack" } })
             );
         }
+    }
+
+    #[test]
+    fn auto_post_maps_to_the_stored_deliver_to() {
+        let entry = cron(json!({
+            "cron": "0 9 * * *",
+            "prompt": "Summarize",
+            "autoPost": { "provider": "slack", "conversationId": "C1", "codeChannel": false },
+        }));
+        assert_eq!(
+            entry["context"]["mda_schedule"]["deliver_to"],
+            json!({
+                "channel": "slack",
+                "to": { "type": "provider_conversation", "conversationId": "C1" },
+            })
+        );
+
+        let entry = cron(json!({
+            "cron": "0 9 * * *",
+            "prompt": "Summarize",
+            "auto_post": {
+                "provider": "slack",
+                "channel": "support",
+                "conversation_id": "C1",
+                "thread_ts": "1.2",
+            },
+        }));
+        assert_eq!(
+            entry["context"]["mda_schedule"]["deliver_to"],
+            json!({
+                "channel": "support",
+                "to": { "type": "provider_thread", "conversation_id": "C1", "thread_id": "1.2" },
+            })
+        );
+
+        let entry = cron(json!({ "cron": "0 9 * * *", "prompt": "Summarize", "autoPost": false }));
+        assert!(entry["context"]["mda_schedule"].get("deliver_to").is_none());
+    }
+
+    #[test]
+    fn auto_post_refuses_what_a_schedule_cant_post_to() {
+        for auto_post in [
+            json!(true),
+            json!({ "provider": "github", "repository": "o/r", "number": 1 }),
+            json!({ "provider": "slack" }),
+        ] {
+            let config =
+                json!({ "cron": "0 9 * * *", "prompt": "Summarize", "autoPost": auto_post });
+            let error = schedule_cron("daily", &config, "agent", &[]).unwrap_err();
+            assert!(error
+                .to_string()
+                .contains("autoPost must be false or a Slack target"));
+        }
+        let config = json!({
+            "cron": "0 9 * * *",
+            "prompt": "Summarize",
+            "autoPost": false,
+            "deliverTo": { "channel": "slack" },
+        });
+        let error = schedule_cron("daily", &config, "agent", &[]).unwrap_err();
+        assert!(error.to_string().contains("not both"));
     }
 
     #[test]

@@ -36,6 +36,7 @@ from managed_deepagents._channels.run_input import (
     normalize_run_inputs,
 )
 from managed_deepagents._channels.runtime import is_json_value, json_copy
+from managed_deepagents._channels.target import channel_target
 from managed_deepagents._channels.types import ChannelError
 from managed_deepagents._log import logger
 from managed_deepagents._telemetry.otel import set_log_attributes
@@ -564,7 +565,7 @@ async def _plan_runs(plan: _ConversationRun, delivery: _Delivery, waiter: _Threa
         message,
         delivery.raw_event,
         waiter,
-        RunChannel(name=delivery.name, provider=channel.kind),
+        _run_channel(delivery.name, channel, message),
         interrupted=paused,
     )
     conversation = next((run for run in runs if "thread" not in run), None)
@@ -680,7 +681,7 @@ async def _start_threaded_run(delivery: _Delivery, run: NormalizedRunInput, inde
     again for a later event. An ephemeral thread's id derives from the delivery
     and the run's place in it, so a redelivery finds the run it started; the
     thread is deleted once the run ends, unless it waits on a decision. The run
-    posts its answer to the event's conversation only with ``deliver_to``.
+    posts its answer to the event's conversation only with ``auto_post``.
     """
     thread = run["thread"]
     message = delivery.message
@@ -1011,9 +1012,25 @@ async def _prepare(
     reading the conversation failed.
     """
     runs = await _prepare_runs(
-        channel, message, raw_event, waiter, RunChannel(name=name, provider=channel.kind)
+        channel, message, raw_event, waiter, _run_channel(name, channel, message)
     )
     return next((run for run in runs if "thread" not in run), None)
+
+
+def _run_channel(name: str, channel: HttpChannel, message: HttpChannelInboundMessage) -> RunChannel:
+    """The channel a message's runs start from: its conversation's thread and target."""
+    origin = channel_target(
+        cast(
+            "ChannelBinding",
+            {"provider": channel.kind, "transport": "direct", "target": message["target"]},
+        )
+    )
+    return RunChannel(
+        name=name,
+        provider=channel.kind,
+        conversation_thread_id=message["thread_id"].lower(),
+        origin=origin,
+    )
 
 
 async def _deliver_reply(

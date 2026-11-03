@@ -390,7 +390,7 @@ async def cancel_ingress_thread_runs(
 #: its handler chose, so Stop and the buttons there reach that run, and no other.
 STARTED_FROM_METADATA = "mda_started_from"
 #: Run metadata set on a run whose handler asked it to answer that source thread
-#: (``deliver_to``), so a resumed run there answers it too.
+#: (``auto_post``), so a resumed run there answers it too.
 DELIVERS_METADATA = "mda_deliver_to_conversation"
 #: Most of a channel's handler threads searched for a Stop or an answer.
 _HANDLER_THREAD_SEARCH_LIMIT = 100
