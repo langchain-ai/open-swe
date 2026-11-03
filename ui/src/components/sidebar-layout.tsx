@@ -5,11 +5,16 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react"
 import { createPortal } from "react-dom"
 import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Kbd } from "@langchain/macaw-components/Kbd"
+import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
+import { ArrowRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowRight"
 import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/ssr/SidebarSimple"
 
+import { shortcutPlatform, useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
 
 const STORAGE_WIDTH = "open-swe.sidebar.width"
@@ -128,25 +133,33 @@ export function SidebarFrame({
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
+  // Electron resolves window drag regions in DOM order, ignoring z-index, so a
+  // page header marked draggable would swallow clicks on these floating
+  // controls if it came earlier. Portal them after all content to keep them last.
+  const windowNavigation =
+    isDesktop && createPortal(<WindowNavigation />, document.body)
+
   if (collapsed) {
-    // Electron resolves window drag regions in DOM order, ignoring z-index, so
-    // a page header marked draggable would swallow clicks on this floating
-    // toggle if it came earlier. Portal it after all content to keep it last.
-    return createPortal(
-      <IconButton
-        icon={SidebarSimpleIcon}
-        label="Expand sidebar"
-        color="secondary"
-        variant="plain"
-        size="sm"
-        data-sidebar-expand=""
-        onClick={toggle}
-        className={cn(
-          "fixed top-2 left-2 z-sidebar size-7",
-          isDesktop && "left-[90px]"
+    return (
+      <>
+        {createPortal(
+          <IconButton
+            icon={SidebarSimpleIcon}
+            label="Expand sidebar"
+            color="secondary"
+            variant="plain"
+            size="sm"
+            data-sidebar-expand=""
+            onClick={toggle}
+            className={cn(
+              "fixed top-2 left-2 z-sidebar size-7",
+              isDesktop && "left-[90px]"
+            )}
+          />,
+          document.body
         )}
-      />,
-      document.body
+        {windowNavigation}
+      </>
     )
   }
 
@@ -165,7 +178,84 @@ export function SidebarFrame({
       <div className="max-md:hidden">
         <ResizeHandle width={width} onResize={setWidth} />
       </div>
+      {windowNavigation}
     </aside>
+  )
+}
+
+/**
+ * Back and forward beside the sidebar toggle, which the desktop app needs
+ * because it has no browser chrome. ⌘[ and ⌘] stay the browser's on the web.
+ */
+function WindowNavigation() {
+  const subscribe = (onChange: () => void) => {
+    window.navigation?.addEventListener("currententrychange", onChange)
+    return () =>
+      window.navigation?.removeEventListener("currententrychange", onChange)
+  }
+  const canGoBack = useSyncExternalStore(
+    subscribe,
+    () => window.navigation?.canGoBack ?? true,
+    () => false
+  )
+  const canGoForward = useSyncExternalStore(
+    subscribe,
+    () => window.navigation?.canGoForward ?? true,
+    () => false
+  )
+  const backShortcut = useShortcutLabel("mod+[")
+  const forwardShortcut = useShortcutLabel("mod+]")
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const mod = shortcutPlatform() === "mac" ? event.metaKey : event.ctrlKey
+      if (!mod || event.altKey || event.shiftKey) return
+      if (event.key === "[") window.history.back()
+      else if (event.key === "]") window.history.forward()
+      else return
+      event.preventDefault()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [])
+
+  return (
+    <div className="fixed top-2 left-[122px] z-sidebar flex items-center gap-0.5 [.desktop-fullscreen_&]:left-[44px]">
+      <IconButton
+        icon={ArrowLeftIcon}
+        label="Back"
+        tooltipProps={{
+          title: (
+            <span className="flex items-center gap-space-2">
+              Back <Kbd>{backShortcut}</Kbd>
+            </span>
+          ),
+        }}
+        color="secondary"
+        variant="plain"
+        size="sm"
+        disabled={!canGoBack}
+        onClick={() => window.history.back()}
+        className="size-7"
+      />
+      <IconButton
+        icon={ArrowRightIcon}
+        label="Forward"
+        tooltipProps={{
+          title: (
+            <span className="flex items-center gap-space-2">
+              Forward <Kbd>{forwardShortcut}</Kbd>
+            </span>
+          ),
+        }}
+        color="secondary"
+        variant="plain"
+        size="sm"
+        disabled={!canGoForward}
+        onClick={() => window.history.forward()}
+        className="size-7"
+      />
+    </div>
   )
 }
 
