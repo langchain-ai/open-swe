@@ -6,8 +6,7 @@ project. A thread is in a project through ``project_id`` in its metadata, or
 through the project bound to its repository.
 
 A project only groups threads: who may read a thread is decided by the thread
-alone, so a member sees the project's threads they could already read. See
-``docs/projects-design.md``.
+alone, so a member sees the project's threads they could already read.
 """
 
 import logging
