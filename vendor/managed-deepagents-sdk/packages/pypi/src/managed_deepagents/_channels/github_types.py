@@ -35,6 +35,7 @@ from managed_deepagents._channels.github_schema import (
     _WorkflowPayload,
 )
 from managed_deepagents._channels.http.endpoint import EndpointRequest, EventEndpoint
+from managed_deepagents._channels.reply import ChannelReplyResult
 from managed_deepagents._channels.run_input import ChannelRunResult
 
 if TYPE_CHECKING:
@@ -175,12 +176,13 @@ class GitHubAppOptions(TypedDict, total=False):
     so install the App only on the ones the agent may change."""
 
 
-GitHubEventResult = ChannelRunResult | None
+GitHubEventResult = ChannelRunResult | ChannelReplyResult | None
 """What an event handler returns: a run's input, as ``agent.invoke`` takes it (a
 string, a message such as ``HumanMessage(...)``, or state such as
 ``{"messages": [...]}``), one run on the event's conversation; or a list of runs
 with options, such as ``[{"input": ..., "context": ..., "metadata": ...}]``.
-``None`` starts nothing."""
+``None`` starts nothing. ``reply(message)`` starts nothing too, and posts
+``message`` where the event came from."""
 
 _Key = TypeVar("_Key", bound=str, default=str)
 _EventPayload = TypeVar("_EventPayload", default=GitHubPayload)
