@@ -352,10 +352,14 @@ async def test_mda_alone_writes_the_proxy_of_its_sandbox_where_the_token_reaches
             )
 
 
-@pytest.mark.parametrize("kind", ["reviewer", "review-scout"])
+@pytest.mark.parametrize(
+    ("assistant", "kind"),
+    [("reviewer", "reviewer"), ("reviewer", "reviewer-shadow"), ("review-scout", "review-scout")],
+)
 async def test_without_mda_github_proxy_a_review_refreshes_on_its_threads_scope(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
+    assistant: str,
     kind: str,
 ) -> None:
     """Unset, the setting changes nothing: a review whose run names no repository still
@@ -367,9 +371,9 @@ async def test_without_mda_github_proxy_a_review_refreshes_on_its_threads_scope(
     monkeypatch.setattr(lifecycle, "thread_token_repositories", AsyncMock(return_value=None))
     monkeypatch.setattr(lifecycle, "get_sandbox_metadata", metadata)
     monkeypatch.setattr(lifecycle, "load_workspace", AsyncMock(return_value=None))
-    run = RemoteRun(thread_id="thread", assistant_id=kind, configurable={})
+    run = RemoteRun(thread_id="thread", assistant_id=assistant, configurable={})
 
-    await TokenRun.answer(run_kinds()[kind], run, "refresh_github_proxy", {})
+    await TokenRun.answer(run_kinds()[assistant], run, "refresh_github_proxy", {})
 
     assert injected_auth(github) == [
         "x-access-token:repos:11;actions=read,checks=read,contents=read,issues=read,"

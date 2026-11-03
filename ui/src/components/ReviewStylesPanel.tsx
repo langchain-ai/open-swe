@@ -10,7 +10,7 @@ import { useEffect, useState } from "react"
 
 import { AddRepositoryField } from "@/components/AddRepositoryField"
 import type { ReviewApprovalMode, ReviewStyle } from "@/lib/api"
-import { api, isGithubReauthError, loginUrl } from "@/lib/api"
+import { api, connectService, isGithubReauthError } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useRepos } from "@/lib/profile"
@@ -159,8 +159,15 @@ export function ReviewStylesPanel() {
         <Banner intent="error">
           <span className="text-xs text-error-secondary">
             Your GitHub connection expired.{" "}
-            <MacawLink href={loginUrl()} variant="sm">
-              Sign in with GitHub again
+            <MacawLink
+              href="#"
+              variant="sm"
+              onClick={(event) => {
+                event.preventDefault()
+                void connectService("github", window.location.href)
+              }}
+            >
+              Link GitHub again
             </MacawLink>{" "}
             to list installed repos.
           </span>

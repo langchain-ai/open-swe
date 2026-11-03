@@ -158,6 +158,7 @@ The backend:
 | `MDA_RUNTIME_URL` | This deployment's URL; every new agent, reviewer and review scout thread runs here |
 | `MDA_RUNTIME_API_KEY` | LangSmith service key the backend calls this deployment with |
 | `MDA_WORKSPACE_ID` | This deployment's LangSmith workspace, if not the backend's; dashboard follow-ups on a channel's thread run as the person's principal there |
+| `MDA_LANGSMITH_PROJECT` | This deployment's LangSmith project (its `LANGSMITH_PROJECT`, the deployment name), where its runs are traced; the backend's trace links, costs, feedback and reviewer evals read runs there. Unset: the backend's `LANGSMITH_PROJECT` |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
 | `MDA_SERVICE_SECRET` | The same value as this deployment's; `/linear/channel/*` and `/github/channel/*` answer only calls signed with it |
 | `MDA_GITHUB_PROXY_CONNECTION` | `mda/github-token`: MDA writes the proxy config of the sandboxes it owns whose thread reaches the whole App installation, their GitHub rules filled from that connection. Set it only once this deployment runs a build that writes it: an older one leaves those sandboxes without one. Unset: the backend writes every sandbox's |

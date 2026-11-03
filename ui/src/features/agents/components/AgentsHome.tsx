@@ -47,6 +47,7 @@ import {
 } from "@/features/agents/lib/gitPanelPreferences"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import { api } from "@/lib/api"
+import { hasLinkedGitHub } from "@/lib/linkedGitHub"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import {
@@ -560,7 +561,8 @@ export function AgentsHome({
           if (
             local.repo &&
             !agentWorkspace &&
-            session.data?.auth_provider !== "langsmith"
+            session.data &&
+            hasLinkedGitHub(session.data)
           )
             configurable.repo = local.repo
           else configurable.repo_explicitly_none = true
@@ -676,6 +678,12 @@ export function AgentsHome({
               </Banner>
             )}
             <AgentPromptBar
+              key={`${session.data?.user_id}:${agentWorkspace}`}
+              draftKey={
+                session.data?.user_id
+                  ? `${session.data.user_id}:new:${agentWorkspace}`
+                  : undefined
+              }
               activeRun={
                 optimisticDraftThread
                   ? { threadId: pendingThreadId ?? "", running: true }

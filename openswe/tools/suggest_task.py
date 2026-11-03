@@ -42,6 +42,9 @@ async def suggest_task(
         links = [str(TypeAdapter(HttpUrl).validate_python(link)) for link in context_links or ()]
     except (ValueError, ValidationError) as exc:
         return {"success": False, "error": str(exc)}
+    # A shadow review is an experiment nobody on the pull request knows of.
+    if cfg.review_shadow:
+        return {"success": True, "dry_run": True, "suggested_task_id": None}
     owner, name = full_name.split("/", 1)
     target_workspace = workspace or await workspace_for_repo(owner, name) or cfg.workspace_slug
     if not target_workspace:

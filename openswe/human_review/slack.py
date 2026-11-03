@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import BackgroundTasks
 from pydantic import BaseModel, ValidationError
 
-from openswe.human_review import card
+from openswe.human_review import card, readiness
 from openswe.human_review.clicks import answer_click
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.people import Outcome
@@ -218,6 +218,8 @@ async def _process(
 async def handle_button(
     interaction: SlackInteraction, button: SlackButtonValue, background_tasks: BackgroundTasks
 ) -> WebhookResponse:
+    if button.type == readiness.BUTTON_TYPE:
+        return await readiness.handle_button(interaction, button, background_tasks)
     channel_id = interaction.channel_id
     thread_ts = interaction.thread_ts
     user_id = interaction.user.id

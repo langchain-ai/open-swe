@@ -151,7 +151,7 @@ function TaskMessageChip({
           )
         }
       >
-        <div className="mt-space-1 max-w-full rounded-xl border border-default bg-surface-level-2 p-space-3">
+        <div className="mt-space-1 max-w-full rounded-xl border border-default bg-user-message p-space-3">
           <div className="text-xs leading-relaxed break-words whitespace-pre-wrap text-primary">
             {content}
           </div>
