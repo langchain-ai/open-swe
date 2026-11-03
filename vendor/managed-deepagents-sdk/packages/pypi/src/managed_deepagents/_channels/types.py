@@ -146,8 +146,6 @@ class SlackChannelTarget:
     conversation_id: str
     #: The thread's root message, Slack's ``thread_ts``.
     thread_ts: str | None = None
-    #: Whether the conversation is a Slack code channel.
-    code_channel: bool = False
     provider: Literal["slack"] = "slack"
     #: The channel's name, needed only to tell apart two channels of one
     #: provider. ``None`` is the channel the target is used with.
