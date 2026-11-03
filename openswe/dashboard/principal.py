@@ -54,51 +54,6 @@ class DashboardPrincipal:
         """The GitHub login the session acts as; a LangSmith session has one once linked."""
         return None if self.subject.startswith("user:") else self.subject
 
-    def authorize_path(self, path: str, method: str) -> None:
-        if self.github_login is not None:
-            return
-        prefix = "/dashboard/api/"
-        relative = path.removeprefix(prefix).rstrip("/") if path.startswith(prefix) else ""
-        personal = (
-            "me",
-            "profile",
-            "my-mcps",
-            "my-managed-tools",
-            "my-credentials/langsmith",
-            "threads",
-            "bridges",
-            "skills",
-            "github/login",
-            "github/desktop/exchange",
-        )
-        if any(relative == group or relative.startswith(group + "/") for group in personal):
-            return
-        if relative == "my-credentials/langsmith" and method in {"GET", "DELETE"}:
-            return
-        if relative in {
-            "options",
-            "desktop/environments",
-            "client-errors",
-            "ui-invalidations",
-            "auth/logout",
-            "auth/callback",
-        }:
-            return
-        if method in {"GET", "HEAD"}:
-            if relative in {
-                "settings",
-                "team-settings",
-                "workspaces/options",
-                "organization-skills",
-            }:
-                return
-            parts = relative.split("/")
-            if len(parts) == 3 and parts[0] == "workspaces" and parts[2] == "settings":
-                return
-            if len(parts) == 2 and parts[0] == "plan":
-                return
-        raise HTTPException(403, "This operation requires a linked GitHub account")
-
     async def user(self) -> User | None:
         if self.provider == "github":
             return await User.for_session(self.user_id, self.subject)

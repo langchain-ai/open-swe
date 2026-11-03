@@ -1,6 +1,6 @@
 import type { SessionUser } from "./api"
 
-/** Whether the person can use coding features: a LangSmith sign-in needs a linked GitHub account. */
+/** Whether the person has linked the GitHub account required to use Open SWE. */
 export function hasLinkedGitHub(
   user: Pick<SessionUser, "auth_provider" | "github_login">
 ): boolean {

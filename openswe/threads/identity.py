@@ -42,10 +42,7 @@ class ThreadIdentity:
             return
         from fastapi import HTTPException
 
-        from openswe.dashboard.langsmith_login import LangSmithLogin
-
-        if await LangSmithLogin().access_token(self.subject) is None:
-            raise HTTPException(401, "LangSmith login expired — sign in again")
+        raise HTTPException(403, "Link GitHub to use Open SWE")
 
     async def user(self) -> User | None:
         if self.user_id is not None:

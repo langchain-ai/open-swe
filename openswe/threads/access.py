@@ -33,8 +33,7 @@ async def resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:
 
 
 async def _ensure_dashboard_github_token(login: str) -> None:
-    if ThreadIdentity(login).user_id is not None:
-        return
+    await ThreadIdentity(login).authorize()
     token = await get_valid_access_token(login)
     if not token:
         raise HTTPException(401, github_reauth_message(login))

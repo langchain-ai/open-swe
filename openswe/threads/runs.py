@@ -389,16 +389,13 @@ async def _build_dashboard_configurable(
     profile: dict[str, Any] | None = None,
     overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    await ThreadIdentity(login).authorize()
     profile = profile if profile is not None else await get_profile(login) or {}
     source = thread_source(metadata)
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
         "source": source,
-        **(
-            {"github_login": login}
-            if ThreadIdentity(login).github_login
-            else {"user_id": str(ThreadIdentity(login).user_id), "auth_provider": "langsmith"}
-        ),
+        "github_login": login,
         "user_email": await resolve_run_email(login, profile),
         "background_task_completion": False,
     }
@@ -444,17 +441,11 @@ async def create_dashboard_session(
     body: SessionCreateBody, login: str, *, email: str | None = None
 ) -> str:
     """Create a fresh owned thread using the person's dashboard defaults."""
+    await _ensure_dashboard_github_token(login)
     profile = RepositoryDefaults.model_validate(await get_profile(login) or {})
-    identity = ThreadIdentity(login)
-    if identity.user_id is not None and body.repo:
-        raise HTTPException(403, "This account has no GitHub repository access")
-    repo = (
-        None
-        if identity.user_id is not None
-        else (body.repo if body.repo is not None else profile.repository())
-    )
+    repo = body.repo if body.repo is not None else profile.repository()
     workspace = await _resolve_requested_workspace(body.workspace, _parse_repo(repo), login=login)
-    if body.repo is None and identity.user_id is None:
+    if body.repo is None:
         preferred_workspace = await _resolve_requested_workspace(body.workspace, None, login=login)
         if profile.workspace_default_repos.get(preferred_workspace):
             workspace = preferred_workspace
@@ -464,17 +455,13 @@ async def create_dashboard_session(
         if not repo_config:
             raise HTTPException(422, "repo must be owner/name")
         await require_repo_access_for_user(login, f"{repo_config['owner']}/{repo_config['name']}")
-    await _ensure_dashboard_github_token(login)
     thread = await create_dashboard_thread_record(
         str(uuid.uuid4()),
         login=login,
         email=email,
         repo_config=repo_config,
         prompt=body.prompt,
-        visibility="private"
-        if identity.user_id is not None
-        else await _requested_visibility({"visibility": body.visibility}, login=login),
-        repo_explicitly_none=identity.user_id is not None,
+        visibility=await _requested_visibility({"visibility": body.visibility}, login=login),
         workspace=workspace,
     )
     return str(thread["thread_id"])
@@ -491,9 +478,7 @@ async def start_dashboard_thread(
     unlisted: bool = False,
 ) -> str:
     """Start a person's dashboard thread; the first repo is the one its sandbox opens in."""
-    identity = ThreadIdentity(login)
-    if identity.user_id is not None and repos:
-        raise HTTPException(403, "This account has no GitHub repository access")
+    await _ensure_dashboard_github_token(login)
     repo_configs: list[dict[str, str]] = []
     for repo in repos:
         repo_config = _parse_repo(repo)
@@ -501,7 +486,6 @@ async def start_dashboard_thread(
             raise HTTPException(422, "repos must be owner/name")
         await require_repo_access_for_user(login, f"{repo_config['owner']}/{repo_config['name']}")
         repo_configs.append(repo_config)
-    await _ensure_dashboard_github_token(login)
     primary = repo_configs[0] if repo_configs else {}
     thread = await create_dashboard_thread_record(
         str(uuid.uuid4()),
@@ -510,8 +494,7 @@ async def start_dashboard_thread(
         repo_config=primary,
         prompt=prompt,
         title=title,
-        visibility="private" if identity.user_id is not None else visibility,
-        repo_explicitly_none=identity.user_id is not None,
+        visibility=visibility,
         workspace=await _resolve_requested_workspace(None, primary, login=login),
         extra_metadata={"unlisted": True} if unlisted else None,
     )
@@ -893,9 +876,6 @@ async def _enrich_run_start_command(
 ) -> dict[str, Any]:
     if command.get("method") != "run.start":
         return command
-    if not creating and ThreadIdentity(login).user_id is not None:
-        if metadata.get("visibility") != "private":
-            raise HTTPException(403, "LangSmith accounts require private tasks")
 
     params = command.get("params")
     if not isinstance(params, dict):
@@ -976,11 +956,6 @@ async def _enrich_run_start_command(
             if sandbox_bridge is not None:
                 # Whoever can prompt a thread runs commands on its machine.
                 visibility = "private"
-            identity = ThreadIdentity(login)
-            if identity.user_id is not None:
-                visibility = "private"
-                if client_configurable.get("repo"):
-                    raise HTTPException(403, "This account has no GitHub repository access")
             repo_config = _parse_repo(client_configurable.get("repo")) or {}
             workspace = await _resolve_requested_workspace(
                 client_configurable.get("workspace") or client_configurable.get("environment"),
@@ -992,8 +967,7 @@ async def _enrich_run_start_command(
                 login=login,
                 email=email,
                 repo_config=repo_config,
-                repo_explicitly_none=identity.user_id is not None
-                or client_configurable.get("repo_explicitly_none") is True,
+                repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
                 visibility=visibility,
                 prompt=_command_prompt_text(content),
                 images=command_images,

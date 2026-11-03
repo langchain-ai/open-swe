@@ -74,8 +74,8 @@ function Login() {
           Continue with LangSmith
         </Button>
         <Text as="p" variant="sm" color="secondary">
-          Link your GitHub account after signing in to use coding features and
-          return to your existing coding threads.
+          GitHub is required to use Open SWE. Sign in with LangSmith, then link
+          GitHub to get started or return to your existing account.
         </Text>
       </Card>
     </main>

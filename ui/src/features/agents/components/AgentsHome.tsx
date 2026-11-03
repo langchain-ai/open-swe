@@ -54,7 +54,6 @@ import {
 } from "@/features/agents/lib/gitPanelPreferences"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import { api } from "@/lib/api"
-import { hasLinkedGitHub } from "@/lib/linkedGitHub"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import {
@@ -237,11 +236,7 @@ export function AgentsHome({
   // Memoized: a fresh array fed straight into the pick below reads as a
   // mutation to the React Compiler and costs the component its optimization.
   const workspaceRepos = useMemo(() => accessibleRepos ?? [], [accessibleRepos])
-  // Working in a repository needs GitHub; until it is linked the picker asks
-  // for it, and runs go to a task folder whatever was remembered or linked.
-  const gitHubLinkUser =
-    session.data && !hasLinkedGitHub(session.data) ? session.data : undefined
-  const pickedRepo = pickComposerRepo({
+  const repo = pickComposerRepo({
     override: repoSelection,
     userDefault: userDefaultRepo,
     userWorkspaceDefault: selectedWorkspace
@@ -252,7 +247,6 @@ export function AgentsHome({
         ?.default_repo ?? null,
     offered: workspaceRepos,
   })
-  const repo = gitHubLinkUser ? null : pickedRepo
   const selectWorkspace = (slug: string | null) => {
     setWorkspaceOverride(slug)
   }
@@ -572,8 +566,7 @@ export function AgentsHome({
           // Awaited so the thread route already knows it is This Mac's.
           await queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
           configurable.sandbox_bridge_id = local.bridgeId
-          if (local.repo && session.data && hasLinkedGitHub(session.data))
-            configurable.repo = local.repo
+          if (local.repo) configurable.repo = local.repo
           else configurable.repo_explicitly_none = true
         }
         await startRun(
@@ -706,7 +699,6 @@ export function AgentsHome({
               repos={workspaceRepos}
               selectedRepo={repo}
               onRepoChange={optimisticDraftThread ? undefined : selectRepo}
-              gitHubLinkUser={gitHubLinkUser}
               runTarget={runTarget}
               onRunTargetChange={
                 !optimisticDraftThread && isDesktop && cloudEnabled

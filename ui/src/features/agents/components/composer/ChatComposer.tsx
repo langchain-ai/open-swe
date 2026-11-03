@@ -51,7 +51,6 @@ import type {
 import type {
   FollowUpBehavior,
   ModelOption,
-  SessionUser,
   Skill,
   WorkspaceOption,
 } from "@/lib/api"
@@ -60,7 +59,6 @@ import type { PassageReply } from "@/features/agents/utils/passageReply"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
-import { GitHubLinkRepoSelector } from "./GitHubLinkRepoSelector"
 import { api } from "@/lib/api"
 import type { SlackChannelOption, SlackUserOption } from "@/lib/api"
 import { useRegisterAppCommands } from "@/lib/appCommands"
@@ -192,8 +190,6 @@ export interface ChatComposerProps {
   repos?: Array<{ full_name: string }>
   selectedRepo?: string | null
   onRepoChange?: (repo: string | null) => void
-  /** The signed-in person while they must link GitHub; the repo picker then asks them to. */
-  gitHubLinkUser?: SessionUser
   /** Desktop-only execution target. Omit this prop to keep the control out of the web UI. */
   runTarget?: RunTarget
   onRunTargetChange?: (next: RunTarget) => void
@@ -361,7 +357,6 @@ export const ChatComposer = memo(function ChatComposer({
   repos,
   selectedRepo = null,
   onRepoChange,
-  gitHubLinkUser,
   runTarget,
   onRunTargetChange,
   runTargetPending,
@@ -860,10 +855,7 @@ export const ChatComposer = memo(function ChatComposer({
           side="top"
         />
       )}
-      {runTarget !== "local" && onRepoChange && gitHubLinkUser && (
-        <GitHubLinkRepoSelector user={gitHubLinkUser} side="top" />
-      )}
-      {runTarget !== "local" && onRepoChange && !gitHubLinkUser && (
+      {runTarget !== "local" && onRepoChange && (
         <RepoSelector
           emptySelectionLabel="Don't work in a repository"
           noMatchesLabel="No matching repositories"

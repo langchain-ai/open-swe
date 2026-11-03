@@ -80,30 +80,10 @@ async def test_create_session_starts_only_when_requested(monkeypatch, start: boo
         dispatch.assert_not_awaited()
 
 
-async def test_langsmith_cloud_session_is_private_and_has_no_repository(monkeypatch) -> None:
-    from openswe.threads.identity import ThreadIdentity
-
-    subject = f"user:{uuid7()}"
-    monkeypatch.setattr(
-        thread_runs, "get_profile", AsyncMock(return_value={"default_repo": "acme/private"})
-    )
-    monkeypatch.setattr(
-        thread_runs, "_resolve_requested_workspace", AsyncMock(return_value="default")
-    )
-    monkeypatch.setattr(thread_runs, "_ensure_dashboard_github_token", AsyncMock())
-    create = AsyncMock(return_value={"thread_id": "cloud-thread"})
-    monkeypatch.setattr(thread_runs, "create_dashboard_thread_record", create)
-    result = await thread_runs.create_dashboard_session(
-        thread_runs.SessionCreateBody(prompt="Research", visibility="public"), subject
-    )
-    assert result == "cloud-thread"
-    assert create.call_args.kwargs["visibility"] == "private"
-    assert create.call_args.kwargs["repo_config"] == {}
-    assert create.call_args.kwargs["repo_explicitly_none"] is True
-    assert ThreadIdentity(subject).github_login is None
-    with pytest.raises(HTTPException) as rejected:
+async def test_langsmith_only_session_requires_github() -> None:
+    with pytest.raises(HTTPException, match="Link GitHub") as rejected:
         await thread_runs.create_dashboard_session(
-            thread_runs.SessionCreateBody(prompt="Clone", repo="acme/private"), subject
+            thread_runs.SessionCreateBody(prompt="Research"), f"user:{uuid7()}"
         )
     assert rejected.value.status_code == 403
 
@@ -254,12 +234,10 @@ async def test_failed_run_start_drains_prefetches(monkeypatch: pytest.MonkeyPatc
         await history_finished.wait()
 
 
-@pytest.mark.parametrize("langsmith", [False, True])
 @pytest.mark.parametrize("local", [False, True])
 async def test_desktop_thread_keeps_authenticated_identity_on_resume(
     monkeypatch: pytest.MonkeyPatch,
     registry_db: None,
-    langsmith: bool,
     local: bool,
 ) -> None:
     monkeypatch.setattr(
@@ -270,9 +248,9 @@ async def test_desktop_thread_keeps_authenticated_identity_on_resume(
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={"default_repo": "acme/default"})
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
-    subject = f"user:{uuid7()}" if langsmith else "octocat"
+    subject = "octocat"
     bridge = await BridgeStore.register(
-        owner_id=subject if langsmith else "github:octocat",
+        owner_id="github:octocat",
         hostname="laptop.local",
         root_path="/Users/test/tasks",
         label=None,
@@ -294,20 +272,12 @@ async def test_desktop_thread_keeps_authenticated_identity_on_resume(
         "new-tid", subject, command, metadata={}, creating=True
     )
     config = first["params"]["config"]["configurable"]
-    if langsmith:
-        assert config["auth_provider"] == "langsmith"
-        assert config["user_id"] == subject.removeprefix("user:")
-        assert "github_login" not in config
-        assert "repo" not in config
-    else:
-        assert config["github_login"] == subject
-        assert "auth_provider" not in config
+    assert config["github_login"] == subject
+    assert "auth_provider" not in config
     metadata = created["metadata"]
     assert isinstance(metadata, dict)
     assert metadata["owner_login"] == subject
-    if langsmith:
-        assert metadata["owner_user_id"] == subject.removeprefix("user:")
-    assert metadata["visibility"] == ("private" if local or langsmith else "public")
+    assert metadata["visibility"] == ("private" if local else "public")
     if local:
         assert metadata["sandbox_id"] == bridge.sandbox_id
     else:
@@ -329,13 +299,8 @@ async def test_desktop_thread_keeps_authenticated_identity_on_resume(
         "new-tid", subject, followup, metadata=metadata
     )
     resumed = next_run["params"]["config"]["configurable"]
-    if langsmith:
-        assert resumed["auth_provider"] == "langsmith"
-        assert resumed["user_id"] == subject.removeprefix("user:")
-        assert "github_login" not in resumed
-    else:
-        assert resumed["github_login"] == subject
-        assert "auth_provider" not in resumed
+    assert resumed["github_login"] == subject
+    assert "auth_provider" not in resumed
 
 
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(

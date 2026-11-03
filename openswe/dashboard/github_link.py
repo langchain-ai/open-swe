@@ -1,4 +1,4 @@
-"""Linking a GitHub account to a LangSmith sign-in, which unlocks the coding features."""
+"""Linking the GitHub account required to use Open SWE after LangSmith sign-in."""
 
 import json
 from collections.abc import Mapping

@@ -73,7 +73,7 @@ function SlackRow({ user }: { user: SessionUser }) {
   )
 }
 
-/** Link (or relink) the signed-in person's GitHub account, which unlocks coding features. */
+/** Link (or relink) the GitHub account required to use Open SWE. */
 export function LinkGitHubButton({
   user,
   size = "xs",
@@ -115,7 +115,7 @@ function GitHubRow({ user }: { user: SessionUser }) {
       description={
         linked
           ? `Linked to @${user.github_login}. Coding features act as this account.`
-          : "Link your GitHub account to use coding features and return to your existing coding threads."
+          : "Link your GitHub account to use Open SWE or return to your existing account."
       }
       control={
         <div className="flex items-center gap-space-2">

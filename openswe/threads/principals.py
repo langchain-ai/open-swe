@@ -215,9 +215,7 @@ async def require_principal(request: Request) -> Principal:
     from openswe.dashboard.principal import DashboardPrincipal
 
     dashboard = DashboardPrincipal.from_session(session)
-    if request.url.path.startswith("/dashboard/api/"):
-        dashboard.authorize_path(request.url.path, request.method)
-    await dashboard.authorize()
+    await dashboard.authorize(path=request.url.path)
     principal = Principal.of_person(session)
     bind_audit_session(request, session)
     return principal

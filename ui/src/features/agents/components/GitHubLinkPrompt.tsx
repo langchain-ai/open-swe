@@ -11,7 +11,7 @@ import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import type { SessionUser } from "@/lib/api"
 import { LinkGitHubButton } from "@/features/settings/components/ConnectionsSection"
 
-/** Stands in for the coding features until the signed-in person links GitHub. */
+/** Blocks access until the signed-in person links GitHub. */
 export function GitHubLinkPrompt({ user }: { user: SessionUser }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -24,33 +24,29 @@ export function GitHubLinkPrompt({ user }: { user: SessionUser }) {
         <GithubLogoIcon size={32} weight="regular" aria-hidden />
         <div className="flex flex-col gap-space-2">
           <Text as="h1" variant="h3">
-            {user.requires_github_link
-              ? "Link GitHub to use Open SWE"
-              : "Link GitHub to start coding"}
+            Link GitHub to use Open SWE
           </Text>
           <Text as="p" variant="sm" color="secondary">
-            {user.requires_github_link
-              ? "GitHub is required to use Open SWE. If you've used Open SWE before, link the GitHub account you used then to return to your existing account, threads, and settings."
-              : "Coding agents clone repositories, push branches and open pull requests as you. Link your GitHub account to use them and return to your existing coding threads."}
+            GitHub is required to use Open SWE. If you've used Open SWE before,
+            link the GitHub account you used then to return to your existing
+            account, threads, and settings.
           </Text>
         </div>
         <LinkGitHubButton user={user} size="md" />
-        {user.requires_github_link && (
-          <Button
-            color="secondary"
-            variant="plain"
-            size="sm"
-            onClick={async () => {
-              await api.logout()
-              productAnalytics.reset()
-              clearCachedRepos()
-              qc.setQueryData(["session"], null)
-              navigate({ to: "/login" })
-            }}
-          >
-            Sign out
-          </Button>
-        )}
+        <Button
+          color="secondary"
+          variant="plain"
+          size="sm"
+          onClick={async () => {
+            await api.logout()
+            productAnalytics.reset()
+            clearCachedRepos()
+            qc.setQueryData(["session"], null)
+            navigate({ to: "/login" })
+          }}
+        >
+          Sign out
+        </Button>
       </Card>
     </div>
   )
