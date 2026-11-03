@@ -278,10 +278,8 @@ for (const review of [false, true]) {
     await expect(editor).toBeVisible();
     await editor.click();
     await editor.pressSequentially("Please ask @bob");
-    const option = page.getByRole("option", { name: /@bob/i }).first();
-    const name = (await option.textContent())?.match(/@(\S+)/)?.[1] ?? "bob";
-    await option.click();
-    await expect(editor.getByTitle(`@${name}`)).toBeVisible();
+    await page.getByRole("option", { name: /@bob/i }).first().click();
+    await expect(editor.getByTitle(/^@Bob$/)).toBeVisible();
     await editor.pressSequentially(" about this change");
     const notificationReceived = recipient.waitForResponse(
       (response) =>
