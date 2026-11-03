@@ -294,7 +294,7 @@ Later messages in that Slack thread, and Slack's Stop, go the same way.
 Trigger Server verifies the request as if Slack had sent it and hands the message to the channel, whose handler (`rt/slack.py`) asks the backend's `plan_slack_turn` what it starts; the backend builds the run from the request it remembered, as for its own Slack runs.
 A mention, a direct message or an explicit request redirects the thread's run in progress (`interrupt`); any other follow-up waits its turn behind it (`enqueue`), as on the backend's own Slack threads.
 The backend still answers `/slack/channel/events` for a deployment whose channel names it as an endpoint, until every deployment runs the handler.
-The agent replies with Open SWE's Slack tools (`reply="none"`), and the channel shows the run's status and Stop.
+The agent replies with Open SWE's Slack tools (`auto_post=False`), and the channel shows the run's status and Stop.
 It adds no reaction to the message that starts a run (`reactions=False`).
 
 The backend forwards to Trigger Server's Slack events URL (`TRIGGER_EVENTS_URL` in `openswe/slack/mda_forwarding.py`), the same on US LangSmith for every environment: Trigger Server routes each request by its Slack app.

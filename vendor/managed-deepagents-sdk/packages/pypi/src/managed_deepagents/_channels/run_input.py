@@ -18,77 +18,67 @@ from langchain_core.messages import (
 )
 
 from managed_deepagents._channels.runtime import is_json_value
+from managed_deepagents._channels.target import is_channel_target, names_origin
 from managed_deepagents._log import logger
 
 if TYPE_CHECKING:
     from langgraph_sdk.schema import MultitaskStrategy
 
-    from managed_deepagents._channels.types import ChannelDestination, ChannelReply, JsonValue
-    from managed_deepagents.schedules import ScheduleThreadConfig
+    from managed_deepagents._channels.types import ChannelReply, ChannelTarget, JsonValue
+    from managed_deepagents.schedules import ThreadConfig
 
 
 ChannelRunInput = str | BaseMessage | Mapping[str, object]
 """A user message's text, a message, or state such as ``{"messages": [...]}``."""
 
 
-class ChannelRunOptions(TypedDict, total=False):
-    """Run options a handler may set with its input.
+class ChannelRun(TypedDict):
+    """A run a handler starts with options: its input, and where and how it runs.
 
     Experimental: this may change in a minor release.
     """
 
-    context: Mapping[str, object]
+    input: ChannelRunInput
+    """The run's input: a user message's text, a message, or state such as
+    ``{"messages": [...]}``."""
+    thread: NotRequired[ThreadConfig]
+    """The thread the run starts on: ``{"mode": "ephemeral"}`` for a fresh
+    thread, deleted once the run ends, or ``{"mode": "persistent", "id":
+    "<uuid>"}`` for the thread with that id, kept across events. Omitted, the
+    thread MDA gives the handler, the event's conversation, as is a persistent
+    thread with its id. GitHub, Linear, HTTP and Slack channels only."""
+    auto_post: NotRequired[bool | ChannelTarget]
+    """Where the run posts its final answer. ``True`` is the event's
+    conversation and ``False`` nowhere. A ``ChannelTarget`` names a conversation;
+    for now only the event's own, such as a ``GitHubChannelTarget`` for its
+    issue or a run's ``channel.target`` passed back, which is ``True``.
+    Omitted, the conversation's run posts as the channel's ``auto_post`` says,
+    and a run on any other thread posts nothing. GitHub, Linear, HTTP and
+    Slack channels only."""
+    multitask_strategy: NotRequired[MultitaskStrategy]
+    """What the run does while its thread already runs, overriding the
+    channel's ``multitask_strategy`` for this run. GitHub, Linear, HTTP and
+    Slack channels only."""
+    context: NotRequired[Mapping[str, object]]
     """Run context, as ``agent.invoke(input, context=...)`` takes it."""
-    metadata: Mapping[str, JsonValue]
+    metadata: NotRequired[Mapping[str, JsonValue]]
     """Metadata for the run, such as where it came from, to find it by in
     LangSmith. Keys are letters, digits, ``_``, ``.`` or ``-`` and start with a
     letter. Keys the Agent Server and LangSmith set are reserved: those starting
     with ``mda_``, ``langgraph_`` or ``ls_``, and ids such as ``thread_id``,
     ``session_id``, ``run_id`` or ``user_id``."""
-    webhook: str
+    webhook: NotRequired[str]
     """A URL the Agent Server POSTs the finished run to (its status, metadata,
     values and any error), as LangGraph's ``runs.create(webhook=...)`` does: from
     the server, so it reaches you even if the deployment restarts. http(s),
     without credentials in it."""
-    thread: ScheduleThreadConfig
-    """The thread the run starts on, as ``define_schedule`` takes it:
-    ``{"mode": "ephemeral"}`` for a fresh thread, deleted once the run ends, or
-    ``{"mode": "persistent", "id": "<uuid>"}`` for the thread with that id, kept
-    across events. Omitted, the run starts on the event's conversation. GitHub,
-    Linear, HTTP and Slack channels only."""
-    reply: ChannelReply
-    """Whether a run on the event's conversation posts its final answer there,
-    overriding the channel's ``reply`` for this run. Only without ``thread``."""
-    multitask_strategy: MultitaskStrategy
-    """What the run does while its thread already runs, overriding the
-    channel's ``multitask_strategy`` for this run. GitHub, Linear, HTTP and
-    Slack channels only."""
-    deliver_to: ChannelRunDeliveryTarget
-    """Where a run on a ``thread`` posts its final answer; omitted, nowhere.
-    Only with ``thread``, and for now only to the event's own conversation:
-    ``{"channel": "<this channel>", "to": {"type": "current_thread"}}``."""
 
 
-class ChannelRunDeliveryTarget(TypedDict):
-    """Where a run on a thread of the handler's choosing posts its final answer.
-
-    The shape ``define_schedule``'s ``deliver_to`` takes, whose ``to`` may also
-    be ``{"type": "current_thread"}``: the conversation the event came from.
-    """
-
-    channel: str
-    to: ChannelDestination
-
-
-ChannelRunResult = (
-    ChannelRunInput
-    | tuple[ChannelRunInput, ChannelRunOptions]
-    | list[tuple[ChannelRunInput, ChannelRunOptions]]
-)
-"""What a channel handler may return to start a run: the input, the input with
-run options, or, on GitHub, Linear, HTTP and Slack channels, a list of
-``(input, options)`` to start several runs, at most one of them on the event's
-conversation.
+ChannelRunResult = ChannelRunInput | list[ChannelRun]
+"""What a channel handler may return to start a run: its input, as one run on
+the event's conversation, or a list of ``ChannelRun`` to set run options. On
+GitHub, Linear, HTTP and Slack channels a list may start several runs, at most
+one of them on the event's conversation; elsewhere it holds one run.
 
 Experimental: this may change in a minor release.
 """
@@ -181,78 +171,106 @@ def _named(value: object) -> str:
 def normalize_run_input(value: object) -> NormalizedRunInput | None:
     """Normalize what a handler returned, as one run on the event's conversation.
 
-    ``None`` starts nothing; anything else that is not valid input raises
-    ``InvalidRunInput``, a ``TypeError``. A run option that is ``None`` is not set.
-    The options that choose a thread are refused: only ``normalize_run_inputs``
-    takes them.
+    Its input alone, or a list of one run with only ``context``, ``metadata``
+    or ``webhook``. ``None`` or an empty list starts nothing; anything else that
+    is not valid input raises ``InvalidRunInput``, a ``TypeError``. A run option
+    that is ``None`` is not set. The options that choose a thread are refused:
+    only ``normalize_run_inputs`` takes them.
     """
     if value is None:
         return None
-    return _normalize_result(value, None)
+    if not isinstance(value, list):
+        return _plain_run(value)
+    runs = [_run_object(item, None) for item in cast("list[object]", value)]
+    if len(runs) > 1:
+        raise InvalidRunInput("this channel starts at most one run")
+    return runs[0] if runs else None
 
 
 class RunChannel(TypedDict):
-    """The channel a handler's runs start from, which ``deliver_to`` may name."""
+    """The channel a handler's runs start from, which a run's ``auto_post`` names."""
 
     name: str
     provider: str
+    conversation_thread_id: NotRequired[str | None]
+    """The thread of the event's conversation. A run on a persistent thread with
+    this id is the conversation's run. Without it, only a run without
+    ``thread`` is."""
+    origin: NotRequired[ChannelTarget | None]
+    """The conversation the event came from, which a run's ``auto_post`` may
+    name. Without it, a run's target is refused."""
 
 
 def normalize_run_inputs(value: object, channel: RunChannel) -> list[NormalizedRunInput]:
     """Normalize what a handler of a GitHub, Linear, HTTP or Slack channel returned.
 
-    ``None`` or an empty list starts nothing. A list starts a run per
-    ``(input, options)`` in it. Options may choose each run's thread, reply,
-    ``multitask_strategy`` and ``deliver_to``. At most one run may start on the
-    event's conversation (one without ``thread``). Anything else raises
+    ``None`` or an empty list starts nothing. Its input alone starts a run on
+    the event's conversation; a list starts a run per run object in it, each
+    of which may choose its thread, ``auto_post`` and ``multitask_strategy``.
+    At most one run may start on the event's conversation: one without
+    ``thread``, or with the conversation's own. Anything else raises
     ``InvalidRunInput``.
     """
     if value is None:
         return []
     if not isinstance(value, list):
-        return [_normalize_result(value, channel)]
-    runs = [_normalize_result(item, channel, listed=True) for item in cast("list[object]", value)]
+        return [_plain_run(value)]
+    runs = [_run_object(item, channel) for item in cast("list[object]", value)]
     if sum("thread" not in run for run in runs) > 1:
         raise InvalidRunInput("at most one run may start on the event's conversation")
     return runs
 
 
-def starts_on_conversation(result: object) -> bool:
-    """Whether a handler's result starts a run on the event's conversation:
-    anything but nothing, or a list whose every run has a ``thread``."""
-    if result is None:
+def starts_on_conversation(result: object, conversation_thread_id: str | None = None) -> bool:
+    """Whether a handler's result starts a run on the event's conversation: its
+    input alone, or a run in a list without ``thread`` or with the
+    conversation's own. A tuple, which is refused, starts nothing."""
+    if result is None or isinstance(result, tuple):
         return False
     if not isinstance(result, list):
         return True
     return any(
-        not (
-            isinstance(item, tuple)
-            and len(item) > 1
-            and isinstance(item[1], Mapping)
-            and item[1].get("thread") is not None
-        )
+        _starts_on_conversation(item, conversation_thread_id)
         for item in cast("list[object]", result)
     )
 
 
-def _normalize_result(
-    value: object, channel: RunChannel | None, *, listed: bool = False
-) -> NormalizedRunInput:
+def _starts_on_conversation(item: object, conversation_thread_id: str | None) -> bool:
+    if not _is_run(item):
+        return False
+    thread = cast("Mapping[str, object]", item).get("thread")
+    if thread is None:
+        return True
+    thread_id = thread.get("id") if isinstance(thread, Mapping) else None
+    return (
+        isinstance(thread, Mapping)
+        and thread.get("mode") == "persistent"
+        and isinstance(thread_id, str)
+        and conversation_thread_id is not None
+        and thread_id.lower() == conversation_thread_id.lower()
+    )
+
+
+_LIST_ITEM = 'each run in a list must be an object with input, such as { input: "..." }'
+
+
+def _is_run(value: object) -> bool:
+    """A run in a list: a mapping with ``input``."""
+    return isinstance(value, Mapping) and value.get("input") is not None
+
+
+def _plain_run(value: object) -> NormalizedRunInput:
+    """A handler's input alone: text, a message, or state. A tuple, the shape
+    handlers returned run options in before, is refused."""
     if isinstance(value, tuple):
-        items = cast("tuple[object, ...]", value)
-        if len(items) not in (1, 2):
-            raise InvalidRunInput("run input must be (input, options)")
-        normalized = _normalize_input(items[0])
-        return normalized if len(items) == 1 else _with_options(normalized, items[1], channel)
-    if listed:
-        raise InvalidRunInput("each run in a list must be (input, options)")
+        raise InvalidRunInput(_LIST_ITEM)
     return _normalize_input(value)
 
 
 _RUN_OPTIONS = frozenset({"context", "metadata", "webhook"})
-# The options that choose where a run starts and answers; GitHub, Linear, HTTP and
-# Slack channels only.
-_ROUTING_OPTIONS = frozenset({"thread", "reply", "multitask_strategy", "deliver_to"})
+# The options that choose where a run starts and answers; GitHub, Linear, HTTP
+# and Slack channels only.
+_ROUTING_OPTIONS = frozenset({"thread", "auto_post", "multitask_strategy"})
 _MULTITASK_STRATEGIES = frozenset({"enqueue", "interrupt", "rollback", "reject"})
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
 # The metadata keys a handler may set.
@@ -267,64 +285,89 @@ _RESERVED_METADATA_KEY = re.compile(
 )
 
 
-def _with_options(
-    normalized: NormalizedRunInput, options: object, channel: RunChannel | None
-) -> NormalizedRunInput:
-    if not isinstance(options, Mapping):
-        raise InvalidRunInput("run options must be a mapping")
+def _run_object(value: object, channel: RunChannel | None) -> NormalizedRunInput:
+    """A run in a list: its input with its options."""
+    if not _is_run(value):
+        raise InvalidRunInput(_LIST_ITEM)
+    run = cast("Mapping[str, object]", value)
     allowed = _RUN_OPTIONS if channel is None else _RUN_OPTIONS | _ROUTING_OPTIONS
-    extra = sorted(str(key) for key in options if key not in allowed)
+    extra = sorted(str(key) for key in run if key != "input" and key not in allowed)
     if extra:
         raise InvalidRunInput(
             f"unsupported run option {_named(', '.join(extra))}; use "
             + ("context, metadata or webhook" if channel is None else ", ".join(sorted(allowed)))
         )
-    result: NormalizedRunInput = {**normalized}
-    context = options.get("context")
+    result: NormalizedRunInput = {**_normalize_input(run["input"])}
+    context = run.get("context")
     if context is not None:
         result["context"] = _run_context(context)
-    metadata = options.get("metadata")
+    metadata = run.get("metadata")
     if metadata is not None:
         result["metadata"] = _run_metadata(metadata)
-    webhook = options.get("webhook")
+    webhook = run.get("webhook")
     if webhook is not None:
         result["webhook"] = _run_webhook(webhook)
     if channel is not None:
-        _with_routing(result, cast("Mapping[str, object]", options), channel)
+        _with_routing(result, run, channel)
     return result
 
 
 def _with_routing(
-    result: NormalizedRunInput, options: Mapping[str, object], channel: RunChannel
+    result: NormalizedRunInput, run: Mapping[str, object], channel: RunChannel
 ) -> None:
     """Check the options that choose a run's thread and where it answers.
 
-    ``reply`` belongs to a run on the event's conversation, and ``deliver_to`` to
-    a run on a thread of the handler's choosing.
+    A persistent thread with the conversation's id is the conversation, so the
+    run has no ``thread``. ``auto_post`` overrides the channel's on the
+    conversation; elsewhere ``True`` posts the answer on the conversation.
     """
-    thread = options.get("thread")
+    thread = run.get("thread")
     if thread is not None:
-        result["thread"] = _run_thread(thread)
-    reply = options.get("reply")
-    if reply is not None:
-        if thread is not None:
-            raise InvalidRunInput("reply is only for a run on the event's conversation")
-        if reply not in ("auto", "none"):
-            raise InvalidRunInput('run reply must be "auto" or "none"')
-        result["reply"] = cast("ChannelReply", reply)
-    strategy = options.get("multitask_strategy")
+        run_thread = _run_thread(thread)
+        conversation = channel.get("conversation_thread_id")
+        if not (
+            run_thread["mode"] == "persistent"
+            and conversation is not None
+            and run_thread["id"] == conversation.lower()
+        ):
+            result["thread"] = run_thread
+    auto_post = run.get("auto_post")
+    if auto_post is not None:
+        posts = _posts_on_conversation(auto_post, channel)
+        if "thread" not in result:
+            result["reply"] = "auto" if posts else "none"
+        elif posts:
+            result["deliver_to_conversation"] = True
+    strategy = run.get("multitask_strategy")
     if strategy is not None:
         if strategy not in _MULTITASK_STRATEGIES:
             raise InvalidRunInput(
                 "run multitask_strategy must be enqueue, interrupt, rollback or reject"
             )
         result["multitask_strategy"] = cast("MultitaskStrategy", strategy)
-    deliver_to = options.get("deliver_to")
-    if deliver_to is not None:
-        if thread is None:
-            raise InvalidRunInput("deliver_to is only for a run with a thread")
-        _check_deliver_to(deliver_to, channel)
-        result["deliver_to_conversation"] = True
+
+
+_BAD_AUTO_POST = "run autoPost must be true, false, or a target on this channel for now"
+
+
+def _posts_on_conversation(auto_post: object, channel: RunChannel) -> bool:
+    """Whether a run's ``auto_post`` is the event's conversation; ``False`` is nowhere.
+
+    A target counts only as the conversation the event came from: GitHub, Linear
+    and HTTP channels post nowhere else yet.
+    """
+    if isinstance(auto_post, bool):
+        return auto_post
+    origin = channel.get("origin")
+    if (
+        not is_channel_target(auto_post)
+        or origin is None
+        or auto_post.provider != channel["provider"]
+        or auto_post.channel not in (None, channel["name"], channel["provider"])
+        or not names_origin(auto_post, origin)
+    ):
+        raise InvalidRunInput(_BAD_AUTO_POST)
+    return True
 
 
 def _run_thread(thread: object) -> RunThread:
@@ -344,21 +387,6 @@ def _run_thread(thread: object) -> RunThread:
     raise InvalidRunInput(
         'run thread must be {"mode": "ephemeral"} or {"mode": "persistent", "id": "<uuid>"}'
     )
-
-
-def _check_deliver_to(deliver_to: object, channel: RunChannel) -> None:
-    """Only the event's own conversation, for now."""
-    to = deliver_to.get("to") if isinstance(deliver_to, Mapping) else None
-    if (
-        not isinstance(deliver_to, Mapping)
-        or set(deliver_to) != {"channel", "to"}
-        or deliver_to.get("channel") not in (channel["name"], channel["provider"])
-        or not isinstance(to, Mapping)
-        or dict(to) != {"type": "current_thread"}
-    ):
-        raise InvalidRunInput(
-            'run deliver_to must be {"channel": "<this channel>", "to": {"type": "current_thread"}}'
-        )
 
 
 _WEBHOOK_PREFIX = re.compile(r"https?://", re.IGNORECASE)

@@ -15,7 +15,7 @@ from rt.slack import start_turn
 channel = channels.slack(
     # The backend decides what reaches the channel, so every forwarded message counts.
     trigger_mode="all",
-    reply="none",
+    auto_post=False,
     # No 👀 on the message that starts a run.
     reactions=False,
     # The handler picks each message's strategy; anything else redirects the work in progress.

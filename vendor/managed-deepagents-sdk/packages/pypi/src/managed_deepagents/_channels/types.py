@@ -62,6 +62,8 @@ ChannelDestination = (
     | ChannelDestinationProviderThread
     | ChannelDestinationProviderConversation
 )
+"""Where a schedule's deprecated ``deliver_to`` posts; ``auto_post`` takes a
+``ChannelTarget`` instead."""
 
 
 MessageContent: TypeAlias = str | list[ContentBlock]
@@ -130,6 +132,60 @@ class ChannelInfo:
     event: ChannelEvent | None
     #: The provider's payload, in the run its message started only.
     raw_event: JsonValue = None
+    #: The provider conversation the channel posts to, in every run of the
+    #: thread. ``None`` for a provider without a typed target, such as
+    #: ``channels.http()``.
+    target: ChannelTarget | None = None
+
+
+@dataclass(frozen=True)
+class SlackChannelTarget:
+    """A Slack conversation: a channel, DM or group, and its thread."""
+
+    #: The conversation id (``C…``, ``D…`` or ``G…``), Slack's ``channel``.
+    conversation_id: str
+    #: The thread's root message, Slack's ``thread_ts``.
+    thread_ts: str | None = None
+    #: Whether the conversation is a Slack code channel.
+    code_channel: bool = False
+    provider: Literal["slack"] = "slack"
+    #: The channel's name, needed only to tell apart two channels of one
+    #: provider. ``None`` is the channel the target is used with.
+    channel: str | None = None
+
+
+@dataclass(frozen=True)
+class GitHubChannelTarget:
+    """A GitHub issue or pull request."""
+
+    #: ``owner/name``.
+    repository: str
+    #: The issue or pull request number.
+    number: int
+    provider: Literal["github"] = "github"
+    #: The channel's name; see ``SlackChannelTarget.channel``.
+    channel: str | None = None
+
+
+@dataclass(frozen=True)
+class LinearChannelTarget:
+    """A Linear issue, and the comment thread or agent session on it."""
+
+    organization_id: str
+    issue_id: str
+    #: The issue's identifier, such as ``ENG-123``.
+    identifier: str | None = None
+    #: The root comment of the thread replies go to.
+    comment_id: str | None = None
+    #: The agent session replies go to.
+    session_id: str | None = None
+    provider: Literal["linear"] = "linear"
+    #: The channel's name; see ``SlackChannelTarget.channel``.
+    channel: str | None = None
+
+
+ChannelTarget: TypeAlias = SlackChannelTarget | GitHubChannelTarget | LinearChannelTarget
+"""Where a channel posts, by provider; narrow it on ``provider`` or its class."""
 
 
 class PostedChannelMessageRequired(TypedDict):
