@@ -11,8 +11,9 @@ import { cn } from "@/lib/utils"
 export type ComposerCommandItem =
   | {
       id: string
-      type: "slack-user"
+      type: "person"
       userId: string
+      name: string
       label: string
       description: string
     }
@@ -124,7 +125,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
                   className="size-3.5 shrink-0 text-icon-tertiary"
                   weight="regular"
                 />
-              ) : item.type === "slack-user" ? (
+              ) : item.type === "person" ? (
                 <UserIcon
                   className="size-3.5 shrink-0 text-icon-tertiary"
                   weight="regular"

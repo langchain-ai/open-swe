@@ -3534,6 +3534,56 @@
         ],
         "type": "string"
       },
+      "MentionDirectory": {
+        "properties": {
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/MentionablePerson"
+            },
+            "title": "People",
+            "type": "array"
+          }
+        },
+        "required": [
+          "people"
+        ],
+        "title": "MentionDirectory",
+        "type": "object"
+      },
+      "MentionablePerson": {
+        "properties": {
+          "avatar_url": {
+            "title": "Avatar Url",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "involved": {
+            "title": "Involved",
+            "type": "boolean"
+          },
+          "login": {
+            "title": "Login",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "login",
+          "avatar_url",
+          "involved"
+        ],
+        "title": "MentionablePerson",
+        "type": "object"
+      },
       "MergeAction": {
         "properties": {
           "action": {
@@ -7757,50 +7807,6 @@
           "events"
         ],
         "title": "SlackTrigger",
-        "type": "object"
-      },
-      "SlackUserDirectory": {
-        "properties": {
-          "users": {
-            "items": {
-              "$ref": "#/components/schemas/SlackUserOption"
-            },
-            "title": "Users",
-            "type": "array"
-          }
-        },
-        "required": [
-          "users"
-        ],
-        "title": "SlackUserDirectory",
-        "type": "object"
-      },
-      "SlackUserOption": {
-        "properties": {
-          "display_name": {
-            "title": "Display Name",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "real_name": {
-            "title": "Real Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "display_name",
-          "real_name"
-        ],
-        "title": "SlackUserOption",
         "type": "object"
       },
       "SlashCommandResponse": {
@@ -14401,6 +14407,56 @@
         ]
       }
     },
+    "/dashboard/api/people/mentionable": {
+      "get": {
+        "description": "People to offer for ``@``, those involved in ``thread_id`` first; a new chat involves no one.",
+        "operationId": "api_get_mentionable_people_dashboard_api_people_mentionable_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "thread_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MentionDirectory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Mentionable People",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
     "/dashboard/api/plan/{thread_id}": {
       "get": {
         "operationId": "get_plan_dashboard_api_plan__thread_id__get",
@@ -19714,33 +19770,6 @@
         "tags": [
           "dashboard",
           "slack",
-          "slack"
-        ]
-      }
-    },
-    "/dashboard/api/slack/users": {
-      "get": {
-        "operationId": "api_slack_users_dashboard_api_slack_users_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SlackUserDirectory"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Slack Users",
-        "tags": [
-          "dashboard",
           "slack"
         ]
       }

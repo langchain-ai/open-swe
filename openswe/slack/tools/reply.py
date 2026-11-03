@@ -44,6 +44,8 @@ from openswe.slack.records import SlackRun, SlackThread, store_slack_message_run
 from openswe.slack.review_links import preserve_github_links as github_link_delivery
 from openswe.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
 from openswe.slack.tools.read_thread_messages import fetch_and_format_thread
+from openswe.users import User
+from openswe.users.mentions import PersonMention
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import thread_metadata
@@ -117,12 +119,15 @@ async def send_slack_reply(
     option_user_id: str | None = None,
 ) -> dict[str, Any]:
     """Post a reply in the run's Slack thread."""
+    message = await PersonMention.to_slack(message)
+    if option_user_id is not None and (person := await User.resolve(option_user_id)):
+        option_user_id = person.slack_user_id or option_user_id
     if option_user_id is not None and (
         not re.fullmatch(r"[UW][A-Z0-9]+", option_user_id) or not options or blocks is not None
     ):
         return {
             "success": False,
-            "error": "option_user_id requires a canonical Slack member ID (U/W followed by uppercase letters or digits), options, and no custom blocks",
+            "error": "option_user_id requires a person with a linked Slack account (their Open SWE user id or Slack member ID), options, and no custom blocks",
         }
     config = get_config()
     cfg = RunConfig.from_config(config)

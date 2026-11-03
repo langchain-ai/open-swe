@@ -271,7 +271,12 @@ async def assign_human_reviewer(
         return _failure("This pull request has no open review request to assign a reviewer to.")
     cfg = RunConfig.from_config(get_config())
     thread_id = cfg.thread_id or ""
-    login = github_login.strip().lstrip("@")
+    reviewer = await User.resolve(github_login)
+    login = (
+        reviewer.github_login
+        if reviewer is not None and reviewer.github_login
+        else github_login.strip().lstrip("@")
+    )
     if caller := cfg.mcp_caller:
         person = await User.for_login("github", caller)
         if person is None or not (

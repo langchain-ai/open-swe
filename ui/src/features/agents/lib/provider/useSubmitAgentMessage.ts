@@ -15,6 +15,7 @@ import {
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
 import { reportError } from "@/lib/errorReporting"
+import { opensWithPersonMention } from "@/features/agents/components/composer/composerMentions"
 
 export interface SubmitAgentMessageVariables extends SendAgentMessageVariables {
   /** The stream can reject after the optimistic mutation has already resolved. */
@@ -96,8 +97,10 @@ export function useSubmitAgentMessage(threadId: string) {
         )
       updateThread((thread) => setPendingMessage(thread, pendingMessage))
       // Set before the start is fired: a rejection below flips it to error and
-      // nothing may flip it back afterwards.
-      setAgentThreadStatus(queryClient, threadId, "running")
+      // nothing may flip it back afterwards. A message that opens by mentioning
+      // someone is for them, and the server starts no run for it.
+      if (!opensWithPersonMention(vars.content))
+        setAgentThreadStatus(queryClient, threadId, "running")
 
       const configurable = modelConfigurable(
         { modelId: vars.model_id, effort: vars.effort },

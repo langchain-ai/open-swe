@@ -68,9 +68,13 @@ def dashboard_input_context(
     sender_id: str,
     relayed_from: str | None,
     replies: Sequence[PassageReply] = (),
+    *,
+    addressed_to_agent: bool = True,
 ) -> InputMessageContext:
     """The envelope of a dashboard send: typed on Web, or relayed by another agent thread."""
     data: dict[str, FieldValue | FieldValues | list[FieldValues]] = {}
+    if not addressed_to_agent:
+        data["addressed_to_agent"] = "false"
     if replies:
         data["reply"] = [reply.fields() for reply in replies]
     context: InputMessageContext = {"sender_id": sender_id, "surface": "web", "kind": "human"}

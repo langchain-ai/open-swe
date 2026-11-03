@@ -1,7 +1,7 @@
 import { Button } from "@langchain/macaw-components/Button"
-import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useRef } from "react"
 
+import { PersonMentionTextarea } from "@/components/PersonMentionTextarea"
 import { SubmitShortcut } from "@/components/SubmitShortcut"
 import { useReviewPage } from "@/features/reviews/page/store"
 
@@ -54,8 +54,8 @@ export function ReplyBox({
     )
   return (
     <div className="flex flex-col gap-space-2">
-      <Textarea
-        ref={(node) => {
+      <PersonMentionTextarea
+        textareaRef={(node) => {
           if (!node || !focusNext.current) return
           focusNext.current = false
           node.focus({ preventScroll: true })
@@ -65,7 +65,7 @@ export function ReplyBox({
         rows={3}
         resize="vertical"
         value={body}
-        onChange={(text) => setDraft(threadId, text)}
+        onValueChange={(text) => setDraft(threadId, text)}
         onKeyDown={(event) => {
           if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
             event.preventDefault()

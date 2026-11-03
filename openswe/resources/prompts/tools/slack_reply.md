@@ -39,7 +39,7 @@ Do not add no-op options such as "Just discussing", "Do nothing", or "Ignore" â€
 Do not add options such as "Reply in Slack" or "Tell me more" that merely ask the user to type a reply; they can already reply manually.
 Do not invent choices for open-ended questions.
 
-When the decision belongs to a specific person, set `option_user_id` to their Slack user ID (the `U...` ID, not their name or GitHub login).
+When the decision belongs to a specific person, set `option_user_id` to their Open SWE user id or Slack user ID (the `U...` ID), not their name or GitHub login.
 This restricts all option buttons to that person server-side; an @mention alone does not.
 Use the intended decision-maker, even when someone else triggered the run.
 Omit `option_user_id` only for genuinely shared choices that anyone may answer.

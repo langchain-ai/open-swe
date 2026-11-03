@@ -1,6 +1,7 @@
 List surfaced threads by locator, participant, admin mode, status, source, or text.
 Pass the caller's own Claude Code session ID as `query` to get the thread mirroring that session.
 Pass a canonical GitHub pull request URL as `query` to find accessible threads linked to that PR, including the original implementation conversation.
+Pass `participant` (a GitHub login or Open SWE user id) to list another person's threads.
 By default, results are limited to threads you own or participate in; pass `all_users=True` to search other authors' accessible threads as well.
 Follow `has_more` with `offset` to page through matches.
 `summary_only=True` returns compact metadata and the last available assistant outcome as `final_message`, capped at 500 characters (null if unavailable); this defaults on for `scope="automation"`.

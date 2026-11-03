@@ -1963,3 +1963,59 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
     assert command.event.sender.login == "teammate"
     assert "also check the tests" in command.event.text
     assert updates[-1]["participant_logins"] == {"teammate": True}
+
+
+async def test_a_message_opening_with_a_mention_is_recorded_without_starting_a_run(
+    monkeypatch, registry_db: None
+) -> None:
+    class FakeThreads:
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            pass
+
+        async def get_state(self, thread_id: str) -> dict[str, object]:
+            return {"values": {"messages": []}}
+
+    class FakeRuns:
+        async def get(self, thread_id: str, run_id: str) -> dict[str, str]:
+            raise AssertionError("an idle thread has no run to read")
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    appended: list[object] = []
+
+    async def fake_append(thread_id: str, commands) -> AppendResult:
+        appended.extend(commands)
+        return AppendResult(versions=[1], events=[])
+
+    dispatch = AsyncMock()
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "append", fake_append)
+    monkeypatch.setattr(thread_runs, "dispatch_agent_run", dispatch)
+    monkeypatch.setattr("openswe.utils.thread_ops.langgraph_client", lambda: FakeClient())
+    text = f"<@user:{uuid7()}|Bob> can you take this one?"
+
+    result = await thread_runs.steer_running_thread(
+        "tid",
+        "teammate",
+        {
+            "method": "run.start",
+            "params": {"input": {"messages": [{"role": "user", "content": text, "id": "m1"}]}},
+        },
+        metadata={"source": "slack", "transcript": "v2"},
+        turn=None,
+        for_people=True,
+    )
+
+    assert result["result"]["steered"] is False
+    requested, settled = appended
+    assert requested.event.type == "turn.requested"
+    assert requested.event.message_id == "m1"
+    assert settled.event.type == "turn.completed"
+    assert settled.event.turn_id == requested.event.turn_id
+    [queued] = await QueuedMessage.for_thread("tid")
+    assert queued.passive
+    assert "source" not in queued.content
+    assert await thread_runs.dispatch_pending_follow_ups("tid", "teammate", {}, client=None) is None
+    dispatch.assert_not_awaited()

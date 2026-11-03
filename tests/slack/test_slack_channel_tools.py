@@ -1,4 +1,6 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 
@@ -37,7 +39,8 @@ def member_run(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_list_members_preserves_pagination_and_only_exposes_public_identity(
     slack_api: SlackAPI, member_run: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value="octocat"))
+    octocat = SimpleNamespace(id=UUID(int=7), github_login="octocat")
+    monkeypatch.setattr(User, "for_identities", AsyncMock(return_value={"U123": octocat}))
     slack_api.respond({"ok": True, "channel": {"id": "C123", "is_private": True}})
     slack_api.respond({"ok": True, "members": [], "response_metadata": {"next_cursor": "more"}})
     assert await tools.slack_list_channel_members("C123") == {
@@ -68,6 +71,7 @@ async def test_list_members_preserves_pagination_and_only_exposes_public_identit
         "members": [
             {
                 "id": "U123",
+                "user_id": f"user:{UUID(int=7)}",
                 "name": "Ada",
                 "github_login": "octocat",
                 "status_text": "On vacation",
@@ -122,7 +126,7 @@ async def test_list_members_rejects_malformed_pages(
 async def test_list_members_keeps_unknown_identity_when_profile_lookup_fails(
     slack_api: SlackAPI, member_run: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value=None))
+    monkeypatch.setattr(User, "for_identities", AsyncMock(return_value={}))
     slack_api.respond({"ok": True, "channel": {"id": "C123"}})
     slack_api.respond({"ok": True, "members": ["U123"]})
     slack_api.respond({"ok": False, "error": "user_not_found"})
@@ -133,6 +137,7 @@ async def test_list_members_keeps_unknown_identity_when_profile_lookup_fails(
         "members": [
             {
                 "id": "U123",
+                "user_id": None,
                 "name": "U123",
                 "github_login": None,
                 "status_text": None,

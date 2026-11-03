@@ -44,6 +44,7 @@ from openswe.threads.summary import (
     _now_ms,
 )
 from openswe.transcript.turns import fail_unstarted_turn, steer_target
+from openswe.users.mentions import PersonMention
 from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import thread_metadata
@@ -234,6 +235,26 @@ async def proxy_dashboard_thread_commands(
     )
     offloading = offload_requested(start_params)
     transcribed = metadata.get("transcript") == TRANSCRIPT_VERSION
+    if (
+        method == "run.start"
+        and transcribed
+        and not creating
+        and not principal.machine
+        and not relayed_from
+        and not offloading
+        and PersonMention.leads(mentions.text)
+    ):
+        handled = await steer_running_thread(
+            thread_id,
+            login,
+            parsed,
+            metadata=metadata,
+            turn=await steer_target(thread_id) if thread_busy else None,
+            email=email,
+            for_people=True,
+        )
+        mentions.dispatch()
+        return 200, json.dumps(handled).encode(), "application/json"
     if method == "run.start" and thread_busy:
         if offloading:
             raise HTTPException(409, "offloading requires an idle conversation")

@@ -1,8 +1,10 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { Kbd } from "@langchain/macaw-components/Kbd"
-import { Textarea } from "@langchain/macaw-components/Textarea"
 
+import { PersonMentionTextarea } from "@/components/PersonMentionTextarea"
 import { useShortcutLabel } from "@/lib/hotkeys"
+import { tagPeople, useMentionablePeople } from "@/lib/people"
+import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
 import {
   buildCommentPayload,
   readableRangeLabel,
@@ -37,6 +39,8 @@ export function Composer({
   const body = useReviewPage((state) => state.composerText)
   const setBody = useReviewPage((state) => state.setComposerText)
   const askAboutLines = useAskAboutLines(pr)
+  const chatThreadId = useReviewChat(pr).data?.thread_id ?? undefined
+  const people = useMentionablePeople(chatThreadId, body.includes("@"))
   const askKey = useShortcutLabel("mod+enter")
   const addKey = useShortcutLabel("mod+shift+enter")
   const close = () => setComposer(null)
@@ -48,7 +52,11 @@ export function Composer({
     })
   }
   const ask = () => {
-    void askAboutLines(path, range, body.trim())
+    void askAboutLines(
+      path,
+      range,
+      tagPeople(body.trim(), people.data?.people ?? [])
+    )
     close()
   }
   return (
@@ -63,9 +71,10 @@ export function Composer({
         <p className="mb-space-1 text-secondary">
           Comment on {readableRangeLabel(range)}
         </p>
-        <Textarea
+        <PersonMentionTextarea
+          threadId={chatThreadId}
           size="md"
-          ref={(node) => {
+          textareaRef={(node) => {
             // Focus once, as it opens; without moving the diff, which already scrolled to it.
             if (!node || focused.has(target)) return
             focused.add(target)
@@ -76,7 +85,7 @@ export function Composer({
           resize="vertical"
           value={body}
           placeholder="Leave a comment, or ask Open SWE about these lines"
-          onChange={setBody}
+          onValueChange={setBody}
           onKeyDown={(event) => {
             if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
               event.preventDefault()

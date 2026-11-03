@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
-from openswe.dashboard.oauth import bind_audit_session, decode_upload_ticket
+from openswe.dashboard.oauth import bind_audit_session, decode_upload_ticket, session_user_id
 from openswe.github.pull_request_checks import PullRequestState
 from openswe.github.pull_request_context import PullRequestFixScope
 from openswe.github.token_auth import bearer_github_token
@@ -64,6 +64,7 @@ from openswe.threads.listing import (
     unpin_dashboard_thread,
 )
 from openswe.threads.machine_reads import machine_thread, machine_threads
+from openswe.threads.mention_directory import MentionDirectory
 from openswe.threads.principals import PrincipalDep
 from openswe.threads.proxy import (
     proxy_dashboard_thread_commands,
@@ -317,6 +318,20 @@ async def api_get_thread_queued_messages(
 ) -> list[QueuedPreview]:
     return await get_dashboard_thread_queued_messages(
         thread_id, session["sub"], email=session.get("email")
+    )
+
+
+@router.get("/people/mentionable")
+async def api_get_mentionable_people(
+    thread_id: str = "", session: dict[str, Any] = SESSION_DEP
+) -> MentionDirectory:
+    """People to offer for ``@``, those involved in ``thread_id`` first; a new chat involves no one."""
+    thread = await THREADS.get(thread_id) if thread_id else None
+    metadata = dict(thread.metadata) if thread is not None else {}
+    if thread is not None:
+        assert_thread_readable(metadata, session["sub"], session.get("email"))
+    return await MentionDirectory.for_conversation(
+        session_user_id(session), thread_id if thread is not None else "", metadata
     )
 
 

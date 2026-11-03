@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query"
 import { PlusIcon, XIcon } from "@langchain/macaw-components/icons"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Banner } from "@langchain/macaw-components/Banner"
@@ -31,6 +30,7 @@ import {
   type ContextWindowMeterProps,
 } from "./ContextWindowMeter"
 import { WorkspaceSelector } from "./WorkspaceSelector"
+import { personMentionToken } from "./composerMentions"
 import {
   LocalBranchSelector,
   LocalRepoSelector,
@@ -67,9 +67,9 @@ import type { PassageReply } from "@/features/agents/utils/passageReply"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
-import { api } from "@/lib/api"
-import type { SlackChannelOption, SlackUserOption } from "@/lib/api"
+import type { MentionablePerson, SlackChannelOption } from "@/lib/api"
 import { useRegisterAppCommands } from "@/lib/appCommands"
+import { useMentionablePeople } from "@/lib/people"
 import {
   rankSlackChannels,
   rememberSlackChannels,
@@ -168,6 +168,8 @@ class ComposerDrafts {
 const composerDrafts = new ComposerDrafts()
 
 export interface ChatComposerProps {
+  /** The conversation being written in; the people involved in it lead `@` suggestions. */
+  threadId?: string
   draftKey?: string
   placeholder?: string
   autoFocus?: boolean
@@ -257,7 +259,7 @@ export function buildCommandItems(
   includeOffloadCommand = false,
   slackChannels: Array<SlackChannelOption> = [],
   recentSlackChannels: ReadonlyArray<string> = [],
-  slackUsers: Array<SlackUserOption> = []
+  people: Array<MentionablePerson> = []
 ): Array<ComposerCommandItem> {
   const query = trigger.query.toLowerCase()
 
@@ -319,9 +321,10 @@ export function buildCommandItems(
       label: path.slice(path.lastIndexOf("/") + 1),
       description: path,
     }))
-  const people: Array<ComposerCommandItem> = slackUsers
-    .filter((user) =>
-      [user.name, user.display_name, user.real_name].some((name) =>
+  // The directory arrives with the people involved in this conversation first.
+  const personItems: Array<ComposerCommandItem> = people
+    .filter((person) =>
+      [person.name, person.login].some((name) =>
         name.toLowerCase().includes(query)
       )
     )
@@ -329,21 +332,27 @@ export function buildCommandItems(
       0,
       paths.length > 0 ? MAX_MENTION_SUGGESTIONS / 2 : MAX_MENTION_SUGGESTIONS
     )
-    .map((user) => ({
-      id: `user:${user.id}`,
-      type: "slack-user",
-      userId: user.id,
-      label: `@${user.display_name || user.name}`,
-      description:
-        user.real_name && user.real_name !== user.display_name
-          ? `${user.real_name} · @${user.name}`
-          : `@${user.name}`,
+    .map((person) => ({
+      id: `user:${person.id}`,
+      type: "person",
+      userId: person.id,
+      name: person.name,
+      label: `@${person.name}`,
+      description: [
+        person.login && person.login !== person.name
+          ? `@${person.login}`
+          : null,
+        person.involved ? "in this conversation" : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
     }))
-  return [...people, ...paths].slice(0, MAX_MENTION_SUGGESTIONS)
+  return [...personItems, ...paths].slice(0, MAX_MENTION_SUGGESTIONS)
 }
 
 /** Prompt editor with autocomplete, model selection, attachments, and send/stop controls. */
 export const ChatComposer = memo(function ChatComposer({
+  threadId,
   draftKey,
   placeholder = "Ask Open SWE to build, fix bugs, explore",
   autoFocus = false,
@@ -487,12 +496,7 @@ export const ChatComposer = memo(function ChatComposer({
   const slackChannels = useSlackChannelDirectory(
     trigger?.kind === "slack-channel"
   ).data?.channels
-  const slackUsers = useQuery({
-    queryKey: ["slackUsers"],
-    queryFn: api.listSlackUsers,
-    enabled: trigger?.kind === "path",
-    staleTime: 300_000,
-  })
+  const people = useMentionablePeople(threadId, trigger?.kind === "path")
   const recentSlackChannels = useRecentSlackChannels()
   const skillNames = useMemo(
     () => new Set(skills.map((skill) => skill.name)),
@@ -509,7 +513,7 @@ export const ChatComposer = memo(function ChatComposer({
             canOffload,
             slackChannels,
             recentSlackChannels,
-            slackUsers.data?.users
+            people.data?.people
           )
         : [],
     [
@@ -520,7 +524,7 @@ export const ChatComposer = memo(function ChatComposer({
       canOffload,
       slackChannels,
       recentSlackChannels,
-      slackUsers.data,
+      people.data,
     ]
   )
   const menuOpen =
@@ -651,7 +655,7 @@ export const ChatComposer = memo(function ChatComposer({
       if (
         item.type === "path" ||
         item.type === "skill" ||
-        item.type === "slack-user" ||
+        item.type === "person" ||
         item.type === "slack-channel"
       ) {
         if (item.type === "slack-channel")
@@ -664,8 +668,8 @@ export const ChatComposer = memo(function ChatComposer({
             ? mentionReplacementText(item.path)
             : item.type === "slack-channel"
               ? `${slackChannelReference(item.channelId, item.name)} `
-              : item.type === "slack-user"
-                ? `<@${item.userId}> `
+              : item.type === "person"
+                ? `${personMentionToken(item.userId, item.name)} `
                 : `/${item.name} `
         )
         applyPrompt(next.text, next.cursor)
@@ -977,10 +981,10 @@ export const ChatComposer = memo(function ChatComposer({
             onSelect={selectCommandItem}
             emptyStateText={
               trigger.kind === "path"
-                ? slackUsers.isPending
+                ? people.isPending
                   ? "Loading people…"
-                  : slackUsers.isError
-                    ? "Could not load Slack people. Type @ again to retry."
+                  : people.isError
+                    ? "Could not load people. Type @ again to retry."
                     : "No matching people or files."
                 : undefined
             }

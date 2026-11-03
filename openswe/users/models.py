@@ -9,6 +9,7 @@ reference ``users.id`` instead of a provider-specific handle.
 """
 
 import logging
+import re
 from collections.abc import Collection, Iterable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal, Self
@@ -390,6 +391,34 @@ class User(Base):
                 .limit(limit)
             )
             return list(rows.all()), total
+
+    @classmethod
+    async def resolve(cls, reference: str) -> Self | None:
+        """The person a tool argument names: an Open SWE user id, a mention, a Slack ID, or a GitHub login.
+
+        Accepts ``user:{id}``, a bare id, ``<@user:{id}|name>``, ``U…``/``W…`` Slack IDs,
+        and ``login`` or ``@login``.
+        """
+        text = reference.strip()
+        if not text or not postgres.configured():
+            return None
+        if match := re.fullmatch(r"<@(user:[0-9a-fA-F-]{36})(?:\|[^>]*)?>", text):
+            text = match[1]
+        if (
+            user_id := cls.key_id(text if text.startswith("user:") else f"user:{text}")
+        ) is not None:
+            return await cls.get(user_id)
+        if re.fullmatch(r"<?@?[UW][A-Z0-9]{2,}>?", text):
+            return await cls.for_identity("slack", text.strip("<@>"))
+        login = text.lstrip("@")
+        return await cls.for_login("github", login) if login else None
+
+    @classmethod
+    async def everyone(cls) -> list[Self]:
+        """Every person Open SWE knows, with their identities."""
+        async with postgres.session() as session:
+            rows = await session.scalars(cls._with_identities(select(cls)).order_by(cls.id))
+            return list(rows.all())
 
     @classmethod
     async def for_identity(cls, provider: Provider, external_id: str) -> Self | None:

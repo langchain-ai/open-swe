@@ -1,4 +1,4 @@
-import { SlackUserMention } from "./messages/SlackMrkdwn"
+import { PersonTag } from "./PersonTag"
 import { splitPromptIntoSegments } from "./composer/composerMentions"
 
 export function SkillBadge({ name }: { name: string }) {
@@ -14,7 +14,7 @@ export function SkillPromptText({ text }: { text: string }) {
     segment.type === "skill" ? (
       <SkillBadge key={index} name={segment.name} />
     ) : segment.type === "user" ? (
-      <SlackUserMention key={index} userId={segment.userId} />
+      <PersonTag key={index} name={segment.name} />
     ) : segment.type === "channel" ? (
       <span key={index} className="font-medium" title={segment.channelId}>
         #{segment.name}
