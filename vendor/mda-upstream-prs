@@ -1,13 +1,11 @@
-1073 ea49aaad507a5c0c9434f820a83aa8a932e85ba4 feat(channels): reply from a handler or endpoint, as resolveUser does
+1073 b63df0a859899e73a1d8db0f533b352ebd4df8ca feat(channels): reply from a handler or endpoint, as resolveUser does
 1143 d031eb7d3f3b155698cdcee1a92bceb42042f795 feat(channels): let a GitHub channel handle its own App's events
-1147 55575f823af9e6f092f57e2409d1d36086e4a0d3 feat(channels): let handlers start runs on threads they choose
+1147 0bcf23eb155f6e3cdf70a873aacfc8e56e8b415d feat(channels): let handlers start runs on threads they choose
 1149 8bc4e362d4375238316e69972944e6386effa0b0 feat(channels): answer the provider first, then ask the channel's handler
-1171 c9119f254b23e51d34cce2542ce054f1208915f3 feat(channels): let Slack handlers choose each run's thread
+1171 b521a1125e16e147d5b3117b48a2f21c343a5fed feat(channels): let Slack handlers choose each run's thread
 1174 48365c151ff3dabfd9ac10665565c3dfcce59e23 feat(channels): handle every GitHub action of handled events, and installation events
-1175 4ae7cba34ee5abe902d19bab9533b5ef098940be feat(channels): let Slack handlers take edits, deletions and reactions
-1212 d53181fc6a1344b350113c2376824a554f8f9461 feat(channels): Slack code channels
-1218 8a41f58a8efdaada4b52ceea00918287f3146e41 feat(channels): give a runtime channel a typed target
-1222 750f37feb1691ccd1e3efd46dcf902952fd7555e feat(channels): Slack code channel view clicks reach the interaction handler
-1228 393ff298e825100acdf67e85f93c6a3530215804 feat(channels): let a channel run hand its thread to a new Slack thread
-1229 ddad6bf065bff3701d0a08a71cf84daa7fcb2947 feat(channels): start a new Slack thread in another conversation of the channel
-1231 8f0c198cd2d0ca5ead996575cdb3af99af047a69 feat(slack): let a handler read its thread's state and the workspace
+1175 deca37c37c1430653c25930445dcfb414351ff9d feat(channels): let Slack handlers take edits, deletions and reactions
+1218 4ceae67a0105ca6f7df0dfad7f4965657badb6eb feat(channels): give a runtime channel a typed target
+1228 14bbd74528ae9d253674bf0e48f6b4daaaf11af7 feat(channels): let a channel run hand its thread to a new Slack thread
+1229 0e85914d56fe3b977d40a7483a7a4fe879f8a7b6 feat(channels): start a new Slack thread in another conversation of the channel
+1231 4058153fccff74304fd1dbfeb73cb4d4e2ac5e4b feat(slack): let a handler read its thread's state and the workspace

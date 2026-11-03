@@ -58,8 +58,6 @@ from rt.public_http import PublicOrigin
 logger = logging.getLogger(__name__)
 
 SLACK_THREAD_MAX_MESSAGES: Final = 500
-#: The thread a code channel's one session is keyed by; its messages are the channel's.
-CODE_CHANNEL_SESSION_TS: Final = "0"
 _FORWARDED_ATTACHMENT_MAX_COUNT: Final = 10
 _FORWARDED_ATTACHMENT_MAX_DEPTH: Final = 4
 _FORWARDED_ATTACHMENT_MAX_NODES: Final = 50
@@ -95,7 +93,6 @@ _SUPPORTED_IMAGE_TYPES: Final = frozenset({"image/jpeg", "image/png", "image/gif
 # summary message followed by messages[cutoff_index:].
 _SUMMARIZATION_EVENT_KEY: Final = "_summarization_event"
 
-CODE_CHANNEL_CONTEXT: Final = prompt("slack-code-channel")
 CONCIERGE_CONTEXT: Final = prompt("slack-concierge")
 KITCHEN_CONTEXT: Final = prompt("slack-kitchen")
 NON_KITCHEN_CONTEXT: Final = prompt("slack-non-kitchen")
@@ -523,14 +520,11 @@ def channel_identity(
     return identity
 
 
-def thread_constant_context(
-    *, code_channel: bool, review_guide: bool, concierge: bool, kitchen: bool
-) -> str:
+def thread_constant_context(*, review_guide: bool, concierge: bool, kitchen: bool) -> str:
     """Guidance that holds for the whole thread, which the model is told once."""
     return "\n\n".join(
         section
         for section in (
-            CODE_CHANNEL_CONTEXT if code_channel and not review_guide else "",
             CONCIERGE_CONTEXT if concierge else "",
             KITCHEN_CONTEXT if kitchen else NON_KITCHEN_CONTEXT,
         )
@@ -877,22 +871,16 @@ async def _api(method: str, params: Mapping[str, object]) -> Mapping[str, object
 async def slack_history(channel_id: str, thread_ts: str) -> list[SlackMessage]:
     """A Slack thread's messages, oldest first, keeping the most recent window.
 
-    A code channel's session (``CODE_CHANNEL_SESSION_TS``) is the whole channel. A
-    page that fails ends the read with the pages read so far.
+    A page that fails ends the read with the pages read so far.
     """
-    session_channel = thread_ts == CODE_CHANNEL_SESSION_TS
     messages: list[SlackMessage] = []
     cursor = ""
     truncated = False
     while True:
-        params: dict[str, object] = {"channel": channel_id, "limit": 200}
-        if not session_channel:
-            params["ts"] = thread_ts
+        params: dict[str, object] = {"channel": channel_id, "limit": 200, "ts": thread_ts}
         if cursor:
             params["cursor"] = cursor
-        payload = await _api(
-            "conversations.history" if session_channel else "conversations.replies", params
-        )
+        payload = await _api("conversations.replies", params)
         if payload is None:
             break
         batch = payload.get("messages")
@@ -982,8 +970,8 @@ async def public_channel_names(channel_ids: Iterable[str]) -> dict[str, str]:
 
 
 async def permalink(channel_id: str, message_ts: str) -> str | None:
-    """A Slack message's permalink; ``None`` for a code channel's session or when unavailable."""
-    if not channel_id or not message_ts or message_ts == CODE_CHANNEL_SESSION_TS:
+    """A Slack message's permalink; ``None`` when unavailable."""
+    if not channel_id or not message_ts:
         return None
     payload = await _api("chat.getPermalink", {"channel": channel_id, "message_ts": message_ts})
     link = payload.get("permalink") if payload is not None else None

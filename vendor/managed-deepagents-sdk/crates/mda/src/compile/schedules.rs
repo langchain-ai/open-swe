@@ -336,7 +336,7 @@ mod tests {
         let entry = cron(json!({
             "cron": "0 9 * * *",
             "prompt": "Summarize",
-            "autoPost": { "provider": "slack", "conversationId": "C1", "codeChannel": false },
+            "autoPost": { "provider": "slack", "conversationId": "C1" },
         }));
         assert_eq!(
             entry["context"]["mda_schedule"]["deliver_to"],
