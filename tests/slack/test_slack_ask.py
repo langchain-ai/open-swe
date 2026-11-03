@@ -269,8 +269,13 @@ async def test_a_by_the_way_question_for_mda_without_a_question_starts_nothing(
 
 
 @pytest.mark.asyncio
-async def test_a_forked_question_quotes_only_what_its_thread_never_got(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("held_thread_id", "read"),
+    [("", "question-thread"), ("conversation-thread", "conversation-thread")],
+    ids=["its-own-thread", "a-branch"],
+)
+async def test_a_question_quotes_only_what_its_thread_never_got(
+    monkeypatch: pytest.MonkeyPatch, held_thread_id: str, read: str
 ) -> None:
     raw = [
         {"ts": "1.0", "user": "U2", "text": "the build is red"},
@@ -284,13 +289,15 @@ async def test_a_forked_question_quotes_only_what_its_thread_never_got(
         channel_id="C1",
         user_id="U1",
         question="why?",
-        thread_id="forked-thread",
+        thread_id="question-thread",
         reply_thread_ts="1.0",
         message_ts="3.0",
+        held_thread_id=held_thread_id,
     )
 
     context = await slack_ask._request_context(request)
 
-    held.assert_awaited_once_with("forked-thread")
+    # A branch's new thread starts with what its conversation's thread holds.
+    held.assert_awaited_once_with(read)
     assert "only said in Slack" in context
     assert "the build is red" not in context
