@@ -1377,7 +1377,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1,<1" },
     { name = "langchain", specifier = ">=1.4.6,<2" },
     { name = "langchain", extras = ["mcp"], marker = "extra == 'test'", specifier = ">=1.4.6,<2" },
-    { name = "langchain-core", specifier = ">=1.6.2,<2" },
+    { name = "langchain-core", specifier = ">=1.7.2,<2" },
     { name = "langgraph", specifier = ">=1.2.15,<2" },
     { name = "langgraph-prebuilt", specifier = ">=1.1.1,<2" },
     { name = "langgraph-sdk", specifier = ">=0.4.6,<0.5" },

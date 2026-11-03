@@ -110,6 +110,27 @@ mda dev
 mda deploy
 ```
 
+## Pull remote context
+
+After editing a deployed agent's prompt or skills in Context Hub, bring those
+changes into the existing local project:
+
+```bash
+mda pull --dry-run
+mda pull
+```
+
+The command previews added, overwritten, and deleted files, then asks for
+confirmation (default: no). It replaces `instructions.md` and mirrors `skills/`,
+including deleting local skill files absent from the remote snapshot. Commit or
+save local edits first; this is a replacement, not a three-way merge. Agent code,
+credentials, and memories are not pulled or changed.
+
+Use `mda pull --yes` for non-interactive use. `--name`, `--agent-environment`,
+`--workspace-id`, and `--env-file` select the remote agent and credentials, as with
+`mda deploy`; `LANGSMITH_AGENT_ENVIRONMENT` in `.env` is honored too.
+The remote context is read-only; pulling does not deploy or modify Context Hub.
+
 ## Evaluate
 
 Managed Deep Agent evals run in Harbor. Install `uv` and Docker before running

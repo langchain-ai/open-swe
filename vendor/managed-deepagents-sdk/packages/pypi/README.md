@@ -1965,6 +1965,9 @@ Python also has async methods such as `aread`, `awrite`, and `adelete`.
 All paths refer to the current sandbox. Context Hub routes for skills and
 memory are not part of this backend.
 
+The sandbox opens on its first use. `open_sandbox(runtime.backend)` opens it
+now and returns its name.
+
 Private published images can declare registry credentials by environment
 variable name; MDA creates or updates the deployment-owned Host registry:
 
@@ -2031,6 +2034,15 @@ When a LangSmith-managed OAuth MCP server needs authorization, the runtime
 reports its connection URL; complete OAuth there, then retry the run. API-key
 MCP servers require the caller to connect the key in LangSmith Tools before
 invoking one of their tools.
+
+A LangSmith tool kit asks for every unconnected provider before the run starts.
+Pass `jit_auth=True` to `define_mcp` to ask on use instead: the kit's tools for
+unconnected providers are still offered to the model. When the model calls
+them, the run interrupts once per model step with the connect links for the
+providers those calls need, then runs the calls after it resumes. If the run
+resumes without a connection, or nobody can connect in this run (no signed-in
+caller, or a scheduled run), those calls return a tool error and the run
+continues.
 
 Deploy the project first, then provision its connections with
 `mda connections create`. Agent-owned opaque secrets are scoped to that
