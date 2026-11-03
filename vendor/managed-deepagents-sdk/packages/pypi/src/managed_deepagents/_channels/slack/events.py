@@ -312,14 +312,14 @@ SlackInteractionCallback = Callable[
 
 SlackActivityCallback = Callable[
     [SlackActivityEvent, SlackChannelThread],
-    "ChannelRunResult | Awaitable[ChannelRunResult | None] | None",
+    "HandlerResult | Awaitable[HandlerResult | None] | None",
 ]
 """An ``edit``, ``delete``, ``reaction`` or ``shortcut`` handler, as a
 ``SlackEventCallback`` but for something that happened to a message."""
 
 SlackChannelCallback = Callable[
     [SlackChannelEvent, SlackChannelThread],
-    "ChannelRunResult | Awaitable[ChannelRunResult | None] | None",
+    "HandlerResult | Awaitable[HandlerResult | None] | None",
 ]
 """A ``channel`` handler, as a ``SlackEventCallback`` but for a channel's own change."""
 
