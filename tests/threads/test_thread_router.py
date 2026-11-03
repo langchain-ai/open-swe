@@ -791,6 +791,7 @@ async def test_without_the_service_secret_a_channel_thread_refuses_writes(
         ("GET", "/runs", None),
         ("GET", "/runs/run-1/join", None),
         ("POST", "/history", {"limit": 10}),
+        ("POST", "/stream/events", {"topics": ["lifecycle", "tools"]}),
         ("POST", "/commands", {"id": 1, "method": "subscription.subscribe", "params": {}}),
     ],
 )
