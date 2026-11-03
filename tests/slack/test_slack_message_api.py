@@ -411,8 +411,9 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
             )
     payload = slack_api.calls[0][1]
     code = f"`{url}`\n```bash\n{url}\n```\n{unchanged}"
-    fallback_target = f"<{target}>" if angled else target
-    assert payload["text"] == f"[PR]({fallback_target}), <{target}|PR> and {target}.\n{code}"
+    assert payload["text"] == (
+        f"[PR]({target})[↗]({url}), <{target}|PR> (<{url}|GitHub>) and <{target}|app#7> (<{url}|GitHub>).\n{code}"
+    )
     sent_blocks = payload["blocks"]
     assert sent_blocks[0]["text"] == (
         f"[PR]({target})[↗]({url}), <{target}|PR> (<{url}|GitHub>) and [app#7]({target})[↗]({url}).\n{code}"

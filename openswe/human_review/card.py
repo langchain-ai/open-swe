@@ -173,7 +173,8 @@ async def open_card(
     if request.detail:
         blocks.append(context(f"Waiting on: {escape(request.detail)}."))
     blocks.append(actions(*_buttons(request)))
-    return f"Review requested for {_label(request)}: {title}", blocks
+    link = f"<{request.pull_request.url}|{_label(request)}>"
+    return f"Review requested for {link}: {title}", blocks
 
 
 async def closed_card(

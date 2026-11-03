@@ -104,7 +104,5 @@ async def pr_review_links(
         or "github.com/" not in (text + str(blocks)).lower()
     ):
         return text, blocks
-    fallback = _PrLinks(mrkdwn=True, github_mark=not blocks)
-    return fallback.text(text), cast(
-        list[dict[str, object]] | None, _PrLinks(mrkdwn=True).block(blocks)
-    )
+    links = _PrLinks(mrkdwn=True)
+    return links.text(text), cast(list[dict[str, object]] | None, links.block(blocks))

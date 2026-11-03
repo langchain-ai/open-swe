@@ -618,7 +618,8 @@ async def test_open_card_counts_only_non_test_files(available: bool) -> None:
         patch.object(ReviewCard, "_review_states", AsyncMock(return_value={})),
         patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="@ada")),
     ):
-        _, blocks = await ReviewCard(request)._render_standard(None)
+        text, blocks = await ReviewCard(request)._render_standard(None)
+    assert f"<{pr.url}|o/r#1>" in text
     rendered = str(block_payload(blocks))
     assert ("+10 −5 in 1 non-test file" in rendered) is available
     assert "+110" not in rendered
