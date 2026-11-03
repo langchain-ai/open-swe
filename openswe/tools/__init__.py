@@ -3,6 +3,12 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 _TOOL_MODULES = {
+    "list_projects": ".projects",
+    "create_project": ".projects",
+    "update_project": ".projects",
+    "share_project": ".projects",
+    "unshare_project": ".projects",
+    "move_thread_to_project": ".projects",
     "add_finding": ".add_finding",
     "assign_human_reviewer": ".request_human_review",
     "auto_assign_human_reviewer": ".request_human_review",
@@ -160,6 +166,12 @@ __all__ = [
     "decide_memory",
     "publish_workspace_prompt",
     "save_user_settings",
+    "list_projects",
+    "create_project",
+    "update_project",
+    "share_project",
+    "unshare_project",
+    "move_thread_to_project",
     "save_user_skill",
     "delete_user_skill",
     "report_work_state",
@@ -241,6 +253,14 @@ if TYPE_CHECKING:
     from openswe.tools.open_pull_request import link_pull_request, open_pull_request
     from openswe.tools.organization_skills import delete_organization_skill, save_organization_skill
     from openswe.tools.output_iframe import output_iframe
+    from openswe.tools.projects import (
+        create_project,
+        list_projects,
+        move_thread_to_project,
+        share_project,
+        unshare_project,
+        update_project,
+    )
     from openswe.tools.publish_artifact import publish_artifact
     from openswe.tools.publish_review import publish_review
     from openswe.tools.read_only_sql import read_only_sql

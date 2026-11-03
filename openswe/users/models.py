@@ -444,6 +444,16 @@ class User(Base):
             return {external_id: user for user, external_id in rows.tuples()}
 
     @classmethod
+    async def for_handle(cls, handle: str) -> Self | None:
+        """The person someone named by GitHub login or email address, as when sharing."""
+        handle = handle.strip().removeprefix("@")
+        if not handle:
+            return None
+        if "@" in handle:
+            return await cls.for_email(handle)
+        return await cls.for_login("github", handle)
+
+    @classmethod
     async def for_login(cls, provider: Provider, login: str) -> Self | None:
         """The person behind a mutable handle; the most recently seen one wins."""
         if not postgres.configured():
