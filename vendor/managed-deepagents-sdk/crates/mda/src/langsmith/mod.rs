@@ -54,9 +54,9 @@ pub use snapshots::{SnapshotDelete, DEFAULT_SNAPSHOT_READY_TIMEOUT};
 #[cfg(test)]
 pub(crate) use trigger_server::TransientSetupError;
 pub(crate) use trigger_server::{
-    is_transient_setup_error, ChannelSetupNote, ChannelSetupRequest, ChannelSetupResponse,
-    ChannelSetupStatus, ChannelSetupTarget, SlackAppInUse, SlackChannelApp, SlackChannelOptions,
-    SlackChannelSetup, SlackCustomerApp, SlackManager, SlackTriggerMode, TriggerChannel,
+    is_transient_setup_error, ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus,
+    ChannelSetupTarget, SlackAppInUse, SlackChannelApp, SlackChannelOptions, SlackChannelSetup,
+    SlackCustomerApp, SlackManager, SlackTriggerMode, TriggerChannel,
 };
 pub use workspaces::DeployTarget;
 pub(crate) use workspaces::{AuthIdentity, KeyCheck};

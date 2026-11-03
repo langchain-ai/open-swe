@@ -27,7 +27,6 @@ class _SlackAddressModel(BaseModel):
     model_config = ConfigDict(extra="ignore", strict=True)
     conversation_id: str = Field(pattern=r"^[CDG][A-Z0-9]+$")
     thread_id: str | None = Field(default=None, pattern=r"^[0-9]+\.[0-9]+$")
-    code_channel: object = None
 
 
 class _SlackTargetModel(BaseModel):
@@ -71,7 +70,6 @@ def channel_target(
             return SlackChannelTarget(
                 conversation_id=address.conversation_id,
                 thread_ts=None if new_thread else address.thread_id,
-                code_channel=address.code_channel is True,
             )
         if provider == "github" and transport == "direct":
             github = _GitHubTargetModel.model_validate(target)
@@ -100,9 +98,9 @@ def names_origin(target: ChannelTarget, origin: ChannelTarget) -> bool:
 
     Only the fields that address a post count: Slack's conversation and thread,
     a GitHub repository (in any case) and number, and a Linear organization and
-    issue, with its comment or session only when ``target`` names one. Fields
-    MDA only reports, such as Slack's ``code_channel``, and ``channel`` are left
-    out, so a run may pass back the target its thread was given.
+    issue, with its comment or session only when ``target`` names one.
+    ``channel`` is left out, so a run may pass back the target its thread was
+    given.
     """
     if isinstance(target, SlackChannelTarget) and isinstance(origin, SlackChannelTarget):
         return (target.conversation_id, target.thread_ts) == (

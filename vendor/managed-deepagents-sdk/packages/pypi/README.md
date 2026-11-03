@@ -384,9 +384,8 @@ The channel facts are available even when the channel cannot send. `post` uses
 a private, verified reply target, which callers can't replace. `target` names
 the conversation it posts to, in every run of the thread, typed by `provider`:
 
-- `SlackChannelTarget`: `conversation_id` (Slack's `channel`), `thread_ts`
-  (Slack's `thread_ts`) and `code_channel`, whether the conversation is a code
-  channel.
+- `SlackChannelTarget`: `conversation_id` (Slack's `channel`) and `thread_ts`
+  (Slack's `thread_ts`).
 - `GitHubChannelTarget`: `repository` (`owner/name`) and the issue or pull
   request `number`.
 - `LinearChannelTarget`: `organization_id`, `issue_id`, and `identifier`,
@@ -448,8 +447,7 @@ Pass `to=` to start the new thread in another conversation of the same
 channel, such as another Slack channel the app is in: a `ChannelTarget` of the
 origin's provider with no thread, for example
 `SlackChannelTarget(conversation_id="C0123456789")`. It works with `run=` and
-with `hand_off=True`. A code channel isn't a valid `to=`: it is one
-conversation with no threads of its own.
+with `hand_off=True`.
 
 When a run with a thread origin ends, MDA posts the run's answers to that
 origin. A Studio resume of a channel thread answers in the channel, and the
@@ -598,8 +596,7 @@ and `team_id`, the workspace your app is installed in) and its
 `SlackChannelThread` (`id`, `source_thread_key`, `channel.name`). `await
 thread.get_state()` reads the thread's state as Agent Server's
 `threads.get_state` does (its `values`, such as `messages`, as its last run left
-them, `next`, `tasks` and `interrupts`), or `None` before any run; in a code
-channel it is the channel's one thread. It
+them, `next`, `tasks` and `interrupts`), or `None` before any run. It
 returns the run's input, as `agent.invoke` takes it, or, to also set run
 options such as `context`, `metadata` or `webhook`, a list of runs, as
 `[{"input": ..., "context": ...}]`, as the GitHub and Linear handlers do.
@@ -901,76 +898,6 @@ correlation ID never answers a tool-call review, which its own prompt answers:
 while the thread waits on one, such a click starts nothing. Trigger Server
 forwards clicks on buttons without a URL and on Slack's `feedback_buttons`;
 selects and inputs aren't forwarded.
-
-### Code channels
-
-[Slack Code](https://docs.slack.dev/ai/slack-code/) gives an agent a channel per
-task: a *code channel*, where Slack shows the agent's session. With
-`code_channel=True`, a code channel's events reach the agent; a channel without
-it behaves as before. Experimental: this may change in a minor release.
-
-```python
-channels.slack(code_channel=True)
-```
-
-MDA does only this:
-
-- **One conversation per channel.** Every message in a code channel reaches the
-  agent, mentioned or not, whatever `trigger_mode` says, and so do its clicks,
-  answers and reactions. The whole channel is one conversation; each answer,
-  approval prompt and progress goes to the person's message, in its Slack
-  thread. A handler's run with its own `thread` keeps the thread it chose, and
-  the channel's Stop and answers reach it, as in any Slack thread.
-- **Session status.** MDA sets the channel session's status from its
-  conversation: working while a run works or waits to, waiting while one waits
-  on a decision, idle once they ended. Slack shows Stop while a run works, and
-  Stop cancels the conversation's runs.
-- **Handlers see it.** A handler's event has `code_channel` set (`True` inside a
-  code channel), and an endpoint is sent `codeChannel: true`.
-- **Clicks in views.** Any element's action in a Block Kit view your agent set
-  on the channel (`agents.conversations.setView`) reaches the `interaction`
-  handler with `view_id` and no `thread_ts`: it belongs to the whole channel,
-  so its run is the channel's conversation's.
-
-Everything else the channel shows, the agent's tools do with their own Slack
-client: the context bar, view tabs, renaming the session, opening a channel or
-archiving one. The app's bot token is the agent connection
-`mda/slack-bot-token`:
-
-```python
-from langchain.tools import tool
-from managed_deepagents import ManagedToolRuntime, connections
-from slack_sdk.web.async_client import AsyncWebClient
-
-
-@tool
-async def show_branch(branch: str, pr_url: str, runtime: ManagedToolRuntime) -> str:
-    """Show the branch and pull request in the code channel's context bar."""
-    origin = runtime.thread.origin
-    raw = (origin.channel.raw_event if origin else None) or {}
-    channel = raw.get("channel") or (raw.get("container") or {}).get("channel_id")
-    if origin is None or origin.channel.provider != "slack" or not channel:
-        return "Not in Slack."
-    token = await connections.get("mda/slack-bot-token", {"type": "agent"})
-    await AsyncWebClient(token=token).api_call(
-        "agents.conversations.setProperties",
-        json={
-            "channel_id": channel,
-            "code_channel": {
-                "context_bar_items": [
-                    {"key": "branch", "label": branch, "icon": "branch"},
-                    {"key": "pr", "label": "Pull request", "url": pr_url, "icon": "link"},
-                ]
-            },
-        },
-    )
-    return "Shown."
-```
-
-**Your own Slack app.** Code channels need Slack's Code channels feature, the
-bot scope `code_channels:manage` and the bot event `message.session`, plus the
-scopes for the calls your tools make. LangSmith adds them to the apps it
-manages; for your own app, `mda deploy` lists them.
 
 ### Setting up the Slack app
 
