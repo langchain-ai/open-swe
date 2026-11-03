@@ -9,7 +9,7 @@ import {
 } from "@langchain/macaw-components/DropdownMenu"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
+import { FunnelSimpleIcon } from "@phosphor-icons/react/dist/ssr/FunnelSimple"
 import type { ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
@@ -28,12 +28,14 @@ export function SidebarSectionHeader({
   onToggleCollapsed,
   menu,
   action,
+  headingClassName,
 }: {
   label: string
   collapsed?: boolean
   onToggleCollapsed?: () => void
   menu?: ReactNode
   action?: ReactNode
+  headingClassName?: string
 }) {
   const Caret = collapsed ? CaretRightIcon : CaretDownIcon
   const Heading = onToggleCollapsed ? "button" : "div"
@@ -44,7 +46,10 @@ export function SidebarSectionHeader({
         type={onToggleCollapsed ? "button" : undefined}
         onClick={onToggleCollapsed}
         aria-expanded={onToggleCollapsed ? !collapsed : undefined}
-        className="flex min-w-0 flex-1 items-center gap-space-1 py-space-1 text-left text-xs font-medium text-tertiary transition-colors hover:text-primary"
+        className={cn(
+          "flex min-w-0 flex-1 items-center gap-space-1 py-space-1 text-left text-xs font-medium text-tertiary transition-colors hover:text-primary",
+          headingClassName
+        )}
       >
         <span className="min-w-0 truncate">{label}</span>
         <Caret
@@ -68,7 +73,7 @@ export function SidebarSectionHeader({
   )
 }
 
-/** Children are Macaw `DropdownMenu*` items. */
+/** A section's view options. Children are Macaw `DropdownMenu*` items. */
 export function SidebarSectionMenu({
   label,
   children,
@@ -80,7 +85,7 @@ export function SidebarSectionMenu({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <IconButton
-          icon={DotsThreeIcon}
+          icon={FunnelSimpleIcon}
           label={label}
           size="xs"
           color="secondary"

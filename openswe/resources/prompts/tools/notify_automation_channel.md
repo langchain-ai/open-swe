@@ -1,1 +1,3 @@
-Notify the configured automation channel once after a concrete requested action. Pass the full outcome as `content`. If it exceeds four lines, also pass a summary of at most four lines; the summary is posted to the channel and the full content in its thread.
+Notify the configured automation channel once after a concrete requested action.
+Pass the full outcome as `content`.
+If it exceeds four lines, also pass a summary of at most four lines; the summary is posted to the channel and the full content in its thread.

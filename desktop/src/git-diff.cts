@@ -136,7 +136,61 @@ async function checkoutBranch(cwd, branch, create = false) {
   return name;
 }
 
-async function addWorktree(repo, worktreePath, branch, baseRef) {
+async function addWorktree(
+  repo,
+  worktreePath,
+  branch,
+  baseRef,
+  fetchUpstream = false,
+) {
+  if (fetchUpstream) {
+    const [localRef, remote, upstream] = text(
+      await git(
+        repo,
+        [
+          "for-each-ref",
+          "--format=%(refname)%0a%(upstream:remotename)%0a%(upstream:remoteref)",
+          `refs/heads/${baseRef}`,
+        ],
+        null,
+        5_000,
+      ),
+    ).split("\n");
+    if (localRef === `refs/heads/${baseRef}`) {
+      try {
+        await git(
+          repo,
+          ["fetch", remote || "origin", upstream || `refs/heads/${baseRef}`],
+          null,
+          60_000,
+        );
+        const tip = text(
+          await git(
+            repo,
+            ["rev-parse", "--verify", "FETCH_HEAD^{commit}"],
+            null,
+            5_000,
+          ),
+        );
+        if (
+          await ok(
+            git(
+              repo,
+              ["merge-base", "--is-ancestor", localRef, tip],
+              null,
+              5_000,
+            ),
+          )
+        )
+          baseRef = tip;
+      } catch (error) {
+        console.warn(
+          "Could not refresh worktree base; using the local branch",
+          error,
+        );
+      }
+    }
+  }
   await git(
     repo,
     ["worktree", "add", "-b", branch, worktreePath, baseRef],
@@ -528,14 +582,12 @@ function decode(blob: Buffer | false | null) {
 async function readDiff(repo, base, headish = null) {
   const head = headish ?? (await writeWorktreeTree(repo));
   const range = ["--no-renames", "--no-ext-diff", "--no-textconv", base, head];
-  const numstat = (
-    await git(repo, ["diff", "--numstat", "-z", ...range])
-  ).toString("utf8");
-  const nameStatus = (
-    await git(repo, ["diff", "--name-status", "-z", ...range])
-  ).toString("utf8");
-  const stats = parseNumstat(numstat);
-  const statuses = parseNameStatus(nameStatus);
+  const [numstat, nameStatus] = await Promise.all([
+    git(repo, ["diff", "--numstat", "-z", ...range]),
+    git(repo, ["diff", "--name-status", "-z", ...range]),
+  ]);
+  const stats = parseNumstat(numstat.toString("utf8"));
+  const statuses = parseNameStatus(nameStatus.toString("utf8"));
   const shown = stats.slice(0, MAX_FILES);
   const blobs = shown.length
     ? await readBlobs(

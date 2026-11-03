@@ -6,6 +6,7 @@ import {
   openRunningThreadViaSlackLink,
   openThreadViaSlackLink,
   threadIdFromUrl,
+  threadState,
   typeIntoComposer,
   waitForStateToContain,
   waitForThreadIdle,
@@ -263,6 +264,52 @@ test.describe("transcript rendering", () => {
     await expect(
       page.getByTestId("user-message").filter({ hasText: followUp }),
     ).toHaveCount(1);
+  });
+
+  test("replies to selected transcript text in the next message", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page);
+    const threadId = threadIdFromUrl(page);
+    await waitForThreadIdle(page, threadId);
+    await waitForThreadNotBusy(page, threadId);
+
+    const passage = page
+      .getByText("Opening a pull request.", { exact: true })
+      .first();
+    const box = await passage.boundingBox();
+    if (!box) throw new Error("The agent's reply has no layout box");
+    await page.mouse.move(box.x + 1, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, {
+      steps: 10,
+    });
+    await page.mouse.up();
+    await page.getByRole("button", { name: "Reply", exact: true }).click();
+    const field = page.getByRole("textbox", { name: "Your reply" });
+    await field.fill("Which branch?");
+    await field.press("Enter");
+    await expect(
+      page.getByRole("list", { name: "Replies in your next message" }),
+    ).toContainText("Which branch?");
+
+    await typeIntoComposer(page, "Thanks!");
+    // The agent gets the selection with a line of context on each side.
+    await waitForStateToContain(
+      page,
+      threadId,
+      "Thanks!\\n<reply>\\nsource: conversation\\nbefore:",
+    );
+    const state = await threadState(page, threadId);
+    expect(state).toContain("selection: Opening a pull request.\\nafter:\\n");
+    expect(state).toContain("comment: Which branch?\\n</reply>");
+    const sent = page
+      .getByTestId("user-message")
+      .filter({ hasText: "Which branch?" });
+    await expect(sent.locator("blockquote")).toHaveText(
+      "Opening a pull request.",
+    );
   });
 
   test("keeps a web model override on the next Slack turn", async ({

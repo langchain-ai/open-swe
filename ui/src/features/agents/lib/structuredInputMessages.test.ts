@@ -86,6 +86,57 @@ github_login: carol
     })
   })
 
+  it("reads the passages a message replies to, as the backend writes them", () => {
+    const parsed = parseStructuredInput(
+      [
+        '<input-message sender="github:alice" surface="web" kind="human">',
+        "Thanks!",
+        "<reply>",
+        "source: file",
+        "file: greet.py",
+        "lines: 6",
+        "before:",
+        "  def greet():",
+        '      """Hi."""',
+        "      ",
+        'selection: return f"Hello, {name}!"',
+        "after:",
+        "  ",
+        "  ",
+        "comment: Use a &lt;constant&gt;",
+        "</reply>",
+        "<reply>",
+        "source: conversation",
+        "selection: Opening a PR.",
+        "</reply>",
+        "</input-message>",
+      ].join("\n")
+    )
+
+    expect(parsed).toMatchObject({
+      type: "message",
+      content: "Thanks!",
+      replies: [
+        {
+          source: "file",
+          file: "greet.py",
+          lines: "6",
+          before: 'def greet():\n    """Hi."""\n    ',
+          selection: 'return f"Hello, {name}!"',
+          after: "\n",
+          comment: "Use a <constant>",
+        },
+        {
+          source: "conversation",
+          before: "",
+          selection: "Opening a PR.",
+          after: "",
+          comment: "",
+        },
+      ],
+    })
+  })
+
   it("still reads messages stored with a content element", () => {
     expect(
       parseStructuredInput(

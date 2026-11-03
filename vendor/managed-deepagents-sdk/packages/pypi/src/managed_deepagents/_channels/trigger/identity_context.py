@@ -19,6 +19,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from jwt import PyJWK, PyJWKClient
 
+from managed_deepagents._langsmith_env import resolve_langsmith_endpoint
+
 IdentityContextKey = Ed25519PublicKey | RSAPublicKey | EllipticCurvePublicKey | PyJWK
 
 IDENTITY_CONTEXT_TOKEN_TYP = "identity-context+jwt"  # noqa: S105
@@ -36,7 +38,6 @@ IDENTITY_CONTEXT_ALGORITHMS = (
     "ES512",
     "EdDSA",
 )
-_DEFAULT_LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 _JWKS_HTTP_TIMEOUT_S = 5
 
 _jwks_clients: dict[str, PyJWKClient] = {}
@@ -55,12 +56,7 @@ def resolve_identity_context_issuer(
 ) -> str:
     """Canonical issuer; self-hosted API URLs may use an internal host or prefix."""
     source = env if env is not None else os.environ
-    raw = (
-        (source.get("OAUTH_AS_ISSUER") or "").strip()
-        or (source.get("LANGSMITH_ENDPOINT") or "").strip()
-        or (source.get("LANGCHAIN_ENDPOINT") or "").strip()
-        or _DEFAULT_LANGSMITH_ENDPOINT
-    )
+    raw = (source.get("OAUTH_AS_ISSUER") or "").strip() or resolve_langsmith_endpoint(source)
     return raw.rstrip("/")
 
 

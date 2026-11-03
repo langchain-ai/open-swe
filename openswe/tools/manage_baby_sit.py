@@ -7,7 +7,7 @@ from langgraph.config import get_config
 
 from openswe.baby_sit import record_retry, start_watch, stop_watch, watch_key
 from openswe.github.app import get_github_app_installation_id_for_repo
-from openswe.github.http import GitHubClient, or_none
+from openswe.github.http import GitHubClient, read_result
 from openswe.github.token import resolve_github_token
 from openswe.run_config import RunConfig
 from openswe.slack.client import parse_github_pr_url
@@ -106,10 +106,21 @@ async def manage_baby_sit(
     except Exception as exc:
         return {"success": False, "error": f"GitHub authentication failed: {exc}"}
     async with GitHubClient.connect(token=token) as github:
-        pr = await or_none(
+        result = await read_result(
             github.repo(pr_ref.owner, pr_ref.repo).pull_request(pr_ref.number).pull()
         )
+    pr = result.value
     if not pr:
+        if result.status == "transient":
+            return {
+                "success": False,
+                "error": "GitHub is temporarily unavailable or rate-limited; retry starting the watch",
+                "retryable": True,
+            }
+        if result.status == "missing":
+            return {"success": False, "error": "Pull request not found or hidden (GitHub 404)"}
+        if result.status == "forbidden":
+            return {"success": False, "error": "GitHub denied access to the pull request (401/403)"}
         return {"success": False, "error": "Pull request is unavailable"}
     if pr.get("state") != "open":
         return {"success": False, "error": "Pull request is not open"}

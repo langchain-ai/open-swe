@@ -8,6 +8,7 @@ import {
 
 import {
   dismissOnboardingIfShown,
+  seedRepoSidebar,
   waitForThreadIdle,
 } from "./helpers/dashboard";
 
@@ -72,6 +73,7 @@ function deferred() {
 async function loginAs(page: Page) {
   const response = await page.request.post("/control/login", { data: USER });
   expect(response.ok()).toBeTruthy();
+  await seedRepoSidebar(page);
 }
 
 function baseMetadata(
@@ -478,7 +480,7 @@ test.describe("threads workspace", () => {
     await page.goto("/agents");
     await profileStarted.promise;
     await expect(
-      page.getByRole("heading", { name: "What should we build?" }),
+      page.getByRole("heading", { name: "What should we work on?" }),
     ).toBeVisible();
 
     await page.evaluate(() => {
@@ -642,6 +644,7 @@ test.describe("threads workspace", () => {
       data: ADMIN_USER,
     });
     expect(loginResponse.ok()).toBeTruthy();
+    await seedRepoSidebar(page);
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/agents");
     await dismissOnboardingIfShown(page);

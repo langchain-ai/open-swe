@@ -7,9 +7,7 @@
 //! `requirements_from_connectors`), not this extractor.
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::Path;
-use std::process::Stdio;
 
 use anyhow::{anyhow, bail, Context, Result};
 use oxc::allocator::Allocator;
@@ -19,6 +17,8 @@ use oxc::ast::ast::{
 };
 use serde_json::{Map, Number, Value};
 
+use crate::child;
+use crate::error::child_failed;
 use crate::toolchain;
 use crate::typescript::{parse_typescript, statement_variable_declaration};
 
@@ -141,38 +141,25 @@ fn extract_python_config(
         .transpose()
         .context("failed to serialize selected static config keys")?
         .unwrap_or_default();
-    let mut child = toolchain::python3()
-        .arg("-c")
-        .arg(PYTHON_KEYWORD_EXTRACTOR)
-        .arg(export_name)
-        .arg(selected_json)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| {
-            format!(
-                "failed to run {} for static config extraction",
-                toolchain::python3_program()
-            )
-        })?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(source.as_bytes()).with_context(|| {
-            format!(
-                "failed to send {} to {}",
-                rel.display(),
-                toolchain::python3_program()
-            )
-        })?;
-    }
-
-    let output = child
-        .wait_with_output()
-        .context("failed to read python static extractor output")?;
+    let output = child::output_with_stdin(
+        toolchain::python3()
+            .arg("-c")
+            .arg(PYTHON_KEYWORD_EXTRACTOR)
+            .arg(export_name)
+            .arg(selected_json),
+        source.as_bytes(),
+    )
+    .with_context(|| {
+        format!(
+            "failed to run {} for static config extraction",
+            toolchain::python3_program()
+        )
+    })?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("failed to parse {}: {stderr}", rel.display());
+        return Err(child_failed(
+            &output,
+            format!("failed to parse {}", rel.display()),
+        ));
     }
 
     let stdout = String::from_utf8(output.stdout).context("static extractor returned UTF-8")?;
@@ -233,11 +220,18 @@ fn json_expression(
     bindings: &HashMap<String, Value>,
 ) -> Result<Value> {
     match expression {
-        Expression::StringLiteral(literal) => Ok(Value::String(literal.value.to_string())),
+        Expression::StringLiteral(literal) => literal
+            .value
+            .as_str()
+            .map(|value| Value::String(value.to_owned()))
+            .ok_or_else(|| anyhow!("string literals with lone surrogates are not supported")),
         Expression::TemplateLiteral(literal) => literal
             .single_quasi()
-            .map(|value| Value::String(value.to_string()))
-            .ok_or_else(|| anyhow!("template literals with substitutions are not static")),
+            .and_then(|value| value.as_str())
+            .map(|value| Value::String(value.to_owned()))
+            .ok_or_else(|| {
+                anyhow!("template literals with substitutions or lone surrogates are not static")
+            }),
         Expression::BooleanLiteral(literal) => Ok(Value::Bool(literal.value)),
         Expression::NullLiteral(_) => Ok(Value::Null),
         Expression::NumericLiteral(literal) => Number::from_f64(literal.value)
@@ -265,8 +259,11 @@ fn json_object_expression(
         let key = property
             .key
             .static_name()
+            .and_then(|name| name.into_cow_str())
             .map(|name| name.into_owned())
-            .ok_or_else(|| anyhow!("computed property keys are not supported"))?;
+            .ok_or_else(|| {
+                anyhow!("computed property keys or keys with lone surrogates are not supported")
+            })?;
         let value = json_expression(&property.value, bindings)
             .with_context(|| format!("property `{key}` is not static"))?;
         map.insert(key, value);
@@ -287,8 +284,9 @@ fn json_selected_object_expression(
         let key = property
             .key
             .static_name()
+            .and_then(|name| name.into_cow_str())
             .map(|name| name.into_owned())
-            .ok_or_else(|| anyhow!("computed property keys may contain deploy-time options"))?;
+            .ok_or_else(|| anyhow!("computed property keys or keys with lone surrogates may contain deploy-time options"))?;
         if !selected_keys.contains(&key.as_str()) {
             continue;
         }
@@ -424,6 +422,23 @@ mod tests {
             value,
             json!({ "list": ["s", "t", true, null, 1.0, "x", { "k": 1.0 }, [2.0]] })
         );
+    }
+
+    #[test]
+    fn unicode_strings_and_keys_preserve_their_values() {
+        assert_eq!(
+            extract(r#"['\uD83D\uDE00', `\uD83D\uDE00`, { '\uD83D\uDE00': 1, 2: 'two' }]"#)
+                .unwrap(),
+            json!({ "list": ["😀", "😀", { "😀": 1.0, "2": "two" }] })
+        );
+    }
+
+    #[test]
+    fn lone_surrogates_cannot_be_serialized_as_strings_or_keys() {
+        for list in [r#"['\uD800']"#, r#"[`\uDC00`]"#, r#"[{ '\uD800': 1 }]"#] {
+            let error = format!("{:#}", extract(list).unwrap_err());
+            assert!(error.contains("lone surrogates"), "{list}: {error}");
+        }
     }
 
     #[test]

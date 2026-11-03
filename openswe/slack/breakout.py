@@ -55,6 +55,10 @@ class BreakoutCommand:
             workspace=message.workspace,
         )
         parts = message.argument.split(maxsplit=1)
+        if parts and parts[0].lower() == "in" and len(parts) > 1:
+            destination = parts[1].split(maxsplit=1)
+            if destination[0].startswith(("#", "<#")):
+                parts = destination
         if (
             message.action is not SlackAction.BREAKOUT
             or not parts
@@ -96,9 +100,7 @@ async def _root_text(request: SlackRequest, heading: str) -> str:
 
 
 async def _mark_done(request: SlackRequest, target: str, new_ts: str) -> None:
-    await mark_broken_out(
-        request.channel_id, request.thread_ts, _command_ts(request), target, new_ts
-    )
+    await mark_broken_out(request.channel_id, request.thread_ts, target, new_ts)
 
 
 async def _tell_sender(request: SlackRequest, text: str) -> None:
@@ -271,7 +273,6 @@ async def process_slack_web(
             await notify_breakout(
                 request.channel_id,
                 request.thread_ts,
-                _command_ts(request),
                 f"<@{request.user_id}> continued in a "
                 f"<{dashboard_thread_url(thread_id)}|private web breakout>.",
             )

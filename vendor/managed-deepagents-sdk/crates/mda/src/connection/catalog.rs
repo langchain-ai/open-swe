@@ -286,10 +286,6 @@ pub fn find(service: &str) -> Option<&'static OAuthService> {
         .find(|entry| entry.service.eq_ignore_ascii_case(service))
 }
 
-pub fn services() -> impl Iterator<Item = &'static OAuthService> {
-    SERVICES.iter()
-}
-
 pub fn service_names() -> String {
     SERVICES
         .iter()
@@ -366,7 +362,7 @@ mod tests {
     #[test]
     fn every_entry_is_well_formed() {
         let mut seen = BTreeSet::new();
-        for entry in services() {
+        for entry in SERVICES {
             assert!(seen.insert(entry.service), "duplicate: {}", entry.service);
             assert_eq!(
                 entry.service,
@@ -400,7 +396,7 @@ mod tests {
                 assert!(!value.is_empty(), "{}", entry.service);
             }
         }
-        let names: Vec<_> = services().map(|entry| entry.service).collect();
+        let names: Vec<_> = SERVICES.iter().map(|entry| entry.service).collect();
         let mut sorted = names.clone();
         sorted.sort_unstable();
         assert_eq!(names, sorted, "catalog must stay sorted by service name");

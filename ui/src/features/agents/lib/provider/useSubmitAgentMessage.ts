@@ -84,6 +84,7 @@ export function useSubmitAgentMessage(threadId: string) {
         id,
         content: vars.content.trim(),
         images: vars.images,
+        ...(vars.replies?.length ? { replies: vars.replies } : {}),
         createdAt: Date.now(),
         status: "sending",
         ...(vars.enqueue ? { queued: true } : {}),
@@ -105,7 +106,12 @@ export function useSubmitAgentMessage(threadId: string) {
 
       void source
         .startRun({
-          message: { id, text: vars.content, images: vars.images },
+          message: {
+            id,
+            text: vars.content,
+            images: vars.images,
+            replies: vars.replies,
+          },
           configurable: {
             ...configurable,
             ...(review
@@ -117,11 +123,12 @@ export function useSubmitAgentMessage(threadId: string) {
           ...(vars.enqueue ? { enqueue: true } : {}),
         })
         .catch((error: unknown) => {
+          const errorId = reportError({ title: "Couldn't send message", error })
           updateThread((thread) =>
             setPendingMessage(thread, {
               ...pendingMessage,
               status: "failed",
-              error: describeSendError(error),
+              error: `${describeSendError(error)} · ID ${errorId}`,
               // A failed enqueue never reaches the SDK's queue, so this
               // must fall back into the normal timeline instead of
               // rendering as a permanently pending queued row.
@@ -130,7 +137,6 @@ export function useSubmitAgentMessage(threadId: string) {
           )
           setAgentThreadStatus(queryClient, threadId, "error")
           vars.onStartError?.()
-          reportError({ title: "Couldn't send message", error })
         })
     },
   })

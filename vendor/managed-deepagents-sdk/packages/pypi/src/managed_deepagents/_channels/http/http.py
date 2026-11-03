@@ -5,7 +5,6 @@ import copy
 import functools
 import inspect
 import json
-import logging
 import os
 import re
 import uuid
@@ -24,16 +23,28 @@ from managed_deepagents._channels.http.types import (
     HttpChannelParseResult,
     HttpChannelRequest,
 )
-from managed_deepagents._channels.run_input import NormalizedRunInput, normalize_run_input
+from managed_deepagents._channels.resolve_user import (
+    post_reply,
+    resolve_channel_user,
+    sender_principal_id,
+    user_resolution,
+)
+from managed_deepagents._channels.run_input import (
+    InvalidRunInput,
+    NormalizedRunInput,
+    normalize_run_input,
+)
 from managed_deepagents._channels.runtime import is_json_value, json_copy
 from managed_deepagents._channels.types import ChannelError
 from managed_deepagents._log import logger
+from managed_deepagents._telemetry.otel import set_log_attributes
 
 if TYPE_CHECKING:
     from managed_deepagents._channel import ChannelEventsContext
+    from managed_deepagents._channels.actor import ChannelActor
     from managed_deepagents._channels.binding import ChannelBinding
     from managed_deepagents._channels.http import HttpChannel
-    from managed_deepagents._channels.http.ingress import SkippedIngressRun
+    from managed_deepagents._channels.http.ingress import PrepareInput, SkippedIngressRun
     from managed_deepagents._channels.http.types import (
         HttpChannelCancelMessage,
         HttpChannelInboundMessage,
@@ -44,13 +55,17 @@ if TYPE_CHECKING:
         HttpOnFinish,
         HttpPost,
     )
+    from managed_deepagents._channels.resolve_user import (
+        ChannelUser,
+        ResolvedIgnore,
+        ResolvedReply,
+    )
     from managed_deepagents._channels.types import ChannelEvent, JsonValue, MessageContent
     from managed_deepagents._ingress_runs import StartedIngressRun
 
     _Finish = Callable[["HttpFinish", "str | None"], Awaitable[None]]
     """Tell the channel the message is done, with the thread's assistant when known."""
 
-_LOG = logging.getLogger("mda")
 _T = TypeVar("_T")
 
 
@@ -101,7 +116,9 @@ async def _verified_parse(
     try:
         verified = await _resolve(channel.verify(_adapter_request(request)))
     except Exception as error:  # noqa: BLE001
-        _LOG.error("channel verification failed (%s)", type(error).__name__)
+        logger.error(
+            "channel verification failed (%s)", logger.safe_error_label(error), error=error
+        )
         return _error(500, "channel verification failed")
     if not verified:
         return _error(401, "invalid channel signature")
@@ -109,7 +126,7 @@ async def _verified_parse(
     try:
         result = await _resolve(channel.parse(_adapter_request(request)))
     except Exception as error:  # noqa: BLE001
-        _LOG.warning("channel payload rejected (%s)", type(error).__name__)
+        logger.warning("channel payload rejected (%s)", logger.safe_error_label(error))
         return _error(400, "invalid channel payload")
     if (
         not isinstance(result, Mapping)
@@ -119,6 +136,15 @@ async def _verified_parse(
     ):
         return _error(400, "invalid channel parse result")
     return result
+
+
+async def _channel_user(
+    ctx: ChannelEventsContext, actor: ChannelActor | None, delivery_id: str
+) -> tuple[ChannelUser | None, str | None]:
+    """What ``resolve_user`` answers about the sender, and the sender's own
+    principal when it keeps the channel default."""
+    user = await resolve_channel_user(ctx.get("resolve_user"), actor, ctx["name"], delivery_id)
+    return user, (await sender_principal_id(actor) if user is None else None)
 
 
 async def handle_http_request(ctx: ChannelEventsContext, channel: HttpChannel) -> Response:
@@ -148,6 +174,17 @@ async def handle_http_request(ctx: ChannelEventsContext, channel: HttpChannel) -
         )
     message = _copied_message(result["message"])
     delivery_id = str(uuid.uuid4())
+    try:
+        user, sender_id = await _channel_user(ctx, result.get("actor"), delivery_id)
+    except Exception as error:  # noqa: BLE001 - the app's hook may raise anything
+        logger.error("channel resolve_user failed (%s)", logger.safe_error_label(error))
+        return _error(500, "channel user resolution failed")
+    principal_id = user["id"] if user is not None and user["type"] == "principal" else None
+    user_id = principal_id or sender_id or message["user_id"]
+    # Ingress copies this onto the runs it starts, for their telemetry.
+    set_log_attributes(
+        {"user_resolution": user_resolution(user, ran_as_sender=sender_id is not None)}
+    )
     content = message.get("content")
     thread_id = message["thread_id"].lower()
     source_thread_key = _source_thread_key(ctx["name"], thread_id)
@@ -170,26 +207,20 @@ async def handle_http_request(ctx: ChannelEventsContext, channel: HttpChannel) -
 
     # Joined before the first start, so a cancel during it reaches the message.
     waiter = _join_thread_waiters(thread_id)
+    prepare = functools.partial(_prepare, channel, message, result.get("raw_event"), waiter)
+    run_input = _run_input(user, ctx["name"], channel, message, prepare)
     start = functools.partial(
         http_ingress.start_http_ingress_agent,
-        user_id=message["user_id"],
+        user_id=user_id,
+        principal_id=principal_id,
         thread_id=thread_id,
         source_thread_key=source_thread_key,
         source_provider=channel.kind,
         binding=copy.deepcopy(binding),
-        input=copy.deepcopy(content),
         assistant_id=assistant_id,
         delivery_key=message.get("delivery_key"),
         multitask_strategy=channel.multitask_strategy,
-        **(
-            {}
-            if content is not None
-            else {
-                "prepare": functools.partial(
-                    _prepare, channel, message, result.get("raw_event"), waiter
-                )
-            }
-        ),
+        **run_input,
     )
     # Every message gets one ``on_received`` and, once it is done, ``on_finish``.
     received = _schedule_received(
@@ -211,15 +242,17 @@ async def handle_http_request(ctx: ChannelEventsContext, channel: HttpChannel) -
     deliver = functools.partial(
         _deliver_reply,
         binding,
-        message["user_id"],
+        user_id,
         source_thread_key,
+        principal_id=principal_id,
         post=channel.post,
         on_error=channel.on_error,
         finish=finish,
     )
     wait = functools.partial(
         http_ingress.wait_for_http_ingress_thread,
-        user_id=message["user_id"],
+        user_id=user_id,
+        principal_id=principal_id,
         source_thread_key=source_thread_key,
         source_provider=channel.kind,
         thread_id=thread_id,
@@ -276,7 +309,7 @@ def _follow_up(
         started = cast("StartedIngressRun", outcome)
         _ingress.schedule_ingress_work(lambda: deliver(started), label=label)
         return
-    _LOG.info("channel run skipped %s", json.dumps({"threadId": thread_id, "reason": skipped}))
+    logger.info("channel run skipped %s", json.dumps({"threadId": thread_id, "reason": skipped}))
     _schedule_skipped(cast("SkippedIngressRun", outcome), start_when_idle, finish, label)
 
 
@@ -343,7 +376,9 @@ def _schedule_received(
         try:
             await on_received(target, delivery)
         except Exception as error:  # noqa: BLE001
-            _LOG.error("channel received notice failed (%s)", type(error).__name__)
+            logger.error(
+                "channel received notice failed (%s)", logger.safe_error_label(error), error=error
+            )
         finally:
             received.set()
 
@@ -370,7 +405,9 @@ async def _finish(
     try:
         await on_finish(json_copy(target), delivery)
     except Exception as error:  # noqa: BLE001
-        _LOG.error("channel finish notice failed (%s)", type(error).__name__)
+        logger.error(
+            "channel finish notice failed (%s)", logger.safe_error_label(error), error=error
+        )
 
 
 def _finished(delivery: HttpDelivery, done: HttpFinish) -> HttpFinishedDelivery:
@@ -432,9 +469,11 @@ async def _cancel_runs(
             )
         )
     except Exception as error:  # noqa: BLE001
-        _LOG.error("channel run could not be cancelled (%s)", type(error).__name__)
+        logger.error(
+            "channel run could not be cancelled (%s)", logger.safe_error_label(error), error=error
+        )
         return _error(500, "channel run could not be cancelled")
-    _LOG.info(
+    logger.info(
         "channel runs cancelled %s",
         json.dumps({"threadId": thread_id, "cancelled": cancelled}),
     )
@@ -454,7 +493,11 @@ async def _cancel_runs(
                     thread_id=thread_id,
                 )
             except Exception as error:  # noqa: BLE001
-                _LOG.error("channel thread could not be read (%s)", type(error).__name__)
+                logger.error(
+                    "channel thread could not be read (%s)",
+                    logger.safe_error_label(error),
+                    error=error,
+                )
             finished: HttpDelivery = {**delivery}
             if "assistant_id" in waits_on:
                 finished["assistant_id"] = waits_on["assistant_id"]
@@ -466,7 +509,9 @@ async def _cancel_runs(
             try:
                 await on_finish(target, _finished(finished, done))
             except Exception as error:  # noqa: BLE001
-                _LOG.error("channel finish notice failed (%s)", type(error).__name__)
+                logger.error(
+                    "channel finish notice failed (%s)", logger.safe_error_label(error), error=error
+                )
 
         _ingress.schedule_ingress_work(notify, label=f'channel "{name}" finish notice')
     return response or JSONResponse(
@@ -530,7 +575,9 @@ async def _start_first(
         outcome = await start()
     except Exception as error:  # noqa: BLE001
         _leave_thread_waiters(thread_id, waiter)
-        _LOG.error("channel run could not be started (%s)", type(error).__name__)
+        logger.error(
+            "channel run could not be started (%s)", logger.safe_error_label(error), error=error
+        )
         return None
     if _skipped(outcome) != "busy":
         _leave_thread_waiters(thread_id, waiter)
@@ -569,10 +616,10 @@ async def _start_when_idle(
     outcome: StartedIngressRun | SkippedIngressRun = {"skipped": "busy"}
     try:
         while (skipped := _skipped(outcome)) == "busy":
-            _LOG.info("channel run waits %s", json.dumps({"threadId": thread_id}))
+            logger.info("channel run waits %s", json.dumps({"threadId": thread_id}))
             await wait()
             if waiter.cancelled:
-                _LOG.info(
+                logger.info(
                     "channel run dropped: its thread was cancelled while it waited %s",
                     json.dumps({"threadId": thread_id}),
                 )
@@ -580,7 +627,9 @@ async def _start_when_idle(
                 return
             outcome = await start()
     except Exception as error:  # noqa: BLE001
-        _LOG.error("channel run could not be started (%s)", type(error).__name__)
+        logger.error(
+            "channel run could not be started (%s)", logger.safe_error_label(error), error=error
+        )
         await finish({"type": "failed", "reason": "start", "interrupts": []}, None)
         return
     finally:
@@ -588,7 +637,7 @@ async def _start_when_idle(
     if skipped is None:
         await deliver(cast("StartedIngressRun", outcome))
         return
-    _LOG.info("channel run skipped %s", json.dumps({"threadId": thread_id, "reason": skipped}))
+    logger.info("channel run skipped %s", json.dumps({"threadId": thread_id, "reason": skipped}))
     await _finish_skipped(cast("SkippedIngressRun", outcome), finish=finish, waiter=waiter)
 
 
@@ -618,13 +667,21 @@ async def _prepare(
                 _copied_message(message), None if raw_event is None else json_copy(raw_event)
             )
         )
-        prepared = normalize_run_input(result)
     except Exception as error:  # noqa: BLE001
-        _LOG.error("channel input failed (%s)", type(error).__name__)
+        logger.error("channel input failed (%s)", logger.safe_error_label(error), error=error)
+        return None
+    try:
+        prepared = normalize_run_input(result)
+    except InvalidRunInput as error:
+        # MDA's own reason, bounded, unlike a raised exception's message.
+        logger.error("channel input refused, no run started: %s", error.reason)
+        return None
+    except Exception as error:  # noqa: BLE001
+        logger.error("channel input failed (%s)", logger.safe_error_label(error), error=error)
         return None
     # A slow input, such as an endpoint's, may outlast a cancel.
     if prepared is not None and waiter.cancelled:
-        _LOG.info(
+        logger.info(
             "channel run dropped: its thread was cancelled while its input was decided %s",
             json.dumps({"threadId": message["thread_id"].lower()}),
         )
@@ -641,9 +698,10 @@ async def _deliver_reply(
     post: HttpPost | None,
     on_error: HttpOnError | None,
     finish: _Finish | None = None,
+    principal_id: str | None = None,
 ) -> None:
     run_id = started["run_id"]
-    _LOG.info(
+    logger.info(
         "channel run started %s",
         json.dumps({"threadId": started["thread_id"], "runId": logger.log_identifier(run_id)}),
     )
@@ -656,9 +714,12 @@ async def _deliver_reply(
             source_provider=binding["provider"],
             thread_id=started["thread_id"],
             run_id=run_id,
+            principal_id=principal_id,
         )
     except Exception as error:  # noqa: BLE001
-        _LOG.error("channel run could not be observed (%s)", type(error).__name__)
+        logger.error(
+            "channel run could not be observed (%s)", logger.safe_error_label(error), error=error
+        )
         outcome = None
     # The run may have answered already, or may still, so no error is reported;
     # how it ended is unknown.
@@ -667,7 +728,7 @@ async def _deliver_reply(
             await finish({"type": "failed", "reason": "observe", "interrupts": []}, None)
         return
     if outcome["status"] in ("error", "timeout"):
-        _LOG.error("channel run failed %s", json.dumps({"threadId": started["thread_id"]}))
+        logger.error("channel run failed %s", json.dumps({"threadId": started["thread_id"]}))
         await _notify_failed(
             ChannelError("channel_run_failed", "channel run failed"), binding, post, on_error
         )
@@ -698,7 +759,12 @@ async def _notify_failed(
             )
     except Exception as reply_error:  # noqa: BLE001
         action = "callback" if on_error is not None else "reply"
-        _LOG.error("channel error %s failed (%s)", action, type(reply_error).__name__)
+        logger.error(
+            "channel error %s failed (%s)",
+            action,
+            logger.safe_error_label(reply_error),
+            error=reply_error,
+        )
 
 
 _CANCEL_MESSAGE_KEYS = frozenset({"user_id", "thread_id", "target"})
@@ -759,6 +825,54 @@ def _valid_content(content: object) -> bool:
             for block in content
         )
     )
+
+
+def _run_input(
+    user: ChannelUser | None,
+    name: str,
+    channel: HttpChannel,
+    message: HttpChannelInboundMessage,
+    prepare: PrepareInput,
+) -> dict[str, object]:
+    """What the message's run starts with: its content or the channel's input,
+    unless resolve_user holds the run back."""
+    content = message.get("content")
+    if user is not None and user["type"] != "principal":
+        return {
+            "prepare": functools.partial(
+                _withhold, user, name, channel, message, prepare if content is None else None
+            )
+        }
+    if content is not None:
+        return {"input": copy.deepcopy(content)}
+    return {"prepare": prepare}
+
+
+async def _withhold(
+    withheld: ResolvedReply | ResolvedIgnore,
+    name: str,
+    channel: HttpChannel,
+    message: HttpChannelInboundMessage,
+    prepare: PrepareInput | None,
+) -> None:
+    """Instead of the run the message would start, post resolve_user's reply, if
+    any, once per delivery. The message then finishes as skipped."""
+    if prepare is not None and await prepare() is None:
+        return
+    if withheld["type"] == "reply":
+        await post_reply(
+            withheld["message"],
+            name=name,
+            provider=channel.kind,
+            target=message["target"],
+            transport=channel.messaging(os.environ) if channel.messaging else None,
+            delivery_key=message.get("delivery_key"),
+        )
+    logger.info(
+        "channel run withheld by resolve_user %s",
+        json.dumps({"threadId": message["thread_id"].lower()}),
+    )
+    return
 
 
 def _error(status: int, message: str) -> Response:

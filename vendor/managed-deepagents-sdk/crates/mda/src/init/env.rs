@@ -1,5 +1,7 @@
 //! Environment variable seeding for scaffolded `.env` files.
 
+use crate::dependencies::{self, ModelApiKeyRequirement};
+
 /// Commented-out model provider API keys to document in the generated `.env`.
 ///
 /// These are forwarded to your deployment as secrets, so the agent's model can
@@ -16,9 +18,10 @@ pub(super) const PROVIDER_API_KEYS: &[(&str, &str)] = &[
 ///
 /// When `langsmith_key` is `Some`, the resolved key is written verbatim so a
 /// key already present in the shell environment is reused; otherwise the line
-/// is left empty for the user to fill in. Provider keys are always commented
-/// out.
-pub(super) fn env_file(langsmith_key: Option<&str>) -> String {
+/// is left empty for the user to fill in. The key `model` authenticates with is
+/// written uncommented and empty, so the one line to fill in is obvious; every
+/// other provider key stays commented out.
+pub(super) fn env_file(langsmith_key: Option<&str>, model: &str) -> String {
     let mut out = String::from(
         "# Environment variables for your Managed Deep Agent.\n\
          #\n\
@@ -33,12 +36,28 @@ pub(super) fn env_file(langsmith_key: Option<&str>) -> String {
         None => out.push_str("LANGSMITH_API_KEY=\n"),
     }
 
-    out.push_str(
-        "\n# Model provider API keys. Uncomment the provider(s) your agent uses;\n\
-         # they are forwarded to your deployment so the model can authenticate.\n",
-    );
+    let model_key = match dependencies::deploy_model_api_key_requirement(model) {
+        ModelApiKeyRequirement::DeploymentSecret(key) => Some(key),
+        _ => None,
+    };
+    if let Some(key) = model_key {
+        out.push_str(&format!(
+            "\n# API key for your agent's model ({model}). `mda dev`, `mda chat`, and\n\
+             # `mda deploy` need it; it is forwarded to your deployment.\n\
+             {key}=\n\
+             \n\
+             # Other model providers. Uncomment the one(s) your agent switches to.\n"
+        ));
+    } else {
+        out.push_str(
+            "\n# Model provider API keys. Uncomment the provider(s) your agent uses;\n\
+             # they are forwarded to your deployment so the model can authenticate.\n",
+        );
+    }
     for (key, provider) in PROVIDER_API_KEYS {
-        out.push_str(&format!("# {key}=  # {provider}\n"));
+        if model_key != Some(*key) {
+            out.push_str(&format!("# {key}=  # {provider}\n"));
+        }
     }
 
     out

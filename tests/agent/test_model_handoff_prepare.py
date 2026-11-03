@@ -3,22 +3,25 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import httpx2
 import pytest
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.tracers.langchain import LangChainTracer
 from langsmith import trace, tracing_context
 from langsmith.run_trees import RunTree
+from runtime_api.catalog import RoutingRules
 
 import openswe.server as server
-from openswe.dashboard.options import available_requested_models
+from openswe.agent_api.tokens import AgentTurnSettings
 from openswe.middleware.model_selection import (
-    ModelSelectionMiddleware,
     ModelSelectionState,
+    RouteSelection,
     SelectedRoute,
 )
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.model_request import ModelRequestIntent
+from openswe.prompt import SystemPrompt
 from openswe.utils.jev import JevDecision
 from openswe.utils.thread_settings import ThreadSettings
 
@@ -28,7 +31,6 @@ class Handoff:
     middleware: server.PrepareAgentRunMiddleware
     settings: ThreadSettings
     store: AsyncMock
-    record: AsyncMock
 
     async def prepare(self, state: PrepareRunState | None = None) -> dict[str, object]:
         return await self.middleware._prepare(state or {"messages": []}, MagicMock())
@@ -44,18 +46,11 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
         settings.update(value)
 
     store = AsyncMock(side_effect=persist)
-    record = AsyncMock()
     monkeypatch.setattr(server, "load_thread_settings", AsyncMock(return_value=settings))
     monkeypatch.setattr(server, "store_thread_settings", store)
-    monkeypatch.setattr(server, "record_agent_invocation_usage", record)
     monkeypatch.setattr(server, "resolve_github_token", AsyncMock(return_value=("token", None)))
     monkeypatch.setattr(server, "schedule_thread_title_generation", lambda **kw: None)
-    monkeypatch.setattr(
-        server,
-        "get_or_create_sandbox_backend_proxy",
-        lambda _: MagicMock(ready=AsyncMock(return_value=MagicMock(id="sandbox-1"))),
-    )
-    monkeypatch.setattr(server, "resolve_sandbox_work_dir", AsyncMock(return_value="/workspace"))
+    monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value={}))
     for name in (
         "resolve_triggering_user_identity",
         "load_workspace",
@@ -64,7 +59,9 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
     ):
         monkeypatch.setattr(server, name, AsyncMock(return_value=None))
     monkeypatch.setattr(server, "_thread_participant_identities", AsyncMock(return_value=[]))
-    monkeypatch.setattr(server, "construct_system_prompt", lambda *args, **kw: "system prompt")
+    monkeypatch.setattr(
+        server, "construct_system_prompt", lambda *args, **kw: SystemPrompt("system prompt", "")
+    )
     monkeypatch.setattr(
         server,
         "client",
@@ -80,6 +77,7 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
             "thread_id": "thread-1",
             "source": "slack",
             "invocation_id": "inv-1",
+            "resolved_agent_model_id": "openai:gpt-6.1-sol",
             "slack_thread": {
                 "channel_id": "C1",
                 "thread_ts": "1.2",
@@ -88,30 +86,16 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
             },
         }
     }
+    turn = AgentTurnSettings(
+        title_model_id="openai:gpt-6-luna",
+        routing=RoutingRules(mode="fast", route_model_ids={"fast": "openai:gpt-6-luna"}),
+        route_models={"fast": ("openai:gpt-6-luna", "low")},
+        offers_requested_models=True,
+    )
     middleware = server.PrepareAgentRunMiddleware(
-        thread_id="thread-1",
-        config=config,
-        profile_login=None,
-        repo_instructions=None,
-        model_id="openai:gpt-6.1-sol",
-        effort=None,
-        title_model=MagicMock(),
-        source="slack",
-        user_email="",
-        linear_project_id="",
-        linear_issue_number="",
-        draft_prs=False,
-        admin_workspaces=False,
+        config, turn, repo_instructions=None, sandbox_id="sandbox-1"
     )
-    middleware._requested_models = available_requested_models(fable_enabled=False)
-    middleware._model_selection = ModelSelectionMiddleware(
-        {"fast": MagicMock()},
-        MagicMock(),
-        routing_mode="fast",
-        requested_model_factory=lambda _model, _effort: MagicMock(),
-    )
-    middleware._routing_defaults = {"fast": ("openai:gpt-6-luna", "low")}
-    return Handoff(middleware, settings, store, record)
+    return Handoff(middleware, settings, store)
 
 
 @pytest.mark.parametrize(
@@ -180,7 +164,6 @@ async def test_initial_handoff_persists_before_work_and_attributes_selected_mode
     assert prepared["selected_model_id"] == (requested or "openai:gpt-6-luna")
     assert prepared["selected_effort"] == ("high" if requested else "low")
     assert prepared["requested_model"] == requested
-    assert handoff.record.call_args.kwargs["model_id"] == prepared["selected_model_id"]
     if requested:
         assert handoff.settings["model_id"] == requested
         assert handoff.settings["model_routing_enabled"] is False
@@ -209,7 +192,7 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
     selection = handoff.middleware._model_selection
     assert selection is not None
     selection._routing_mode = "auto"
-    classify = AsyncMock(return_value=fresh_route)
+    classify = AsyncMock(return_value=RouteSelection(fresh_route))
     monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
     state: ModelSelectionState = {
         "messages": [HumanMessage(content="Fix the typo")],
@@ -225,6 +208,61 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
     )
     assert (await selection.abefore_model(state, MagicMock()))["model_route"] == fresh_route
     classify.assert_awaited_once_with("Fix the typo")
+
+
+async def test_prepare_auth_fallback_attributes_default_without_pinning_route(
+    handoff: Handoff, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    handoff.middleware._requested_models = None
+    selection = handoff.middleware._model_selection
+    assert selection is not None
+    selection._routing_mode = "auto"
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "rejected-key")
+    requests: list[httpx2.Request] = []
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx2.Response(403)
+        return httpx2.Response(
+            200,
+            json={
+                "model": "jev-1.13.0",
+                "answers": {
+                    "route": {
+                        "type": "choice",
+                        "choice": "fast",
+                        "confidence": 0.95,
+                        "probabilities": {"fast": 1.0},
+                    }
+                },
+            },
+        )
+
+    client = httpx2.AsyncClient
+    monkeypatch.setattr(
+        httpx2,
+        "AsyncClient",
+        lambda **kwargs: client(**{**kwargs, "transport": httpx2.MockTransport(handle)}),
+    )
+    state: PrepareRunState = {"messages": [HumanMessage(content="Fix the typo")]}
+    prepared = await handoff.prepare(state)
+    assert "model_route" not in prepared
+    assert prepared["selected_model_id"] == "openai:gpt-6.1-sol"
+    assert (
+        handoff.middleware._config["configurable"]["resolved_agent_model_id"]
+        == "openai:gpt-6.1-sol"
+    )
+    state.update(cast(PrepareRunState, prepared))
+    assert len(requests) == 1
+    recovered = await handoff.prepare(state)
+    assert recovered["model_route"] == "fast"
+    assert recovered["selected_model_id"] == "openai:gpt-6-luna"
+    state.update(cast(PrepareRunState, recovered))
+    assert await selection.abefore_model(cast(ModelSelectionState, state), MagicMock()) == {
+        "model_route": "fast"
+    }
+    assert len(requests) == 2
 
 
 @pytest.mark.parametrize(
@@ -291,7 +329,6 @@ async def test_handoff_validates_and_persists_before_selecting_model(
             }[failure]
         )
         select.assert_not_called()
-        handoff.record.assert_not_awaited()
         if failure != "persistence":
             handoff.store.assert_not_awaited()
         assert handoff.settings == {"model_id": "openai:gpt-6.1-sol", "repo_instructions": "retain"}
@@ -411,5 +448,4 @@ async def test_requested_effort_is_validated_persisted_and_reused(
     assert handoff.settings["model_id"] == selected_model
     assert handoff.settings["effort"] == effort
     assert handoff.settings["model_routing_enabled"] is False
-    assert handoff.record.call_args.kwargs["effort"] == effort
     handoff.store.assert_awaited_once()

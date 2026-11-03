@@ -23,8 +23,8 @@ import {
 //   that same review, and the card becomes "Expedited review: merged".
 
 const PEOPLE = [
-  { login: "alice", slack_id: "U_ALICE" },
-  { login: "bob", slack_id: "U_BOB" },
+  { login: "alice", slack_id: "U_ALICE", name: "Alice" },
+  { login: "bob", slack_id: "U_BOB", name: "Bob" },
 ];
 const PR_NUMBER = 1;
 const REPO = { owner: "fakeorg", repo: "demo" };
@@ -242,7 +242,7 @@ test.describe("Expedited Slack review", () => {
     await control(request, "/control/repo-file", {
       repo: `${REPO.owner}/${REPO.repo}`,
       files: {
-        ".open-swe/APPROVALS.md":
+        ".open-swe/auto-approve-rules/generated-and-release-notes.md":
           "Auto-approve release notes appended to CHANGELOG.md and the generated GENERATED_* table at the end of config.py.\n",
         "CHANGELOG.md": "# Changelog\n",
         "config.py": Array.from(
@@ -319,10 +319,10 @@ test.describe("Expedited Slack review", () => {
     await expect(diff).toBeVisible();
     await expect(diff).toHaveAttribute("alt", /config\.py.*greet\.py/);
     await expect(diff).not.toHaveAttribute("alt", /CHANGELOG/);
-    // 44 lines changed outside tests; only the 4 not covered by APPROVALS.md are
+    // 44 lines changed outside tests; only the 4 not covered by the auto-approve rule are
     // drawn, and the other 40 are listed by guideline.
     await expect(card(page)).toContainText(
-      /Open SWE judged these auto-approvable under `?\.open-swe\/APPROVALS\.md`? \(not shown\)/,
+      /Open SWE judged these auto-approvable under `?\.open-swe\/auto-approve-rules\/`? \(not shown\)/,
     );
     await expect(card(page)).toContainText(
       /Release notes_?: `?CHANGELOG\.md`? \+30 −0/,
@@ -432,10 +432,8 @@ test.describe("Expedited Slack review", () => {
       .poll(async () => (await latest(request)).approvers, { timeout: 60_000 })
       .toEqual([reviewer.login]);
     await page.goto("/mock/slack");
-    // A voter who clicked from Slack is mentioned by their Slack identity.
-    await expect(card(page)).toContainText(
-      new RegExp(`Approved by (<@${reviewer.slack_id}>|@${reviewer.slack_id})`),
-    );
+    await expect(card(page)).toContainText(`Approved by ${reviewer.name}.`);
+    await expect(card(page)).not.toContainText(`<@${reviewer.slack_id}>`);
     await expect(card(page).getByRole("button")).toHaveCount(0);
     await expect(card(page).locator("img.block-image")).toHaveCount(0);
     await shootCard(page, "approved");

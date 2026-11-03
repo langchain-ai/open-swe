@@ -30,7 +30,14 @@ from uuid import UUID
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.callbacks.manager import AsyncCallbackManager, CallbackManager
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolCall, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    ToolCall,
+    ToolMessage,
+    get_notification_metadata,
+)
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
@@ -84,6 +91,8 @@ _HIDDEN_TAGS = frozenset({"nostream", "langsmith:hidden"})
 
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _LIST_ITEM = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])\s")
+_DATA_URL = re.compile(r"data:([\w.+-]+/[\w.+-]+);base64,(.*)", re.DOTALL)
+_IMAGE_BLOCK_TYPES = frozenset({"image", "image_url"})
 
 # Namespace of the enclosing ``task`` tool calls; travels into nested subagents.
 _namespace: ContextVar[tuple[str, ...]] = ContextVar("transcript_namespace", default=())
@@ -202,9 +211,10 @@ class RunState:
         self,
         tool_call: ToolCall,
         tool_call_id: str,
-        messages: object,
+        message_id: str | None,
         namespace: list[str],
     ) -> None:
+        """Record ``tool_call`` started, under the reply ``message_id`` that made it."""
         name = tool_call.get("name") or "tool"
         try:
             self.enqueue(
@@ -214,7 +224,9 @@ class RunState:
                         type="tool.started",
                         turn_id=self.turn_id,
                         tool_call_id=tool_call_id,
-                        message_id=_issuing_message_id(self, messages, tool_call_id),
+                        message_id=None
+                        if message_id is None
+                        else self.message_alias.get(message_id, message_id),
                         name=name,
                         input=_json_object(tool_call.get("args")),
                         namespace=namespace,
@@ -234,6 +246,9 @@ class RunState:
         status: Literal["completed", "error"],
         text: str,
         truncated: bool,
+        *,
+        attachments: Sequence[MessageAttachment] = (),
+        pending: tuple[PendingAttachment, ...] = (),
     ) -> None:
         try:
             self.enqueue(
@@ -248,10 +263,12 @@ class RunState:
                         output_truncated=truncated,
                         has_output=bool(text),
                         namespace=namespace,
+                        attachments=list(attachments) or None,
                     ),
                     actor_kind="agent",
                     run_id=self.run_id,
                     turn_id=self.turn_id,
+                    attachments=pending,
                     tool_output=text,
                 )
             )
@@ -261,6 +278,24 @@ class RunState:
                 exc_info=True,
                 extra={"transcript_tool_call_id": tool_call_id},
             )
+
+    def complete_tool_result(
+        self, tool_call_id: str, namespace: list[str], result: ToolMessage | GraphCommand[Any]
+    ) -> None:
+        """Record a tool's result: its status, its text, and the images it returned."""
+        message = _result_message(result, tool_call_id)
+        if message is None:
+            self.complete_tool(tool_call_id, namespace, "completed", "", False)
+            return
+        attachments, pending = _image_attachments(message, tool_call_id, keep_remote=False)
+        self.complete_tool(
+            tool_call_id,
+            namespace,
+            "error" if message.status == "error" else "completed",
+            *_tool_output(message.content),
+            attachments=attachments,
+            pending=pending,
+        )
 
 
 _runs: dict[str, RunState] = {}
@@ -417,9 +452,13 @@ def _usage(message: AIMessage) -> MessageUsage | None:
 
 
 def _image_bytes(block: Mapping[str, object]) -> tuple[str, bytes] | None:
-    """``(mime_type, data)`` for a standard base64 image content block."""
+    """``(mime_type, data)`` for a standard base64 image block, inline or as a data URL."""
     mime_type = block.get("mime_type")
     encoded = block.get("base64")
+    url = block.get("url")
+    if not isinstance(encoded, str) and isinstance(url, str):
+        if match := _DATA_URL.fullmatch(url):
+            mime_type, encoded = match[1], match[2]
     if not isinstance(mime_type, str) or not isinstance(encoded, str):
         return None
     try:
@@ -429,13 +468,15 @@ def _image_bytes(block: Mapping[str, object]) -> tuple[str, bytes] | None:
         return None
 
 
-def _human_attachments(
-    message: HumanMessage, message_id: str
+def _image_attachments(
+    message: BaseMessage, message_id: str, *, keep_remote: bool
 ) -> tuple[list[MessageAttachment], tuple[PendingAttachment, ...]]:
-    """Files on a human message, as event metadata plus the bytes to store.
+    """Images on a message, as event metadata plus the bytes to store.
 
-    Only standard base64 image blocks are captured; a remote-URL image is
-    referenced rather than copied, and anything else is skipped with a log.
+    Only standard base64 image blocks, inline or as a data URL, are captured.
+    With ``keep_remote`` a remote-URL image is referenced rather than copied;
+    without it, as for a tool's result, the browser is never handed a URL to
+    fetch. Anything else is skipped with a log.
     """
     try:
         blocks = message.content_blocks
@@ -450,11 +491,11 @@ def _human_attachments(
         url = block.get("url")
         decoded = _image_bytes(block)
         if decoded is None:
-            if isinstance(url, str) and url:
+            if keep_remote and isinstance(url, str) and url and not url.startswith("data:"):
                 attachments.append(MessageAttachment(mime_type="image/*", url=url))
             else:
                 logger.warning(
-                    "Skipping a transcript attachment with no bytes and no url",
+                    "Skipping a transcript attachment with no bytes to store",
                     extra={"transcript": {"message_id": message_id}},
                 )
             continue
@@ -497,6 +538,9 @@ def _tool_output(content: object) -> tuple[str, bool]:
         for block in content if isinstance(content, list) else [content]:
             if isinstance(block, Mapping) and isinstance(block.get("text"), str):
                 parts.append(cast(str, block["text"]))
+            elif isinstance(block, Mapping) and block.get("type") in _IMAGE_BLOCK_TYPES:
+                # Images travel as attachments; their base64 is no use as text.
+                continue
             else:
                 parts.append(str(block))
         text = "\n".join(parts)
@@ -636,9 +680,7 @@ class _NestedToolHandler(AsyncCallbackHandler):
         if tool_call_id is None:
             return
         if isinstance(output, ToolMessage):
-            self._state.complete_tool(
-                tool_call_id, self._namespace, *_result_output(output, tool_call_id)
-            )
+            self._state.complete_tool_result(tool_call_id, self._namespace, output)
             return
         self._state.complete_tool(tool_call_id, self._namespace, "completed", *_tool_output(output))
 
@@ -1041,14 +1083,15 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         for message in messages:
             if not isinstance(message, HumanMessage):
                 continue
-            if message.additional_kwargs.get("lc_source") == "summarization":
+            notification = get_notification_metadata(message)
+            if notification is not None and notification["source"] == "summarization":
                 continue
             message_id = message.id
             if not isinstance(message_id, str) or message_id in state.seen_human_ids:
                 continue
             state.seen_human_ids.add(message_id)
             text = _transcribed_human_text(message)
-            attachments, pending = _human_attachments(message, message_id)
+            attachments, pending = _image_attachments(message, message_id, keep_remote=True)
             if not text and not attachments:
                 continue
             state.enqueue(
@@ -1075,9 +1118,8 @@ class TranscriptMiddleware(OpenSWEMiddleware):
     def _record_offloading(self, state: RunState, request: ModelRequest) -> None:
         """Persist the offloading hint the summarizer already wrote into state.
 
-        ``ConversationOffloadingMiddleware`` streams its status through
-        ``get_stream_writer`` and mirrors it onto ``state``; reading it here
-        keeps that middleware untouched.
+        A requested offload streams its status and keeps it in the run's state, which
+        reaches here with the next model call.
         """
         status = request.state.get("conversation_offloading")
         if not isinstance(status, Mapping):
@@ -1160,7 +1202,9 @@ class TranscriptMiddleware(OpenSWEMiddleware):
 
         namespace = current_namespace()
         messages = request.state.get("messages") if isinstance(request.state, Mapping) else None
-        state.start_tool(tool_call, tool_call_id, messages, namespace)
+        state.start_tool(
+            tool_call, tool_call_id, _issuing_message_id(messages, tool_call_id), namespace
+        )
         token = _namespace.set((*_namespace.get(), tool_call_id))
         try:
             result = await handler(
@@ -1187,25 +1231,22 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             raise
         finally:
             _namespace.reset(token)
-        state.complete_tool(tool_call_id, namespace, *_result_output(result, tool_call_id))
+        state.complete_tool_result(tool_call_id, namespace, result)
         return result
 
-    async def atool_started(self, tool_call: ToolCall, messages: Sequence[BaseMessage]) -> None:
-        """Record a tool call that another process runs, such as MDA's ``task``."""
+    async def atool_started(self, tool_call: ToolCall, message_id: str | None) -> None:
+        """Record a tool call that another process runs, such as MDA's ``task``, under the
+        reply ``message_id`` that made it."""
         state = _lookup_state()
         tool_call_id = tool_call.get("id")
         if state.enabled and tool_call_id:
-            state.start_tool(tool_call, tool_call_id, messages, current_namespace())
+            state.start_tool(tool_call, tool_call_id, message_id, current_namespace())
 
     async def atool_finished(self, result: ToolMessage) -> None:
         """Record how a tool call ``atool_started`` recorded ended."""
         state = _lookup_state()
         if state.enabled:
-            state.complete_tool(
-                result.tool_call_id,
-                current_namespace(),
-                *_result_output(result, result.tool_call_id),
-            )
+            state.complete_tool_result(result.tool_call_id, current_namespace(), result)
 
     async def _interrupt_turn(self, state: RunState) -> None:
         """End a cancelled turn. The cancel endpoint writes the same command id."""
@@ -1311,7 +1352,7 @@ def _turn_requested(
     message_id = human.id if isinstance(human.id, str) and human.id else str(uuid.uuid7())
     # ``_start_run`` marks this message as seen, so its images can never be
     # recovered by ``_record_injected_humans``; they travel with the request.
-    attachments, pending = _human_attachments(human, message_id)
+    attachments, pending = _image_attachments(human, message_id, keep_remote=True)
     return Command(
         command_id=f"turn:{state.turn_id}:requested",
         event=TurnRequested(
@@ -1332,18 +1373,16 @@ def _turn_requested(
     )
 
 
-def _issuing_message_id(state: RunState, candidates: object, tool_call_id: str) -> str | None:
+def _issuing_message_id(candidates: object, tool_call_id: str) -> str | None:
+    """The reply among ``candidates`` that made the tool call ``tool_call_id``."""
     if not isinstance(candidates, Sequence):
         return None
     for message in reversed(candidates):
         if not isinstance(message, AIMessage):
             continue
         for call in message.tool_calls or ():
-            if call.get("id") != tool_call_id:
-                continue
-            if not isinstance(message.id, str):
-                return None
-            return state.message_alias.get(message.id, message.id)
+            if call.get("id") == tool_call_id:
+                return message.id if isinstance(message.id, str) else None
     return None
 
 
@@ -1362,27 +1401,22 @@ def _json_object(value: object) -> JsonObject:
     return out
 
 
-def _result_output(
+def _result_message(
     result: ToolMessage | GraphCommand[Any], tool_call_id: str
-) -> tuple[Literal["completed", "error"], str, bool]:
-    """The tool's status, its capped output text, and whether capping cut it."""
+) -> ToolMessage | None:
+    """The tool's own message, whether it returned one or a command carrying it."""
     if isinstance(result, ToolMessage):
-        message: ToolMessage | None = result
-    else:
-        update = result.update
-        updates = update.get("messages") if isinstance(update, Mapping) else None
-        message = next(
-            (
-                item
-                for item in (updates if isinstance(updates, Sequence) else ())
-                if isinstance(item, ToolMessage) and item.tool_call_id == tool_call_id
-            ),
-            None,
-        )
-    if message is None:
-        return "completed", "", False
-    status: Literal["completed", "error"] = "error" if message.status == "error" else "completed"
-    return status, *_tool_output(message.content)
+        return result
+    update = result.update
+    updates = update.get("messages") if isinstance(update, Mapping) else None
+    return next(
+        (
+            item
+            for item in (updates if isinstance(updates, Sequence) else ())
+            if isinstance(item, ToolMessage) and item.tool_call_id == tool_call_id
+        ),
+        None,
+    )
 
 
 def _observing_nested_tools(

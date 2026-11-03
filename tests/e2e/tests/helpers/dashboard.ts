@@ -28,27 +28,40 @@ export async function loginAs(
 ) {
   const res = await page.request.post("/control/login", { data: user });
   expect(res.ok()).toBeTruthy();
+  await seedRepoSidebar(page);
 }
 
-export async function optIntoQueue(page: Page) {
+/** Suites written for the repository-grouped sidebar with its nav links shown. */
+export async function seedRepoSidebar(page: Page) {
+  await page.addInitScript(() => {
+    if (!localStorage.getItem("open-swe.agents.sidebar-prefs"))
+      localStorage.setItem(
+        "open-swe.agents.sidebar-prefs",
+        JSON.stringify({
+          organize: "workspace",
+          hiddenNavItems: ["/agents/bots", "/incidents"],
+        }),
+      );
+  });
+}
+
+// What a message sent while a run is live does. It is the person's saved
+// preference, so a spec that depends on it sets it rather than inherit another's.
+export async function setFollowUpBehavior(
+  page: Page,
+  behavior: "queue" | "steer",
+) {
   const saved = await page.request.get("/dashboard/api/me/preferences");
   expect(saved.ok()).toBeTruthy();
   const res = await page.request.put("/dashboard/api/me/preferences", {
-    data: { ...(await saved.json()), follow_up_behavior: "queue" },
+    data: { ...(await saved.json()), follow_up_behavior: behavior },
     headers: SAME_ORIGIN_HEADERS,
   });
   expect(res.ok()).toBeTruthy();
 }
 
-// `monitor` is off by default; the sender opts in on their profile.
-export async function enableMonitors(page: Page) {
-  const saved = await page.request.get("/dashboard/api/profile");
-  expect(saved.ok()).toBeTruthy();
-  const response = await page.request.put("/dashboard/api/profile", {
-    headers: { origin: new URL(saved.url()).origin },
-    data: { ...(await saved.json()), experimental_monitor: true },
-  });
-  expect(response.ok(), await response.text()).toBeTruthy();
+export async function optIntoQueue(page: Page) {
+  await setFollowUpBehavior(page, "queue");
 }
 
 // The composer is a rich-text editor, not a <textarea>: it carries the prompt
@@ -252,7 +265,14 @@ export async function readPullRequest(
 // follow-up. It may finish while the UI observes the next server refresh.
 export async function openRunningThreadViaSlackLink(page: Page) {
   await page.goto("/mock/slack");
-  await page.locator("#reset").click();
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/control/reset") &&
+        response.request().method() === "POST",
+    ),
+    page.locator("#reset").click(),
+  ]);
   await expect(page.locator("#thread")).toContainText("No messages yet");
   await page
     .locator("#text")
@@ -272,7 +292,14 @@ export async function openThreadViaSlackLink(
   options: { repoPrivate?: boolean; message?: string } = {},
 ) {
   await page.goto("/mock/slack");
-  await page.locator("#reset").click();
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/control/reset") &&
+        response.request().method() === "POST",
+    ),
+    page.locator("#reset").click(),
+  ]);
   if (options.repoPrivate) {
     await setRepoPrivate(page, true);
   }
@@ -297,7 +324,14 @@ export async function openThreadViaSlackLink(
 // briefly lag; a reload re-fetches it. Retry until the PR link renders.
 export async function openMultiRepoPrThreadViaSlackLink(page: Page) {
   await page.goto("/mock/slack");
-  await page.locator("#reset").click();
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/control/reset") &&
+        response.request().method() === "POST",
+    ),
+    page.locator("#reset").click(),
+  ]);
   await page
     .locator("#text")
     .fill(
@@ -312,6 +346,27 @@ export async function openMultiRepoPrThreadViaSlackLink(page: Page) {
   await expect(webLink).toBeVisible();
   await webLink.click();
   await expect(page).toHaveURL(/\/agents\//);
+}
+
+// Every call the backend planned the thread's runs for, once its runs are done. The
+// harness answers each call as a replica that never served the run (patches.py).
+export async function plannedCalls(page: Page, threadId: string) {
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get(
+          `${BASE_URL}/control/thread-idle?thread_id=${threadId}`,
+        );
+        return ((await res.json()) as { idle: boolean }).idle;
+      },
+      { timeout: 30_000, intervals: [500] },
+    )
+    .toBe(true);
+  const res = await page.request.get(
+    `${BASE_URL}/control/plans?thread_id=${threadId}`,
+  );
+  expect(res.ok()).toBeTruthy();
+  return (await res.json()) as string[];
 }
 
 export function threadIdFromUrl(page: Page): string {

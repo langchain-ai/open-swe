@@ -1,5 +1,11 @@
+import { Badge } from "@langchain/macaw-components/Badge"
+import { Button } from "@langchain/macaw-components/Button"
 import { Text } from "@langchain/macaw-components/Text"
-import type { MouseEvent as ReactMouseEvent, ReactNode } from "react"
+import {
+  useId,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react"
 
 import type { OpenPullRequest } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -19,6 +25,29 @@ export type { PullRequestOutcome }
 const outcomeLabels: Record<PullRequestOutcome, string> = {
   merged: "Merged",
   closed: "Closed",
+}
+
+const assignmentLabels: Partial<
+  Record<NonNullable<OpenPullRequest["assignment"]>, [string, string]>
+> = {
+  tentative: [
+    "May be assigned",
+    "Open SWE may assign you this review if nobody claims it in time",
+  ],
+  requested: ["Requested", "GitHub asks you to review this"],
+  mentioned: ["Mentioned", "Linked in a Slack thread that mentions you"],
+  draft: ["Your draft", "Review it, then mark it ready"],
+  speculative: ["Speculative", "Open SWE reviewed this; nobody asked you yet"],
+}
+
+function AssignmentBadge({ pr }: { pr: OpenPullRequest }) {
+  const label = pr.assignment ? assignmentLabels[pr.assignment] : undefined
+  if (!label) return null
+  return (
+    <Badge size="sm" color="secondary" title={label[1]}>
+      {label[0]}
+    </Badge>
+  )
 }
 
 const interactive =
@@ -49,15 +78,23 @@ export function PullRequestCard({
   onSettled: (outcome: PullRequestOutcome | undefined) => void
   onReady: () => void
 }) {
+  const contentId = useId()
   if (compact) {
     return (
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-labelledby={contentId}
         type="button"
         aria-current={selected ? "true" : undefined}
         onClick={onSelect}
         className={cn(
-          "flex w-full gap-space-3 rounded-md py-space-2 pr-space-2 pl-space-2 text-left transition-colors",
-          selected ? "bg-selected" : "hover:bg-surface-level-1-hover",
+          "h-auto justify-start whitespace-normal",
+          "w-full gap-space-3 py-space-2 pr-space-2 pl-space-2 text-left",
+          selected
+            ? "bg-selected hover:bg-selected dark:hover:bg-selected"
+            : "hover:bg-surface-level-1-hover",
           outcome && "opacity-60"
         )}
       >
@@ -68,7 +105,7 @@ export function PullRequestCard({
             selected ? "bg-brand" : "bg-transparent"
           )}
         />
-        <span className="min-w-0 flex-1">
+        <span id={contentId} className="min-w-0 flex-1">
           <span className="flex items-baseline gap-space-2 text-xs text-secondary">
             <span className="min-w-0 truncate">{pr.repo}</span>
             <span className="font-mono tabular-nums">#{pr.number}</span>
@@ -83,6 +120,7 @@ export function PullRequestCard({
           ) : (
             <>
               <span className="mt-space-1 flex flex-wrap gap-space-1">
+                <AssignmentBadge pr={pr} />
                 {statusLabels(pr).map((status) => (
                   <StatusPill key={status} status={status} />
                 ))}
@@ -95,7 +133,7 @@ export function PullRequestCard({
             </>
           )}
         </span>
-      </button>
+      </Button>
     )
   }
 
@@ -127,6 +165,7 @@ export function PullRequestCard({
               {pr.repo}{" "}
               <span className="font-mono tabular-nums">#{pr.number}</span>
             </span>
+            <AssignmentBadge pr={pr} />
             {statusLabels(pr).map((status) => (
               <StatusPill key={status} status={status} />
             ))}
@@ -137,13 +176,19 @@ export function PullRequestCard({
             weight="medium"
             className="mt-space-1 break-words"
           >
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="xs"
+              aria-label={pr.title}
               type="button"
-              className="text-left hover:underline"
+              className="block h-auto max-w-full border-0 px-0 text-left whitespace-normal hover:underline"
               onClick={onSelect}
             >
-              {pr.title}
-            </button>
+              <Text as="span" variant="h5" weight="medium" color="primary">
+                {pr.title}
+              </Text>
+            </Button>
           </Text>
         </div>
         <div className="flex flex-wrap items-center gap-x-space-5 gap-y-space-2 text-xs text-secondary">

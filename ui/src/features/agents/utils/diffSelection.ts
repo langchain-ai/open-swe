@@ -39,8 +39,19 @@ export function selectedRangeFromDiff(
   if (!selection || selection.isCollapsed || selection.rangeCount === 0)
     return null
   const range = selection.getRangeAt(0)
-  const start = lineMetaFromNode(range.startContainer)
-  const end = lineMetaFromNode(range.endContainer)
+  // A drag that starts or ends past the code (a gutter, the file's trailing
+  // space) has an endpoint on no line; fall back to the lines it covers.
+  const covered = () =>
+    Array.from(
+      (container?.shadowRoot ?? container)?.querySelectorAll("[data-line]") ??
+        []
+    ).filter((line) => range.intersectsNode(line))
+  const start =
+    lineMetaFromNode(range.startContainer) ??
+    lineMetaFromNode(covered().at(0) ?? null)
+  const end =
+    lineMetaFromNode(range.endContainer) ??
+    lineMetaFromNode(covered().at(-1) ?? null)
   if (!start || !end) return null
   return {
     start: start.line,

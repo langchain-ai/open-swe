@@ -4,7 +4,7 @@
 //! `defineSandbox` / `define_sandbox` (string literals only).
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -22,9 +22,6 @@ use super::write_if_changed;
 
 /// Build artifact next to `langgraph.json`.
 pub const SANDBOX_RECIPE_FILE: &str = "sandbox-recipe.json";
-
-const LEGACY_THREAD_SCOPE_WARNING: &str =
-    "sandbox scope \"thread\" is deprecated and ignored. Remove it from the sandbox declaration. Support for this option will be removed in v0.7.0.";
 
 /// Secret-safe private registry declaration compiled from the authoring API.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -55,6 +52,9 @@ pub struct SandboxRecipeManifest {
     pub docker_image: Option<String>,
     /// Private registry declaration. Contains only an env-var name, not a secret.
     pub registry: Option<SandboxRegistryManifest>,
+    /// Filesystem size for a snapshot built from `docker_image`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fs_capacity_bytes: Option<u64>,
     /// [`recipe_digest`] over setup bytes + bake bases.
     pub digest: String,
 }
@@ -113,11 +113,19 @@ pub(super) fn write_sandbox_recipe_manifest(
         bases.snapshot_id.as_deref(),
         bases.docker_image.as_deref(),
         registry_digest.as_deref(),
+        bases.fs_capacity_bytes,
     );
     let setup_sha_preview = if !has_setup_script {
         None
     } else {
-        Some(recipe_digest(setup.as_bytes(), None, None, None, None))
+        Some(recipe_digest(
+            setup.as_bytes(),
+            None,
+            None,
+            None,
+            None,
+            None,
+        ))
     };
 
     let manifest = SandboxRecipeManifest {
@@ -127,6 +135,7 @@ pub(super) fn write_sandbox_recipe_manifest(
         snapshot_id: bases.snapshot_id,
         docker_image: bases.docker_image,
         registry: bases.registry,
+        fs_capacity_bytes: bases.fs_capacity_bytes,
         digest,
     };
 
@@ -158,6 +167,7 @@ struct BakeBases {
     snapshot_id: Option<String>,
     docker_image: Option<String>,
     registry: Option<SandboxRegistryManifest>,
+    fs_capacity_bytes: Option<u64>,
 }
 
 impl BakeBases {
@@ -189,13 +199,72 @@ fn extract_sandbox_bases(project: &Project, entry: &PathBuf) -> Result<BakeBases
             &["snapshot_name", "snapshot_id", "docker_image", "registry"],
         )?,
     };
-    bases_from_config(&config, project.language)
+    let mut bases = bases_from_config(&config, project.language)?;
+    if bases.docker_image.is_some() {
+        bases.fs_capacity_bytes =
+            extract_docker_fs_capacity_bytes(&source, entry, project.language)?;
+    }
+    Ok(bases)
 }
 
-/// Return the migration warning when the legacy thread scope is statically identifiable.
-pub(super) fn legacy_thread_scope_warning(project: &Project) -> Result<Option<String>> {
-    let Some(entry) = find_sandbox_entry(project) else {
+/// The declared size of the snapshot built from `docker_image`.
+///
+/// Read only for a `docker_image` base so other sandboxes may still compute it.
+fn extract_docker_fs_capacity_bytes(
+    source: &str,
+    entry: &Path,
+    language: Language,
+) -> Result<Option<u64>> {
+    let key = language.ident("fsCapacityBytes", "fs_capacity_bytes");
+    let config = match language {
+        Language::TypeScript => extract_typescript_selected_object_config(
+            source,
+            entry,
+            "sandbox",
+            "defineSandbox",
+            &[key],
+        ),
+        Language::Python => extract_python_selected_keyword_config(
+            source,
+            entry,
+            "sandbox",
+            "define_sandbox",
+            &[key],
+        ),
+    }
+    .with_context(|| {
+        format!(
+            "sandbox {key} sizes the {} snapshot, so it must be an integer literal or a top-level constant",
+            language.ident("dockerImage", "docker_image")
+        )
+    })?;
+    fs_capacity_bytes(&config, language)
+}
+
+fn fs_capacity_bytes(config: &Value, language: Language) -> Result<Option<u64>> {
+    let key = language.ident("fsCapacityBytes", "fs_capacity_bytes");
+    let Some(value) = config.get(key).filter(|value| !value.is_null()) else {
         return Ok(None);
+    };
+    // TypeScript numeric literals extract as f64.
+    value
+        .as_u64()
+        .or_else(|| {
+            value
+                .as_f64()
+                .filter(|bytes| bytes.fract() == 0.0 && *bytes > 0.0)
+                .map(|bytes| bytes as u64)
+        })
+        .filter(|bytes| *bytes > 0)
+        .map(Some)
+        .with_context(|| format!("sandbox {key} must be a positive integer literal"))
+}
+
+/// Fail the build when the sandbox declaration still passes the removed `scope`
+/// option, which `defineSandbox` / `define_sandbox` reject at startup.
+pub(super) fn reject_removed_sandbox_scope(project: &Project) -> Result<()> {
+    let Some(entry) = find_sandbox_entry(project) else {
+        return Ok(());
     };
     let path = project.root.join(&entry);
     let source =
@@ -216,16 +285,19 @@ pub(super) fn legacy_thread_scope_warning(project: &Project) -> Result<Option<St
             &["scope"],
         ),
     };
+    // A declaration compile cannot read statically is reported by recipe
+    // extraction later in this compile, and the runtime still rejects a dynamic
+    // `scope` at startup.
     let Ok(config) = config else {
-        // Warning detection is advisory. Recipe extraction later in this compile
-        // validates the declaration, while runtime validation handles dynamic scope.
-        return Ok(None);
+        return Ok(());
     };
-
-    Ok(
-        (config.get("scope").and_then(Value::as_str) == Some("thread"))
-            .then(|| LEGACY_THREAD_SCOPE_WARNING.to_string()),
-    )
+    if config.get("scope").is_some() {
+        bail!(
+            "{} passes the removed sandbox `scope` option. Sandbox reuse is always one box per thread: remove `scope` from the sandbox declaration.",
+            entry.display()
+        );
+    }
+    Ok(())
 }
 
 fn bases_from_config(config: &Value, language: Language) -> Result<BakeBases> {
@@ -297,6 +369,7 @@ fn bases_from_config(config: &Value, language: Language) -> Result<BakeBases> {
         snapshot_id: pick("snapshotId", "snapshot_id"),
         docker_image: pick("dockerImage", "docker_image"),
         registry,
+        fs_capacity_bytes: None,
     };
     if bases.registry.is_some() && bases.docker_image.is_none() {
         bail!(
@@ -349,6 +422,22 @@ mod tests {
     }
 
     #[test]
+    fn fs_capacity_bytes_from_literals() {
+        let python = json!({ "fs_capacity_bytes": 2_147_483_648_u64 });
+        let typescript = json!({ "fsCapacityBytes": 2_147_483_648.0 });
+        for (config, language) in [
+            (python, Language::Python),
+            (typescript, Language::TypeScript),
+        ] {
+            assert_eq!(fs_capacity_bytes(&config, language).unwrap(), Some(2 << 30));
+        }
+        for bad in [json!(0), json!(1.5), json!("2GiB")] {
+            let config = json!({ "fs_capacity_bytes": bad });
+            assert!(fs_capacity_bytes(&config, Language::Python).is_err());
+        }
+    }
+
+    #[test]
     fn bases_from_python_kwargs() {
         let config = json!({
             "default_timeout": 600,
@@ -393,6 +482,54 @@ mod tests {
     }
 
     #[test]
+    fn docker_sandbox_records_fs_capacity_bytes() {
+        for (language, entry, source) in [
+            (
+                Language::Python,
+                "sandbox/__init__.py",
+                "sandbox = define_sandbox(docker_image=\"python:3.12\", fs_capacity_bytes=2_147_483_648)\n",
+            ),
+            (
+                Language::TypeScript,
+                "sandbox/index.ts",
+                "export const sandbox = defineSandbox({ dockerImage: \"python:3.12\", fsCapacityBytes: 2_147_483_648 });\n",
+            ),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            write_sandbox(root.path(), entry, source);
+            let project = sandbox_project(root.path(), language, entry);
+
+            let manifest =
+                write_sandbox_recipe_manifest(&project, &root.path().join("build"), false)
+                    .unwrap()
+                    .unwrap();
+
+            assert_eq!(manifest.fs_capacity_bytes, Some(2 << 30));
+        }
+    }
+
+    #[test]
+    fn computed_fs_capacity_bytes_fails_only_with_a_docker_image() {
+        let compile = |base: &str| {
+            let root = tempfile::tempdir().unwrap();
+            write_sandbox(
+                root.path(),
+                "sandbox/__init__.py",
+                &format!("sandbox = define_sandbox({base}, fs_capacity_bytes=2 * 1024**3)\n"),
+            );
+            let project = sandbox_project(root.path(), Language::Python, "sandbox/__init__.py");
+            write_sandbox_recipe_manifest(&project, &root.path().join("build"), false)
+        };
+
+        let manifest = compile("snapshot_name=\"base\"").unwrap().unwrap();
+        assert_eq!(manifest.fs_capacity_bytes, None);
+        let error = compile("docker_image=\"python:3.12\"").unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("must be an integer literal or a top-level constant"));
+    }
+
+    #[test]
     fn plain_typescript_sandbox_does_not_emit_a_recipe() {
         let root = tempfile::tempdir().unwrap();
         write_sandbox(
@@ -433,7 +570,7 @@ mod tests {
         assert_eq!(manifest.docker_image, None);
         assert_eq!(
             manifest.digest,
-            recipe_digest(b"echo ready\n", None, None, None, None)
+            recipe_digest(b"echo ready\n", None, None, None, None, None)
         );
     }
 
@@ -526,7 +663,7 @@ mod tests {
     }
 
     #[test]
-    fn warns_when_typescript_declares_legacy_thread_scope() {
+    fn rejects_typescript_sandbox_scope() {
         let root = tempfile::tempdir().unwrap();
         write_sandbox(
             root.path(),
@@ -540,14 +677,15 @@ mod tests {
         );
         let project = sandbox_project(root.path(), Language::TypeScript, "sandbox/index.ts");
 
-        assert_eq!(
-            legacy_thread_scope_warning(&project).unwrap().as_deref(),
-            Some(LEGACY_THREAD_SCOPE_WARNING)
-        );
+        let error = reject_removed_sandbox_scope(&project)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("sandbox/index.ts"), "{error}");
+        assert!(error.contains("removed sandbox `scope` option"), "{error}");
     }
 
     #[test]
-    fn warns_when_python_declares_legacy_thread_scope() {
+    fn rejects_python_sandbox_scope() {
         let root = tempfile::tempdir().unwrap();
         write_sandbox(
             root.path(),
@@ -561,14 +699,15 @@ mod tests {
         );
         let project = sandbox_project(root.path(), Language::Python, "sandbox/__init__.py");
 
-        assert_eq!(
-            legacy_thread_scope_warning(&project).unwrap().as_deref(),
-            Some(LEGACY_THREAD_SCOPE_WARNING)
-        );
+        let error = reject_removed_sandbox_scope(&project)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("sandbox/__init__.py"), "{error}");
+        assert!(error.contains("removed sandbox `scope` option"), "{error}");
     }
 
     #[test]
-    fn does_not_warn_when_sandbox_omits_scope() {
+    fn accepts_sandbox_without_scope() {
         let root = tempfile::tempdir().unwrap();
         write_sandbox(
             root.path(),
@@ -577,11 +716,11 @@ mod tests {
         );
         let project = sandbox_project(root.path(), Language::TypeScript, "sandbox/index.ts");
 
-        assert_eq!(legacy_thread_scope_warning(&project).unwrap(), None);
+        reject_removed_sandbox_scope(&project).unwrap();
     }
 
     #[test]
-    fn does_not_fail_compile_when_legacy_scope_is_dynamic() {
+    fn leaves_dynamic_sandbox_scope_to_the_runtime() {
         let root = tempfile::tempdir().unwrap();
         write_sandbox(
             root.path(),
@@ -590,6 +729,6 @@ mod tests {
         );
         let project = sandbox_project(root.path(), Language::TypeScript, "sandbox/index.ts");
 
-        assert_eq!(legacy_thread_scope_warning(&project).unwrap(), None);
+        reject_removed_sandbox_scope(&project).unwrap();
     }
 }

@@ -10,6 +10,7 @@ import type {
   TranscriptToolCallState,
 } from "@/features/agents/lib/transcript/reducer"
 import type { ImageChunk, Message } from "@/features/agents/lib/types"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import type { ContextUsage } from "@/features/agents/lib/contextUsage"
 
 /** The human message and run configuration a new run starts from. */
@@ -20,6 +21,7 @@ export interface ThreadRunInput {
     id: string
     text: string
     images?: ReadonlyArray<ImageChunk>
+    replies?: ReadonlyArray<PassageReply>
   }
   configurable: Record<string, unknown>
   /**
@@ -84,6 +86,7 @@ export interface StreamThreadSource extends ThreadSourceShared {
 /** The thread is served by the append-only transcript event log. */
 export interface TranscriptThreadSource extends ThreadSourceShared {
   kind: "transcript"
+  settledRunId: string | null
   /** Nested tool calls under a subagent namespace, for the subagent card. */
   subagentToolCalls: (
     namespace: ReadonlyArray<string>

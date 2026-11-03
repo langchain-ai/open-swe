@@ -40,7 +40,7 @@ from runtime_api.workers import (
     Worker,
 )
 
-from openswe.agent_api.client import remote_run_context
+from openswe.agent_api.client import start_remote_run
 from openswe.agent_api.runs import in_graph_context, run_config
 from openswe.agent_api.tokens import RemoteRun, WorkerGrant, sign_worker_grant
 from openswe.dispatch import prepare_run_config
@@ -139,14 +139,16 @@ async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:
         },
         None,
     )["configurable"]
-    context = await remote_run_context(
+    started = await start_remote_run(
         _json_object.validate_python(configurable),
         # MDA started this run, not a task message: no run metadata comes with it.
         metadata={},
         thread_id=body.thread_id,
         assistant_id=grant.coordinator.assistant_id,
     )
-    return Adopted(run_token=str(context["__run_token"]))
+    return Adopted(
+        run_token=started.token, catalog=started.catalog, invocation_id=started.invocation_id
+    )
 
 
 @dataclass(frozen=True)

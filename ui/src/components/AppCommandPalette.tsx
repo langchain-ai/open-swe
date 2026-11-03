@@ -19,7 +19,7 @@ import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { CommandIcon } from "@phosphor-icons/react/dist/ssr/Command"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 
 import type { AppCommand } from "@/lib/appCommands"
 import type { PullRequestSearchResult } from "@/lib/api"
@@ -27,6 +27,7 @@ import { usePullRequestSearch } from "@/features/reviews/lib/usePullRequestSearc
 import type { AgentThread } from "@/features/agents/lib/types"
 import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
+import { parsePullRequestReference } from "@/features/reviews/search"
 import { useShortcutLabel } from "@/lib/hotkeys"
 
 interface CommandResult {
@@ -47,7 +48,8 @@ interface PullRequestResult {
   id: string
   kind: "pull-request"
   label: string
-  pr: PullRequestSearchResult
+  pr: Pick<PullRequestSearchResult, "repo" | "number"> &
+    Partial<Pick<PullRequestSearchResult, "state">>
 }
 
 type PaletteResult = CommandResult | CloudThreadResult | PullRequestResult
@@ -88,22 +90,7 @@ export function buildPaletteResults(
       command,
     }))
   const cloudResults: Array<CloudThreadResult> = cloudThreads
-    .filter(
-      (thread) =>
-        !actionsOnly &&
-        (!searchQuery ||
-          [
-            thread.title,
-            thread.repo,
-            thread.repoFullName,
-            thread.branch,
-            thread.pr?.url ?? "",
-            `${thread.repoFullName}#${thread.pr?.number ?? ""}`,
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(searchQuery))
-    )
+    .filter(() => !actionsOnly)
     .map((thread) => ({
       id: `cloud:${thread.id}`,
       kind: "cloud-thread",
@@ -126,6 +113,12 @@ export function AppCommandPalette({
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
 
+  const actionsOnly = query.trim().startsWith(">")
+  const prReference = actionsOnly ? null : parsePullRequestReference(query)
+  const threadQuery = prReference
+    ? `https://github.com/${prReference.owner}/${prReference.repo}/pull/${prReference.number}`
+    : query.trim()
+
   useEffect(() => {
     if (!open) {
       // oxlint-disable-next-line react/set-state-in-effect
@@ -133,55 +126,63 @@ export function AppCommandPalette({
       setDebouncedQuery("")
       return
     }
-    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 180)
+    const timer = window.setTimeout(() => setDebouncedQuery(threadQuery), 180)
     return () => window.clearTimeout(timer)
-  }, [open, query])
-
+  }, [open, threadQuery])
   const cloudThreads = useInfiniteThreadsPages(
     {
       limit: 20,
       q: debouncedQuery || undefined,
-      scope: "interactive",
+      scope: prReference ? "all" : "interactive",
     },
-    { enabled: open, staleWhileRevalidate: true }
+    { enabled: open && !actionsOnly, staleWhileRevalidate: true }
   )
   const pullRequests = usePullRequestSearch(
     query,
-    open && !query.trim().startsWith(">")
+    open && !actionsOnly && !prReference
   )
-  const results = useMemo(
-    () => [
-      ...buildPaletteResults(
-        commands,
-        cloudThreads.data?.pages.flatMap((page) => page.items) ?? [],
-        query
-      ),
-      ...(open && !query.trim().startsWith(">")
-        ? (pullRequests.data?.pages.flatMap((page) =>
-            page.pull_requests.map((pr): PullRequestResult => ({
-              id: `pr:${pr.repo}#${pr.number}`,
-              kind: "pull-request",
-              label: pr.title || `${pr.repo} #${pr.number}`,
-              pr,
-            }))
-          ) ?? [])
-        : []),
-    ],
-    [cloudThreads.data?.pages, commands, query, open, pullRequests.data]
-  )
-  const resultGroups = useMemo(() => {
-    const grouped = new Map<string, Array<PaletteResult>>()
-    for (const result of results) {
-      const group =
-        result.kind === "command"
-          ? result.command.group
-          : result.kind === "cloud-thread"
-            ? "Threads"
-            : "Pull requests"
-      grouped.set(group, [...(grouped.get(group) ?? []), result])
-    }
-    return [...grouped]
-  }, [results])
+  const results: Array<PaletteResult> = [
+    ...buildPaletteResults(
+      commands,
+      debouncedQuery === threadQuery
+        ? (cloudThreads.data?.pages.flatMap((page) => page.items) ?? [])
+        : [],
+      query
+    ),
+    ...(prReference
+      ? [
+          {
+            id: `pr:${prReference.owner}/${prReference.repo}#${prReference.number}`,
+            kind: "pull-request" as const,
+            label: "Open Review Page",
+            pr: {
+              repo: `${prReference.owner}/${prReference.repo}`,
+              number: prReference.number,
+            },
+          },
+        ]
+      : []),
+    ...(open && !actionsOnly && !prReference
+      ? (pullRequests.data?.pages.flatMap((page) =>
+          page.pull_requests.map((pr): PullRequestResult => ({
+            id: `pr:${pr.repo}#${pr.number}`,
+            kind: "pull-request",
+            label: pr.title || `${pr.repo} #${pr.number}`,
+            pr,
+          }))
+        ) ?? [])
+      : []),
+  ]
+  const resultGroups = new Map<string, Array<PaletteResult>>()
+  for (const result of results) {
+    const group =
+      result.kind === "command"
+        ? result.command.group
+        : result.kind === "cloud-thread"
+          ? "Threads"
+          : "Pull requests"
+    resultGroups.set(group, [...(resultGroups.get(group) ?? []), result])
+  }
   const runResult = (result: PaletteResult | undefined) => {
     if (!result) return
     onOpenChange(false)
@@ -205,7 +206,9 @@ export function AppCommandPalette({
   }
 
   const showLoading =
-    (cloudThreads.isFetching || pullRequests.isSearching) &&
+    ((!actionsOnly &&
+      (debouncedQuery !== threadQuery || cloudThreads.isFetching)) ||
+      pullRequests.isSearching) &&
     results.length === 0
   const showError = cloudThreads.isError && results.length === 0
 
@@ -261,7 +264,7 @@ export function AppCommandPalette({
               </p>
             ) : (
               <>
-                {resultGroups.map(([group, groupResults]) => (
+                {[...resultGroups].map(([group, groupResults]) => (
                   <CommandGroup heading={group} key={group}>
                     {groupResults.map((result) => {
                       const command =
@@ -288,8 +291,8 @@ export function AppCommandPalette({
                             {result.label}
                             {result.kind === "pull-request" && (
                               <span className="ml-space-2 text-xs text-secondary">
-                                {result.pr.repo} #{result.pr.number} ·{" "}
-                                {result.pr.state}
+                                {result.pr.repo} #{result.pr.number}
+                                {result.pr.state && ` · ${result.pr.state}`}
                               </span>
                             )}
                           </span>

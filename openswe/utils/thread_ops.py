@@ -12,6 +12,7 @@ import logging
 from langgraph_sdk import get_client
 
 from openswe.config import ENV
+from openswe.input_messages import system_input
 from openswe.message_queue import QueuedContent, QueuedMessage
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,14 @@ def langgraph_url() -> str:
 
 def langgraph_client():
     return get_client(url=langgraph_url())
+
+
+async def queue_system_note_for_thread(thread_id: str, note: str) -> bool:
+    """Queue internal context without exposing it as a person's pending message."""
+    message = system_input(
+        note, {"sender_id": "system:slack-note", "surface": "automation", "kind": "system"}
+    )
+    return await queue_message_for_thread(thread_id, dict(message))
 
 
 async def queue_message_for_thread(thread_id: str, message_content: QueuedContent) -> bool:

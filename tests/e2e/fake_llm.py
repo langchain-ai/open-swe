@@ -71,7 +71,7 @@ EOF
 """.strip()
 
 # The expedited-review change is too big to qualify until the agent excludes what
-# the spec's seeded APPROVALS.md covers: CHANGELOG.md and config.py's trailing
+# the spec's seeded auto-approve rule covers: CHANGELOG.md and config.py's trailing
 # generated block, whose hunk starts at new line 28.
 EXPEDITE_MARKER = "E2E_EXPEDITE"
 EXPEDITE_PR_TITLE = "Fix the greeting punctuation"
@@ -263,6 +263,16 @@ class SystemPromptRecord:
 
 LAST_SYSTEM_PROMPT = SystemPromptRecord()
 
+# Opening line of openswe/resources/prompts/thread-title.md. Title calls get an
+# empty reply so background titling never renames threads or code channels mid-spec.
+_THREAD_TITLE_PROMPT_PREFIX = "Generate a title that will help the user recognize"
+
+# Gives every reply of the run a thought, as a reasoning model's would carry.
+THOUGHT_MARKER = "E2E_THOUGHT"
+THOUGHT_TEXT = (
+    "**Checking the snapshot status**\n\n"
+    "The workspace image looks stale, so I will compare it with the latest capture."
+)
 _BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
 _ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
@@ -671,6 +681,24 @@ def _human_review_assign_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+PR_MENTIONS_MARKER = "E2E_PR_MENTIONS"
+
+
+def _pr_mentions_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    message = f"Opened the pull request:\n\n{url}\n\nSee [the greet() PR]({url}) for the details."
+    return AIMessage(
+        content="Replying with the PR on its own line and inline.",
+        tool_calls=[
+            {
+                "name": "slack_reply",
+                "args": {"message": message, "response_type": "final"},
+                "id": "call-pr-mentions-reply",
+            }
+        ],
+    )
+
+
 def _multi_pr_reply_step(messages: list[BaseMessage]) -> AIMessage:
     url = _pr_url_from_messages(messages) or "(PR url unavailable)"
     return AIMessage(
@@ -974,9 +1002,9 @@ def _inspected_thread_id(messages: list[BaseMessage]) -> str:
 
 def _workspace_poll_step(messages: list[BaseMessage]) -> AIMessage:
     """Follow the reproducibility rebuild through the one poll tool."""
-    task_id = _tool_payload(messages, "refresh_workspace_start").get("task_id")
+    task_id = _tool_payload(messages, "snapshotctl").get("task_id")
     if not isinstance(task_id, str):
-        raise ValueError("refresh_workspace_start did not return a task id")
+        raise ValueError("snapshotctl did not return a task id")
     return AIMessage(
         content="Following the rebuild.",
         tool_calls=[
@@ -1034,6 +1062,51 @@ REVIEW_CHAT_COMMENTS_MARKER = "E2E_REVIEW_CHAT_COMMENTS"
 REVIEW_CHAT_REVIEW_MARKER = "E2E_REVIEW_CHAT_REVIEW"
 REVIEW_CHAT_PLAIN_MARKER = "E2E_REVIEW_CHAT_PLAIN"
 REVIEW_CHAT_FILE = "zeta.py"
+
+_IMPLEMENT_STEPS: tuple[StepSpec, ...] = (
+    _tool_step(
+        "Acknowledging the Slack request before starting work.",
+        "slack_reply",
+        {"message": "On it!"},
+        "call-ack",
+    ),
+    _tool_step(
+        "Setting up the repository.",
+        "execute",
+        {"command": _SETUP_SCRIPT},
+        "call-setup",
+    ),
+    _tool_step(
+        "Implementing the greeting.",
+        "edit_file",
+        {
+            "file_path": f"/repo/{FEATURE_FILE}",
+            "old_string": 'def greet(name):\n    return "Hello!"',
+            "new_string": 'def greet(name):\n    return f"Hello, {name}!"',
+        },
+        "call-edit",
+    ),
+    _tool_step(
+        "Committing and pushing the change.",
+        "execute",
+        {"command": _COMMIT_SCRIPT},
+        "call-commit",
+    ),
+    _tool_step(
+        "Opening a pull request.",
+        "open_pull_request",
+        {
+            "owner": OWNER,
+            "repo": REPO,
+            "head": FEATURE_BRANCH,
+            "base": BASE_BRANCH,
+            "title": PR_TITLE,
+            "body": "Adds a `greet()` helper as requested.",
+            "draft": True,
+        },
+        "call-pr",
+    ),
+)
 
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "review_chat_comments": (
@@ -1310,51 +1383,8 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         StepSpec(content="Finished the delegated investigation."),
     ),
-    "implement": (
-        _tool_step(
-            "Acknowledging the Slack request before starting work.",
-            "slack_reply",
-            {"message": "On it!"},
-            "call-ack",
-        ),
-        _tool_step(
-            "Setting up the repository.",
-            "execute",
-            {"command": _SETUP_SCRIPT},
-            "call-setup",
-        ),
-        _tool_step(
-            "Implementing the greeting.",
-            "edit_file",
-            {
-                "file_path": f"/repo/{FEATURE_FILE}",
-                "old_string": 'def greet(name):\n    return "Hello!"',
-                "new_string": 'def greet(name):\n    return f"Hello, {name}!"',
-            },
-            "call-edit",
-        ),
-        _tool_step(
-            "Committing and pushing the change.",
-            "execute",
-            {"command": _COMMIT_SCRIPT},
-            "call-commit",
-        ),
-        _tool_step(
-            "Opening a pull request.",
-            "open_pull_request",
-            {
-                "owner": OWNER,
-                "repo": REPO,
-                "head": FEATURE_BRANCH,
-                "base": BASE_BRANCH,
-                "title": PR_TITLE,
-                "body": "Adds a `greet()` helper as requested.",
-                "draft": True,
-            },
-            "call-pr",
-        ),
-        _dynamic_step(_reply_step),
-    ),
+    "implement": (*_IMPLEMENT_STEPS, _dynamic_step(_reply_step)),
+    "pr_mentions": (*_IMPLEMENT_STEPS, _dynamic_step(_pr_mentions_reply_step)),
     # Expedited review, turn 1: implement a one-line change, open the PR, start
     # the durable CI watch, and post the approval card before checks report.
     "expedite": (
@@ -1540,6 +1570,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "slack_breakout_thread",
             {
                 "title": "Add greet() helper",
+                "destination": DEMO_CHANNEL,
                 "instructions": "Please add a greet() helper and open a draft PR in the default repository. Use the current Slack request as context, and report progress in this new thread.",
             },
             "call-breakout",
@@ -1560,7 +1591,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "slack_move_thread",
             {
                 "message": "Continue the existing Open SWE task in this channel.",
-                "channel_id": "C_TARGET",
+                "destination": "CTARGET01",
             },
             "call-move",
         ),
@@ -1596,8 +1627,8 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         # Then prove the script reproduces it, the way the nightly cron will.
         _tool_step(
             "Checking the setup script reproduces the image.",
-            "refresh_workspace_start",
-            {"name": WORKSPACE_NAME},
+            "snapshotctl",
+            {"action": "rebuild", "workspace": WORKSPACE_NAME},
             "call-env-refresh",
         ),
         _dynamic_step(_workspace_poll_step),
@@ -1711,6 +1742,7 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: _UNCLAIMED_MARKER in ctx.last_text or _DECLINED_MARKER in ctx.pending_text,
     ),
     ScriptRule("hello", lambda ctx: "E2E_HELLO" in ctx.last_text),
+    ScriptRule("followup", lambda ctx: "E2E_FOLLOWUP" in ctx.last_text),
     ScriptRule("human_review_dismiss", lambda ctx: HUMAN_REVIEW_DISMISS_MARKER in ctx.last_text),
     ScriptRule(
         "human_review_resummarize",
@@ -1729,6 +1761,9 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "multi_pr",
         lambda ctx: ctx.human_count <= 1 and "E2E_MULTI_PR" in f"{ctx.first_text}\n{ctx.last_text}",
+    ),
+    ScriptRule(
+        "pr_mentions", lambda ctx: ctx.human_count <= 1 and PR_MENTIONS_MARKER in ctx.first_text
     ),
     ScriptRule(
         "many_files", lambda ctx: ctx.human_count <= 1 and "E2E_MANY_FILES" in ctx.first_text
@@ -1784,6 +1819,8 @@ class FakeScriptedChatModel(BaseChatModel):
     ) -> ChatResult:
         for message in messages:
             if isinstance(message, SystemMessage):
+                if _text(message.content).startswith(_THREAD_TITLE_PROMPT_PREFIX):
+                    return ChatResult(generations=[ChatGeneration(message=AIMessage(content=""))])
                 LAST_SYSTEM_PROMPT.record(_text(message.content))
                 break
         humans = _script_humans(messages)
@@ -1820,4 +1857,14 @@ class FakeScriptedChatModel(BaseChatModel):
         if hold:
             time.sleep(float(hold.group(1) or os.environ.get("E2E_BUSY_HOLD_SECONDS", "10")))
         step = script[step_index] if step_index < len(script) else SCRIPT_LIBRARY["followup"][0]
-        return ChatResult(generations=[ChatGeneration(message=_render_step(step, messages))])
+        reply = _render_step(step, messages)
+        if THOUGHT_MARKER in context.first_text and isinstance(reply.content, str):
+            reply = reply.model_copy(
+                update={
+                    "content": [
+                        {"type": "reasoning", "reasoning": THOUGHT_TEXT},
+                        {"type": "text", "text": reply.content},
+                    ]
+                }
+            )
+        return ChatResult(generations=[ChatGeneration(message=reply)])

@@ -24,6 +24,8 @@ from openswe.slack.client import parse_github_pr_url
 from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.blobs import copy_thread_blobs, referenced_blob_digests
 from openswe.threads.creation import TITLE_LOCKED_KEY, create_thread
+from openswe.threads.identity import ThreadIdentity
+from openswe.threads.index import STOPPED_AT_KEY
 from openswe.threads.listing import (
     attach_task_workers,
     list_unresolved_dashboard_threads,
@@ -195,8 +197,10 @@ async def get_dashboard_thread(
             latest_run_id=latest_run_id,
         )
     with phase(record, "subagents"):
-        await attach_subagents([summary])
-    await attach_task_workers(client, [summary], login, email)
+        await asyncio.gather(
+            attach_subagents([summary]),
+            attach_task_workers(client, [summary], login, email),
+        )
     return summary
 
 
@@ -205,7 +209,11 @@ async def get_dashboard_thread_queued_messages(
 ) -> list[QueuedPreview]:
     """Messages waiting in the thread's queue for its agent's next model call."""
     await _authorized_thread(thread_id, login, email=email)
-    return [await message.preview() for message in await QueuedMessage.for_thread(thread_id)]
+    return [
+        await message.preview()
+        for message in await QueuedMessage.for_thread(thread_id)
+        if not message.hidden
+    ]
 
 
 async def _cancel_active_thread_runs(
@@ -243,6 +251,12 @@ async def _cancel_active_thread_runs(
             action="interrupt",
         )
     return cancelled, kept
+
+
+def _stopped_metadata() -> dict[str, Any]:
+    """What a stop records: its run reads as interrupted, and a run still starting sees it."""
+    now = _now_ms()
+    return {"latest_run_status": "interrupted", STOPPED_AT_KEY: now, "updated_at_ms": now}
 
 
 async def interrupt_transcript_turns(thread_id: str, run_ids: Sequence[str]) -> None:
@@ -303,10 +317,7 @@ async def cancel_dashboard_thread(
         await on_interrupted()
     await interrupt_transcript_turns(thread_id, cancelled_run_ids)
 
-    metadata_update: dict[str, Any] = {
-        "latest_run_status": "interrupted",
-        "updated_at_ms": _now_ms(),
-    }
+    metadata_update: dict[str, Any] = _stopped_metadata()
     await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     # A follow-up left queued picks the leftovers up with its first model call.
     try:
@@ -343,7 +354,7 @@ async def cancel_machine_thread(thread_id: str, principal: Principal) -> JsonObj
     await interrupt_transcript_turns(thread_id, cancelled_run_ids)
     await client.threads.update(
         thread_id=thread_id,
-        metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
+        metadata=_stopped_metadata(),
     )
     return await machine_thread(thread_id, principal)
 
@@ -372,7 +383,7 @@ async def admin_cancel_dashboard_thread(
 
     await client.threads.update(
         thread_id=thread_id,
-        metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
+        metadata=_stopped_metadata(),
     )
     updated_thread = await client.threads.get(thread_id)
     return await _thread_summary(updated_thread)
@@ -688,6 +699,8 @@ async def get_dashboard_thread_pull_request_status(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
     """Return live GitHub health for every pull request tracked by the thread."""
+    if ThreadIdentity(login).user_id is not None:
+        raise HTTPException(403, "Agent Workspace has no GitHub repository access")
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     tracked = _tracked_pull_requests(metadata)
     if not tracked:
@@ -700,6 +713,8 @@ async def get_dashboard_pull_request_checks(
     records: Sequence[object], login: str
 ) -> dict[str, PullRequestState]:
     """Return batched live state for the pull requests the sidebar is showing."""
+    if ThreadIdentity(login).user_id is not None:
+        raise HTTPException(403, "Agent Workspace has no GitHub repository access")
     if not records:
         return {}
     async with GitHubClient.as_user(login) as github:
@@ -716,6 +731,8 @@ async def get_dashboard_thread_pull_request_context(
     email: str | None = None,
 ) -> dict[str, Any]:
     """Return fresh model context for one PR already tracked by the thread."""
+    if ThreadIdentity(login).user_id is not None:
+        raise HTTPException(403, "Agent Workspace has no GitHub repository access")
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     record = next(
         (

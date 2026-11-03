@@ -78,16 +78,26 @@ def remote_path(scope: Scope) -> str:
 
 
 async def forward(
-    http: httpx.AsyncClient, scope: Scope, send: Send, body: bytes, *, path: str | None = None
+    http: httpx.AsyncClient,
+    scope: Scope,
+    send: Send,
+    body: bytes,
+    *,
+    path: str | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> None:
-    """Send the request to another deployment, and stream its answer back unchanged."""
-    headers = Headers(scope=scope)
+    """Send the request to another deployment, and stream its answer back unchanged.
+
+    ``headers`` join the caller's forwarded ones, such as a credential for this call.
+    """
+    received = Headers(scope=scope)
     request = http.build_request(
         scope["method"],
         path or remote_path(scope),
         params=scope.get("query_string", b"").decode(),
         headers={
-            name: value for name in _FORWARDED_REQUEST_HEADERS if (value := headers.get(name))
+            **{name: value for name in _FORWARDED_REQUEST_HEADERS if (value := received.get(name))},
+            **(headers or {}),
         },
         content=body or None,
     )
@@ -113,7 +123,7 @@ async def forward(
 
 
 class StatusRecorder:
-    """A ``send`` that remembers the response status, and acts on a success before its body.
+    """A ``send`` that remembers the response status, and acts on a success's headers before its body.
 
     With ``keep_body`` it keeps the body too, for a short JSON answer read afterwards.
     """
@@ -121,7 +131,7 @@ class StatusRecorder:
     def __init__(
         self,
         send: Send,
-        on_success: Callable[[], Awaitable[None]] | None = None,
+        on_success: Callable[[Headers], Awaitable[None]] | None = None,
         *,
         keep_body: bool = False,
     ) -> None:
@@ -135,7 +145,7 @@ class StatusRecorder:
         if message["type"] == "http.response.start":
             self.status = int(message["status"])
             if self.succeeded and self._on_success is not None:
-                await self._on_success()
+                await self._on_success(Headers(raw=message["headers"]))
         elif message["type"] == "http.response.body" and self._keep_body:
             self._body.extend(message.get("body", b""))
         await self._send(message)

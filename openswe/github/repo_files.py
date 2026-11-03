@@ -1,12 +1,22 @@
 """Small configuration files Open SWE reads from a repository's ``.open-swe`` directory."""
 
+import json
 import logging
 import random
 from collections import Counter
 from datetime import timedelta
 from fnmatch import fnmatchcase
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    ValidatorFunctionWrapHandler,
+    field_validator,
+)
 
 from openswe.github.http import (
     GitHubAppUnavailable,
@@ -51,6 +61,51 @@ class ReviewChannelRule(BaseModel):
     channel: str = Field(min_length=1)
 
 
+class SupplementaryReviewArea(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    label: str = Field(min_length=1, max_length=300)
+    github_login: str = Field(alias="githubLogin", pattern=r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$")
+
+
+class SupplementaryReviewPolicy(BaseModel):
+    """A specialist review a repository asks for alongside engineering review, such as design."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")
+    label: str = Field(min_length=1, max_length=60)
+    team: str = Field(pattern=r"^[^/\s]+/[^/\s]+$")
+    paths: list[str] = Field(min_length=1)
+    exclude: list[str] = Field(default_factory=list)
+    criteria: str = Field(min_length=1, max_length=2000)
+    areas: dict[
+        Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")], SupplementaryReviewArea
+    ] = Field(default_factory=dict)
+
+    @field_validator("areas", mode="wrap")
+    @classmethod
+    def _valid_areas(
+        cls, raw: object, handler: ValidatorFunctionWrapHandler
+    ) -> dict[str, SupplementaryReviewArea]:
+        try:
+            areas: dict[str, SupplementaryReviewArea] = handler(raw)
+            if "unmapped" in areas:
+                raise ValueError("'unmapped' is reserved for team rotation")
+        except ValueError:
+            logger.warning(
+                "Ignoring invalid supplementary review areas; falling back to team rotation",
+                exc_info=True,
+            )
+            return {}
+        return areas
+
+    def matches(self, path: str) -> bool:
+        return any(fnmatchcase(path, pattern) for pattern in self.paths) and not any(
+            fnmatchcase(path, pattern) for pattern in self.exclude
+        )
+
+
 class ReviewFile(BaseModel):
     filename: str
 
@@ -60,10 +115,79 @@ class RepoSettings(BaseModel):
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
+    supplementary_reviews: list[SupplementaryReviewPolicy] = Field(
+        default_factory=list, alias="supplementaryReviews"
+    )
+    review_allowed_authors: list[str] = Field(default_factory=list, alias="reviewAllowedAuthors")
     review_channel: str = Field("", alias="reviewChannel")
     review_channel_rules: list[ReviewChannelRule] = Field(
         default_factory=list, alias="reviewChannelRules"
     )
+
+    @field_validator("supplementary_reviews", mode="before")
+    @classmethod
+    def _valid_policies(cls, raw: object) -> list[SupplementaryReviewPolicy]:
+        """Drop invalid or duplicate policies so one mistake never discards the rest of the file."""
+        if not isinstance(raw, list):
+            logger.warning("supplementaryReviews is not a list; ignoring it")
+            return []
+        policies: list[SupplementaryReviewPolicy] = []
+        for index, entry in enumerate(raw):
+            try:
+                policy = SupplementaryReviewPolicy.model_validate(entry)
+            except ValidationError:
+                logger.warning(
+                    "Ignoring an invalid supplementary review policy",
+                    extra={"policy_index": index},
+                    exc_info=True,
+                )
+                continue
+            if any(existing.id == policy.id for existing in policies):
+                logger.warning(
+                    "Ignoring a duplicate supplementary review policy",
+                    extra={"policy_id": policy.id},
+                )
+                continue
+            policies.append(policy)
+        return policies
+
+    @classmethod
+    def problems(cls, content: str) -> list[str]:
+        """Why ``content`` is not a valid settings file, including entries reading would drop."""
+        try:
+            raw = json.loads(content)
+        except ValueError as exc:
+            return [f"`{SETTINGS_PATH}` is not valid JSON: {exc}"]
+        try:
+            cls.model_validate(raw)
+        except ValidationError as exc:
+            return [f"`{SETTINGS_PATH}`: {cls.describe(exc)}"]
+        entries = raw.get("supplementaryReviews", []) if isinstance(raw, dict) else []
+        if not isinstance(entries, list):
+            return [f"`{SETTINGS_PATH}`: supplementaryReviews must be a list"]
+        problems: list[str] = []
+        seen: set[str] = set()
+        for index, entry in enumerate(entries):
+            try:
+                policy = SupplementaryReviewPolicy.model_validate(entry)
+            except ValidationError as exc:
+                problems.append(
+                    f"`{SETTINGS_PATH}`: supplementaryReviews[{index}]: {cls.describe(exc)}"
+                )
+                continue
+            if policy.id in seen:
+                problems.append(
+                    f"`{SETTINGS_PATH}`: supplementaryReviews[{index}]: duplicate id {policy.id!r}"
+                )
+            seen.add(policy.id)
+        return problems
+
+    @staticmethod
+    def describe(exc: ValidationError) -> str:
+        return "; ".join(
+            f"{'.'.join(str(part) for part in error['loc']) or 'value'}: {error['msg']}"
+            for error in exc.errors()
+        )
 
     @property
     def review_channels(self) -> set[str]:

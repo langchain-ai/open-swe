@@ -5,6 +5,7 @@ import {
   ReviewExcerptChips,
 } from "@/features/reviews/components/ReviewChatActions"
 import { serializeExcerpts } from "@/features/agents/utils/codeExcerpt"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import {
   Profiler,
   useCallback,
@@ -32,7 +33,6 @@ import type {
   ThreadFixScope,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
-import { BackgroundWorkSidebar } from "@/features/agents/components/BackgroundWorkSidebar"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
@@ -69,6 +69,7 @@ import {
 } from "@/features/agents/lib/queuedMessages"
 import type { QueuedTurn } from "@/features/agents/lib/transcript/reducer"
 import type {
+  ComposerSubmission,
   RestoredDraft,
   SubmitOptions,
 } from "@/features/agents/components/composer/ChatComposer"
@@ -100,6 +101,10 @@ interface AgentThreadViewProps {
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
+function plainSubmission(text: string): ComposerSubmission {
+  return { text, images: [], replies: [] }
+}
+
 function editedPaths(messages: Array<Message>): Array<string> {
   const paths = new Set<string>()
   for (const message of messages) {
@@ -189,7 +194,9 @@ export function AgentThreadView({
   }, [localThread, refetchLocalBridge])
   // A "This Mac" thread works in a checkout other threads on this machine may
   // share, so its branch and worktree are shown, and switched, from here.
-  const localRefsQuery = useLocalRepoRefs(localThread?.cwd)
+  const localRefsQuery = useLocalRepoRefs(
+    localThread?.managedTaskFolder ? undefined : localThread?.cwd
+  )
   const localRepoRefs = localRefsQuery.data
   const refetchLocalRepoRefs = localRefsQuery.refetch
   const localWorktreePath = localThread?.worktreePath ?? null
@@ -230,7 +237,6 @@ export function AgentThreadView({
   const canMove =
     (runsElsewhere || Boolean(window.openSweDesktop)) &&
     thread.sandboxBridgeClient !== "cli" &&
-    Boolean(thread.repoFullName) &&
     thread.visibility === "private" &&
     ownsThread
   // The review page shows its PR's status itself; don't poll it a second time here.
@@ -270,14 +276,47 @@ export function AgentThreadView({
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
   )
-  const baseMessages = source.messages
+  const login = session.data?.login
+  const displayName = session.data?.display_name || undefined
+  // A message sent from here keeps the label it showed while pending until the
+  // transcript names its sender, which waits on the run introducing them.
+  const [sentLabels, setSentLabels] = useState<ReadonlyMap<string, string>>(
+    () => new Map()
+  )
+  const senderName = pendingSenderName(source.messages, login, displayName)
+  const unlabeled = senderName
+    ? (thread.pendingMessages ?? []).filter(
+        (message) => !sentLabels.has(message.id)
+      )
+    : []
+  if (senderName && unlabeled.length > 0) {
+    setSentLabels(
+      new Map([
+        ...sentLabels,
+        ...unlabeled.map((message) => [message.id, senderName] as const),
+      ])
+    )
+  }
+  const baseMessages = useMemo(
+    () =>
+      source.messages.map((message) => {
+        const label =
+          message.author === "user" && !message.structuredSenderName
+            ? sentLabels.get(message.id)
+            : undefined
+        return label ? { ...message, structuredSenderName: label } : message
+      }),
+    [sentLabels, source.messages]
+  )
+  // Until the source has hydrated, only the thread record knows a run is live.
+  const sourceRunning =
+    source.isRunning || (source.isHydrating && thread.status === "running")
   const isStreaming =
     source.kind === "transcript"
-      ? source.isRunning
+      ? sourceRunning
       : thread.status === "running" || source.isRunning
   // Server truth: follow-ups queued behind the live run, from the transcript.
   const queued = source.queued
-  const login = session.data?.login
   // Only its sender may act on a queued follow-up; the server enforces it too.
   const isOwnQueued = useCallback(
     (entry: QueuedTurn) => login !== undefined && entry.senderLogin === login,
@@ -287,8 +326,7 @@ export function AgentThreadView({
   const followUpBehavior = session.data?.follow_up_behavior ?? "steer"
   const submitMessage = useCallback(
     async (
-      content: string,
-      images: Array<ImageChunk>,
+      { text: content, images, replies }: ComposerSubmission,
       options?: SubmitOptions
     ) => {
       // While a run is live the message either waits for it as a queued run of
@@ -314,6 +352,7 @@ export function AgentThreadView({
         await sendMessage.mutateAsync({
           content,
           images,
+          replies,
           client_message_id: messageId,
           model_id: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
@@ -340,15 +379,15 @@ export function AgentThreadView({
 
   // Code attached on the review page rides along as fenced excerpts the transcript renders as blocks.
   const submitWithExcerpts = useCallback(
-    async (
-      content: string,
-      images: Array<ImageChunk>,
-      options?: SubmitOptions
-    ) => {
+    async (submission: ComposerSubmission, options?: SubmitOptions) => {
       const excerpts = reviewChat?.excerpts ?? []
       await submitMessage(
-        excerpts.length ? serializeExcerpts(content, excerpts) : content,
-        images,
+        excerpts.length
+          ? {
+              ...submission,
+              text: serializeExcerpts(submission.text, excerpts),
+            }
+          : submission,
         options
       )
       if (excerpts.length) reviewChat?.clearExcerpts?.()
@@ -357,7 +396,7 @@ export function AgentThreadView({
   )
 
   const submitText = useCallback(
-    (content: string) => submitMessage(content, []),
+    (content: string) => submitMessage(plainSubmission(content)),
     [submitMessage]
   )
 
@@ -392,7 +431,7 @@ export function AgentThreadView({
     if (!question || !canPost) return
     clearQuestion?.()
     // oxlint-disable-next-line react/set-state-in-effect
-    submitWithExcerpts(question, []).catch((error: unknown) => {
+    submitWithExcerpts(plainSubmission(question)).catch((error: unknown) => {
       console.error("Could not send the review question", error)
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
@@ -406,13 +445,25 @@ export function AgentThreadView({
     key: number
     files: Array<File>
   } | null>(null)
+  const [addedReply, setAddedReply] = useState<{
+    key: number
+    reply: PassageReply
+  } | null>(null)
+  const addReply = (reply: PassageReply) =>
+    setAddedReply((previous) => ({ key: (previous?.key ?? 0) + 1, reply }))
   const restoreQueuedToComposer = useCallback(
-    (texts: ReadonlyArray<string>, images: Array<ImageChunk>) => {
-      if (texts.length === 0 && images.length === 0) return
+    (
+      texts: ReadonlyArray<string>,
+      images: Array<ImageChunk>,
+      replies: Array<PassageReply>
+    ) => {
+      if (!texts.some(Boolean) && images.length === 0 && replies.length === 0)
+        return
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
         text: texts.filter(Boolean).join("\n\n"),
         images,
+        replies,
       }))
     },
     []
@@ -457,7 +508,11 @@ export function AgentThreadView({
         const images = await materializeQueuedImages(entry)
         if (images === null) return
         await withdrawQueued(entry)
-        restoreQueuedToComposer([queuedText(entry)], images)
+        restoreQueuedToComposer(
+          [queuedText(entry)],
+          images,
+          entry.message.replies ?? []
+        )
       })().catch((error: unknown) =>
         reportError({ title: "Couldn't cancel the queued message", error })
       )
@@ -509,7 +564,11 @@ export function AgentThreadView({
         ...pending.map(queuedText),
         ...unacknowledged.map((message) => message.content),
       ],
-      images
+      images,
+      [
+        ...pending.flatMap((entry) => entry.message.replies ?? []),
+        ...unacknowledged.flatMap((message) => message.replies ?? []),
+      ]
     )
     if (failed > 0) {
       toast.error(
@@ -536,7 +595,7 @@ export function AgentThreadView({
         pullRequest.number,
         scope
       )
-      await submitMessage(result.prompt, [])
+      await submitMessage(plainSubmission(result.prompt))
     },
     [submitMessage, thread.id]
   )
@@ -575,9 +634,9 @@ export function AgentThreadView({
       visiblePendingMessages(
         thread.pendingMessages?.filter((message) => !message.queued),
         [...baseMessages, ...queued.map((entry) => entry.message)],
-        pendingSenderName(baseMessages, login)
+        senderName
       ),
-    [baseMessages, login, queued, thread.pendingMessages]
+    [baseMessages, queued, senderName, thread.pendingMessages]
   )
   const visibleMessages = useMemo(
     () => [...baseMessages, ...pendingMessages],
@@ -620,6 +679,7 @@ export function AgentThreadView({
         id: entry.message.id,
         content: queuedText(entry),
         images: queuedImages(entry),
+        replies: entry.message.replies,
         createdAt: Date.parse(entry.requestedAt),
         pending: entry.runId === null,
         mine: isOwnQueued(entry),
@@ -630,6 +690,7 @@ export function AgentThreadView({
           id: message.id,
           content: message.content,
           images: message.images,
+          replies: message.replies,
           createdAt: message.createdAt,
           pending: true,
         })),
@@ -657,8 +718,8 @@ export function AgentThreadView({
         : null,
     [source.hasOlder, source.isLoadingOlder, source.loadOlder]
   )
-  const isThinking = source.isRunning
-  const settingUpSandbox = isThinking && baseMessages.length === 0
+  const isThinking = sourceRunning
+  const settingUpSandbox = source.isRunning && baseMessages.length === 0
   const reconnect = useConnectionStatus(source.connection)
   // The transcript hydrates once: the SDK's state fetch, or the event log's
   // snapshot. Show a loading state during it instead of the empty state.
@@ -807,8 +868,7 @@ export function AgentThreadView({
                 />
               }
             >
-              Every pull request from this thread is merged or closed. Resolve
-              the thread if the work is done, or send a follow-up to keep going.
+              Every pull request from this thread is merged or closed.
             </Banner>
           </div>
         )}
@@ -900,10 +960,14 @@ export function AgentThreadView({
                     onRemoveQueuedMessage={
                       canPost ? removeQueuedMessage : undefined
                     }
+                    onReply={canPost ? addReply : undefined}
                     isStreaming={isStreaming}
                     streamIsLoading={source.isRunning}
                     scrollControlRef={scrollControlRef}
                     isThinking={isThinking}
+                    isWaitingForDelegatedWork={
+                      thread.waitingForDelegatedWork && !source.isRunning
+                    }
                     isOffloading={source.isOffloading}
                     reconnectLabel={reconnect.label}
                     settingUpSandbox={settingUpSandbox}
@@ -936,6 +1000,12 @@ export function AgentThreadView({
               )}
               {reviewChat && <ReviewExcerptChips />}
               <AgentPromptBar
+                key={`${session.data?.user_id}:${thread.id}`}
+                draftKey={
+                  session.data?.user_id
+                    ? `${session.data.user_id}:thread:${thread.id}`
+                    : undefined
+                }
                 placeholder={
                   moving
                     ? `Moving this thread to ${moving === "local" ? "This Mac" : "Cloud"}…`
@@ -962,6 +1032,7 @@ export function AgentThreadView({
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
                 droppedFiles={droppedFiles}
+                addedReply={addedReply}
                 models={models}
                 routed={routed}
                 selection={activeSelection}
@@ -971,13 +1042,17 @@ export function AgentThreadView({
                 {...(localThread
                   ? {
                       runTarget: "local" as const,
-                      selectedLocalRepoPath: localThread.cwd,
+                      // A task folder is the thread's own, not a project.
+                      selectedLocalRepoPath: localThread.managedTaskFolder
+                        ? null
+                        : localThread.cwd,
                       localRepoBranches: localRepoRefs,
                       selectedLocalRepoBranch: localBranch,
                       onRefreshLocalRepoBranch: () =>
                         void refetchLocalRepoRefs(),
-                      onSelectLocalRepoBranch: (branch: string) =>
-                        void selectLocalBranch(branch),
+                      onSelectLocalRepoBranch: localRepoRefs.length
+                        ? (branch: string) => void selectLocalBranch(branch)
+                        : undefined,
                       localWorkspaceMode: localWorktreePath
                         ? ("worktree" as const)
                         : ("local" as const),
@@ -1005,12 +1080,12 @@ export function AgentThreadView({
           )}
         </div>
       </div>
-      {!reviewChat && <BackgroundWorkSidebar threadId={thread.id} />}
       {/* The review page is already the diff; a second panel only squeezes the chat. */}
       {!reviewChat && (
         <AgentGitPanel
           thread={thread}
           onComment={canPost ? submitText : undefined}
+          onReply={canPost ? addReply : undefined}
           revealFilePath={revealFilePath}
           revealChangesKey={revealChangesKey}
           collapsed={panelCollapsed}

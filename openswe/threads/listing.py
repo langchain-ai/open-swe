@@ -13,6 +13,10 @@ from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel
 
 from openswe.review.session import ReviewSessionMetadata
+from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
+from openswe.slack.records import lookup_slack_link_thread_id
+from openswe.slack.routed_work import RoutedWork
+from openswe.source_context import SourceContext
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
 from openswe.threads import index
 from openswe.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
@@ -133,6 +137,16 @@ def _search_rank(thread: ThreadLike) -> float:
 
 
 def _search_matches(values: Sequence[object], query: str) -> bool:
+    if expected := parse_github_pr_url(query):
+        return any(
+            actual is not None
+            and actual.owner.lower() == expected.owner.lower()
+            and actual.repo.lower() == expected.repo.lower()
+            and actual.number == expected.number
+            for value in values
+            if isinstance(value, str)
+            for actual in [parse_github_pr_url(value)]
+        )
     needle = query.lower()
     return any(isinstance(value, (str, int)) and needle in str(value).lower() for value in values)
 
@@ -418,6 +432,25 @@ async def attach_task_workers(
     filter_workers: Callable[[list[ThreadLike]], Awaitable[list[ThreadLike]]] | None = None,
 ) -> None:
     """Attach independently readable task children without recursively expanding them."""
+    semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
+
+    async def attach_waiting(summary: JsonObject) -> None:
+        summary["waitingForDelegatedWork"] = False
+        if summary.get("status") == "running" or not isinstance(
+            thread_id := summary.get("id"), str
+        ):
+            return
+        async with semaphore:
+            try:
+                summary["waitingForDelegatedWork"] = await RoutedWork(thread_id).delegated_active(
+                    prune=False
+                )
+            except Exception:
+                logger.exception(
+                    "Could not read delegated work status", extra={"thread_id": thread_id}
+                )
+
+    await asyncio.gather(*(attach_waiting(summary) for summary in summaries))
     ids = [thread_id for summary in summaries if isinstance(thread_id := summary.get("id"), str)]
     memberships = await sidebar_memberships(ids)
     if not memberships:
@@ -428,7 +461,11 @@ async def attach_task_workers(
     children = await sidebar_memberships(coordinator_ids, workers_of=True)
     parent_ids = list({membership.coordinator_thread_id for membership in memberships.values()})
     related = await _readable_threads_by_id(
-        client, [*parent_ids, *children], login, email, include_private=include_private
+        client,
+        [*parent_ids, *children],
+        login,
+        email,
+        include_private=include_private,
     )
     worker_threads = [
         related[key]
@@ -747,7 +784,11 @@ async def list_unresolved_dashboard_threads(
 
 
 async def list_dashboard_threads(
-    login: str, *, email: str | None = None, limit: int = 50, include_all: bool = False
+    login: str,
+    *,
+    email: str | None = None,
+    limit: int = 50,
+    include_all: bool = False,
 ) -> list[dict[str, Any]]:
     page = await list_dashboard_threads_page(
         login,
@@ -777,7 +818,13 @@ async def _pinned_thread_summaries(
         )
         for thread in threads:
             thread_id = _thread_id(thread)
-            if thread_id and thread_is_readable(_thread_metadata(thread), login, email):
+            metadata = _thread_metadata(thread)
+            slack_thread = SourceContext.from_metadata(metadata).slack_thread
+            if (
+                thread_id
+                and thread_is_readable(metadata, login, email)
+                and not (slack_thread is not None and slack_thread.is_concierge)
+            ):
                 threads_by_id[thread_id] = thread
     # Search order is unrelated to pin order; deleted/inaccessible IDs are omitted.
     summaries = await _summarize_threads(
@@ -886,9 +933,30 @@ async def list_dashboard_threads_page(
     hierarchy: bool = False,
 ) -> dict[str, Any]:
     client = langgraph_client()
+    normalized_query = query.strip() if query else ""
+    if parse_slack_thread_url(normalized_query):
+        thread_id = await lookup_slack_link_thread_id(normalized_query)
+        items = []
+        if thread_id and offset <= 0:
+            try:
+                thread = await client.threads.get(thread_id)
+            except NotFoundError:
+                thread = None
+            if thread is not None:
+                metadata = _thread_metadata(thread)
+                if thread_is_readable(metadata, login, email) and (
+                    include_private or metadata.get("visibility", "public") == "public"
+                ):
+                    items = [await _summarize_thread(client, thread)]
+        return {"items": items, "limit": 1, "offset": max(offset, 0), "hasMore": False}
+    pr_ref = parse_github_pr_url(normalized_query)
+    if pr_ref:
+        query = pr_ref.url
     search_login = filter_participant_login or login
     search_email = email if search_login == login else None
-    if scope == "automation" and filter_participant_login is None:
+    if pr_ref and filter_participant_login is None:
+        searches = [{}]
+    elif scope == "automation" and filter_participant_login is None:
         searches = [{"thread_category": "automation"}, {"source": "schedule"}]
     elif scope == "bot" and filter_participant_login is None:
         # Bot threads have no participants, and every signed-in user may read them.

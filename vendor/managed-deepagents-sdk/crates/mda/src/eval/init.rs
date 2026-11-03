@@ -9,7 +9,8 @@ use cliclack::log;
 use serde::Serialize;
 
 use super::harbor::{
-    stage_harbor_adapter, validate_harbor_adapter_paths, write_job_config_if_missing,
+    reject_legacy_job_config, stage_harbor_adapter, validate_harbor_adapter_paths,
+    write_job_config_if_missing,
 };
 use super::types::{InitOptions, InitSummary, EVAL_DATASET_DIR, GENERATED_EVAL_DIR};
 use crate::cli_output::{heading_style, show_sequence, supporting_style, SequenceItem};
@@ -39,20 +40,17 @@ pub fn init(options: InitOptions) -> Result<InitSummary> {
     validate_project_directory_path(&project_root, generated_relative)?;
     validate_generated_file(&project_root.join(GENERATED_EVAL_DIR).join("runtime.json"))?;
     validate_harbor_adapter_paths(&project_root)?;
+    reject_legacy_job_config(&project_root)?;
     let dataset_dir = ensure_project_directory(&project_root, dataset_relative)?;
     let generated_dir = ensure_project_directory(&project_root, generated_relative)?;
-    let adapter_dir = stage_harbor_adapter(&project_root)?;
-    let runtime_settings_path =
-        write_runtime_settings(&project_root, &generated_dir, &installation)?;
+    stage_harbor_adapter(&project_root)?;
+    write_runtime_settings(&project_root, &generated_dir, &installation)?;
     let job_config_path = write_job_config_if_missing(&project_root, &dataset_dir)?;
 
     Ok(InitSummary {
         project_root,
         language: project.language,
         dataset_dir,
-        generated_dir,
-        adapter_dir,
-        runtime_settings_path,
         job_config_path,
     })
 }
@@ -137,7 +135,7 @@ fn write_runtime_settings(
     project_root: &Path,
     generated_dir: &Path,
     installation: &Installation,
-) -> Result<PathBuf> {
+) -> Result<()> {
     let mda_executable = std::env::current_exe()
         .context("failed to locate the current mda executable")?
         .canonicalize()
@@ -164,9 +162,7 @@ fn write_runtime_settings(
         serde_json::to_string_pretty(&settings)
             .context("failed to serialize eval runtime settings")?
     );
-    let path = generated_dir.join("runtime.json");
-    write_generated_file(&path, contents)?;
-    Ok(path)
+    write_generated_file(&generated_dir.join("runtime.json"), contents)
 }
 
 /// Skill prompt shared by noninteractive guidance and explicit handoff.

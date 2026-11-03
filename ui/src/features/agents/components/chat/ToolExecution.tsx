@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import {
   memo,
@@ -90,15 +91,19 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
   if (!expanded) {
     return (
       <div className="my-0.5 text-xxs leading-5">
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="xs"
+          aria-label={`Edited ${fileName}`}
           type="button"
           onClick={toggle}
-          className="inline-flex items-center gap-space-2 text-left transition-colors hover:brightness-125"
+          className="h-auto justify-start gap-space-2 border-0 px-0 text-left hover:brightness-125"
         >
           <span className={isError ? "text-error-secondary" : "text-secondary"}>
             Edited <span className="text-brand-primary">{fileName}</span>
           </span>
-        </button>
+        </Button>
       </div>
     )
   }
@@ -106,10 +111,14 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
   return (
     <div className="my-space-1">
       <div className="my-0.5 mb-space-1 text-xxs leading-5">
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="xs"
+          aria-label="Edited file"
           type="button"
           onClick={toggle}
-          className="inline-flex items-center gap-space-2 text-left transition-colors hover:brightness-125"
+          className="h-auto justify-start gap-space-2 border-0 px-0 text-left hover:brightness-125"
         >
           <span className={isError ? "text-error-secondary" : "text-secondary"}>
             Edited file
@@ -120,7 +129,7 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
             className="text-icon-tertiary"
             aria-hidden
           />
-        </button>
+        </Button>
       </div>
 
       <div className="overflow-hidden rounded-lg border border-subtle bg-surface-level-2">

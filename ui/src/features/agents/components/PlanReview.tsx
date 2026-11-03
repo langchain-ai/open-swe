@@ -370,9 +370,13 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                             data-testid="plan-comment"
                             className="rounded-lg border border-default bg-surface-level-1 p-space-3"
                           >
-                            <button
+                            <Button
+                              color="secondary"
+                              variant="plain"
+                              size="sm"
+                              aria-label={`Comment ${index + 1} by ${comment.author}: ${comment.body}`}
                               type="button"
-                              className="block w-full text-left focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                              className="block h-auto w-full justify-start border-0 p-0 text-left whitespace-normal text-inherit hover:bg-transparent focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none dark:hover:bg-transparent"
                               onClick={() => openComment(comment.id)}
                             >
                               <span className="text-xs font-semibold">
@@ -386,7 +390,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                               <span className="mt-space-2 block text-sm whitespace-pre-wrap">
                                 {comment.body}
                               </span>
-                            </button>
+                            </Button>
                             <div className="mt-space-2 flex gap-space-2">
                               <Button
                                 size="xs"
@@ -436,7 +440,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                                         size="xs"
                                         variant="plain"
                                         color="secondary"
-                                        className="mt-space-2"
+                                        className="mt-space-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                                         onClick={() =>
                                           void removeComment(reply.id)
                                         }
@@ -457,7 +461,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                   ) && (
                     <div className="border-t border-default p-space-3">
                       <Button
-                        className="w-full"
+                        className="w-full focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                         disabled={submitting || posting || submitted}
                         onClick={() => void submitComments()}
                       >

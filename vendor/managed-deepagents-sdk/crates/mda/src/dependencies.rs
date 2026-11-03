@@ -67,7 +67,7 @@ const TYPESCRIPT_MANAGED: &[Dependency] = &[
     },
     Dependency {
         name: "deepagents",
-        version: "^1.12.1",
+        version: "^1.15.1",
     },
     // Serves MDA managed HTTP routes (channels / connectors) from the
     // generated `_mda_http.ts` module.
@@ -110,7 +110,7 @@ const TYPESCRIPT_MANAGED: &[Dependency] = &[
 const PYTHON_MANAGED: &[Dependency] = &[
     Dependency {
         name: "deepagents",
-        version: ">=0.7.27,<1",
+        version: ">=0.7.30,<1",
     },
     Dependency {
         name: "langchain[mcp]",
@@ -169,6 +169,31 @@ pub const PYTHON_BROWSER: Dependency = Dependency {
     version: "==4.3.0",
 };
 
+/// PyPI package behind that browser's `run`, `snapshot` and `screenshot`
+/// tools: Stagehand's facade. Pinned like the package's typing group: it is a
+/// first release, and `browser.py` is written against how it closes and saves.
+pub const PYTHON_BROWSER_TOOLS: Dependency = Dependency {
+    name: "stagehand-middleware",
+    version: "==0.1.0",
+};
+
+/// npm package that drives a LangSmith browser from the deployment, for
+/// projects that declare one in `browser.ts`. Pinned to the release that
+/// `managed-deepagents` lists as a peer dependency, so a deployment
+/// runs the Stagehand the package is tested against.
+pub const TYPESCRIPT_BROWSER: Dependency = Dependency {
+    name: "@browserbasehq/stagehand",
+    version: "4.3.0",
+};
+
+/// npm package behind that browser's `run`, `snapshot` and `screenshot`
+/// tools: Stagehand's facade, the npm twin of [`PYTHON_BROWSER_TOOLS`]. Pinned
+/// to the release that `managed-deepagents` lists as a peer dependency.
+pub const TYPESCRIPT_BROWSER_TOOLS: Dependency = Dependency {
+    name: "stagehand-middleware",
+    version: "0.1.1",
+};
+
 /// npm package that provides the local LangGraph in-memory dev server.
 ///
 /// The caret range keeps local development on compatible LangGraph CLI updates;
@@ -206,6 +231,14 @@ pub fn managed_dependencies(language: Language) -> &'static [Dependency] {
     match language {
         Language::TypeScript => TYPESCRIPT_MANAGED,
         Language::Python => PYTHON_MANAGED,
+    }
+}
+
+/// Extra dependencies for projects that declare a `browser`.
+pub fn browser_dependencies(language: Language) -> &'static [Dependency] {
+    match language {
+        Language::TypeScript => &[TYPESCRIPT_BROWSER, TYPESCRIPT_BROWSER_TOOLS],
+        Language::Python => &[PYTHON_BROWSER, PYTHON_BROWSER_TOOLS],
     }
 }
 
@@ -476,24 +509,6 @@ pub fn provider_dependency_for_model(model: &str, language: Language) -> Option<
     })
 }
 
-/// The OpenAI integration package, which also serves every OpenAI-compatible
-/// endpoint addressed through a `baseURL` / `base_url` override.
-///
-/// Inference is the normal route to a provider package, and it reads a static
-/// `provider:model` string. A project that constructs its own chat model has no
-/// such string to read, so the package it imports is written into its manifest
-/// at scaffold time instead.
-pub fn openai_compatible_dependency(language: Language) -> Dependency {
-    let provider = MODEL_PROVIDERS
-        .iter()
-        .find(|provider| provider.keys.contains(&"openai"))
-        .expect("the provider registry always carries OpenAI");
-    match language {
-        Language::TypeScript => provider.npm,
-        Language::Python => provider.pypi,
-    }
-}
-
 /// The environment variable that must carry an API key for `model`'s provider
 /// at runtime, or `None` when no key can be pre-flighted.
 ///
@@ -648,66 +663,27 @@ fn infer_provider_from_model_name(model: &str) -> Option<&'static str> {
     }
 }
 
-/// Render the user-facing TypeScript dependencies as `"name": "version"` JSON
-/// members, each indented by `indent` spaces and comma-joined (no trailing
-/// comma).
-///
-/// `extra` carries the packages a scaffolded project imports itself and that
-/// compile-time inference therefore cannot supply; entries are emitted in name
-/// order, the order a manifest is normally kept in.
-pub fn package_json_entries(indent: usize, extra: &[Dependency]) -> String {
-    package_json_entries_for_version(indent, &version::package_version(), extra)
+/// Render the user-facing TypeScript dependency (the runtime package every
+/// project gets) as a `"name": "version"` JSON member indented by `indent`
+/// spaces.
+pub fn package_json_entries(indent: usize) -> String {
+    package_json_entries_for_version(indent, &version::package_version())
 }
 
-/// Render the user-facing Python dependencies as quoted TOML array elements
-/// (e.g. `"deepagents>=0.7.3"`), each indented by `indent` spaces and
-/// comma-joined. `extra` is as in [`package_json_entries`].
-pub fn pyproject_entries(indent: usize, extra: &[Dependency]) -> String {
-    pyproject_entries_for_version(indent, &version::package_version(), extra)
+/// Render the user-facing Python dependency as a quoted TOML array element
+/// (e.g. `"managed-deepagents==0.7.3"`) indented by `indent` spaces.
+pub fn pyproject_entries(indent: usize) -> String {
+    pyproject_entries_for_version(indent, &version::package_version())
 }
 
-/// The user-facing dependencies in name order: the runtime package every
-/// project gets, plus whatever the scaffold decided it also imports.
-fn user_dependencies(package_version: &str, extra: &[Dependency]) -> Vec<(&'static str, String)> {
-    let mut entries = vec![(USER_RUNTIME_PACKAGE, package_version.to_string())];
-    entries.extend(extra.iter().map(|dep| (dep.name, dep.version.to_string())));
-    entries.sort_unstable_by_key(|(name, _)| *name);
-    entries
-}
-
-fn package_json_entries_for_version(
-    indent: usize,
-    package_version: &str,
-    extra: &[Dependency],
-) -> String {
+fn package_json_entries_for_version(indent: usize, package_version: &str) -> String {
     let pad = " ".repeat(indent);
-    user_dependencies(package_version, extra)
-        .into_iter()
-        .map(|(name, version)| format!("{pad}\"{name}\": \"{version}\""))
-        .collect::<Vec<_>>()
-        .join(",\n")
+    format!("{pad}\"{USER_RUNTIME_PACKAGE}\": \"{package_version}\"")
 }
 
-fn pyproject_entries_for_version(
-    indent: usize,
-    package_version: &str,
-    extra: &[Dependency],
-) -> String {
+fn pyproject_entries_for_version(indent: usize, package_version: &str) -> String {
     let pad = " ".repeat(indent);
-    user_dependencies(package_version, extra)
-        .into_iter()
-        .map(|(name, version)| {
-            // The runtime package is pinned; a registry version already carries
-            // its own operator (`>=1.4.1`), so only the pin adds one.
-            let requirement = if name == USER_RUNTIME_PACKAGE {
-                format!("{name}=={version}")
-            } else {
-                format!("{name}{version}")
-            };
-            format!("{pad}\"{requirement}\"")
-        })
-        .collect::<Vec<_>>()
-        .join(",\n")
+    format!("{pad}\"{USER_RUNTIME_PACKAGE}=={package_version}\"")
 }
 
 #[cfg(test)]
@@ -723,6 +699,38 @@ mod tests {
             .and_then(|rest| rest.strip_suffix('"'))
             .unwrap();
         assert_eq!(PYTHON_BROWSER.version, format!("=={version}"));
+    }
+
+    #[test]
+    fn typescript_browser_dependency_matches_the_npm_packages_pin() {
+        let package: serde_json::Value =
+            serde_json::from_str(include_str!("../../../packages/npm/package.json")).unwrap();
+        for dep in [TYPESCRIPT_BROWSER, TYPESCRIPT_BROWSER_TOOLS] {
+            assert_eq!(package["peerDependencies"][dep.name], dep.version);
+        }
+        // The browser loads its extension from the same Stagehand release.
+        let runtime = include_str!("../../../packages/npm/src/runtime/browser-langsmith.ts");
+        let pin = format!("STAGEHAND_VERSION = \"{}\"", TYPESCRIPT_BROWSER.version);
+        assert!(runtime.contains(&pin), "browser-langsmith.ts lacks {pin}");
+        // Python deployments run the same Stagehand.
+        assert_eq!(
+            PYTHON_BROWSER.version,
+            format!("=={}", TYPESCRIPT_BROWSER.version)
+        );
+    }
+
+    #[test]
+    fn browser_tools_dependency_matches_the_packages_typing_pin() {
+        // The package's tests and type checks run against the release deployments get.
+        let pyproject = include_str!("../../../packages/pypi/pyproject.toml");
+        let pin = format!(
+            "\"{}{}\"",
+            PYTHON_BROWSER_TOOLS.name, PYTHON_BROWSER_TOOLS.version
+        );
+        assert!(
+            pyproject.contains(&pin),
+            "pyproject.toml does not pin {pin}"
+        );
     }
 
     #[test]
@@ -750,11 +758,11 @@ mod tests {
     #[test]
     fn user_manifest_only_lists_managed_deepagents() {
         assert_eq!(
-            package_json_entries_for_version(0, "1.2.3", &[]),
+            package_json_entries_for_version(0, "1.2.3"),
             "\"managed-deepagents\": \"1.2.3\""
         );
         assert_eq!(
-            pyproject_entries_for_version(0, "1.2.3", &[]),
+            pyproject_entries_for_version(0, "1.2.3"),
             "\"managed-deepagents==1.2.3\""
         );
     }
@@ -762,48 +770,12 @@ mod tests {
     #[test]
     fn user_managed_deepagents_is_pinned_to_the_runtime_package_version() {
         assert_eq!(
-            package_json_entries_for_version(4, "0.0.3-dev.22", &[]),
+            package_json_entries_for_version(4, "0.0.3-dev.22"),
             "    \"managed-deepagents\": \"0.0.3-dev.22\""
         );
         assert_eq!(
-            pyproject_entries_for_version(4, "0.0.3-dev.22", &[]),
+            pyproject_entries_for_version(4, "0.0.3-dev.22"),
             "    \"managed-deepagents==0.0.3-dev.22\""
-        );
-    }
-
-    #[test]
-    fn extra_user_dependencies_are_rendered_in_name_order() {
-        // The registry version carries its own operator, so a Python entry must
-        // not gain a second one — `langchain-openai>=1.4.1`, never `==>=`.
-        let ts = openai_compatible_dependency(Language::TypeScript);
-        assert_eq!(
-            package_json_entries_for_version(0, "1.2.3", &[ts]),
-            format!(
-                "\"{name}\": \"{version}\",\n\"managed-deepagents\": \"1.2.3\"",
-                name = ts.name,
-                version = ts.version
-            )
-        );
-        let py = openai_compatible_dependency(Language::Python);
-        assert_eq!(
-            pyproject_entries_for_version(0, "1.2.3", &[py]),
-            format!(
-                "\"{name}{version}\",\n\"managed-deepagents==1.2.3\"",
-                name = py.name,
-                version = py.version
-            )
-        );
-    }
-
-    #[test]
-    fn the_openai_compatible_dependency_is_the_openai_integration_package() {
-        assert_eq!(
-            openai_compatible_dependency(Language::TypeScript).name,
-            "@langchain/openai"
-        );
-        assert_eq!(
-            openai_compatible_dependency(Language::Python).name,
-            "langchain-openai"
         );
     }
 
@@ -869,7 +841,7 @@ mod tests {
 
     #[test]
     fn package_json_entries_are_indented() {
-        let rendered = package_json_entries(4, &[]);
+        let rendered = package_json_entries(4);
         assert_eq!(
             rendered,
             format!(
@@ -881,7 +853,7 @@ mod tests {
 
     #[test]
     fn pyproject_entries_are_indented() {
-        let rendered = pyproject_entries(4, &[]);
+        let rendered = pyproject_entries(4);
         assert_eq!(
             rendered,
             format!("    \"managed-deepagents=={}\"", version::package_version())
@@ -892,7 +864,7 @@ mod tests {
     fn package_json_entries_compose_into_valid_json() {
         let manifest = format!(
             "{{\n  \"dependencies\": {{\n{}\n  }}\n}}",
-            package_json_entries(4, &[])
+            package_json_entries(4)
         );
         let value: serde_json::Value = serde_json::from_str(&manifest).unwrap();
         assert_eq!(

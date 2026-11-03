@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from openswe.dashboard import deps, oauth, routes
 from openswe.slack.channels import SlackChannel
+from openswe.workspaces import refresh
 from openswe.workspaces import routes as workspace_routes
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
@@ -95,10 +96,8 @@ async def test_repo_update_starts_snapshot_rebuild(admin_client: httpx.AsyncClie
         "admin",
     )
     with (
-        patch.object(workspace_routes, "ensure_refresh_cron", AsyncMock(return_value="cron-1")),
-        patch.object(
-            workspace_routes, "start_refresh_run", AsyncMock(return_value="run-1")
-        ) as start,
+        patch.object(refresh, "ensure_refresh_cron", AsyncMock(return_value="cron-1")),
+        patch.object(refresh, "start_refresh_run", AsyncMock(return_value="run-1")) as start,
     ):
         response = await admin_client.put(
             "/dashboard/api/workspaces/oss", json={"repos": ["acme/oss", "acme/api"]}
@@ -141,7 +140,7 @@ async def test_newly_enabled_kitchen_channels_check_fresh_slack_eligibility(
     admin_client: httpx.AsyncClient, payload: dict[str, bool], allowed: bool
 ) -> None:
     with patch.object(
-        workspace_routes.SlackChannel,
+        SlackChannel,
         "load",
         AsyncMock(return_value=SlackChannel(id="C0API", payload=_ELIGIBLE)),
     ):
@@ -157,7 +156,7 @@ async def test_newly_enabled_kitchen_channels_check_fresh_slack_eligibility(
     assert created.status_code == 200
 
     load = AsyncMock(return_value=SlackChannel(id="C0NEW", payload=payload))
-    with patch.object(workspace_routes.SlackChannel, "load", load):
+    with patch.object(SlackChannel, "load", load):
         response = await admin_client.put(
             "/dashboard/api/workspaces/oss", json={"kitchen_channel_ids": ["C0API", "C0NEW"]}
         )

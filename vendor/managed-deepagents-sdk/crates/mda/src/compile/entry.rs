@@ -9,7 +9,10 @@ use serde_json::json;
 use crate::agent_config::AsyncSubagentGraph;
 use crate::project::Language;
 
-use super::{BROWSER_EXPORT, IDENTITY_EXPORT, MEMORY_EXPORT, NODE_VERSION, RUNTIME_DIR};
+use super::{
+    BROWSER_EXPORT, BROWSER_HANDOFF_EXPORT, IDENTITY_EXPORT, MEMORY_EXPORT, NODE_VERSION,
+    RUNTIME_DIR,
+};
 
 /// Encode `value` as a string literal valid in both TypeScript and Python.
 ///
@@ -61,11 +64,11 @@ pub(super) struct EntryInputs<'a> {
     /// Module specifier for the root `memory` declaration, if the project opts
     /// into durable memory. Absent means the runtime mounts nothing.
     pub(super) memory_import: Option<&'a str>,
-    /// Module specifier for the root `browser` declaration (Python only), if
-    /// the project opts into browser use.
-    pub(super) browser_import: Option<&'a str>,
-    /// Async subagents that get their own graph factory (served Python only).
+    /// Async subagents that get their own graph factory (served builds only).
     pub(super) async_subagents: &'a [AsyncSubagentGraph],
+    /// Module specifier for the root `browser` declaration, if the project
+    /// opts into browser use.
+    pub(super) browser_import: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -159,6 +162,15 @@ fn generate_typescript_entry(inputs: &EntryInputs<'_>) -> String {
             "import {{ {MEMORY_EXPORT} }} from \"{memory_import}\";\n"
         ));
     }
+    if let Some(browser_import) = inputs.browser_import {
+        out.push_str(&format!(
+            "import {{ {BROWSER_EXPORT} }} from \"{browser_import}\";\n"
+        ));
+        // The graph whose run waits out a browser handoff.
+        out.push_str(&format!(
+            "export {{ browserHandoffWatcher as {BROWSER_HANDOFF_EXPORT} }} from \"managed-deepagents/runtime\";\n"
+        ));
+    }
     out.push('\n');
 
     // Managed options handed to the runtime, in shorthand object form.
@@ -230,6 +242,20 @@ fn generate_typescript_entry(inputs: &EntryInputs<'_>) -> String {
     if inputs.memory_import.is_some() {
         option_keys.push("memory");
     }
+    if inputs.browser_import.is_some() {
+        option_keys.push("browser");
+    }
+    // Async subagents run with the lead's managed options. They keep `channels` so
+    // a paused subagent can find the lead's channel thread to show its approval.
+    let subagent_options = option_keys.clone();
+    let subagents = inputs.async_subagents;
+    if !subagents.is_empty() {
+        out.push_str(&format!(
+            "const asyncSubagentGraphs = {{ {} }};\n",
+            async_subagent_graph_entries(subagents)
+        ));
+        option_keys.push("asyncSubagentGraphs");
+    }
     if !option_keys.is_empty() {
         out.push('\n');
     }
@@ -257,7 +283,34 @@ fn generate_typescript_entry(inputs: &EntryInputs<'_>) -> String {
         ));
     }
     out.push_str("}\n");
+    for subagent in subagents {
+        let mut options: Vec<String> = subagent_options.iter().map(|key| key.to_string()).collect();
+        options.push(format!(
+            "asyncSubagent: {}",
+            encode_string_literal(&subagent.name)
+        ));
+        out.push_str(&format!(
+            "\nexport function {}(config: ManagedRunConfig, runtime: ManagedServerRuntime) {{\n  return {compile_fn}(definition, config, {{ {} }}, runtime);\n}}\n",
+            subagent.export,
+            options.join(", ")
+        ));
+    }
     out
+}
+
+/// `"name": "graph id"` pairs for each async subagent, as an object or dict body.
+fn async_subagent_graph_entries(subagents: &[AsyncSubagentGraph]) -> String {
+    subagents
+        .iter()
+        .map(|subagent| {
+            format!(
+                "{}: {}",
+                encode_string_literal(&subagent.name),
+                encode_string_literal(&subagent.graph_id)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
@@ -337,6 +390,10 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
         out.push_str(&format!(
             "from {browser_import} import {BROWSER_EXPORT} as _browser\n"
         ));
+        // The graph whose run waits out a browser handoff.
+        out.push_str(
+            "from managed_deepagents.browser import handoff_watcher as _handoff_watcher\n",
+        );
     }
     out.push('\n');
 
@@ -419,19 +476,9 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
     let mut subagent_kwargs = kwargs.clone();
     subagent_kwargs.push("runtime=runtime".to_string());
     if !subagents.is_empty() {
-        let entries: Vec<String> = subagents
-            .iter()
-            .map(|subagent| {
-                format!(
-                    "{}: {}",
-                    encode_string_literal(&subagent.name),
-                    encode_string_literal(&subagent.graph_id)
-                )
-            })
-            .collect();
         out.push_str(&format!(
             "_async_subagent_graphs = {{{}}}\n",
-            entries.join(", ")
+            async_subagent_graph_entries(subagents)
         ));
         kwargs.push("async_subagent_graphs=_async_subagent_graphs".to_string());
     }
@@ -473,6 +520,13 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
             subagent.export,
             subagent_kwargs.join(", "),
             encode_string_literal(&subagent.name)
+        ));
+    }
+    // The browser handoff's watcher runs like an async subagent: under its agent's
+    // trace, once its caller may access the agent's thread.
+    if inputs.browser_import.is_some() {
+        out.push_str(&format!(
+            "\n\n@asynccontextmanager\nasync def {BROWSER_HANDOFF_EXPORT}(config, runtime: ServerRuntime):\n    async with parent_run(config):\n        yield _handoff_watcher\n"
         ));
     }
     out
@@ -927,8 +981,8 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
-                browser_import: None,
                 async_subagents: &[],
+                browser_import: None,
             };
             for (language, check) in [
                 (
@@ -979,8 +1033,8 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
-                browser_import: None,
                 async_subagents: &[],
+                browser_import: None,
             };
             for language in [Language::TypeScript, Language::Python] {
                 let entry = generate_entry(language, &inputs);
@@ -1008,8 +1062,8 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
-                browser_import: None,
                 async_subagents: &[],
+                browser_import: None,
             },
         );
 
@@ -1042,9 +1096,9 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
-                browser_import: None,
                 sandbox_setup: false,
                 async_subagents: &[],
+                browser_import: None,
             },
         );
 
@@ -1079,8 +1133,8 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
-                browser_import: None,
                 async_subagents: &[],
+                browser_import: None,
             },
         );
 

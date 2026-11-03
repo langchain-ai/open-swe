@@ -25,7 +25,7 @@ esac
 # gateway key (lsv2_*) stray in the shell won't authenticate — prefer .env's
 # OPENAI_API_KEY unless the shell already holds an OpenAI-looking key (sk-…).
 # Pulled line-by-line, not by sourcing .env, which would clobber the harness's
-# test env (SANDBOX_TYPE, DASHBOARD_*, …).
+# test env (E2E_SANDBOX_ROOT, DASHBOARD_*, …).
 case "${OPENAI_API_KEY:-}" in
   sk-*) : ;;
   *)
@@ -53,7 +53,7 @@ export DASHBOARD_ALLOWED_ORIGINS="$UI"
 echo
 echo "┌──────────────────────────────────────────────────────────────────────┐"
 echo "│  START HERE →  ${UI}/login                            │"
-echo "│  Continue with GitHub → pick Alice or Bob (mock sign-in)              │"
+echo "│  Continue with LangSmith → pick Alice or Bob (mock sign-in)           │"
 echo "└──────────────────────────────────────────────────────────────────────┘"
 echo "  Mock Slack:  ${UI}/mock/slack          (send as Alice or Bob)"
 echo "  Everything is on ${UI} (Vite HMR; API + WS proxied to the harness)."

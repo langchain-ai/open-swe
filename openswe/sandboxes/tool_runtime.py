@@ -1,19 +1,14 @@
-"""What a graph factory plans for a run: its tools, middleware, models and subagents.
+"""What starting a run works out for it: its tools, models, subagents and loop rules.
 
 The model loop runs on Managed Deep Agents, which builds a tool for each of the
-planned tools and calls the backend to run it (``openswe.agent_api``).
+run's tools and calls the backend to run it (``openswe.agent_api``).
 """
 
-import math
-import re
-from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
 from uuid import uuid4
 
-from deepagents.backends.protocol import BackendProtocol
-from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
@@ -22,13 +17,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.typing import StateT
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from runtime_api.catalog import FileCheck
+from runtime_api.catalog import FileCheck, InboxSpec, LoopRules, McpServerSpec
 
 from openswe.mcp.models import MCPToolProvenance
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
-from openswe.prompts import prompt
 from openswe.sandboxes.tool_models import ToolDescription
-from openswe.threads.inbox import ThreadInbox
 
 _json = TypeAdapter(JsonValue)
 # Every surface lists the integration tools themselves, so none offers their loader.
@@ -52,50 +45,10 @@ def describe_tool(name: str, tool: BaseTool) -> ToolDescription:
         )
     return ToolDescription(
         name=name,
-        description=tool.description
-        + "\n\n"
-        + prompt("tools/mcp-provenance", provenance=provenance.model_dump_json()),
+        description=f"{tool.description}\n\n{provenance.note()}",
         parameters=tool_parameters(tool),
         mcp_provenance=provenance,
     )
-
-
-_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
-
-
-def _tokens(text: str) -> list[str]:
-    return [word.casefold() for word in _WORD.findall(text)]
-
-
-def _tool_tokens(name: str, tool: BaseTool) -> list[str]:
-    properties = tool_parameters(tool).get("properties")
-    parameters = " ".join(properties) if isinstance(properties, dict) else ""
-    # A match on the name says more than one buried in a long description.
-    return [*_tokens(name) * 3, *_tokens(tool.description), *_tokens(parameters)]
-
-
-def bm25(
-    query: Sequence[str], documents: Sequence[Sequence[str]], k1: float = 1.2, b: float = 0.75
-) -> list[float]:
-    """Okapi BM25 score of each document for ``query``."""
-    if not documents:
-        return []
-    average = sum(map(len, documents)) / len(documents) or 1
-    counts = [Counter(document) for document in documents]
-    scores = [0.0] * len(documents)
-    for term in set(query):
-        having = sum(1 for count in counts if term in count)
-        if not having:
-            continue
-        idf = math.log(1 + (len(documents) - having + 0.5) / (having + 0.5))
-        for index, count in enumerate(counts):
-            frequency = count[term]
-            if frequency:
-                length = len(documents[index]) / average
-                scores[index] += (
-                    idf * frequency * (k1 + 1) / (frequency + k1 * (1 - b + b * length))
-                )
-    return scores
 
 
 # The file and shell tools deepagents' FilesystemMiddleware gives every deep agent.
@@ -144,47 +97,43 @@ type PlannedTool = BaseTool | Callable[..., object] | dict[str, object]
 
 @dataclass
 class ToolSurface:
-    """A run as its graph factory plans it."""
+    """A run as starting it works it out, for its catalog."""
 
-    # The factory's own tools; its middleware adds theirs.
     base_tools: Sequence[PlannedTool] = ()
     dynamic: DynamicToolMiddleware | None = None
     excluded: frozenset[str] = frozenset()
     tools: dict[str, BaseTool] = field(default_factory=dict)
     integration_names: list[str] = field(default_factory=list)
-    # What a model loop running elsewhere needs from the graph: its own middleware,
-    # in order, and the models and subagents the factory picked.
-    middleware: Sequence[AgentMiddleware] = ()
+    # MCP servers whose credential is an MDA connection, which the MDA run connects to itself.
+    mcp_servers: Sequence[McpServerSpec] = ()
     models: SurfaceModels | None = None
     subagents: Sequence[SurfaceSubagent] = ()
-    # The thread's files: its sandbox, with the paths this deployment serves routed in.
-    files: BackendProtocol | None = None
-    # Paths under ``files`` this deployment serves rather than the sandbox.
+    # Paths in the thread's files this deployment serves rather than the sandbox.
     backend_paths: tuple[str, ...] = ()
-    # Where the run's skills are under ``files``, a later source's skill taking the
+    # Where the run's skills are in the thread's files, a later source's skill taking the
     # place of an earlier one's of the same name.
     skill_sources: tuple[str, ...] = ()
     # Where large tool results and binary reads are offloaded.
     artifacts_root: str = "/"
-    # The guards on the shell commands the run's tools run, as tool-call middleware.
-    shell_guards: Sequence[AgentMiddleware] = ()
     # The checks on what the run's ``read_file`` calls return.
     file_checks: tuple[FileCheck, ...] = ()
     # Whether the graph's core tools it seldom needs belong in a runtime's code mode.
     code_mode: bool = False
-    # What is sent to the thread while it runs, which the run takes before each model call.
-    inbox: ThreadInbox | None = None
+    # How the run reads what is sent to its thread while it runs, before each model call.
+    inbox: InboxSpec | None = None
+    # What MDA's middleware does around each model call.
+    loop: LoopRules = field(default_factory=LoopRules)
+    # The most model calls the run makes; None leaves it to the runtime.
+    model_call_limit: int | None = None
+    # Whether the thread coordinates a task through workers rather than synchronous subagents.
+    delegates: bool = False
 
     async def prepare(self) -> None:
-        planned = [
-            *self.base_tools,
-            *(tool for middleware in self.middleware for tool in getattr(middleware, "tools", ())),
-        ]
         tools = {
             tool.name: tool
             for tool in (
                 item if isinstance(item, BaseTool) else as_tool(item)
-                for item in planned
+                for item in self.base_tools
                 if not isinstance(item, dict)
             )
         }
@@ -197,16 +146,6 @@ class ToolSurface:
 
     def catalog(self) -> list[ToolDescription]:
         return [describe_tool(name, tool) for name, tool in sorted(self.tools.items())]
-
-    def search(self, query: str, limit: int) -> list[ToolDescription]:
-        """The tools whose name, description and parameters best match ``query``, by BM25."""
-        names = sorted(self.tools)
-        scores = bm25(_tokens(query), [_tool_tokens(name, self.tools[name]) for name in names])
-        ranked = sorted(
-            (item for item in zip(names, scores, strict=True) if item[1] > 0),
-            key=lambda item: -item[1],
-        )
-        return [describe_tool(name, self.tools[name]) for name, _ in ranked[:limit]]
 
 
 @dataclass(frozen=True)

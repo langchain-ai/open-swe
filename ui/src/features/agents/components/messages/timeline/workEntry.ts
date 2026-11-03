@@ -7,9 +7,9 @@ import type {
 import {
   formatPathDisplayParts,
   formatToolDisplayParts,
-  toolTextArguments,
 } from "@/features/agents/components/chat/toolExecutionDisplay"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
+import { Thought } from "@/features/agents/components/messages/thought"
 
 export type WorkEntryIconName =
   | "bot"
@@ -32,10 +32,11 @@ export interface WorkEntryView {
   /** Dimmed argument shown after the heading; null when it would just repeat it. */
   preview: string | null
   previewTooltip?: string
+  destinationHref?: string
   diffStats?: { additions: number; deletions: number }
   tone: WorkEntryTone
   status: AcpToolStatus
-  /** Plain-text detail for rows that have no richer renderer of their own. */
+  /** The call's output as plain text, for rows that render nothing richer. */
   expandedText: string | null
   /**
    * Fetches the rest of the output when the row is expanded, for sources whose
@@ -102,48 +103,39 @@ function normalizeForCompare(value: string): string {
 
 /**
  * Truncated so a runaway tool output can't blow up the row; the full text stays
- * reachable through the tool's own renderer where one exists.
+ * reachable through the lazy load or the tool's own renderer.
  */
 const MAX_EXPANDED_TEXT_LENGTH = 4000
 
 function expandedTextForChunk(
   chunk: ToolExecutionChunk,
-  repoPath?: string,
-  loadedOutput?: string
+  repoPath?: string
 ): string | null {
-  const blocks: Array<string> = []
-
-  const command =
-    typeof chunk.input?.command === "string" ? chunk.input.command.trim() : ""
-  if (command) blocks.push(command)
-  const textArguments = toolTextArguments(chunk.input)
-  for (const [key, value] of textArguments) {
-    blocks.push(`${key.replace(/_/g, " ")}:\n${value}`)
+  const output = (chunk.output ?? "").trim()
+  if (!output) {
+    const locations = chunk.locations ?? []
+    return locations.length > 0
+      ? locations.map((loc) => stripRepoPath(loc.path, repoPath)).join("\n")
+      : null
   }
+  const json = formatJsonToolResult(chunk.output ?? "")
+  if (json !== null) return json
+  return output.length > MAX_EXPANDED_TEXT_LENGTH
+    ? `${output.slice(0, MAX_EXPANDED_TEXT_LENGTH)}\n…`
+    : output
+}
 
-  const rawOutput = loadedOutput ?? chunk.output ?? ""
-  const output = rawOutput.trim()
-  const jsonOutput = formatJsonToolResult(rawOutput)
-  if (output) blocks.push(jsonOutput ?? output)
-
-  const locations = chunk.locations ?? []
-  if (!output && locations.length > 0) {
-    blocks.push(
-      locations.map((loc) => stripRepoPath(loc.path, repoPath)).join("\n")
-    )
-  }
-
-  if (blocks.length === 0) return null
-  const joined = blocks.join("\n\n")
-  if (
-    loadedOutput !== undefined ||
-    textArguments.length ||
-    (jsonOutput !== null && !command)
+/** Whether a call's input/output body would show anything when expanded. */
+export function hasToolCallDetail(
+  chunk: ToolExecutionChunk,
+  hasInput: boolean
+): boolean {
+  return (
+    hasInput ||
+    Boolean(chunk.output || chunk.loadOutput) ||
+    chunk.status === "in_progress" ||
+    chunk.status === "pending"
   )
-    return joined
-  return joined.length > MAX_EXPANDED_TEXT_LENGTH
-    ? `${joined.slice(0, MAX_EXPANDED_TEXT_LENGTH)}\n…`
-    : joined
 }
 
 /** The diff a tool call ultimately produced — the last one wins when a call touched a file repeatedly. */
@@ -151,6 +143,38 @@ export function latestDiff(chunk: ToolExecutionChunk) {
   return chunk.diffs?.length
     ? chunk.diffs[chunk.diffs.length - 1]
     : chunk.diffData
+}
+
+export function routedMessageHref(
+  chunk: ToolExecutionChunk
+): string | undefined {
+  const name = (
+    chunk.toolName ?? chunk.title.trim().split(/\s+/, 1)[0]
+  )?.toLowerCase()
+  if (
+    chunk.status !== "completed" ||
+    !(
+      name === "message_task_thread" ||
+      (name === "manage_thread" && chunk.input?.action === "send_message")
+    )
+  )
+    return undefined
+  try {
+    const result: unknown = JSON.parse(chunk.output ?? "")
+    if (
+      typeof result === "object" &&
+      result !== null &&
+      "success" in result &&
+      result.success === true &&
+      "recipient_thread_id" in result &&
+      typeof result.recipient_thread_id === "string" &&
+      /^[0-9a-f-]{36}$/i.test(result.recipient_thread_id)
+    )
+      return `/agents/${result.recipient_thread_id}`
+  } catch {
+    return undefined
+  }
+  return undefined
 }
 
 export function describeWorkEntry(
@@ -191,7 +215,6 @@ export function describeWorkEntry(
     repoPath
   )
   const resolvedPreview = preview ?? firstLocationPath(chunk, repoPath)
-  const loadOutput = chunk.loadOutput
 
   return {
     icon: iconForChunk(chunk),
@@ -202,16 +225,11 @@ export function describeWorkEntry(
         ? resolvedPreview
         : null,
     previewTooltip,
+    destinationHref: routedMessageHref(chunk),
     tone: toneForChunk(chunk),
     status: chunk.status,
     expandedText: expandedTextForChunk(chunk, repoPath),
-    loadExpandedText:
-      loadOutput && toolTextArguments(chunk.input).length
-        ? async () => {
-            const output = await loadOutput()
-            return expandedTextForChunk(chunk, repoPath, output) ?? ""
-          }
-        : (loadOutput ?? null),
+    loadExpandedText: chunk.loadOutput ?? null,
   }
 }
 
@@ -256,7 +274,10 @@ export function liveActivityLabel(
     let chunk = chunks[index]
     if (!chunk) continue
 
-    if (chunk.kind === "reasoning") return "Thinking…"
+    if (chunk.kind === "reasoning") {
+      const label = new Thought(chunk.text).liveLabel
+      return label ? `${label}…` : "Thinking…"
+    }
     if (chunk.kind === "text") {
       if (chunk.text.trim()) return "Writing response…"
       continue

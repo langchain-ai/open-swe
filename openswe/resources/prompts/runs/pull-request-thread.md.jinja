@@ -1,1 +1,4 @@
-This thread is for {{ url }}. Before working on the request, check out the pull request's head branch in the sandbox with `gh pr checkout {{ url }}` so you start from its current code.
+This thread is for {{ url }}.
+Before reading or changing its code, check out the pull request's head branch from inside the repository's checkout: `cd /workspace/<repo> && gh pr checkout {{ url }}`, cloning the repository to `/workspace/<repo>` first if it is missing.
+`gh pr checkout` must run inside that checkout; `-R` does not substitute for one.
+If the request only touches the pull request on GitHub, such as its title, description, labels, or comments, skip the checkout and use `gh pr view`, `gh pr diff`, and `gh pr edit` with {{ url }}.

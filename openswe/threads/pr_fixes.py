@@ -105,7 +105,16 @@ class FixIntent(_PullRequestIntentBase):
     dispatches_run: ClassVar[bool] = True
 
     def prompt(self, url: str) -> str:
-        text = prompt("runs/pull-request-fix", url=url, scope="repair")
+        context = self.context if self.context and self.context.status_available else None
+        text = prompt(
+            "runs/pull-request-fix",
+            url=url,
+            scope="repair",
+            conflicts=context is None
+            or context.mergeable is not True
+            or context.merge_state in {"dirty", "unknown", ""},
+            failing_ci=context is None or context.ci in {"failing", "unknown", "pending"},
+        )
         if self.context is None:
             return text
         # Review state belongs to Address comments, so a fix is never handed it to chase.

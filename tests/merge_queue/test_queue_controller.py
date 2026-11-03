@@ -173,7 +173,6 @@ async def test_controller_rejects_changed_trusted_inputs(
         monkeypatch.setenv("MERGE_QUEUE_DISPATCH_SECRET", "s" * 32)
     else:
         monkeypatch.delenv("MERGE_QUEUE_DISPATCH_SECRET", raising=False)
-    monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
     repository = Repository(full_name="acme/widgets")
     queue = MergeQueue(
         workspace_id=uuid7(), repository_id=repository.id, target_branch="main", mode=mode

@@ -14,7 +14,7 @@ mod types;
 mod tests;
 
 pub use init::{coding_agent_prompt, init, show_initialized, show_non_interactive_next_steps};
-pub use types::{CompileOptions, CompileSummary, InitOptions, InitSummary};
+pub use types::{CompileOptions, CompileSummary, InitOptions};
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -23,7 +23,7 @@ use crate::cli_output::{show_sequence, SequenceItem};
 use crate::compile as compile_cmd;
 use crate::install::Installation;
 
-use artifact::{artifact_graph, build_eval_artifact, read_artifact_manifest};
+use artifact::{build_eval_artifact, read_artifact_manifest};
 use helpers::looks_like_project_root;
 use init::{ensure_project_directory, validate_project_directory_path};
 use types::GENERATED_EVAL_DIR;
@@ -81,13 +81,10 @@ pub fn compile(options: CompileOptions) -> Result<CompileSummary> {
         .and_then(|value| value.as_str())
         .context("eval artifact manifest is missing artifact_sha256")?
         .to_string();
-    let graph = artifact_graph(&artifact_dir)?;
 
     let summary = CompileSummary {
         artifact_dir,
-        graph,
         model_name,
-        model_override,
         artifact_sha256,
     };
     show_compile_summary(&project.root, &summary)?;

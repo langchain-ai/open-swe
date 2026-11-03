@@ -7,10 +7,15 @@ ending settles on — only exist against a real schema.
 
 from uuid import UUID, uuid7
 
+from openswe.transcript import attachments
+from openswe.transcript.attachments import PendingAttachment
 from openswe.transcript.engine import Command, append
 from openswe.transcript.events import (
+    MessageAttachment,
     MessageSender,
     ThreadCreated,
+    ToolCompleted,
+    ToolStarted,
     TurnCheckpointCompleted,
     TurnCompleted,
     TurnInterrupted,
@@ -116,6 +121,62 @@ async def test_two_checkpoints_are_numbered_apart(
     assert checkpoints[first_turn].checkpoint_ref != checkpoints[second_turn].checkpoint_ref
 
 
+async def test_a_tool_calls_images_reach_the_snapshot(registry_db: None) -> None:
+    thread_id, turn_id, attachment_id = str(uuid7()), uuid7(), uuid7()
+    await _create(thread_id)
+    await _request_turn(thread_id, turn_id)
+    png = b"\x89PNG\r\n\x1a\n"
+
+    await append(
+        thread_id,
+        [
+            Command(
+                command_id="tool:shot-1:started",
+                event=ToolStarted(turn_id=turn_id, tool_call_id="shot-1", name="screenshot"),
+                actor_kind="agent",
+                turn_id=turn_id,
+            ),
+            Command(
+                command_id="tool:shot-1:completed",
+                event=ToolCompleted(
+                    turn_id=turn_id,
+                    tool_call_id="shot-1",
+                    status="completed",
+                    attachments=[
+                        MessageAttachment(mime_type="image/png", attachment_id=attachment_id)
+                    ],
+                ),
+                actor_kind="agent",
+                turn_id=turn_id,
+                attachments=(
+                    PendingAttachment(
+                        attachment_id=attachment_id,
+                        message_id="shot-1",
+                        position=0,
+                        mime_type="image/png",
+                        file_name=None,
+                        data=png,
+                    ),
+                ),
+            ),
+        ],
+    )
+
+    snapshot = await load_snapshot(thread_id)
+    assert snapshot is not None
+    [call] = snapshot.tool_calls
+    assert call.attachments == [
+        {
+            "mime_type": "image/png",
+            "file_name": None,
+            "url": None,
+            "attachment_id": str(attachment_id),
+        }
+    ]
+    stored = await attachments.load(thread_id, attachment_id)
+    assert stored is not None and stored.data == png
+
+
 async def test_a_checkpoint_replayed_for_a_turn_keeps_its_ordinal(registry_db: None) -> None:
     thread_id = str(uuid7())
     first_turn, second_turn = uuid7(), uuid7()
@@ -154,6 +215,33 @@ async def test_ending_one_of_two_open_turns_keeps_the_thread_running(registry_db
     assert snapshot.thread.status == "running"
 
     await _end_turn(thread_id, second_turn, tag="completed")
+    snapshot = await load_snapshot(thread_id)
+    assert snapshot is not None
+    assert snapshot.thread.status == "idle"
+
+
+async def test_a_request_no_run_took_does_not_keep_the_thread_running(registry_db: None) -> None:
+    """A start that died after recording its turn, then a later turn that ran."""
+    thread_id = str(uuid7())
+    stranded_turn, later_turn = uuid7(), uuid7()
+    await _create(thread_id)
+    await _request_turn(thread_id, stranded_turn)
+    await _request_turn(thread_id, later_turn)
+    await append(
+        thread_id,
+        [
+            Command(
+                command_id=f"turn:{later_turn}:started",
+                event=TurnStarted(turn_id=later_turn, run_id="run-1"),
+                actor_kind="agent",
+                run_id="run-1",
+                turn_id=later_turn,
+            )
+        ],
+    )
+
+    await _end_turn(thread_id, later_turn, tag="completed")
+
     snapshot = await load_snapshot(thread_id)
     assert snapshot is not None
     assert snapshot.thread.status == "idle"

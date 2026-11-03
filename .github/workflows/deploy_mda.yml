@@ -15,6 +15,7 @@ on:
       - "mda/**"
       - "packages/runtime-api/**"
       - "vendor/managed-deepagents-sdk/**"
+      - "vendor/langchain-quickjs/**"
       - ".github/workflows/deploy_mda.yml"
   workflow_dispatch:
     inputs:
@@ -73,13 +74,13 @@ jobs:
             echo "mda/agent.py does not exist at this commit; nothing to deploy."
             echo "deploy=false" >>"$GITHUB_OUTPUT"
           elif git rev-parse -q --verify "refs/tags/${DEPLOYED_TAG}" >/dev/null \
-            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda packages/runtime-api vendor/managed-deepagents-sdk .github/workflows/deploy_mda.yml; then
+            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda packages/runtime-api vendor/managed-deepagents-sdk vendor/langchain-quickjs .github/workflows/deploy_mda.yml; then
             echo "Nothing deployed changed since ${DEPLOYED_TAG}; nothing to deploy."
             echo "deploy=false" >>"$GITHUB_OUTPUT"
           else
             echo "deploy=true" >>"$GITHUB_OUTPUT"
           fi
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         if: steps.changed.outputs.deploy == 'true'
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         if: steps.changed.outputs.deploy == 'true'
@@ -88,6 +89,8 @@ jobs:
         # From the vendored SDK, into the runtime mda/ installs.
         run: make mda-cli
       - name: Deploy
+        id: deploy
+        shell: bash
         if: steps.changed.outputs.deploy == 'true'
         env:
           ENVIRONMENT: ${{ matrix.environment }}
@@ -104,6 +107,7 @@ jobs:
           # own key and count against the workspace's gateway spend cap.
           # Each secret is named, so the runner gets only the one this deployment uses.
           LANGSMITH_GATEWAY_API_KEY: ${{ matrix.environment == 'prod' && secrets.LANGSMITH_GATEWAY_API_KEY_PROD || matrix.environment == 'staging' && secrets.LANGSMITH_GATEWAY_API_KEY_STAGING || '' }}
+          LANGSMITH_RUNS_ENDPOINTS: ${{ matrix.environment == 'prod' && secrets.LANGSMITH_RUNS_ENDPOINTS_PROD || '' }}
           # This deployment's Linear app, which deploy cannot ask for without a terminal. Deploy
           # hands it to Agent Auth and never to the deployment.
           MDA_LINEAR_CLIENT_ID: >-
@@ -120,6 +124,18 @@ jobs:
             ${{ matrix.environment == 'prod' && secrets.MDA_LINEAR_WEBHOOK_SECRET_PROD
             || matrix.environment == 'staging' && secrets.MDA_LINEAR_WEBHOOK_SECRET_STAGING
             || matrix.environment == 'preview' && secrets.MDA_LINEAR_WEBHOOK_SECRET_PREVIEW
+            || '' }}
+          # This environment's own Open SWE Slack app, which deploy registers with Trigger Server for
+          # the Slack channel; its URLs stay at the backend. Deploy never forwards these.
+          MDA_SLACK_BOT_TOKEN: >-
+            ${{ matrix.environment == 'prod' && secrets.MDA_SLACK_BOT_TOKEN_PROD
+            || matrix.environment == 'staging' && secrets.MDA_SLACK_BOT_TOKEN_STAGING
+            || matrix.environment == 'preview' && secrets.MDA_SLACK_BOT_TOKEN_PREVIEW
+            || '' }}
+          MDA_SLACK_SIGNING_SECRET: >-
+            ${{ matrix.environment == 'prod' && secrets.MDA_SLACK_SIGNING_SECRET_PROD
+            || matrix.environment == 'staging' && secrets.MDA_SLACK_SIGNING_SECRET_STAGING
+            || matrix.environment == 'preview' && secrets.MDA_SLACK_SIGNING_SECRET_PREVIEW
             || '' }}
           # This environment's own Open SWE GitHub App, which deploy brings into Agent Auth when the
           # deployment has none yet; it cannot ask for it without a terminal. A deployment that
@@ -152,9 +168,43 @@ jobs:
             echo "::error::Set the LANGSMITH_GATEWAY_API_KEY_${ENVIRONMENT^^} secret to the backend's gateway key."
             exit 1
           fi
+          if [[ -z "$MDA_SERVICE_SECRET" ]]; then
+            echo "::error::Set the MDA_SERVICE_SECRET_${ENVIRONMENT^^} secret to the backend's MDA_SERVICE_SECRET: without it the backend refuses every channel call."
+            exit 1
+          fi
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
-          # the gateway key it calls models with, and the secret it signs its calls to the backend with.
-          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" >mda/.env
+          # the gateway key it calls models with, the secret it signs its calls to the backend with,
+          # and the commit its traces name as their revision.
+          # The backend acts on the channels' threads with the same secret, as MDA's ingress secret.
+          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\nMDA_INGRESS_SECRET=%s\nLANGSMITH_REVISION_ID=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" "$MDA_SERVICE_SECRET" "$(git rev-parse HEAD)" >mda/.env
+          if [[ "$ENVIRONMENT" == prod ]]; then
+            python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          try:
+              endpoints = json.loads(os.environ["LANGSMITH_RUNS_ENDPOINTS"])
+              required = {
+                  ("https://dev.api.smith.langchain.com", "d6684905-655c-429b-bd14-ba302d94c03b"),
+                  ("https://api.smith.langchain.com", "ebbaf2eb-769b-4505-aca2-d11de10372a4"),
+              }
+              valid = isinstance(endpoints, list) and all(
+                  isinstance(entry, dict)
+                  and isinstance(entry.get("api_key"), str)
+                  and bool(entry["api_key"].strip())
+                  and (entry.get("api_url"), entry.get("workspace_id")) in required
+                  for entry in endpoints
+              )
+              if not valid or {(entry["api_url"], entry["workspace_id"]) for entry in endpoints} != required:
+                  raise ValueError
+          except (ValueError, TypeError):
+              raise SystemExit("Set LANGSMITH_RUNS_ENDPOINTS_PROD to a JSON array with dev and prod API keys and their explicit workspace IDs.") from None
+          value = json.dumps(endpoints, separators=(",", ":")).replace("\\", "\\\\").replace("'", "\\'")
+          with Path("mda/.env").open("a") as env_file:
+              env_file.write(f"LANGSMITH_RUNS_ENDPOINTS='{value}'\n")
+          PY
+          fi
           # The GitHub channel's App is Open SWE's own, whose webhook stays at the backend,
           # which forwards issue mentions to the channel.
           export MDA_GITHUB_WEBHOOK_ELSEWHERE="$backend/webhooks/github"
@@ -170,12 +220,52 @@ jobs:
             export MDA_GITHUB_WEBHOOK_SECRET="$GITHUB_APP_WEBHOOK_SECRET"
           fi
           unset GITHUB_APP_PRIVATE_KEY GITHUB_APP_WEBHOOK_SECRET
-          uv run --project mda --locked --python 3.13 mda deploy mda \
+          uv run --project mda --locked mda deploy mda \
             --name "open-swe-mda-$ENVIRONMENT" \
             --deployment-type prod \
             --workspace-id ebbaf2eb-769b-4505-aca2-d11de10372a4 \
             --context-strategy overwrite \
-            --yes
+            --yes 2>&1 | tee "$RUNNER_TEMP/mda-deploy.log"
+      - name: Summarize deployment
+        if: always()
+        env:
+          ENVIRONMENT: ${{ matrix.environment }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          DEPLOY_NEEDED: ${{ steps.changed.outputs.deploy }}
+        run: |
+          export CANDIDATE_SHA="$(git rev-parse HEAD)"
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          from urllib.parse import urlsplit
+
+          log = Path(os.environ["RUNNER_TEMP"]) / "mda-deploy.log"
+          text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", log.read_text() if log.exists() else "")
+          outcome = os.environ["DEPLOY_OUTCOME"]
+          if os.environ["DEPLOY_NEEDED"] == "false":
+              outcome = "Skipped — no runtime changes to deploy"
+          lines = [f"## Managed Deep Agents · {os.environ['ENVIRONMENT']}", "", f"- Deploy step: {outcome}"]
+          for label, host in [("Agent Server", "langgraph.app"), ("Dashboard", "smith.langchain.com")]:
+              prefix = rf"{label}\s+" if label == "Agent Server" else r"(?:Dashboard\s+)?"
+              matches = re.findall(rf"^\s*{prefix}(https://\S+)\s*$", text, re.MULTILINE)
+              for url in reversed(matches):
+                  parsed = urlsplit(url)
+                  if parsed.scheme == "https" and parsed.hostname and (parsed.hostname == host or parsed.hostname.endswith(f".{host}")) and not parsed.username and not parsed.password:
+                      lines.append(f"- [{label}]({url})")
+                      break
+          ids = re.findall(r"^Deployment ID: ([0-9a-f-]{36})\s*$", text, re.MULTILINE)
+          statuses = re.findall(r"^Deployment status: ([A-Z_]+)\s*$", text, re.MULTILINE)
+          if ids:
+              lines.append(f"- Deployment ID: `{ids[-1]}`")
+          if statuses:
+              lines.append(f"- Last reported deployment status: `{statuses[-1]}`")
+          sha = os.environ["CANDIDATE_SHA"]
+          repo_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+          lines.append(f"- Candidate commit: [{sha[:12]}]({repo_url}/commit/{sha})")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("\n".join(lines) + "\n")
+          PY
       - name: Record what the deployment runs
         if: steps.changed.outputs.deploy == 'true'
         env:

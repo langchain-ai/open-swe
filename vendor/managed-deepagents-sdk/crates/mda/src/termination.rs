@@ -4,8 +4,9 @@
 //! Ctrl-C is a request each command answers in its own time (see
 //! [`crate::interrupt`]). These are not: the main thread may be blocked on a
 //! prompt or a network read and never look at a flag again. So a watcher thread
-//! takes down every process group the CLI owns (see [`crate::child`]) and exits
-//! with the conventional `128 + signal` status. SIGKILL cannot be caught, so a
+//! takes down every process group the CLI owns (see [`crate::child`]), sends
+//! the run's telemetry as cancelled, and exits with the conventional
+//! `128 + signal` status. SIGKILL cannot be caught, so a
 //! caller that skips straight to it still leaves the children behind.
 //!
 //! Killing the children wakes the main thread too — it sees its server exit and
@@ -43,6 +44,7 @@ pub fn install() -> Result<()> {
             if let Some(signal) = signals.forever().next() {
                 TERMINATING.store(true, Ordering::SeqCst);
                 crate::child::terminate_registered();
+                crate::telemetry::deliver_at_exit(crate::command::CommandCompletion::Cancelled);
                 std::process::exit(128 + signal);
             }
         })

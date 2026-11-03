@@ -5,6 +5,7 @@ One conversation per issue, and one per agent session.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -17,16 +18,16 @@ from pydantic import ValidationError
 from typing_extensions import TypeIs
 
 from managed_deepagents._channel_icon import validate_channel_icon_path
+from managed_deepagents._channels.actor import endpoint_actor
 from managed_deepagents._channels.http import HttpChannel, channel_thread_id, http_channel
 from managed_deepagents._channels.http.endpoint import is_endpoint_handler
 from managed_deepagents._channels.http.provider import (
     EventFinished,
     EventHandlerOutcome,
     channel_name,
-    defined_fields,
+    check_event_keys,
     event_snapshot,
     finish_events,
-    handled_event_keys,
     read_deployment_secret,
     reset_deployment_secrets,
     resolve_endpoints,
@@ -39,7 +40,11 @@ from managed_deepagents._channels.http.studio import (
     studio_url,
 )
 from managed_deepagents._channels.http.types import ChannelName
-from managed_deepagents._channels.linear_connections import linear_app_connection_slug
+from managed_deepagents._channels.linear_app_setup import linear_app_setup
+from managed_deepagents._channels.linear_connections import (
+    LINEAR_TOKEN_SLUG,
+    linear_app_connection_slug,
+)
 from managed_deepagents._channels.linear_graphql import (
     LinearAppUser,
     OutgoingActivity,
@@ -66,6 +71,7 @@ from managed_deepagents._channels.linear_types import (
     LinearAppOptions,
     LinearChannelThread,
     LinearCommentCreateEvent,
+    LinearEndpointFields,
     LinearEvent,
     LinearEventCallback,
     LinearHandlers,
@@ -75,13 +81,16 @@ from managed_deepagents._channels.linear_types import (
     LinearSessionPromptedEvent,
     LinearTeam,
 )
+from managed_deepagents._channels.resolve_user import checked_resolve_user
 from managed_deepagents._channels.runtime import require_text_content
 from managed_deepagents._log import logger
+from managed_deepagents._telemetry.otel import set_log_attributes
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.http.endpoint import EventEndpoint
     from managed_deepagents._channels.http.types import (
         HttpChannelInboundMessage,
+        HttpChannelMessageResult,
         HttpChannelParseResult,
         HttpChannelPostInput,
         HttpChannelRequest,
@@ -90,7 +99,9 @@ if TYPE_CHECKING:
         HttpPostedMessage,
         JsonValue,
     )
+    from managed_deepagents._channels.resolve_user import ResolveUser
     from managed_deepagents._channels.run_input import ChannelRunResult
+    from managed_deepagents._channels.types import ChannelReply
 
 
 def linear_channel(
@@ -98,15 +109,21 @@ def linear_channel(
     on_event: LinearHandlers | None = None,
     app: LinearAppOptions | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
+    reply: ChannelReply = "auto",
     sessions: bool = True,
     ignore_bots: bool = True,
     on_finish: EventFinished[LinearEvent, LinearChannelThread] | None = None,
+    resolve_user: ResolveUser | EventEndpoint | None = None,
 ) -> HttpChannel:
     """Options for ``channels.linear(...)``: the app's scope, event handlers and sessions.
 
     Runs for the same issue share one thread, and each agent session has its
     own. A run's reply is posted as a comment on the issue, under the comment
     that started it, or in the agent session that asked.
+
+    !!! warning "Experimental"
+
+        The Linear channel may change in a minor release.
 
     Args:
         on_event: Event handlers that start runs. Return a prompt (string,
@@ -119,11 +136,17 @@ def linear_channel(
             run and starts after it, ``interrupt`` cancels the run, keeping its
             progress, and starts at once, ``rollback`` cancels it and discards
             its progress, and ``reject`` starts nothing.
+        reply: Whether the channel posts the run's final answer, as a comment
+            or the session's response: ``"auto"`` (the default) or ``"none"``,
+            to leave replying to the agent. Session acknowledgements, Stop and
+            error notices still post.
         sessions: Answer Linear agent sessions, which open when someone
             mentions the app or delegates an issue to it. Without a handler, a
             new session runs with Linear's prompt for it (``promptContext``), and
-            a reply in the session continues the conversation. Stop cancels the
-            session's run. A run that stops on interrupts answers with a link to
+            a reply in the session continues the conversation. The session
+            hears every 10 minutes that the run is still working, so Linear
+            doesn't mark it stale. Stop cancels the session's run. A run that
+            stops on interrupts answers with a link to
             its thread in LangSmith Studio, where they are resumed.
             Experimental: sessions use Linear's Agents API, a Developer
             Preview, so they may change as Linear changes it.
@@ -153,14 +176,16 @@ def linear_channel(
         "Linear",
         # By key; the channel calls each only with its own key's events.
         cast("Mapping[str, LinearEventCallback | EventEndpoint]", on_event or {}),
+        _endpoint_fields,
     )
-    if set(handlers) - SUPPORTED_EVENT_KEYS:
-        raise ValueError("unsupported Linear event key")
-    filters = _Filters(teams=_teams(app), ignore_bots=ignore_bots, sessions=sessions)
-    events = handled_event_keys(handlers) + (sorted(SESSION_EVENT_KEYS) if sessions else [])
-    provider_config: dict[str, JsonValue] = {"events": sorted(set(events))}
-    if app is not None:
-        provider_config["app"] = _app_config(app)
+    check_event_keys("Linear", handlers, SUPPORTED_EVENT_KEYS)
+    app_setup = linear_app_setup(handlers, app, sessions=sessions)
+    teams = (
+        frozenset(team.strip().lower() for team in app["teams"])
+        if app is not None and "teams" in app
+        else None
+    )
+    filters = _Filters(teams=teams, ignore_bots=ignore_bots, sessions=sessions)
 
     def name() -> str:
         return channel_name(channel)
@@ -186,11 +211,19 @@ def linear_channel(
             _notify_finished,
             on_finish,
             _event,
-            lambda thread_id: LinearChannelThread(id=thread_id, channel=ChannelName(name=name())),
+            lambda delivery: LinearChannelThread(
+                id=delivery["thread_id"], channel=ChannelName(name=name())
+            ),
         ),
-        provider_config=provider_config,
+        # mda deploy sets up the Linear app from this.
+        provider_config=cast("dict[str, JsonValue]", app_setup),
         multitask_strategy=multitask_strategy,
+        reply=reply,
     )
+    channel.paused_notice = _notify_paused
+    # Deploy provides the app's token at this name.
+    channel.agent_connections = [LINEAR_TOKEN_SLUG]
+    channel.resolve_user = checked_resolve_user("channels.linear", resolve_user)
     if app is not None and "icon" in app:
         # Served at /channels/{name}/icon; deploy points the app's icon at it.
         channel.icon = validate_channel_icon_path(app["icon"], "Linear app.icon")
@@ -204,63 +237,6 @@ class _Filters:
         self.teams = teams
         self.ignore_bots = ignore_bots
         self.sessions = sessions
-
-
-_APP_OPTION_KEYS = ("name", "description", "icon", "teams")
-_FORBIDDEN_IN_NAME = re.compile(r"linear|https?://", re.IGNORECASE)
-_APP_NAME_MIN_CHARS = 2
-_APP_NAME_MAX_CHARS = 80
-_APP_DESCRIPTION_MAX_CHARS = 1000
-
-
-def _check_app_display(app: LinearAppOptions) -> None:
-    """Check how the app looks against Linear's rules, before deploy sends it."""
-    name = app.get("name")
-    if name is not None and (
-        not _APP_NAME_MIN_CHARS <= len(name.strip()) <= _APP_NAME_MAX_CHARS
-        or _FORBIDDEN_IN_NAME.search(name)
-    ):
-        raise ValueError('Linear app.name must be 2-80 characters, without "Linear" or a URL')
-    description = app.get("description")
-    if description is not None and not (0 < len(description.strip()) <= _APP_DESCRIPTION_MAX_CHARS):
-        raise ValueError("Linear app.description must be 1-1000 characters")
-    icon = app.get("icon")
-    if icon is not None:
-        validate_channel_icon_path(icon, "Linear app.icon")
-
-
-def _app_config(app: LinearAppOptions) -> dict[str, JsonValue]:
-    """The app options deploy reads, in the manifest's spelling."""
-    name = app.get("name")
-    description = app.get("description")
-    return defined_fields(
-        {
-            "name": name.strip() if name is not None else None,
-            "description": description.strip() if description is not None else None,
-            "icon": validate_channel_icon_path(app["icon"], "Linear app.icon")
-            if "icon" in app
-            else None,
-            "teams": list(app["teams"]) if "teams" in app else None,
-        }
-    )
-
-
-def _teams(app: LinearAppOptions | None) -> frozenset[str] | None:
-    """The team keys the channel is limited to, after checking the app options."""
-    # A misspelled option would silently widen what starts runs.
-    unknown = sorted(set(app or {}) - set(_APP_OPTION_KEYS))
-    if unknown:
-        raise ValueError(
-            f"unknown Linear app option {', '.join(unknown)}; use {', '.join(_APP_OPTION_KEYS)}"
-        )
-    if app is not None:
-        _check_app_display(app)
-    if app is None or "teams" not in app:
-        return None
-    teams = frozenset(team.strip().lower() for team in app["teams"])
-    if not teams or "" in teams:
-        raise ValueError("Linear app.teams must list team keys; omit it to allow every team")
-    return teams
 
 
 async def _linear_webhook_secret() -> str | None:
@@ -297,19 +273,41 @@ async def _verify(ctx: HttpChannelRequest) -> bool:
         return False
     if not verify_hmac_sha256(secret, ctx.raw_body, signature):
         return False
-    return _is_fresh(ctx.raw_body)
+    # The signature covers only the body, so the window reads the body's
+    # `webhookTimestamp`, never the `Linear-Timestamp` header.
+    age = _delivery_age(ctx.raw_body)
+    if age is not None and abs(age) <= _WEBHOOK_TOLERANCE_SECONDS:
+        return True
+    # Linear retries a failed delivery under the same `Linear-Delivery` ID and
+    # signs each attempt anew. A signed delivery refused here is a replay, or a
+    # retry the window can't take: say which delivery, so retries that keep
+    # failing show up.
+    details: dict[str, object] = {
+        "deliveryId": logger.log_identifier(ctx.request.headers.get("linear-delivery", "")),
+    }
+    if age is not None:
+        details["ageSeconds"] = round(age)
+    logger.warning(
+        "linear delivery refused: %s %s",
+        "it has no webhookTimestamp"
+        if age is None
+        else "its webhookTimestamp is outside the replay window",
+        json.dumps(details),
+    )
+    return False
 
 
-def _is_fresh(raw_body: bytes) -> bool:
-    """Whether a signed delivery was sent within the replay window."""
+def _delivery_age(raw_body: bytes) -> float | None:
+    """How long ago a signed delivery was sent, in seconds; ``None`` when its
+    body has no timestamp to trust."""
     try:
         body = json.loads(raw_body)
     except ValueError:
-        return False
+        return None
     timestamp = body.get("webhookTimestamp") if isinstance(body, Mapping) else None
     if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
-        return False
-    return abs(time.time() - timestamp / 1000) <= _WEBHOOK_TOLERANCE_SECONDS
+        return None
+    return time.time() - timestamp / 1000
 
 
 async def _parse(
@@ -330,6 +328,7 @@ async def _parse(
     delivery_id = receipt["delivery_id"]
     record = receipt["payload"]
     key = f"{record['type']}.{record['action']}"
+    set_log_attributes({"provider_event_type": key})
     logger.info(
         "linear receipt %s",
         json.dumps(
@@ -371,8 +370,13 @@ async def _parse(
         "target": _target(event),
         "delivery_key": delivery_id,
     }
-    # An endpoint may take longer to answer than Linear waits.
-    if is_endpoint_handler(handlers.get(key)):
+    # An endpoint may take longer to answer than Linear waits. A session's
+    # person can't wait for Linear's retries, an hour apart after the first:
+    # its run starts in the background too, and a failed start says so in the
+    # session at once.
+    if is_endpoint_handler(handlers.get(key)) or isinstance(
+        event, LinearSessionCreatedEvent | LinearSessionPromptedEvent
+    ):
         message["background"] = True
     # Stop in a session cancels the session's run.
     if _is_stop(event):
@@ -388,12 +392,15 @@ async def _parse(
         }
     # What the run starts with, or how the event answers an interrupt, is
     # decided once MDA knows whether the thread waits on one.
-    return {
+    result: HttpChannelMessageResult = {
         "type": "message",
         "message": message,
         "raw_event": snapshot,
         "response": response,
     }
+    if event.actor is not None:
+        result["actor"] = event.actor
+    return result
 
 
 def _by_bot(
@@ -567,6 +574,13 @@ def _team(team: LinearTeamPayload | None) -> LinearTeam | None:
     return None if team is None else LinearTeam(id=team["id"], key=team["key"])
 
 
+def _endpoint_fields(event: LinearEvent) -> LinearEndpointFields:
+    """The fields of a Linear event its endpoints are sent beside key, delivery ID
+    and payload: the one place they're listed, as TypeScript's
+    ``LINEAR_ENDPOINT_EVENT_FIELDS``."""
+    return {"actor": endpoint_actor(event.actor)} if event.actor is not None else {}
+
+
 def _actor(actor: LinearActorPayload | None) -> LinearActor | None:
     if actor is None:
         return None
@@ -634,13 +648,17 @@ async def _handler_input(
         return outcome.input
     # A session that gets no run would wait for an answer that never comes,
     # whether it just opened or this is a follow-up in it. A handler that
-    # raised failed; one that returned nothing declined.
+    # raised failed; one that returned nothing declined, and an endpoint may
+    # say why.
     if isinstance(event, LinearSessionCreatedEvent | LinearSessionPromptedEvent):
         await _say(
             event.session_id,
             {"type": "error", "body": _ERROR_MESSAGE}
             if outcome.type == "failed"
-            else {"type": "response", "body": "I'm not set up to work on this request."},
+            else {
+                "type": "response",
+                "body": outcome.decline or "I'm not set up to work on this request.",
+            },
         )
     return None
 
@@ -719,8 +737,55 @@ async def _post_reply(post: HttpChannelPostInput) -> HttpPostedMessage:
     )
 
 
+_KEEPALIVE_SECONDS = 10 * 60.0
+"""How often a session hears from a delivery still under way. Linear marks a
+session stale after 30 minutes without an activity; an ephemeral thought
+counts, and the next activity replaces it."""
+
+
+class _KeepAlive:
+    """A session's deliveries under way, and what keeps it alive."""
+
+    def __init__(self, task: asyncio.Task[None]) -> None:
+        self.deliveries = 1
+        self.task = task
+
+
+_keepalives: dict[str, _KeepAlive] = {}
+
+
+async def _beat(session_id: str) -> None:
+    while True:
+        await asyncio.sleep(_KEEPALIVE_SECONDS)
+        await _say(session_id, {"type": "thought", "body": "Still working on it."}, ephemeral=True)
+
+
+def _keep_session_alive(session_id: str) -> None:
+    """A delivery in the session is under way: keep the session from going stale."""
+    kept = _keepalives.get(session_id)
+    # A keep-alive whose event loop closed under it is started again.
+    if kept is not None and not kept.task.done():
+        kept.deliveries += 1
+        return
+    task = asyncio.get_running_loop().create_task(_beat(session_id))
+    _keepalives[session_id] = _KeepAlive(task)
+
+
+def _release_session(session_id: str) -> None:
+    """A delivery in the session is done; the last one stops the keep-alive."""
+    kept = _keepalives.get(session_id)
+    if kept is None:
+        return
+    kept.deliveries -= 1
+    if kept.deliveries > 0:
+        return
+    kept.task.cancel()
+    del _keepalives[session_id]
+
+
 async def _acknowledge_session(target: JsonValue, delivery: HttpDelivery) -> None:
-    """Acknowledge a session at once, and link a new one to its thread in Studio.
+    """Acknowledge a session at once, keep it alive until the delivery is done,
+    and link a new one to its thread in Studio.
 
     Linear marks a session unresponsive without an activity within seconds,
     even while the run waits behind another one.
@@ -728,6 +793,7 @@ async def _acknowledge_session(target: JsonValue, delivery: HttpDelivery) -> Non
     if not _is_linear_target(target) or "sessionId" not in target:
         return
     session_id = target["sessionId"]
+    _keep_session_alive(session_id)
     await _say(session_id, {"type": "thought", "body": "Working on it."}, ephemeral=True)
     url = studio_url(delivery)
     if url is None or not isinstance(_event(delivery.get("raw_event")), LinearSessionCreatedEvent):
@@ -741,20 +807,31 @@ async def _acknowledge_session(target: JsonValue, delivery: HttpDelivery) -> Non
 async def _notify_finished(target: JsonValue, delivery: HttpFinishedDelivery) -> None:
     """What the conversation hears once a delivery is done.
 
-    Besides the run's own answer and ``_report_error``: where to make a pending
-    decision, or, after Stop, the final word Linear waits for.
+    Besides the run's own answer, its own paused notice and ``_report_error``:
+    that a message found the thread waiting on a decision, or, after Stop, the
+    final word Linear waits for.
     """
+    # A Stop is never acknowledged, so it has no keep-alive to release.
     if delivery["type"] == "skipped" and delivery["reason"] == "cancel":
         await _confirm_stopped(target)
         return
-    # A session would keep "working" on a run that never started.
-    # One Linear retries (``retry``) may still start, so it hears nothing yet.
+    if _is_linear_target(target) and "sessionId" in target:
+        _release_session(target["sessionId"])
+    # A session would keep "working" on a run that never started; its runs
+    # start in the background, so nothing retries them. An issue's or
+    # comment's delivery Linear retries (``retry``) may still start, so it
+    # hears nothing yet.
     if delivery["type"] == "failed" and delivery["reason"] == "start":
         await _report_error(RuntimeError("channel run could not be started"), target)
         return
     pending = pending_decision(delivery)
     if pending is not None:
         await _notify_interrupted(target, delivery, pending)
+
+
+async def _notify_paused(target: JsonValue, delivery: HttpDelivery) -> None:
+    """A run stopped on interrupts, as it ended."""
+    await _notify_interrupted(target, delivery, "interrupted")
 
 
 def _is_stop(event: LinearEvent | None) -> bool:

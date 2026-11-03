@@ -20,6 +20,7 @@ const e2eRoot = join(repoRoot, "tests", "e2e");
 const baseURL = `http://127.0.0.1:${process.env.E2E_PORT ?? "2024"}`;
 const e2eTmp = resolve(process.env.E2E_TMP ?? join(e2eRoot, ".e2e-tmp"));
 const fakeRemote = join(e2eTmp, "github", "fakeorg__demo.git");
+const uiArchive = join(repoRoot, "ui", ".output", "desktop", "ui.json.gz");
 const electronPath = createRequire(join(desktopRoot, "package.json"))(
   "electron",
 ) as string;
@@ -80,6 +81,7 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
       XDG_CONFIG_HOME: join(stateRoot, "xdg-config"),
       APPDATA: join(stateRoot, "app-data"),
       OPEN_SWE_BACKEND_URL: baseURL,
+      OPEN_SWE_DESKTOP_UI_ARCHIVE: uiArchive,
       // The bridge runs the agent's commands with this environment, so the
       // fake model's script pushes with this git config rather than yours.
       GIT_CONFIG_GLOBAL: gitConfig,
@@ -123,6 +125,18 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     );
 
     await page.goto("open-swe://app/agents");
+    const taskThreadId = "74000000-0000-4000-8000-000000000099";
+    const bridgeId = await page.evaluate(async (threadId) => {
+      return window.openSweDesktop!.takeOverThread({ threadId, repo: "" });
+    }, taskThreadId);
+    expect(bridgeId).toBeTruthy();
+    const tasks = await page.evaluate(() =>
+      window.openSweDesktop!.listLocalThreads(),
+    );
+    const task = tasks.find((thread) => thread.id === taskThreadId);
+    expect(task?.managedTaskFolder).toBe(true);
+    expect(task?.cwd).toContain(taskThreadId);
+    await expect(page).toHaveTitle(/Open SWE/);
 
     await expect(
       page.getByRole("button", { name: /Cloud threads, \d+/ }),
@@ -135,6 +149,12 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     await expect(
       composer.getByRole("button", { name: "This Mac", exact: true }),
     ).toBeVisible();
+    // New threads start without a project (the agent gets a task folder), so
+    // choose the registered one.
+    await composer
+      .getByRole("button", { name: "Choose project", exact: true })
+      .click();
+    await page.getByRole("option").filter({ hasText: "demo" }).click();
     await expect(
       composer.getByRole("button", { name: "demo", exact: true }),
     ).toBeVisible();
@@ -233,6 +253,7 @@ test("Desktop links supersede startup loading", async () => {
       HOME: stateRoot,
       XDG_CONFIG_HOME: stateRoot,
       APPDATA: stateRoot,
+      OPEN_SWE_DESKTOP_UI_ARCHIVE: uiArchive,
     },
   });
   try {
@@ -254,12 +275,19 @@ test("Desktop links supersede startup loading", async () => {
         "NSUserActivityTypeBrowsingWeb",
         {},
         {
-          webpageURL: "https://desktop.test/agents/reviews/a/b/1",
+          webpageURL:
+            "https://desktop.test/agents/reviews/a/b/1?tab=changes#file-1",
         },
       );
     });
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
-    await expect(page).toHaveURL("open-swe://app/agents/reviews/a/b/1");
+    await expect(page).toHaveURL(
+      "open-swe://app/agents/reviews/a/b/1?tab=changes#file-1",
+    );
+    await page.evaluate(() => window.openSweDesktop!.copyPageLink());
+    expect(
+      await electronApp.evaluate(({ clipboard }) => clipboard.readText()),
+    ).toBe("https://desktop.test/agents/reviews/a/b/1?tab=changes#file-1");
     await page.goto("data:text/html,Non-app page");
     await electronApp.evaluate(({ Menu }) => {
       Menu.getApplicationMenu()

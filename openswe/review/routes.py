@@ -18,7 +18,7 @@ from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repos import accessible_repo_full_names
-from openswe.review.approvals import fetch_approvals_md
+from openswe.review.approvals import ApprovalPolicy
 from openswe.review.assessment_feedback import (
     AssessmentFeedback,
     FeedbackSubmission,
@@ -68,6 +68,7 @@ from openswe.review.styles import (
     ReviewStyleCreate,
     ReviewStylePromptUpdate,
 )
+from openswe.review_scout.launch import RepositoryNotAllowed
 from openswe.threads.handlers import mark_review_session_viewed
 from openswe.users.records import user_id_for_login
 from openswe.walkthrough.record import Walkthrough
@@ -253,6 +254,23 @@ async def api_get_pull_request_preview(
         return await get_pull_request_preview(repository.pull_request(pr_number))
 
 
+class PullRequestDescriptionUpdate(BaseModel):
+    body: str = Field(max_length=65_536)
+
+
+@router.patch("/reviews/{owner}/{repo}/{pr_number}/description", status_code=204)
+@audit_endpoint
+async def api_update_pull_request_description(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    update: PullRequestDescriptionUpdate,
+    session: dict[str, str] = SESSION_DEP,
+) -> None:
+    async with _as_viewer(session, owner, repo) as repository:
+        await repository.pull_request(pr_number).update_description(update.body)
+
+
 @router.get("/reviews/{owner}/{repo}/{pr_number}/labels")
 async def api_get_pull_request_labels(
     owner: str,
@@ -338,7 +356,10 @@ async def api_run_review_scout(
     session: dict[str, Any] = SESSION_DEP,
 ) -> ReviewScoutTrigger:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await trigger_review_scout(owner, repo, pr_number, session["sub"])
+    try:
+        return await trigger_review_scout(owner, repo, pr_number, session["sub"])
+    except RepositoryNotAllowed as exc:
+        raise HTTPException(403, str(exc)) from exc
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/viewed", status_code=204)
@@ -620,7 +641,7 @@ async def api_get_review_style_approvals_file(
     token = await require_repo_access_for_user(session["sub"], full_name)
     owner, _, name = full_name.partition("/")
     return ApprovalsFileStatus(
-        found=await fetch_approvals_md(owner, name, None, token=token) is not None
+        found=(await ApprovalPolicy.load(owner, name, token=token)).configured
     )
 
 

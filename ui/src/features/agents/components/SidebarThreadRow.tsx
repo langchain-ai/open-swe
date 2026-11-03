@@ -29,6 +29,7 @@ import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { LockIcon } from "@phosphor-icons/react/dist/ssr/Lock"
+import { HourglassIcon } from "@phosphor-icons/react/dist/ssr/Hourglass"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
@@ -240,7 +241,7 @@ function sidebarRowClassName({
   archived: boolean
 }): string {
   return cn(
-    "flex items-center gap-space-2 rounded-lg pr-space-2 transition-colors",
+    "relative flex items-center gap-space-2 rounded-lg pr-space-2 transition-colors",
     paddingLeft,
     // Only ever on screen while "Show archived" is on; without this an
     // archived row is indistinguishable from a live one.
@@ -428,52 +429,61 @@ export function SidebarThreadRow({
 
   const rowContent = (
     <>
-      {hasSubagents && (
-        <span
-          role="button"
-          tabIndex={0}
-          aria-expanded={!subagentsCollapsed}
-          aria-label={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
-          title={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
-          onClick={onToggleSubagents}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ")
-              onToggleSubagents(event)
-          }}
-          className="flex h-5 w-4 shrink-0 items-center justify-center text-tertiary transition-colors hover:text-primary"
-        >
-          <SubagentCaret size={12} weight="bold" />
-        </span>
-      )}
-      {workers.length > 0 && (
-        <span
-          role="button"
-          tabIndex={0}
-          aria-expanded={workersExpanded}
-          aria-label={
-            workersExpanded ? "Hide task workers" : "Show task workers"
-          }
-          onClick={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            setWorkersExpanded((expanded) => !expanded)
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
+      <span
+        className={cn(
+          "absolute inset-y-0 flex -translate-x-full flex-col justify-center",
+          indent ? "left-space-5" : "left-space-2"
+        )}
+      >
+        {hasSubagents && (
+          <span
+            role="button"
+            tabIndex={0}
+            aria-expanded={!subagentsCollapsed}
+            aria-label={
+              subagentsCollapsed ? "Show subagents" : "Hide subagents"
+            }
+            title={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
+            onClick={onToggleSubagents}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ")
+                onToggleSubagents(event)
+            }}
+            className="flex max-h-5 min-h-0 w-4 flex-1 items-center justify-center text-tertiary transition-colors hover:text-primary"
+          >
+            <SubagentCaret size={12} weight="bold" />
+          </span>
+        )}
+        {workers.length > 0 && (
+          <span
+            role="button"
+            tabIndex={0}
+            aria-expanded={workersExpanded}
+            aria-label={
+              workersExpanded ? "Hide task workers" : "Show task workers"
+            }
+            onClick={(event) => {
               event.preventDefault()
               event.stopPropagation()
               setWorkersExpanded((expanded) => !expanded)
-            }
-          }}
-          className="flex h-5 w-4 shrink-0 items-center justify-center text-tertiary transition-colors hover:text-primary"
-        >
-          {workersExpanded ? (
-            <CaretDownIcon size={12} weight="bold" />
-          ) : (
-            <CaretRightIcon size={12} weight="bold" />
-          )}
-        </span>
-      )}
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault()
+                event.stopPropagation()
+                setWorkersExpanded((expanded) => !expanded)
+              }
+            }}
+            className="flex max-h-5 min-h-0 w-4 flex-1 items-center justify-center text-tertiary transition-colors hover:text-primary"
+          >
+            {workersExpanded ? (
+              <CaretDownIcon size={12} weight="bold" />
+            ) : (
+              <CaretRightIcon size={12} weight="bold" />
+            )}
+          </span>
+        )}
+      </span>
       <SidebarRowTitle marquee={marquee} title={item.title} />
 
       <span className="flex shrink-0 items-center gap-space-2 group-hover/row:hidden">
@@ -508,6 +518,13 @@ export function SidebarThreadRow({
         )}
         {item.status === "running" ? (
           <RunningIndicator label="Thread running" />
+        ) : item.waitingForDelegatedWork ? (
+          <HourglassIcon
+            size={ICON_SIZE}
+            weight="regular"
+            className="text-icon-secondary"
+            aria-label="Waiting for delegated work"
+          />
         ) : unread ? (
           <span
             className="size-2 rounded-full bg-brand"
@@ -540,14 +557,7 @@ export function SidebarThreadRow({
   const rowClassName = sidebarRowClassName({
     compact,
     active: rowIsActive,
-    paddingLeft:
-      hasSubagents || workers.length > 0
-        ? indent
-          ? "pl-space-4"
-          : "pl-space-2"
-        : indent
-          ? "pl-space-5"
-          : "pl-space-2",
+    paddingLeft: indent ? "pl-space-5" : "pl-space-2",
     archived,
   })
 
@@ -646,9 +656,11 @@ export function SidebarThreadRow({
         detail={
           !worktreeThread
             ? undefined
-            : worktreeThread.ownedWorktrees.length
-              ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
-              : "This removes its history but does not revert changes made to your repository."
+            : worktreeThread.managedTaskFolder
+              ? `This deletes the conversation. Its task files are kept at ${worktreeThread.cwd}.`
+              : worktreeThread.ownedWorktrees.length
+                ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
+                : "This removes its history but does not revert changes made to your repository."
         }
       />
     </>
@@ -925,7 +937,7 @@ function SidebarTaskWorkerRow({
                 toggleSubagentsCollapsed(`cloud:${worker.id}`)
               }
             }}
-            className="flex h-5 w-4 shrink-0 items-center justify-center text-tertiary transition-colors hover:text-primary"
+            className="absolute top-1/2 flex h-5 w-4 -translate-x-full -translate-y-1/2 items-center justify-center text-tertiary transition-colors hover:text-primary"
           >
             <SubagentCaret size={12} weight="bold" />
           </span>

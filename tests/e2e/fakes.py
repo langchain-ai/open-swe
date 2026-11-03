@@ -360,6 +360,26 @@ def file_at_ref(owner: str, repo: str, path: str, ref: str) -> str | None:
         return None
 
 
+def files_in_dir(owner: str, repo: str, path: str, ref: str) -> dict[str, str] | None:
+    """The text of each file directly in ``path`` at ``ref``, or ``None`` when it is absent."""
+    remote = _REMOTES.get((owner, repo))
+    if remote is None:
+        return None
+    revision = resolve_ref(owner, repo, BASE_BRANCH if ref == "HEAD" else ref)
+    try:
+        listing = _git("--git-dir", str(remote), "ls-tree", f"{revision}:{path}")
+    except subprocess.CalledProcessError:
+        return None
+    files: dict[str, str] = {}
+    for line in listing.splitlines():
+        meta, _, name = line.partition("\t")
+        if meta.split()[1] == "blob":
+            files[f"{path}/{name}"] = _git(
+                "--git-dir", str(remote), "show", f"{revision}:{path}/{name}"
+            )
+    return files
+
+
 def merge_base(owner: str, repo: str, base: str, head: str) -> str | None:
     remote = _REMOTES.get((owner, repo))
     if remote is None:
@@ -666,9 +686,12 @@ def repo_private() -> bool:
 
 # --- LangSmith snapshots ---------------------------------------------------
 # Captures the workspace tools asked for: {"snapshot_id", "name", "sandbox_id"}.
-# The E2E sandbox is the local provider, so there is no real snapshot service —
+# The E2E's sandboxes are stand-ins (sandbox_service.py), so there is no real snapshot service —
 # this store stands in for it and is what the specs assert on.
 SNAPSHOTS: list[dict[str, Any]] = []
+# Each time the backend planned a run: the thread, and the call it planned it for
+# (``start`` when it started the run).
+PLANS: list[dict[str, str]] = []
 DELETED_SNAPSHOTS: list[str] = []
 _snapshot_seq = [0]
 
@@ -1018,6 +1041,7 @@ def reset() -> None:
     REPO_MERGE_METHODS.clear()
     SNAPSHOTS.clear()
     DELETED_SNAPSHOTS.clear()
+    PLANS.clear()
     COLLABORATOR_PERMISSIONS.clear()
     REPO_PRIVATE[0] = False
     _pr_seq[0] = 0

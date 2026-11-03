@@ -94,7 +94,13 @@ class LangSmithBrowser:
             await _browser_request(
                 "POST",
                 "/browsers",
-                json={"name": self.name, "idle_ttl_seconds": _BROWSER_IDLE_TTL_SECONDS},
+                json={
+                    "name": self.name,
+                    "idle_ttl_seconds": _BROWSER_IDLE_TTL_SECONDS,
+                    # As mda/rt/browser.py has MDA create it, so the panel's
+                    # zoomed-in view is sharp. LangSmith fixes it at creation.
+                    "hidpi": True,
+                },
                 timeout=_BROWSER_START_TIMEOUT_SECONDS,
             )
         except httpx2.HTTPStatusError as exc:

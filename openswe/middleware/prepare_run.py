@@ -10,7 +10,6 @@ from langchain.agents.middleware.types import (
 )
 from langgraph.runtime import Runtime
 
-from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.utils.startup_trace import aphase, flush_phases
 from openswe.utils.thread_reads import shared_thread_reads
@@ -27,6 +26,12 @@ class PrepareRunState(AgentState):
     run_prepared_for: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
     work_dir: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
     rendered_system_prompt: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
+    # The workspace's part, just ahead of the thread's.
+    rendered_workspace_prompt: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
+    # How the rendered prompt ends: the part only this thread's says.
+    rendered_thread_prompt: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
+    # Set once the prompt is the thread's for good; a thread from before that renders it once more.
+    system_prompt_fixed: NotRequired[Annotated[bool, OmitFromOutput, _take_latest]]
     requested_model: NotRequired[Annotated[str | None, OmitFromOutput]]
     requested_effort: NotRequired[Annotated[str | None, OmitFromOutput]]
     selected_model_id: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
@@ -55,7 +60,7 @@ class BasePrepareRunMiddleware(OpenSWEMiddleware):
     Subclasses must keep `_prepare` idempotent. LangGraph checkpoints the
     `run_prepared_for` latch after this before-agent node, so resumed attempts
     of the same invocation skip completed setup while later invocations on the
-    same thread re-prepare fresh tokens, prompts, and diff context. If a run
+    same thread re-prepare fresh tokens and diff context. If a run
     fails before that checkpoint, setup may execute again and every operation it
     calls must tolerate that.
     """
@@ -124,9 +129,3 @@ class BasePrepareRunMiddleware(OpenSWEMiddleware):
 
     async def _rejoin(self, state: PrepareRunState, runtime: Runtime) -> None:
         del state, runtime
-
-    async def ashape_model_call(
-        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
-    ) -> CallShape:
-        rendered = state.get("rendered_system_prompt")
-        return call.prepending(rendered) if isinstance(rendered, str) else call

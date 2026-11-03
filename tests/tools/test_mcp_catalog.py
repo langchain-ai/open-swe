@@ -6,7 +6,7 @@ import pytest
 from cryptography.fernet import Fernet
 from mcp.types import Tool
 
-from openswe.mcp import MCPConnectionUpdate, runtime
+from openswe.mcp import MCPConnection, MCPConnectionUpdate, runtime
 from openswe.mcp import workspace as settings
 from openswe.tool_loaders import workspace_mcp as loader
 
@@ -64,6 +64,39 @@ async def test_stale_catalog_is_served_then_refreshed(registry_db, monkeypatch):
     await asyncio.gather(*(state.task for state in cache._SWR_STATES.values() if state.task))
     monkeypatch.setattr(cache, "_now_ms", now)
     assert sorted(await names()) == ["fetch", "search"]
+
+
+async def test_discovery_caps_active_requests(monkeypatch):
+    active = peak = 0
+
+    async def discover(record, namespace):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0)
+            return [SEARCH]
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(runtime, "_discover_tools", discover)
+    record = MCPConnection.model_construct(name="example", url="https://example.com/mcp")
+    results = await asyncio.wait_for(
+        asyncio.gather(*(runtime.discover_tools(record, ("ns",)) for _ in range(24))), 2
+    )
+    assert results == [[SEARCH]] * 24
+    assert peak == 8
+
+
+async def test_discovery_deadline_includes_waiting_for_capacity(monkeypatch):
+    monkeypatch.setattr(runtime, "_DISCOVERY_CONCURRENCY", 1)
+    monkeypatch.setattr(runtime, "_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(runtime, "_discover_tools", AsyncMock(return_value=[SEARCH]))
+    record = MCPConnection.model_construct(name="example", url="https://example.com/mcp")
+    async with runtime._discovery_slots():
+        with pytest.raises(ValueError, match="discovery timed out"):
+            await asyncio.wait_for(runtime.discover_tools(record, ("ns",)), 1)
+    assert await runtime.discover_tools(record, ("ns",)) == [SEARCH]
 
 
 @pytest.mark.parametrize(

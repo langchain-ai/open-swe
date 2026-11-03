@@ -5,7 +5,7 @@
 //! hook.
 //! Not every connector needs one: connectors with deploy-time environment,
 //! permission, provider-configuration, or credential requirements implement
-//! the hook. The CLI discovers `connectors/*`, and emits
+//! the hook. The CLI discovers `tools/mcp.{ts,py}`, and emits
 //! deploy manifests by loading the live `_mda_connectors` aggregator and
 //! calling `requirementsFromConnectors` / `requirements_from_connectors` —
 //! not by matching first-party factory names.
@@ -13,15 +13,15 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::discovery::entry_stem_name;
-#[cfg(test)]
-use super::exports::find_exported_connector_entries;
+use crate::child;
+use crate::error::child_failed;
 use crate::langsmith::ConnectionOwnerPolicy;
 use crate::project::{Language, Project};
 use crate::toolchain;
@@ -97,8 +97,6 @@ for connector in connectors:
     connector_name = getattr(connector, "name", "")
     config = getattr(connector, "config", None)
     servers = config.get("servers") if isinstance(config, dict) else None
-    if not isinstance(servers, dict) and isinstance(config, dict):
-        servers = config.get("mcp_servers")
     if not isinstance(servers, dict):
         continue
     for server_name, server in servers.items():
@@ -127,7 +125,7 @@ Path(__file__).resolve().parent.joinpath("mcp-connections.json").write_text(
 )
 "#;
 
-/// One connection declaration extracted from a live `connectors.mcp(...)` module.
+/// One connection declaration extracted from a live `defineMcp(...)` / `define_mcp(...)` module.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct McpConnectionEntry {
     pub connector_name: String,
@@ -156,45 +154,80 @@ pub(crate) fn required_env_from_connector_requirements(
     out
 }
 
-/// Agent connection names a channel reserves for what its setup provides,
-/// such as `mda/github-token`, the GitHub App's installation token. They are
-/// not workspace connections, so deploy neither checks for them nor creates
-/// them.
-/// Each with what the token is and what the agent acts as with it.
-const CHANNEL_RESERVED_AGENT_CONNECTIONS: [(&str, &str, &str); 2] = [
-    (
-        "mda/github-token",
-        "the GitHub App's installation token",
-        "act on GitHub as the App",
-    ),
-    (
-        "mda/linear-token",
-        "the Linear app's token",
-        "act in Linear as the app",
-    ),
-];
+/// Connection names under `mda/` belong to MDA: a channel's setup provides
+/// them, such as `mda/github-token`, the GitHub App's installation token. They
+/// are not workspace connections, so deploy neither checks for them nor
+/// creates them, and a new channel needs no change here.
+const RESERVED_CONNECTION_PREFIX: &str = "mda/";
 
-/// Whether `slug` is a channel's reserved agent connection.
 fn is_channel_reserved_agent_connection(slug: &str) -> bool {
-    CHANNEL_RESERVED_AGENT_CONNECTIONS
-        .iter()
-        .any(|(reserved, _, _)| *reserved == slug)
+    slug.starts_with(RESERVED_CONNECTION_PREFIX)
 }
 
-/// Why a project cannot declare `slug` as a user connection, for a channel's
-/// reserved agent connection: reading an app's token as the person running
-/// the agent is not supported yet.
-pub(crate) fn reserved_user_connection_error(slug: &str) -> Option<String> {
-    CHANNEL_RESERVED_AGENT_CONNECTIONS
-        .iter()
-        .find(|(reserved, _, _)| *reserved == slug)
-        .map(|(_, token, acts_as)| {
-            format!(
-                "'{slug}' is not supported as a user connection yet: it is {token}, an \
-                 agent connection. Use connections.get(\"{slug}\", {{ type: \"agent\" }}) \
-                 to {acts_as}."
-            )
-        })
+/// The `mda/` agent connections the project's channels say their setup
+/// provides, such as `mda/github-token`, each with the name of the channel
+/// that provides it.
+pub(crate) fn channel_provided_connections(
+    channels: &ChannelRequirements,
+) -> BTreeMap<String, String> {
+    let mut provided = BTreeMap::new();
+    for (channel, manifest) in channels {
+        for slug in declared_slugs(manifest, "agentConnections") {
+            if is_channel_reserved_agent_connection(slug) {
+                provided.insert(slug.to_string(), channel.clone());
+            }
+        }
+    }
+    provided
+}
+
+/// The `mda/` agent connections the project's connectors read that none of
+/// its channels provides, so reading them fails at runtime.
+pub(crate) fn unprovided_reserved_connections(
+    connectors: &ConnectorRequirements,
+    channels: &ChannelRequirements,
+) -> Vec<String> {
+    let provided = channel_provided_connections(channels);
+    let slugs: BTreeSet<&str> = connectors
+        .values()
+        .flat_map(|manifest| declared_slugs(manifest, "agentConnections"))
+        .filter(|slug| is_channel_reserved_agent_connection(slug) && !provided.contains_key(*slug))
+        .collect();
+    slugs.into_iter().map(str::to_string).collect()
+}
+
+fn declared_slugs<'a>(manifest: &'a Value, field: &str) -> impl Iterator<Item = &'a str> {
+    manifest
+        .get(field)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+}
+
+/// Why a project cannot declare `slug` as a user connection: names under
+/// `mda/` are agent connections a channel's setup provides, and reading an
+/// app's token as the person running the agent is not supported yet.
+/// `provided` is what [`channel_provided_connections`] returns.
+pub(crate) fn reserved_user_connection_error(
+    slug: &str,
+    provided: &BTreeMap<String, String>,
+) -> Option<String> {
+    if !is_channel_reserved_agent_connection(slug) {
+        return None;
+    }
+    Some(match provided.get(slug) {
+        Some(channel) => format!(
+            "'{slug}' is not supported as a user connection yet: the {channel} channel's app \
+             provides it as an agent connection. Use connections.get(\"{slug}\", {{ type: \
+             \"agent\" }}) to act as the app."
+        ),
+        None => format!(
+            "'{slug}' cannot be a user connection: names under mda/ are reserved for the \
+             agent connections channels provide. Use connections.get(\"{slug}\", {{ type: \
+             \"agent\" }}) for a channel's token, or rename the connection."
+        ),
+    })
 }
 
 /// Collect unique user-owned connection slugs from compiled connector requirements.
@@ -266,28 +299,6 @@ pub(crate) fn connection_owner_policy_for_slug(
     }
 }
 
-/// File-stem connector names discovered under `connectors/` (modules that
-/// export a named `connector`; helpers and co-located tests are omitted).
-///
-/// Enforces stem uniqueness with a clear compile-time error, rather than
-/// deferring to the runtime `collectConnectors` duplicate check — e.g. two
-/// `slack.ts`-equivalents (`connectors/slack.ts` and `connectors/slack.mts`)
-/// would otherwise both resolve to the same instance name.
-#[cfg(test)]
-pub(crate) fn discover_connector_names(project: &Project) -> Result<Vec<String>> {
-    let mut names = Vec::new();
-    let mut seen = HashSet::new();
-    for rel in find_exported_connector_entries(project)? {
-        let name = entry_stem_name(&rel, "connector")?;
-        if !seen.insert(name.clone()) {
-            bail!("duplicate connector name '{name}' from connectors/");
-        }
-        names.push(name);
-    }
-    names.sort();
-    Ok(names)
-}
-
 /// Load requirements previously written by [`emit_connector_requirements_for_entries`].
 pub(crate) fn load_connector_requirements(out_dir: &Path) -> Result<ConnectorRequirements> {
     load_requirements(out_dir, CONNECTOR_REQUIREMENTS_FILE)
@@ -355,9 +366,8 @@ pub(crate) fn emit_channel_requirements_for_entries(
 /// `requirements_from_connectors`, and write [`CONNECTOR_REQUIREMENTS_FILE`].
 ///
 /// Requires a successful compile that vendored `managed-deepagents` and copied
-/// the project's `connectors/` modules into `out_dir`. Reuses connector paths
-/// already discovered during compile (avoids a second AST walk of
-/// `connectors/`). Unlike the former channel manifests (where every channel
+/// the project's connector modules into `out_dir`. Reuses connector paths
+/// already discovered during compile (avoids a second AST walk). Unlike the former channel manifests (where every channel
 /// always had one), not every discovered connector declares requirements, so
 /// this never bails on a discovered name missing from the result.
 pub(crate) fn emit_connector_requirements_for_entries(
@@ -370,7 +380,7 @@ pub(crate) fn emit_connector_requirements_for_entries(
     for rel in entries {
         let name = entry_stem_name(rel, "connector")?;
         if !seen.insert(name.clone()) {
-            bail!("duplicate connector name '{name}' from connectors/");
+            bail!("duplicate connector name '{name}'");
         }
         names.push(name);
     }
@@ -378,7 +388,7 @@ pub(crate) fn emit_connector_requirements_for_entries(
     emit_connector_requirements_named(project, out_dir, &names)
 }
 
-/// Import `_mda_connectors`, read each `connectors.mcp(...)` declaration's
+/// Import `_mda_connectors`, read each `defineMcp(...)` declaration's
 /// named servers, and write [`MCP_CONNECTIONS_FILE`].
 pub(crate) fn emit_mcp_connection_entries_for_entries(
     project: &Project,
@@ -390,7 +400,7 @@ pub(crate) fn emit_mcp_connection_entries_for_entries(
     for rel in entries {
         let name = entry_stem_name(rel, "connector")?;
         if !seen.insert(name.clone()) {
-            bail!("duplicate connector name '{name}' from connectors/");
+            bail!("duplicate connector name '{name}'");
         }
         names.push(name);
     }
@@ -461,14 +471,17 @@ writeFileSync(
     fs::write(&script_path, script)
         .with_context(|| format!("failed to write {}", script_path.display()))?;
 
-    let status = run_tsx(out_dir, script_name)?;
-    if !status.success() {
-        bail!(
-            "failed to emit connector requirements via Node/tsx (exit {}). \
-             Ensure `connectors/*` exports branded Connector objects and that \
-             project dependencies are installed.",
-            status.code().unwrap_or(-1)
-        );
+    let output = run_tsx(out_dir, script_name)?;
+    if !output.status.success() {
+        return Err(child_failed(
+            &output,
+            format!(
+                "failed to emit connector requirements via Node/tsx (exit {}). \
+                 Ensure `tools/mcp` exports a valid `mcp` declaration and that \
+                 project dependencies are installed.",
+                output.status.code().unwrap_or(-1)
+            ),
+        ));
     }
     Ok(())
 }
@@ -482,14 +495,17 @@ fn emit_typescript_mcp_connection_entries(out_dir: &Path) -> Result<()> {
     fs::write(&script_path, TYPESCRIPT_MCP_CONNECTIONS_SCRIPT)
         .with_context(|| format!("failed to write {}", script_path.display()))?;
 
-    let status = run_tsx(out_dir, script_name)?;
-    if !status.success() {
-        bail!(
-            "failed to emit MCP connection entries via Node/tsx (exit {}). \
-             Ensure `connectors/*` exports branded Connector objects and that \
-             project dependencies are installed.",
-            status.code().unwrap_or(-1)
-        );
+    let output = run_tsx(out_dir, script_name)?;
+    if !output.status.success() {
+        return Err(child_failed(
+            &output,
+            format!(
+                "failed to emit MCP connection entries via Node/tsx (exit {}). \
+                 Ensure `tools/mcp` exports a valid `mcp` declaration and that \
+                 project dependencies are installed.",
+                output.status.code().unwrap_or(-1)
+            ),
+        ));
     }
     Ok(())
 }
@@ -512,14 +528,17 @@ writeFileSync(
 "#;
     fs::write(&script_path, script)
         .with_context(|| format!("failed to write {}", script_path.display()))?;
-    let status = run_tsx(out_dir, script_name)?;
-    if !status.success() {
-        bail!(
-            "failed to emit channel requirements via Node/tsx (exit {}). \
-             Ensure `channels/*` exports branded Channel objects and that \
-             project dependencies are installed.",
-            status.code().unwrap_or(-1)
-        );
+    let output = run_tsx(out_dir, script_name)?;
+    if !output.status.success() {
+        return Err(child_failed(
+            &output,
+            format!(
+                "failed to emit channel requirements via Node/tsx (exit {}). \
+                 Ensure `channels/*` exports branded Channel objects and that \
+                 project dependencies are installed.",
+                output.status.code().unwrap_or(-1)
+            ),
+        ));
     }
     Ok(())
 }
@@ -560,14 +579,13 @@ fn install_typescript_build_deps(out_dir: &Path) -> Result<()> {
         toolchain::npm_program(),
         NPM_INSTALL_ARGS.join(" ")
     );
-    let output = toolchain::npm()
-        .args(NPM_INSTALL_ARGS)
-        .current_dir(out_dir)
-        .output()
+    let output = child::output(toolchain::npm().args(NPM_INSTALL_ARGS).current_dir(out_dir))
         .with_context(|| format!("failed to run {command} for connector requirements emit"))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("{command} failed (needed to resolve connector imports):\n{stderr}");
+        return Err(child_failed(
+            &output,
+            format!("{command} failed (needed to resolve connector imports)"),
+        ));
     }
     // Fingerprint after the install: npm may normalize the lockfile it read.
     write_stamp(&stamp, &typescript_emit_fingerprint(out_dir)?)
@@ -728,7 +746,7 @@ fn symlink_relative_runtime(link: &Path) -> Result<()> {
     }
 }
 
-fn run_tsx(out_dir: &Path, script_name: &str) -> Result<std::process::ExitStatus> {
+fn run_tsx(out_dir: &Path, script_name: &str) -> Result<Output> {
     // Run tsx via `node` with a path relative to `out_dir`. npm `.bin/tsx` is
     // often a symlink to `cli.mjs`; execing that shim while `current_dir` is
     // `out_dir` breaks when the shim path is absolute or repo-relative
@@ -737,18 +755,19 @@ fn run_tsx(out_dir: &Path, script_name: &str) -> Result<std::process::ExitStatus
     if tsx_cli.is_file() {
         let tsx_cli = fs::canonicalize(&tsx_cli)
             .with_context(|| format!("failed to resolve {}", tsx_cli.display()))?;
-        return toolchain::node()
-            .arg(&tsx_cli)
-            .arg(script_name)
-            .current_dir(out_dir)
-            .status()
-            .with_context(|| {
-                format!(
-                    "failed to run {} via {}",
-                    tsx_cli.display(),
-                    toolchain::node_program()
-                )
-            });
+        return child::output(
+            toolchain::node()
+                .arg(&tsx_cli)
+                .arg(script_name)
+                .current_dir(out_dir),
+        )
+        .with_context(|| {
+            format!(
+                "failed to run {} via {}",
+                tsx_cli.display(),
+                toolchain::node_program()
+            )
+        });
     }
     let bin_dir = out_dir.join("node_modules").join(".bin");
     if let Some(local_tsx) = toolchain::npm_bin(&bin_dir, "tsx") {
@@ -758,23 +777,25 @@ fn run_tsx(out_dir: &Path, script_name: &str) -> Result<std::process::ExitStatus
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "tsx".to_string());
         let tsx_shim = Path::new("node_modules").join(".bin").join(shim_name);
-        return Command::new(&tsx_shim)
-            .arg(script_name)
-            .current_dir(out_dir)
-            .status()
-            .with_context(|| format!("failed to run {}", tsx_shim.display()));
+        return child::output(
+            Command::new(&tsx_shim)
+                .arg(script_name)
+                .current_dir(out_dir),
+        )
+        .with_context(|| format!("failed to run {}", tsx_shim.display()));
     }
-    let npx = toolchain::npx()
-        .args(["--yes", "tsx", script_name])
-        .current_dir(out_dir)
-        .status()
-        .with_context(|| {
-            format!(
-                "failed to run {} tsx for connector requirements emit",
-                toolchain::npx_program()
-            )
-        })?;
-    Ok(npx)
+    let output = child::output(
+        toolchain::npx()
+            .args(["--yes", "tsx", script_name])
+            .current_dir(out_dir),
+    )
+    .with_context(|| {
+        format!(
+            "failed to run {} tsx for connector requirements emit",
+            toolchain::npx_program()
+        )
+    })?;
+    Ok(output)
 }
 
 fn emit_python_connector_requirements(project: &Project, out_dir: &Path) -> Result<()> {
@@ -805,28 +826,32 @@ Path(__file__).resolve().parent.joinpath("connector-manifests.json").write_text(
     fs::write(&script_path, script)
         .with_context(|| format!("failed to write {}", script_path.display()))?;
 
-    let status = Command::new(&python)
-        .arg(script_name)
-        .current_dir(out_dir)
-        .env(
-            "PYTHONPATH",
-            pythonpath_with(out_dir, std::env::var_os("PYTHONPATH")),
+    let output = child::output(
+        Command::new(&python)
+            .arg(script_name)
+            .current_dir(out_dir)
+            .env(
+                "PYTHONPATH",
+                pythonpath_with(out_dir, std::env::var_os("PYTHONPATH")),
+            ),
+    )
+    .with_context(|| {
+        format!(
+            "failed to run {} for connector requirements emit",
+            python.display()
         )
-        .status()
-        .with_context(|| {
+    })?;
+    if !output.status.success() {
+        return Err(child_failed(
+            &output,
             format!(
-                "failed to run {} for connector requirements emit",
-                python.display()
-            )
-        })?;
-    if !status.success() {
-        bail!(
-            "failed to emit connector requirements via {} (exit {}). \
-             Install project deps (`uv sync`) and ensure `connectors/*` exports branded \
-             Connector objects.",
-            python.display(),
-            status.code().unwrap_or(-1)
-        );
+                "failed to emit connector requirements via {} (exit {}). \
+                 Install project deps (`uv sync`) and ensure `tools/mcp.py` exports a valid \
+                 `mcp` declaration.",
+                python.display(),
+                output.status.code().unwrap_or(-1)
+            ),
+        ));
     }
     Ok(())
 }
@@ -840,28 +865,32 @@ fn emit_python_mcp_connection_entries(project: &Project, out_dir: &Path) -> Resu
     fs::write(&script_path, PYTHON_MCP_CONNECTIONS_SCRIPT)
         .with_context(|| format!("failed to write {}", script_path.display()))?;
 
-    let status = Command::new(&python)
-        .arg(script_name)
-        .current_dir(out_dir)
-        .env(
-            "PYTHONPATH",
-            pythonpath_with(out_dir, std::env::var_os("PYTHONPATH")),
+    let output = child::output(
+        Command::new(&python)
+            .arg(script_name)
+            .current_dir(out_dir)
+            .env(
+                "PYTHONPATH",
+                pythonpath_with(out_dir, std::env::var_os("PYTHONPATH")),
+            ),
+    )
+    .with_context(|| {
+        format!(
+            "failed to run {} for MCP connection entry emit",
+            python.display()
         )
-        .status()
-        .with_context(|| {
+    })?;
+    if !output.status.success() {
+        return Err(child_failed(
+            &output,
             format!(
-                "failed to run {} for MCP connection entry emit",
-                python.display()
-            )
-        })?;
-    if !status.success() {
-        bail!(
-            "failed to emit MCP connection entries via {} (exit {}). \
-             Ensure `connectors/*` exports branded Connector objects and that \
-             project dependencies are installed.",
-            python.display(),
-            status.code().unwrap_or(-1)
-        );
+                "failed to emit MCP connection entries via {} (exit {}). \
+                 Ensure `tools/mcp` exports a valid `mcp` declaration and that \
+                 project dependencies are installed.",
+                python.display(),
+                output.status.code().unwrap_or(-1)
+            ),
+        ));
     }
     Ok(())
 }
@@ -888,27 +917,31 @@ Path(__file__).resolve().parent.joinpath("channel-manifests.json").write_text(
 "#;
     fs::write(&script_path, script)
         .with_context(|| format!("failed to write {}", script_path.display()))?;
-    let status = Command::new(&python)
-        .arg(script_name)
-        .current_dir(out_dir)
-        .env(
-            "PYTHONPATH",
-            pythonpath_with(out_dir, std::env::var_os("PYTHONPATH")),
+    let output = child::output(
+        Command::new(&python)
+            .arg(script_name)
+            .current_dir(out_dir)
+            .env(
+                "PYTHONPATH",
+                pythonpath_with(out_dir, std::env::var_os("PYTHONPATH")),
+            ),
+    )
+    .with_context(|| {
+        format!(
+            "failed to run {} for channel requirements emit",
+            python.display()
         )
-        .status()
-        .with_context(|| {
+    })?;
+    if !output.status.success() {
+        return Err(child_failed(
+            &output,
             format!(
-                "failed to run {} for channel requirements emit",
-                python.display()
-            )
-        })?;
-    if !status.success() {
-        bail!(
-            "failed to emit channel requirements via {} (exit {}). \
-             Install project deps (`uv sync`) and ensure `channels/*` exports branded Channel objects.",
-            python.display(),
-            status.code().unwrap_or(-1)
-        );
+                "failed to emit channel requirements via {} (exit {}). \
+                 Install project deps (`uv sync`) and ensure `channels/*` exports branded Channel objects.",
+                python.display(),
+                output.status.code().unwrap_or(-1)
+            ),
+        ));
     }
     Ok(())
 }
@@ -953,17 +986,19 @@ fn install_python_emit_deps(out_dir: &Path, python: &Path) -> Result<()> {
         toolchain::uv_available(),
     );
     let installer = python_emit_installer_label(use_uv, python);
-    let output = python_emit_install_command(&site, use_uv, python)
-        .current_dir(out_dir)
-        .output()
-        .with_context(|| format!("failed to run {installer} for connector requirements emit"))?;
+    let output =
+        child::output(python_emit_install_command(&site, use_uv, python).current_dir(out_dir))
+            .with_context(|| {
+                format!("failed to run {installer} for connector requirements emit")
+            })?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!(
-            "{installer} --target {} ./__runtime__ failed \
-             (needed to resolve connector imports):\n{stderr}",
-            PYTHON_EMIT_SITE_DIR
-        );
+        return Err(child_failed(
+            &output,
+            format!(
+                "{installer} --target {PYTHON_EMIT_SITE_DIR} ./__runtime__ failed \
+                 (needed to resolve connector imports)"
+            ),
+        ));
     }
     write_stamp(&stamp, &fingerprint)
 }
@@ -1156,48 +1191,6 @@ connectors = [
         assert_eq!(
             run_python_mcp_connection_script("servers"),
             expected_mcp_connection_entry()
-        );
-    }
-
-    #[test]
-    fn python_mcp_connection_emit_reads_legacy_mcp_servers() {
-        assert_eq!(
-            run_python_mcp_connection_script("mcp_servers"),
-            expected_mcp_connection_entry()
-        );
-    }
-
-    #[test]
-    fn discovers_connector_names_without_helper_allowlist() {
-        let (_root, project) = write_project(
-            Language::TypeScript,
-            &[
-                ("agent.ts", "export const agent = {};\n"),
-                (
-                    "connectors/stripe.ts",
-                    "import { defineStripeConnector } from \"@acme/mda-stripe\";\n\
-                     export const connector = defineStripeConnector({});\n",
-                ),
-            ],
-        );
-        let names = discover_connector_names(&project).unwrap();
-        assert_eq!(names, vec!["stripe".to_string()]);
-    }
-
-    #[test]
-    fn rejects_duplicate_connector_stems() {
-        let (_root, project) = write_project(
-            Language::TypeScript,
-            &[
-                ("agent.ts", "export const agent = {};\n"),
-                ("connectors/slack.ts", "export const connector = {};\n"),
-                ("connectors/slack.mts", "export const connector = {};\n"),
-            ],
-        );
-        let err = discover_connector_names(&project).unwrap_err();
-        assert!(
-            err.to_string().contains("duplicate connector name 'slack'"),
-            "unexpected error: {err}"
         );
     }
 
@@ -1605,7 +1598,7 @@ build-backend = \"setuptools.build_meta\"
             "mcp".to_string(),
             serde_json::json!({
                 "userConnections": ["notion"],
-                "agentConnections": ["mda/github-token", "docs-token"],
+                "agentConnections": ["mda/github-token", "mda/slack-bot-token", "docs-token"],
             }),
         )]);
 
@@ -1627,15 +1620,52 @@ build-backend = \"setuptools.build_meta\"
             user_connections_from_connector_requirements(&requirements),
             vec!["mda/github-token".to_string()]
         );
-        let error = reserved_user_connection_error("mda/github-token").unwrap();
+        let channels = BTreeMap::from([(
+            "github".to_string(),
+            serde_json::json!({ "provider": "github", "agentConnections": ["mda/github-token"] }),
+        )]);
+        let provided = channel_provided_connections(&channels);
+        assert_eq!(
+            provided,
+            BTreeMap::from([("mda/github-token".to_string(), "github".to_string())])
+        );
+        let error = reserved_user_connection_error("mda/github-token", &provided).unwrap();
         assert!(
             error.contains("not supported as a user connection yet"),
             "{error}"
         );
+        assert!(error.contains("the github channel's app"), "{error}");
         assert!(error.contains("{ type: \"agent\" }"), "{error}");
-        let linear = reserved_user_connection_error("mda/linear-token").unwrap();
-        assert!(linear.contains("the Linear app's token"), "{linear}");
-        assert!(reserved_user_connection_error("notion").is_none());
+        // The whole namespace is reserved, provided by a channel or not.
+        let error = reserved_user_connection_error("mda/acme-token", &provided).unwrap();
+        assert!(error.contains("names under mda/ are reserved"), "{error}");
+        assert!(reserved_user_connection_error("notion", &provided).is_none());
+    }
+
+    #[test]
+    fn reserved_agent_connections_no_channel_provides_are_listed() {
+        let connectors = BTreeMap::from([(
+            "mcp".to_string(),
+            serde_json::json!({
+                "agentConnections": ["mda/github-token", "mda/linear-token", "docs-token"]
+            }),
+        )]);
+        let channels = BTreeMap::from([(
+            "linear".to_string(),
+            serde_json::json!({ "provider": "linear", "agentConnections": ["mda/linear-token"] }),
+        )]);
+
+        assert_eq!(
+            unprovided_reserved_connections(&connectors, &channels),
+            vec!["mda/github-token".to_string()]
+        );
+        assert_eq!(
+            unprovided_reserved_connections(&connectors, &BTreeMap::new()),
+            vec![
+                "mda/github-token".to_string(),
+                "mda/linear-token".to_string()
+            ]
+        );
     }
 
     #[test]

@@ -54,6 +54,16 @@ export function runsOnAMac(thread: Pick<AgentThread, "sandboxBridgeClient">) {
 }
 
 /**
+ * A "This Mac" thread with no repository: it belongs to a folder only that Mac
+ * knows, so until projects live in the backend only the desktop app can file it.
+ */
+export function boundToMacFolder(
+  thread: Pick<AgentThread, "sandboxBridgeClient" | "repoFullName">
+) {
+  return runsOnAMac(thread) && !thread.repoFullName.trim()
+}
+
+/**
  * The "This Mac" threads whose checkouts are on this machine. Only this app
  * changes the list, so it is refreshed where it does rather than polled.
  */

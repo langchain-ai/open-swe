@@ -110,11 +110,13 @@ describe("the page's lifetimes", () => {
     page().setEntryOrder(entries)
   })
 
-  it("starts the visit over on coming back, keeping what was written", () => {
+  it("starts the visit over on coming back, keeping what was written and opened", () => {
     page().setActive(second, true)
     page().jumpTo({ kind: "entry", id: second.id })
     page().setComposerText("half a thought")
     page().setReplyDraft(42, "a reply")
+    page().setExpandedFinding("finding-1")
+    page().setThreadOpen(42, true)
     page().showFindings()
     useReviewPage.setState({ lastStop: "src/a.ts:RIGHT:7" })
 
@@ -132,6 +134,8 @@ describe("the page's lifetimes", () => {
     expect(state.takeEvent("showFindings")).toBe(false)
     expect(state.composerText).toBe("half a thought")
     expect(state.replyDrafts.get(42)).toBe("a reply")
+    expect(state.expandedFinding).toBe("finding-1")
+    expect(state.threadsOpen.get(42)).toBe(true)
   })
 
   it("drops drafts on another pull request, and folds on a new head", () => {
@@ -140,8 +144,10 @@ describe("the page's lifetimes", () => {
     expect(page().collapsed.size).toBe(0)
 
     page().setReplyDraft(42, "a reply")
+    page().setThreadOpen(42, true)
     page().open({ ...pr, number: 8 }, null)
     expect(page().replyDrafts.size).toBe(0)
+    expect(page().threadsOpen.size).toBe(0)
   })
 
   it("x folds the file being read and leaves it folded", () => {

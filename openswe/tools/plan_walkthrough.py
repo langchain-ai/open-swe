@@ -1,8 +1,15 @@
 """Tools that let the review scout build the pull request's shared walkthrough plan."""
 
-from typing import Any
+import json
+from typing import Annotated
+
+from langchain_core.messages import ToolMessage
+from langchain_core.tools import InjectedToolCallId
+from langgraph.prebuilt import InjectedState
+from langgraph.types import Command
 
 from openswe.github.pull_request_key import PullRequestKey
+from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.runtime import get_cached_sandbox_backend
 from openswe.ui_invalidations import Topic
@@ -11,11 +18,35 @@ from openswe.walkthrough.plan import FileHunks, FileSplits, RangeError
 from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
 from openswe.walkthrough.record import PlanMovedError
 
-PLANNING_ERRORS = (CheckoutError, PlannerUnavailableError, PlanMovedError, RangeError)
+PLANNING_ERRORS = (CheckoutError, PlannerUnavailableError, RangeError)
 
 
-async def _workspace() -> PlanWorkspace:
+ScoutPlanning = Annotated[bool | None, InjectedState("scout_nothing_to_plan")]
+CallId = Annotated[str, InjectedToolCallId]
+
+
+def _moved(
+    exc: PlanMovedError, scout: bool | None, tool_call_id: str
+) -> dict[str, object] | Command:
+    if scout is None:
+        return {"success": False, "error": str(exc)}
+    return Command(
+        update={
+            "scout_nothing_to_plan": True,
+            "messages": [
+                ToolMessage(
+                    json.dumps({"success": False, "error": prompt("review-scout/moved")}),
+                    tool_call_id=tool_call_id,
+                )
+            ],
+        }
+    )
+
+
+async def _workspace(pr_url: str | None = None) -> PlanWorkspace:
     cfg = RunConfig.from_runtime()
+    if pr_url is not None:
+        return await PlanWorkspace.for_implementation(cfg, pr_url)
     if not cfg.thread_id or cfg.repo is None or cfg.pr_number is None:
         raise PlannerUnavailableError("this run is not planning a pull request")
     return await PlanWorkspace.locate(
@@ -26,23 +57,34 @@ async def _workspace() -> PlanWorkspace:
     )
 
 
-async def _planned(workspace: PlanWorkspace, **result: object) -> dict[str, Any]:
+async def _planned(workspace: PlanWorkspace, **result: object) -> dict[str, object]:
     pr = workspace.pull_request
     await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(pr.owner, pr.repo, pr.number))
-    return {"success": True, **result, "plan": workspace.status().model_dump()}
+    return {
+        "success": True,
+        **result,
+        "complete": workspace.complete,
+        "head_sha": workspace.head_sha,
+        "plan": workspace.status().model_dump(),
+    }
 
 
 async def walkthrough_plan_chunk(
-    title: str,
-    show: list[FileHunks],
-    explanation: str,
+    scout: ScoutPlanning,
+    tool_call_id: CallId,
+    title: str = "",
+    show: list[FileHunks] | None = None,
+    explanation: str = "",
     other: list[FileHunks] | None = None,
     after: int | None = None,
     replace: list[int] | None = None,
-) -> dict[str, Any]:
+    pr_url: str | None = None,
+) -> dict[str, object] | Command:
     """Implement the `walkthrough_plan_chunk` tool."""
     try:
-        workspace = await _workspace()
+        workspace = await _workspace(pr_url) if pr_url is not None else await _workspace()
+        if show is None:
+            return await _planned(workspace, guidance=prompt("walkthrough/planning"))
         number = await workspace.plan_chunk(
             title=title,
             show=show,
@@ -51,38 +93,54 @@ async def walkthrough_plan_chunk(
             after=after,
             replace=replace,
         )
+    except PlanMovedError as exc:
+        return _moved(exc, scout, tool_call_id)
     except PLANNING_ERRORS as exc:
         return {"success": False, "error": str(exc)}
     return await _planned(workspace, chunk=number)
 
 
-async def walkthrough_split_hunks(files: list[FileSplits]) -> dict[str, Any]:
+async def walkthrough_split_hunks(
+    files: list[FileSplits], scout: ScoutPlanning, tool_call_id: CallId, pr_url: str | None = None
+) -> dict[str, object] | Command:
     """Implement the `walkthrough_split_hunks` tool."""
     try:
-        workspace = await _workspace()
+        workspace = await _workspace(pr_url) if pr_url is not None else await _workspace()
         await workspace.split(files)
+    except PlanMovedError as exc:
+        return _moved(exc, scout, tool_call_id)
     except PLANNING_ERRORS as exc:
         return {"success": False, "error": str(exc)}
     return await _planned(workspace)
 
 
 async def walkthrough_move_to_other(
-    files: list[FileHunks], restore: bool = False
-) -> dict[str, Any]:
+    files: list[FileHunks],
+    scout: ScoutPlanning,
+    tool_call_id: CallId,
+    restore: bool = False,
+    pr_url: str | None = None,
+) -> dict[str, object] | Command:
     """Implement the `walkthrough_move_to_other` tool."""
     try:
-        workspace = await _workspace()
+        workspace = await _workspace(pr_url) if pr_url is not None else await _workspace()
         await workspace.move_to_other(files, restore=restore)
+    except PlanMovedError as exc:
+        return _moved(exc, scout, tool_call_id)
     except PLANNING_ERRORS as exc:
         return {"success": False, "error": str(exc)}
     return await _planned(workspace)
 
 
-async def walkthrough_describe_other(summary: str) -> dict[str, Any]:
+async def walkthrough_describe_other(
+    summary: str, scout: ScoutPlanning, tool_call_id: CallId, pr_url: str | None = None
+) -> dict[str, object] | Command:
     """Implement the `walkthrough_describe_other` tool."""
     try:
-        workspace = await _workspace()
+        workspace = await _workspace(pr_url) if pr_url is not None else await _workspace()
         await workspace.describe_other(summary)
+    except PlanMovedError as exc:
+        return _moved(exc, scout, tool_call_id)
     except PLANNING_ERRORS as exc:
         return {"success": False, "error": str(exc)}
     return await _planned(workspace)

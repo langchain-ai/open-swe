@@ -9,6 +9,7 @@ from typing import NotRequired, TypedDict, cast
 
 from managed_deepagents._connectors.mcp import McpServersDefinition
 from managed_deepagents._memory.layers import normalize_memory_layers
+from managed_deepagents.define_browser import BrowserDefinition
 from managed_deepagents.define_memory import MemoryDefinition
 from managed_deepagents.sandbox import SandboxDefinition
 
@@ -148,6 +149,12 @@ def snapshot_sandbox_selection(value: object) -> SandboxDefinition | None:
     raise TypeError("sandbox must be a SandboxDefinition or None")
 
 
+def snapshot_browser_selection(value: object) -> BrowserDefinition | None:
+    if value is None or isinstance(value, BrowserDefinition):  # frozen: safe to share
+        return value
+    raise TypeError("browser must be a BrowserDefinition or None")
+
+
 def _snapshot_generated_skill(item: Mapping[str, object]) -> Mapping[str, object]:
     name = item.get("name")
     description = item.get("description")
@@ -212,6 +219,7 @@ def copy_managed_selections(
     sandbox: SandboxDefinition | Omitted | None,
     skills: SkillSelection | Omitted | None,
     memory: MemoryDefinition | Omitted | None,
+    browser: BrowserDefinition | Omitted | None,
 ) -> dict[str, object]:
     selected: dict[str, object] = {}
     if not isinstance(instructions, Omitted):
@@ -226,6 +234,8 @@ def copy_managed_selections(
         selected["skills"] = None if skills is None else snapshot_skill_selection(skills)
     if not isinstance(memory, Omitted):
         selected["memory"] = None if memory is None else snapshot_memory_selection(memory)
+    if not isinstance(browser, Omitted):
+        selected["browser"] = snapshot_browser_selection(browser)
     return selected
 
 
@@ -246,6 +256,8 @@ def snapshot_managed_composition(config: Mapping[str, object]) -> dict[str, obje
         )
     if "sandbox" in copied:
         copied["sandbox"] = snapshot_sandbox_selection(copied["sandbox"])
+    if "browser" in copied:
+        copied["browser"] = snapshot_browser_selection(copied["browser"])
     if "skills" in copied:
         copied["skills"] = (
             None if copied["skills"] is None else snapshot_skill_selection(copied["skills"])

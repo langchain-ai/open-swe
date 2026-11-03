@@ -1,6 +1,7 @@
 """Transcript middleware: paragraph batching and the emitted event sequence."""
 
 import asyncio
+import base64
 import itertools
 from collections.abc import Sequence
 from typing import Any
@@ -23,6 +24,7 @@ from openswe.transcript.events import (
     MessageSender,
     MessageUsage,
     ThreadCreated,
+    ToolCompleted,
     TurnCompleted,
     TurnFailed,
     TurnRequested,
@@ -640,27 +642,60 @@ async def test_a_cancelled_subagent_tool_leaves_the_parent_running(
     assert engine.types[-1] == "turn.completed"
 
 
+async def test_a_tool_results_image_is_stored_beside_its_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+    middleware = mw.TranscriptMiddleware()
+    await middleware.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
+    png = b"\x89PNG\r\n\x1a\n"
+    encoded = base64.b64encode(png).decode()
+
+    async def screenshot(request: ToolCallRequest) -> ToolMessage:
+        # The block MDA's browser `screenshot` tool returns.
+        return ToolMessage(
+            content=[
+                {"type": "text", "text": "Screenshot of the current page."},
+                {"type": "image", "url": f"data:image/png;base64,{encoded}"},
+            ],
+            tool_call_id="shot-1",
+        )
+
+    await middleware.awrap_tool_call(_tool_request("shot-1", {"messages": []}), screenshot)
+    await middleware.aafter_agent({"messages": []}, None)
+
+    completed = next(c for c in engine.commands if isinstance(c.event, ToolCompleted))
+    event = completed.event
+    assert isinstance(event, ToolCompleted) and event.attachments
+    [attachment] = event.attachments
+    [stored] = completed.attachments
+    assert stored.attachment_id == attachment.attachment_id
+    assert (attachment.mime_type, stored.data) == ("image/png", png)
+    assert encoded not in event.model_dump_json()
+    assert completed.tool_output == "Screenshot of the current page."
+
+
 async def test_an_mda_subagent_is_recorded_under_its_task_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """MDA runs ``task`` and its subagent; the backend's hooks file their events under the call."""
-    # A provider MDA declares no box for, so preparing reads no thread metadata.
-    monkeypatch.setenv("SANDBOX_TYPE", "local")
     from langchain_core.messages import messages_to_dict
 
-    from openswe.agent_api.graph import RemoteGraph
+    from openswe.agent_api.run_calls import TokenRun
+    from openswe.agent_api.run_kinds import RunKind
     from openswe.agent_api.tokens import RemoteRun
-    from openswe.sandboxes.tool_runtime import ToolSurface
 
     engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+    # No replica began the run's turn before its start was reported.
+    monkeypatch.setattr(mw, "run_turn", AsyncMock(return_value=None))
 
-    async def build(config: Any, surface: ToolSurface) -> None:
-        surface.middleware = [mw.TranscriptMiddleware()]
+    class Reporting(RunKind):
+        assistant_id = "agent"
+        reporters = (mw.TranscriptMiddleware(),)
 
-    async def start_models(cfg: Any) -> Any:
-        raise AssertionError("not asked for")
+    async def report(endpoint: str, raw: dict[str, Any]) -> None:
+        await TokenRun.answer(Reporting(), run, endpoint, raw)
 
-    graph = RemoteGraph("agent", build, start_models)
     run = RemoteRun(thread_id=THREAD_ID, assistant_id="agent", configurable={})
     asked = HumanMessage(content="do the thing", id="human-1")
     delegated = AIMessage(
@@ -674,28 +709,24 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
         id="sub-ai-1",
         tool_calls=[{"name": "read_file", "args": {"path": "a.py"}, "id": "sub-call-1"}],
     )
-    nested = messages_to_dict([HumanMessage(content="look", id="sub-human"), looked])
     answer = AIMessage(content="found it", id="sub-ai-2")
 
-    await graph.api(run, "prepare", {"run_id": RUN_ID, "messages": root[:1]})
+    await report("run_started", {"run_id": RUN_ID, "humans": root[:1]})
     task = {"name": "task", "arguments": {"description": "look"}, "tool_call_id": "task-1"}
-    await graph.api(run, "tool_started", {"run_id": RUN_ID, "messages": root, **task})
-    inside = {"run_id": RUN_ID, "messages": nested, "namespace": ["task-1"]}
+    # Each report names the reply that made the call, never the conversation.
+    await report("tool_started", {"run_id": RUN_ID, "message_id": "ai-1", **task})
+    inside = {"run_id": RUN_ID, "namespace": ["task-1"]}
     # MDA reports every call it makes, the subagent's included, under its ``task`` call.
     read = {"name": "read_file", "arguments": {"path": "a.py"}, "tool_call_id": "sub-call-1"}
-    await graph.api(run, "tool_started", {**inside, **read})
+    await report("tool_started", {**inside, **read, "message_id": looked.id})
     contents = ToolMessage(content="contents of a.py", tool_call_id="sub-call-1")
-    await graph.api(
-        run, "tool_result", {**inside, **read, "result": messages_to_dict([contents])[0]}
-    )
-    await graph.api(run, "model_result", {**inside, "response": messages_to_dict([answer])})
+    await report("tool_result", {**inside, **read, "result": messages_to_dict([contents])[0]})
+    await report("model_result", {**inside, "response": messages_to_dict([answer])})
     result = ToolMessage(content="found it", tool_call_id="task-1")
-    await graph.api(
-        run,
-        "tool_result",
-        {"run_id": RUN_ID, "messages": root, **task, "result": messages_to_dict([result])[0]},
-    )
+    await report("tool_result", {"run_id": RUN_ID, **task, "result": messages_to_dict([result])[0]})
+    await report("run_ended", {"run_id": RUN_ID})
 
+    assert engine.types[-1] == "turn.completed"
     recorded = [
         (
             c.event.type,

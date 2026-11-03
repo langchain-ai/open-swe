@@ -4,11 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
-use super::artifact::{artifact_graph, read_artifact_manifest};
+use super::artifact::read_artifact_manifest;
 use super::compile_result_items;
-use super::harbor::{
-    project_env_keys, provider_env_templates, stage_harbor_adapter, unexportable_env_keys,
-};
+use super::harbor::{project_env_keys, provider_env_templates, stage_harbor_adapter};
 use super::helpers::{looks_like_project_root, project_digest, ProjectDigestInputs};
 use super::init::{
     coding_agent_handoff_prompt, coding_agent_prompt, documentation_url, harbor_run_command,
@@ -29,9 +27,7 @@ static INSTALLATION_ENV_LOCK: Mutex<()> = Mutex::new(());
 fn compile_result_uses_the_shared_sequence_without_the_internal_graph() {
     let summary = CompileSummary {
         artifact_dir: PathBuf::from("agent/.mda/evals/artifact"),
-        graph: "agent".to_string(),
         model_name: Some("openai:gpt-5".to_string()),
-        model_override: None,
         artifact_sha256: "64fe".to_string(),
     };
 
@@ -147,9 +143,6 @@ fn init_summary_for(project_root: PathBuf, language: Language) -> InitSummary {
     InitSummary {
         language,
         dataset_dir: project_root.join("evals"),
-        generated_dir: project_root.join(".mda/evals"),
-        adapter_dir: project_root.join(".mda/evals/harbor-adapter"),
-        runtime_settings_path: project_root.join(".mda/evals/runtime.json"),
         job_config_path: project_root.join("evals/harbor-job.json"),
         project_root,
     }
@@ -281,18 +274,6 @@ fn test_project(root: &Path, language: Language) -> Project {
             Language::Python => "agent.py".into(),
         }],
     }
-}
-
-#[test]
-fn artifact_graph_rejects_unsafe_cached_graph() {
-    let root = tempfile::tempdir().unwrap();
-    fs::write(
-        root.path().join("mda-eval-manifest.json"),
-        r#"{"graph":"agent; echo injected"}"#,
-    )
-    .unwrap();
-
-    assert!(artifact_graph(root.path()).is_err());
 }
 
 #[test]
@@ -762,7 +743,6 @@ fn compile_without_override_preserves_dynamic_authored_model() {
     let manifest = read_artifact_manifest(&summary.artifact_dir).unwrap();
 
     assert!(summary.model_name.is_none());
-    assert!(summary.model_override.is_none());
     assert!(manifest["model_name"].is_null());
     assert!(manifest["model_override"].is_null());
 }
@@ -1143,15 +1123,6 @@ fn provider_env_templates_skips_keys_a_shell_cannot_export() {
     }
     assert!(templates.get("_OK").is_some());
     assert!(templates.get("ok_KEY2").is_some());
-}
-
-#[test]
-fn unexportable_env_keys_reports_only_invalid_names() {
-    let mut keys = BTreeSet::new();
-    keys.insert("Key.Value".to_string());
-    keys.insert("OPENAI_API_KEY".to_string());
-    keys.insert("_ok".to_string());
-    assert_eq!(unexportable_env_keys(&keys), vec!["Key.Value"]);
 }
 
 #[test]

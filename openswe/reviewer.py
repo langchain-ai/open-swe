@@ -19,43 +19,45 @@ import asyncio
 import logging
 import posixpath
 import re
+import uuid
 import warnings
+from functools import partial
 from typing import Any, NamedTuple, NotRequired, cast
 
 logger = logging.getLogger(__name__)
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
+from runtime_api.catalog import InboxSpec
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
-from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
-from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
-from langchain.agents.middleware.types import AgentMiddleware
-from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 
+from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
+from openswe.github.org_membership import OPEN_SWE_AUTHOR_LOGINS
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
-    ExcludeToolsMiddleware,
-    ModelErrorMiddleware,
-    RepairOrphanedToolCallsMiddleware,
-    refresh_github_proxy_before_model,
-    settle_review_check_on_exit,
 )
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.require_user_reply import WEB_REPLY_SURFACE
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.prompts import apply_tool_descriptions, prompt
-from openswe.review.approvals import approval_policy_for_review
+from openswe.review.approvals import (
+    ApprovalPolicy,
+    approval_policy_for_review,
+    open_swe_config_errors,
+)
 from openswe.review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -70,20 +72,18 @@ from openswe.review.findings import (
 )
 from openswe.review.publish import fetch_pr_review_threads
 from openswe.review.reconcile import reconcile_findings_with_review_threads
-from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
-    MODEL_CALL_RECURSION_LIMIT,
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
 )
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
-from openswe.sandboxes.state import SandboxUnreachableError
+from openswe.sandboxes.state import SandboxHandedOverError, SandboxUnreachableError
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
-from openswe.threads.inbox import ThreadInbox
+from openswe.threads.store import THREADS
 from openswe.tools import (
     add_finding,
     fetch_review_diff,
@@ -93,6 +93,7 @@ from openswe.tools import (
     publish_review,
     reply_to_finding_thread,
     resolve_finding_thread,
+    suggest_task,
     update_finding,
     web_search,
 )
@@ -107,7 +108,6 @@ from openswe.utils.model import (
     provider_model_kwargs,
 )
 from openswe.utils.startup_trace import aphase
-from openswe.walkthrough.record import WalkthroughView
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = prompt("reviewer/subagent")
 
@@ -135,13 +135,10 @@ def _repo_checkout_note(
 
 
 def _reviewer_system_prompt(
-    working_dir: str,
     *,
     repo_owner: str,
     repo_name: str,
     pr_number: int | str,
-    repo_ready: bool = True,
-    head_sha: str = "",
     reviewer_eval: bool = False,
     org_guidelines: str | None = None,
     approval_policy: str | None = None,
@@ -152,20 +149,11 @@ def _reviewer_system_prompt(
 ) -> str:
     return prompt(
         "reviewer/main",
-        working_dir=working_dir,
         repo_owner=repo_owner or "<owner>",
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
         reviewer_eval=reviewer_eval,
         approval_policy=approval_policy or "",
-        repo_checkout_note=_repo_checkout_note(
-            repo_ready=repo_ready,
-            working_dir=working_dir,
-            repo_owner=repo_owner,
-            repo_name=repo_name,
-            pr_number=pr_number,
-            head_sha=head_sha,
-        ),
         org_guidelines=org_guidelines or "",
         repo_style_prompt=repo_style_prompt or "",
         agents_md_content=agents_md_content or "",
@@ -193,45 +181,6 @@ def _format_pr_overview(pr_title: str, pr_body: str) -> str:
     safe_title = _escape_for_data_block(title)
     safe_body = _escape_for_data_block(body) if body else "_(no description provided)_"
     return prompt("reviewer/pr-overview", title=safe_title, body=safe_body)
-
-
-def _format_human_input(walkthrough: WalkthroughView | None) -> str:
-    """Render the scout's summary of what people asked for, or ``""`` without one."""
-    if walkthrough is None or not walkthrough.human_input:
-        return ""
-    return prompt("reviewer/human-input", summary=walkthrough.human_input)
-
-
-def _format_line_ranges(prefix: str, ranges: list[tuple[int, int]]) -> list[str]:
-    return [
-        f"{prefix}{start}" if start == end else f"{prefix}{start}-{end}" for start, end in ranges
-    ]
-
-
-def _format_walkthrough(walkthrough: WalkthroughView | None) -> str:
-    """Render the scout's steps as an untrusted-data block, or ``""`` without one."""
-    if walkthrough is None or not walkthrough.steps:
-        return ""
-    steps: list[str] = []
-    for step in walkthrough.steps:
-        files = "\n".join(
-            " ".join(
-                [
-                    _escape_for_data_block(file.path),
-                    *_format_line_ranges("+", file.added),
-                    *_format_line_ranges("-", file.deleted),
-                ]
-            )
-            for file in step.files
-        )
-        steps.append(
-            f'<step index="{step.index}">\n'
-            f"<title>{_escape_for_data_block(step.title)}</title>\n"
-            f"<summary>{_escape_for_data_block(step.summary)}</summary>\n"
-            f"<files>\n{files}\n</files>\n"
-            "</step>"
-        )
-    return prompt("reviewer/walkthrough", steps="\n".join(steps))
 
 
 def _build_first_review_context(
@@ -490,6 +439,8 @@ class PrepareReviewerRunState(PrepareRunState):
     diff_text: NotRequired[str]
     diff_line_set: NotRequired[dict[str, dict[str, set[int]]] | None]
     review_approval_policy: NotRequired[str | None]
+    review_approval_errors: NotRequired[list[str]]
+    review_config_errors: NotRequired[list[str]]
 
 
 async def _cached_org_guidelines(workspace: str | None) -> str | None:
@@ -530,9 +481,9 @@ async def ensure_reviewer_sandbox_for_thread(
         github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
         # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
         # re-derives every run, and reviewer threads outlive their sandbox: one
-        # thread per PR, re-triggered on every push. Refusing to replace an
+        # thread per PR, re-triggered on every push. Staying bound to an
         # unreachable one would brick reviews on that PR for good.
-        allow_replacement=True,
+        abandon_unreachable=True,
     )
 
 
@@ -577,10 +528,12 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         thread_id: str,
         config: RunnableConfig,
         use_gateway: bool,
+        model: ReviewerModelChoice,
     ) -> None:
         self._thread_id = thread_id
         self._config = config
         self._use_gateway = use_gateway
+        self._model = model
 
     def _prepare_config_fingerprint(self) -> Any:
         cfg = RunConfig.from_config(self._config)
@@ -599,7 +552,36 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         }
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
+        await self._record_run()
         return await prepare_reviewer_run(self._thread_id, self._config, runtime)
+
+    async def _record_run(self) -> None:
+        """Attribute the run to its model before the transcript and usage observers read it."""
+        cfg = RunConfig.from_config(self._config)
+        try:
+            async with aphase(self._thread_id, "prepare.record_run"):
+                await THREADS.update(
+                    self._thread_id,
+                    {
+                        "agent_kind": "reviewer",
+                        "model": self._model.model_id,
+                        "effort": self._model.effort,
+                    },
+                )
+                if cfg.invocation_id:
+                    await record_agent_invocation_usage(
+                        invocation_id=cfg.invocation_id,
+                        thread_id=self._thread_id,
+                        github_login=cfg.github_login,
+                        github_user_id=cfg.github_user_id,
+                        user_email=cfg.user_email,
+                        model_id=self._model.model_id,
+                        effort=self._model.effort,
+                        source=cfg.source,
+                        repository=cfg.repo_full_name or None,
+                    )
+        except Exception:
+            logger.warning("Failed to record the reviewer run", exc_info=True)
 
     async def _rejoin(self, state: PrepareRunState, runtime: Runtime) -> None:  # noqa: ARG002
         await ensure_reviewer_github_token(self._thread_id, RunConfig.from_config(self._config))
@@ -625,11 +607,14 @@ async def prepare_reviewer_run(
             try:
                 sandbox_backend = await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
             except SandboxUnreachableError as exc:
-                # Replacement was allowed and still failed, so this run dies without a
-                # sandbox. Say so on the PR instead of leaving it looking unreviewed.
-                await post_sandbox_unreachable_notification(
-                    config or {}, sandbox_id=exc.sandbox_id, replacement_attempted=True
-                )
+                # This run dies without a sandbox. Say so on the PR instead of leaving
+                # it looking unreviewed, unless it is a shadow nobody on the PR knows of.
+                if not cfg.review_shadow:
+                    await post_sandbox_unreachable_notification(
+                        config or {},
+                        sandbox_id=exc.sandbox_id,
+                        handed_to_mda=isinstance(exc, SandboxHandedOverError),
+                    )
                 raise
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
             repo_ready = await prepare_review_repo(
@@ -647,8 +632,6 @@ async def prepare_reviewer_run(
                     sandbox_backend, repo_dir=f"{work_dir}/{repo_name}", trusted_ref=base_sha
                 )
                 if skill_sources:
-                    # Reading every SKILL.md takes seconds on skill-heavy repos;
-                    # here it overlaps the walkthrough wait.
                     skills_prompt = await _trusted_skills_prompt(
                         sandbox_backend, skill_sources, runtime, config
                     )
@@ -728,7 +711,16 @@ async def prepare_reviewer_run(
                 pr_number=pr_number,
                 token=github_token,
             )
-            await reconcile_findings_with_review_threads(thread_id, threads)
+            if cfg.review_shadow:
+                # Open SWE's own threads are the control reviewer's, which a shadow must not see.
+                threads = [
+                    thread
+                    for thread in threads
+                    if not (comments := thread.get("comments"))
+                    or str(comments[0].get("author") or "").lower() not in OPEN_SWE_AUTHOR_LOGINS
+                ]
+            else:
+                await reconcile_findings_with_review_threads(thread_id, threads)
             block = _format_pr_review_threads(threads)
             if block:
                 logger.info(
@@ -747,26 +739,6 @@ async def prepare_reviewer_run(
                 pr_number,
             )
             return ""
-
-    async def _await_walkthrough() -> WalkthroughView | None:
-        if reviewer_event == "finding_reply" or reviewer_eval or not isinstance(pr_number, int):
-            return None
-        pr_title, _ = await pr_overview_task
-        target = ReviewScoutTarget(
-            owner=repo_owner,
-            repo=repo_name,
-            pr_number=pr_number,
-            pr_title=pr_title,
-            base_sha=base_sha,
-            head_sha=head_sha,
-            workspace_slug=cfg.workspace_slug,
-        )
-        try:
-            async with aphase(thread_id, "prepare.walkthrough"):
-                return await target.await_walkthrough()
-        except Exception:
-            logger.warning("Reviewing without a walkthrough", exc_info=True, extra=target.log_extra)
-            return None
 
     # Benchmark runs score the stock reviewer, without our workspace's
     # guidelines, per-repo style prompts, or API standards.
@@ -809,35 +781,43 @@ async def prepare_reviewer_run(
             changed_files(diff_text),
         )
 
-    async def _fetch_approval_policy() -> str | None:
+    async def _fetch_approval_policy() -> ApprovalPolicy | None:
         # Read from the default branch so a pull request cannot rewrite the policy it is judged by.
-        if reviewer_eval:
+        if reviewer_eval or not isinstance(pr_number, int):
             return None
-        return await approval_policy_for_review(repo_owner, repo_name, token=github_token)
+        return await approval_policy_for_review(
+            repo_owner, repo_name, pr_number, token=github_token
+        )
 
-    # Only the diff waits on the checkout; the walkthrough above all, a whole
-    # scout run in its own sandbox, must not queue behind the clone.
+    async def _fetch_config_errors() -> list[str]:
+        if reviewer_eval or not can_fetch_pr or not isinstance(pr_number, int) or not head_sha:
+            return []
+        return await open_swe_config_errors(
+            repo_owner, repo_name, pr_number, head_sha, token=github_token
+        )
+
+    # Only the diff waits on the checkout.
     checkout_task = asyncio.create_task(_check_out())
     diff_context_task = asyncio.create_task(_fetch_diff_context())
     pr_overview_task = asyncio.create_task(_fetch_pr_overview())
-    walkthrough_task = asyncio.create_task(_await_walkthrough())
     existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
     repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
     agents_md_task = asyncio.create_task(_fetch_agents_md_context())
     org_guidelines_task = asyncio.create_task(_fetch_org_guidelines())
     approval_policy_task = asyncio.create_task(_fetch_approval_policy())
+    config_errors_task = asyncio.create_task(_fetch_config_errors())
     api_standards_task = asyncio.create_task(_fetch_api_standards_skill())
     scoped_agents_md_task = asyncio.create_task(_fetch_scoped_agents_md())
     tasks = (
         checkout_task,
         diff_context_task,
         pr_overview_task,
-        walkthrough_task,
         existing_threads_task,
         repo_style_task,
         agents_md_task,
         org_guidelines_task,
         approval_policy_task,
+        config_errors_task,
         api_standards_task,
         scoped_agents_md_task,
     )
@@ -850,15 +830,16 @@ async def prepare_reviewer_run(
         agents_md_content = await agents_md_task
         scoped_agents_md = await scoped_agents_md_task
         org_guidelines = await org_guidelines_task
-        approval_policy = await approval_policy_task
+        policy = await approval_policy_task
+        config_errors = await config_errors_task
         api_standards_skill = await api_standards_task
-        walkthrough = await walkthrough_task
     finally:
-        # A failed checkout must not leave the scout wait polling for minutes.
         for task in tasks:
             task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
     work_dir, repo_ready = checkout.work_dir, checkout.repo_ready
     pr_title, pr_body = pr_overview
+    approval_policy = policy.render() if policy is not None else None
 
     review_context = ""
     if pr_number is not None:
@@ -906,12 +887,9 @@ async def prepare_reviewer_run(
             )
 
     system_prompt = _reviewer_system_prompt(
-        f"{work_dir}/{repo_name}" if repo_name else work_dir,
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number if isinstance(pr_number, int) else "",
-        repo_ready=repo_ready,
-        head_sha=head_sha,
         reviewer_eval=reviewer_eval,
         org_guidelines=org_guidelines,
         approval_policy=approval_policy,
@@ -920,21 +898,34 @@ async def prepare_reviewer_run(
         scoped_agents_md=scoped_agents_md,
         api_standards_skill=api_standards_skill,
     )
-    if review_context:
-        system_prompt = f"{system_prompt}\n\n{review_context}"
-    walkthrough_block = _format_walkthrough(walkthrough)
-    if walkthrough_block:
-        system_prompt = f"{system_prompt}\n\n{walkthrough_block}"
-    human_input_block = _format_human_input(walkthrough)
-    if human_input_block:
-        system_prompt = f"{system_prompt}\n\n{human_input_block}"
+    run_context = prompt(
+        "reviewer/run-context",
+        blocks=[
+            block
+            for block in (
+                _repo_checkout_note(
+                    repo_ready=repo_ready,
+                    working_dir=f"{work_dir}/{repo_name}" if repo_name else work_dir,
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    pr_number=pr_number if isinstance(pr_number, int) else "",
+                    head_sha=head_sha,
+                ),
+                review_context,
+            )
+            if block
+        ],
+    )
     if checkout.skills_prompt:
         system_prompt = f"{system_prompt}\n\n{checkout.skills_prompt}"
 
     prepared: dict[str, Any] = {
         "work_dir": work_dir,
         "rendered_system_prompt": system_prompt,
+        "messages": [HumanMessage(content=run_context, id=f"run-context:{uuid.uuid4()}")],
         "review_approval_policy": approval_policy,
+        "review_approval_errors": policy.errors if policy is not None else [],
+        "review_config_errors": config_errors,
         "diff_text": pr_diff_text,
         "diff_line_set": pr_diff_line_set,
     }
@@ -944,6 +935,7 @@ async def prepare_reviewer_run(
 class ReviewerModelChoice(NamedTuple):
     model_id: str
     kwargs: ModelKwargs
+    effort: str | None
 
 
 class ReviewerModels(NamedTuple):
@@ -994,6 +986,7 @@ async def resolve_reviewer_models(cfg: RunConfig) -> ReviewerModels:
                 max_tokens=DEFAULT_LLM_MAX_TOKENS,
                 openai_reasoning_default=DEFAULT_LLM_REASONING,
             ),
+            reasoning_effort,
         ),
         subagent=ReviewerModelChoice(
             subagent_model_id,
@@ -1003,6 +996,7 @@ async def resolve_reviewer_models(cfg: RunConfig) -> ReviewerModels:
                 max_tokens=DEFAULT_LLM_MAX_TOKENS,
                 openai_reasoning_default=DEFAULT_LLM_REASONING,
             ),
+            subagent_effort,
         ),
         use_gateway=settings.effective_gateway_enabled,
     )
@@ -1022,54 +1016,34 @@ def reviewer_tools() -> list[BaseTool]:
             web_search,
             fetch_url,
             http_request,
+            suggest_task,
         ]
     )
 
 
-async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
-    """Plan a review run into ``surface``: the tools, middleware, models and subagents its MDA run plays."""
-    config = config.copy()
-    configurable = dict(config.get("configurable") or {})
-    config["configurable"] = configurable
-    cfg = RunConfig.parse(configurable)
-    thread_id = cfg.thread_id
-    if thread_id is None:
+async def _reconnect_reviewer_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBackendProtocol:
+    await ensure_reviewer_github_token(thread_id, cfg)
+    return await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
+
+
+def reviewer_sandbox(thread_id: str, cfg: RunConfig) -> BackendProtocol:
+    """The review thread's sandbox, connected again with a fresh token whenever it is gone."""
+    return get_cached_sandbox_backend(
+        thread_id, reconnect=partial(_reconnect_reviewer_sandbox, thread_id, cfg)
+    )
+
+
+async def reviewer_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
+    """Work out a review run into ``surface``: its tools, models, subagents and loop rules."""
+    cfg = RunConfig.from_config(config)
+    if cfg.thread_id is None:
         raise ValueError("A review run needs a thread")
 
     models = await resolve_reviewer_models(cfg)
     use_gateway = models.use_gateway
 
-    async def reconnect_backend(
-        _thread_id: str = thread_id,
-        _cfg: RunConfig = cfg,
-    ) -> SandboxBackendProtocol:
-        await ensure_reviewer_github_token(_thread_id, _cfg)
-        return await ensure_reviewer_sandbox_for_thread(_thread_id, _cfg)
-
-    backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
-
-    middleware = cast(
-        list[AgentMiddleware[Any, Any, Any]],
-        [
-            PrepareReviewerRunMiddleware(
-                thread_id=thread_id,
-                config=config,
-                use_gateway=use_gateway,
-            ),
-            AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
-            ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
-            ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
-            refresh_github_proxy_before_model,
-            RepairOrphanedToolCallsMiddleware(),
-            ModelRetryMiddleware(retry_on=(TimeoutError,)),
-            ModelErrorMiddleware(),
-            settle_review_check_on_exit,
-        ],
-    )
     surface.base_tools = reviewer_tools()
-    surface.middleware = middleware
-    surface.inbox = ThreadInbox(thread_id, events=False, surface=WEB_REPLY_SURFACE)
-    surface.files = backend
+    surface.inbox = InboxSpec(surface=WEB_REPLY_SURFACE, model_id=cfg.agent_model_id)
     surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS
     surface.models = SurfaceModels(
         main=ModelChoice(models.main.model_id, dict(models.main.kwargs)),

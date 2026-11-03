@@ -15,7 +15,8 @@ const ALLOWED_PERMISSIONS = new Set([
 const SESSION_COOKIE_NAME = "osw_session";
 const LOGIN_PATH = "/dashboard/api/auth/login";
 const DESKTOP_EXCHANGE_PATH = "/dashboard/api/auth/desktop/exchange";
-const CONNECT_PROVIDERS = new Set(["slack", "langsmith"]);
+const DESKTOP_ENVIRONMENTS_PATH = "/dashboard/api/desktop/environments";
+const CONNECT_PROVIDERS = new Set(["slack", "github"]);
 
 function resolveAppRuntime({ argv, isPackaged, appDataPath }) {
   const isDevelopment = !isPackaged || argv.includes("--dev");
@@ -25,9 +26,10 @@ function resolveAppRuntime({ argv, isPackaged, appDataPath }) {
     appUserModelId: isDevelopment
       ? DEVELOPMENT_APP_USER_MODEL_ID
       : APP_USER_MODEL_ID,
-    userDataPath: isDevelopment
-      ? path.join(appDataPath, DEVELOPMENT_USER_DATA_DIRECTORY)
-      : null,
+    userDataPath: path.join(
+      appDataPath,
+      isDevelopment ? DEVELOPMENT_USER_DATA_DIRECTORY : "Open SWE",
+    ),
   };
 }
 
@@ -71,14 +73,25 @@ function isAppUrl(value) {
 
 function isAppLoginUrl(value) {
   try {
-    return isAppUrl(value) && new URL(value).pathname === LOGIN_PATH;
+    return (
+      isAppUrl(value) &&
+      [LOGIN_PATH, "/dashboard/api/auth/langsmith/login"].includes(
+        new URL(value).pathname,
+      )
+    );
   } catch {
     return false;
   }
 }
 
-function desktopLoginUrl(backendUrl, { challenge, port }) {
-  const target = new URL(LOGIN_PATH, backendUrl);
+function desktopLoginUrl(
+  backendUrl,
+  { challenge, port },
+  navigationUrl = `${APP_URL}${LOGIN_PATH.slice(1)}`,
+) {
+  if (!isAppLoginUrl(navigationUrl))
+    throw new Error("Invalid desktop login URL");
+  const target = new URL(new URL(navigationUrl).pathname, backendUrl);
   // Make OAuth redirect back through this backend's origin.
   target.searchParams.set("desktop", "true");
   target.searchParams.set("desktop_handoff", challenge);
@@ -111,6 +124,26 @@ function desktopExchangeUrl(backendUrl) {
   return new URL(DESKTOP_EXCHANGE_PATH, backendUrl).toString();
 }
 
+function desktopEnvironmentsUrl(backendUrl) {
+  return new URL(DESKTOP_ENVIRONMENTS_PATH, backendUrl).toString();
+}
+
+/** The alternate backends a response names, skipping any that are malformed. */
+function parseDesktopEnvironments(payload) {
+  const entries = Array.isArray(payload?.environments)
+    ? payload.environments
+    : [];
+  return entries.flatMap((entry) => {
+    if (typeof entry?.name !== "string" || typeof entry?.url !== "string")
+      return [];
+    try {
+      return [{ name: entry.name, url: validateBackendUrl(entry.url) }];
+    } catch {
+      return [];
+    }
+  });
+}
+
 function isTrustedPermissionRequest(permission, requestingUrl) {
   return isAppUrl(requestingUrl) && ALLOWED_PERMISSIONS.has(permission);
 }
@@ -119,11 +152,34 @@ function isTrustedProxyRequest(pageUrl) {
   return isAppUrl(pageUrl);
 }
 
+/**
+ * The response headers of a page the app frames, with its CSP letting the app
+ * frame it as well as whoever it already allowed. LangSmith's browser window
+ * names the origins that may frame it, and only https ones, so it can never
+ * name the app's own `open-swe://app`.
+ */
+function headersFramedByApp(headers: Record<string, string[]>) {
+  return Object.fromEntries(
+    Object.entries(headers).map(([name, values]) => [
+      name,
+      name.toLowerCase() === "content-security-policy"
+        ? values.map((value) =>
+            value.replace(
+              /(^|;)(\s*)frame-ancestors([^;]*)/i,
+              (_match, start, space, sources) =>
+                `${start}${space}frame-ancestors${sources.replace(/\s*'none'/i, "")} ${APP_ORIGIN}`,
+            ),
+          )
+        : values,
+    ]),
+  );
+}
+
 function backendRequestUrl(backendUrl, appRequestUrl) {
   if (!isAppUrl(appRequestUrl)) throw new Error("Invalid desktop request URL");
   const source = new URL(appRequestUrl);
   const target = new URL(`${source.pathname}${source.search}`, backendUrl);
-  if (source.pathname === "/dashboard/api/auth/login") {
+  if (isAppLoginUrl(appRequestUrl)) {
     target.searchParams.set("desktop", "true");
   }
   return target.toString();
@@ -178,7 +234,7 @@ function staticFilePath(root, appRequestUrl) {
   return candidate;
 }
 
-module.exports = {
+export = {
   APP_ORIGIN,
   APP_URL,
   DEFAULT_DEVELOPMENT_BACKEND_URL,
@@ -186,6 +242,7 @@ module.exports = {
   appRedirectUrl,
   connectExchangeUrl,
   connectLoginUrl,
+  desktopEnvironmentsUrl,
   desktopExchangeUrl,
   desktopLoginUrl,
   desktopDeepLinkUrl,
@@ -195,8 +252,10 @@ module.exports = {
   isAppUrl,
   isConnectProvider,
   isTrustedPermissionRequest,
+  headersFramedByApp,
   isTrustedProxyRequest,
   localCallbackUrl,
+  parseDesktopEnvironments,
   resolveBackendUrl,
   staticFilePath,
   validateBackendUrl,

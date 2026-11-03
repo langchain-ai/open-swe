@@ -2,11 +2,10 @@ import { Button } from "@langchain/macaw-components/Button"
 import { useCallback } from "react"
 import { toast } from "sonner"
 
-/** A `javascript:` URL that opens the GitHub PR in the current tab as an Open SWE review. */
+/** Opens a GitHub PR or an agent thread's latest linked PR as an Open SWE review. */
 export function reviewBookmarkletUrl(origin: string): string {
-  // Percent-encoded, the base holds only characters that are inert inside a JS string literal.
-  const base = encodeURIComponent(`${new URL(origin).origin}/agents/reviews/`)
-  const script = `(()=>{const m=location.href.match(/github\\.com\\/([^/]+)\\/([^/]+)\\/pull\\/(\\d+)/);if(!m){alert("Open this on a GitHub pull request page.");return}window.open(decodeURIComponent("${base}")+m[1]+"/"+m[2]+"/"+m[3],"_blank")})()`
+  const base = encodeURIComponent(new URL(origin).origin)
+  const script = `(()=>{const base=decodeURIComponent("${base}"),page=new URL(location.href);let url=page;if(page.origin===base&&/^\\/agents\\/[0-9a-f-]{36}\\/?$/i.test(page.pathname)){const links=document.querySelectorAll("a[data-thread-pull-request]");if(!links.length){alert("This agent thread has no loaded linked pull request. Wait for it to load, then try again.");return}url=new URL(links[links.length-1].getAttribute("data-thread-pull-request"))}const m=url.hostname==="github.com"&&url.pathname.match(/^\\/([^/]+)\\/([^/]+)\\/pull\\/(\\d+)(?:\\/|$)/);if(!m){alert("Open this on a GitHub pull request or an Open SWE agent thread with a linked pull request.");return}window.open(base+"/agents/reviews/"+m[1]+"/"+m[2]+"/"+m[3],"_blank")})()`
   return `javascript:${script}`
 }
 
@@ -22,7 +21,7 @@ export function ReviewBookmarklet() {
       as={
         <a
           draggable
-          title="Drag to your bookmarks bar, then click it on any GitHub pull request"
+          title="Drag to your bookmarks bar, then click it on a GitHub pull request or Open SWE agent thread"
         />
       }
       color="secondary"
@@ -33,7 +32,7 @@ export function ReviewBookmarklet() {
         event.preventDefault()
         toast.info("Drag this button to your bookmarks bar", {
           description:
-            "Then click the bookmark on any GitHub pull request to open its review here.",
+            "Then click the bookmark on a GitHub pull request or Open SWE agent thread to open its linked PR review here.",
         })
       }}
     >

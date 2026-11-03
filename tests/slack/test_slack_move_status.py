@@ -8,6 +8,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from openswe import event_claims
 from openswe.slack import move as slack_move
+from openswe.slack import routed_work
 from openswe.slack import thinking as slack_thinking
 from openswe.slack.channels import SlackChannel
 from openswe.slack.records import lookup_slack_thread_id
@@ -87,6 +88,7 @@ def statuses(monkeypatch: pytest.MonkeyPatch) -> list[StatusCall]:
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 0.001)
     monkeypatch.setattr(slack_thinking, "_STATUS_RETRY_DELAYS", (0.0, 0.0))
+    monkeypatch.setattr(routed_work.THREADS, "get", AsyncMock(return_value=None))
     return calls
 
 
@@ -254,27 +256,28 @@ async def test_unreadable_binding_after_a_breakout_leaves_the_old_thread_alone(
     assert statuses[-1] == ("C2", "2.0", "")
 
 
-@pytest.mark.parametrize("explicit, target", [(None, "C1"), ("C3", "C3")])
+@pytest.mark.parametrize("explicit, target", [("C1", "C1"), ("C3", "C3"), ("D1", "D1")])
 async def test_move_tool_uses_current_or_explicit_channel_without_moving_twice(
-    monkeypatch: pytest.MonkeyPatch, statuses: list[StatusCall], explicit: str | None, target: str
+    monkeypatch: pytest.MonkeyPatch, statuses: list[StatusCall], explicit: str, target: str
 ) -> None:
-    client = cast(LangGraphClient, _LangGraph({"channel_id": "C1", "thread_ts": "1.0"}))
+    source = "D1" if target == "D1" else "C1"
+    client = cast(LangGraphClient, _LangGraph({"channel_id": source, "thread_ts": "1.0"}))
     config = {
         "configurable": {
             "thread_id": "thread-1",
             "workspace": "engineering",
-            "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+            "slack_thread": {"channel_id": source, "thread_ts": "1.0"},
         }
     }
     monkeypatch.setattr(move_thread, "get_config", lambda: config)
     monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
     monkeypatch.setattr(move_thread, "langgraph_client", lambda: client)
     monkeypatch.setattr(
-        SlackChannel, "load", AsyncMock(return_value=SimpleNamespace(public=target != "C1"))
+        SlackChannel, "load", AsyncMock(return_value=SimpleNamespace(public=target != source))
     )
     root = AsyncMock(return_value="2.0")
     monkeypatch.setattr(slack_move, "post_slack_top_level_message_with_ts", root)
-    await slack_move.bind_slack_thread_id("C1", "1.0", "thread-1")
+    await slack_move.bind_slack_thread_id(source, "1.0", "thread-1")
 
     result = await move_thread.slack_move_thread("Breakout", explicit)
     assert result["success"] is True

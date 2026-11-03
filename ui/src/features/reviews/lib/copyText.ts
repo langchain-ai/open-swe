@@ -1,8 +1,20 @@
 import { toast } from "sonner"
 
-/** Copies `text` and says so; a refused clipboard says that instead of failing silently. */
 export function copyText(text: string, copied: string): void {
-  navigator.clipboard.writeText(text).then(
+  reportCopy(navigator.clipboard.writeText(text), copied)
+}
+
+export function copyPageLink(): void {
+  reportCopy(
+    window.openSweDesktop
+      ? window.openSweDesktop.copyPageLink()
+      : navigator.clipboard.writeText(window.location.href),
+    "Copied the link"
+  )
+}
+
+function reportCopy(pending: Promise<void>, copied: string): void {
+  pending.then(
     () => toast.success(copied),
     (error: unknown) => {
       console.warn("Could not copy to the clipboard", { error })

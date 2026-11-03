@@ -148,8 +148,9 @@ export function WorkflowApprovalCard({
               </Button>
             </div>
             <p className="mt-space-2 text-xxs text-secondary">
-              Approval resumes this exact push only. If the workflow files
-              change, Open SWE will ask again.
+              Approval covers this workflow diff on branches in this thread and
+              repository. Different workflow diffs and lease-protected pushes
+              require separate approval.
             </p>
 
             <div className="mt-space-4 grid gap-space-2 sm:grid-cols-2">
@@ -158,7 +159,8 @@ export function WorkflowApprovalCard({
                   What happens next
                 </p>
                 <p className="mt-space-1 text-xs text-primary">
-                  The paused push resumes; no other changes are approved.
+                  The paused push resumes; only matching workflow diffs are
+                  approved.
                 </p>
               </div>
               <div className="rounded-md border border-default bg-surface-level-1 p-space-3">

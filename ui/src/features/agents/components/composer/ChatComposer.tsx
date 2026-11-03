@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query"
 import { PlusIcon, XIcon } from "@langchain/macaw-components/icons"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Banner } from "@langchain/macaw-components/Banner"
@@ -10,6 +11,8 @@ import { IconButton } from "@langchain/macaw-components/IconButton"
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/ssr/ImageSquare"
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu"
+import { ComposerReplyCards } from "./ComposerReplyCards"
+import type { PendingReply } from "./ComposerReplyCards"
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import {
   ComposerPromptEditor,
@@ -22,7 +25,7 @@ import {
 import { WorkspaceSelector } from "./WorkspaceSelector"
 import {
   LocalBranchSelector,
-  LocalRepoSelector,
+  LocalProjectSelector,
   LocalWorkspaceSelector,
   RunTargetSelector,
 } from "./RunTargetSelector"
@@ -48,14 +51,18 @@ import type {
 import type {
   FollowUpBehavior,
   ModelOption,
+  SessionUser,
   Skill,
   WorkspaceOption,
 } from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
-import type { SlackChannelOption } from "@/lib/api"
+import { GitHubLinkRepoSelector } from "./GitHubLinkRepoSelector"
+import { api } from "@/lib/api"
+import type { SlackChannelOption, SlackUserOption } from "@/lib/api"
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import {
   rankSlackChannels,
@@ -103,17 +110,59 @@ export interface SubmitOptions {
   alternate: boolean
 }
 
+/** What the person sends: their text, and what rides along with it. */
+export interface ComposerSubmission {
+  text: string
+  images: Array<ImageChunk>
+  replies: Array<PassageReply>
+}
+
 /** Text and attachments handed back to the composer, e.g. a cancelled queued message. */
 export interface RestoredDraft {
   /** Changes on every restore so the same content can come back twice. */
   key: number
   text: string
   images: Array<ImageChunk>
+  replies?: Array<PassageReply>
   /** Replace the previous suggested prompt if it is still exactly as suggested, instead of stacking on it. */
   replacesSuggestion?: boolean
 }
 
+class ComposerDrafts {
+  private drafts = new Map<
+    string,
+    {
+      text: string
+      images: Array<ImageChunk>
+      replies: Array<PendingReply>
+    }
+  >()
+
+  read(key?: string) {
+    return key ? this.drafts.get(key) : undefined
+  }
+
+  write(
+    key: string | undefined,
+    text: string,
+    images: Array<ImageChunk>,
+    replies: Array<PendingReply>
+  ) {
+    if (!key) return
+    this.drafts.delete(key)
+    if (!text && !images.length && !replies.length) return
+    this.drafts.set(key, { text, images, replies })
+    if (this.drafts.size > 50) {
+      const oldest = this.drafts.keys().next().value
+      if (oldest) this.drafts.delete(oldest)
+    }
+  }
+}
+
+const composerDrafts = new ComposerDrafts()
+
 export interface ChatComposerProps {
+  draftKey?: string
   placeholder?: string
   autoFocus?: boolean
   compact?: boolean
@@ -126,8 +175,7 @@ export interface ChatComposerProps {
   /** False when this viewer may not stop the live run. */
   stoppable?: boolean
   onSubmit?: (
-    value: string,
-    images: Array<ImageChunk>,
+    submission: ComposerSubmission,
     options?: SubmitOptions
   ) => void | Promise<void>
   /** What a message sent while a run is live does; drives copy only. */
@@ -135,6 +183,8 @@ export interface ChatComposerProps {
   /** Content to put back in front of whatever is being typed. */
   restoreDraft?: RestoredDraft | null
   droppedFiles?: { key: number; files: Array<File> } | null
+  /** A reply to a passage the user selected; it rides ahead of their next message. */
+  addedReply?: { key: number; reply: PassageReply } | null
   models?: Array<ModelOption>
   selection?: ModelSelection | null
   onSelectionChange?: (next: ModelSelection | null) => void
@@ -142,6 +192,8 @@ export interface ChatComposerProps {
   repos?: Array<{ full_name: string }>
   selectedRepo?: string | null
   onRepoChange?: (repo: string | null) => void
+  /** The signed-in person while they must link GitHub; the repo picker then asks them to. */
+  gitHubLinkUser?: SessionUser
   /** Desktop-only execution target. Omit this prop to keep the control out of the web UI. */
   runTarget?: RunTarget
   onRunTargetChange?: (next: RunTarget) => void
@@ -155,6 +207,7 @@ export interface ChatComposerProps {
   localWorktreeLabel?: string
   onLocalWorkspaceModeChange?: (next: DesktopWorkspaceMode) => void
   onSelectLocalRepo?: (cwd: string) => void
+  onClearLocalRepo?: () => void
   onAddLocalRepo?: () => void
   onRemoveLocalRepo?: (cwd: string) => void
   onRefreshLocalRepoBranch?: () => void
@@ -199,7 +252,8 @@ export function buildCommandItems(
   includeModelCommand = true,
   includeOffloadCommand = false,
   slackChannels: Array<SlackChannelOption> = [],
-  recentSlackChannels: ReadonlyArray<string> = []
+  recentSlackChannels: ReadonlyArray<string> = [],
+  slackUsers: Array<SlackUserOption> = []
 ): Array<ComposerCommandItem> {
   const query = trigger.query.toLowerCase()
 
@@ -252,20 +306,41 @@ export function buildCommandItems(
     ]
   }
 
-  return mentionPaths
+  const paths: Array<ComposerCommandItem> = mentionPaths
     .filter((path) => !query || path.toLowerCase().includes(query))
-    .slice(0, MAX_MENTION_SUGGESTIONS)
     .map((path) => ({
       id: `path:${path}`,
-      type: "path" as const,
+      type: "path",
       path,
       label: path.slice(path.lastIndexOf("/") + 1),
       description: path,
     }))
+  const people: Array<ComposerCommandItem> = slackUsers
+    .filter((user) =>
+      [user.name, user.display_name, user.real_name].some((name) =>
+        name.toLowerCase().includes(query)
+      )
+    )
+    .slice(
+      0,
+      paths.length > 0 ? MAX_MENTION_SUGGESTIONS / 2 : MAX_MENTION_SUGGESTIONS
+    )
+    .map((user) => ({
+      id: `user:${user.id}`,
+      type: "slack-user",
+      userId: user.id,
+      label: `@${user.display_name || user.name}`,
+      description:
+        user.real_name && user.real_name !== user.display_name
+          ? `${user.real_name} · @${user.name}`
+          : `@${user.name}`,
+    }))
+  return [...people, ...paths].slice(0, MAX_MENTION_SUGGESTIONS)
 }
 
 /** Prompt editor with autocomplete, model selection, attachments, and send/stop controls. */
 export const ChatComposer = memo(function ChatComposer({
+  draftKey,
   placeholder = "Ask Open SWE to build, fix bugs, explore",
   autoFocus = false,
   compact = false,
@@ -279,12 +354,14 @@ export const ChatComposer = memo(function ChatComposer({
   followUpBehavior = "steer",
   restoreDraft = null,
   droppedFiles = null,
+  addedReply = null,
   models = [],
   selection = null,
   onSelectionChange,
   repos,
   selectedRepo = null,
   onRepoChange,
+  gitHubLinkUser,
   runTarget,
   onRunTargetChange,
   runTargetPending,
@@ -296,6 +373,7 @@ export const ChatComposer = memo(function ChatComposer({
   localWorktreeLabel,
   onLocalWorkspaceModeChange,
   onSelectLocalRepo,
+  onClearLocalRepo,
   onAddLocalRepo,
   onRemoveLocalRepo,
   onRefreshLocalRepoBranch,
@@ -308,9 +386,28 @@ export const ChatComposer = memo(function ChatComposer({
   contextUsage,
   routed,
 }: ChatComposerProps) {
-  const [value, setValue] = useState("")
-  const [cursor, setCursor] = useState(0)
-  const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
+  const [value, setValue] = useState(
+    () => composerDrafts.read(draftKey)?.text ?? ""
+  )
+  const [cursor, setCursor] = useState(value.length)
+  const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>(
+    () => composerDrafts.read(draftKey)?.images ?? []
+  )
+  const [pendingReplies, setPendingReplies] = useState<Array<PendingReply>>(
+    () => composerDrafts.read(draftKey)?.replies ?? []
+  )
+  useEffect(() => {
+    composerDrafts.write(draftKey, value, pendingImages, pendingReplies)
+  }, [draftKey, value, pendingImages, pendingReplies])
+  const [appliedReply, setAppliedReply] = useState<typeof addedReply>(null)
+  if (addedReply !== appliedReply) {
+    setAppliedReply(addedReply)
+    if (addedReply)
+      setPendingReplies((prev) => [
+        ...prev,
+        { id: `added:${addedReply.key}`, reply: addedReply.reply },
+      ])
+  }
   const [dragKind, setDragKind] = useState<"files" | "path" | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
@@ -368,6 +465,10 @@ export const ChatComposer = memo(function ChatComposer({
     if (autoFocus) editorRef.current?.focus()
   }, [autoFocus])
 
+  useEffect(() => {
+    if (addedReply) editorRef.current?.focusAtEnd()
+  }, [addedReply])
+
   // Synchronous double-submit guard: blocks a same-tick second send (Enter +
   // click, or two rapid Enters) before React re-renders. Scoped to the send
   // request only — never the run lifecycle.
@@ -381,6 +482,12 @@ export const ChatComposer = memo(function ChatComposer({
   const slackChannels = useSlackChannelDirectory(
     trigger?.kind === "slack-channel"
   ).data?.channels
+  const slackUsers = useQuery({
+    queryKey: ["slackUsers"],
+    queryFn: api.listSlackUsers,
+    enabled: trigger?.kind === "path",
+    staleTime: 300_000,
+  })
   const recentSlackChannels = useRecentSlackChannels()
   const skillNames = useMemo(
     () => new Set(skills.map((skill) => skill.name)),
@@ -396,7 +503,8 @@ export const ChatComposer = memo(function ChatComposer({
             models.length > 0,
             canOffload,
             slackChannels,
-            recentSlackChannels
+            recentSlackChannels,
+            slackUsers.data?.users
           )
         : [],
     [
@@ -407,11 +515,12 @@ export const ChatComposer = memo(function ChatComposer({
       canOffload,
       slackChannels,
       recentSlackChannels,
+      slackUsers.data,
     ]
   )
   const menuOpen =
     trigger !== null &&
-    commandItems.length > 0 &&
+    (commandItems.length > 0 || trigger.kind === "path") &&
     dismissedTriggerKey !== triggerKey
   const activeItem =
     commandItems.find((item) => item.id === activeItemId) ??
@@ -423,7 +532,10 @@ export const ChatComposer = memo(function ChatComposer({
     return models.some((m) => m.id === selection.modelId && m.supports_images)
   }, [models, pendingImages.length, selection])
 
-  const composerEmpty = value.trim().length === 0 && pendingImages.length === 0
+  const composerEmpty =
+    value.trim().length === 0 &&
+    pendingImages.length === 0 &&
+    pendingReplies.length === 0
   const canSubmit =
     !disabled && !isSubmitting && selectedModelSupportsImages && !composerEmpty
 
@@ -453,6 +565,16 @@ export const ChatComposer = memo(function ChatComposer({
       // oxlint-disable-next-line react/set-state-in-effect
       setPendingImages((prev) => [...restoreDraft.images, ...prev])
     }
+    const restoredReplies = restoreDraft.replies ?? []
+    if (restoredReplies.length > 0) {
+      setPendingReplies((prev) => [
+        ...restoredReplies.map((reply, index) => ({
+          id: `restored:${restoreDraft.key}:${index}`,
+          reply,
+        })),
+        ...prev,
+      ])
+    }
     editorRef.current?.focusAtEnd()
   }, [applyPrompt, restoreDraft, value])
 
@@ -463,25 +585,31 @@ export const ChatComposer = memo(function ChatComposer({
       // has not yet round-tripped through state would otherwise be dropped.
       const snapshot = editorRef.current?.readSnapshot()
       const trimmed = (snapshot?.value ?? value).trim()
-      if (trimmed.length === 0 && pendingImages.length === 0) return
+      const attached = pendingImages.length + pendingReplies.length
+      if (trimmed.length === 0 && attached === 0) return
 
-      if (trimmed === "/offload" && (!canOffload || pendingImages.length)) {
+      if (trimmed === "/offload" && (!canOffload || attached)) {
         setComposerError(
-          pendingImages.length
+          attached
             ? "Offloading does not accept attachments."
             : "Offloading requires an idle, existing conversation."
         )
         return
       }
 
-      const images = pendingImages
+      const submission = {
+        text: trimmed,
+        images: pendingImages,
+        replies: pendingReplies.map((pending) => pending.reply),
+      }
       submittingRef.current = true
       setIsSubmitting(true)
       applyPrompt("", 0)
       setPendingImages([])
+      setPendingReplies([])
       setComposerError(null)
       try {
-        await onSubmit?.(trimmed, images, options)
+        await onSubmit?.(submission, options)
       } catch {
         // Caller surfaces send errors (e.g. via react-query mutation state).
       } finally {
@@ -489,7 +617,15 @@ export const ChatComposer = memo(function ChatComposer({
         setIsSubmitting(false)
       }
     },
-    [applyPrompt, disabled, onSubmit, pendingImages, value, canOffload]
+    [
+      applyPrompt,
+      disabled,
+      onSubmit,
+      pendingImages,
+      pendingReplies,
+      value,
+      canOffload,
+    ]
   )
 
   const selectCommandItem = useCallback(
@@ -510,6 +646,7 @@ export const ChatComposer = memo(function ChatComposer({
       if (
         item.type === "path" ||
         item.type === "skill" ||
+        item.type === "slack-user" ||
         item.type === "slack-channel"
       ) {
         if (item.type === "slack-channel")
@@ -522,7 +659,9 @@ export const ChatComposer = memo(function ChatComposer({
             ? mentionReplacementText(item.path)
             : item.type === "slack-channel"
               ? `${slackChannelReference(item.channelId, item.name)} `
-              : `/${item.name} `
+              : item.type === "slack-user"
+                ? `<@${item.userId}> `
+                : `/${item.name} `
         )
         applyPrompt(next.text, next.cursor)
         return
@@ -544,6 +683,10 @@ export const ChatComposer = memo(function ChatComposer({
 
   const handleCommandKeyDown = useCallback(
     (key: ComposerCommandKey, event: KeyboardEvent): boolean => {
+      if (menuOpen && key === "Escape") {
+        setDismissedTriggerKey(triggerKey)
+        return true
+      }
       if (menuOpen && activeItem) {
         switch (key) {
           case "ArrowDown":
@@ -562,9 +705,6 @@ export const ChatComposer = memo(function ChatComposer({
           case "Enter":
           case "Tab":
             selectCommandItem(activeItem)
-            return true
-          case "Escape":
-            setDismissedTriggerKey(triggerKey)
             return true
         }
       }
@@ -703,15 +843,15 @@ export const ChatComposer = memo(function ChatComposer({
     [addFiles]
   )
 
+  const executionTarget = runTarget && (
+    <RunTargetSelector
+      onChange={onRunTargetChange}
+      pending={runTargetPending}
+      value={runTarget}
+    />
+  )
   const targetControls = (onRepoChange || runTarget || onWorkspaceChange) && (
     <>
-      {runTarget && (
-        <RunTargetSelector
-          onChange={onRunTargetChange}
-          pending={runTargetPending}
-          value={runTarget}
-        />
-      )}
       {runTarget !== "local" && onWorkspaceChange && (
         <WorkspaceSelector
           workspaces={workspaceOptions}
@@ -720,7 +860,10 @@ export const ChatComposer = memo(function ChatComposer({
           side="top"
         />
       )}
-      {runTarget !== "local" && onRepoChange && (
+      {runTarget !== "local" && onRepoChange && gitHubLinkUser && (
+        <GitHubLinkRepoSelector user={gitHubLinkUser} side="top" />
+      )}
+      {runTarget !== "local" && onRepoChange && !gitHubLinkUser && (
         <RepoSelector
           emptySelectionLabel="Don't work in a repository"
           noMatchesLabel="No matching repositories"
@@ -732,20 +875,19 @@ export const ChatComposer = memo(function ChatComposer({
           side="top"
         />
       )}
+      {runTarget === "local" && (
+        <LocalProjectSelector
+          onAdd={onAddLocalRepo}
+          onClear={onClearLocalRepo}
+          onRemove={onRemoveLocalRepo}
+          onSelect={onSelectLocalRepo}
+          projects={localRepos}
+          selectedPath={selectedLocalRepoPath}
+          side="top"
+        />
+      )}
       {runTarget === "local" &&
-        onSelectLocalRepo &&
-        onAddLocalRepo &&
-        onRemoveLocalRepo && (
-          <LocalRepoSelector
-            onAddRepo={onAddLocalRepo}
-            onRemoveRepo={onRemoveLocalRepo}
-            onSelectRepo={onSelectLocalRepo}
-            repos={localRepos}
-            selectedRepoPath={selectedLocalRepoPath}
-            side="top"
-          />
-        )}
-      {runTarget === "local" &&
+        localRepoBranches.length > 0 &&
         onRefreshLocalRepoBranch &&
         onSelectLocalRepoBranch && (
           <LocalBranchSelector
@@ -756,13 +898,15 @@ export const ChatComposer = memo(function ChatComposer({
             selectedBranch={selectedLocalRepoBranch}
           />
         )}
-      {runTarget === "local" && onSelectLocalRepoBranch && (
-        <LocalWorkspaceSelector
-          onChange={onLocalWorkspaceModeChange}
-          value={localWorkspaceMode}
-          worktreeLabel={localWorktreeLabel}
-        />
-      )}
+      {runTarget === "local" &&
+        localRepoBranches.length > 0 &&
+        onSelectLocalRepoBranch && (
+          <LocalWorkspaceSelector
+            onChange={onLocalWorkspaceModeChange}
+            value={localWorkspaceMode}
+            worktreeLabel={localWorktreeLabel}
+          />
+        )}
     </>
   )
 
@@ -793,9 +937,9 @@ export const ChatComposer = memo(function ChatComposer({
       <div
         data-chat-composer
         className={cn(
-          "relative z-floating-bar flex flex-col rounded-xl border bg-elevated px-space-3 py-space-2 shadow-md transition-[border-color,box-shadow] duration-slow hover:shadow-lg",
+          "relative z-floating-bar flex flex-col rounded-2xl border bg-elevated px-space-4 py-space-3 shadow-sm transition-[border-color,box-shadow] duration-slow",
           compact ? "min-h-[88px]" : "min-h-[106px]",
-          dragKind ? "border-brand" : "border-default"
+          dragKind ? "border-brand" : "border-subtle dark:border-transparent"
         )}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
@@ -808,6 +952,15 @@ export const ChatComposer = memo(function ChatComposer({
             items={commandItems}
             onHighlight={setActiveItemId}
             onSelect={selectCommandItem}
+            emptyStateText={
+              trigger.kind === "path"
+                ? slackUsers.isPending
+                  ? "Loading people…"
+                  : slackUsers.isError
+                    ? "Could not load Slack people. Type @ again to retry."
+                    : "No matching people or files."
+                : undefined
+            }
             triggerKind={trigger.kind}
           />
         )}
@@ -829,6 +982,15 @@ export const ChatComposer = memo(function ChatComposer({
           onChange={handleFileChange}
           ref={fileInputRef}
           type="file"
+        />
+
+        <ComposerReplyCards
+          replies={pendingReplies}
+          onRemove={(id) =>
+            setPendingReplies((prev) =>
+              prev.filter((pending) => pending.id !== id)
+            )
+          }
         />
 
         {pendingImages.length > 0 && (
@@ -951,8 +1113,9 @@ export const ChatComposer = memo(function ChatComposer({
       </div>
 
       {targetControls && (
-        <div className="mt-space-2 flex min-w-0 flex-wrap items-center gap-x-space-5 gap-y-space-2 px-space-3 text-xs">
+        <div className="mx-space-3 -mt-space-4 flex min-w-0 flex-wrap items-center gap-x-space-4 gap-y-space-2 rounded-b-xl border border-t-0 border-subtle bg-surface-level-2 px-space-4 pt-space-5 pb-space-2 text-xs dark:border-transparent">
           {targetControls}
+          <div className="ml-auto">{executionTarget}</div>
         </div>
       )}
     </div>

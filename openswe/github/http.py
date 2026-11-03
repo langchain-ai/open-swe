@@ -25,7 +25,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 from urllib.parse import quote, urlparse
 
 import httpx2
@@ -43,6 +43,7 @@ from openswe.github.queue import (
     ValidationRuns,
     WorkflowRun,
 )
+from openswe.utils.dashboard_links import dashboard_api_base_url, dashboard_base_url
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.url_safety import request_with_safe_redirects
 
@@ -222,16 +223,29 @@ async def github_request(
     raise last_exc or httpx2.HTTPError("Max retries exceeded")
 
 
+def github_reauth_message(login: str | None = None) -> str:
+    person = f" for {login}" if login else ""
+    url = f"{dashboard_base_url() or dashboard_api_base_url()}/my-settings/connections"
+    return (
+        f"GitHub token unavailable{person}. Link GitHub again in Open SWE's connections "
+        f"settings: {url}. Then retry the action."
+    )
+
+
 class GitHubSignInRequired(Exception):
     """The person has no usable GitHub authorization and must sign in again."""
 
     def __init__(self, login: str) -> None:
-        super().__init__(f"GitHub sign-in required for {login}")
+        super().__init__(github_reauth_message(login))
         self.login = login
 
 
 class GitHubAppUnavailable(Exception):
     """No GitHub App installation token can be minted for the request."""
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class RepoFileUnreadableError(RuntimeError):
@@ -325,6 +339,7 @@ class GitHubClient:
             installation_id=installation_id,
             repositories=[repo] if permissions is not None and repo is not None else None,
             permissions=permissions,
+            raise_errors=True,
         )
         if not token:
             raise GitHubAppUnavailable("GitHub App token unavailable")
@@ -333,6 +348,14 @@ class GitHubClient:
 
     def repo(self, owner: str, name: str) -> RepoClient:
         return RepoClient(self, owner, name)
+
+    async def viewer_login(self) -> str:
+        """The login of the account this client's token acts as."""
+        payload = await self.get("user")
+        login = payload.get("login") if isinstance(payload, dict) else None
+        if not isinstance(login, str) or not login:
+            raise ValueError("GitHub answered the authenticated user without a login")
+        return login
 
     async def request(self, method: str, path: str, **kwargs: Any) -> httpx2.Response:
         """``path`` is relative to the REST API root, or an absolute URL."""
@@ -567,6 +590,28 @@ class RepoClient:
                 blob = repository.get(f"f{i}")
                 if isinstance(blob, Mapping) and isinstance(blob.get("text"), str):
                     found[path] = blob["text"]
+        return found
+
+    async def read_dir(self, path: str, ref: str | None) -> dict[str, str | None]:
+        """Text of each file directly in ``path`` at ``ref`` (the default branch when ``None``).
+
+        A file GitHub returns no text for (binary or too large) maps to ``None``.
+        """
+        data = await self.graphql(
+            "query($owner:String!,$repo:String!,$expression:String!)"
+            "{repository(owner:$owner,name:$repo){object(expression:$expression)"
+            "{...on Tree{entries{path type object{...on Blob{text}}}}}}}",
+            {"expression": f"{ref or 'HEAD'}:{path}"},
+        )
+        tree = (data.get("repository") or {}).get("object")
+        entries = tree.get("entries") if isinstance(tree, Mapping) else None
+        found: dict[str, str | None] = {}
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, Mapping) or entry.get("type") != "blob":
+                continue
+            blob = entry.get("object")
+            text = blob.get("text") if isinstance(blob, Mapping) else None
+            found[entry["path"]] = text if isinstance(text, str) else None
         return found
 
     async def can_write(self, login: str) -> bool:
@@ -909,6 +954,45 @@ def _artifact_destination(location: str) -> None:
         or url.port not in (None, 443)
     ):
         raise ValueError("Untrusted artifact download destination")
+
+
+type ReadStatus = Literal["ok", "transient", "missing", "forbidden", "unavailable"]
+
+
+@dataclass(frozen=True, slots=True)
+class ReadResult[T]:
+    """A GitHub read and the reason it could not be completed."""
+
+    value: T | None
+    status: ReadStatus
+
+
+async def read_result[T](read: Awaitable[T]) -> ReadResult[T]:
+    """Preserve retryable failures separately from missing or inaccessible resources."""
+    try:
+        return ReadResult(await read, "ok")
+    except httpx2.HTTPStatusError as exc:
+        response = exc.response
+        status: ReadStatus = "unavailable"
+        if (
+            response.status_code == 429
+            or 500 <= response.status_code < 600
+            or _is_secondary_rate_limit(response)
+            or (response.status_code == 403 and "Retry-After" in response.headers)
+        ):
+            status = "transient"
+        elif response.status_code == 404:
+            status = "missing"
+        elif response.status_code in {401, 403}:
+            status = "forbidden"
+        logger.warning("GitHub read failed", extra={"read_status": status}, exc_info=True)
+        return ReadResult(None, status)
+    except httpx2.TransportError:
+        logger.warning("GitHub read transport failed", exc_info=True)
+        return ReadResult(None, "transient")
+    except httpx2.HTTPError, ValueError:
+        logger.warning("GitHub read unavailable", exc_info=True)
+        return ReadResult(None, "unavailable")
 
 
 async def or_none[T](read: Awaitable[T]) -> T | None:

@@ -18,11 +18,11 @@ from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph.message import add_messages
 from langgraph.runtime import Runtime
+from runtime_api.catalog import InboxSpec
 from sqlalchemy import delete, func, select, text, update
 
 from openswe import completion
 from openswe.database import postgres
-from openswe.middleware.model_call_shape import CallShape
 from openswe.tasks import events, presentation, store
 from openswe.tasks import messages as task_messages
 from openswe.tasks.messages import TaskMessage
@@ -493,13 +493,14 @@ async def test_repaired_task_thread_checkpoints_owed_messages_once(
     if missing_task_message:
         async with postgres.session() as session:
             await message.record(session)
-    inbox = ThreadInbox(thread_id, events=True, surface="web")
+    inbox = ThreadInbox(thread_id)
+    spec = InboxSpec(events=True)
 
-    taken = await inbox.read("run-1")
+    taken = await inbox.read("run-1", spec)
     assert taken.messages[-1]["id"] == f"event-match:{message.id}"
     assert "Check logout too" in taken.messages[-1]["content"]
     await inbox.receive(events=taken.events)
-    assert (await inbox.read("run-1")).messages == []
+    assert (await inbox.read("run-1", spec)).messages == []
     async with postgres.session() as session:
         saved = await session.get_one(TaskMessage, message.id)
         assert saved.delivered_at is not None
@@ -523,17 +524,13 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
     monkeypatch.setattr(postgres, "configured", lambda: False)
     middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, enabled, None)
     state: AgentState = {"messages": [HumanMessage(content="Repair login", id="request")]}
-    received: list[CallShape] = []
 
-    async def model_call() -> None:
-        received.append(
-            await middleware.ashape_model_call(
-                CallShape(system_prompt="Existing instructions"), state, Runtime()
-            )
-        )
-
+    # The role and the task's context arrive as messages, so the system prompt stays the same.
+    role = await middleware.abefore_model(state, Runtime())
+    assert role is not None
+    assert [message["content"] for message in role["messages"]] == [middleware.instructions]
+    state["messages"] = add_messages(state["messages"], role["messages"])
     assert await middleware.abefore_model(state, Runtime()) is None
-    await model_call()
     state["messages"] = add_messages(
         state["messages"],
         [
@@ -550,7 +547,6 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
     state["messages"] = add_messages(state["messages"], update["messages"])
     assert str(task.id) in state["messages"][-1].text
     assert _COORDINATOR in state["messages"][-1].text
-    await model_call()
     state["messages"] = add_messages(
         state["messages"],
         [
@@ -564,9 +560,6 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
     assert await middleware.abefore_model(state, Runtime()) is None
     middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, enabled, None)
     assert await middleware.abefore_model(state, Runtime()) is None
-    await model_call()
-    # The task's context arrives as a message, so the system prompt stays the same.
-    assert len({call.system_prompt for call in received}) == 1
 
 
 async def test_task_context_returns_after_summarization_without_replacing_history(
@@ -587,7 +580,7 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
     initial = await middleware.abefore_model(state, Runtime())
     assert initial is not None
     state["messages"] = add_messages(state["messages"], initial["messages"])
-    original_context = state["messages"][-1]
+    told = state["messages"][-2:]
     for _ in range(2):
         cutoff = len(state["messages"])
         state["messages"] = add_messages(
@@ -605,17 +598,17 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
         state["_summarization_event"] = event
         before = list(state["messages"])
         visible_before = _DeepAgentsSummarizationMiddleware._apply_event_to_messages(before, event)
-        assert original_context not in visible_before
+        assert not any(message in visible_before for message in told)
         update = await middleware.abefore_model(state, Runtime())
         assert update is not None
         state["messages"] = add_messages(before, update["messages"])
-        assert state["messages"][:-1] == before
+        assert state["messages"][:-2] == before
         visible = _DeepAgentsSummarizationMiddleware._apply_event_to_messages(
             state["messages"], event
         )
-        assert visible[:-1] == visible_before
-        assert visible[-1].content == original_context.content
-        assert visible[-1].id != original_context.id
+        assert visible[:-2] == visible_before
+        assert [message.content for message in visible[-2:]] == [m.content for m in told]
+        assert {message.id for message in visible[-2:]}.isdisjoint(m.id for m in told)
         middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, False, context)
         assert await middleware.abefore_model(state, Runtime()) is None
 

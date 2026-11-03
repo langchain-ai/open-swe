@@ -8,13 +8,8 @@ the review not completing is reviewer infrastructure failing, not the PR.
 """
 
 import logging
-from typing import Any
-
-from langchain.agents.middleware import AgentState, after_agent
-from langgraph.runtime import Runtime
 
 from openswe.github.thread_token import resolve_thread_github_token
-from openswe.middleware.trace import scrub_middleware_inputs
 from openswe.review.findings import get_thread_metadata
 from openswe.review.publish import settle_review_check_run
 from openswe.run_config import RunConfig
@@ -22,27 +17,22 @@ from openswe.run_config import RunConfig
 logger = logging.getLogger(__name__)
 
 
-@scrub_middleware_inputs
-@after_agent
-async def settle_review_check_on_exit(
-    state: AgentState,
-    runtime: Runtime,
-) -> dict[str, Any] | None:
-    """Fail the tracked review check run if the run ended without publishing."""
+async def settle_review_check() -> None:
+    """Settle the run's tracked review check run if the run ended without publishing, as the run."""
     cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id or not cfg.repo:
-        return None
+        return
     owner, repo = cfg.repo.owner, cfg.repo.name
 
     try:
         metadata = await get_thread_metadata(thread_id)
         if not isinstance(metadata.get("review_check_run_id"), int):
-            return None
+            return
         token = await resolve_thread_github_token()
         if not token:
             logger.warning("No GitHub token to settle stale review check on thread %s", thread_id)
-            return None
+            return
         # A pending result means publish_review DID finish but its completion
         # PATCH failed transiently — retry with the real conclusion instead of
         # misreporting a published review as failed.
@@ -76,4 +66,3 @@ async def settle_review_check_on_exit(
         logger.info("Settled stale review check run for thread %s", thread_id)
     except Exception:
         logger.exception("Failed to settle stale review check run for thread %s", thread_id)
-    return None

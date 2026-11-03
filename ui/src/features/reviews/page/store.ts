@@ -17,6 +17,7 @@ import { findEntry, isRenderable, type DiffEntry } from "./diffEntries"
 
 export type RailTab = "chat" | "discussion"
 export type DiffOrder = "files" | "guide"
+export type NavigatorLayout = "tabs" | "stacked"
 
 export type DiffTarget =
   | { kind: "top" }
@@ -45,6 +46,8 @@ export type PageEvent = "showFindings" | "showOpenConversations"
 interface Preferences {
   /** Whether the file list sits beside the diff, where there is room for it. */
   navigatorOpen: boolean
+  /** Whether the file list shows the walkthrough or the tree behind tabs, or both stacked. */
+  navigatorLayout: NavigatorLayout
   order: DiffOrder
   diffStyle: DiffStyle
 }
@@ -58,7 +61,7 @@ interface HeadState {
   collapsed: ReadonlySet<string>
 }
 
-/** Words the viewer started writing on this pull request, kept until they open another one. */
+/** What the viewer started or opened on this pull request, kept until they open another one. */
 interface PullRequestState {
   pr: PullRequestRef | null
   composer: CommentDraftTarget | null
@@ -70,6 +73,9 @@ interface PullRequestState {
   pendingEdits: ReadonlyMap<number, string>
   /** Code attached to the next chat message, shown as chips above the composer. */
   chatExcerpts: ReadonlyArray<CodeExcerpt>
+  expandedFinding: string | null
+  /** Threads on the diff the reader opened or folded, against their default. */
+  threadsOpen: ReadonlyMap<number, boolean>
 }
 
 /** One visit to the page: where the reader is and what's open. Leaving the page drops it. */
@@ -90,9 +96,6 @@ interface VisitState {
   atEnd: boolean
   /** Bumped per request so asking for the same target twice still scrolls. */
   jump: { key: number; target: DiffTarget } | null
-  expandedFinding: string | null
-  /** Threads on the diff the reader opened or folded, against their default. */
-  threadsOpen: ReadonlyMap<number, boolean>
   chatDraft: { key: number; text: string } | undefined
   /** A question the chat sends as soon as it can, then clears. */
   chatQuestion: string | undefined
@@ -117,12 +120,13 @@ type ReviewPageState = Preferences & HeadState & PullRequestState & VisitState
 interface ReviewPageActions {
   /** Shows a pull request at a head; drafts survive only on the same pull request, marks only on the same head. */
   open: (pr: PullRequestRef, headSha: string | null) => void
-  /** Drops what only this visit needs, keeping drafts and marks for coming back. */
+  /** Drops what only this visit needs, keeping drafts, marks and what was opened for coming back. */
   leave: () => void
   setRailTab: (tab: RailTab) => void
   setRailOpen: (open: boolean) => void
   toggleNavigator: () => void
   setNavigatorOverlay: (open: boolean) => void
+  toggleNavigatorLayout: () => void
   openReview: (verdict?: PullRequestReviewEvent) => void
   setReviewOpen: (open: boolean) => void
   setOrder: (order: DiffOrder) => void
@@ -175,6 +179,7 @@ interface ReviewPageActions {
 const ORDER_KEY = "open-swe.review.view"
 const DIFF_STYLE_KEY = "open-swe.review.diffStyle"
 const NAVIGATOR_KEY = "open-swe.review.navigator"
+const NAVIGATOR_LAYOUT_KEY = "open-swe.review.navigatorLayout"
 /** Wide enough for the file list, the diff and the chat side by side. */
 export const NAVIGATOR_INLINE_QUERY = "(min-width: 1360px)"
 
@@ -255,6 +260,8 @@ export function isPassed(
 function storedPreferences(): Preferences {
   return {
     navigatorOpen: readPreference(NAVIGATOR_KEY) !== "closed",
+    navigatorLayout:
+      readPreference(NAVIGATOR_LAYOUT_KEY) === "stacked" ? "stacked" : "tabs",
     // A walkthrough, when one exists, is the default reading order.
     order: readPreference(ORDER_KEY) === "files" ? "files" : "guide",
     diffStyle: readPreference(DIFF_STYLE_KEY) === "split" ? "split" : "unified",
@@ -280,6 +287,8 @@ function freshPullRequest(pr: PullRequestRef | null): PullRequestState {
     replyDrafts: new Map(),
     pendingEdits: new Map(),
     chatExcerpts: [],
+    expandedFinding: null,
+    threadsOpen: new Map(),
   }
 }
 
@@ -295,8 +304,6 @@ function freshVisit(): VisitState {
     visitedSteps: new Set(),
     atEnd: false,
     jump: null,
-    expandedFinding: null,
-    threadsOpen: new Map(),
     chatDraft: undefined,
     chatQuestion: undefined,
     events: new Set(),
@@ -371,6 +378,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
 
   return {
     navigatorOpen: true,
+    navigatorLayout: "tabs",
     order: "files",
     diffStyle: "unified",
     ...freshHead(null, null),
@@ -404,6 +412,12 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       set({ navigatorOpen })
     },
     setNavigatorOverlay: (navigatorOverlay) => set({ navigatorOverlay }),
+    toggleNavigatorLayout: () => {
+      const navigatorLayout =
+        get().navigatorLayout === "stacked" ? "tabs" : "stacked"
+      writePreference(NAVIGATOR_LAYOUT_KEY, navigatorLayout)
+      set({ navigatorLayout })
+    },
     openReview: (verdict = "COMMENT") =>
       set({ reviewOpen: true, reviewVerdict: verdict }),
     setReviewOpen: (reviewOpen) => set({ reviewOpen }),

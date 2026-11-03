@@ -46,3 +46,43 @@ async def test_only_a_person_naming_the_reviewer_may_reassign(
         request_human_review, "fetch_slack_thread_message_by_ts", AsyncMock(return_value=message)
     )
     assert await request_human_review._named_by_trigger(_config(source), "bob") is named
+
+
+@pytest.mark.parametrize("source", ["slack", "mcp"])
+async def test_channel_mismatch_reports_existing_location(
+    source: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.human_review.standard import RequestResult
+
+    monkeypatch.setattr(
+        request_human_review,
+        "get_config",
+        lambda: {"configurable": {"source": source, "github_login": "alice", "thread_id": "owner"}},
+    )
+    monkeypatch.setattr(request_human_review, "_repository_refusal", AsyncMock(return_value=None))
+    monkeypatch.setattr(User, "for_login", AsyncMock(return_value=User()))
+    monkeypatch.setattr(
+        request_human_review, "run_slack_location", AsyncMock(return_value=("C1", "1.0"))
+    )
+    monkeypatch.setattr(
+        request_human_review,
+        "request_review",
+        AsyncMock(
+            return_value=RequestResult(
+                success=True,
+                request_id="request",
+                channel="C_OLD",
+                reused=True,
+                channel_mismatch=True,
+                requested_channel="C_NEW",
+            )
+        ),
+    )
+    result = await request_human_review.request_human_review(
+        "https://github.com/lc/repo/pull/7", "Summary", "#requested"
+    )
+    assert result["success"] is True
+    assert result["request_id"] == "request"
+    assert "<#C_OLD>" in result["next"] and "<#C_NEW>" in result["next"]
+    assert "dismiss_human_review_request" in result["next"]
+    assert "Do not announce" not in result["next"]

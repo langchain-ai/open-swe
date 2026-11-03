@@ -12,6 +12,7 @@ from openswe.agent_cost import RUN_COST_KEY_PREFIX
 from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
+from openswe.memories.store import CURATOR_THREAD_KEY
 from openswe.review.findings import (
     REVIEWER_THREAD_KIND,
     REVIEWER_UNTITLED,
@@ -23,6 +24,7 @@ from openswe.slack.client import parse_github_pr_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.slack.oauth import SLACK_TEAM_ID
 from openswe.source_context import SourceContext
+from openswe.threads.identity import ThreadIdentity
 from openswe.utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -119,7 +121,10 @@ def thread_is_private(metadata: Mapping[str, Any]) -> bool:
 
 def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
     """Threads that remain accessible directly but stay out of thread lists."""
-    return metadata.get("unlisted") is True or metadata.get("review_chat") is True
+    if metadata.get("unlisted") is True or metadata.get("review_chat") is True:
+        return True
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    return slack_thread is not None and slack_thread.is_concierge
 
 
 def thread_is_readable(
@@ -130,12 +135,18 @@ def thread_is_readable(
     A review chat is readable only by the user it belongs to, so its sidebar row
     can be pinned, archived and marked read.
     """
+    if login and ThreadIdentity(login).user_id is not None:
+        return thread_is_private(metadata) and thread_is_owner(metadata, login)
     if (review := ReviewSessionMetadata.parse(metadata)) is not None:
         return review.owned_by(login)
     return thread_source(metadata) in _SURFACED_SOURCES and (
         not thread_is_private(metadata)
         or thread_is_owner(metadata, login)
-        or is_admin(email, login=login)
+        or (
+            not login.startswith("user:") and is_admin(email, login=login)
+            if login
+            else is_admin(email)
+        )
     )
 
 
@@ -146,6 +157,8 @@ def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool
     shared before such threads were kept private. Nobody prompts a mirrored
     Claude Code session here: it runs in Claude Code.
     """
+    if login and ThreadIdentity(login).user_id is not None:
+        return thread_is_readable(metadata, login)
     source = thread_source(metadata)
     return (
         source in _SURFACED_SOURCES
@@ -181,6 +194,9 @@ def _assert_thread_promptable(metadata: Mapping[str, Any], login: str | None) ->
         raise HTTPException(404, "thread not found")
     if thread_is_bot_triggered(metadata):
         raise HTTPException(403, BOT_THREAD_READ_ONLY)
+    # Its wake run must take direction from nobody, and a message would join that run.
+    if metadata.get(CURATOR_THREAD_KEY):
+        raise HTTPException(403, "The memory curator's thread is read-only.")
 
 
 def _assert_thread_postable(
@@ -190,8 +206,8 @@ def _assert_thread_postable(
     # A run here would start without the history the upload is about to seed.
     if metadata.get(SESSION_UPLOAD_PENDING_KEY) is True:
         raise HTTPException(409, "this thread is waiting for its session upload")
-    if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not is_admin(
-        email, login=login
+    if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not (
+        not login.startswith("user:") and is_admin(email, login=login)
     ):
         raise HTTPException(403, "only admins can send messages in this thread")
 
@@ -530,6 +546,10 @@ async def _thread_summary(
             else None
         ),
         "adminThread": metadata.get("admin_thread") is True,
+        "concierge": bool(
+            (slack_thread := SourceContext.from_metadata(metadata).slack_thread)
+            and slack_thread.is_concierge
+        ),
         "visibility": metadata.get("visibility", "public"),
         "transcript": (
             TRANSCRIPT_VERSION if metadata.get("transcript") == TRANSCRIPT_VERSION else None
