@@ -15,10 +15,11 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from pydantic.alias_generators import to_camel
 
-from openswe.github.ci import RequiredCheck, unreported_required_checks
+from openswe.github.ci import unreported_required_checks
 from openswe.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient, or_none
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.queue import QueuePull, Review, ReviewPage
+from openswe.github.required_check_cache import RequiredCheckCache
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,18 @@ query PullRequestAllReviewThreads($owner: String!, $repo: String!, $number: Int!
             nodes { id fullDatabaseId body pullRequestReview { fullDatabaseId } }
           }
         }
+      }
+    }
+  }
+}
+"""
+_REVIEW_THREAD_STATES_QUERY = """
+query PullRequestFindingThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id isResolved }
       }
     }
   }
@@ -184,6 +197,9 @@ class PullRequestReviewer(BaseModel):
 _GITHUB_REVIEWS = TypeAdapter(list[_GithubReview])
 
 
+ReviewAssignment = Literal["assigned", "tentative", "mentioned"]
+
+
 class OpenPullRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
@@ -199,10 +215,12 @@ class OpenPullRequest(BaseModel):
     deletions: int | None = None
     mergeable: bool | None = None
     merge_state: str = "unknown"
+    auto_merge: bool = False
     head_sha: str | None = None
     head_ref: str | None = None
     status_available: bool = False
     ci: CheckState = "unknown"
+    required_checks_passing: bool | None = None
     review_decision: ReviewDecision | None = None
     reviewers: list[PullRequestReviewer] | None = None
     review_required: bool = False
@@ -210,6 +228,8 @@ class OpenPullRequest(BaseModel):
     failing_checks: list[str] = Field(default_factory=list)
     pending_checks: list[str] = Field(default_factory=list)
     missing_checks: list[str] = Field(default_factory=list)
+    # Why it is on the To Review list; ``None`` on every other list.
+    assignment: ReviewAssignment | None = None
 
 
 class OpenPullRequests(BaseModel):
@@ -449,11 +469,24 @@ class PullRequestClient:
     def _log_extra(self) -> dict[str, object]:
         return {"pr_repo_full_name": self.repo.full_name, "pr_number": self.number}
 
-    async def pull(self) -> dict[str, Any]:
-        payload = await self.repo.get(f"pulls/{self.number}")
+    async def pull(self, *, rendered_body: bool = False) -> dict[str, Any]:
+        payload = (
+            (
+                await self.repo.github.request(
+                    "GET",
+                    f"repos/{self.repo.full_name}/pulls/{self.number}",
+                    headers={"Accept": "application/vnd.github.full+json"},
+                )
+            ).json()
+            if rendered_body
+            else await self.repo.get(f"pulls/{self.number}")
+        )
         if not isinstance(payload, dict):
             raise ValueError("GitHub answered the pull request without an object")
         return payload
+
+    async def update_description(self, body: str) -> None:
+        await self.repo.patch(f"pulls/{self.number}", {"body": body})
 
     async def head_sha(self) -> str:
         head = (await self.pull()).get("head")
@@ -559,6 +592,39 @@ class PullRequestClient:
             if cursor is None:
                 return threads
 
+    async def review_thread_states(self) -> dict[str, bool]:
+        """Explicit resolution states, returned only after every page was read."""
+        states: dict[str, bool] = {}
+        cursor: str | None = None
+        seen: set[str] = set()
+        while True:
+            pull = _graphql_pull(
+                await self.repo.graphql(
+                    _REVIEW_THREAD_STATES_QUERY, {"number": self.number, "cursor": cursor}
+                )
+            )
+            connection = pull.get("reviewThreads") if pull is not None else None
+            if not isinstance(connection, Mapping) or not isinstance(connection.get("nodes"), list):
+                raise ValueError("GitHub answered finding threads without a list")
+            page_info = connection.get("pageInfo")
+            if not isinstance(page_info, Mapping) or not isinstance(
+                page_info.get("hasNextPage"), bool
+            ):
+                raise ValueError("GitHub answered finding threads without pagination")
+            for node in connection["nodes"]:
+                if (
+                    not isinstance(node, Mapping)
+                    or not isinstance(thread_id := node.get("id"), str)
+                    or not thread_id
+                    or not isinstance(resolved := node.get("isResolved"), bool)
+                    or thread_id in states
+                ):
+                    raise ValueError("GitHub answered an invalid finding thread")
+                states[thread_id] = resolved
+            cursor = _next_cursor(connection, seen)
+            if cursor is None:
+                return states
+
     async def add_review_thread(self, thread: Mapping[str, object]) -> None:
         """Add an inline comment to a pending review; ``thread`` is GraphQL's thread input."""
         await self.repo.github.graphql(_ADD_REVIEW_THREAD_MUTATION, {"input": dict(thread)})
@@ -651,6 +717,39 @@ class PullRequestClient:
         await self.repo.github.request(
             "PUT", f"repos/{self.repo.full_name}/pulls/{self.number}/merge", json=payload
         )
+
+    async def enable_auto_merge(
+        self, *, sha: str, method: str, commit_message: str | None = None
+    ) -> None:
+        """Enable GitHub's auto-merge for the head the person inspected."""
+        pull = await self.pull()
+        head = pull.get("head")
+        if not isinstance(head, Mapping) or head.get("sha") != sha:
+            raise HTTPException(409, "The PR head changed. Refresh before enabling auto-merge.")
+        node_id = pull.get("node_id")
+        if not isinstance(node_id, str) or not node_id:
+            raise ValueError("GitHub did not return the pull request ID.")
+        mutation_input: dict[str, object] = {
+            "pullRequestId": node_id,
+            "mergeMethod": method.upper(),
+            "expectedHeadOid": sha,
+        }
+        if commit_message is not None:
+            mutation_input["commitBody"] = commit_message
+        data = await self.repo.github.graphql(
+            """
+            mutation EnableAutoMerge($input: EnablePullRequestAutoMergeInput!) {
+              enablePullRequestAutoMerge(input: $input) {
+                pullRequest { autoMergeRequest { enabledAt } }
+              }
+            }
+            """,
+            {"input": mutation_input},
+        )
+        enabled = data.get("enablePullRequestAutoMerge")
+        updated = enabled.get("pullRequest") if isinstance(enabled, Mapping) else None
+        if not isinstance(updated, Mapping) or not updated.get("autoMergeRequest"):
+            raise ValueError("GitHub did not confirm auto-merge was enabled.")
 
     async def mergeable_pull(self) -> dict[str, Any] | None:
         """Read the pull request, waiting for GitHub to decide whether it merges.
@@ -921,10 +1020,13 @@ class PullRequestClient:
             deletions=_as_optional_int(source.get("deletions")),
             mergeable=_as_optional_bool(source.get("mergeable")),
             merge_state=_as_str(source.get("mergeable_state"), "unknown"),
+            auto_merge=bool(source.get("auto_merge")),
             status_available=pull is not None,
         )
         if pull is None:
             return result
+        if result.merge_state == "clean":
+            result.required_checks_passing = True
         head = pull.get("head")
         if not isinstance(head, Mapping):
             return result
@@ -977,10 +1079,23 @@ class PullRequestClient:
         )
         base = pull.get("base")
         base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
-        # A check gated on `needs:` has no run until its upstream jobs finish.
-        if base_ref is not None and result.merge_state == "blocked" and not pending:
-            required = await RequiredCheck.for_branch(self.repo, base_ref)
+        if base_ref is not None and result.merge_state != "clean":
+            required = await RequiredCheckCache(self.repo.full_name, base_ref).read(
+                self.repo.github.login
+            )
             if required is not None:
+                passing_runs = [
+                    run
+                    for run in runs
+                    if run.get("status") == "completed"
+                    and run.get("conclusion") in {"success", "neutral", "skipped"}
+                ]
+                passing_statuses = [
+                    status for status in statuses if status.get("state") == "success"
+                ]
+                result.required_checks_passing = all(
+                    check.reported_by(passing_runs, passing_statuses) for check in required
+                )
                 result.missing_checks = unreported_required_checks(required, runs, statuses)
         return result
 

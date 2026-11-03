@@ -2,14 +2,17 @@
 
 They carry the names, descriptions and argument schemas the backend gives its
 operations, so the prompts, the transcript and the dashboard see what an
-in-process run shows. The tool call is this runtime's: it sends the arguments and
-the run state the operation reads, then turns what the operation answers into the
-tool's result and its state updates. The file and shell tools are this runtime's
-own (``rt.file_tools``).
+in-process run shows. The tool call is this runtime's: it sends the arguments, the
+run state the operation reads and, read as the run, the credentials of the MDA
+connections its tool uses, then turns what the operation answers into the tool's
+result and its state updates. The file and shell tools are this runtime's own
+(``rt.file_tools``).
 """
 
 import logging
+import time
 from collections.abc import Awaitable, Callable, Mapping
+from functools import partial
 from typing import Final
 from uuid import uuid4
 
@@ -19,6 +22,12 @@ from langchain_core.tools import StructuredTool
 from langchain_quickjs import UnresolvedToolError
 from langgraph.config import get_config
 from langgraph.types import Command
+from managed_deepagents import (
+    ConnectionNotFoundError,
+    CredentialAuthorizationRequiredError,
+    CredentialStoreError,
+    connections,
+)
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import ToolSpec
 from runtime_api.endpoint import LONG_CALL_SECONDS, call
@@ -37,13 +46,12 @@ from rt.backend import (
     BackendTimeoutError,
     BackendUnavailableError,
     OpenSweBackend,
-    git_trace,
     held_state,
     issuing_message_id,
     namespace,
     reported_call,
 )
-from rt.tracing import TurnTrace
+from rt.git_evidence import turn_git
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +64,14 @@ _UNREACHABLE: Final = (
     "Error: The Open SWE backend could not be reached for this tool call. "
     "It may or may not have run; check state before retrying."
 )
+_NO_CONNECTION: Final = (
+    "Error: This tool reads its credential from the deployment's {slug} connection, which "
+    "is not set up, so it did not run. An admin creates it with `mda connections create {slug}`."
+)
+_UNREAD_CONNECTION: Final = (
+    "Error: This tool could not read its credential from the deployment's connections, so "
+    "it did not run: {reason}"
+)
 _json = TypeAdapter(JsonValue)
 _json_list = TypeAdapter(list[dict[str, JsonValue]])
 _json_object = TypeAdapter(dict[str, JsonValue])
@@ -63,7 +79,15 @@ _json_content = TypeAdapter(str | list[JsonValue])
 
 
 class SandboxGoneError(RuntimeError):
-    """The thread's box did not answer an operation; the person has been told, and the run ends."""
+    """The thread's sandbox did not answer an operation; the person has been told, and the run ends."""
+
+
+class UnreadConnectionError(RuntimeError):
+    """A connection of the deployment's an operation needs could not be read, so it did not run."""
+
+    async def result(self, tool_call_id: str) -> ToolMessage | Command:
+        """The failed tool call, which tells the model why."""
+        return ToolMessage(content=str(self), tool_call_id=tool_call_id, status="error")
 
 
 def run_id() -> str | None:
@@ -81,11 +105,10 @@ def tool_report(
     arguments: Mapping[str, JsonValue],
     tool_call_id: str,
 ) -> ToolCallReport:
-    """A tool call as the backend's transcript takes it, with the turn's git evidence."""
+    """A tool call as the backend's transcript takes it."""
     return ToolCallReport(
         run_id=run_id(),
         namespace=namespace(),
-        git={**git_trace(state), **TurnTrace.current_evidence()},
         name=name,
         arguments=dict(arguments),
         tool_call_id=tool_call_id,
@@ -135,8 +158,6 @@ def _result(answer: OperationResult, tool_call_id: str, name: str) -> ToolMessag
         name=name,
         id=answer.message_id,
     )
-    if answer.evidence:
-        TurnTrace.record_evidence(answer.evidence)
     if not answer.state:
         return message
     return Command(update={"messages": [message], STATE_KEY: answer.state})
@@ -162,12 +183,57 @@ async def cited(
     return result.model_copy(update={"content": _content(reply.content)})
 
 
+async def _credentials(spec: ToolSpec) -> dict[str, str]:
+    """What the run reads of each connection ``spec`` names, by slug.
+
+    One of the deployment's it cannot read raises ``UnreadConnectionError``.
+
+    A person who has not granted a user connection is asked to, and the run pauses
+    until they answer (``GraphBubbleUp``). A user connection the run cannot read
+    otherwise (it acts for no person, they would not grant it, Agent Auth could not
+    be reached) is left out, and the operation goes on as it did without it.
+    """
+    credentials: dict[str, str] = {}
+    for ref in spec.connections:
+        extra = {"operation": spec.name, "connection": ref.slug}
+        try:
+            credentials[ref.slug] = await connections.get(ref.slug, {"type": ref.owner})
+        except ConnectionNotFoundError as exc:
+            logger.warning("An operation's connection is not set up", extra=extra)
+            raise UnreadConnectionError(_NO_CONNECTION.format(slug=ref.slug)) from exc
+        except (CredentialStoreError, CredentialAuthorizationRequiredError) as exc:
+            if ref.owner == "agent":
+                # Its message quotes no more of Agent Auth's answer than the problem's
+                # detail and remedy, never a credential, so the model may read it.
+                logger.warning(
+                    "Could not read an operation's connection", extra=extra, exc_info=True
+                )
+                raise UnreadConnectionError(_UNREAD_CONNECTION.format(reason=exc)) from exc
+            logger.info(
+                "The run reads no user connection for an operation",
+                extra={**extra, "reason": str(exc)},
+            )
+        except OSError as exc:
+            # The SDK raises ``urllib.error.URLError`` when Agent Auth does not answer.
+            logger.warning(
+                "Could not reach Agent Auth for an operation's connection",
+                extra=extra,
+                exc_info=True,
+            )
+            if ref.owner == "agent":
+                raise UnreadConnectionError(
+                    _UNREAD_CONNECTION.format(reason="Agent Auth could not be reached.")
+                ) from exc
+    return credentials
+
+
 async def _operate(
     backend: OpenSweBackend,
     spec: ToolSpec,
     arguments: Mapping[str, JsonValue],
     runtime: ToolRuntime,
     tool_call_id: str,
+    credentials: dict[str, str],
 ) -> ToolMessage | Command:
     request = _reading(spec, runtime.state).model_copy(
         update={
@@ -175,8 +241,10 @@ async def _operate(
             "arguments": dict(arguments),
             "request_id": tool_call_id,
             "grant": backend.grant(spec),
+            "credentials": credentials,
         }
     )
+    started = time.time_ns()
     try:
         answer = await call(backend, OPERATION, request, timeout=_seconds(spec, arguments))
     except BackendTimeoutError:
@@ -189,18 +257,20 @@ async def _operate(
         raise SandboxGoneError(f"The thread's sandbox did not answer {spec.name}")
     for event in answer.events:
         runtime.stream_writer(event)
+    turn_git(backend.run).found_pull_requests(answer.pull_requests, started)
     return _result(answer, tool_call_id, spec.name)
 
 
-async def run_operation(
+async def called(
     backend: OpenSweBackend,
-    spec: ToolSpec,
+    name: str,
     arguments: Mapping[str, JsonValue],
     runtime: ToolRuntime,
+    make: Callable[[str], Awaitable[ToolMessage | Command]],
     *,
     cites_evidence: bool = False,
 ) -> ToolMessage | Command:
-    """Call ``spec``'s operation with ``arguments``, for one tool call.
+    """Make one call of tool ``name`` with ``arguments``: ``make``, given the call's id.
 
     Code mode calls tools directly, past the agent's tool-call chain that reports each
     call and cites it as incident evidence, so a call it makes does both itself, under
@@ -208,14 +278,12 @@ async def run_operation(
     """
     outer = reported_call()
     if outer is None or outer == runtime.tool_call_id:
-        return await _operate(backend, spec, arguments, runtime, runtime.tool_call_id or "")
-    tool_call_id = f"{outer}:{spec.name}:{uuid4().hex[:8]}"
-    report = tool_report(
-        runtime.state, name=spec.name, arguments=arguments, tool_call_id=tool_call_id
-    )
+        return await make(runtime.tool_call_id or "")
+    tool_call_id = f"{outer}:{name}:{uuid4().hex[:8]}"
+    report = tool_report(runtime.state, name=name, arguments=arguments, tool_call_id=tool_call_id)
     backend.outbox.started(report)
     try:
-        result = await _operate(backend, spec, arguments, runtime, tool_call_id)
+        result = await make(tool_call_id)
     except Exception as exc:
         failure = ToolMessage(
             content=f"{type(exc).__name__}: {exc}", tool_call_id=tool_call_id, status="error"
@@ -224,7 +292,7 @@ async def run_operation(
         raise
     message = result if isinstance(result, ToolMessage) else _answer(result, tool_call_id)
     if cites_evidence:
-        message = await cited(backend, spec.name, arguments, message)
+        message = await cited(backend, name, arguments, message)
     backend.outbox.finished(report, message)
     if isinstance(result, ToolMessage):
         return message
@@ -245,6 +313,27 @@ def _answer(result: Command, tool_call_id: str) -> ToolMessage:
 
 def _update(result: Command) -> dict[str, object]:
     return dict(result.update) if isinstance(result.update, Mapping) else {}
+
+
+async def run_operation(
+    backend: OpenSweBackend,
+    spec: ToolSpec,
+    arguments: Mapping[str, JsonValue],
+    runtime: ToolRuntime,
+    *,
+    cites_evidence: bool = False,
+) -> ToolMessage | Command:
+    """Call ``spec``'s operation with ``arguments``, for one tool call, with what the run
+    reads of the connections it names."""
+    # Read before code mode reports the call: a pause for a grant runs the code again,
+    # which reports the call under a new id, so a report made first would never finish.
+    try:
+        credentials = await _credentials(spec)
+    except UnreadConnectionError as exc:
+        make = exc.result
+    else:
+        make = partial(_operate, backend, spec, arguments, runtime, credentials=credentials)
+    return await called(backend, spec.name, arguments, runtime, make, cites_evidence=cites_evidence)
 
 
 def operation_tool(

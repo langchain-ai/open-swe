@@ -8,6 +8,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx2
+from runtime_api import sandbox_setup
 
 from openswe.analytics.identity import DisplayNameSource
 from openswe.input_messages import PersonIdentity
@@ -33,11 +34,8 @@ _TOKEN_IDENTITY_CACHE_TTL = timedelta(hours=1)
 _GITHUB_LOGIN_MAX_CHARS = 39
 _GITHUB_LOGIN_ALLOWED = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
 
-OPEN_SWE_BOT_NAME = "open-swe[bot]"
-# Use the open-swe user noreply address: the bot's numeric noreply
-# (215916821+open-swe[bot]@...) doesn't resolve to a GitHub account Vercel
-# accepts, which broke preview deploys on commits carrying this co-author.
-OPEN_SWE_BOT_EMAIL = "open-swe@users.noreply.github.com"
+OPEN_SWE_BOT_NAME = sandbox_setup.GIT_NAME
+OPEN_SWE_BOT_EMAIL = sandbox_setup.GIT_EMAIL
 
 PR_ATTRIBUTION_TEXT = "Made by [Open SWE]"
 PR_ATTRIBUTION_DEFAULT_URL = "https://github.com/langchain-ai/open-swe"
@@ -103,6 +101,8 @@ class ThreadParticipant:
     workspace_admin: bool = False
     draft_prs: bool = True
     instructions: str = ""
+    # What the person asked their runs to remember (``remember``), newest first.
+    memories: tuple[str, ...] = ()
     email: str = ""
     timezone: str = ""
     linked: bool = False
@@ -128,6 +128,8 @@ class ThreadParticipant:
         person["new_prs"] = "as drafts" if self.draft_prs else "ready for review"
         if self.instructions.strip():
             person["standing_instructions"] = self.instructions.strip()
+        if self.memories:
+            person["personal_memories"] = "\n".join(f"- {memory}" for memory in self.memories)
         return person
 
 

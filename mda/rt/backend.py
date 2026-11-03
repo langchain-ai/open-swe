@@ -20,7 +20,7 @@ import os
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Final, Literal, cast
+from typing import Final, cast
 from weakref import WeakKeyDictionary
 
 import httpx2
@@ -46,6 +46,7 @@ from runtime_api.loop import VISIBLE_FROM, RunCall
 from runtime_api.tool_search import TOOL_SPECS, ToolNames
 from runtime_api.workers import ADOPT, Adopt
 
+from rt.kinds import KINDS, Graph
 from rt.outbox import Outbox
 from rt.tracing import TurnTrace
 
@@ -123,6 +124,10 @@ class BackendUnavailableError(BackendCallError):
     """A transport or gateway failure left the call without a usable response."""
 
 
+class BackendRefusedError(BackendCallError):
+    """The backend answered that the run may not make this call."""
+
+
 def held_state(state: Mapping[str, object]) -> dict[str, JsonValue]:
     """The graph state the backend's hooks keep, which goes back with every call."""
     held = state.get("open_swe_state")
@@ -132,16 +137,6 @@ def held_state(state: Mapping[str, object]) -> dict[str, JsonValue]:
     if isinstance(cutoff, int):
         forwarded[VISIBLE_FROM] = cutoff
     return _json_object.validate_python({**(held if isinstance(held, dict) else {}), **forwarded})
-
-
-_GIT_TRACE_PREFIX: Final = "git_trace_"
-
-
-def git_trace(state: Mapping[str, object]) -> dict[str, JsonValue]:
-    """The turn's git trace the backend keeps in the run's state: its baseline and evidence."""
-    return {
-        key: value for key, value in held_state(state).items() if key.startswith(_GIT_TRACE_PREFIX)
-    }
 
 
 def namespace() -> list[str]:
@@ -222,9 +217,6 @@ def _call_failure(response: httpx2.Response) -> CallFailure | None:
         return None
 
 
-Graph = Literal["agent", "reviewer", "review-scout"]
-
-
 class Run:
     """One run of a graph, as the backend knows it: what it calls with, what it was
     planned with, and what it has told the backend.
@@ -235,6 +227,8 @@ class Run:
     """
 
     def __init__(self, context: RunContext) -> None:
+        # What every run of its kind does, whatever its catalog says.
+        self._kind = KINDS[context.graph]
         # Dispatch sends the catalog it planned the run with in every run's context.
         self._carried = context.catalog
         self._token = context.run_token
@@ -289,7 +283,7 @@ class Run:
         """The catalog the run started with: its coordinator's, for a launched worker."""
         if self._planned is None:
             if self._carried is not None:
-                self._planned = Catalog.model_validate(self._carried)
+                self._planned = self._kind.applied(Catalog.model_validate(self._carried))
             elif self.has_run:
                 raise BackendCallError("The run started without its catalog")
             else:
@@ -311,7 +305,7 @@ class Run:
         )
         self._token, self._worker_grant = adopted.run_token, None
         self.invocation_id = adopted.invocation_id
-        self.adopted = adopted.catalog
+        self.adopted = self._kind.applied(adopted.catalog)
         # Resolved under the coordinator's grants.
         self.backend_tools.clear()
 
@@ -484,11 +478,11 @@ class OpenSweBackend:
                     )
                     await asyncio.sleep(wait)
                     continue
-                error = (
-                    BackendUnavailableError
-                    if isinstance(exc, httpx2.TransportError) or status in _GATEWAY_STATUSES
-                    else BackendCallError
-                )
+                error: type[BackendCallError] = BackendCallError
+                if isinstance(exc, httpx2.TransportError) or status in _GATEWAY_STATUSES:
+                    error = BackendUnavailableError
+                elif status == 403:
+                    error = BackendRefusedError
                 raise error(f"{label} failed ({type(exc).__name__})") from exc
         return _json.validate_python(response.json())
 

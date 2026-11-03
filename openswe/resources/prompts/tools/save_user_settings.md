@@ -13,6 +13,7 @@ Supported profile fields:
 - `auto_human_review_enabled`: allow automatic review picks (default true); false opts out, but people can still explicitly name the user as a reviewer.
 - Server-backed personal flags exposed by `read_user_settings` may also be toggled by name; flags on the user account require an existing Open SWE user record.
   Browser-local Feature Flags tab visibility cannot be changed here.
+- `experimental_conditional_approval`: opt the requester’s authored PRs into conditional approval (default false); never enables it for other authors.
 - `review_draft_prs`: boolean overrides; null inherits the shared default.
 - `draft_prs`: whether newly opened PRs are drafts; use true or false (null keeps the existing preference).
 
@@ -27,7 +28,7 @@ Direct the user to the dashboard settings to enable or disable it; including it 
 
 Only save explicitly requested personal changes.
 If personal versus shared scope is unclear, ask first.
-Use `save_user_instructions` for standing behavioral guidance and the existing personal skill tools for skills.
+Use `remember` for standing behavioral guidance and the existing personal skill tools for skills.
 This tool cannot change credentials, account links, admin/shared settings, or browser-local appearance/notification preferences.
 Defaults apply to future runs/threads; do not claim to have changed the current run's model, thread visibility, or workspace.
 

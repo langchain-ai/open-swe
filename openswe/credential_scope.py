@@ -1,7 +1,8 @@
 """Resolve personal integration access and PR authorship within saved thread scope."""
 
 from collections.abc import Mapping
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from openswe.run_config import RunConfig
 from openswe.utils.json_types import thread_metadata
@@ -56,7 +57,9 @@ def private_owner_login(cfg: RunConfig, metadata: Mapping[str, Any]) -> str | No
     if metadata.get("visibility", "public") == "public":
         return None
     owner = metadata.get("owner_login")
-    login = (cfg.github_login or "").strip()
+    login = (
+        (cfg.sender_id or "") if cfg.auth_provider == "langsmith" else cfg.github_login or ""
+    ).strip()
     if not isinstance(owner, str) or not login or owner.strip().lower() != login.lower():
         return None
     return login
@@ -77,9 +80,34 @@ async def private_credential_login(
 ) -> str | None:
     """Personal integrations require the saved private owner to start the run."""
     cfg, metadata = await _thread_scope(config, thread_id=thread_id)
+    if cfg.auth_provider == "langsmith":
+        if (
+            not cfg.user_id
+            or metadata.get("owner_login") != f"user:{cfg.user_id}"
+            or metadata.get("visibility") != "private"
+        ):
+            raise PermissionError("Personal credentials require the private thread owner")
+        return f"user:{cfg.user_id}"
     if metadata.get("visibility", "public") == "public":
         return None
     return _private_owner_login(cfg, metadata)
+
+
+@dataclass(frozen=True)
+class GitHubCredentialScope:
+    """GitHub acts as the verified private owner, or as the workspace App."""
+
+    login: str | None
+
+    @property
+    def kind(self) -> Literal["personal", "system"]:
+        return "personal" if self.login is not None else "system"
+
+    @classmethod
+    async def for_thread(
+        cls, config: Mapping[str, object] | None = None, *, thread_id: str | None = None
+    ) -> GitHubCredentialScope:
+        return cls(await private_credential_login(config, thread_id=thread_id))
 
 
 async def pr_author_login(requested: str | None = None) -> str | None:
@@ -90,6 +118,8 @@ async def pr_author_login(requested: str | None = None) -> str | None:
     owner and system threads to the App, so neither can borrow an account.
     """
     cfg, metadata = await _thread_scope()
+    if cfg.auth_provider == "langsmith":
+        raise PermissionError("Agent Workspace has no GitHub repository access")
     if metadata.get("visibility", "public") == "private":
         return _private_owner_login(cfg, metadata)
     owner = metadata.get("owner_login")

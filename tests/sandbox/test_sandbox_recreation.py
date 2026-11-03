@@ -84,7 +84,7 @@ async def test_recreating_an_old_sandbox_hands_the_thread_to_mda(
     else:
         stop_error = str(stop_failure)
     assert handed == HandedOver("sandbox-old", stop_error)
-    # MDA creates the next box from what was asked for; the thread no longer names the old one.
+    # MDA creates the next sandbox from what was asked for; the thread no longer names the old one.
     assert [call.kwargs["metadata"] for call in update.await_args_list] == [
         {"sandbox_replacement": {"workspace": "large", "source": "base"}},
         {"sandbox_id": None, "sandbox_base_proxy_config": None},

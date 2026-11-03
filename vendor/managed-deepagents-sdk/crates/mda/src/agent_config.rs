@@ -717,9 +717,12 @@ fn factory_definition_config<'a>(
 
 fn inline_object_name_property(object: &ObjectExpression<'_>) -> AgentNameValue {
     match object_property(object, "name") {
-        Some(Expression::StringLiteral(literal)) => {
-            AgentNameValue::Static(literal.value.to_string())
-        }
+        Some(Expression::StringLiteral(literal)) => literal
+            .value
+            .as_str()
+            .map_or(AgentNameValue::Dynamic, |name| {
+                AgentNameValue::Static(name.to_owned())
+            }),
         Some(_) => AgentNameValue::Dynamic,
         None => AgentNameValue::Absent,
     }

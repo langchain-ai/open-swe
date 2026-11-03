@@ -68,6 +68,7 @@ from openswe.review.styles import (
     ReviewStyleCreate,
     ReviewStylePromptUpdate,
 )
+from openswe.review_scout.launch import RepositoryNotAllowed
 from openswe.threads.handlers import mark_review_session_viewed
 from openswe.users.records import user_id_for_login
 from openswe.walkthrough.record import Walkthrough
@@ -253,6 +254,23 @@ async def api_get_pull_request_preview(
         return await get_pull_request_preview(repository.pull_request(pr_number))
 
 
+class PullRequestDescriptionUpdate(BaseModel):
+    body: str = Field(max_length=65_536)
+
+
+@router.patch("/reviews/{owner}/{repo}/{pr_number}/description", status_code=204)
+@audit_endpoint
+async def api_update_pull_request_description(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    update: PullRequestDescriptionUpdate,
+    session: dict[str, str] = SESSION_DEP,
+) -> None:
+    async with _as_viewer(session, owner, repo) as repository:
+        await repository.pull_request(pr_number).update_description(update.body)
+
+
 @router.get("/reviews/{owner}/{repo}/{pr_number}/labels")
 async def api_get_pull_request_labels(
     owner: str,
@@ -338,7 +356,10 @@ async def api_run_review_scout(
     session: dict[str, Any] = SESSION_DEP,
 ) -> ReviewScoutTrigger:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await trigger_review_scout(owner, repo, pr_number, session["sub"])
+    try:
+        return await trigger_review_scout(owner, repo, pr_number, session["sub"])
+    except RepositoryNotAllowed as exc:
+        raise HTTPException(403, str(exc)) from exc
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/viewed", status_code=204)

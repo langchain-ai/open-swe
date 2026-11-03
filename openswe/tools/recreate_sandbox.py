@@ -26,9 +26,9 @@ class SandboxRecreationResult(TypedDict):
     old_sandbox_id: NotRequired[str]
     old_sandbox_stopped: NotRequired[bool]
     old_sandbox_stop_error: NotRequired[str | None]
-    # A box the backend made: the thread's next run starts in a fresh one MDA creates.
+    # A sandbox the backend made: the thread's next run starts in a fresh one MDA creates.
     handed_to_mda: NotRequired[bool]
-    # An MDA-owned box: what MDA replaces it with; MDA answers with the rest.
+    # An MDA-owned sandbox: what MDA replaces it with; MDA answers with the rest.
     replace: NotRequired[dict[str, JsonValue]]
 
 
@@ -56,7 +56,7 @@ async def recreate_sandbox(
     thread_workspace = workspace_slug(cfg)
     metadata = ThreadMetadata.model_validate(await get_sandbox_metadata(thread_id))
     if metadata.sandbox_owner == "mda" and metadata.task_id is None:
-        # MDA names and replaces this box; the call's access policy has already run.
+        # MDA names and replaces this sandbox; the call's access policy has already run.
         options = await request_mda_replacement(
             thread_id, workspace_slug=workspace or thread_workspace, source=source
         )

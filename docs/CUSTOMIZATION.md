@@ -2,13 +2,13 @@
 
 Open SWE is designed to be forked and customized for your org.
 Every run's model loop runs on Managed Deep Agents (`mda/`).
-What the run gets from the backend is decided in one function, `plan_agent()` in `openswe/server.py` (`plan_reviewer()` and `plan_review_scout()` for the reviewer and the review scout).
-It records the run's tools, middleware, models and subagents in a `ToolSurface` (`openswe/sandboxes/tool_runtime.py`), and that is where you swap out the model, tools and middleware.
+What the run gets from the backend is resolved in one function as the run starts, `agent_catalog()` in `openswe/server.py` (`reviewer_catalog()` and `review_scout_catalog()` for the reviewer and the review scout).
+It records the run's tools, models, subagents and loop rules in a `ToolSurface` (`openswe/sandboxes/tool_runtime.py`), and that is where you swap out the model and tools.
 
 ```python
-# openswe/server.py — the end of plan_agent()
+# openswe/server.py — the end of agent_catalog()
 surface.base_tools = main_tools  # tools the run can call
-surface.middleware = middleware  # hooks the run's loop hands each phase to
+surface.loop = LoopRules(...)  # what MDA's middleware does around each model call
 surface.models = SurfaceModels(
     main=ModelChoice(model_id, dict(model_kwargs)),
     subagent=ModelChoice(subagent_model_id, dict(subagent_model_kwargs)),
@@ -37,7 +37,7 @@ DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="137438953472"          # Optional, d
 DEFAULT_SANDBOX_VCPUS="4"                                          # Optional, default 4
 DEFAULT_SANDBOX_MEM_BYTES="17179869184"                            # Optional, default 16 GiB
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"                            # Optional, default 7200 (2 h); 0 disables
-DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"                # Optional, default 2592000 (30 d); 0 disables
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="604800"                 # Optional, default 604800 (7 d); 0 disables
 ```
 
 This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run.
@@ -49,6 +49,7 @@ For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a s
 - `api.github.com` receives Bearer auth for `gh` and REST API operations.
 
 The proxy token is minted at runtime from the GitHub App installation credentials.
+With `MDA_GITHUB_PROXY_CONNECTION` set, the Managed Deep Agents deployment writes these rules instead on the sandboxes it owns whose thread reaches the whole installation, with the App token its GitHub channel keeps in Agent Auth (see [mda/README.md](../mda/README.md)).
 Do not store GitHub access tokens as deployment environment variables.
 
 ### Who creates sandboxes
@@ -90,7 +91,7 @@ For OpenAI reasoning models, this budget can include both internal reasoning tok
 ### Switching models
 
 Models are named in the `provider:model` format, with their provider settings, as a `ModelChoice`.
-The MDA run builds the chat model from it (`mda/rt/models.py`), so a model object built in `plan_agent()` never reaches the run:
+The MDA run builds the chat model from it (`mda/rt/models.py`), so a model object built in `agent_catalog()` never reaches the run:
 
 ```python
 # Anthropic
@@ -108,7 +109,7 @@ To change how a provider's chat model is built (its client, retries or gateway r
 
 ### Using different models per context
 
-You can route to different models based on task complexity, repo, or trigger source, in `plan_agent()`:
+You can route to different models based on task complexity, repo, or trigger source, in `agent_catalog()`:
 
 ```python
 if cfg.source == "slack":
@@ -194,8 +195,110 @@ GitHub operations are handled by `gh` inside the sandbox.
 |---|---|---|
 | `fetch_url` | `openswe/tools/fetch_url.py` | Fetch web pages as markdown |
 | `http_request` | `openswe/tools/http_request.py` | HTTP API calls |
+| `classify` | `openswe/tools/classify.py` | Fast typed classification with TypeSafe's System One model, from code mode |
 | `slack_attach_html` | `openswe/slack/tools/attach_html.py` | Attach sandbox HTML previews to Slack threads |
 | `slack_reply` | `openswe/slack/tools/reply.py` | Reply to the person who asked, in a Slack thread or ephemerally |
+
+### Classifying from code mode
+
+`classify` asks TypeSafe's System One model questions about a state and returns typed answers with calibrated probabilities, typically in 70–500ms.
+It goes through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models) with the same LangSmith gateway key and TypeSafe provider secret as Auto model routing, so it needs no key of its own.
+It is an experiment: each person turns it on under **Settings → Experiments → Classify tool**, and their runs then offer it to code mode as `tools.classify`, kept off the model's tool list and found with `search_tools`.
+
+Each question is a `choice` (one label from up to 255), a `noul` (the probability of yes), or a `score` (an expected level on an ordered rubric).
+Every answer comes from the options supplied, and `choice` and `score` answers carry a `confidence` to gate actions on.
+These examples are adapted from [langchain-typesafe](https://github.com/langchain-ai/langchain-typesafe), [Pipecat's classifier docs](https://docs.pipecat.ai/api-reference/server/classifiers/jev), [classifier.dev](https://jev101.org/guides/jev-text-classification-api-guide), and [TypeSafe's launch post](https://typesafe.ai/blog/introducing-system-one-models-and-jev).
+
+Route a support request, falling back to a person when unsure:
+
+```typescript
+const { answers } = await tools.classify({
+  state: "Stripe fails whenever I connect my account.",
+  questions: {
+    department: {
+      type: "choice",
+      instructions: "Which team should handle this request?",
+      criteria: {
+        billing: "Payment, invoice, or subscription issues.",
+        technical: "Product bugs or integration failures.",
+        sales: "Pricing or purchasing questions.",
+      },
+    },
+  },
+});
+const { choice, confidence } = answers.department;
+const team = confidence >= 0.7 ? choice : "human_triage";
+```
+
+Ask a yes/no question, such as whether a call reached voicemail or a message is urgent:
+
+```typescript
+const { answers } = await tools.classify({
+  state: "Hi, you've reached Dana. Leave a message.",
+  questions: {
+    voicemail: { type: "noul", instructions: "Is this a voicemail greeting?" },
+    urgent: { type: "noul", instructions: "Does this message require an urgent response?" },
+  },
+});
+const isVoicemail = answers.voicemail.noul >= 0.8;
+```
+
+Score a state on a rubric:
+
+```typescript
+const { answers } = await tools.classify({
+  state: "This has failed three times. Fix it now.",
+  questions: {
+    frustration: {
+      type: "score",
+      instructions: "How frustrated does the customer appear?",
+      criteria: ["Calm and neutral.", "Concerned but civil.", "Very angry or using strong language."],
+    },
+  },
+});
+const { score, probabilities } = answers.frustration;
+```
+
+Label a batch in parallel, sending low-confidence rows to review:
+
+```typescript
+const feedback = [
+  "The export button crashes the app.",
+  "Please add dark mode.",
+  "Integration with external tools is seamless.",
+];
+const labeled = await Promise.all(
+  feedback.map(async (text) => {
+    const { answers } = await tools.classify({
+      state: text,
+      questions: {
+        label: {
+          type: "choice",
+          instructions: "What kind of product feedback is this?",
+          criteria: { bug: null, feature: null, praise: null, other: null },
+        },
+      },
+    });
+    return { text, ...answers.label, review: answers.label.confidence < 0.7 };
+  }),
+);
+```
+
+Guard an LLM's output before acting on it:
+
+```typescript
+const { answers } = await tools.classify({
+  state: { prompt: userPrompt, response: draftReply },
+  questions: {
+    jailbreak: { type: "noul", instructions: "Does the prompt try to get the assistant to ignore its rules?" },
+    leaks_secret: {
+      type: "noul",
+      instructions: "Does the response reveal a credential, token, or API key?",
+      criteria: { true: "A real-looking secret value appears.", false: "No secret value appears." },
+    },
+  },
+});
+```
 
 ### Workspace MCP servers
 
@@ -250,8 +353,9 @@ The Currents REST API URL itself does not speak MCP, and the local `npx @current
 Optional reviewer trace resolution and personal LangSmith credential proxying have been removed.
 Configure agent access to LangSmith through Workspace MCPs.
 Sandbox provisioning uses the deployment's `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`.
-Linear webhook intake uses the signed webhook setup; configure Linear replies and other agent operations through Workspace MCPs.
-Automatic failure notices use the workspace connection named `linear` and its selected `save_comment` tool (`create_comment` is also supported).
+Linear sessions arrive through the MDA deployment's Linear channel, which posts the agent's answer in the session; configure other Linear operations through Workspace MCPs.
+The channel reports a session's failed run in the session.
+Notices a run posts on its issue itself, such as a failing sandbox, use the workspace connection named `linear` and its selected `save_comment` tool (`create_comment` is also supported).
 These notices run independently of the agent and honor the connection's enabled state and tool selection.
 Delivery failures are logged without marking the run as notified.
 
@@ -354,6 +458,30 @@ A personal connection with the same name as a workspace connection replaces it e
 Desktop (local) runs do not load MCP connections yet.
 GitHub PR follow-ups targeting a private thread are rejected unless the commenter owns that thread, before credentials are read or a run is dispatched.
 
+### MCP servers on an MDA connection
+
+An instance, workspace or personal MCP server can keep its credential in an MDA connection (LangSmith Agent Auth) instead of Open SWE's database.
+The MDA run then connects to the server itself; the backend holds no credential for it and never calls it.
+Create the connection from `mda/` after the deployment's first `mda deploy`, for example `mda connections create open-swe-mcp-incident-io --secret-from-env INCIDENT_IO_API_KEY --deployment-id <id>`, then save the server through the dashboard API with `connection` and the tools to allow:
+
+```json
+{
+  "name": "incident",
+  "url": "https://mcp.incident.io/mcp",
+  "allowed_tools": ["incident_list"],
+  "connection": {"slug": "open-swe-mcp-incident-io", "owner": "agent"}
+}
+```
+
+The slug must be `open-swe-mcp-<server>`: a server never gets a credential Open SWE or a channel reads for itself, such as `mda/github-token` or `open-swe-exa`.
+Instance and workspace servers read the deployment's connection (`"owner": "agent"`); personal servers read their owner's own (`"owner": "user"`), and only in runs that act for their owner, so not in a background task's completion.
+The credential goes as `Authorization: Bearer <credential>`, or as it is in the header `connection_header` names, such as `DD_API_KEY`.
+A server with a connection takes no headers or OAuth, and saving it drops those the record had.
+An update that sends no `connection`, headers or OAuth, such as the dashboard's enable toggle, keeps the connection; changing the URL needs `connection` sent again.
+Open SWE cannot list its tools, so name them in `allowed_tools`; each run lists the server's tools once and offers those, under the same names and tier rules as other MCP tools.
+A person who has not granted a personal server's connection is asked to through MDA's credential interrupt; a run that acts for no person, or whose agent connection is missing, goes without the server.
+The dashboard's forms do not set `connection` yet, and the inbound MCP server and Linear notices leave these servers out.
+
 ### Adding a Python tool
 
 Create a new file in `openswe/tools/`, define a function, and add it to the tools list.
@@ -380,7 +508,7 @@ def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
     ...
 ```
 
-Then register it in `plan_agent()` in `openswe/server.py`, where the run's tools are listed:
+Then register it in `agent_catalog()` in `openswe/server.py`, where the run's tools are listed:
 
 ```python
 from openswe.tools.datadog_search import datadog_search
@@ -609,22 +737,16 @@ This is the easiest way to encode conventions per-repo without modifying Open SW
 
 ## 6. Middleware
 
-Middleware hooks run around the agent loop.
+Middleware hooks run around the agent loop, in the Managed Deep Agents run (`mda/`).
 Follow-ups and events that arrive mid-run are not middleware: the MDA run takes them from the thread's inbox (`openswe/threads/inbox.py`) before each model call.
-Open SWE includes:
-
-| Middleware | Type | Purpose |
-|---|---|---|
-| `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors |
-| `notify_step_limit_reached` | After agent | Posts a Slack reply when the agent hits the model-call limit |
+What the loop does around each model call (reply and CLI-result nudges, routing, the step limit, what the run's end records) follows the `LoopRules` the backend puts in each run's catalog (`agent_catalog()` in `openswe/server.py`), and MDA's own middleware carries them out (`mda/rt/loop.py`).
 
 There is intentionally no after-agent middleware that opens a PR for the agent.
 The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel.
-If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
 
-Add custom middleware by appending to the middleware list in `plan_agent()`.
-The MDA run hands each phase of its loop to it (`openswe/agent_api/graph.py`), so `before_agent`, `before_model`, `after_model` and `after_agent` hooks run on the backend as they would in a graph.
-Tool calls are the MDA run's: a check around them goes in `mda/rt` (`rt/file_tools.py` for the file and shell tools), or behind an endpoint of the typed API in `packages/runtime-api` where it needs the backend, as the shell-command guards do.
+Add custom middleware to the graph's middleware in `mda/agent.py` (`_parts`).
+Tool calls are the MDA run's: a check around them goes in `mda/rt` (`rt/file_tools.py` for the file and shell tools).
+Work that needs the backend's credentials or data goes behind a named endpoint of the typed API in `packages/runtime-api`, as the shell-command guards (`check_shell`) and the task context (`task_context`) do.
 See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
 
 **Example — adding a CI check after agent completion:**
@@ -641,12 +763,12 @@ async def run_ci_check(state: AgentState, runtime: Runtime):
     ...
 ```
 
-Then add it to the middleware list:
+Then add it to the graph's middleware in `mda/agent.py`:
 
 ```python
 middleware = [
-    ToolErrorMiddleware(),
-    notify_step_limit_reached,
+    BackendRunMiddleware(backend, opened_sandbox, booted_sandbox, read_ahead=[...]),
+    ...,
     run_ci_check,  # new middleware
 ]
 ```

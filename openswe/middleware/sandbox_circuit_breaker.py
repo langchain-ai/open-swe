@@ -14,6 +14,8 @@ from openswe.linear.notifications import post_linear_notification
 from openswe.run_config import RunConfig
 from openswe.slack.client import (
     LANGGRAPH_URL,
+    SANDBOX_UNREACHABLE_NOTICE,
+    SlackNotice,
     get_active_slack_thread,
     post_slack_thread_reply,
 )
@@ -33,7 +35,7 @@ def sandbox_unreachable_message(
 
     Deliberately does not claim the sandbox is gone for good — all we observed is
     that it stopped responding, and it may come back. ``handed_to_mda`` is for a
-    box Open SWE set aside (deleted, or a reviewer's that stopped answering), where
+    sandbox Open SWE set aside (deleted, or a reviewer's that stopped answering), where
     the thread's next run starts in a fresh one and "will not start a replacement"
     would be untrue.
     """
@@ -132,12 +134,13 @@ async def post_sandbox_unreachable_notification(
     slack_target = await get_slack_target(cfg)
     if slack_target is not None:
         channel_id, thread_ts = slack_target
+        notice = SlackNotice(SANDBOX_UNREACHABLE_NOTICE, message)
         if cfg.thread_id:
             await post_slack_thread_reply(
-                channel_id, thread_ts, message, agent_thread_id=cfg.thread_id
+                channel_id, thread_ts, message, agent_thread_id=cfg.thread_id, notice=notice
             )
         else:
-            await post_slack_thread_reply(channel_id, thread_ts, message)
+            await post_slack_thread_reply(channel_id, thread_ts, message, notice=notice)
         logger.info("Sent sandbox unreachable notification to Slack thread %s", thread_ts)
         return
 

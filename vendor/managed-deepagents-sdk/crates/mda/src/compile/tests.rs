@@ -880,6 +880,29 @@ fn compile_refresh_does_not_replace_managed_lockfile_with_author_lock() {
     );
 }
 
+// `--env-file config/staging.env` is not a name discovery skips; its secrets
+// must still stay out of the build that deploy uploads.
+#[test]
+fn compile_leaves_out_the_env_file() {
+    let root = tempfile::tempdir().unwrap();
+    setup_mock_ts_runtime(root.path());
+    write_file(
+        root.path(),
+        "agent.ts",
+        "export const agent = defineDeepAgent({ name: \"agent\", model: \"openai:gpt-5\" });\n",
+    );
+    write_file(root.path(), "config/staging.env", "OPENAI_API_KEY=secret\n");
+    let project = load(root.path())
+        .unwrap()
+        .without_env_file(Some(&root.path().join("config/staging.env")));
+    let out_dir = root.path().join("build");
+
+    compile(&project, &out_dir).unwrap();
+
+    assert!(out_dir.join("agent.ts").is_file());
+    assert!(!out_dir.join("config/staging.env").exists());
+}
+
 // A build dir written by an older CLI still holds the author's pnpm lockfile;
 // refresh must prune it rather than let it survive next to the managed lock.
 #[test]

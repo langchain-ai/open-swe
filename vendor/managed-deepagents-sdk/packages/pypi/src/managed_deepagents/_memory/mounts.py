@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.protocol import (
     BackendProtocol,
+    DeleteResult,
     EditResult,
     FileDownloadResponse,
     FileUploadResponse,
@@ -177,6 +178,12 @@ class UnmountedMemoryBackend(BackendProtocol):
     ) -> EditResult:
         return self.edit(file_path, old_string, new_string, replace_all)
 
+    def delete(self, file_path: str) -> DeleteResult:
+        return DeleteResult(error=self._error("delete", file_path))
+
+    async def adelete(self, file_path: str) -> DeleteResult:
+        return self.delete(file_path)
+
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         return [FileUploadResponse(path=path, error="permission_denied") for path, _ in files]
 
@@ -198,15 +205,7 @@ class UnmountedMemoryBackend(BackendProtocol):
 
 
 class MountedPathBackend(BackendProtocol):
-    """Backend view that mounts a source file or directory at another path.
-
-    ``delete`` is intentionally not overridden: the inherited
-    ``BackendProtocol.delete`` raises ``NotImplementedError``, which
-    ``CompositeBackend`` reports as an unsupported-delete ``DeleteResult``.
-    Context Hub mounts (instructions, skills, memory) are never deleted through
-    the agent filesystem, matching the TypeScript runtime, whose mounts expose
-    no delete operation.
-    """
+    """Backend view that mounts a source file or directory at another path."""
 
     def __init__(
         self,
@@ -386,6 +385,18 @@ class MountedPathBackend(BackendProtocol):
             file_path,
         )
 
+    def delete(self, file_path: str) -> DeleteResult:
+        if error := self._delete_error(file_path):
+            return DeleteResult(error=error)
+        return self._with_visible_path(self._backend.delete(self._repo_path(file_path)), file_path)
+
+    async def adelete(self, file_path: str) -> DeleteResult:
+        if error := self._delete_error(file_path):
+            return DeleteResult(error=error)
+        return self._with_visible_path(
+            await self._backend.adelete(self._repo_path(file_path)), file_path
+        )
+
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         if self._read_only:
             return self._read_only_uploads(files)
@@ -505,6 +516,14 @@ class MountedPathBackend(BackendProtocol):
             return None
         label = self._visible_file if self._visible_file is not None else self._visible_prefix
         return f"Context Hub mount {label} is read-only"
+
+    def _delete_error(self, path: str) -> str | None:
+        """The tool error for a delete this mount refuses, including the mount root."""
+        if error := self._missing_under_file(path) or self._read_only_error():
+            return error
+        if not trim_slashes(path):
+            return f"Cannot delete {self._visible_prefix}: delete the files inside it instead"
+        return None
 
     def _read_only_uploads(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         return [

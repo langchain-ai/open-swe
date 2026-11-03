@@ -13,4 +13,4 @@ TanStack Start + React 19 app styled with the [Macaw design system](https://gith
 - Dark mode is the `.dark` class on `<html>`, managed by `src/lib/theme.ts`.
 - Toasts use `toast` from `sonner`, rendered by the Macaw-styled `src/components/Toaster.tsx`.
 
-`vendor/macaw/` holds the Macaw 2.0.0-alpha tarballs until they are published to npm.
+Macaw components and tokens are pinned to published npm releases in `package.json`.

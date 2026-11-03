@@ -7,8 +7,9 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 
 from openswe import reviewer
+from openswe.agent_api.reviewer import ReviewerKind
+from openswe.agent_api.tokens import RunSettings
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
-from openswe.sandboxes.tool_runtime import ToolSurface
 
 
 def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
@@ -42,12 +43,9 @@ def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
 
 
 async def _planned_prepare(config: RunnableConfig) -> AgentMiddleware:
-    """The reviewer's run preparation, as its planner sets it up for ``config``."""
-    surface = ToolSurface()
-    await reviewer.plan_reviewer(config, surface)
-    return next(
-        m for m in surface.middleware if isinstance(m, reviewer.PrepareReviewerRunMiddleware)
-    )
+    """The reviewer's run preparation, as its run's turn sets it up for ``config``."""
+    preparation = await ReviewerKind().preparation(config, RunSettings(), sandbox_id=None)
+    return next(m for m in preparation if isinstance(m, reviewer.PrepareReviewerRunMiddleware))
 
 
 async def _run_prepare(prepare: AgentMiddleware) -> dict[str, object]:
@@ -346,8 +344,7 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
 ) -> None:
     from langchain_core.messages import AIMessage, HumanMessage, messages_from_dict
 
-    from openswe.agent_api.loop import run_hooks
-    from openswe.walkthrough.record import WalkthroughStepView, WalkthroughView
+    from openswe.agent_api.run_state import run_hooks
 
     config: RunnableConfig = {
         "configurable": {
@@ -378,8 +375,6 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
     monkeypatch.setattr(
         "openswe.review.styles.get_repo_custom_prompt", AsyncMock(return_value=None)
     )
-    walkthrough = AsyncMock()
-    monkeypatch.setattr(reviewer.ReviewScoutTarget, "await_walkthrough", walkthrough)
     findings = AsyncMock(return_value=[])
     monkeypatch.setattr(reviewer, "list_findings_async", findings)
     history = [HumanMessage(content="Review this PR"), AIMessage(content="Previous review")]
@@ -391,19 +386,6 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
         config["configurable"]["invocation_id"] = head
         monkeypatch.setattr(
             reviewer, "resolve_sandbox_work_dir", AsyncMock(return_value=f"/{head}")
-        )
-        walkthrough.return_value = WalkthroughView(
-            head_sha=head,
-            human_input=f"Requirements at {head}",
-            steps=[
-                WalkthroughStepView(
-                    index=1,
-                    title=f"Walkthrough at {head}",
-                    summary="Summary",
-                    other=False,
-                    files=[],
-                )
-            ],
         )
         findings.return_value = [
             {
@@ -430,8 +412,6 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
         assert f"previous reviewed SHA: {last_reviewed}" in context.text
         assert f"new HEAD SHA: {head}" in context.text
         assert f"Finding at {head}" in context.text
-        assert f"Walkthrough at {head}" in context.text
-        assert f"Requirements at {head}" in context.text
         assert f"/{head}/repo" in context.text
         rendered = result.update["rendered_system_prompt"]
         assert isinstance(rendered, str)

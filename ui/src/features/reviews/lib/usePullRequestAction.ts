@@ -33,7 +33,7 @@ export function usePullRequestAction({
     onMutate: () => ({ undo: apply?.() }),
     onError: (_error, _reason, context) => context?.undo?.(),
     onSuccess: () => {
-      toast.success(succeeded(pullRequestKey(pr)))
+      toast.success(succeeded(pullRequestKey(pr), pr))
       onDone?.()
     },
     retry: false,

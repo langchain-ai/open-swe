@@ -121,6 +121,8 @@ export interface ToolExecutionChunk {
    */
   loadOutput?: () => Promise<string>
   display?: OutputIframeDisplay
+  /** Images the tool returned alongside its text, such as a browser screenshot. */
+  images?: Array<AnyImageChunk>
   elapsedMs?: number
   approvalRequestId?: string
   diffData?: DiffData
@@ -399,7 +401,8 @@ export interface PendingThreadMessage extends Omit<
 > {
   images?: Array<ImageChunk>
   replies?: Array<PassageReply>
-  status: "sending" | "failed"
+  /** `sent`: the server took it; the transcript just doesn't have it yet. */
+  status: "sending" | "sent" | "failed"
   /** Sent to queue behind the live run, so it renders as a queued row. */
   queued?: boolean
   /** Why delivery failed, e.g. `503 Service Unavailable`. */
@@ -558,6 +561,8 @@ export type TaskMembership =
   | { role: "worker"; taskId: string; coordinatorThreadId: string | null }
 
 export interface AgentThread {
+  experience?: "coding" | "agent_workspace"
+  waitingForDelegatedWork?: boolean
   taskMembership?: TaskMembership
   taskWorkers?: Array<AgentThread>
   ownerLogin?: string | null
@@ -582,6 +587,7 @@ export interface AgentThread {
   modelSelection?: "auto" | "explicit" | null
   planStatus?: string | null
   adminThread?: boolean
+  concierge?: boolean
   source?: AgentSource
   origin?: AgentSource | string
   threadCategory?: AgentThreadCategory | string
@@ -594,6 +600,7 @@ export interface AgentThread {
   status: AgentStatus
   viewed: boolean
   viewedAt?: number | null
+  latestRunId?: string | null
   resolved?: boolean
   resolvedAt?: number | null
   attentionReason?: string | null

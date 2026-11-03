@@ -8,11 +8,11 @@ from unittest.mock import AsyncMock, patch
 import httpx2
 import pytest
 
-from openswe.dashboard.profiles import ProfileUpdate, put_my_profile
-from openswe.run_config import RunConfig
+from openswe import completion
 from openswe.slack import client as slack_utils
+from openswe.slack import review_links
 from openswe.slack.blocks import actions, block_payload, button, code_blocks, markdown, section
-from openswe.users import User, UserPreferences
+from openswe.threads.runs import _SlackWebHandoff
 from openswe.utils import url_safety
 from tests.support.slack_api import SlackAPI
 
@@ -212,21 +212,174 @@ async def test_reply_is_kept_when_the_thread_still_exists(slack_api) -> None:
     ]
 
 
+@pytest.mark.parametrize("source", ["slack", "dashboard"])
+async def test_web_handoff_posts_a_quiet_link_without_a_trace_message(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    metadata = {
+        "source": source,
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+    }
+    slack_api.respond({"ok": True, "messages": [{"ts": "1.0", "text": "Fix it"}]})
+    slack_api.respond({"ok": True, "ts": "2.0", "message": {"thread_ts": "1.0", "text": "Notice"}})
+
+    await _SlackWebHandoff("t1", metadata).notify()
+
+    posts = [params for method, params in slack_api.calls if method == "chat.postMessage"]
+    if source != "slack":
+        assert not posts
+        return
+    [posted] = posts
+    assert posted["channel"] == "C1"
+    assert posted["thread_ts"] == "1.0"
+    assert posted["text"] == "<https://dashboard.example/agents/t1|Continued on Web>"
+    blocks = posted["blocks"]
+    assert isinstance(blocks, list)
+    assert [block["type"] for block in blocks] == ["context"]
+    assert posted["unfurl_links"] is False
+    assert posted["unfurl_media"] is False
+    slack_api.respond(
+        {"ok": True, "messages": [{"ts": "1.0", "text": "Fix it", "latest_reply": "2.0"}]}
+    )
+    slack_api.respond({"ok": True, "messages": [{"ts": "2.0", "blocks": blocks}]})
+    await _SlackWebHandoff("t1", metadata).notify()
+    assert len([method for method, _ in slack_api.calls if method == "chat.postMessage"]) == 1
+
+
+@pytest.mark.parametrize("author", ["UBOT", "UHUMAN", "UOTHERBOT"])
+async def test_web_handoff_updates_only_our_latest_reply_footer(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, author: str
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    link = "<https://dashboard.example/agents/t1|Open in Web>"
+    footer = f"{link} • model • $0.02"
+    blocks = [
+        section("Answer"),
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]},
+    ]
+    message = {"ts": "2.0", "user": author, "text": f"Answer {footer}", "blocks": blocks}
+    metadata = {
+        "source": "slack",
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+    }
+    slack_api.respond({"ok": True, "messages": [{"ts": "1.0", "latest_reply": "2.0"}]})
+    slack_api.respond({"ok": True, "messages": [message]})
+    if author == "UBOT":
+        slack_api.respond({"ok": True, "ts": "2.0"})
+    else:
+        slack_api.respond({"ok": True, "ts": "3.0"})
+        slack_api.respond({"ok": True, "messages": [{"ts": "1.0"}]})
+
+    await _SlackWebHandoff("t1", metadata).notify()
+
+    updates = [params for method, params in slack_api.calls if method == "chat.update"]
+    posts = [params for method, params in slack_api.calls if method == "chat.postMessage"]
+    if author != "UBOT":
+        assert not updates
+        assert len(posts) == 1
+        return
+    assert not posts
+    [updated] = updates
+    assert updated["ts"] == "2.0"
+    assert updated["text"] == f"Answer {footer.replace('|Open in Web>', '|Continued in Web>')}"
+    assert updated["blocks"] == [
+        blocks[0],
+        {
+            "type": "context",
+            "elements": [
+                {"type": "mrkdwn", "text": footer.replace("|Open in Web>", "|Continued in Web>")}
+            ],
+        },
+    ]
+    slack_api.respond({"ok": True, "messages": [{"ts": "1.0", "latest_reply": "2.0"}]})
+    slack_api.respond(
+        {"ok": True, "messages": [message | {"text": updated["text"], "blocks": updated["blocks"]}]}
+    )
+    await _SlackWebHandoff("t1", metadata).notify()
+    assert (
+        len(
+            [
+                method
+                for method, _ in slack_api.calls
+                if method in {"chat.update", "chat.postMessage"}
+            ]
+        )
+        == 1
+    )
+
+
+@pytest.mark.parametrize(
+    ("status", "reason_code"),
+    [("error", "provider_rate_limited"), ("error", None), ("timeout", None)],
+)
+async def test_a_notice_is_not_repeated_while_the_thread_still_ends_with_it(
+    slack_api: SlackAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    reason_code: str | None,
+) -> None:
+    thread: list[dict[str, object]] = [{"ts": "1.0", "text": "Fix it"}]
+
+    def handle(method: str, params: dict[str, object], _headers: object):
+        if method == "chat.postMessage":
+            blocks = params.get("blocks")
+            message = {
+                "ts": f"{len(thread) + 1}.0",
+                "text": params["text"],
+                "blocks": json.loads(blocks) if isinstance(blocks, str) else blocks or [],
+            }
+            thread.append(message)
+            return 200, {"ok": True, "ts": message["ts"], "message": message}, {}
+        parent = thread[0] | {"latest_reply": thread[-1]["ts"]}
+        found = [m for m in [parent, *thread[1:]] if m["ts"] == params.get("oldest", "1.0")]
+        return 200, {"ok": True, "messages": found}, {}
+
+    slack_api.handler = handle
+    monkeypatch.setattr(completion, "get_langsmith_error_url", AsyncMock(return_value=None))
+    metadata = {
+        "source": "slack",
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+    }
+    sandbox = slack_utils.SlackNotice("sandbox_unreachable", "Sandbox stopped responding")
+
+    for _ in range(2):
+        assert await slack_utils.post_slack_thread_reply("C1", "1.0", sandbox.key, notice=sandbox)
+        assert await completion._post_failure_reply(
+            "t1", metadata, "error", reason_code="sandbox_unreachable"
+        )
+    assert [message["text"] for message in thread] == ["Fix it", sandbox.key]
+
+    for _ in range(2):
+        assert await completion._post_failure_reply("t1", metadata, status, reason_code)
+    thread.append({"ts": "9.0", "text": "@Open SWE stop please"})
+    assert await completion._post_failure_reply("t1", metadata, status, reason_code)
+
+    failure = completion._failure_text(status, reason_code=reason_code)
+    assert [message["text"] for message in thread] == [
+        "Fix it",
+        sandbox.key,
+        failure,
+        "@Open SWE stop please",
+        failure,
+    ]
+
+
 @pytest.mark.parametrize("delivery", ["post", "update", "ephemeral", "command"])
-async def test_review_link_flag_changes_displayed_links_not_code_or_button_values(
+@pytest.mark.parametrize("angled", [False, True])
+async def test_review_links_default_to_open_swe_without_changing_code_or_button_values(
     slack_api: SlackAPI,
     monkeypatch: pytest.MonkeyPatch,
     delivery: str,
+    angled: bool,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example/prefix/")
-    monkeypatch.setattr(RunConfig, "from_runtime", lambda: RunConfig(github_login="alice"))
-    monkeypatch.setattr(
-        User, "preferences_for_login", AsyncMock(return_value=UserPreferences(pr_review_links=True))
-    )
     url = "https://github.com/acme/app/pull/7"
     target = "https://openswe.example/prefix/agents/reviews/acme/app/7"
     unchanged = f"{url}/files {url}?diff=split {url}#discussion https://example.com/acme/app/pull/7"
-    text = f"[PR]({url}), <{url}|PR> and {url}.\n`{url}`\n```bash\n{url}\n```\n{unchanged}"
+    destination = f"<{url}>" if angled else url
+    text = f"[PR]({destination}), <{url}|PR> and {url}.\n`{url}`\n```bash\n{url}\n```\n{unchanged}"
     blocks = block_payload(
         [
             markdown(text),
@@ -257,17 +410,54 @@ async def test_review_link_flag_changes_displayed_links_not_code_or_button_value
                 "https://hooks.slack.com/commands/test", text, blocks=blocks
             )
     payload = slack_api.calls[0][1]
-    expected = (
-        f"[PR]({target}), <{target}|PR> and {target}.\n`{url}`\n```bash\n{url}\n```\n{unchanged}"
-    )
-    assert payload["text"] == expected
+    code = f"`{url}`\n```bash\n{url}\n```\n{unchanged}"
+    fallback_target = f"<{target}>" if angled else target
+    assert payload["text"] == f"[PR]({fallback_target}), <{target}|PR> and {target}.\n{code}"
     sent_blocks = payload["blocks"]
-    assert sent_blocks[0]["text"] == expected
-    assert sent_blocks[1]["text"]["text"] == f"<{target}|PR>"
+    assert sent_blocks[0]["text"] == (
+        f"[PR]({target})[↗]({url}), <{target}|PR> (<{url}|GitHub>) and [app#7]({target})[↗]({url}).\n{code}"
+    )
+    assert sent_blocks[1]["text"]["text"] == f"<{target}|PR> (<{url}|GitHub>)"
     assert sent_blocks[2]["elements"][0]["url"] == target
     assert sent_blocks[2]["elements"][0]["value"] == url
     assert sent_blocks[3] == blocks[3]
     assert blocks[0]["text"] == text
+    resent = await review_links.pr_review_links(payload["text"], sent_blocks)
+    assert resent == (payload["text"], sent_blocks)
+
+    fetched: list[dict[str, object]] = [
+        {
+            "type": "rich_text",
+            "elements": [
+                {
+                    "type": "rich_text_section",
+                    "elements": [
+                        {"type": "link", "url": url, "text": "PR"},
+                        {"type": "link", "url": url, "text": "↗"},
+                        {"type": "text", "text": f"see {url}"},
+                    ],
+                }
+            ],
+        }
+    ]
+    assert await review_links.pr_review_links("", fetched) == (
+        "",
+        [
+            {
+                "type": "rich_text",
+                "elements": [
+                    {
+                        "type": "rich_text_section",
+                        "elements": [
+                            {"type": "link", "url": target, "text": "PR"},
+                            {"type": "link", "url": url, "text": "↗"},
+                            {"type": "text", "text": f"see {target}"},
+                        ],
+                    }
+                ],
+            }
+        ],
+    )
 
 
 @pytest.mark.parametrize("fail", [False, True])
@@ -276,10 +466,6 @@ async def test_direct_github_reply_override_is_scoped_to_one_delivery(
 ) -> None:
     reply = importlib.import_module("openswe.slack.tools.reply")
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example")
-    monkeypatch.setattr(RunConfig, "from_runtime", lambda: RunConfig(github_login="alice"))
-    monkeypatch.setattr(
-        User, "preferences_for_login", AsyncMock(return_value=UserPreferences(pr_review_links=True))
-    )
     url = "https://github.com/acme/app/pull/7"
     blocks = block_payload([markdown(f"[GitHub]({url})"), section(f"<{url}|GitHub>")])
 
@@ -300,39 +486,20 @@ async def test_direct_github_reply_override_is_scoped_to_one_delivery(
     assert slack_api.calls[-1][1]["text"] == url
     assert slack_api.calls[-1][1]["blocks"] == blocks
     await slack_utils.post_slack_top_level_message_with_ts("C1", url)
-    assert slack_api.calls[-1][1]["text"] == "https://openswe.example/agents/reviews/acme/app/7"
+    sent = slack_api.calls[-1][1]["text"]
+    assert sent == f"<https://openswe.example/agents/reviews/acme/app/7|app#7> (<{url}|GitHub>)"
+    assert await review_links.pr_review_links(sent, None) == (sent, None)
+    fetched = (
+        f"<https://openswe.example/agents/reviews/acme/app/7|app#7><{url}|:arrow_upper_right:>"
+    )
+    assert await review_links.pr_review_links(fetched, None) == (fetched, None)
 
 
-@pytest.mark.usefixtures("registry_db")
-async def test_review_links_are_opt_in_per_user_even_in_the_same_channel(
+async def test_review_links_fall_back_to_github_without_a_dashboard(
     slack_api: SlackAPI,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example")
-    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bob")
-    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
-    await User.sign_in("github", "1", login="alice")
-    await User.sign_in("github", "2", login="bob")
-    cfg = RunConfig(github_login="alice")
-    monkeypatch.setattr(RunConfig, "from_runtime", lambda: cfg)
+    monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
     url = "https://github.com/acme/app/pull/7"
-    await slack_utils.post_slack_top_level_message_with_ts("C1", url)
-    assert slack_api.calls[-1][1]["text"] == url
-    saved = await put_my_profile(
-        ProfileUpdate(
-            default_model="openai:gpt-6.1-sol", reasoning_effort="high", pr_review_links=True
-        ),
-        {"sub": "alice", "email": "alice@example.com"},
-    )
-    assert saved["pr_review_links"] is True
-    await slack_utils.post_slack_top_level_message_with_ts("C1", url)
-    assert slack_api.calls[-1][1]["text"] == "https://openswe.example/agents/reviews/acme/app/7"
-    cfg.github_login = "bob"
-    await slack_utils.post_slack_top_level_message_with_ts("C1", url)
-    assert slack_api.calls[-1][1]["text"] == url
-    await slack_utils.update_slack_message("C1", "1.0", url, login="alice")
-    assert slack_api.calls[-1][1]["text"] == "https://openswe.example/agents/reviews/acme/app/7"
-    cfg.github_login = "alice"
-    monkeypatch.delenv("DASHBOARD_BASE_URL")
     await slack_utils.post_slack_top_level_message_with_ts("C1", url)
     assert slack_api.calls[-1][1]["text"] == url

@@ -7,13 +7,14 @@ from typing import Annotated, Any
 import httpx2
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
+from pydantic import JsonValue, TypeAdapter
 
 from openswe.analytics.usage import record_reviewer_publication
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.github.checks import review_check_conclusion
 from openswe.github.http import GitHubClient
-from openswe.github.pull_requests import PullRequest
+from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.thread_token import (
     GitHubAuthError,
     invalidate_cached_github_token,
@@ -22,6 +23,7 @@ from openswe.github.thread_token import (
 from openswe.review.approvals import approval_mode_for
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
+from openswe.review.events import ReviewEvents
 from openswe.review.findings import (
     REVIEWER_EVAL_PUBLICATION_KEY,
     SEVERITY_ORDER,
@@ -29,7 +31,6 @@ from openswe.review.findings import (
     ReviewerThreadMissingError,
     Severity,
     comment_ids_for_finding,
-    filter_findings_for_publish,
     get_thread_id_from_runtime,
     get_thread_last_reviewed_sha,
     get_thread_metadata,
@@ -50,6 +51,7 @@ from openswe.review.findings import (
     list_findings as list_findings_async,
 )
 from openswe.review.publish import (
+    PublishSelection,
     ReviewAssessment,
     approval_allowed_for_head,
     clear_review_started_comment,
@@ -67,8 +69,10 @@ from openswe.review.publish import (
     settle_review_check_run,
 )
 from openswe.review.reconcile import reconcile_findings_with_review_threads
+from openswe.review.shadow import ReviewShadow
 from openswe.run_config import RunConfig
 from openswe.slack.client import post_slack_thread_reply
+from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_review_url
 from openswe.utils.langsmith import get_langsmith_trace_url
 
@@ -120,6 +124,15 @@ async def publish_review(
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
 
+    if cfg.review_shadow:
+        return await ReviewShadow.publish(
+            get_thread_id_from_runtime(),
+            head_sha=head_sha,
+            re_review=is_re_review,
+            severity_threshold=severity_threshold,
+            assessment=assessment,
+        )
+
     if cfg.is_eval:
         if cfg.reviewer_eval_severity_threshold in {"low", "medium", "high", "critical"}:
             severity_threshold = cfg.reviewer_eval_severity_threshold
@@ -136,7 +149,7 @@ async def publish_review(
         return {"success": False, "error": "No GitHub token available"}
 
     try:
-        return await _publish_review_async(
+        result = await _publish_review_async(
             owner=cfg.repo.owner,
             repo=cfg.repo.name,
             pr_number=pr_number,
@@ -149,6 +162,15 @@ async def publish_review(
             state=state,
             assessment=assessment,
         )
+        events = ReviewEvents.from_config(cfg)
+        if events is not None:
+            await events.append(
+                "review.published" if result.get("success") else "review.publish_failed",
+                run_id=cfg.invocation_id,
+                head_sha=head_sha,
+                result=TypeAdapter(dict[str, JsonValue]).validate_python(result),
+            )
+        return result
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
     except GitHubAuthError as exc:
@@ -178,17 +200,13 @@ async def _record_ranking(ranking: list[str], cfg: RunConfig) -> dict[str, Any] 
     thread_id = get_thread_id_from_runtime()
     findings = await list_findings_async(thread_id)
     head_sha = await resolve_review_head_sha(thread_id, cfg) if cfg.re_review else ""
-
-    def is_candidate(finding: Finding) -> bool:
-        if finding.get("status", "open") != "open" or not finding.get("in_diff", True):
-            return False
-        if cfg.is_eval:
-            return not _has_publication_identity(finding)
-        if comment_ids_for_finding(finding):
-            return False
-        return not cfg.re_review or finding.get("first_seen_sha") == head_sha
-
-    expected = [finding["id"] for finding in findings if is_candidate(finding)]
+    selection = PublishSelection(
+        findings,
+        destination=cfg.review_destination,
+        re_review=bool(cfg.re_review),
+        head_sha=head_sha,
+    )
+    expected = [finding["id"] for finding in selection.rankable]
     known = {finding["id"] for finding in findings}
     duplicates = sorted({finding_id for finding_id in ranking if ranking.count(finding_id) > 1})
     unknown = [finding_id for finding_id in ranking if finding_id not in known]
@@ -246,19 +264,14 @@ async def _publish_review_eval_dry_run_async(
     """Simulate publish_review for benchmark runs without posting to GitHub."""
     thread_id = get_thread_id_from_runtime()
     findings = await list_findings_async(thread_id)
-    unpublished_findings = [f for f in findings if not _has_publication_identity(f)]
-    open_unpublished = [f for f in unpublished_findings if f.get("status", "open") == "open"]
-    # Out-of-diff findings are disabled: only in-diff findings are surfaced.
-    in_diff_unpublished = [f for f in unpublished_findings if f.get("in_diff", True)]
-    eligible = filter_findings_for_publish(
-        in_diff_unpublished,
+    selection = PublishSelection(
+        findings,
+        destination="eval",
+        re_review=False,
+        head_sha=head_sha,
         severity_threshold=severity_threshold,
     )
-    eligible_with_payload = [
-        (finding, payload)
-        for finding in eligible
-        if (payload := render_inline_comment_payload(finding)) is not None
-    ]
+    eligible_with_payload = selection.postable
     finding_ids = [
         finding["id"]
         for finding, _payload in eligible_with_payload
@@ -281,7 +294,7 @@ async def _publish_review_eval_dry_run_async(
         "dry_run": True,
         "review_id": None,
         "surfaced_count": len(eligible_with_payload),
-        "hidden_count": max(len(open_unpublished) - len(eligible_with_payload), 0),
+        "hidden_count": max(len(selection.open) - len(eligible_with_payload), 0),
         "resolved_thread_count": 0,
     }
 
@@ -310,6 +323,33 @@ async def _publish_review_async(
         if not policy or mode == "off":
             assessment = None
         dry_run = mode != "approve"
+    if assessment is not None and assessment.decision == "would_approve_conditionally":
+        try:
+            async with GitHubClient.connect(token=token) as github:
+                payload = PullRequestPayload.model_validate(
+                    await github.repo(owner, repo).pull_request(pr_number).pull()
+                )
+            opted_in: bool | None = (
+                await User.preferences_for_login(payload.author)
+            ).experimental_conditional_approval
+        except Exception:
+            logger.warning(
+                "Could not confirm the author opted in to conditional approval",
+                extra={"repository": f"{owner}/{repo}", "pr_number": pr_number},
+                exc_info=True,
+            )
+            opted_in = None
+        if not opted_in:
+            assessment = assessment.model_copy(
+                update={
+                    "decision": "needs_human_review",
+                    "approval_condition": None,
+                    "auto_approved": None,
+                    "explanation": "Conditional approval is not enabled for this PR's author."
+                    if opted_in is False
+                    else "Could not confirm that this PR's author enabled conditional approval.",
+                }
+            )
     # The run config's head_sha is frozen at run creation; a push that arrived
     # mid-run updated the live head in thread metadata. Prefer that so the
     # review anchors to (and last_reviewed_sha advances to) the commit actually
@@ -329,35 +369,23 @@ async def _publish_review_async(
         pr_number=pr_number,
         token=token,
     )
-    if (
-        assessment is not None
-        and assessment.decision == "would_approve"
-        and any(f.get("status", "open") == "open" for f in findings)
-    ):
-        assessment = assessment.model_copy(
-            update={
-                "decision": "needs_human_review",
-                "explanation": f"Unresolved findings remain. {assessment.explanation}",
-            }
-        )
+    if assessment is not None:
+        assessment = assessment.settled(findings)
 
     # Re-reviews only post NEW findings. Anything with a recorded review comment
     # id already lives on GitHub from a prior publish — reposting would create
     # duplicate inline comments and break the resolve-on-fix flow (only
     # whichever duplicate id we'd cache last would resolve later).
-    unpublished_findings = [f for f in findings if not comment_ids_for_finding(f)]
-    if is_re_review:
-        unpublished_findings = [
-            f for f in unpublished_findings if f.get("first_seen_sha") == head_sha
-        ]
-    open_unpublished = [f for f in unpublished_findings if f.get("status", "open") == "open"]
-    # In-diff findings become inline comments. Out-of-diff findings are disabled:
-    # they are never surfaced on the PR (any legacy in-state ones are treated as
-    # hidden).
-    in_diff_unpublished = [f for f in unpublished_findings if f.get("in_diff", True)]
-    eligible = filter_findings_for_publish(
-        in_diff_unpublished, severity_threshold=severity_threshold
+    selection = PublishSelection(
+        findings,
+        destination="github",
+        re_review=is_re_review,
+        head_sha=head_sha,
+        severity_threshold=severity_threshold,
     )
+    open_unpublished = selection.open
+    in_diff_unpublished = selection.in_diff
+    eligible = selection.eligible
 
     severity_rank = SEVERITY_ORDER[severity_threshold]
     eligible_ids = {f.get("id") for f in eligible}
@@ -801,10 +829,6 @@ async def _open_swe_already_reviewed(
         return True
     exists = await open_swe_review_exists(owner=owner, repo=repo, pr_number=pr_number, token=token)
     return exists is True
-
-
-def _has_publication_identity(finding: Finding) -> bool:
-    return bool(comment_ids_for_finding(finding)) or review_id_for_finding(finding) is not None
 
 
 async def _backfill_findings_from_pr_threads(

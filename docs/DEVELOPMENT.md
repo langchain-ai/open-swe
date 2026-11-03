@@ -7,7 +7,7 @@ Deploying it for a team is the [installation guide](INSTALLATION.md).
 
 - **Python 3.14+** and [uv](https://docs.astral.sh/uv/)
 - [LangGraph CLI](https://docs.langchain.com/langsmith/cli) (installed by `uv sync`)
-- Node 22.22.2+ and [pnpm](https://pnpm.io/) for the dashboard
+- Node 26+ and [pnpm](https://pnpm.io/) for the dashboard
 - Rust (`cargo`, e.g. via [rustup](https://rustup.rs/)): `make dev-mda` builds the `mda` CLI from the vendored Managed Deep Agents SDK ([vendor/README.md](../vendor/README.md))
 - A free [ngrok](https://ngrok.com/) account, so GitHub and Slack can reach your local backend (step 3)
 - A Slack workspace where you may create apps, and a GitHub account or organization where you may create a GitHub App
@@ -165,9 +165,10 @@ The HMR WebSocket connects straight to Vite's port; the UI's Vite config points 
 |---|---|
 | `/` | Dashboard |
 | `POST /webhooks/github` | GitHub issue, PR, and comment webhooks |
+| `POST /github/channel/events` | The MDA deployment's GitHub channel asking what an issue mention starts |
 | `POST /webhooks/slack`, `POST /webhooks/slack/interactivity` | Slack events and Block Kit interactions |
 | `POST /webhooks/slack/commands` | The `/oswe` slash command |
-| `POST /webhooks/linear` | Linear comment webhooks |
+| `POST /linear/channel/events` | The MDA deployment's Linear channel asking what a Linear event starts |
 | `GET /dashboard/api/auth/login`, `GET /dashboard/api/auth/callback` | GitHub login |
 | `/dashboard/api/*` | Dashboard API |
 | `GET /ok`, `GET /health` | Health checks |
@@ -407,7 +408,7 @@ Ask users to attach that file to a report.
   With the webhooks-only policy, ngrok itself answers 404 for anything outside `/webhooks/*`, so test with `/webhooks/slack`, not `/ok`.
 - Restart the backend after changing `.env`: `langgraph dev` reloads on code changes only, so a new `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET` is not picked up until then, and every delivery is rejected as `Invalid signature` in the meantime.
   Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
-- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
+- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET`, every request to that endpoint is rejected with 401, and the Linear channel's routes verify the deployment's signature with `MDA_SERVICE_SECRET`, the same value as `mda/.env`'s.
 
 ### Dashboard login fails or won't stay logged in
 

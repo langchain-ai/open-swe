@@ -14,6 +14,7 @@ vi.mock("./session", () => ({
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  Reflect.deleteProperty(window, "openSweDesktop")
 })
 
 interface Pending {

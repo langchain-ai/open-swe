@@ -502,14 +502,15 @@ async def test_a_head_change_during_planning_ends_the_scout(
     from contextlib import asynccontextmanager
     from types import SimpleNamespace
 
-    from runtime_api.loop import RunCall
-    from runtime_api.operations import RunOperation
+    from runtime_api.operations import OperationResult, RunOperation
 
-    from openswe.agent_api.graph import RunSession
+    from openswe.agent_api.review_scout import ReviewScoutKind
+    from openswe.agent_api.run_calls import TokenRun
+    from openswe.agent_api.tokens import RemoteRun
     from openswe.database import postgres
-    from openswe.review_scout.graph import PrepareReviewScoutRunMiddleware
-    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
     from openswe.tools import plan_walkthrough
+
+    monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-signing-key-0123456789abcdef")
 
     base = _git(repo, "rev-parse", "HEAD").strip()
     head = _commit(repo, {"cli.py": "print(1)\n"}, "feature")
@@ -525,28 +526,63 @@ async def test_a_head_change_during_planning_ends_the_scout(
 
     monkeypatch.setattr(postgres, "session", database_session)
     monkeypatch.setattr(plan_walkthrough, "_workspace", AsyncMock(return_value=workspace))
-    config = {"configurable": {"thread_id": "scout"}}
-    model = ModelChoice("anthropic:claude-sonnet-4-5", {})
-    surface = ToolSurface(
-        base_tools=[plan_walkthrough.walkthrough_describe_other],
-        middleware=[PrepareReviewScoutRunMiddleware(thread_id="scout", config=config)],
-        models=SurfaceModels(main=model, subagent=model, use_gateway=False),
-    )
-    await surface.prepare()
-    run = RunSession(surface, config, None, started_here=True)
+    run = RemoteRun(thread_id="scout", assistant_id="review-scout", configurable={})
     stored.head_sha = _commit(repo, {"cli.py": "print(2)\n"}, "push")
 
-    result = await run.operation(
-        RunOperation(
-            name="walkthrough_describe_other",
-            arguments={"summary": "Noise"},
-            state={"scout_nothing_to_plan": False},
-            request_id="call-1",
+    operation = RunOperation(
+        name="walkthrough_describe_other",
+        arguments={"summary": "Noise"},
+        state={"scout_nothing_to_plan": False},
+        request_id="call-1",
+        grant=run.grant("walkthrough_describe_other"),
+    )
+    result = OperationResult.model_validate(
+        await TokenRun.answer(
+            ReviewScoutKind(), run, "operation", operation.model_dump(mode="json")
         )
     )
+    # The scout's loop ends the run before its next model call once this is set.
     assert result.state == {"scout_nothing_to_plan": True}
-    next_step = await run.before_model(RunCall(state=result.state))
-    assert next_step.jump_to == "end"
-    assert next_step.call is None
     assert workspace.plan.other_summary == ""
     session.commit.assert_not_awaited()
+
+
+async def test_implementation_tool_completes_the_shared_plan_in_its_own_checkout(
+    repo: Path, checkout: PinnedCheckout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.run_config import RunConfig
+    from openswe.tools.plan_walkthrough import walkthrough_plan_chunk
+    from openswe.ui_invalidations import Topic
+
+    monkeypatch.setattr(RunConfig, "from_runtime", lambda: RunConfig(thread_id="implementation"))
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    head = _commit(repo, {"core.py": BASE.replace("return 1", "return 2")}, "change behavior")
+    index = await _pin(checkout, base, head)
+    plan = Plan.start(head, index)
+    _stored_as(monkeypatch, plan)
+    workspace = PlanWorkspace(
+        PullRequest(owner="lc", repo="repo", number=7), checkout, head, base, index, plan
+    )
+    monkeypatch.setattr(
+        PlanWorkspace,
+        "for_implementation",
+        AsyncMock(return_value=workspace),
+    )
+    monkeypatch.setattr(Topic, "invalidate", AsyncMock())
+
+    initial = await walkthrough_plan_chunk(
+        scout=None, tool_call_id="first", pr_url="https://github.com/lc/repo/pull/7"
+    )
+    assert initial["complete"] is False
+    assert workspace.status().unplanned_hunks
+    result = await walkthrough_plan_chunk(
+        scout=None,
+        tool_call_id="second",
+        pr_url="https://github.com/lc/repo/pull/7",
+        title="Change the return value",
+        show=[FileHunks(path="core.py", hunks=["-4"])],
+        explanation="Return two instead of one.",
+    )
+    assert result["complete"] is True
+    assert len(plan.chunks) == 1
+    assert "return 2" in plan.chunks[0].code

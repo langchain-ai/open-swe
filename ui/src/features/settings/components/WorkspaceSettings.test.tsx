@@ -254,6 +254,36 @@ describe("WorkspaceSettingsPanel", () => {
     expect(channel.getAttribute("target")).toBe("_blank")
   })
 
+  it("never exposes channel IDs while names load or cannot be resolved", async () => {
+    mockApis({ ...RECORD, slack_channel_ids: ["C1", "C2"] })
+    let finish!: (directory: { channels: []; refreshing: boolean }) => void
+    vi.mocked(api.listSlackChannels).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    renderPage()
+
+    const channel = await screen.findByRole("link", { name: "Slack channel 1" })
+    expect(channel.textContent).not.toContain("C1")
+    expect(
+      screen.getByRole("link", { name: "Slack channel 2" }).getAttribute("href")
+    ).toContain("C2")
+    const secondKitchen = screen.getByRole("switch", {
+      name: "Kitchen mode for Slack channel 2",
+    })
+    fireEvent.click(secondKitchen)
+    expect(secondKitchen.getAttribute("aria-checked")).toBe("true")
+    expect(
+      screen
+        .getByRole("switch", { name: "Kitchen mode for Slack channel 1" })
+        .getAttribute("aria-checked")
+    ).toBe("false")
+    await act(async () => finish({ channels: [], refreshing: false }))
+    expect(channel.textContent).toBe("Slack channel 1")
+  })
+
   it("confirms deletion, keeps failures retryable, and leaves the detail page on success", async () => {
     mockApis()
     const onDeleted = vi.fn()
@@ -313,6 +343,7 @@ describe("WorkspaceSettingsPanel", () => {
     mockApis()
     renderPage(false)
     await screen.findByLabelText("Workspace name")
+    expect(await screen.findByRole("link", { name: "#oss-help" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: /^Delete/ })).toBeNull()
   })
 
@@ -414,7 +445,11 @@ describe("WorkspaceSettingsPanel", () => {
         expect(
           within(general).queryByRole("button", { name: "Cancel" })
         ).toBeNull()
-        expect(within(general).getByRole("status").textContent).toContain(
+        const sandbox = screen
+          .getByRole("heading", { name: "Sandbox Image" })
+          .closest("section")!
+        expect(within(general).queryByRole("status")).toBeNull()
+        expect(within(sandbox).getByRole("status").textContent).toContain(
           savedStatus === "refreshing"
             ? "Rebuilding sandbox image"
             : "rebuild queued"
@@ -447,7 +482,7 @@ describe("WorkspaceSettingsPanel", () => {
           await vi.advanceTimersByTimeAsync(65_001)
         })
         expect(
-          within(general).getByRole(outcome === "unknown" ? "alert" : "status")
+          within(sandbox).getByRole(outcome === "unknown" ? "alert" : "status")
             .textContent
         ).toContain(
           outcome === "unknown"
@@ -466,7 +501,7 @@ describe("WorkspaceSettingsPanel", () => {
         })
         await invalidateWorkspaces()
         expect(
-          within(general).getByRole(outcome === "success" ? "status" : "alert")
+          within(sandbox).getByRole(outcome === "success" ? "status" : "alert")
             .textContent
         ).toContain(
           outcome === "unknown"
@@ -758,6 +793,16 @@ describe("WorkspaceSettingsPanel", () => {
       name: "Rebuilding…",
     })
     expect((rebuilding as HTMLButtonElement).disabled).toBe(true)
+    const imageSection = rebuilding.closest("section")!
+    expect(within(imageSection).getByRole("status").textContent).toContain(
+      "Rebuilding sandbox image"
+    )
+    expect(within(imageSection).queryByText("Image ready")).toBeNull()
+    expect(
+      within(
+        screen.getByRole("button", { name: "Save" }).closest("section")!
+      ).queryByRole("status")
+    ).toBeNull()
   }, 15_000)
 
   it("offers every accessible repository as its default", async () => {

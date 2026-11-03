@@ -1,4 +1,3 @@
-import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -49,6 +48,26 @@ async def test_scout_records_security_identity_before_starting_or_reusing_a_run(
     assert await target.start() == (active or "new-run")
 
 
+async def test_scout_refuses_a_repository_outside_the_allowed_orgs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.webhooks import common
+
+    monkeypatch.setattr(common, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    target = launch.ReviewScoutTarget(
+        owner="Joshluxr",
+        repo="tester",
+        pr_number=7,
+        pr_title="Change",
+        base_sha="base",
+        head_sha="head",
+        workspace_slug=None,
+    )
+
+    with pytest.raises(launch.RepositoryNotAllowed):
+        await target.start()
+
+
 async def test_scout_run_context_preserves_history_and_system_prefix(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -57,7 +76,7 @@ async def test_scout_run_context_preserves_history_and_system_prefix(
     from langchain_core.messages import AIMessage, HumanMessage, messages_from_dict
     from langgraph.runtime import Runtime
 
-    from openswe.agent_api.loop import run_hooks
+    from openswe.agent_api.run_state import run_hooks
     from openswe.review.author_guidance import HumanTurn, SteeringHistory
     from openswe.review_scout import graph
     from openswe.walkthrough.checkout import PinnedCheckout
@@ -121,52 +140,3 @@ async def test_scout_run_context_preserves_history_and_system_prefix(
         assert result.update["has_human_input"] is True
         prompts.append(result.update["rendered_system_prompt"])
     assert prompts[0] == prompts[1]
-
-
-@pytest.mark.parametrize("stage", ["lookup", "startup", "poll"])
-async def test_walkthrough_wait_bounds_lookup_startup_and_polling(
-    monkeypatch: pytest.MonkeyPatch, stage: str
-) -> None:
-    cancelled = asyncio.Event()
-
-    async def wait() -> None:
-        try:
-            await asyncio.Event().wait()
-        finally:
-            cancelled.set()
-
-    async def walkthrough(self: launch.ReviewScoutTarget) -> None:
-        if stage == "lookup":
-            await wait()
-
-    async def start(self: launch.ReviewScoutTarget) -> str:
-        if stage == "startup":
-            await wait()
-        return "run-1"
-
-    async def current_thread_id(self: launch.ReviewScoutTarget) -> str:
-        return "scout-thread"
-
-    async def poll(thread_id: str, run_id: str) -> None:
-        await wait()
-
-    monkeypatch.setattr(launch.postgres, "configured", lambda: True)
-    monkeypatch.setattr(launch, "SCOUT_WAIT_SECONDS", 0.01)
-    monkeypatch.setattr(launch.ReviewScoutTarget, "walkthrough", walkthrough)
-    monkeypatch.setattr(launch.ReviewScoutTarget, "start", start)
-    monkeypatch.setattr(launch.ReviewScoutTarget, "current_thread_id", current_thread_id)
-    monkeypatch.setattr(
-        launch, "dispatch_client", lambda: SimpleNamespace(runs=SimpleNamespace(get=poll))
-    )
-    target = launch.ReviewScoutTarget(
-        owner="acme",
-        repo="widgets",
-        pr_number=7,
-        pr_title="Change",
-        base_sha="base",
-        head_sha="head",
-        workspace_slug=None,
-    )
-    async with asyncio.timeout(1):
-        assert await target.await_walkthrough() is None
-    assert cancelled.is_set()

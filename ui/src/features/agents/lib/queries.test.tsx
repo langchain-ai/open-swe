@@ -1,6 +1,12 @@
+import { experienceStore } from "@/lib/experience"
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import {
+  QueryClient,
+  QueryClientProvider,
+  focusManager,
+  onlineManager,
+} from "@tanstack/react-query"
 import { act, render, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -14,6 +20,7 @@ import {
   setAgentThreadStatus,
   setAgentThreadResolved,
   useAgentThread,
+  useInfiniteThreadsPages,
   useAgentThreadBrowser,
   useAgentThreadWorkingTreeDiff,
   usePinAgentThread,
@@ -43,6 +50,20 @@ import type {
   WorkflowPushApprovalsResponse,
 } from "./types"
 
+vi.mock("@/lib/experience", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/experience")>()
+  return {
+    ...actual,
+    useExperience: () => {
+      const state = actual.useExperience()
+      return {
+        ...state,
+        experience: window.openSweDesktop ? state.experience : undefined,
+      }
+    },
+  }
+})
+
 const params: ThreadsPageParams = {
   limit: 100,
   offset: 0,
@@ -62,6 +83,8 @@ afterEach(() => {
   for (const client of clients) client.clear()
   clients.length = 0
   vi.restoreAllMocks()
+  Reflect.deleteProperty(window, "openSweDesktop")
+  localStorage.clear()
 })
 
 function testClient() {
@@ -576,6 +599,32 @@ describe("sidebar queries", () => {
     }
   )
 
+  it("does not reinsert an open concierge conversation into the sidebar", () => {
+    const opened = {
+      id: "concierge-thread",
+      concierge: true,
+    } as AgentThread
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.detail(opened.id), opened)
+    const { result } = renderHook(
+      () =>
+        useSidebarActiveThread({
+          activeThreadId: opened.id,
+          loadedThreads: [],
+        }),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+
+    expect(result.current).toBeUndefined()
+    expect(client.getQueryData(agentThreadKeys.detail(opened.id))).toEqual(
+      opened
+    )
+  })
+
   it("refetches detail after sidebar rerenders", async () => {
     const opened = { id: "opened-thread", status: "idle" } as AgentThread
     const updated = { ...opened, title: "Refreshed title" }
@@ -907,6 +956,37 @@ describe("optimistic thread mutations", () => {
     hasMore: false,
   })
 
+  it("appends a new pin without reordering after the server refresh", async () => {
+    const existing = { ...thread, id: "existing-pin" }
+    const request = deferred<void>()
+    vi.spyOn(agentsApi, "pinThread").mockReturnValue(request.promise)
+    const listPins = vi
+      .spyOn(agentsApi, "listPinnedThreads")
+      .mockResolvedValueOnce([existing])
+      .mockResolvedValue([existing, thread])
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.detail(thread.id), thread)
+    const { result } = renderHook(
+      () => ({
+        pins: useSidebarPinnedThreads(),
+        mutation: usePinAgentThread(),
+      }),
+      { wrapper: wrapperFor(client) }
+    )
+    await waitFor(() => expect(result.current.pins.data).toEqual([existing]))
+
+    act(() =>
+      result.current.mutation.mutate({ threadId: thread.id, pinned: true })
+    )
+    await waitFor(() =>
+      expect(result.current.pins.data).toEqual([existing, thread])
+    )
+    await act(async () => request.resolve(undefined))
+    await waitFor(() => expect(listPins).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.pins.isFetching).toBe(false))
+    expect(result.current.pins.data).toEqual([existing, thread])
+  })
+
   it("renames across detail, pinned, and page caches and rolls back on failure", async () => {
     const request = deferred<AgentThread>()
     vi.spyOn(agentsApi, "renameThread").mockReturnValue(request.promise)
@@ -1156,4 +1236,294 @@ describe("sidebar task families", () => {
       expect(result.current.items[0]?.taskWorkers?.[1]?.status).toBe("finished")
     )
   })
+})
+
+describe("desktop experience segregation", () => {
+  it("scopes list requests before paging and keeps pins, active injection and workers isolated across switches", async () => {
+    Object.defineProperty(window, "openSweDesktop", {
+      configurable: true,
+      value: {},
+    })
+    const coding = optimisticThread("legacy-coding", {
+      prompt: "Legacy coding",
+    })
+    const work = {
+      ...optimisticThread("work", { prompt: "Work" }),
+      experience: "agent_workspace" as const,
+      taskWorkers: [coding],
+    }
+    const listPages = vi
+      .spyOn(agentsApi, "listThreadsPage")
+      .mockImplementation(async (request) => ({
+        ...page,
+        items: request?.experience === "agent_workspace" ? [work] : [coding],
+      }))
+    const listPins = vi
+      .spyOn(agentsApi, "listPinnedThreads")
+      .mockResolvedValue([coding, work])
+    const client = testClient()
+    client.setQueryData(["session"], { login: "mode-test" })
+    client.setQueryData(agentThreadKeys.detail(coding.id), coding)
+    const { result } = renderHook(
+      () => ({
+        recents: useSidebarRecents({ repoMode: false }),
+        pins: useSidebarPinnedThreads(),
+        active: useSidebarActiveThread({
+          activeThreadId: coding.id,
+          loadedThreads: [],
+        }),
+      }),
+      { wrapper: wrapperFor(client) }
+    )
+    await waitFor(() =>
+      expect(result.current.recents.items.map((thread) => thread.id)).toEqual([
+        work.id,
+      ])
+    )
+    expect(listPages).toHaveBeenCalledWith(
+      expect.objectContaining({ experience: "agent_workspace", offset: 0 })
+    )
+    expect(listPins).toHaveBeenCalledWith("agent_workspace")
+    expect(result.current.pins.data?.map((thread) => thread.id)).toEqual([
+      work.id,
+    ])
+    expect(result.current.pins.data?.[0]?.taskWorkers).toEqual([])
+    expect(result.current.active).toBeUndefined()
+    act(() => experienceStore.write("mode-test", "coding"))
+    expect(result.current.recents.items).toEqual([])
+    expect(result.current.pins.data).toBeUndefined()
+    await waitFor(() =>
+      expect(result.current.recents.items.map((thread) => thread.id)).toEqual([
+        coding.id,
+      ])
+    )
+    expect(listPages).toHaveBeenCalledWith(
+      expect.objectContaining({ experience: "coding", offset: 0 })
+    )
+    expect(result.current.pins.data?.map((thread) => thread.id)).toEqual([
+      coding.id,
+    ])
+    expect(result.current.active?.id).toBe(coding.id)
+  })
+})
+
+describe("Work freshness", () => {
+  it("discovers external runs from all-idle pins and every loaded page, then settles at running cadence", async () => {
+    vi.useFakeTimers()
+    Object.defineProperty(window, "openSweDesktop", {
+      configurable: true,
+      value: {},
+    })
+    let status: AgentThread["status"] = "finished"
+    const work = {
+      ...optimisticThread("work", { prompt: "Work" }),
+      experience: "agent_workspace" as const,
+    }
+    vi.spyOn(agentsApi, "listPinnedThreads").mockImplementation(async () => [
+      { ...work, status },
+    ])
+    vi.spyOn(agentsApi, "listThreadsPage").mockImplementation(
+      async (request) => ({
+        ...page,
+        offset: request?.offset ?? 0,
+        limit: 10,
+        hasMore: request?.offset === 0,
+        items: [
+          {
+            ...work,
+            id: `work-${request?.offset ?? 0}`,
+            status: request?.offset === 0 ? "finished" : status,
+          },
+        ],
+      })
+    )
+    const client = testClient()
+    const { result } = renderHook(
+      () => ({
+        pins: useSidebarPinnedThreads(),
+        pages: useInfiniteThreadsPages(
+          { experience: "agent_workspace", limit: 10 },
+          { pollWhileRunning: true }
+        ),
+        page: useThreadsPage(
+          { experience: "agent_workspace", offset: 1 },
+          { pollWhileRunning: true }
+        ),
+      }),
+      { wrapper: wrapperFor(client) }
+    )
+    await vi.waitFor(() =>
+      expect(result.current.pages.data?.pages).toHaveLength(1)
+    )
+    await act(() => result.current.pages.fetchNextPage())
+    await vi.waitFor(() =>
+      expect(result.current.pages.data?.pages).toHaveLength(2)
+    )
+    status = "running"
+    await act(() => vi.advanceTimersByTimeAsync(10_000))
+    await vi.waitFor(() => {
+      expect(result.current.pins.data?.[0]?.status).toBe("running")
+      expect(result.current.pages.data?.pages[1]?.items[0]?.status).toBe(
+        "running"
+      )
+      expect(result.current.page.data?.items[0]?.status).toBe("running")
+    })
+    status = "finished"
+    await act(() => vi.advanceTimersByTimeAsync(2000))
+    await vi.waitFor(() => {
+      expect(result.current.pins.data?.[0]?.status).toBe("finished")
+      expect(result.current.pages.data?.pages[1]?.items[0]?.status).toBe(
+        "finished"
+      )
+      expect(result.current.page.data?.items[0]?.status).toBe("finished")
+    })
+  })
+
+  it("recovers Work pins, loaded offsets and detail on focus and reconnect despite production freshness defaults", async () => {
+    Object.defineProperty(window, "openSweDesktop", {
+      configurable: true,
+      value: {},
+    })
+    const client = testClient()
+    client.setDefaultOptions({
+      queries: {
+        retry: false,
+        staleTime: Infinity,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
+      },
+    })
+    let title = "initial"
+    const work = {
+      ...optimisticThread("work", { prompt: "Work" }),
+      experience: "agent_workspace" as const,
+      status: "finished" as const,
+    }
+    vi.spyOn(agentsApi, "listPinnedThreads").mockImplementation(async () => [
+      { ...work, title },
+    ])
+    vi.spyOn(agentsApi, "getThread").mockImplementation(async () => ({
+      ...work,
+      title,
+    }))
+    vi.spyOn(agentsApi, "listThreadsPage").mockImplementation(
+      async (request) => ({
+        ...page,
+        offset: request?.offset ?? 0,
+        hasMore: request?.offset === 0,
+        items: [{ ...work, id: `work-${request?.offset ?? 0}`, title }],
+      })
+    )
+    const view = renderHook(
+      () => ({
+        pins: useSidebarPinnedThreads(),
+        detail: useAgentThread(work.id),
+        pages: useInfiniteThreadsPages(
+          { experience: "agent_workspace", limit: 10 },
+          { pollWhileRunning: true }
+        ),
+      }),
+      { wrapper: wrapperFor(client) }
+    )
+    await waitFor(() =>
+      expect(view.result.current.detail.data?.title).toBe("initial")
+    )
+    await act(() => view.result.current.pages.fetchNextPage())
+    await waitFor(() =>
+      expect(view.result.current.pages.data?.pages).toHaveLength(2)
+    )
+    title = "focused"
+    act(() => {
+      focusManager.setFocused(false)
+      focusManager.setFocused(true)
+    })
+    await waitFor(() => {
+      expect(view.result.current.pins.data?.[0]?.title).toBe(title)
+      expect(view.result.current.detail.data?.title).toBe(title)
+      expect(view.result.current.pages.data?.pages[1]?.items[0]?.title).toBe(
+        title
+      )
+    })
+    title = "reconnected"
+    act(() => {
+      onlineManager.setOnline(false)
+      onlineManager.setOnline(true)
+    })
+    await waitFor(() => {
+      expect(view.result.current.pins.data?.[0]?.title).toBe(title)
+      expect(view.result.current.detail.data?.title).toBe(title)
+      expect(view.result.current.pages.data?.pages[1]?.items[0]?.title).toBe(
+        title
+      )
+    })
+    focusManager.setFocused(undefined)
+  })
+})
+
+it("keeps Work unread through optimistic row navigation", () => {
+  const client = testClient()
+  const work = {
+    ...optimisticThread("work", { prompt: "Work" }),
+    experience: "agent_workspace" as const,
+    viewed: false,
+  }
+  client.setQueryData(agentThreadKeys.detail(work.id), work)
+  client.setQueryData(agentThreadKeys.pinned, [work])
+  client.setQueryData(agentThreadKeys.page({ hierarchy: true }), {
+    ...page,
+    items: [{ ...work, id: "parent", taskWorkers: [work] }],
+  })
+  markAgentThreadViewed(client, work.id)
+  expect(
+    client.getQueryData<AgentThread>(agentThreadKeys.detail(work.id))?.viewed
+  ).toBe(false)
+  expect(
+    client.getQueryData<Array<AgentThread>>(agentThreadKeys.pinned)?.[0]?.viewed
+  ).toBe(false)
+  expect(
+    client.getQueryData<ThreadsPage>(agentThreadKeys.page({ hierarchy: true }))
+      ?.items[0]?.taskWorkers?.[0]?.viewed
+  ).toBe(false)
+})
+
+it("polls idle Work detail at ten seconds and running detail at two without changing Coding idle or focus defaults", async () => {
+  vi.useFakeTimers()
+  const client = testClient()
+  client.setDefaultOptions({
+    queries: { retry: false, refetchOnWindowFocus: false },
+  })
+  let workStatus: AgentThread["status"] = "finished"
+  let codingTitle = "before"
+  vi.spyOn(agentsApi, "getThread").mockImplementation(async (id) => ({
+    ...optimisticThread(id, { prompt: "Thread" }),
+    experience: id === "work" ? "agent_workspace" : "coding",
+    title: id === "work" ? workStatus : codingTitle,
+    status: id === "work" ? workStatus : "finished",
+  }))
+  const view = renderHook(
+    () => ({ work: useAgentThread("work"), coding: useAgentThread("coding") }),
+    { wrapper: wrapperFor(client) }
+  )
+  await vi.waitFor(() =>
+    expect(view.result.current.work.data?.status).toBe("finished")
+  )
+  workStatus = "running"
+  codingTitle = "after"
+  await act(() => vi.advanceTimersByTimeAsync(10_000))
+  await vi.waitFor(() =>
+    expect(view.result.current.work.data?.status).toBe("running")
+  )
+  expect(view.result.current.coding.data?.title).toBe("before")
+  workStatus = "finished"
+  await act(() => vi.advanceTimersByTimeAsync(2000))
+  await vi.waitFor(() =>
+    expect(view.result.current.work.data?.status).toBe("finished")
+  )
+  act(() => {
+    focusManager.setFocused(false)
+    focusManager.setFocused(true)
+  })
+  await act(() => vi.advanceTimersByTimeAsync(10))
+  expect(view.result.current.coding.data?.title).toBe("before")
+  focusManager.setFocused(undefined)
 })

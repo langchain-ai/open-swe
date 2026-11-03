@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query"
 
 import { ApiError, api, DEFAULT_WORKSPACE_SLUG } from "./api"
+import { hasLinkedGitHub } from "./linkedGitHub"
 import {
   REPOS_CACHE_MAX_AGE_MS,
   readCachedRepos,
@@ -93,7 +94,7 @@ export function useRepos() {
         throw e
       }
     },
-    enabled: !!session.data,
+    enabled: !!session.data && hasLinkedGitHub(session.data),
     initialData: cached?.payload,
     initialDataUpdatedAt: cached?.updatedAt,
     staleTime: REPOS_STALE_TIME_MS,

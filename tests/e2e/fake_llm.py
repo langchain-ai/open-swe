@@ -267,6 +267,12 @@ LAST_SYSTEM_PROMPT = SystemPromptRecord()
 # empty reply so background titling never renames threads or code channels mid-spec.
 _THREAD_TITLE_PROMPT_PREFIX = "Generate a title that will help the user recognize"
 
+# Gives every reply of the run a thought, as a reasoning model's would carry.
+THOUGHT_MARKER = "E2E_THOUGHT"
+THOUGHT_TEXT = (
+    "**Checking the snapshot status**\n\n"
+    "The workspace image looks stale, so I will compare it with the latest capture."
+)
 _BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
 _ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
@@ -675,6 +681,24 @@ def _human_review_assign_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+PR_MENTIONS_MARKER = "E2E_PR_MENTIONS"
+
+
+def _pr_mentions_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    message = f"Opened the pull request:\n\n{url}\n\nSee [the greet() PR]({url}) for the details."
+    return AIMessage(
+        content="Replying with the PR on its own line and inline.",
+        tool_calls=[
+            {
+                "name": "slack_reply",
+                "args": {"message": message, "response_type": "final"},
+                "id": "call-pr-mentions-reply",
+            }
+        ],
+    )
+
+
 def _multi_pr_reply_step(messages: list[BaseMessage]) -> AIMessage:
     url = _pr_url_from_messages(messages) or "(PR url unavailable)"
     return AIMessage(
@@ -1039,6 +1063,51 @@ REVIEW_CHAT_REVIEW_MARKER = "E2E_REVIEW_CHAT_REVIEW"
 REVIEW_CHAT_PLAIN_MARKER = "E2E_REVIEW_CHAT_PLAIN"
 REVIEW_CHAT_FILE = "zeta.py"
 
+_IMPLEMENT_STEPS: tuple[StepSpec, ...] = (
+    _tool_step(
+        "Acknowledging the Slack request before starting work.",
+        "slack_reply",
+        {"message": "On it!"},
+        "call-ack",
+    ),
+    _tool_step(
+        "Setting up the repository.",
+        "execute",
+        {"command": _SETUP_SCRIPT},
+        "call-setup",
+    ),
+    _tool_step(
+        "Implementing the greeting.",
+        "edit_file",
+        {
+            "file_path": f"/repo/{FEATURE_FILE}",
+            "old_string": 'def greet(name):\n    return "Hello!"',
+            "new_string": 'def greet(name):\n    return f"Hello, {name}!"',
+        },
+        "call-edit",
+    ),
+    _tool_step(
+        "Committing and pushing the change.",
+        "execute",
+        {"command": _COMMIT_SCRIPT},
+        "call-commit",
+    ),
+    _tool_step(
+        "Opening a pull request.",
+        "open_pull_request",
+        {
+            "owner": OWNER,
+            "repo": REPO,
+            "head": FEATURE_BRANCH,
+            "base": BASE_BRANCH,
+            "title": PR_TITLE,
+            "body": "Adds a `greet()` helper as requested.",
+            "draft": True,
+        },
+        "call-pr",
+    ),
+)
+
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "review_chat_comments": (
         _tool_step(
@@ -1314,51 +1383,8 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         StepSpec(content="Finished the delegated investigation."),
     ),
-    "implement": (
-        _tool_step(
-            "Acknowledging the Slack request before starting work.",
-            "slack_reply",
-            {"message": "On it!"},
-            "call-ack",
-        ),
-        _tool_step(
-            "Setting up the repository.",
-            "execute",
-            {"command": _SETUP_SCRIPT},
-            "call-setup",
-        ),
-        _tool_step(
-            "Implementing the greeting.",
-            "edit_file",
-            {
-                "file_path": f"/repo/{FEATURE_FILE}",
-                "old_string": 'def greet(name):\n    return "Hello!"',
-                "new_string": 'def greet(name):\n    return f"Hello, {name}!"',
-            },
-            "call-edit",
-        ),
-        _tool_step(
-            "Committing and pushing the change.",
-            "execute",
-            {"command": _COMMIT_SCRIPT},
-            "call-commit",
-        ),
-        _tool_step(
-            "Opening a pull request.",
-            "open_pull_request",
-            {
-                "owner": OWNER,
-                "repo": REPO,
-                "head": FEATURE_BRANCH,
-                "base": BASE_BRANCH,
-                "title": PR_TITLE,
-                "body": "Adds a `greet()` helper as requested.",
-                "draft": True,
-            },
-            "call-pr",
-        ),
-        _dynamic_step(_reply_step),
-    ),
+    "implement": (*_IMPLEMENT_STEPS, _dynamic_step(_reply_step)),
+    "pr_mentions": (*_IMPLEMENT_STEPS, _dynamic_step(_pr_mentions_reply_step)),
     # Expedited review, turn 1: implement a one-line change, open the PR, start
     # the durable CI watch, and post the approval card before checks report.
     "expedite": (
@@ -1736,6 +1762,9 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: ctx.human_count <= 1 and "E2E_MULTI_PR" in f"{ctx.first_text}\n{ctx.last_text}",
     ),
     ScriptRule(
+        "pr_mentions", lambda ctx: ctx.human_count <= 1 and PR_MENTIONS_MARKER in ctx.first_text
+    ),
+    ScriptRule(
         "many_files", lambda ctx: ctx.human_count <= 1 and "E2E_MANY_FILES" in ctx.first_text
     ),
     ScriptRule("move", lambda ctx: ctx.human_count <= 1 and _is_move_request(ctx.first_text)),
@@ -1827,4 +1856,14 @@ class FakeScriptedChatModel(BaseChatModel):
         if hold:
             time.sleep(float(hold.group(1) or os.environ.get("E2E_BUSY_HOLD_SECONDS", "10")))
         step = script[step_index] if step_index < len(script) else SCRIPT_LIBRARY["followup"][0]
-        return ChatResult(generations=[ChatGeneration(message=_render_step(step, messages))])
+        reply = _render_step(step, messages)
+        if THOUGHT_MARKER in context.first_text and isinstance(reply.content, str):
+            reply = reply.model_copy(
+                update={
+                    "content": [
+                        {"type": "reasoning", "reasoning": THOUGHT_TEXT},
+                        {"type": "text", "text": reply.content},
+                    ]
+                }
+            )
+        return ChatResult(generations=[ChatGeneration(message=reply)])

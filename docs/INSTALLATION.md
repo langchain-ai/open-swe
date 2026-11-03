@@ -43,6 +43,7 @@ What a deployment needs:
 | `LANGGRAPH_URL` | The deployment's own public URL |
 
 GitHub and Slack are the two surfaces every deployment has; Linear is an optional add-on.
+The backend refuses to start if any of the five required Slack app variables above are missing or blank.
 Every variable Open SWE reads is declared in `openswe/config.py` with its description and default; that file is the complete reference.
 
 ### Optional PostHog usage tracking
@@ -50,12 +51,17 @@ Every variable Open SWE reads is declared in `openswe/config.py` with its descri
 Set `POSTHOG_API_KEY` to your PostHog project API key.
 `POSTHOG_HOST` defaults to `https://us.i.posthog.com`; use `https://eu.i.posthog.com` for EU projects or your self-hosted ingestion host.
 Without a key, capture is disabled.
-No frontend key or additional dependency is needed.
+The dashboard reads the same key from `/dashboard/api/analytics/config` and captures in the browser with posthog-js, so no frontend build setting is needed.
 
-Authenticated dashboard navigation sends `$pageview` events with normalized `page_name`; MCP executions send `MCP Tool Called` with tool name, `is_error`, and the run repository name; persisted webhook deliveries send `Webhook Received` with source, event type, action, resolved workspace/repository/PR IDs, and the repository name on GitHub events.
+The dashboard sends `$pageview` and `$pageleave` events grouped into PostHog sessions, with the page title, a normalized `page_name` and URLs whose ids and query strings are replaced by placeholders (`/agents/:threadId`); autocapture, heatmaps, session recording, exception capture and web vitals are off.
+`platform` is `web` or `desktop` (with `desktop_version`), so desktop app usage can be told apart.
+MCP executions send `MCP Tool Called` with tool name, `is_error`, and the run repository name; persisted webhook deliveries send `Webhook Received` with source, event type, action, resolved workspace/repository/PR IDs, and the repository name on GitHub events.
 `DD_ENV` identifies the deployment.
 Resolved users share the internal user UUID, with email and GitHub login traits on usage events.
-Unresolved usage is skipped; unresolved webhooks use a source-specific ID without creating person profiles.
+Signed-out dashboard visits create no person profiles; unresolved MCP usage is skipped.
+A webhook whose sender is no Open SWE user counts as that account (`github:<id>`, `slack:<id>`); bots get a person profile marked `is_bot`, people without an account get none, and events with no sender use `open-swe:webhook:<source>`.
+Webhooks on a pull request also carry `pull_request_author_id`, the author's user UUID, so bot activity on a PR can be credited to its author.
+Private events, such as a person's own threads, record only who acted, the source, event type and workspace, marked `visibility: private`; PRs they open are public and tracked in full.
 
 Delivery is best effort, not a durable export or historical backfill.
 Tool arguments/results, page URLs/query strings/thread identifiers, and raw webhook payloads are excluded; only allowlisted metadata properties are exported; IP geolocation is disabled.
@@ -213,7 +219,7 @@ Users can override the model for an individual thread, for example by asking the
 Model ids and their providers are described in [CUSTOMIZATION.md](CUSTOMIZATION.md).
 
 **Other API keys.**
-`EXA_API_KEY` (from [dashboard.exa.ai](https://dashboard.exa.ai)) enables the web search tool.
+`EXA_API_KEY` (from [dashboard.exa.ai](https://dashboard.exa.ai)) enables the web search tool; with `MDA_EXA_CONNECTION`, runs read the key from the MDA deployment's connection instead ([mda/README.md](../mda/README.md#configure)).
 `REVIEWER_OUTCOMES_DATASET` names the LangSmith dataset the reviewer records finding outcomes in (default `openswe-reviewer-outcomes`).
 
 ## 5. Create the Slack app
@@ -365,6 +371,8 @@ CONFIGURED_ADMINS=""                  # GitHub logins or emails, comma-separated
 
 MDA_RUNTIME_URL=""                    # the Managed Deep Agents deployment of mda/; required
 MDA_RUNTIME_API_KEY=""                # LangSmith key to call it with; defaults to LANGSMITH_API_KEY
+MDA_WORKSPACE_ID=""                   # its LangSmith workspace; defaults to this backend's
+MDA_LANGSMITH_PROJECT=""              # its LangSmith project (the deployment name); defaults to LANGSMITH_PROJECT
 REMOTE_RUNTIME_TOKEN_SECRET=""        # openssl rand -hex 32     (signs the run tokens it calls back with); required
 ```
 
@@ -424,6 +432,7 @@ Admins turn kitchen mode on per channel in the workspace editor (**Workspaces �
 In a kitchen channel, a top-level human message starts a new agent thread and replies continue it without tagging Open SWE; ordinary untagged replies queue behind an active run.
 Other channels still require mentions.
 To enable private channels, update the Slack app with the current manifest and reinstall it so Slack sends the `message.groups` event (the base manifest already includes the `groups:history` scope).
+
 Existing Slack app installations must update their event subscriptions; saving the dashboard setting alone does not change them.
 
 **Native Stop.**
@@ -554,15 +563,25 @@ A machine caller reads back only the threads it started, through `GET /dashboard
 <details id="linear">
 <summary><strong>Linear</strong></summary>
 
-Open SWE listens for Linear comments that mention `@openswe`.
+Open SWE works in Linear as an app, through the Linear channel of its Managed Deep Agents deployment (`mda/channels/linear.py`).
+Mentioning the app on an issue, or delegating the issue to it, opens an agent session.
+The agent answers there, a reply in the session continues the conversation, and **Stop** cancels the run.
+Each session is its own conversation and thread; mentioning the app again on the same issue opens a new one.
+The dashboard shows these threads read-only: continue them in Linear.
 
-1. **Settings → API → Webhooks → New webhook**: label `Open SWE`, URL `<URL>/webhooks/linear`, a secret from `openssl rand -hex 32` saved as `LINEAR_WEBHOOK_SECRET`, and under **Data change events** **Comments → Create**, plus **Issues** when workspace automations should run on Linear issue events.
-1. Add a Linear MCP server named `linear` under **Workspaces → the workspace → MCP connections** and select the tools Open SWE may use.
-   Include `save_comment` (or `create_comment` if offered) so the backend can post run, authentication, and sandbox failure notices even after the agent stops.
+1. Pick a secret (`openssl rand -hex 32`) and set it as `MDA_SERVICE_SECRET` in both `mda/.env` and the backend's environment.
+   The deployment signs each Linear event it hands the backend with it, as Standard Webhooks does, and the backend answers only calls whose signature it verifies.
+1. Run `mda deploy` in `mda/`.
+   Deploy sets up the Linear app, which takes a Linear workspace admin: it opens Linear's new-app page filled in with the app's name, redirect URI, webhook URL and events, then asks for the app's client ID, client secret and webhook signing secret, and the admin approves the install.
+   The deployment checks each delivery's signature with that secret; the backend needs no Linear secret.
+1. Add a Linear MCP server named `linear` under **Workspaces → the workspace → MCP connections** and select the tools Open SWE may use to read issues and change them.
+   Include `save_comment` (or `create_comment` if offered) so a run can still post a notice on the issue, such as when its sandbox keeps failing; the session's answer and errors need no tool.
 1. Set a workspace default repository under **Open SWE Agent**.
-   Add a `repo:owner/name` token or GitHub URL to a Linear comment when the issue belongs to another repository.
+   Add a `repo:owner/name` token or GitHub URL to the message that mentions the app when the issue belongs to another repository.
 
-**Verify:** comment `@openswe what files are in this repo?` on an issue, adding `repo:owner/name` when needed.
+Issue events still reach workspace automations and `listen_events`: the channel forwards them to the backend.
+
+**Verify:** mention the app on an issue with `what files are in this repo?`, adding `repo:owner/name` when needed.
 
 </details>
 
@@ -653,8 +672,10 @@ Before upgrading a deployment that predates those imports, run an earlier releas
 
 - The URL configured in GitHub, Slack, or Linear must be the deployment's URL; GitHub shows each delivery and its response under the App's **Advanced** tab.
   A new webhook or signing secret takes effect only after the deployment restarts with it; deliveries in between are rejected as `Invalid signature`, and Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
-- Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack, Comments → Create (and Issues, for automations) for Linear.
-- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
+- Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack.
+  `mda deploy` subscribes the Linear app to the events its channel handles.
+- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET`, every request to that endpoint is rejected with 401.
+  Linear deliveries reach the backend only from the MDA deployment, which verifies them and signs its calls with `MDA_SERVICE_SECRET`, needed on both sides.
 
 ### Thread credential scope
 
@@ -723,7 +744,8 @@ User identity and membership checks still apply to public runs.
 ### Agent not responding to comments
 
 - GitHub: the comment must contain a configured handle (`@openswe` by default, case-insensitive), and the commenter must have signed in to the dashboard once; otherwise the log says `No email mapping for GitHub user`.
-- Linear: the comment must contain the handle; Slack: the bot must be in the channel and `@`-mentioned.
+- Linear: mention the app itself, or delegate the issue to it; a session opens on the issue.
+  Slack: the bot must be in the channel and `@`-mentioned.
 - Check the server log for webhook processing errors.
 
 ### Token encryption errors

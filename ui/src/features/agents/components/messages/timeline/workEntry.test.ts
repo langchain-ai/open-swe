@@ -36,6 +36,22 @@ function diff(overrides: Partial<DiffData> = {}): DiffData {
 }
 
 describe("describeWorkEntry", () => {
+  it("links only successful cross-thread messages to their authorized recipient", () => {
+    const recipient = "553f74de-534d-5377-815d-c14b58b21ea2"
+    const sent = chunk({
+      title: "message_task_thread",
+      toolKind: "other",
+      output: JSON.stringify({ success: true, recipient_thread_id: recipient }),
+    })
+    expect(describeWorkEntry(sent).destinationHref).toBe(`/agents/${recipient}`)
+    expect(
+      describeWorkEntry({ ...sent, output: "invalid" }).destinationHref
+    ).toBeUndefined()
+    expect(
+      describeWorkEntry({ ...sent, status: "error" }).destinationHref
+    ).toBeUndefined()
+  })
+
   it("splits a read into a verb, file name, and full-path tooltip", () => {
     const fullPath = `${repoPath}/ui/src/AGENTS.md`
     const entry = describeWorkEntry(
@@ -176,6 +192,19 @@ describe("liveActivityLabel", () => {
     expect(
       liveActivityLabel([{ ...running, status: "completed" }, chunk()])
     ).toBe("Thinking…")
+  })
+
+  it("names the thought by its latest finished heading", () => {
+    const reasoning = (text: string): Chunk => ({ kind: "reasoning", text })
+
+    expect(liveActivityLabel([reasoning("**Evaluating tok")])).toBe("Thinking…")
+    expect(
+      liveActivityLabel([
+        reasoning(
+          "**Evaluating token budget**\n\nEnough left.\n\n**Running the e2e test**\n\nStarting"
+        ),
+      ])
+    ).toBe("Running the e2e test…")
   })
 
   it("switches to response status when final text starts streaming", () => {

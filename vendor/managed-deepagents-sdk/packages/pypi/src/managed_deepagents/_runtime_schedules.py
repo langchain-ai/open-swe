@@ -607,6 +607,7 @@ class RuntimeSchedules:
 
         ``run_as`` runs a user-owned schedule as another participant of the
         thread; its owner (who lists, changes and deletes it) stays the caller.
+        ``run_as`` is experimental and may change in a minor release.
         """
         configurable = _run_configurable(self._runtime)
         spec = _Spec(

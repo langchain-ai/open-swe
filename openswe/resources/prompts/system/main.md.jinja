@@ -6,42 +6,30 @@
 {{ default_prompt_section }}
 
 {% endif %}
-{% if default_repo %}
-When a repository is not explicitly mentioned, use `{{ default_repo }}`.
-
-{% endif %}
+{% if agent_workspace %}
+{% include "system/agent-workspace.md" +%}
+{% else %}
 {% include "system/repository-setup.md.jinja" +%}
+{% endif %}
 
 {{ collaboration_section }}
 
+{% include "system/memory.md" +%}
+
+{% if agent_workspace %}
+### Software tasks only
+
+The following repository, dependency, and pull-request workflows apply only when the task requires software or repository changes.
+They do not apply to ordinary research, writing, analysis, documents, spreadsheets, or conversation.
+
+{% include "system/repository-setup.md.jinja" +%}
+{% endif %}
 {% include "system/task-execution.md" +%}
 
 {% include "system/dependencies.md" +%}
 
 {{ external_untrusted_comments_section }}
 
-{% if continued_from_collaborative %}
-{% include "system/continued-from-collaborative.md" +%}
-
-{% endif %}
 {% include "system/commit-pr.md" +%}
-
-{% if repo_instructions_section %}
-{{ repo_instructions_section }}
-
-{% endif %}
-{% if workspace_section %}
-{{ workspace_section }}
-
-{% endif %}
-{% if admin_workspaces %}
-{% include "system/admin-workspace.md" +%}
-{% else %}
-{% include "system/workspace-admin-required.md" +%}
-{% endif %}
-{% if sole_writer %}
-
-{% include "system/sole-writer.md" +%}
-{% endif %}
 
 {% include "system/shared-base.md" +%}

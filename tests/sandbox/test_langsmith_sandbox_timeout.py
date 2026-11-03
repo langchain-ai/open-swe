@@ -74,9 +74,12 @@ def _no_grace(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", "0")
 
 
-async def test_aexecute_kills_on_client_timeout() -> None:
+@pytest.mark.parametrize("reset", [False, True])
+async def test_aexecute_kills_on_client_timeout(reset: bool) -> None:
     handle = _FakeHandle(sleep=5.0)
     sb = _backend(handle)
+    if reset:
+        sb.reset_git_identity()
     start = time.monotonic()
     resp = await sb.aexecute("sleep 999", timeout=1)
     assert time.monotonic() - start < 3.0
@@ -85,6 +88,11 @@ async def test_aexecute_kills_on_client_timeout() -> None:
     assert handle.killed_while_streaming
     sandbox = cast(_FakeSandbox, sb._async_sandbox)
     assert sandbox.run_calls[0]["wait"] is False
+    assert sb._git_identity_pending is None
+    handle._sleep = 0
+    handle._result = SimpleNamespace(stdout="next command", stderr="", exit_code=0)
+    assert (await sb.aexecute("echo next command", timeout=1)).output == "next command"
+    assert sandbox.run_calls[-1]["command"] == "echo next command"
 
 
 async def test_cancelling_aexecute_kills_the_running_command() -> None:
@@ -107,13 +115,17 @@ async def test_aexecute_success_combines_streams() -> None:
     assert not handle.killed
 
 
-async def test_aexecute_server_timeout_not_killed() -> None:
+@pytest.mark.parametrize("reset", [False, True])
+async def test_aexecute_server_timeout_not_killed(reset: bool) -> None:
     handle = _FakeHandle(raises=CommandTimeoutError("server enforced"))
     sb = _backend(handle)
+    if reset:
+        sb.reset_git_identity()
     resp = await sb.aexecute("make hang", timeout=2)
     assert resp.exit_code == 124
     assert "on the sandbox" in resp.output
     assert not handle.killed
+    assert sb._git_identity_pending is None
 
 
 def _patch_base_execute(monkeypatch: pytest.MonkeyPatch, sink: dict[str, Any]) -> None:
