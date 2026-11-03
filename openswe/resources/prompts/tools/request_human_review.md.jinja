@@ -42,6 +42,7 @@ For an existing review request, omit `inline_summary` so the engineering card st
 Open SWE chooses the mapped owner, otherwise rotates a member of the configured team, and sends one Slack ping with available PR screenshots (DM for private or unreadable channels or failed delivery), without replacing engineering review.
 Do not use `assign_human_reviewer` for supplementary reviewers.
 
+To turn off auto-merge for an existing standard request without dismissing it, use `disable_human_review_auto_merge`.
 Pass `auto_merge=false` for review only: reviewer signup, assignment and reminders continue, but a person must merge the PR.
 Omit `auto_merge` to inherit the workspace’s `human_review_auto_merge_enabled` default (enabled unless configured otherwise), or pass `true` to enable it for this request.
 The resolved mode is saved when the request is created; later workspace-default changes do not alter existing requests.

@@ -1131,7 +1131,7 @@ async def test_only_auto_merge_requests_merge_when_approved(
         ThreadLink(thread_id="deleted"),
     ]
     request = HumanReviewRequest(
-        pull_request_id=pr.id, head_sha="abc", kind="standard", auto_merge=auto_merge
+        pull_request_id=pr.id, head_sha="abc", kind="standard", auto_merge=True
     )
     request.pull_request = pr
     request.thread_id = "review-request"
@@ -1184,6 +1184,9 @@ async def test_only_auto_merge_requests_merge_when_approved(
             standard, "merge_pull_request", AsyncMock(return_value=MergeResult("merged", "Merged"))
         ) as merge,
     ):
+        if not auto_merge:
+            await ReviewCard(request).disable_auto_merge()
+            assert request.auto_merge is False
         if trigger == "deadline":
             await standard.run_deadline(str(request.id), "auto_merge")
         else:

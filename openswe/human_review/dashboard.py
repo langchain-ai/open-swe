@@ -65,6 +65,7 @@ class DashboardReviewRequest:
                             approval = await HumanReviewRequest.get(UUID(result["approval_id"]))
                             return RequestResult(
                                 success=True,
+                                auto_merge=None,
                                 request_id=str(result["approval_id"]),
                                 channel=target.id,
                                 channel_name=target.name,

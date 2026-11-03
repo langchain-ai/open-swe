@@ -96,6 +96,17 @@ class ReviewCard:
 
     request: HumanReviewRequest
 
+    async def disable_auto_merge(self) -> None:
+        """Keep standard review active but require a person to merge."""
+        async with HumanReviewRequest.locked(self.request.id) as (_, row):
+            if row is None or row.state != "open":
+                raise ValueError("This review request is already closed")
+            if row.kind != "standard":
+                raise ValueError("Only standard review requests support an auto-merge opt-out")
+            row.auto_merge = False
+            self.request = row
+        await self.refresh()
+
     async def link_on_github(self) -> None:
         """Link the published Slack review request from its pull request."""
         request = self.request

@@ -234,6 +234,26 @@ async def _request_for_mcp_caller(
 
 @expose_mcp()
 @audit_tool()
+async def disable_human_review_auto_merge(pr_url: str) -> dict[str, object]:
+    """Disable Open SWE auto-merge while keeping a standard human review request active."""
+    pr_ref = parse_github_pr_url(pr_url)
+    if pr_ref is None:
+        return {"success": False, "error": "pr_url must be a canonical GitHub pull request URL"}
+    cfg = RunConfig.from_config(get_config())
+    if refusal := await _repository_refusal(pr_ref, cfg):
+        return {"success": False, "error": refusal}
+    request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    if request is None:
+        return {"success": False, "error": "This pull request has no open review request"}
+    try:
+        await ReviewCard(request).disable_auto_merge()
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    return {"success": True, "auto_merge": False, "request_id": str(request.id)}
+
+
+@expose_mcp()
+@audit_tool()
 async def dismiss_human_review_request(pr_url: str, reason: str = "") -> dict[str, Any]:
     """Implement the `dismiss_human_review_request` tool."""
     pr_ref = parse_github_pr_url(pr_url)

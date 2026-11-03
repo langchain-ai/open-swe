@@ -86,3 +86,21 @@ async def test_channel_mismatch_reports_existing_location(
     assert "<#C_OLD>" in result["next"] and "<#C_NEW>" in result["next"]
     assert "dismiss_human_review_request" in result["next"]
     assert "Do not announce" not in result["next"]
+
+
+async def test_auto_merge_opt_out_cannot_bypass_repository_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        request_human_review, "get_config", lambda: {"configurable": {"github_login": "alice"}}
+    )
+    monkeypatch.setattr(
+        request_human_review, "_repository_refusal", AsyncMock(return_value="Forbidden")
+    )
+    lookup = AsyncMock()
+    monkeypatch.setattr(request_human_review.HumanReviewRequest, "active_for", lookup)
+    result = await request_human_review.disable_human_review_auto_merge(
+        "https://github.com/lc/repo/pull/7"
+    )
+    assert result == {"success": False, "error": "Forbidden"}
+    lookup.assert_not_awaited()
