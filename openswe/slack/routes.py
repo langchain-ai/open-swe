@@ -1059,10 +1059,15 @@ async def slack_webhook(
                 triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
             )
             if web_in_mda:
-                side_thread = mda_forwarding.side_thread_id(channel_id, original_message_ts)
-                await mda_forwarding.claim_side(
-                    side_thread, owner_login=await service.slack_login(user_id)
-                )
+                # A fork of the conversation's thread, which knows what the agent did here,
+                # or a thread seeded from the Slack thread.
+                asker = await service.slack_login(user_id)
+                side_thread = await forks.fork_thread(
+                    mda_thread_id,
+                    key=forks.branch_key(channel_id, original_message_ts),
+                    login=asker,
+                ) or mda_forwarding.side_thread_id(channel_id, original_message_ts)
+                await mda_forwarding.claim_side(side_thread, owner_login=asker)
                 await mda_forwarding.remember(
                     await web_opening(request, breakout, side_thread), repo, original_message_ts
                 )

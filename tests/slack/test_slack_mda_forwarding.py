@@ -1741,6 +1741,29 @@ async def test_moving_a_backend_thread_or_an_empty_web_breakout_stays_on_the_bac
     assert tasks.kwargs == [{}]
 
 
+async def test_a_web_breakout_in_an_mda_conversation_runs_on_a_fork(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = AsyncMock()
+    monkeypatch.setattr(mda_forwarding, "claim_side", claim)
+    monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
+    monkeypatch.setattr(
+        webhook_common, "get_thread_workspace", AsyncMock(return_value="engineering")
+    )
+    fork = AsyncMock(return_value="forked-thread")
+    monkeypatch.setattr(forks, "fork_thread", fork)
+    request = _FakeRequest(_mention(text="<@BOT> /breakout:web why is CI red?"), _SLACK_HEADERS)
+
+    await slack_routes.slack_webhook(
+        cast(Request, request), cast(BackgroundTasks, _FakeBackgroundTasks())
+    )
+
+    fork.assert_awaited_once_with(_MDA_THREAD, key=forks.branch_key("C1", _COMMAND_TS), login="ada")
+    claim.assert_awaited_once_with("forked-thread", owner_login="ada")
+    [remembered, _repo, _ts] = cast(AsyncMock, mda_forwarding.remember).await_args.args
+    assert (remembered.thread_id, remembered.web_only) == ("forked-thread", True)
+
+
 async def test_a_web_breakout_goes_to_mda_on_a_thread_of_its_own(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
