@@ -30,7 +30,7 @@ def upgrade() -> None:
             id uuid PRIMARY KEY,
             cache_id uuid NOT NULL REFERENCES code_owner_cache(id) ON DELETE CASCADE,
             user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            sole boolean NOT NULL,
+            alternatives integer NOT NULL,
             created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             created_by uuid REFERENCES users(id) ON DELETE SET NULL,

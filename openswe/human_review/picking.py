@@ -224,13 +224,10 @@ class Coverage:
             areas.append(Area(handles, frozenset(owners), tuple(files)))
         return cls(tuple(sorted(areas, key=lambda area: (-len(area.files), area.handles))))
 
-    def sole_owners(self, author: str) -> set[str]:
-        """Owners whose approval nobody else but the author could give for some area."""
-        sole: set[str] = set()
-        for area in self.areas:
-            if len(others := area.owners - {author.lower()}) == 1:
-                sole |= others
-        return sole
+    def alternatives(self, login: str, author: str) -> int:
+        """The fewest others, besides the author, who could approve an area ``login`` owns."""
+        excluded = {login.lower(), author.lower()}
+        return min(len(area.owners - excluded) for area in self.of(login))
 
     @classmethod
     async def of_pull(cls, pull: PullRequestClient, base_ref: str | None) -> Self | None:

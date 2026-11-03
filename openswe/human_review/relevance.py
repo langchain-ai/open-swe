@@ -1,16 +1,20 @@
-"""How closely each pull request on a To Review list concerns its person.
+"""How much each pull request on a To Review list is waiting on its person in particular.
 
-Each row scores why it is on the list plus what PostgreSQL has cached about the
-person and the pull request: whether they own its changed files, alone or with
-others, and whether they are in the Slack channels its review was posted to or
-it was built in. A cache miss scores nothing and queues a refresh for the next read.
+A row scores three things, from what PostgreSQL has cached:
+
+- Obligation: why it is on the list, Open SWE's own assignment above everything.
+- Necessity: the changed files they own, divided by one more than the other people who
+  could approve them instead, so a sole owner counts fully and one of many barely.
+- Context: whether they are in the Slack channel its review was posted to or it was built in.
+
+A cache miss scores nothing and queues a refresh for the next read.
 """
 
 import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Final, Literal, Self
+from typing import Final, Self
 from uuid import UUID
 
 from openswe.github.pull_request_status import OpenPullRequest, ReviewAssignment
@@ -19,32 +23,47 @@ from openswe.human_review.code_owners import CodeOwnerCache
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.channel_members import SlackChannelMember
 
-Signal = Literal["sole_owner", "owner", "review_channel", "kitchen_channel"]
-
-# Open SWE's own assignment outweighs every other reason put together.
-WEIGHTS: Final[Mapping[ReviewAssignment | Signal, int]] = {
-    "assigned": 64,
-    "sole_owner": 32,
-    "requested": 16,
-    "owner": 16,
-    "tentative": 8,
-    "review_channel": 8,
-    "mentioned": 4,
-    "draft": 4,
-    "kitchen_channel": 2,
+OBLIGATION: Final[Mapping[ReviewAssignment, float]] = {
+    "assigned": 120,
+    "requested": 30,
+    "tentative": 15,
+    "mentioned": 6,
+    "draft": 6,
     "speculative": 0,
 }
+NECESSITY: Final = 60
+REVIEW_CHANNEL: Final = 8
+KITCHEN_CHANNEL: Final = 4
+
+
+@dataclass(frozen=True, slots=True)
+class Signals:
+    """What the caches say about one pull request and one person."""
+
+    # Others who could approve the files this person owns; ``None`` when they own none.
+    alternatives: int | None = None
+    in_review_channel: bool = False
+    in_kitchen_channel: bool = False
+
+    @property
+    def score(self) -> float:
+        necessity = NECESSITY / (1 + self.alternatives) if self.alternatives is not None else 0
+        return (
+            necessity
+            + REVIEW_CHANNEL * self.in_review_channel
+            + KITCHEN_CHANNEL * self.in_kitchen_channel
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class Relevance:
     """Each row's signals for one person, by lowercased ``(repo, number)``."""
 
-    signals: Mapping[tuple[str, int], frozenset[Signal]]
+    signals: Mapping[tuple[str, int], Signals]
 
-    def score(self, row: OpenPullRequest) -> int:
-        reasons = self.signals.get(row.key, frozenset())
-        return WEIGHTS[row.assignment or "mentioned"] + sum(WEIGHTS[s] for s in reasons)
+    def score(self, row: OpenPullRequest) -> float:
+        signals = self.signals.get(row.key, Signals())
+        return OBLIGATION[row.assignment or "mentioned"] + signals.score
 
     @classmethod
     async def of(cls, user_id: UUID, rows: list[OpenPullRequest]) -> Self:
@@ -53,21 +72,20 @@ class Relevance:
             for row in rows
         }
         owned, built, posted = await asyncio.gather(
-            CodeOwnerCache.owned_by(user_id, changed),
+            CodeOwnerCache.alternatives_for(user_id, changed),
             PullRequest.built_in(list(changed)),
             HumanReviewRequest.posted_in(list(changed)),
         )
         joined = await SlackChannelMember.joined(
             user_id, {*built.values(), *(c for channels in posted.values() for c in channels)}
         )
-        signals: dict[tuple[str, int], frozenset[Signal]] = {}
-        for key in changed:
-            found: set[Signal] = set()
-            if key in owned:
-                found.add("sole_owner" if owned[key] else "owner")
-            if posted.get(key, set()) & joined:
-                found.add("review_channel")
-            if built.get(key) in joined:
-                found.add("kitchen_channel")
-            signals[key] = frozenset(found)
-        return cls(signals)
+        return cls(
+            {
+                key: Signals(
+                    alternatives=owned.get(key),
+                    in_review_channel=bool(posted.get(key, set()) & joined),
+                    in_kitchen_channel=built.get(key) in joined,
+                )
+                for key in changed
+            }
+        )

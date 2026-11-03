@@ -911,7 +911,12 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
     from openswe.slack.channel_members import SlackChannelMember
     from openswe.slack.channels import SlackChannel
 
-    owned = Coverage((Area(("@o/team",), frozenset({"ada", "grace"}), ("a.py",)),))
+    owned = Coverage(
+        (
+            Area(("@o/team",), frozenset({"ada", "bob", "carol"}), ("a.py",)),
+            Area(("@o/core",), frozenset({"ada", "bob", "grace"}), ("b.py",)),
+        )
+    )
     with (
         patch.object(GitHubClient, "as_app", _review_github_app),
         patch.object(
@@ -971,10 +976,10 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         result = await api_review_assignments(page=1, session={"sub": "ada"})
     assert [(row.number, row.assignment) for row in result.pull_requests] == [
         (1, "assigned"),
-        (30, "speculative"),
         (20, "requested"),
-        (12, "mentioned"),
+        (30, "speculative"),
         (7, "tentative"),
+        (12, "mentioned"),
         (22, "draft"),
     ]
 

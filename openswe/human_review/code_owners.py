@@ -36,8 +36,8 @@ class CodeOwnerCacheUser(Base):
 
     cache_id: Mapped[UUID] = mapped_column(ForeignKey("code_owner_cache.id", ondelete="CASCADE"))
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    # The only owner besides the author of some changed file: the PR needs them.
-    sole: Mapped[bool]
+    # The fewest other people, besides the author, who own any changed file this person owns.
+    alternatives: Mapped[int]
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
@@ -57,10 +57,10 @@ class CodeOwnerCache(Base):
     updated_by: Mapped[UUID | None] = mapped_column(default=None, init=False)
 
     @classmethod
-    async def owned_by(
+    async def alternatives_for(
         cls, user_id: UUID, pulls: Mapping[tuple[str, int], datetime | None]
-    ) -> dict[tuple[str, int], bool]:
-        """The cached PRs this person owns files of, ``True`` when solely; stale ones refresh.
+    ) -> dict[tuple[str, int], int]:
+        """The cached PRs this person owns files of, with their alternatives; stale ones refresh.
 
         ``pulls`` maps lowercased ``(repo, number)`` to when GitHub last updated it, if known.
         """
@@ -68,7 +68,7 @@ class CodeOwnerCache(Base):
             return {}
         async with postgres.session() as session:
             rows = await session.execute(
-                select(Repository.key, cls.number, cls.updated_at, CodeOwnerCacheUser.sole)
+                select(Repository.key, cls.number, cls.updated_at, CodeOwnerCacheUser.alternatives)
                 .join(Repository, Repository.id == cls.repository_id)
                 .outerjoin(
                     CodeOwnerCacheUser,
@@ -78,7 +78,7 @@ class CodeOwnerCache(Base):
                 )
                 .where(tuple_(Repository.key, cls.number).in_(list(pulls)))
             )
-            cached = {(key, number): (updated_at, sole) for key, number, updated_at, sole in rows}
+            cached = {(key, number): (updated_at, alts) for key, number, updated_at, alts in rows}
         oldest = datetime.now(UTC) - CACHE_TTL
         for pull, changed in pulls.items():
             updated_at = cached[pull][0] if pull in cached else None
@@ -90,7 +90,7 @@ class CodeOwnerCache(Base):
                     key=f"{REFRESH_JOB}:{repo}:{number}",
                     replace=False,
                 )
-        return {pull: sole for pull, (_, sole) in cached.items() if sole is not None}
+        return {pull: alts for pull, (_, alts) in cached.items() if alts is not None}
 
     @classmethod
     async def refresh(cls, repo: str, number: int) -> None:
@@ -109,11 +109,11 @@ class CodeOwnerCache(Base):
             logger.info("No GitHub App token to cache code owners", extra={"repository": repo})
             return
         login = login if isinstance(login, str) else ""
-        owners = sorted(set(coverage.owned()) - {login.lower()}) if coverage is not None else []
-        sole = coverage.sole_owners(login) if coverage is not None else set()
+        coverage = coverage or Coverage(())
+        owners = sorted(set(coverage.owned()) - {login.lower()})
         users = await asyncio.gather(*(User.for_login("github", owner) for owner in owners))
         found = {
-            user.id: owner in sole
+            user.id: coverage.alternatives(owner, login)
             for owner, user in zip(owners, users, strict=True)
             if user is not None
         }
@@ -135,8 +135,13 @@ class CodeOwnerCache(Base):
                 await session.execute(
                     insert(CodeOwnerCacheUser).values(
                         [
-                            {"id": uuid7(), "cache_id": cache_id, "user_id": user_id, "sole": s}
-                            for user_id, s in found.items()
+                            {
+                                "id": uuid7(),
+                                "cache_id": cache_id,
+                                "user_id": user_id,
+                                "alternatives": alternatives,
+                            }
+                            for user_id, alternatives in found.items()
                         ]
                     )
                 )
