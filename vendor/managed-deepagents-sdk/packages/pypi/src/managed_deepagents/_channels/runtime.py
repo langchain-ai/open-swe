@@ -15,6 +15,7 @@ from managed_deepagents._channels.types import (
     ChannelEvent,
     ChannelInfo,
     ChannelMessage,
+    ChannelTarget,
     JsonValue,
     PostedChannelMessage,
     PostedChannelThread,
@@ -48,13 +49,19 @@ def json_copy(value: JsonValue) -> JsonValue:
 
 
 def channel_info(
-    *, name: str, provider: str, event: Mapping[str, object] | None, raw_event: JsonValue = None
+    *,
+    name: str,
+    provider: str,
+    event: Mapping[str, object] | None,
+    raw_event: JsonValue = None,
+    channel_target: ChannelTarget | None = None,
 ) -> ChannelInfo:
     return ChannelInfo(
         name,
         provider,
         cast("ChannelEvent | None", immutable_copy(event)),
         cast("JsonValue", immutable_copy(raw_event)),
+        channel_target,
     )
 
 
@@ -109,12 +116,21 @@ def create_runtime_channel(
     transport: ChannelMessagingAdapter | None = None,
     raw_event: JsonValue = None,
     start_thread: StartThread | None = None,
+    channel_target: ChannelTarget | None = None,
 ) -> RuntimeChannel:
-    facts = channel_info(name=name, provider=provider, event=event, raw_event=raw_event)
+    facts = channel_info(
+        name=name,
+        provider=provider,
+        event=event,
+        raw_event=raw_event,
+        channel_target=channel_target,
+    )
     # Keep the route private and copy it so authored code cannot change the target.
 
     if transport is None:
-        return RuntimeChannel(facts.name, facts.provider, facts.event, facts.raw_event)
+        return RuntimeChannel(
+            facts.name, facts.provider, facts.event, facts.raw_event, facts.target
+        )
     bound_target = json_copy(target)
     # Only a schedule event chooses a new provider thread.
     schedule = (
@@ -144,7 +160,12 @@ def create_runtime_channel(
         return cast("PostedChannelMessage", await result if inspect.isawaitable(result) else result)
 
     return RuntimeChannel(
-        facts.name, facts.provider, facts.event, facts.raw_event, cast("ChannelPost", post)
+        facts.name,
+        facts.provider,
+        facts.event,
+        facts.raw_event,
+        facts.target,
+        cast("ChannelPost", post),
     )
 
 

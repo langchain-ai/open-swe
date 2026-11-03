@@ -258,9 +258,9 @@ SlackEventCallback = Callable[
     [SlackMessageEvent, SlackChannelThread],
     "ChannelRunResult | Awaitable[ChannelRunResult | None] | None",
 ]
-"""A handler: returns a run's input, as ``agent.invoke`` takes it, optionally
-with run options as ``(input, {"context", "metadata", "webhook"})``, or ``None``
-to start nothing."""
+"""A handler: returns a run's input, as ``agent.invoke`` takes it, or a list of one
+run with options, as ``[{"input", "context", "metadata", "webhook"}]``, or
+``None`` to start nothing."""
 
 SlackInteractionCallback = Callable[
     [SlackInteractionEvent, SlackChannelThread],

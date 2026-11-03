@@ -213,7 +213,7 @@ def github_channel(
                 id=delivery["thread_id"], channel=ChannelName(name=name()), interrupted=True
             )
             result = await _handler_input(handlers, delivery.get("raw_event"), thread)
-            if not starts_on_conversation(result):
+            if not starts_on_conversation(result, delivery["thread_id"]):
                 return
         await _post_interrupted_notice(target, delivery, pending)
 

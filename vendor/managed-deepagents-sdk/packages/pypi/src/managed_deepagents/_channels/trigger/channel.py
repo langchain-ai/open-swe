@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, cast
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from managed_deepagents._channel import Channel
+from managed_deepagents._channels.auto_post import channel_auto_post, reply_of
 from managed_deepagents._channels.reactions import (
     DEFAULT_REACTION_EMOJI,
     ReactionChoice,
@@ -21,12 +22,13 @@ from managed_deepagents._telemetry.otel import set_log_attributes
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.actor import ChannelActor
+    from managed_deepagents._channels.binding import ChannelBinding
     from managed_deepagents._channels.http.endpoint import EventEndpoint
     from managed_deepagents._channels.http.provider import EventFinished
     from managed_deepagents._channels.http.types import HttpFinishedDelivery
     from managed_deepagents._channels.manifest import ChannelManifest, JsonObject
     from managed_deepagents._channels.resolve_user import ChannelResolveUser, ResolveUser
-    from managed_deepagents._channels.run_input import ChannelRunResult
+    from managed_deepagents._channels.run_input import ChannelRunResult, RunChannel
     from managed_deepagents._channels.slack.events import (
         DecidedSlackEvents,
         SlackChannelThread,
@@ -99,7 +101,7 @@ class TriggerSlackChannel(Channel):
         status: SlackStatusChoice | None = None,
         on_event: Mapping[str, SlackEventCallback] | None = None,
         multitask_strategy: MultitaskStrategy = "enqueue",
-        reply: ChannelReply = "auto",
+        auto_post: bool = True,
         on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
         resolve_user: ChannelResolveUser | None = None,
         code_channel: bool = False,
@@ -112,7 +114,8 @@ class TriggerSlackChannel(Channel):
         self.status = status
         self.on_event = on_event
         self.multitask_strategy = multitask_strategy
-        self.reply = reply
+        self.auto_post = auto_post
+        self.reply: ChannelReply = reply_of(auto_post)
         self.on_finish = on_finish
         self.code_channel = code_channel
         self._decided: DecidedSlackEvents | None = None
@@ -338,28 +341,55 @@ async def _decide_event(
         return await _run_handler(
             event,
             lambda: handler(cast("SlackMessageEvent", event), slack_thread(thread, channel_name)),
-            channel_name,
+            _run_channel(channel_name, delivery, thread),
         )
 
     return TriggerMessageBackground(decide)
 
 
+def _run_channel(
+    channel_name: str,
+    delivery: TriggerChannelMessageEvent
+    | TriggerChannelUserPromptResponseEvent
+    | TriggerChannelProviderEvent,
+    thread: TriggerChannelThread,
+) -> RunChannel:
+    """The channel a delivery's runs start from: its conversation's thread and target."""
+    from managed_deepagents._channels.run_input import RunChannel  # noqa: PLC0415
+    from managed_deepagents._channels.target import channel_target  # noqa: PLC0415
+
+    origin = channel_target(
+        cast(
+            "ChannelBinding",
+            {
+                "provider": "slack",
+                "transport": "trigger_server",
+                "target": {"address": delivery["address"]},
+            },
+        )
+    )
+    return RunChannel(
+        name=channel_name,
+        provider="slack",
+        conversation_thread_id=thread["id"],
+        origin=origin,
+    )
+
+
 async def _run_handler(
     event: SlackEvent,
     call: Callable[[], ChannelRunResult | Awaitable[ChannelRunResult | None] | None],
-    channel_name: str,
+    channel: RunChannel,
 ) -> TriggerMessageDecision:
     """Run a handler and normalize what it returned into run input.
 
-    A handler may return several runs, each with ``(input, options)``: at most
-    one on the Slack thread's own conversation, the others on threads it
-    chooses. A Slack message's blocks and attachments are added to each run's
-    messages, as to a message's own.
+    A handler may return a list of runs: at most one on the Slack thread's own
+    conversation, the others on threads it chooses. A Slack message's blocks
+    and attachments are added to each run's messages, as to a message's own.
     """
     from managed_deepagents._channels.http.provider import run_event_handler  # noqa: PLC0415
     from managed_deepagents._channels.run_input import (  # noqa: PLC0415
         InvalidRunInput,
-        RunChannel,
         normalize_run_inputs,
     )
     from managed_deepagents._channels.slack.events import SlackMessageEvent  # noqa: PLC0415
@@ -372,7 +402,7 @@ async def _run_handler(
     if outcome.type != "input":
         return TriggerMessageDecision(outcome.type)
     try:
-        runs = normalize_run_inputs(outcome.input, RunChannel(name=channel_name, provider="slack"))
+        runs = normalize_run_inputs(outcome.input, channel)
     except InvalidRunInput as error:
         # MDA's own reason, bounded, unlike a raised exception's message.
         logger.error("slack handler returned invalid run input: %s", error.reason)
@@ -494,7 +524,8 @@ def slack_channel(
     status: SlackStatusChoice | None = None,
     on_event: SlackHandlers | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
-    reply: ChannelReply = "auto",
+    auto_post: bool | None = None,
+    reply: ChannelReply | None = None,
     on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
     resolve_user: ResolveUser | EventEndpoint | None = None,
     code_channel: bool = False,
@@ -541,8 +572,8 @@ def slack_channel(
             ``"directMessage"``, and ``"message"`` (any other channel message,
             which only ``trigger_mode`` ``"thread"`` or ``"all"`` delivers). A
             handler gets the ``SlackMessageEvent`` and its ``SlackChannelThread``, and
-            returns a prompt (string, message, or state), optionally with run
-            options as ``(input, {"context", "metadata", "webhook"})``, or
+            returns a prompt (string, message, or state), a list of one run
+            with options as ``[{"input", "context", "metadata", "webhook"}]``, or
             ``None`` to start no run: then the agent doesn't react or reply. A
             message kind without a handler starts a run with the message, as
             without ``on_event``. The message's blocks, attachments and files
@@ -560,12 +591,13 @@ def slack_channel(
             progress, and starts at once, ``rollback`` cancels it and discards
             its progress, and ``reject`` starts nothing.
             Experimental: this may change in a minor release.
-        reply: Whether the channel posts the run's final answer in the thread:
-            ``"auto"`` (the default) or ``"none"``, to leave replying to the
-            agent, through ``runtime.channel.post`` or its own tools. The
-            status, reactions and ``on_finish`` stay as they are. ``"none"``
+        auto_post: Whether the channel posts the run's final answer in the
+            thread: ``True`` (the default), or ``False`` to leave replying to
+            the agent, through ``runtime.channel.post`` or its own tools. The
+            status, reactions and ``on_finish`` stay as they are. ``False``
             needs an ``mda`` CLI that deploys it.
             Experimental: this may change in a minor release.
+        reply: Deprecated: ``auto_post``. ``"none"`` is ``auto_post=False``.
         resolve_user: Map the Slack user to one of your users, with a function
             or an endpoint MDA asks; overrides the identity's ``resolve_user``.
             Experimental: this may change in a minor release.
@@ -606,15 +638,13 @@ def slack_channel(
     """
     if on_finish is not None and not callable(on_finish):
         raise TypeError("channels.slack(...) on_finish must be callable")
-    from managed_deepagents._channels.types import CHANNEL_REPLIES  # noqa: PLC0415
     from managed_deepagents._ingress_runs import MULTITASK_STRATEGIES  # noqa: PLC0415
 
     if multitask_strategy not in MULTITASK_STRATEGIES:
         raise ValueError(
             "channels.slack(...) multitask_strategy must be enqueue, interrupt, rollback or reject"
         )
-    if reply not in CHANNEL_REPLIES:
-        raise ValueError("channels.slack(...) reply must be auto or none")
+    posts = channel_auto_post(auto_post, reply, label="channels.slack(...)", error=ValueError)
     try:
         parsed = _TriggerSlackArgs.model_validate(
             {
@@ -652,7 +682,7 @@ def slack_channel(
         status=cast("SlackStatusChoice | None", parsed.status),
         on_event=_resolve_handlers(on_event),
         multitask_strategy=multitask_strategy,
-        reply=reply,
+        auto_post=posts,
         on_finish=on_finish,
         resolve_user=checked_resolve_user("channels.slack", resolve_user),
         code_channel=parsed.code_channel,
