@@ -1,7 +1,14 @@
 import { AgentChatEmptyState } from "@/features/agents/components/AgentChatEmptyState"
 import { useAgentWorkspace } from "@/features/agents/lib/agentWorkspace"
 import { cn } from "@/lib/utils"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
@@ -13,6 +20,7 @@ import {
   pickComposerRepo,
   pickComposerWorkspace,
 } from "@/features/agents/lib/composerWorkspace"
+import { composerRepoSelection } from "@/features/agents/lib/composerRepoSelection"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
@@ -174,6 +182,21 @@ export function AgentsHome({
   const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
     initialNoRepo ? null : initialRepo
   )
+  const userId = session.data?.user_id ?? ""
+  const rememberedRepo = useSyncExternalStore(
+    composerRepoSelection.subscribe,
+    () => composerRepoSelection.read(userId),
+    () => undefined
+  )
+  const restoredRepo =
+    rememberedRepo === null
+      ? null
+      : reposQuery.data?.repositories.find(
+          (candidate) =>
+            candidate.full_name.toLowerCase() === rememberedRepo?.toLowerCase()
+        )?.full_name
+  const repoSelection =
+    repoOverride === undefined && !agentWorkspace ? restoredRepo : repoOverride
   const userDefaultRepo = profileQuery.data?.default_repo ?? null
 
   // Workspace first: an explicit pick, else the workspace preferring a
@@ -190,13 +213,13 @@ export function AgentsHome({
     ? profileQuery.data?.workspace_default_repos?.[preferredWorkspace]
     : undefined
   const namedRepo = (
-    agentWorkspace && repoOverride === undefined
+    agentWorkspace && repoSelection === undefined
       ? null
-      : repoOverride === undefined
+      : repoSelection === undefined
         ? personalWorkspaceRepo
           ? null
           : userDefaultRepo
-        : repoOverride
+        : repoSelection
   )?.toLowerCase()
   const selectedWorkspace = pickComposerWorkspace({
     override: workspaceOverride,
@@ -215,7 +238,7 @@ export function AgentsHome({
   // mutation to the React Compiler and costs the component its optimization.
   const workspaceRepos = useMemo(() => accessibleRepos ?? [], [accessibleRepos])
   const repo = pickComposerRepo({
-    override: agentWorkspace ? (repoOverride ?? null) : repoOverride,
+    override: agentWorkspace ? (repoSelection ?? null) : repoSelection,
     userDefault: userDefaultRepo,
     userWorkspaceDefault: selectedWorkspace
       ? profileQuery.data?.workspace_default_repos?.[selectedWorkspace]
@@ -230,6 +253,7 @@ export function AgentsHome({
   }
   const selectRepo = (value: string | null) => {
     setRepoOverride(value)
+    if (!agentWorkspace) composerRepoSelection.write(userId, value)
     // Picking from the list pins the workspace it was offered under, so the
     // pick cannot drag the composer into whichever workspace owns it.
     if (!workspaceOverride) setWorkspaceOverride(selectedWorkspace)
@@ -511,7 +535,7 @@ export function AgentsHome({
           repo,
           visibility,
           repo_explicitly_none:
-            repoOverride === null || (agentWorkspace && !repo),
+            repoSelection === null || (agentWorkspace && !repo),
           model_id: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
         }
@@ -528,7 +552,7 @@ export function AgentsHome({
       configurable.thread_type = "private"
     } else {
       if (repo) configurable.repo = repo
-      if (repoOverride === null || (agentWorkspace && !repo))
+      if (repoSelection === null || (agentWorkspace && !repo))
         configurable.repo_explicitly_none = true
       configurable.thread_type =
         visibility === "private" ? "private" : "workspace"
