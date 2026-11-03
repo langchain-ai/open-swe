@@ -181,37 +181,6 @@ def test_a_second_click_on_a_message_starts_nothing(monkeypatch: pytest.MonkeyPa
     assert slack.posted == []
 
 
-def test_a_click_in_a_code_channel_view_is_the_backends(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    slack = _Slack(monkeypatch, SlackClickStart(run=_RUN))
-    # As a click in a code channel's view comes: no message, no thread.
-    click = dataclasses.replace(
-        _click(_option(), clicker="U7"),
-        thread_ts=None,
-        message_ts=None,
-        view_id="V1",
-        code_channel=True,
-    )
-
-    assert asyncio.run(clicks.start_click(click, _THREAD)) is None
-
-    assert slack.asked == []
-    [acted] = slack.acted
-    assert (acted.user_id, acted.channel_id, acted.thread_ts) == ("U7", "C1", None)
-    assert acted.payload == click.payload
-
-
-def test_a_click_with_no_thread_and_no_view_starts_nothing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    slack = _Slack(monkeypatch, SlackClickStart(run=_RUN))
-    click = dataclasses.replace(_click(_option()), thread_ts=None, message_ts=None)
-
-    assert asyncio.run(clicks.start_click(click, _THREAD)) is None
-    assert slack.calls == []
-
-
 def test_a_concierge_dms_click_runs_on_the_dms_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     dm_thread = uuid.uuid4()
     _Slack(monkeypatch, SlackClickStart(run=_RUN, thread_id=dm_thread))

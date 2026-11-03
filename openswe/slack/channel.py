@@ -330,7 +330,7 @@ async def act_on_slack_click(call: ChannelCall, click: ActOnSlackClick) -> Slack
         interaction,
         json.dumps(payload),
         call.background,
-        origin=(click.channel_id, click.thread_ts) if click.thread_ts else None,
+        origin=(click.channel_id, click.thread_ts),
     )
     return SlackClickActed()
 
