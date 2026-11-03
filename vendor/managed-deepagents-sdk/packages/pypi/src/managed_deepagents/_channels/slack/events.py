@@ -31,6 +31,8 @@ from managed_deepagents._channels.types import (
 from managed_deepagents._log import logger
 
 if TYPE_CHECKING:
+    from langgraph_sdk.schema import ThreadState
+
     from managed_deepagents._channels.http.types import ChannelName, HttpFinishedDelivery
     from managed_deepagents._channels.reply import HandlerResult
     from managed_deepagents._channels.trigger.http import TriggerChannelThread
@@ -297,20 +299,21 @@ class SlackChannelThread:
     source_thread_key: str
     """The key the thread is derived from, which names the Slack thread."""
     channel: ChannelName
-    _read_state: Callable[[], Awaitable[dict[str, Any] | None]] | None = field(
+    _get_state: Callable[[], Awaitable[ThreadState | None]] | None = field(
         default=None, repr=False, compare=False
     )
 
-    async def state(self) -> dict[str, Any] | None:
-        """The thread's state values, such as its ``messages``, as its last run
-        left them; ``None`` when no run started on it yet.
+    async def get_state(self) -> ThreadState | None:
+        """The thread's state, as Agent Server's ``threads.get_state`` reads it:
+        its ``values`` (such as ``messages``) as its last run left them, ``next``,
+        ``tasks`` and ``interrupts``; ``None`` when no run started on it yet.
 
         Read as the conversation's own runs read it, so in a code channel it is
         the channel's one thread. Only a handler deciding an event can read it.
         """
-        if self._read_state is None:
+        if self._get_state is None:
             raise RuntimeError("only a handler deciding an event can read its thread's state")
-        return await self._read_state()
+        return await self._get_state()
 
 
 SlackEventCallback = Callable[
@@ -629,7 +632,7 @@ def slack_thread(thread: TriggerChannelThread, name: str) -> SlackChannelThread:
         id=thread["id"],
         source_thread_key=thread["source_thread_key"],
         channel=ChannelName(name=name),
-        _read_state=thread.get("read_state"),
+        _get_state=thread.get("get_state"),
     )
 
 
