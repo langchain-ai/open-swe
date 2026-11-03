@@ -23,6 +23,9 @@ CODE_TEXT_MAX_CHARS = 4000
 # Cumulative across every markdown block in one message.
 MARKDOWN_TEXT_MAX_CHARS = 12000
 MESSAGE_MAX_BLOCKS = 50
+CARD_HEADING_MAX_CHARS = 150
+CARD_TEXT_MAX_CHARS = 200
+CARD_MAX_ACTIONS = 3
 BUTTON_TEXT_MAX_CHARS = 75
 OPTION_TEXT_MAX_CHARS = 75
 ButtonStyle = Literal["primary", "danger"]
@@ -152,8 +155,28 @@ class InputBlock(TypedDict):
     optional: NotRequired[bool]
 
 
+class ImageElement(TypedDict):
+    type: Literal["image"]
+    image_url: str
+    alt_text: str
+
+
+class CardBlock(TypedDict):
+    """Slack's card: a titled tile with an icon, a short body and up to three buttons."""
+
+    type: Literal["card"]
+    block_id: NotRequired[str]
+    icon: NotRequired[ImageElement]
+    title: NotRequired[Mrkdwn]
+    subtitle: NotRequired[Mrkdwn]
+    body: NotRequired[Mrkdwn]
+    subtext: NotRequired[Mrkdwn]
+    actions: NotRequired[list[ButtonElement]]
+
+
 type Block = (
     SectionBlock
+    | CardBlock
     | MarkdownBlock
     | ContextBlock
     | DividerBlock

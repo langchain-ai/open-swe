@@ -66,19 +66,12 @@ async def test_markers_become_cards_in_place_and_unreadable_ones_stay_links(
     assert carded.unavailable == [_URL.format(3)]
     assert "pr-card" not in carded.text
     blocks = block_payload(carded.blocks(live_until=carded.live_until) or [])
-    assert [block["type"] for block in blocks] == [
-        "markdown",
-        "section",
-        "context",
-        "section",
-        "context",
-        "markdown",
-    ]
-    status = _texts(blocks[3:4])
-    assert "*lint* failing" in status
-    assert "Waiting on review from bob" in status
-    assert "2 unresolved conversations" in status
-    assert "Updating live until" in _texts(blocks[4:5])
+    assert [block["type"] for block in blocks] == ["markdown", "card", "markdown"]
+    card = _texts(blocks[1:2])
+    assert "*lint* failing" in card
+    assert "Waiting on bob" in card
+    assert "2 unresolved comments" in card
+    assert "Live until" in card
 
 
 async def test_redraw_replaces_only_its_own_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -91,7 +84,7 @@ async def test_redraw_replaces_only_its_own_blocks(monkeypatch: pytest.MonkeyPat
         message_ts="2.0",
         live_until=datetime.now(UTC) - timedelta(minutes=1),
     )
-    before = block_payload(_card(1, "Old title").blocks(card_id, live_until=tracked.live_until))
+    before = block_payload([_card(1, "Old title").block(card_id, live_until=tracked.live_until)])
     other = {"type": "rich_text", "block_id": "prose", "elements": []}
     footer = {"type": "context", "block_id": "open_swe_usage_footer", "elements": []}
     sent: list[list[dict[str, object]]] = []
@@ -113,7 +106,8 @@ async def test_redraw_replaces_only_its_own_blocks(monkeypatch: pytest.MonkeyPat
     [blocks] = sent
     assert blocks[0] == other and blocks[-1] == footer
     assert "New title" in _texts(blocks) and "Old title" not in _texts(blocks)
-    assert "No longer updating" in _texts(blocks[-2:-1])
+    assert len(blocks) == 3
+    assert "No longer updating" in _texts(blocks[1:2])
 
 
 async def _stored_card(number: int) -> PullRequestCard:

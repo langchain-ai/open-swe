@@ -76,7 +76,8 @@ class _PrLinks:
             return [self.block(item) for item in value]
         if (
             not isinstance(value, dict)
-            or value.get("type") in {"plain_text", "rich_text_preformatted"}
+            # A card links its review page and GitHub with buttons of its own.
+            or value.get("type") in {"plain_text", "rich_text_preformatted", "card"}
             or (value.get("type") == "link" and value.get("text") in _GITHUB_LABELS)
         ):
             return value

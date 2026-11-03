@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Final, Literal, Self
+from urllib.parse import quote
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel
@@ -28,15 +29,18 @@ from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repositories import Repository
 from openswe.jobs import queue
 from openswe.slack.blocks import (
+    CARD_HEADING_MAX_CHARS,
+    CARD_MAX_ACTIONS,
+    CARD_TEXT_MAX_CHARS,
     MARKDOWN_TEXT_MAX_CHARS,
     MESSAGE_MAX_BLOCKS,
     Block,
-    ContextBlock,
-    SectionBlock,
+    ButtonElement,
+    CardBlock,
     block_payload,
-    context,
+    button,
     escape,
-    section,
+    mrkdwn,
 )
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
@@ -47,6 +51,7 @@ from openswe.slack.client import (
 from openswe.slack.http import SlackRequestError
 from openswe.slack.markdown import markdown_blocks
 from openswe.users import User
+from openswe.utils.dashboard_links import dashboard_review_url
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +62,7 @@ MAX_CARDS: Final = 10
 # Webhooks arrive in bursts (a push sets off every check); one redraw covers a burst.
 _REFRESH_DELAY: Final = timedelta(seconds=5)
 _BLOCK_ID_PREFIX: Final = "open_swe_pr_card:"
+_BUTTON_ID: Final = "open_swe_pr_card"
 _MARKER: Final = re.compile(r"\{\{\s*pr-card\s+<?(?P<url>[^\s{}<>|]+)(?:\|[^{}<>]*)?>?\s*\}\}")
 _NAMES_SHOWN: Final = 3
 
@@ -122,37 +128,56 @@ class PullRequestCard:
         title = self.pull.title.replace("[", "(").replace("]", ")")
         return f"[{self.record.label}: {title}]({self.record.url})"
 
-    def blocks(self, card_id: UUID, *, live_until: datetime | None) -> list[Block]:
-        """The card, every block tagged with ``card_id`` so a redraw can find it.
+    def block(self, card_id: UUID, *, live_until: datetime | None) -> CardBlock:
+        """The card as Slack's card block, tagged with ``card_id`` so a redraw can find it.
 
         ``live_until`` is when its live updates end; ``None`` for a card nobody updates.
         """
-        emoji, _ = _STATE_LOOKS[self.state]
-        drawn: list[SectionBlock | ContextBlock] = [
-            section(f"{emoji}  *<{self.record.url}|{escape(self.pull.title)}>*"),
-            context(self._summary()),
-        ]
-        if lines := self._status_lines():
-            drawn.append(section("\n".join(lines)))
-        drawn.append(context(self._footer(live_until)))
-        blocks: list[Block] = []
-        for index, block in enumerate(drawn):
-            block["block_id"] = f"{_BLOCK_ID_PREFIX}{card_id}:{index}"
-            blocks.append(block)
-        return blocks
-
-    def _summary(self) -> str:
         pull = self.pull
-        _, word = _STATE_LOOKS[self.state]
+        drawn: CardBlock = {
+            "type": "card",
+            "block_id": f"{_BLOCK_ID_PREFIX}{card_id}",
+            "title": mrkdwn(self._title()),
+            "subtitle": mrkdwn(self._state_line()),
+            "subtext": mrkdwn(self._subtext(live_until)),
+            "actions": self._buttons(),
+        }
+        if body := self._fit(self._status_lines(), CARD_TEXT_MAX_CHARS, separator="\n"):
+            drawn["body"] = mrkdwn(body)
+        if pull.author:
+            path = f"u/{pull.author_id}" if pull.author_id is not None else quote(pull.author)
+            drawn["icon"] = {
+                "type": "image",
+                "image_url": f"https://avatars.githubusercontent.com/{path}?size=72",
+                "alt_text": pull.author,
+            }
+        return drawn
+
+    def _title(self) -> str:
+        """The linked title, shortened so the link still fits Slack's limit."""
+        room = CARD_HEADING_MAX_CHARS - len(f"<{self.record.url}|>")
+        title = escape(self.pull.title)
+        if len(title) > room:
+            title = title[: room - 1].rstrip() + "…"
+        return f"<{self.record.url}|{title}>"
+
+    def _state_line(self) -> str:
+        pull = self.pull
+        emoji, word = _STATE_LOOKS[self.state]
         if self.state == "merged" and pull.merged_at is not None:
-            by = f" by {escape(pull.merged_by.login)}" if pull.merged_by else ""
-            word = f"Merged{by} {self._when(pull.merged_at)}"
+            word = f"Merged {self._when(pull.merged_at, time=False)}"
         elif self.state == "closed" and pull.closed_at is not None:
-            word = f"Closed {self._when(pull.closed_at)}"
-        label = f"*{escape(self.record.label)}*"
-        parts = [f"{label} by {escape(pull.author)}" if pull.author else label, word]
-        if pull.head_ref and pull.base_ref:
-            parts.append(f"`{escape(pull.head_ref)}` → `{escape(pull.base_ref)}`")
+            word = f"Closed {self._when(pull.closed_at, time=False)}"
+        line = f"{emoji} {word} · {escape(self.record.label)}"
+        author = f" by {escape(pull.author)}"
+        return (
+            line + author if pull.author and len(line + author) <= CARD_HEADING_MAX_CHARS else line
+        )
+
+    def _subtext(self, live_until: datetime | None) -> str:
+        """Diffstat, branches and labels as room allows, then whether the card is live."""
+        pull = self.pull
+        parts: list[str] = []
         if pull.additions is not None and pull.deletions is not None:
             files = (
                 f" in {self._plural(pull.changed_files, 'file')}"
@@ -160,9 +185,20 @@ class PullRequestCard:
                 else ""
             )
             parts.append(f"+{pull.additions} −{pull.deletions}{files}")
+        if pull.head_ref and pull.base_ref:
+            parts.append(f"`{escape(pull.head_ref)}` → `{escape(pull.base_ref)}`")
         if pull.labels:
             parts.append(f":label: {self._names([label.name for label in pull.labels])}")
-        return "  ·  ".join(parts)
+        footer = self._footer(live_until)
+        room = CARD_TEXT_MAX_CHARS - len(footer) - len(" · ")
+        return " · ".join([*self._fit_parts(parts, room), footer])
+
+    def _buttons(self) -> list[ButtonElement]:
+        buttons: list[ButtonElement] = []
+        if review := dashboard_review_url(self.record.owner, self.record.repo, self.record.number):
+            buttons.append(button("Review", action_id=f"{_BUTTON_ID}_review", url=review))
+        buttons.append(button("GitHub", action_id=f"{_BUTTON_ID}_github", url=self.record.url))
+        return buttons[:CARD_MAX_ACTIONS]
 
     def _status_lines(self) -> list[str]:
         """What stands between an open pull request and its merge; nothing once it is done."""
@@ -170,7 +206,7 @@ class PullRequestCard:
         if self.state in {"merged", "closed"} or status is None:
             return []
         if not status.status_available:
-            return [":grey_question: Status unavailable from GitHub"]
+            return [":grey_question: Status unavailable"]
         return [
             *self._check_lines(status),
             *self._review_lines(status),
@@ -187,16 +223,13 @@ class PullRequestCard:
             )
             lines.append(f":x: {heading}")
         if missing := status.missing_checks:
-            lines.append(
-                f":grey_question: {self._plural(len(missing), 'required check')} not reported: "
-                f"{self._names(missing)}"
-            )
+            lines.append(f":grey_question: {self._plural(len(missing), 'required check')} missing")
         if pending := status.pending_checks:
             lines.append(f":hourglass_flowing_sand: {self._plural(len(pending), 'check')} running")
         elif status.ci == "passing" and not failing:
             lines.append(":white_check_mark: Checks passing")
         elif status.ci == "unknown":
-            lines.append(":grey_question: Checks finished without a clear result")
+            lines.append(":grey_question: Checks inconclusive")
         return lines
 
     def _review_lines(self, status: OpenPullRequest) -> list[str]:
@@ -212,52 +245,71 @@ class PullRequestCard:
         if approved:
             lines.append(f":white_check_mark: Approved by {self._names(approved)}")
         if waiting:
-            lines.append(f":eyes: Waiting on review from {self._names(waiting)}")
+            lines.append(f":eyes: Waiting on {self._names(waiting)}")
         elif status.review_required and not changes and self.state == "open":
             lines.append(":eyes: Needs an approving review")
         elif not reviewers and self.state == "open":
             lines.append(":eyes: No reviews yet")
         if unresolved := status.unresolved_threads:
-            lines.append(f":speech_balloon: {self._plural(unresolved, 'unresolved conversation')}")
+            lines.append(f":speech_balloon: {self._plural(unresolved, 'unresolved comment')}")
         return lines
 
     def _merge_lines(self, status: OpenPullRequest) -> list[str]:
-        base = f"`{escape(self.pull.base_ref)}`" if self.pull.base_ref else "the base branch"
+        base = f"`{escape(self.pull.base_ref)}`" if self.pull.base_ref else "base"
         if status.mergeable is False or status.merge_state == "dirty":
-            return [f":warning: Merge conflicts with {base}"]
+            return [f":warning: Conflicts with {base}"]
         lines: list[str] = []
         if status.merge_state == "behind":
             lines.append(f":arrow_down: Behind {base}")
         if self.state == "draft":
             return lines
         if status.auto_merge:
-            lines.append(":hourglass: Merges automatically once everything passes")
+            lines.append(":hourglass: Auto-merges once it passes")
         elif status.merge_state in {"clean", "has_hooks"}:
             lines.append(":rocket: Ready to merge")
         return lines
 
     @staticmethod
-    def _when(moment: datetime) -> str:
+    def _when(moment: datetime, *, time: bool = True) -> str:
         """A time each reader sees in their own time zone."""
-        fallback = f"{moment:%b %-d, %Y %H:%M} UTC"
-        return f"<!date^{int(moment.timestamp())}^{{date_short_pretty}} at {{time}}|{fallback}>"
+        shown = "{date_short_pretty} at {time}" if time else "{date_short_pretty}"
+        return f"<!date^{int(moment.timestamp())}^{shown}|{moment:%b %-d}>"
 
     @staticmethod
     def _names(names: Sequence[str]) -> str:
         shown = ", ".join(escape(name) for name in names[:_NAMES_SHOWN])
         rest = len(names) - _NAMES_SHOWN
-        return f"{shown} and {rest} more" if rest > 0 else shown
+        return f"{shown} +{rest}" if rest > 0 else shown
 
     @staticmethod
     def _plural(count: int, noun: str) -> str:
         return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
+    @staticmethod
+    def _fit_parts(parts: Sequence[str], room: int, separator: str = " · ") -> list[str]:
+        """The leading ``parts`` that fit in ``room`` characters once joined."""
+        kept: list[str] = []
+        for part in parts:
+            if len(separator.join([*kept, part])) > room:
+                break
+            kept.append(part)
+        return kept
+
+    @classmethod
+    def _fit(cls, lines: Sequence[str], limit: int, *, separator: str = " · ") -> str:
+        """``lines`` joined within ``limit``, saying how many were left out."""
+        kept = cls._fit_parts(lines, limit - len(f"{separator}+99 more"), separator)
+        if len(kept) == len(lines):
+            kept = cls._fit_parts(lines, limit, separator)
+        dropped = len(lines) - len(kept)
+        return separator.join([*kept, *([f"+{dropped} more"] if dropped else [])])
+
     def _footer(self, live_until: datetime | None) -> str:
         if live_until is None:
             return f"As of {self._when(self.read_at)}"
         if live_until > self.read_at:
-            return f"Updating live until {self._when(live_until)}"
-        return f"No longer updating  ·  as of {self._when(self.read_at)}"
+            return f"Live until {self._when(live_until, time=False)}"
+        return f"No longer updating · as of {self._when(self.read_at, time=False)}"
 
 
 @dataclass(slots=True)
@@ -339,7 +391,7 @@ class CardedMessage:
         blocks: list[Block] = []
         for part in self.parts:
             if isinstance(part, tuple):
-                blocks.extend(part[1].blocks(part[0], live_until=live_until))
+                blocks.append(part[1].block(part[0], live_until=live_until))
             elif part.strip():
                 drawn = markdown_blocks(part.strip("\n"), budget=budget)
                 if drawn is None:
@@ -543,21 +595,22 @@ class SlackPullRequestCard(Base):
                 extra={"slack_channel": self.channel_id, "slack_message_ts": self.message_ts},
             )
             return
-        prefix = f"{_BLOCK_ID_PREFIX}{self.id}:"
-        mine = [
-            index
-            for index, block in enumerate(blocks)
-            if isinstance(block, dict) and str(block.get("block_id", "")).startswith(prefix)
-        ]
-        if not mine:
+        block_id = f"{_BLOCK_ID_PREFIX}{self.id}"
+        mine = next(
+            (
+                index
+                for index, block in enumerate(blocks)
+                if isinstance(block, dict) and block.get("block_id") == block_id
+            ),
+            None,
+        )
+        if mine is None:
             await self.forget()
             return
-        blocks_before, after = blocks[: mine[0]], blocks[mine[-1] + 1 :]
-        redrawn = block_payload(drawn.blocks(self.id, live_until=self.live_until))
+        updated = list(blocks)
+        updated[mine] = block_payload([drawn.block(self.id, live_until=self.live_until)])[0]
         try:
-            await update_slack_message(
-                self.channel_id, self.message_ts, text, blocks=[*blocks_before, *redrawn, *after]
-            )
+            await update_slack_message(self.channel_id, self.message_ts, text, blocks=updated)
         except SlackRequestError as exc:
             if exc.code in {"message_not_found", "channel_not_found", "cant_update_message"}:
                 await self.forget()
