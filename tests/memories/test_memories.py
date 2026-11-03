@@ -133,3 +133,42 @@ async def test_taking_a_memory_back_asks_the_curator_unless_it_never_saw_it(
         (habit, True),
     }
     assert await MEMORIES.for_curator(workspace.slug, "held") == []
+
+
+async def test_a_triggered_memory_leaves_context_until_recalled(registry_db: None) -> None:
+    workspace = WorkspaceRow(slug="platform", name="Platform")
+    person = User(display_name="Ada")
+    async with postgres.session() as session:
+        session.add_all([workspace, person])
+
+    async def save(body: str) -> UUID:
+        row = await MEMORIES.save(
+            scope="personal",
+            body=body,
+            person=person.id,
+            workspace=workspace.slug,
+            thread_id=None,
+            from_private_thread=False,
+        )
+        return row.id
+
+    broad, api, deploy = await save("broad"), await save("api only"), await save("deploy")
+    await MEMORIES.set_trigger(workspace.slug, "repo:org/api", "Working in org/api.")
+    await MEMORIES.set_trigger(workspace.slug, "task:deploy", "Deploying.")
+    for slug, memory in (("repo:org/api", api), ("repo:org/api", deploy), ("task:deploy", deploy)):
+        assert await MEMORIES.link_trigger(workspace.slug, slug, memory, linked=True)
+    assert not await MEMORIES.link_trigger(workspace.slug, "repo:org/web", broad, linked=True)
+
+    assert [m.id for m in await MEMORIES.personal(person.id)] == [broad]
+    assert [t.line for t in await MEMORIES.triggers(person.id)] == [
+        "repo:org/api: Working in org/api.",
+        "task:deploy: Deploying.",
+    ]
+    assert [m.id for m in await MEMORIES.recall(person.id, "repo:org/api")] == [deploy, api]
+    assert [m.id for m in await MEMORIES.recall(person.id, "task:deploy")] == [deploy]
+
+    # A memory stays held back while any trigger still links it.
+    assert await MEMORIES.delete_trigger(workspace.slug, "repo:org/api")
+    assert {m.id for m in await MEMORIES.personal(person.id)} == {broad, api}
+    curated = await MEMORIES.for_curator(workspace.slug, "pending")
+    assert {m.id: m.triggers for m in curated}[deploy] == ["task:deploy"]

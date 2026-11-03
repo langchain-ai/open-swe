@@ -4,16 +4,20 @@ Every memory waits for the curator of the workspace it was saved in, which may r
 what many people's threads learned in the workspace's prompt. A personal memory also
 applies to its person's runs at once, until a line there supersedes it. Memories
 saved in private threads before every memory reached the curator stay held from it.
+The curator may also link memories to triggers it names: a linked memory leaves its
+person's context, which reads only the trigger's summary of when to ``recall`` it.
 """
 
 import hashlib
 import hmac
+import re
 from datetime import datetime
 from typing import Final, Literal, Self
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel
-from sqlalchemy import ForeignKey, delete, func, or_, select, update
+from sqlalchemy import ColumnElement, ForeignKey, delete, exists, func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,6 +39,8 @@ CURATOR_THREAD_KEY: Final = "curator"
 CURATOR_SOURCE: Final = "curator"
 MAX_MEMORY_CHARS: Final = 2_000
 MAX_WORKSPACE_PROMPT_CHARS: Final = 40_000
+MAX_TRIGGER_SUMMARY_CHARS: Final = 300
+_TRIGGER_SLUG: Final = re.compile(r"[a-z0-9][a-z0-9:/._-]{0,99}")
 # The personal memories a person's runs see, newest first.
 _PERSONAL_LIMIT: Final = 50
 _CURATOR_PAGE: Final = 200
@@ -95,6 +101,68 @@ class WorkspacePromptVersion(Base):
     )
 
 
+class MemoryTriggerRow(Base):
+    __tablename__ = "memory_trigger"
+
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey(WorkspaceRow.id, ondelete="CASCADE"))
+    slug: Mapped[str]
+    summary: Mapped[str]
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
+    updated_at: Mapped[datetime] = mapped_column(server_default=NOW, onupdate=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey(User.id, ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey(User.id, ondelete="SET NULL"), default=None
+    )
+
+
+class MemoryTriggerLink(Base):
+    __tablename__ = "memory_trigger_link"
+
+    trigger_id: Mapped[UUID] = mapped_column(ForeignKey(MemoryTriggerRow.id, ondelete="CASCADE"))
+    memory_id: Mapped[UUID] = mapped_column(ForeignKey(MemoryRow.id, ondelete="CASCADE"))
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
+    updated_at: Mapped[datetime] = mapped_column(server_default=NOW, onupdate=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey(User.id, ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey(User.id, ondelete="SET NULL"), default=None
+    )
+
+
+class MemoryTrigger(BaseModel):
+    """When the memories behind ``slug`` apply; a run reads this in place of them."""
+
+    slug: str
+    summary: str
+
+    @classmethod
+    def slug_of(cls, text: str) -> str:
+        """``text`` as a trigger slug, such as ``repo:org/name``; ValueError when it is none."""
+        slug = text.strip().lower()
+        if not _TRIGGER_SLUG.fullmatch(slug):
+            raise ValueError(
+                "A trigger slug is 1-100 lowercase letters, digits and ':/._-', "
+                "starting with a letter or digit."
+            )
+        return slug
+
+    @property
+    def line(self) -> str:
+        """The trigger as its person's block lists it, with the slug ``recall`` takes."""
+        return f"{self.slug}: {self.summary}"
+
+
+class CuratedTrigger(MemoryTrigger):
+    """A trigger as its curator sees it, with the memories it recalls."""
+
+    memory_ids: list[UUID]
+
+
 class PersonalMemory(BaseModel):
     """A memory that reaches its person's runs."""
 
@@ -125,9 +193,11 @@ class CuratedMemory(BaseModel):
     thread_id: str | None
     # Its person asked to take it back, even after it was adopted.
     withdrawal_requested: bool
+    # The slugs of the triggers that recall it in place of its body.
+    triggers: list[str]
 
     @classmethod
-    def of(cls, row: MemoryRow) -> Self:
+    def of(cls, row: MemoryRow, triggers: list[str]) -> Self:
         return cls.model_validate(
             {
                 "id": row.id,
@@ -139,6 +209,7 @@ class CuratedMemory(BaseModel):
                 "body": None if row.status == "held" else row.body,
                 "thread_id": None if row.from_private_thread else row.thread_id,
                 "withdrawal_requested": row.withdrawal_requested,
+                "triggers": triggers,
             }
         )
 
@@ -148,7 +219,8 @@ class UnknownWorkspaceError(LookupError):
 
 
 class Memories:
-    """Every ``memory`` row and every ``workspace_prompt_version``, by workspace slug."""
+    """Every ``memory`` row, its triggers, and every ``workspace_prompt_version``, by
+    workspace slug."""
 
     @staticmethod
     async def _workspace_id(session: AsyncSession, slug: str) -> UUID:
@@ -194,17 +266,14 @@ class Memories:
             session.add(row)
         return row
 
-    async def personal(
-        self, person: UUID | None, *, curated_in: str | None = None
-    ) -> list[PersonalMemory]:
-        """``person``'s personal memories, newest first; none for no person.
+    @staticmethod
+    def _applying(person: UUID, curated_in: str | None) -> list[ColumnElement[bool]]:
+        """What makes a memory one of ``person``'s that applies to their runs.
 
-        With ``curated_in``, the workspace whose curated prompt the run reads, leaving out
+        With ``curated_in``, the workspace whose curated prompt the run reads, it leaves out
         the memories its curator superseded: that prompt carries them now. Without it, as for
         a person who does not read that prompt, they keep applying rather than disappear.
         """
-        if person is None or not postgres.configured():
-            return []
         conditions = [
             MemoryRow.scope == "personal",
             MemoryRow.created_by == person,
@@ -221,6 +290,19 @@ class Memories:
                     ),
                 )
             )
+        return conditions
+
+    @staticmethod
+    def _triggered(slug: str | None = None) -> ColumnElement[bool]:
+        """Whether a trigger links the memory, or the one stored under ``slug``."""
+        linked = select(MemoryTriggerLink.id).where(MemoryTriggerLink.memory_id == MemoryRow.id)
+        if slug is not None:
+            linked = linked.join(
+                MemoryTriggerRow, MemoryTriggerRow.id == MemoryTriggerLink.trigger_id
+            ).where(MemoryTriggerRow.slug == slug)
+        return exists(linked)
+
+    async def _personal_where(self, *conditions: ColumnElement[bool]) -> list[PersonalMemory]:
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(MemoryRow)
@@ -229,6 +311,40 @@ class Memories:
                 .limit(_PERSONAL_LIMIT)
             )
             return [PersonalMemory.model_validate({"id": row.id, "body": row.body}) for row in rows]
+
+    async def personal(
+        self, person: UUID | None, *, curated_in: str | None = None
+    ) -> list[PersonalMemory]:
+        """``person``'s personal memories no trigger holds back, newest first; none for no
+        person."""
+        if person is None or not postgres.configured():
+            return []
+        return await self._personal_where(*self._applying(person, curated_in), ~self._triggered())
+
+    async def triggers(
+        self, person: UUID | None, *, curated_in: str | None = None
+    ) -> list[MemoryTrigger]:
+        """The triggers holding back ``person``'s personal memories, in place of them."""
+        if person is None or not postgres.configured():
+            return []
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(MemoryTriggerRow.slug, MemoryTriggerRow.summary)
+                .join(MemoryTriggerLink, MemoryTriggerLink.trigger_id == MemoryTriggerRow.id)
+                .join(MemoryRow, MemoryRow.id == MemoryTriggerLink.memory_id)
+                .where(*self._applying(person, curated_in))
+                .distinct()
+                .order_by(MemoryTriggerRow.slug, MemoryTriggerRow.summary)
+            )
+            return [MemoryTrigger(slug=slug, summary=summary) for slug, summary in rows]
+
+    async def recall(
+        self, person: UUID, slug: str, *, curated_in: str | None = None
+    ) -> list[PersonalMemory]:
+        """``person``'s personal memories the trigger ``slug`` holds back, newest first."""
+        return await self._personal_where(
+            *self._applying(person, curated_in), self._triggered(slug)
+        )
 
     async def withdraw(self, memory_id: UUID, person: UUID) -> Withdrawal | None:
         """Take back one of ``person``'s memories; None when they saved no such one.
@@ -267,7 +383,104 @@ class Memories:
                 .order_by(MemoryRow.created_at)
                 .limit(_CURATOR_PAGE)
             )
-            return [CuratedMemory.of(row) for row in rows]
+            memories = list(rows)
+            links = await session.execute(
+                select(MemoryTriggerLink.memory_id, MemoryTriggerRow.slug)
+                .join(MemoryTriggerRow, MemoryTriggerRow.id == MemoryTriggerLink.trigger_id)
+                .where(MemoryTriggerLink.memory_id.in_([row.id for row in memories]))
+                .order_by(MemoryTriggerRow.slug)
+            )
+        triggers: dict[UUID, list[str]] = {}
+        for memory_id, slug in links:
+            triggers.setdefault(memory_id, []).append(slug)
+        return [CuratedMemory.of(row, triggers.get(row.id, [])) for row in memories]
+
+    async def triggers_for_curator(self, workspace: str) -> list[CuratedTrigger]:
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(MemoryTriggerRow, MemoryTriggerLink.memory_id)
+                .outerjoin(MemoryTriggerLink, MemoryTriggerLink.trigger_id == MemoryTriggerRow.id)
+                .where(
+                    MemoryTriggerRow.workspace_id == await self._workspace_id(session, workspace)
+                )
+                .order_by(MemoryTriggerRow.slug, MemoryTriggerLink.created_at)
+            )
+            triggers: dict[str, CuratedTrigger] = {}
+            for trigger, memory_id in rows:
+                curated = triggers.setdefault(
+                    trigger.slug,
+                    CuratedTrigger(slug=trigger.slug, summary=trigger.summary, memory_ids=[]),
+                )
+                if memory_id is not None:
+                    curated.memory_ids.append(memory_id)
+        return list(triggers.values())
+
+    async def set_trigger(self, workspace: str, slug: str, summary: str) -> None:
+        """Name a trigger, or change when an existing one says its memories apply."""
+        async with postgres.session() as session:
+            upsert = insert(MemoryTriggerRow).values(
+                id=uuid7(),
+                workspace_id=await self._workspace_id(session, workspace),
+                slug=slug,
+                summary=summary,
+            )
+            await session.execute(
+                upsert.on_conflict_do_update(
+                    index_elements=[MemoryTriggerRow.workspace_id, MemoryTriggerRow.slug],
+                    set_={"summary": summary, "updated_at": func.clock_timestamp()},
+                )
+            )
+
+    async def delete_trigger(self, workspace: str, slug: str) -> bool:
+        """Drop a trigger; the memories it held back return to their people's context."""
+        async with postgres.session() as session:
+            deleted = await session.scalar(
+                delete(MemoryTriggerRow)
+                .where(
+                    MemoryTriggerRow.workspace_id == await self._workspace_id(session, workspace),
+                    MemoryTriggerRow.slug == slug,
+                )
+                .returning(MemoryTriggerRow.id)
+            )
+        return deleted is not None
+
+    async def link_trigger(
+        self, workspace: str, slug: str, memory_id: UUID, *, linked: bool
+    ) -> bool:
+        """Link a memory the curator may decide to a trigger, or unlink it; False when either
+        is not this workspace's."""
+        async with postgres.session() as session:
+            workspace_id = await self._workspace_id(session, workspace)
+            trigger_id = await session.scalar(
+                select(MemoryTriggerRow.id).where(
+                    MemoryTriggerRow.workspace_id == workspace_id, MemoryTriggerRow.slug == slug
+                )
+            )
+            memory = await session.scalar(
+                select(MemoryRow.id).where(
+                    MemoryRow.id == memory_id,
+                    MemoryRow.workspace_id == workspace_id,
+                    MemoryRow.status != "held",
+                )
+            )
+            if trigger_id is None or memory is None:
+                return False
+            if linked:
+                await session.execute(
+                    insert(MemoryTriggerLink)
+                    .values(id=uuid7(), trigger_id=trigger_id, memory_id=memory_id)
+                    .on_conflict_do_nothing(
+                        index_elements=[MemoryTriggerLink.trigger_id, MemoryTriggerLink.memory_id]
+                    )
+                )
+            else:
+                await session.execute(
+                    delete(MemoryTriggerLink).where(
+                        MemoryTriggerLink.trigger_id == trigger_id,
+                        MemoryTriggerLink.memory_id == memory_id,
+                    )
+                )
+        return True
 
     async def pending_workspaces(self) -> list[str]:
         """The slugs of the workspaces with a memory their curator has not decided."""

@@ -41,6 +41,7 @@ class PersonIdentity(TypedDict):
     new_prs: NotRequired[Literal["as drafts", "ready for review"]]
     standing_instructions: NotRequired[str]
     personal_memories: NotRequired[str]
+    memory_triggers: NotRequired[str]
 
 
 class ChannelIdentity(TypedDict):

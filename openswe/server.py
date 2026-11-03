@@ -184,6 +184,7 @@ from openswe.tools import (
     create_sandbox_file_download_url,
     decide_memory,
     delete_automation,
+    delete_memory_trigger,
     delete_organization_skill,
     delete_user_skill,
     delete_workspace,
@@ -197,10 +198,12 @@ from openswe.tools import (
     get_human_review_status,
     get_thread,
     http_request,
+    link_memory_trigger,
     link_pull_request,
     list_automations,
     list_event_types,
     list_memories,
+    list_memory_triggers,
     list_threads,
     list_workspaces,
     listen_events,
@@ -219,6 +222,7 @@ from openswe.tools import (
     read_only_sql,
     read_user_settings,
     read_workspace_prompt,
+    recall,
     recreate_sandbox,
     remember,
     report_platform_issue,
@@ -232,6 +236,7 @@ from openswe.tools import (
     schedule_thread_wakeup,
     search_pull_requests,
     send_announcement,
+    set_memory_trigger,
     slack_add_reaction,
     slack_attach_html,
     slack_breakout_thread,
@@ -483,18 +488,17 @@ async def _thread_participant(
             slack_user_id=slack_user_id,
         )
     identity = replace(identity, github_login=login)
-    profile, workspace_admin, instructions, memories = await asyncio.gather(
+    curated_in = (
+        RunConfig.from_config(config).workspace_slug
+        if user is not None and user.typed_preferences.experimental_memory
+        else None
+    )
+    profile, workspace_admin, instructions, memories, triggers = await asyncio.gather(
         load_profile(login),
         participant_is_admin(login),
         _resolve_user_custom_instructions(login),
-        MEMORIES.personal(
-            user.id if user else None,
-            curated_in=(
-                RunConfig.from_config(config).workspace_slug
-                if user is not None and user.typed_preferences.experimental_memory
-                else None
-            ),
-        ),
+        MEMORIES.personal(user.id if user else None, curated_in=curated_in),
+        MEMORIES.triggers(user.id if user else None, curated_in=curated_in),
     )
     display_name = (user.display_name if user else "") or identity.display_name or login
     return ThreadParticipant(
@@ -509,6 +513,7 @@ async def _thread_participant(
         draft_prs=profile_draft_prs(profile),
         instructions=instructions or "",
         memories=tuple(memory.line for memory in memories),
+        memory_triggers=tuple(trigger.line for trigger in triggers),
         email=(user.email if user else "") or "",
         timezone=timezone,
         linked=user is not None,
@@ -661,10 +666,15 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "save_user_settings",
         "remember",
         "forget",
+        "recall",
         "list_memories",
         "read_workspace_prompt",
         "decide_memory",
         "publish_workspace_prompt",
+        "list_memory_triggers",
+        "set_memory_trigger",
+        "delete_memory_trigger",
+        "link_memory_trigger",
         "record_incident_report",
         "search_incidents",
         "start_thread",
@@ -724,10 +734,15 @@ AGENT_TOOLS: Final = (
     publish_artifact,
     remember,
     forget,
+    recall,
     list_memories,
     read_workspace_prompt,
     decide_memory,
     publish_workspace_prompt,
+    list_memory_triggers,
+    set_memory_trigger,
+    delete_memory_trigger,
+    link_memory_trigger,
     save_user_settings,
     save_user_skill,
     delete_user_skill,
