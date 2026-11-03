@@ -6,12 +6,18 @@ from typing import cast
 
 import pytest
 import rt.slack as slack
-from managed_deepagents import ChannelRun, SlackChannelThread, SlackMessageEvent
+from managed_deepagents import ChannelReplyResult, ChannelRun, SlackChannelThread, SlackMessageEvent
 from managed_deepagents._channels.http.types import ChannelName
 from managed_deepagents._channels.run_input import RunChannel, normalize_run_inputs
 from pydantic import BaseModel
 from runtime_api.endpoint import Endpoint
-from runtime_api.slack import PLAN_SLACK_TURN, PlanSlackTurn, SlackTurnRun, SlackTurnStart
+from runtime_api.slack import (
+    PLAN_SLACK_TURN,
+    PlanSlackTurn,
+    SlackTurnDeclined,
+    SlackTurnRun,
+    SlackTurnStart,
+)
 
 _THREAD = SlackChannelThread(
     id=str(uuid.uuid4()),
@@ -85,6 +91,44 @@ def test_a_message_the_backend_starts_nothing_for_starts_nothing(
     _backend(monkeypatch, SlackTurnStart())
 
     assert asyncio.run(slack.start_turn(_EVENT, _THREAD)) is None
+
+
+@pytest.mark.parametrize(
+    ("declined", "told"),
+    [
+        (
+            SlackTurnDeclined(reason="external_channel"),
+            "Open SWE does not operate in channels with external participants.",
+        ),
+        (
+            SlackTurnDeclined(reason="sign_in", settings_url="https://openswe.test/settings"),
+            "👋 I couldn't resolve your GitHub account from Slack. Sign in with GitHub and "
+            "connect your Slack account in <https://openswe.test/settings|your Open SWE "
+            "settings>, then tag me again.",
+        ),
+        (
+            SlackTurnDeclined(reason="sign_in_again", settings_url="https://openswe.test/settings"),
+            "🔐 Your GitHub sign-in is no longer valid, so I can't resolve your GitHub "
+            "account. Re-connect it in <https://openswe.test/settings|your Open SWE "
+            "settings>, then tag me again.",
+        ),
+        (
+            SlackTurnDeclined(reason="sign_in"),
+            "👋 I couldn't resolve your GitHub account from Slack. Sign in with GitHub and "
+            "connect your Slack account in your Open SWE settings, then tag me again.",
+        ),
+    ],
+    ids=["external-channel", "sign-in", "sign-in-again", "no-dashboard-url"],
+)
+def test_a_message_the_backend_declines_gets_a_reply_and_no_run(
+    monkeypatch: pytest.MonkeyPatch, declined: SlackTurnDeclined, told: str
+) -> None:
+    _backend(monkeypatch, SlackTurnStart(declined=declined))
+
+    result = asyncio.run(slack.start_turn(_EVENT, _THREAD))
+
+    assert isinstance(result, ChannelReplyResult)
+    assert result.message == {"type": "content", "content": told}
 
 
 def test_a_concierge_dms_turn_runs_on_the_dms_one_thread(

@@ -7,23 +7,54 @@ that request, as for its own Slack runs, and signs its context. A mention, a
 direct message or an explicit request redirects the thread's work in progress;
 any other follow-up waits its turn behind it, as on the backend's own Slack
 threads. A concierge DM's runs go on the DM's one thread, which the backend names.
+When the backend starts nothing and says why, such as a person who must sign in to
+Open SWE first, the handler replies with it in the Slack thread.
 """
 
+from typing import Final
+
 from managed_deepagents import (
+    ChannelReplyResult,
     ChannelRun,
     ChannelRunResult,
     SlackChannelThread,
     SlackMessageEvent,
+    reply,
 )
-from runtime_api.slack import PLAN_SLACK_TURN, PlanSlackTurn, SlackTurnStart
+from runtime_api.slack import PLAN_SLACK_TURN, PlanSlackTurn, SlackTurnDeclined, SlackTurnStart
 
 from rt.intake import ask_backend
+
+EXTERNAL_CHANNEL: Final = "Open SWE does not operate in channels with external participants."
+
+
+def decline_text(declined: SlackTurnDeclined) -> str:
+    """What the Slack thread hears when the backend starts nothing for a message."""
+    if declined.reason == "external_channel":
+        return EXTERNAL_CHANNEL
+    # Without a dashboard URL the text names the settings page, since the person
+    # must still be told why nothing started.
+    settings = (
+        f"<{declined.settings_url}|your Open SWE settings>"
+        if declined.settings_url
+        else "your Open SWE settings"
+    )
+    if declined.reason == "sign_in_again":
+        return (
+            "🔐 Your GitHub sign-in is no longer valid, so I can't resolve your GitHub "
+            f"account. Re-connect it in {settings}, then tag me again."
+        )
+    return (
+        "👋 I couldn't resolve your GitHub account from Slack. Sign in with GitHub and "
+        f"connect your Slack account in {settings}, then tag me again."
+    )
 
 
 async def start_turn(
     event: SlackMessageEvent, thread: SlackChannelThread
-) -> ChannelRunResult | None:
-    """The run a message starts on its conversation's thread, or ``None``."""
+) -> ChannelRunResult | ChannelReplyResult | None:
+    """The run a message starts on its conversation's thread, the reply that says why
+    it starts none, or ``None``."""
     start = await ask_backend(
         PLAN_SLACK_TURN,
         PlanSlackTurn(
@@ -34,6 +65,8 @@ async def start_turn(
         ),
         msg_id=f"msg_{event.delivery_id}",
     )
+    if start.declined is not None:
+        return reply(decline_text(start.declined))
     return run_result(start)
 
 
