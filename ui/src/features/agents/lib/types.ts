@@ -59,6 +59,8 @@ export type AcpToolKind =
   | "move"
   | "search"
   | "execute"
+  /** `background_execute` — a shell command started in the background. */
+  | "background"
   | "think"
   | "fetch"
   | "slack"

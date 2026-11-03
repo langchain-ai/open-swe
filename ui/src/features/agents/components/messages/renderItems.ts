@@ -194,7 +194,7 @@ function isExplorationTool(chunk: ToolExecutionChunk): boolean {
 }
 
 function isShellTool(chunk: ToolExecutionChunk): boolean {
-  return chunk.toolKind === "execute"
+  return chunk.toolKind === "execute" || chunk.toolKind === "background"
 }
 
 function isSqlResult(chunk: ToolExecutionChunk): boolean {
