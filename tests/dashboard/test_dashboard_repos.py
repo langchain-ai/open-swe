@@ -77,7 +77,7 @@ def test_missing_github_authorization_returns_direct_reconnect_without_clearing_
         assert response.status_code == 401
         detail = response.json()["detail"]
         assert "octocat" in detail
-        assert "https://api.example/prefix/dashboard/api/auth/login" in detail
+        assert "https://api.example/prefix/my-settings/connections" in detail
         assert client.cookies.get("osw_session") == "existing-session"
         assert "set-cookie" not in response.headers
 

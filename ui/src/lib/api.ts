@@ -471,13 +471,6 @@ export interface MCPConnectionUpdate {
   oauth?: MCPOAuthUpdate | null
 }
 
-export interface LangSmithConnectionStatus {
-  available: boolean
-  connected: boolean
-  email?: string | null
-  updated_at?: string | null
-}
-
 export interface ManagedToolsGateway {
   id: string
   name: string
@@ -1799,12 +1792,6 @@ export const api = {
       `/my-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
-  getMyLangSmithStatus: () =>
-    request<LangSmithConnectionStatus>("/my-credentials/langsmith"),
-  disconnectLangSmith: () =>
-    request<LangSmithConnectionStatus>("/my-credentials/langsmith", {
-      method: "DELETE",
-    }),
   listManagedToolsGateways: () =>
     request<ManagedToolsGateway[]>("/managed-tools/gateways"),
   getMyManagedTools: () => request<ManagedToolsView>("/my-managed-tools"),
@@ -2137,19 +2124,14 @@ export const api = {
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 }
 
-export function loginUrl(
-  redirectTo?: string,
-  provider: "github" | "langsmith" = "github"
-): string {
+export function loginUrl(redirectTo?: string): string {
   const target =
     redirectTo ??
     (typeof window !== "undefined"
       ? `${window.location.pathname}${window.location.search}${window.location.hash}`
       : "")
   const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : ""
-  const path =
-    provider === "langsmith" ? "/auth/langsmith/login" : "/auth/login"
-  return `${API_BASE}/dashboard/api${path}${qs}`
+  return `${API_BASE}/dashboard/api/auth/login${qs}`
 }
 
 /**
@@ -2161,7 +2143,7 @@ export function loginUrl(
  * itself and resolves once the connection is stored.
  */
 export function connectService(
-  provider: "slack" | "langsmith",
+  provider: "slack" | "github",
   redirectTo?: string
 ) {
   const pending = window.openSweDesktop?.connectService(provider)
