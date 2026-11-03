@@ -129,8 +129,6 @@ def _conversation_of(origin: ChannelBinding, to: ChannelTarget) -> str:
         raise ValueError("a new thread can go to another conversation only on Slack")
     if to.thread_ts is not None:
         raise ValueError("a new thread's conversation names no thread")
-    if to.code_channel:
-        raise ValueError("a code channel is one conversation: it takes no new thread")
     if not _SLACK_CONVERSATION_ID.fullmatch(to.conversation_id):
         raise ValueError("a Slack conversation id looks like C…, D… or G…")
     return to.conversation_id
