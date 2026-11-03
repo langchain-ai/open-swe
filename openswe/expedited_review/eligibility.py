@@ -5,7 +5,7 @@ to arrive as a readable text diff, and those files together have to fit in
 ``MAX_CHANGED_LINES``, so all of it is on the card. Test files are outside both
 gates — CI judges them — which is what lets a two-line fix arrive with the
 tests that prove it. So are hunks the agent excludes as qualifying under the
-target repository's ``.open-swe/APPROVALS.md``; the card summarizes them. When
+target repository's ``.open-swe/auto-approve-rules/``; the card summarizes them. When
 Open SWE's review would approve the PR subject to human approval of a stated condition,
 the card shows that condition instead of the diff, so a PR of any size qualifies.
 """
@@ -33,7 +33,7 @@ ACCEPTED_CHANGED_LINES = 25
 MAX_FILES = 3000
 FILE_PAGES = MAX_FILES // 100
 
-# Kinds of change that must be read, so no APPROVALS.md guideline can hide them.
+# Kinds of change that must be read, so no auto-approve rule can hide them.
 _UNEXCLUDABLE_PATH = re.compile(
     r"(?:^|/)\.github/"
     r"|(?:^|/)(?:migrations|alembic)/"
@@ -98,6 +98,11 @@ class ChangedFile(BaseModel):
     deletions: int = 0
     patch: str | None = None
     previous_filename: str | None = None
+
+    @property
+    def paths(self) -> list[str]:
+        """Every path this change touches: a rename's old path as well as its new one."""
+        return [self.filename, *([self.previous_filename] if self.previous_filename else [])]
 
     @property
     def hunks(self) -> list[Hunk]:
@@ -200,6 +205,14 @@ class ChangedFile(BaseModel):
             )
             return None
 
+    @classmethod
+    async def touched_paths(cls, pull: PullRequestClient, *, max_pages: int) -> list[str] | None:
+        """Every path the PR touches, or ``None`` when its file list is unavailable or truncated."""
+        files = await cls.of_pull(pull, max_pages=max_pages)
+        if files is None or len(files) >= max_pages * 100:
+            return None
+        return [path for file in files for path in file.paths]
+
 
 _CHANGED_FILES = TypeAdapter(list[ChangedFile])
 
@@ -218,7 +231,7 @@ class ExcludedHunk(TypedDict):
 
 
 class Exclusion(BaseModel):
-    """Changes the agent judged to qualify under the target repository's APPROVALS.md."""
+    """Changes the agent judged to qualify under the target repository's auto-approve rules."""
 
     path: str
     hunks: list[int] = []

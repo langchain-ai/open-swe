@@ -257,6 +257,7 @@ export function AgentsSidebar({
     includeResolved: prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
     includeClaudeCode: prefs.filters.includeClaudeCode,
+    includeSlack: prefs.filters.includeSlack,
     sort: repoMode ? prefs.sortChats : "updated",
     enabled: true,
   })
@@ -265,6 +266,7 @@ export function AgentsSidebar({
     includeResolved: prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
     includeClaudeCode: prefs.filters.includeClaudeCode,
+    includeSlack: prefs.filters.includeSlack,
     enabled: repoMode,
   })
   const workspaceOptionsQuery = useWorkspaceOptions(workspaceOrganize)
@@ -551,6 +553,14 @@ export function AgentsSidebar({
           Show automations
         </MenuCheckItem>
         <MenuCheckItem
+          checked={prefs.filters.includeSlack}
+          onCheckedChange={(checked) =>
+            setFilters({ ...prefs.filters, includeSlack: checked })
+          }
+        >
+          Show Slack
+        </MenuCheckItem>
+        <MenuCheckItem
           checked={prefs.filters.includeClaudeCode}
           onCheckedChange={(checked) =>
             setFilters({ ...prefs.filters, includeClaudeCode: checked })
@@ -603,6 +613,7 @@ export function AgentsSidebar({
       includeAutomations={includeAutomations}
       owned={prefs.filters.ownedOnly}
       includeClaudeCode={prefs.filters.includeClaudeCode}
+      includeSlack={prefs.filters.includeSlack}
       sort={prefs.sortChats}
       activeThreadId={activeThreadId}
       openThread={openThread}
@@ -1003,6 +1014,7 @@ function RepoGroup({
   includeAutomations,
   owned,
   includeClaudeCode,
+  includeSlack,
   sort,
   activeThreadId,
   openThread,
@@ -1026,6 +1038,7 @@ function RepoGroup({
   includeAutomations: boolean
   owned: boolean
   includeClaudeCode: boolean
+  includeSlack: boolean
   sort: ChatSort
   activeThreadId?: string
   openThread: (threadId: string) => void
@@ -1050,6 +1063,7 @@ function RepoGroup({
     includeAutomations,
     owned,
     includeClaudeCode,
+    includeSlack,
     sort,
     enabled: !collapsed,
   })

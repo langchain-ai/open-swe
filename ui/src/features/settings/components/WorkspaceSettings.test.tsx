@@ -836,8 +836,9 @@ describe("WorkspaceSettingsPanel", () => {
       name: /acme\/api\s*Private/,
     })
     expect(option.closest("section")).toBeNull()
-    expect(screen.getAllByText("acme/oss").length).toBeGreaterThan(1)
-    expect(screen.queryByText("acme/legacy")).toBeNull()
+    const picker = within(screen.getByRole("dialog"))
+    expect(picker.getByText("oss")).toBeTruthy()
+    expect(picker.queryByText("legacy")).toBeNull()
     fireEvent.click(screen.getByRole("checkbox", { name: "Show archived" }))
     expect(
       screen.getByRole("button", { name: /acme\/legacy\s*Public\s*archive/ })

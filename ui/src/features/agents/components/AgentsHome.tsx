@@ -486,7 +486,7 @@ export function AgentsHome({
     resetPendingSubmit()
   }
 
-  const handleSubmit = ({ text: prompt, images }: ComposerSubmission) => {
+  const handleSubmit = async ({ text: prompt, images }: ComposerSubmission) => {
     void requestNotificationPermission().then((perm) => {
       if (perm === "granted") setNotificationsPref(true)
     })

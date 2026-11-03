@@ -28,6 +28,7 @@ function warmApiRequests(
     let includeResolved = false
     let owned = false
     let includeClaudeCode = true
+    let includeSlack = true
     let repoMode = false
     let sortByCreated = true
     try {
@@ -44,6 +45,7 @@ function warmApiRequests(
         includeResolved = filters.includeResolved === true
         owned = filters.ownedOnly === true
         includeClaudeCode = filters.includeClaudeCode !== false
+        includeSlack = filters.includeSlack !== false
       }
     } catch {
       // An unreadable preference just means the default (false).
@@ -59,6 +61,7 @@ function warmApiRequests(
     if (repoMode) search.set("ownerless", "true")
     if (owned) search.set("owned", "true")
     if (!includeClaudeCode) search.append("exclude_source", "claude_code")
+    if (!includeSlack) search.append("exclude_source", "slack")
     search.set("sort_by", sortByCreated ? "created_at" : "updated_at")
     targets.push(sidebarPath + "?" + search.toString())
   }

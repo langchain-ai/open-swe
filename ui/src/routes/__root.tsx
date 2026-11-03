@@ -28,6 +28,8 @@ import { InvalidationStream } from "@/lib/invalidations/InvalidationStream"
 import { THEME_COLOR } from "@/lib/theme"
 import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
 import { isPerfHudEnabled } from "@/lib/perf/trace"
+import { useSession } from "@/lib/session"
+import { GitHubLinkPrompt } from "@/features/agents/components/GitHubLinkPrompt"
 
 const PerfHud = lazy(() => import("@/lib/perf/PerfHud"))
 
@@ -84,6 +86,25 @@ export const Route = createRootRouteWithContext<{
   shellComponent: RootDocument,
 })
 
+function AccountGate({ children }: { children: React.ReactNode }) {
+  const session = useSession()
+  if (session.data?.requires_github_link) {
+    return (
+      <main className="flex min-h-svh bg-surface-level-1 text-primary">
+        <GitHubLinkPrompt user={session.data} />
+      </main>
+    )
+  }
+  return (
+    <>
+      <InvalidationStream />
+      <AppNotifications />
+      <VersionMismatchBanner />
+      <AppCommandProvider>{children}</AppCommandProvider>
+    </>
+  )
+}
+
 function RootDocument({ children }: { children: React.ReactNode }) {
   const { queryClient } = useRouter().options.context
   const pathname = useRouterState({ select: (s) => s.location.pathname })
@@ -111,10 +132,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           <Favicon />
           <TooltipProvider>
             <AnalyticsIdentity />
-            <InvalidationStream />
-            <AppNotifications />
-            <VersionMismatchBanner />
-            <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
+            <AccountGate>{children ?? <Outlet />}</AccountGate>
             <PerfHudMount />
             {import.meta.env.VITE_DEVTOOLS !== "false" && (
               <>

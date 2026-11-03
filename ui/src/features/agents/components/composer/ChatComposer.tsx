@@ -60,7 +60,7 @@ import type { PassageReply } from "@/features/agents/utils/passageReply"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
-import { GitHubLinkPrompt } from "@/features/agents/components/GitHubLinkPrompt"
+import { GitHubLinkRepoSelector } from "./GitHubLinkRepoSelector"
 import { api } from "@/lib/api"
 import type { SlackChannelOption, SlackUserOption } from "@/lib/api"
 import { useRegisterAppCommands } from "@/lib/appCommands"
@@ -861,7 +861,7 @@ export const ChatComposer = memo(function ChatComposer({
         />
       )}
       {runTarget !== "local" && onRepoChange && gitHubLinkUser && (
-        <GitHubLinkPrompt user={gitHubLinkUser} side="top" />
+        <GitHubLinkRepoSelector user={gitHubLinkUser} side="top" />
       )}
       {runTarget !== "local" && onRepoChange && !gitHubLinkUser && (
         <RepoSelector

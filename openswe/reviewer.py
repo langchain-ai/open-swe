@@ -53,7 +53,11 @@ from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.require_user_reply import WEB_REPLY_SURFACE
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.prompts import apply_tool_descriptions, prompt
-from openswe.review.approvals import approval_policy_for_review
+from openswe.review.approvals import (
+    ApprovalPolicy,
+    approval_policy_for_review,
+    open_swe_config_errors,
+)
 from openswe.review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -435,6 +439,8 @@ class PrepareReviewerRunState(PrepareRunState):
     diff_text: NotRequired[str]
     diff_line_set: NotRequired[dict[str, dict[str, set[int]]] | None]
     review_approval_policy: NotRequired[str | None]
+    review_approval_errors: NotRequired[list[str]]
+    review_config_errors: NotRequired[list[str]]
 
 
 async def _cached_org_guidelines(workspace: str | None) -> str | None:
@@ -775,11 +781,20 @@ async def prepare_reviewer_run(
             changed_files(diff_text),
         )
 
-    async def _fetch_approval_policy() -> str | None:
+    async def _fetch_approval_policy() -> ApprovalPolicy | None:
         # Read from the default branch so a pull request cannot rewrite the policy it is judged by.
-        if reviewer_eval:
+        if reviewer_eval or not isinstance(pr_number, int):
             return None
-        return await approval_policy_for_review(repo_owner, repo_name, token=github_token)
+        return await approval_policy_for_review(
+            repo_owner, repo_name, pr_number, token=github_token
+        )
+
+    async def _fetch_config_errors() -> list[str]:
+        if reviewer_eval or not can_fetch_pr or not isinstance(pr_number, int) or not head_sha:
+            return []
+        return await open_swe_config_errors(
+            repo_owner, repo_name, pr_number, head_sha, token=github_token
+        )
 
     # Only the diff waits on the checkout.
     checkout_task = asyncio.create_task(_check_out())
@@ -790,6 +805,7 @@ async def prepare_reviewer_run(
     agents_md_task = asyncio.create_task(_fetch_agents_md_context())
     org_guidelines_task = asyncio.create_task(_fetch_org_guidelines())
     approval_policy_task = asyncio.create_task(_fetch_approval_policy())
+    config_errors_task = asyncio.create_task(_fetch_config_errors())
     api_standards_task = asyncio.create_task(_fetch_api_standards_skill())
     scoped_agents_md_task = asyncio.create_task(_fetch_scoped_agents_md())
     tasks = (
@@ -801,6 +817,7 @@ async def prepare_reviewer_run(
         agents_md_task,
         org_guidelines_task,
         approval_policy_task,
+        config_errors_task,
         api_standards_task,
         scoped_agents_md_task,
     )
@@ -813,7 +830,8 @@ async def prepare_reviewer_run(
         agents_md_content = await agents_md_task
         scoped_agents_md = await scoped_agents_md_task
         org_guidelines = await org_guidelines_task
-        approval_policy = await approval_policy_task
+        policy = await approval_policy_task
+        config_errors = await config_errors_task
         api_standards_skill = await api_standards_task
     finally:
         for task in tasks:
@@ -821,6 +839,7 @@ async def prepare_reviewer_run(
         await asyncio.gather(*tasks, return_exceptions=True)
     work_dir, repo_ready = checkout.work_dir, checkout.repo_ready
     pr_title, pr_body = pr_overview
+    approval_policy = policy.render() if policy is not None else None
 
     review_context = ""
     if pr_number is not None:
@@ -905,6 +924,8 @@ async def prepare_reviewer_run(
         "rendered_system_prompt": system_prompt,
         "messages": [HumanMessage(content=run_context, id=f"run-context:{uuid.uuid4()}")],
         "review_approval_policy": approval_policy,
+        "review_approval_errors": policy.errors if policy is not None else [],
+        "review_config_errors": config_errors,
         "diff_text": pr_diff_text,
         "diff_line_set": pr_diff_line_set,
     }

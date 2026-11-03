@@ -71,7 +71,7 @@ EOF
 """.strip()
 
 # The expedited-review change is too big to qualify until the agent excludes what
-# the spec's seeded APPROVALS.md covers: CHANGELOG.md and config.py's trailing
+# the spec's seeded auto-approve rule covers: CHANGELOG.md and config.py's trailing
 # generated block, whose hunk starts at new line 28.
 EXPEDITE_MARKER = "E2E_EXPEDITE"
 EXPEDITE_PR_TITLE = "Fix the greeting punctuation"
