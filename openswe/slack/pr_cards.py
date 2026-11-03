@@ -213,7 +213,7 @@ class PullRequestCard:
             lines.append(f":white_check_mark: Approved by {self._names(approved)}")
         if waiting:
             lines.append(f":eyes: Waiting on review from {self._names(waiting)}")
-        elif status.review_required and not changes:
+        elif status.review_required and not changes and self.state == "open":
             lines.append(":eyes: Needs an approving review")
         elif not reviewers and self.state == "open":
             lines.append(":eyes: No reviews yet")
