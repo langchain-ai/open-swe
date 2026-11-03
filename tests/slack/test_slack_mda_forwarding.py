@@ -330,7 +330,7 @@ async def test_a_message_in_mdas_conversation_trigger_server_would_drop_runs_now
     assert tasks.tasks == []
 
 
-async def test_an_edit_in_mdas_conversation_is_ignored_and_says_why(
+async def test_an_edit_in_mdas_conversation_goes_to_trigger_server_as_slack_sent_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     owned = AsyncMock(return_value=_MDA_THREAD)
@@ -352,13 +352,16 @@ async def test_an_edit_in_mdas_conversation_is_ignored_and_says_why(
         cast(Request, _FakeRequest(edit, dict(_SLACK_HEADERS))), cast(BackgroundTasks, tasks)
     )
 
-    assert response == {
-        "status": "ignored",
-        "reason": "MDA's Slack channel doesn't take message edits",
-    }
+    assert response == {"status": "accepted", "message": "Slack edit handed to MDA"}
     owned.assert_awaited_once_with("C1", "1786573369.551099")
     claim.assert_not_awaited()
-    assert tasks.tasks == []
+    [(forward, (_url, body, _headers))] = tasks.tasks
+    [kwargs] = tasks.kwargs
+    assert forward is mda_forwarding.forward_to_trigger_server
+    assert body == json.dumps(edit).encode()
+    assert kwargs["thread_id"] == _MDA_THREAD
+    # The conversation is MDA's: a lost edit is only logged.
+    assert kwargs["on_refused"] is None
 
 
 @pytest.mark.parametrize(
@@ -1211,7 +1214,7 @@ async def test_a_move_outside_an_mda_conversation_starts_nothing(
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()
     cast(AsyncMock, slack_service.account_link_needed).assert_not_awaited()
     [record] = [r for r in caplog.records if hasattr(r, "no_run_reason")]
-    assert record.no_run_reason == "a move outside an MDA conversation"
+    assert record.no_run_reason == "move outside an MDA conversation"
 
 
 @pytest.mark.parametrize(
@@ -1361,7 +1364,7 @@ async def test_an_edit_in_a_concierge_dm_mda_holds_is_ignored(
 
     assert response == {
         "status": "ignored",
-        "reason": "MDA's Slack channel doesn't take message edits",
+        "reason": "MDA's Slack channel doesn't take a concierge DM's edits",
     }
     assert tasks.tasks == []
 
@@ -2057,3 +2060,130 @@ async def test_a_conversation_that_moved_away_starts_on_the_backend(
     expected = mda_forwarding.mda_thread_id("A1", "T1", "C1", "1.0")
     assert thread_id == (None if indexed else expected)
     known.assert_awaited_once_with(expected)
+
+
+async def test_an_edit_in_an_mda_conversation_reaches_the_agent_as_a_correction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
+    prepare = _prepared(monkeypatch, content="help, fixed")
+
+    start = await _start(
+        _start_app(monkeypatch),
+        kind="edit",
+        text="<@BOT> help, fixed",
+        message_ts="1.2",
+        event_ts="1.9",
+    )
+
+    assert start["run"]["input"] == {"messages": [{"role": "user", "content": "help, fixed"}]}
+    request = prepare.await_args.args[0]
+    # The builder notes the correction for a run in progress, or makes it a turn.
+    assert request.message_update
+    assert (request.original_message_ts, request.event_ts) == ("1.2", "1.9")
+    assert request.thread_id == _MDA_THREAD
+    assert prepare.await_args.kwargs["read"] is None
+    cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()
+
+
+async def test_an_edit_outside_an_mda_conversation_or_eligible_channel_starts_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepare = _prepared(monkeypatch)
+    app = _start_app(monkeypatch)
+
+    assert await _start(app, kind="edit", text="<@BOT> help, fixed") == _NO_RUN
+
+    monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
+
+    async def external(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
+        return SlackChannelContext(is_ext_shared=True)
+
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", external)
+    assert await _start(app, msg_id="msg_delivery-2", kind="edit", text="x") == _NO_RUN
+    prepare.assert_not_awaited()
+    cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()
+
+
+def _reaction(reaction: str, *, removed: bool = False) -> dict[str, JsonValue]:
+    """A reaction as MDA's Slack channel POSTs it to its endpoint."""
+    payload: dict[str, JsonValue] = {
+        "type": "reaction_removed" if removed else "reaction_added",
+        "user": "U1",
+        "reaction": reaction,
+        "item": {"type": "message", "channel": "C1", "ts": "1.2"},
+        "event_ts": "1.9",
+    }
+    return {
+        "event": {
+            "key": "reaction",
+            "deliveryId": "delivery-7",
+            "payload": payload,
+            "channelId": "C1",
+            "messageTs": "1.2",
+            "threadTs": "1.2",
+            "text": "",
+            "userId": "U1",
+            "reaction": reaction,
+            "removed": removed,
+        },
+        "thread": {"id": _MDA_THREAD, "channel": {"name": "slack"}},
+    }
+
+
+@pytest.mark.parametrize("removed", [False, True])
+async def test_a_feedback_reaction_is_recorded_as_the_webhook_records_it(
+    monkeypatch: pytest.MonkeyPatch, removed: bool
+) -> None:
+    from openswe.mda_channels import slack_channel_events  # noqa: PLC0415
+
+    added, taken_back = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(slack_channel_events, "process_slack_reaction_added", added)
+    monkeypatch.setattr(slack_channel_events, "process_slack_reaction_removed", taken_back)
+    monkeypatch.setenv("MDA_SERVICE_SECRET", _SERVICE_SECRET)
+    app = FastAPI()
+    app.include_router(slack_channel_events.router)
+    reaction = next(iter(slack_channel_events.FEEDBACK_REACTIONS))
+
+    answered = await _post_endpoint(
+        app, _reaction(reaction, removed=removed), signed=True, path="/mda/slack/reactions"
+    )
+
+    assert answered.status_code == 200
+    assert answered.json() is None
+    recorded = taken_back if removed else added
+    other = added if removed else taken_back
+    recorded.assert_awaited_once()
+    assert recorded.await_args.args[1] == "delivery-7"
+    assert recorded.await_args.args[0]["reaction"] == reaction
+    other.assert_not_awaited()
+
+
+async def test_the_summon_reaction_tags_open_swe_and_any_other_does_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.mda_channels import slack_channel_events  # noqa: PLC0415
+
+    summon = AsyncMock()
+    monkeypatch.setattr(slack_channel_events, "process_slack_summon_reaction", summon)
+    monkeypatch.setenv("MDA_SERVICE_SECRET", _SERVICE_SECRET)
+    app = FastAPI()
+    app.include_router(slack_channel_events.router)
+
+    for body in (
+        _reaction(slack_channel_events.SUMMON_REACTION),
+        _reaction(slack_channel_events.SUMMON_REACTION, removed=True),
+        _reaction("tada"),
+    ):
+        answered = await _post_endpoint(app, body, signed=True, path="/mda/slack/reactions")
+        assert answered.status_code == 200
+
+    summon.assert_awaited_once()
+    event = summon.await_args.args[0]
+    assert (event.item.channel, event.item.ts) == ("C1", "1.2")
+    assert summon.await_args.args[1] == "delivery-7"
+    assert summon.await_args.kwargs["bot_user_id"] == "BOT"
+    unsigned = await _post_endpoint(
+        app, _reaction("tada"), signed=False, path="/mda/slack/reactions"
+    )
+    assert unsigned.status_code == 401

@@ -23209,6 +23209,43 @@
         "summary": "Slack Channel Event"
       }
     },
+    "/mda/slack/reactions": {
+      "post": {
+        "description": "Act on a reaction as ``/webhooks/slack`` does; ``None`` starts no run of MDA's.",
+        "operationId": "slack_reaction_mda_slack_reactions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointRequest_SlackEndpointEvent_"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Slack Reaction"
+      }
+    },
     "/webhooks/rollout": {
       "post": {
         "description": "Verify a deployment event, record it, and acknowledge it.",

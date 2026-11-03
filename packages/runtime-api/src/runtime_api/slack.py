@@ -39,6 +39,8 @@ class SlackMessage(BaseModel):
     channel_type: str = Field(default="", max_length=32)
     # Slack's timestamp of the message, which names it in its channel.
     message_ts: str = Field(min_length=1, max_length=64)
+    # The event's own timestamp, when it isn't the message's, as an edit's.
+    event_ts: str = Field(default="", max_length=64)
     # The Slack thread's first message; ``message_ts`` when it starts one.
     thread_ts: str = Field(min_length=1, max_length=64)
     # Slack's ``thread_ts``: empty for a message outside any Slack thread.
@@ -87,9 +89,10 @@ class StartSlackTurn(SlackMessage):
     """A message the handler decided starts a turn, with what it read from Slack."""
 
     # ``turn``: a message in the conversation, whose prompt the handler builds.
-    # ``by_the_way``, ``breakout``, ``web`` and ``move`` (a bare ``/breakout``) are
-    # built here whole.
-    kind: Literal["turn", "by_the_way", "breakout", "web", "move"] = "turn"
+    # ``by_the_way``, ``breakout``, ``web``, ``move`` (a bare ``/breakout``) and
+    # ``edit`` (a message the conversation holds, edited by its author) are built here
+    # whole.
+    kind: Literal["turn", "by_the_way", "breakout", "web", "move", "edit"] = "turn"
     # From ``slack_message_facts``, as the handler decided with them.
     concierge: bool = False
     kitchen_channel: bool = False

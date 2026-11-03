@@ -223,9 +223,9 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
             raise HTTPException(
                 status_code=409, detail="The Slack thread belongs to another thread"
             ) from exc
-    elif turn.kind == "move":
-        # Only a conversation this channel holds moves through MDA.
-        _no_run("a move outside an MDA conversation", **fields)
+    elif turn.kind in {"move", "edit"}:
+        # Only a conversation this channel holds moves, or takes an edit, through MDA.
+        _no_run(f"{turn.kind} outside an MDA conversation", **fields)
         return SlackTurnStarted()
     else:
         declined = await _account_gate(turn, webhook_id, fields)
@@ -284,6 +284,16 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
         case "move":
             request = request.model_copy(
                 update={"move_thread": True, "move_channel_id": turn.move_channel_id}
+            )
+        case "edit":
+            if not (
+                await common.resolve_slack_channel_context(turn.channel_id, use_cache=False)
+            ).allows_operations:
+                _no_run("edit in an ineligible channel", **fields)
+                return SlackTurnStarted()
+            # The agent hears of the correction: a note for the run in progress, or a turn.
+            request = request.model_copy(
+                update={"message_update": True, "event_ts": turn.event_ts or turn.message_ts}
             )
         case "turn":
             read = SlackTurnRead(

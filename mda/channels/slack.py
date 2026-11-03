@@ -13,7 +13,7 @@ so the channel posts nothing itself.
 
 from managed_deepagents import channels
 from rt.intake import backend_endpoint
-from rt.slack import start_turn
+from rt.slack import start_edit, start_turn
 from rt.slack_clicks import start_click, start_shortcut
 
 channel = channels.slack(
@@ -35,6 +35,12 @@ channel = channels.slack(
         "mention": start_turn,
         "directMessage": start_turn,
         "message": start_turn,
+        # A person's edit of a message the conversation holds: the backend gives the
+        # agent the correction. Deletions start nothing, as on the backend.
+        "edit": start_edit,
+        # Feedback reactions and the summon reaction, which the backend acts on as
+        # /webhooks/slack does; they start no run here.
+        "reaction": backend_endpoint("/mda/slack/reactions"),
         "interaction": start_click,
         # Explain this: Trigger Server forwards message shortcuts as Slack sends them.
         "shortcut": start_shortcut,

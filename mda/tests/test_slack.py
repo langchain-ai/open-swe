@@ -7,7 +7,13 @@ from typing import Any, cast
 
 import pytest
 import rt.slack as slack
-from managed_deepagents import ChannelReplyResult, ChannelRun, SlackChannelThread, SlackMessageEvent
+from managed_deepagents import (
+    ChannelReplyResult,
+    ChannelRun,
+    SlackActivityEvent,
+    SlackChannelThread,
+    SlackMessageEvent,
+)
 from managed_deepagents._channels.http.types import ChannelName
 from managed_deepagents._channels.run_input import RunChannel, normalize_run_inputs
 from pydantic import BaseModel
@@ -387,9 +393,92 @@ def test_the_channel_asks_its_handlers_for_every_message_and_click() -> None:
         "mention",
         "directMessage",
         "message",
+        "edit",
+        "reaction",
         "interaction",
         "shortcut",
         "channel",
     }
     assert all(handlers[key] is slack.start_turn for key in ("mention", "directMessage", "message"))
+    assert handlers["edit"] is slack.start_edit
     assert handlers["interaction"] is start_click
+
+
+def _edit(text: str = "<@UBOT> and the tests too, please", **changes: Any) -> SlackActivityEvent:
+    edited = {"type": "message", "user": "U1", "ts": "171.2", "thread_ts": "171.1"}
+    payload: dict[str, Any] = {
+        "type": "message",
+        "subtype": "message_changed",
+        "event_ts": "171.9",
+        "message": {**edited, "text": text},
+        "previous_message": {**edited, "text": "<@UBOT> and the tests too"},
+        **changes,
+    }
+    return SlackActivityEvent(
+        key="edit",
+        delivery_id="delivery-1",
+        channel_id="C1",
+        message_ts="171.2",
+        thread_ts="171.1",
+        text=text,
+        payload=payload,
+        user_id="U1",
+    )
+
+
+def _holding(run_input: Mapping[str, Any]) -> SlackChannelThread:
+    """A thread whose state holds the run ``run_input`` started."""
+    return _thread({"messages": run_input["messages"]})
+
+
+@pytest.mark.usefixtures("slack_reads")
+def test_an_edit_of_a_message_the_thread_holds_is_a_correction_from_the_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _backend(monkeypatch, SlackTurnStarted(run=_RUN, prompt=_PROMPT))
+    [earlier] = cast(list[ChannelRun], asyncio.run(slack.start_turn(_event(), _thread())))
+    corrected = _RUN.model_copy(
+        update={"input": {"messages": [{"role": "human", "content": "corrected"}]}}
+    )
+    backend = _backend(monkeypatch, SlackTurnStarted(run=corrected, interrupts=False))
+
+    held = _holding(cast(Mapping[str, Any], earlier["input"]))
+    [run] = cast(list[ChannelRun], asyncio.run(slack.start_edit(_edit(), held)))
+
+    [turn] = backend.turns
+    assert (turn.kind, turn.message_ts, turn.event_ts) == ("edit", "171.2", "171.9")
+    assert (turn.app_id, turn.team_id, turn.user_id) == ("A1", "T1", "U1")
+    assert turn.text == "<@UBOT> and the tests too, please"
+    assert run["input"] == corrected.input
+    assert run["multitask_strategy"] == "enqueue"
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        # An unfurl: the text didn't change.
+        _edit("<@UBOT> and the tests too"),
+        # Someone else's edit, as Slack reports an author change.
+        _edit(previous_message={"user": "U2", "ts": "171.2", "text": "before"}),
+        # A bot's own edit.
+        _edit(message={"user": "U1", "bot_id": "B1", "ts": "171.2", "text": "changed"}),
+    ],
+    ids=["unfurl", "other-author", "bot"],
+)
+def test_edits_that_change_nothing_the_person_said_start_nothing(
+    monkeypatch: pytest.MonkeyPatch, edit: SlackActivityEvent
+) -> None:
+    backend = _backend(monkeypatch, SlackTurnStarted(run=_RUN))
+
+    assert asyncio.run(slack.start_edit(edit, _thread({"messages": []}))) is None
+    assert backend.turns == []
+
+
+def test_an_edit_of_a_message_the_agent_never_got_starts_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _backend(monkeypatch, SlackTurnStarted(run=_RUN))
+
+    assert asyncio.run(slack.start_edit(_edit(), _thread())) is None
+    assert asyncio.run(slack.start_edit(_edit(), _thread({"messages": []}))) is None
+    assert backend.turns == []

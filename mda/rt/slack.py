@@ -27,6 +27,7 @@ from managed_deepagents import (
     ChannelReplyResult,
     ChannelRun,
     ChannelRunResult,
+    SlackActivityEvent,
     SlackChannelThread,
     SlackMessageEvent,
     reply,
@@ -394,6 +395,59 @@ async def _start_turn(
         bot_username=bot_username,
     )
     start.run.input = cast(dict[str, JsonValue], dict(run_input))
+    return run_result(start)
+
+
+async def start_edit(
+    event: SlackActivityEvent, thread: SlackChannelThread
+) -> ChannelRunResult | ChannelReplyResult | None:
+    """What a person's edit of a message the conversation holds starts: the backend
+    gives the agent the correction, as a note for its run in progress or as a turn.
+
+    Only the author's edit of its text counts: an unfurl adds attachments alone, and
+    a bot's edits are its own. The thread must hold the message, so an edit of one the
+    agent never got starts nothing; a concierge DM's runs go on another thread, whose
+    state the handler can't read, so its edits start nothing.
+    """
+    if event.code_channel:
+        return None
+    raw = event.payload
+    edited, previous = raw.get("message"), raw.get("previous_message")
+    if not (isinstance(edited, Mapping) and isinstance(previous, Mapping)):
+        return None
+    author = _text(edited.get("user"))
+    text = _text(edited.get("text"))
+    if (
+        not author
+        or author != _text(previous.get("user"))
+        or edited.get("bot_id")
+        or text == _text(previous.get("text"))
+    ):
+        return None
+    _, held = slack_prompt.dispatched_context(await thread.state())
+    if event.message_ts not in held:
+        return None
+    key = thread.source_thread_key.split(":")
+    if len(key) < 4:
+        return None
+    turn = StartSlackTurn(
+        thread_id=thread.id,
+        app_id=key[2],
+        team_id=key[3],
+        channel_id=event.channel_id,
+        channel_type=_text(raw.get("channel_type")),
+        message_ts=event.message_ts,
+        event_ts=_text(raw.get("event_ts")) or _text(raw.get("ts")),
+        thread_ts=event.thread_ts,
+        reply_thread_ts=_text(edited.get("thread_ts")),
+        user_id=author,
+        text=text,
+        attachments=_attachments(edited.get("attachments")),
+        kind="edit",
+    )
+    start = await ask_backend(START_SLACK_TURN, turn, msg_id=f"msg_{event.delivery_id}")
+    if start.declined is not None:
+        return reply(decline_text(start.declined))
     return run_result(start)
 
 
