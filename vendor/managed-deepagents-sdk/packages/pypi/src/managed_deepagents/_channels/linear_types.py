@@ -18,6 +18,7 @@ from managed_deepagents._channels.linear_schema import (
     LinearSessionCreatedPayload,
     LinearSessionPromptedPayload,
 )
+from managed_deepagents._channels.reply import ChannelReplyResult
 from managed_deepagents._channels.run_input import ChannelRunResult
 
 if TYPE_CHECKING:
@@ -183,12 +184,13 @@ class LinearAppOptions(TypedDict, total=False):
     team access in Linear too."""
 
 
-LinearEventResult = ChannelRunResult | None
+LinearEventResult = ChannelRunResult | ChannelReplyResult | None
 """What an event handler returns: a run's input, as ``agent.invoke`` takes it (a
 string, a message such as ``HumanMessage(...)``, or state such as
 ``{"messages": [...]}``), one run on the event's conversation; or a list of runs
 with options, such as ``[{"input": ..., "context": ..., "metadata": ...}]``.
-``None`` starts nothing."""
+``None`` starts nothing. ``reply(message)`` starts nothing too, and posts
+``message`` where the event came from."""
 
 LinearEventCallback = Callable[
     [_Event, LinearChannelThread],
