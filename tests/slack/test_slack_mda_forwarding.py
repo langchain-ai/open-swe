@@ -815,6 +815,7 @@ _NO_RUN = {
     "run": None,
     "interrupts": True,
     "thread_id": None,
+    "branches_conversation": False,
     "declined": None,
     "prompt": None,
 }
@@ -1128,7 +1129,7 @@ async def test_a_web_breakout_runs_on_a_thread_of_its_own_and_its_thread_hears_o
 
 
 @pytest.mark.parametrize("kind", ["by_the_way", "web"])
-async def test_a_question_in_an_mda_conversation_runs_on_a_fork_of_its_thread(
+async def test_a_question_in_an_mda_conversation_branches_off_its_thread(
     monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
     prepare = _prepared(monkeypatch)
@@ -1143,19 +1144,41 @@ async def test_a_question_in_an_mda_conversation_runs_on_a_fork_of_its_thread(
         webhook_common, "get_thread_workspace", AsyncMock(return_value="engineering")
     )
     monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
-    forked = str(uuid.uuid4())
-    fork = AsyncMock(return_value=forked)
-    monkeypatch.setattr(forks, "fork_thread", fork)
+    branches = AsyncMock(return_value=True)
+    monkeypatch.setattr(forks, "branches_from", branches)
     text = "<@BOT> /btw why?" if kind == "by_the_way" else "<@BOT> /breakout:web why?"
 
     start = await _start(_start_app(monkeypatch), kind=kind, text=text)
 
-    # It knows what the agent did in the conversation, and belongs to the one who asked.
-    fork.assert_awaited_once_with(_MDA_THREAD, key=forks.branch_key("C1", "1.2"), login="ada")
-    cast(AsyncMock, mda_forwarding.claim_side).assert_awaited_once_with(forked, owner_login="ada")
-    assert start["thread_id"] == forked
+    # A new thread the channel owns, which belongs to the one who asked and starts with
+    # what the conversation's thread holds: the prompt leaves those Slack messages out.
+    side = mda_forwarding.side_thread_id("C1", "1.2")
+    branches.assert_awaited_once_with(_MDA_THREAD, login="ada")
+    cast(AsyncMock, mda_forwarding.claim_side).assert_awaited_once_with(side, owner_login="ada")
+    assert start["thread_id"] == side
+    assert start["branches_conversation"] is True
     built = prepare_ask.await_args.args[0] if kind == "by_the_way" else prepare.await_args.args[0]
-    assert built.thread_id == forked
+    assert (built.thread_id, built.held_thread_id) == (side, _MDA_THREAD)
+
+
+async def test_a_question_branches_only_off_the_handlers_own_conversation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepare_ask = AsyncMock(
+        return_value=slack_ask.AskChannelRun(
+            input={"messages": [{"role": "user", "content": "why?"}]},
+            configurable={"source": "slack", "github_login": "ada"},
+        )
+    )
+    monkeypatch.setattr(slack_channel, "prepare_ask_channel_run", prepare_ask)
+    # A thread the handler can't read, such as a concierge DM's.
+    monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=str(uuid.uuid4())))
+    monkeypatch.setattr(forks, "branches_from", AsyncMock(return_value=True))
+
+    start = await _start(_start_app(monkeypatch), kind="by_the_way", text="<@BOT> /btw why?")
+
+    assert start["branches_conversation"] is False
+    assert prepare_ask.await_args.args[0].held_thread_id == ""
 
 
 @pytest.mark.parametrize("owner", [_MDA_THREAD, None], ids=["mda", "backend"])
@@ -1174,9 +1197,15 @@ async def test_a_breakout_opens_its_new_thread_and_runs_its_first_turn_there(
     seen: list[tuple[SlackRequest, object]] = []
 
     async def breakout(
-        request: SlackRequest, command: object, repo: object, *, hand_to_mda: Callable
+        request: SlackRequest,
+        command: object,
+        repo: object,
+        *,
+        hand_to_mda: Callable,
+        branches: bool,
     ) -> None:
         seen.append((request, command))
+        assert branches is False  # Not readable here: seeded from Slack.
         await hand_to_mda(opening, None)
 
     monkeypatch.setattr(slack_channel, "process_slack_breakout", breakout)
@@ -1600,6 +1629,7 @@ async def test_an_option_click_is_the_persons_message_and_is_acted_on_once(
         "run": None,
         "interrupts": True,
         "thread_id": None,
+        "branches_conversation": False,
         "declined": None,
         "acted": False,
         "backend": False,

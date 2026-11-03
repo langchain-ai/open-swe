@@ -77,6 +77,8 @@ class SlackAskRequest(BaseModel):
     # `/btw` only: the Slack thread the public answer goes to, and the mention's own ts.
     reply_thread_ts: str = ""
     message_ts: str = ""
+    # The thread this question's thread starts with, whose Slack messages it holds.
+    held_thread_id: str = ""
 
     @property
     def by_the_way(self) -> bool:
@@ -112,6 +114,7 @@ def by_the_way_request(request: SlackRequest) -> SlackAskRequest:
         team_id=request.team_id,
         reply_thread_ts=request.thread_ts,
         message_ts=request.original_message_ts,
+        held_thread_id=request.held_thread_id,
     )
 
 
@@ -170,7 +173,8 @@ async def _thread_context(channel_id: str, thread_ts: str, held: set[str]) -> st
 
 async def _request_context(request: SlackAskRequest) -> str:
     if request.in_slack_thread:
-        held = await forks.held_timestamps(request.thread_id) if request.thread_id else set()
+        holder = request.held_thread_id or request.thread_id
+        held = await forks.held_timestamps(holder) if holder else set()
         context = await _thread_context(request.channel_id, request.reply_thread_ts, held)
     else:
         context = await _channel_context(request.channel_id)

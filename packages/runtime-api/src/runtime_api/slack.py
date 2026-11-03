@@ -164,8 +164,12 @@ class SlackTurnStart(BaseModel):
     # work in progress; any other follow-up waits for it, as on the backend's own
     # Slack threads.
     interrupts: bool = True
-    # A concierge DM's thread, when the run doesn't go on the Slack thread's own.
+    # A concierge DM's thread, or a branch's (a `/btw` question's, a breakout's), when
+    # the run doesn't go on the Slack thread's own.
     thread_id: UUID | None = None
+    # ``thread_id`` is a new branch of the event's conversation: the channel starts it
+    # with what the conversation's thread holds, which the run's prompt leaves out.
+    branches_conversation: bool = False
     # Why no run starts, which the handler replies with in the Slack thread; set at
     # most once per webhook ID.
     declined: SlackTurnDeclined | None = None
