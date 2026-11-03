@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
-from langgraph_sdk.schema import Interrupt
+from langgraph_sdk.schema import Interrupt, ThreadState
 
 from managed_deepagents._channels.types import ChannelError
 from managed_deepagents._identity_auth import (
@@ -85,15 +85,16 @@ async def ingress_thread_exists(
     return True
 
 
-async def ingress_thread_values(
+async def get_ingress_thread_state(
     *,
     thread_id: str,
     source_provider: str,
     source_thread_key: str,
     user_id: str,
-) -> dict[str, Any] | None:
-    """The thread's state values, as its last run left them; ``None`` when no
-    run created the thread yet. Any other lookup failure propagates."""
+) -> ThreadState | None:
+    """The thread's state, as Agent Server's ``threads.get_state`` reads it;
+    ``None`` when no run created the thread yet. Any other lookup failure
+    propagates."""
     client = _create_trigger_ingress_loopback_client(
         {
             "provider": source_provider,
@@ -102,13 +103,11 @@ async def ingress_thread_values(
         }
     )
     try:
-        state = await client.threads.get_state(thread_id)
+        return await client.threads.get_state(thread_id)
     except Exception as error:
         if lookup_status(error) == HTTPStatus.NOT_FOUND:
             return None
         raise
-    values = state.get("values")
-    return dict(values) if isinstance(values, Mapping) else {}
 
 
 async def newer_ingress_run(
