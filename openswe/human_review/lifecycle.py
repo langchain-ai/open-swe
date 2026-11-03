@@ -56,6 +56,7 @@ from openswe.slack.client import (
 from openswe.slack.diff_image import SlackDiffImage
 from openswe.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
+from openswe.slack.review_links import PrReviewLinks
 from openswe.slack.thread_owner import wake_thread_owner
 from openswe.threads.pr_fixes import dispatch_pull_request_prompt
 from openswe.users import User
@@ -917,7 +918,7 @@ class ReviewPicks:
             if message is None:
                 continue
             pr = self.request.pull_request
-            status = f"Review submitted for <{pr.url}|{pr.label}>."
+            status = f"Review submitted for {PrReviewLinks.slack(pr.url, pr.label)}."
             if not await message.replace(status):
                 continue
             if participant.user.slack_user_id:
@@ -1016,7 +1017,7 @@ class ReviewPicks:
         current = await HumanReviewRequest.get(request.id) or request
         if current.state == "open":
             await ReviewCard(current).refresh()
-        label = f"<{pr.url}|{pr.label}>"
+        label = PrReviewLinks.slack(pr.url, pr.label)
         for reviewer in released:
             logger.info(
                 "Released a reviewer Open SWE picked",

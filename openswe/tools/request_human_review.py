@@ -33,6 +33,7 @@ from openswe.slack.client import (
 )
 from openswe.slack.dm import send_dm
 from openswe.slack.payloads import SlackMessage
+from openswe.slack.review_links import PrReviewLinks
 from openswe.tools.manage_baby_sit import dispatch_run_config
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User
@@ -209,7 +210,7 @@ async def _request_for_mcp_caller(
         posted = "This pull request already had an open review request; no new card was posted."
     elif requester.slack_user_id and await send_dm(
         requester.slack_user_id,
-        f"Review requested for <{pr_ref.url}|{pr_ref.repo}#{pr_ref.number}> "
+        f"Review requested for {PrReviewLinks.slack(pr_ref.url, f'{pr_ref.repo}#{pr_ref.number}')} "
         f"in <#{result.channel}>."
         + (f" <{result.permalink}|View review request>" if result.permalink else ""),
     ):

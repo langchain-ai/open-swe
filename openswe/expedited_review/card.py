@@ -19,6 +19,7 @@ from openswe.slack.blocks import (
     section,
     static_select,
 )
+from openswe.slack.review_links import PrReviewLinks
 
 BUTTON_TYPE = "expedited_review"
 SEND_BLOCK_ID = "expedited_review_send"
@@ -42,8 +43,11 @@ def _vote_summary(approval: HumanReviewRequest) -> str:
 
 def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block]:
     pr = approval.pull_request
-    label = pr.label
-    blocks = [section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}")]
+    blocks = [
+        section(
+            f"*Expedited review requested*\n{PrReviewLinks.slack(pr.url, pr.label)} {escape(title)}"
+        )
+    ]
     if approval.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(approval.tldr).splitlines())))
     return [*blocks, context(f"Author {author}")]
@@ -194,13 +198,13 @@ def readiness_prompt(
 ) -> tuple[str, list[Block]]:
     """The full author-only draft card."""
     pr = approval.pull_request
-    text = f"Review {pr.url} carefully yourself before clicking Mark ready for review."
+    text = f"Review {PrReviewLinks.slack(pr.url, pr.label)} carefully yourself before clicking Mark ready for review."
     return text, [
         *_header(approval, title, author),
         divider(),
         *_voting_diff(approval, files, diff_image_id),
         section(
-            f"*Draft.* Review <{pr.url}|the pull request> carefully yourself before clicking *Mark ready for review* to request an approval in the thread."
+            f"*Draft.* Review {PrReviewLinks.slack(pr.url, 'the pull request')} carefully yourself before clicking *Mark ready for review* to request an approval in the thread."
         ),
         actions(_ready_button(approval), _dismiss_button(approval)),
     ]
@@ -253,10 +257,11 @@ def open_card(
     """
     pr = approval.pull_request
     if approval.approved and not approval.awaiting_ready:
-        label = pr.label
         heading = f"Expedited review: {_vote_summary(approval)}"
-        return f"{heading} — {pr.url}", [
-            section(f":white_check_mark: *{heading}*\n<{pr.url}|{label}> {escape(title)}")
+        return f"{heading} — {PrReviewLinks.slack(pr.url, pr.label)}", [
+            section(
+                f":white_check_mark: *{heading}*\n{PrReviewLinks.slack(pr.url, pr.label)} {escape(title)}"
+            )
         ]
     header = _header(approval, title, author)
     if thread_url:
@@ -267,7 +272,7 @@ def open_card(
         *_voting_diff(approval, files, diff_image_id),
         *_status(approval, author, [] if thread_url is not None else choices or []),
     ]
-    text = f"Expedited review requested for {pr.url}"
+    text = f"Expedited review requested for {PrReviewLinks.slack(pr.url, pr.label)}"
     return text, blocks
 
 
@@ -286,9 +291,10 @@ def closed_card(
     """
     pr = approval.pull_request
     if approval.state in {"merged", "cancelled"}:
-        label = pr.label
-        return f"Expedited review: {outcome} — {pr.url}", [
-            section(f"*Expedited review: {outcome}*\n<{pr.url}|{label}> {escape(title)}")
+        return f"Expedited review: {outcome} — {PrReviewLinks.slack(pr.url, pr.label)}", [
+            section(
+                f"*Expedited review: {outcome}*\n{PrReviewLinks.slack(pr.url, pr.label)} {escape(title)}"
+            )
         ]
     blocks: list[Block] = [
         *_header(approval, title, author),
@@ -297,7 +303,7 @@ def closed_card(
         section(f"*{outcome}*"),
         *([context(_vote_summary(approval))] if approval.approvals else []),
     ]
-    return f"{outcome} — {pr.url}", blocks
+    return f"{outcome} — {PrReviewLinks.slack(pr.url, pr.label)}", blocks
 
 
 def author_status(
@@ -305,9 +311,11 @@ def author_status(
 ) -> tuple[str, list[Block]]:
     """The persistent author DM record, without a diff or actions."""
     pr = approval.pull_request
-    text = f"Expedited review: {outcome} — {pr.url}"
+    text = f"Expedited review: {outcome} — {PrReviewLinks.slack(pr.url, pr.label)}"
     blocks: list[Block] = [
-        section(f"*Expedited review: {outcome}*\n<{pr.url}|{pr.label}> {escape(pr.title)}")
+        section(
+            f"*Expedited review: {outcome}*\n{PrReviewLinks.slack(pr.url, pr.label)} {escape(pr.title)}"
+        )
     ]
     if origin_url:
         blocks.append(context(f"Requested from <{origin_url}|this thread>."))

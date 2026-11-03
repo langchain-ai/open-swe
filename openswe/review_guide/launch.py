@@ -40,6 +40,7 @@ from openswe.slack.code_channels import (
 from openswe.slack.dm import post_dm
 from openswe.slack.http import SlackRequestError
 from openswe.slack.records import bind_slack_thread_id
+from openswe.slack.review_links import PrReviewLinks
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_thread_url
@@ -77,7 +78,7 @@ class GuideOrigin(BaseModel):
             return await post_dm(
                 self.requester_slack_id,
                 f"Opening a review channel for "
-                f"<{pull_request.url}|{pull_request.repo}#{pull_request.number}>: {title}",
+                f"{PrReviewLinks.slack(pull_request.url, pull_request.label)}: {title}",
             )
         except SlackRequestError as exc:
             raise GuideStartError(f"Slack could not DM the requester: {exc}") from exc

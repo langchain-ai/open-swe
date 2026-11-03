@@ -33,6 +33,7 @@ from openswe.human_review.requests import HumanReviewRequest
 from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.slack.client import GitHubPrRef, post_slack_thread_reply
+from openswe.slack.review_links import PrReviewLinks
 from openswe.source_context import SourceContext
 from openswe.tasks.store import Task, TaskMembership
 from openswe.utils.json_types import JsonObject
@@ -788,7 +789,7 @@ async def _record_retry(
         await _notify_watch(
             watch,
             f"*Flaky CI detected:* `{_escape_slack(clean_name)}`\n"
-            f"• PR: <{watch.pr_url}|{watch.owner}/{watch.repo}#{watch.pr_number}>\n"
+            f"• PR: {PrReviewLinks.slack(watch.pr_url, f'{watch.owner}/{watch.repo}#{watch.pr_number}')}\n"
             f"• Evidence: {_escape_slack(clean_evidence)}\n"
             f"• Rerun: {retries}/{MAX_RETRIES_PER_HEAD}\n"
             f"• {check_text}",

@@ -1411,6 +1411,13 @@ async def _post_slack_callback(
         or not parsed.path.startswith(path_prefix)
     ):
         return False
+    text = payload.get("text")
+    blocks = payload.get("blocks")
+    if (text is None or isinstance(text, str)) and (blocks is None or isinstance(blocks, list)):
+        text, blocks = await pr_review_links(text or "", blocks)
+        payload = {**payload, **({"text": text} if "text" in payload else {})}
+        if blocks is not None:
+            payload["blocks"] = blocks
     request = httpx2.Request(
         "POST",
         response_url,
@@ -1464,7 +1471,6 @@ async def replace_slack_command_message(
     agent_thread_id: str | None = None,
 ) -> bool:
     """Replace a command acknowledgement or publish a new ephemeral shortcut answer."""
-    text, blocks = await pr_review_links(text, blocks)
     dashboard_url = dashboard_thread_url(agent_thread_id) if agent_thread_id else None
     payload: dict[str, Any] = {
         "response_type": "ephemeral",
