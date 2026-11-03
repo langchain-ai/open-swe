@@ -1,4 +1,10 @@
-import { useEffect, useEffectEvent, useMemo, useRef } from "react"
+import { Button } from "@langchain/macaw-components/Button"
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@langchain/macaw-components/Popover"
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 
 import type { PlanComment, PlanTextAnchor } from "@/lib/plan"
 import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFrame"
@@ -171,11 +177,20 @@ function frameScript(channel: string): string {
       };
     }
 
-    document.addEventListener("mouseup", () => {
-      setTimeout(() => {
-        post({ type: "text-selected", anchor: selectedAnchor() });
-      });
+    function publishSelection() {
+      const anchor = selectedAnchor();
+      const range = getSelection()?.rangeCount ? getSelection().getRangeAt(0) : null;
+      const rect = range?.getBoundingClientRect();
+      post({ type: "text-selected", anchor, x: rect?.left, y: rect?.bottom });
+    }
+
+    document.addEventListener("mouseup", () => setTimeout(publishSelection));
+    document.addEventListener("keyup", event => {
+      if (event.key === "Shift" || event.shiftKey) publishSelection();
+      if (event.key === "Escape") post({ type: "text-selected", anchor: null });
     });
+    document.addEventListener("pointerdown", () => post({ type: "text-selected", anchor: null }));
+    addEventListener("scroll", () => post({ type: "text-selected", anchor: null }), { capture: true, passive: true });
 
     function receive(message) {
       if (message.type === "set-comments" && Array.isArray(message.comments)) {
@@ -273,6 +288,24 @@ export function PlanArtifactFrame({
   const theme = useResolvedTheme()
   const frameRef = useRef<HTMLIFrameElement>(null)
   const portRef = useRef<MessagePort | null>(null)
+  const [selection, setSelection] = useState<{
+    anchor: PlanTextAnchor
+    x: number
+    y: number
+  } | null>(null)
+  const selectionPosition = {
+    current: {
+      getBoundingClientRect: () => {
+        const frame = frameRef.current?.getBoundingClientRect()
+        return new DOMRect(
+          (frame?.left ?? 0) + (selection?.x ?? 0),
+          (frame?.top ?? 0) + (selection?.y ?? 0),
+          0,
+          0
+        )
+      },
+    },
+  }
   const channel = useMemo(() => globalThis.crypto.randomUUID(), [])
   const srcDoc = useMemo(
     () => withViewerPolicy(html, theme, channel),
@@ -307,8 +340,14 @@ export function PlanArtifactFrame({
     if (
       event.data?.type === "text-selected" &&
       (event.data.anchor === null || isAnchor(event.data.anchor))
-    )
-      onTextSelected?.(event.data.anchor)
+    ) {
+      const { anchor, x, y } = event.data
+      setSelection(
+        anchor && Number.isFinite(x) && Number.isFinite(y)
+          ? { anchor, x, y }
+          : null
+      )
+    }
     if (
       event.data?.type === "comment-selected" &&
       typeof event.data.id === "string"
@@ -317,6 +356,7 @@ export function PlanArtifactFrame({
   })
 
   const connect = () => {
+    setSelection(null)
     portRef.current?.close()
     const messageChannel = new MessageChannel()
     portRef.current = messageChannel.port1
@@ -350,15 +390,44 @@ export function PlanArtifactFrame({
   }, [focusCommentId, focusCommentKey])
 
   return (
-    <SandboxedHtmlFrame
-      ref={frameRef}
-      testId="plan-artifact-frame"
-      title={title}
-      html={srcDoc}
-      sandbox={ARTIFACT_SANDBOX}
-      allow={ARTIFACT_ALLOW}
-      onLoad={connect}
-      className={cn("bg-surface-level-1", className)}
-    />
+    <>
+      <SandboxedHtmlFrame
+        ref={frameRef}
+        testId="plan-artifact-frame"
+        title={title}
+        html={srcDoc}
+        sandbox={ARTIFACT_SANDBOX}
+        allow={ARTIFACT_ALLOW}
+        onLoad={connect}
+        className={cn("bg-surface-level-1", className)}
+      />
+      <Popover
+        open={Boolean(selection && onTextSelected)}
+        onOpenChange={(open) => {
+          if (!open) setSelection(null)
+        }}
+      >
+        <PopoverAnchor virtualRef={selectionPosition} />
+        <PopoverContent
+          side="bottom"
+          align="start"
+          className="w-auto p-0.5"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
+          <Button
+            color="secondary"
+            variant="plain"
+            size="sm"
+            onClick={() => {
+              if (selection) onTextSelected?.(selection.anchor)
+              setSelection(null)
+            }}
+          >
+            Ask about this
+          </Button>
+        </PopoverContent>
+      </Popover>
+    </>
   )
 }

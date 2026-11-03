@@ -173,10 +173,26 @@ test.describe("HTML artifacts", () => {
       });
     const clearSelection = () => verificationHeading.click();
     await selectHeading();
-    await expect(owner.getByTestId("comment-composer")).toBeVisible();
-    await clearSelection();
+    await expect(
+      owner.getByRole("button", { name: "Ask about this" }),
+    ).toBeVisible();
     await expect(owner.getByTestId("comment-composer")).toHaveCount(0);
+    expect(
+      await verificationHeading.evaluate(() =>
+        window.getSelection()?.toString(),
+      ),
+    ).toBe("Verification");
+    expect(
+      await owner.evaluate(
+        () => document.activeElement?.tagName === "TEXTAREA",
+      ),
+    ).toBe(false);
+    await clearSelection();
+    await expect(
+      owner.getByRole("button", { name: "Ask about this" }),
+    ).toHaveCount(0);
     await selectHeading();
+    await owner.getByRole("button", { name: "Ask about this" }).click();
     await expect(owner.getByTestId("comment-composer")).toContainText(
       "Verification",
     );
