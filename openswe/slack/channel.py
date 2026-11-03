@@ -45,7 +45,7 @@ from openswe import event_claims
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.mda_channels.api import ChannelCall
 from openswe.mda_channels.auth import require_mda_channel
-from openswe.slack import mda_forwarding
+from openswe.slack import forks, mda_forwarding
 from openswe.slack import webhook as service
 from openswe.slack.ask import by_the_way_request, prepare_ask_channel_run
 from openswe.slack.dm import CONCIERGE_TS
@@ -242,7 +242,7 @@ async def _remembered_in(
     thread_id: str, channel_id: str, thread_ts: str, message_ts: str = ""
 ) -> list[str]:
     """The Slack thread's own thread, then a concierge DM's it is bound to, then the
-    message's own (a `/btw` question's or a new breakout's)."""
+    message's own (a `/btw` question's or a new breakout's, or the fork it made)."""
     threads = [thread_id]
     if channel_id and thread_ts:
         owner = await mda_forwarding.owned_conversation(channel_id, thread_ts)
@@ -250,6 +250,8 @@ async def _remembered_in(
             threads.append(owner)
     if channel_id and message_ts:
         threads.append(mda_forwarding.side_thread_id(channel_id, message_ts))
+        if fork := await forks.find_fork(thread_id, forks.branch_key(channel_id, message_ts)):
+            threads.append(fork)
     return threads
 
 
