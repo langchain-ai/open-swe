@@ -16,6 +16,8 @@ from managed_deepagents._channels.types import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from managed_deepagents._channels.binding import ChannelBinding
 
 _NONBLANK = r"\S"
@@ -48,20 +50,27 @@ class _LinearTargetModel(BaseModel):
     sessionId: str | None = Field(default=None, pattern=_NONBLANK)  # noqa: N815 - the stored key
 
 
-def channel_target(binding: ChannelBinding) -> ChannelTarget | None:
+def channel_target(
+    binding: ChannelBinding, event: Mapping[str, object] | None = None
+) -> ChannelTarget | None:
     """The conversation a binding posts to, when its provider has a typed target.
 
     ``None`` when the target is malformed. Only the conversation's own ids are
-    copied; the Trigger channel and the rest of its address stay internal.
+    copied; the Trigger channel and the rest of its address stay internal. A
+    schedule that starts a new thread posts at top level, so its target has no
+    thread.
     """
     provider, transport = binding["provider"], binding["transport"]
+    new_thread = (
+        event is not None and event.get("type") == "schedule" and event.get("new_thread") is True
+    )
     target = json_copy(binding["target"])
     try:
         if provider == "slack" and transport == "trigger_server":
             address = _SlackTargetModel.model_validate(target).address
             return SlackChannelTarget(
                 conversation_id=address.conversation_id,
-                thread_ts=address.thread_id,
+                thread_ts=None if new_thread else address.thread_id,
                 code_channel=address.code_channel is True,
             )
         if provider == "github" and transport == "direct":
@@ -73,8 +82,8 @@ def channel_target(binding: ChannelBinding) -> ChannelTarget | None:
                 organization_id=linear.organizationId,
                 issue_id=linear.issueId,
                 identifier=linear.identifier,
-                comment_id=linear.commentId,
-                session_id=linear.sessionId,
+                comment_id=None if new_thread else linear.commentId,
+                session_id=None if new_thread else linear.sessionId,
             )
     except ValidationError:
         return None

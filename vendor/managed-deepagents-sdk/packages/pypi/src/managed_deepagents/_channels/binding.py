@@ -178,7 +178,7 @@ def resolve_channel_info(
         provider=binding["provider"],
         event=binding.get("event"),
         raw_event=binding.get("raw_event"),
-        channel_target=channel_target(binding),
+        channel_target=channel_target(binding, binding.get("event")),
     )
 
 
@@ -215,9 +215,11 @@ def runtime_channel(
             transport = TriggerTransport(client)
 
             async def start_thread(
-                message: ChannelMessage, run: ChannelRunResult | None
+                message: ChannelMessage, run: ChannelRunResult | None, *, hand_off: bool = False
             ) -> PostedChannelThread:
-                return await start_trigger_conversation(client, binding, message, run)
+                return await start_trigger_conversation(
+                    client, binding, message, run, hand_off=hand_off
+                )
     else:
         transport = messaging_transport_for_name(binding["name"])
         if transport is None and transport_factory is not None:
@@ -230,7 +232,7 @@ def runtime_channel(
         target=binding["target"],
         transport=cast("ChannelMessagingAdapter | None", transport),
         start_thread=start_thread,
-        channel_target=channel_target(binding),
+        channel_target=channel_target(binding, binding.get("event")),
     )
 
 
