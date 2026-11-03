@@ -448,7 +448,8 @@ Pass `to=` to start the new thread in another conversation of the same
 channel, such as another Slack channel the app is in: a `ChannelTarget` of the
 origin's provider with no thread, for example
 `SlackChannelTarget(conversation_id="C0123456789")`. It works with `run=` and
-with `hand_off=True`.
+with `hand_off=True`. A code channel isn't a valid `to=`: it is one
+conversation with no threads of its own.
 
 When a run with a thread origin ends, MDA posts the run's answers to that
 origin. A Studio resume of a channel thread answers in the channel, and the
