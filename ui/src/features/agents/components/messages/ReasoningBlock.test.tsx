@@ -27,6 +27,21 @@ describe("ReasoningBlock", () => {
     expect(screen.getAllByText(/Checking the snapshot/)).toHaveLength(1)
   })
 
+  it("shows the live thought before a heading or newline arrives", () => {
+    const { rerender } = render(<ReasoningBlock isLive text="" />)
+    expect(screen.getByRole("button", { name: "Thinking..." })).toBeTruthy()
+
+    rerender(<ReasoningBlock isLive text="Checking the snapshot" />)
+    expect(
+      screen.getByRole("button", { name: "Checking the snapshot..." })
+    ).toBeTruthy()
+
+    rerender(<ReasoningBlock isLive text="**Checking the snapshot**" />)
+    expect(
+      screen.getByRole("button", { name: "Checking the snapshot..." })
+    ).toBeTruthy()
+  })
+
   it("names the live thought by its heading", () => {
     render(
       <ReasoningBlock

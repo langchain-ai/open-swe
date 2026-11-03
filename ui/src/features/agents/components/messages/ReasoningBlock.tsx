@@ -49,7 +49,8 @@ export function ReasoningBlock({
   if (!thought.text && !isLive) return null
 
   const expanded = isLive || userExpanded
-  const liveLabel = thought.heading ? `${thought.heading}...` : "Thinking..."
+  const liveThought = thought.heading || thought.preview
+  const liveLabel = liveThought ? `${liveThought}...` : "Thinking..."
   const label = thought.preview || "Reasoning"
   const body = thought.bodyUnder(isLive ? thought.heading : thought.preview)
 
