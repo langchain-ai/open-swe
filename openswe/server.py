@@ -1185,6 +1185,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._draft_prs = cfg.draft_prs is True
         self._admin_workspaces = turn.admin_workspaces
         self._sole_writer = turn.sole_writer
+        self._admin_participants = turn.admin_participants
         self._model_selection = ModelSelectionMiddleware(
             turn.routing.route_model_ids, routing_mode=turn.routing.mode
         )
@@ -1623,6 +1624,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             workspace_memory=memory,
             admin_workspaces=self._admin_workspaces,
             sole_writer=self._sole_writer,
+            admin_participants=self._admin_participants,
             continued_from_collaborative=bool(cfg.continued_from_thread_id),
         )
 
@@ -2115,6 +2117,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         credential_login=credential_login,
         admin_workspaces=admin_thread,
         sole_writer=tool_access.sole,
+        admin_participants=tool_access.admin_participants,
         title_model_id=title_model_id,
         title_effort=title_effort,
         use_gateway=bool(use_gateway),

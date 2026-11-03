@@ -11,7 +11,7 @@ That image is two things: a **record** (name, prompt, repos, sizing, optional sc
 Runs routed to a workspace boot from its image and get its prompt appended to their system prompt.
 The workspace named `default` is what a run uses when routing picks no other.
 
-Only workspace admins can change a workspace's image, from an admin thread or through supported writes in a verified sole-writer shared thread.
+Only workspace admins can change a workspace's image, from an admin thread or through supported writes in a verified sole-writer or admin-only shared thread.
 Shared writes return only acknowledgements; workspace reads and switching to another workspace's image still require a private admin surface.
 Anyone can read workspaces on the **Workspaces** page.
 If the asker is not an admin, tell them what would need to happen and who can do it; do not try the tools.

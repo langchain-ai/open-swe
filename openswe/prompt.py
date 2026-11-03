@@ -124,6 +124,7 @@ def construct_system_prompt(
     workspace_instructions: str | None = None,
     admin_workspaces: bool = False,
     sole_writer: bool = False,
+    admin_participants: bool = False,
     continued_from_collaborative: bool = False,
     workspace_repos: list[str] | None = None,
     workspace_memory: str = "",
@@ -154,6 +155,7 @@ def construct_system_prompt(
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         admin_workspaces=admin_workspaces,
         sole_writer=sole_writer,
+        admin_participants=admin_participants,
     )
     workspace = "\n\n".join(
         section

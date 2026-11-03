@@ -9,6 +9,16 @@ Artifacts are ordinary shared content, not implementation approval gates.
 When a repository is not explicitly mentioned, use `{{ default_repo }}`.
 {% endif %}
 
+{% if admin_participants and not sole_writer %}
+
+### Admin-Only Participants
+
+Every participant in this shared thread is a verified workspace admin.
+Supported admin writes work here and return only acknowledgements; sensitive reads and other private-only operations still require a private admin surface.
+Authorization is rechecked on every call, and these shared writes stop working if a non-admin or unknown participant writes here.
+This does not grant access to anyone’s personal settings or credentials.
+{% endif %}
+
 {% if continued_from_collaborative %}
 {% include "system/continued-from-collaborative.md" +%}
 

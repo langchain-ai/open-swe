@@ -1,6 +1,6 @@
 Read or set a repository's approval mode when the user requests a settings change.
 Requires a currently authorized workspace admin.
-`read` requires a private admin surface; `set` also works in a verified sole-writer shared thread, returning only an acknowledgement.
+`read` requires a private admin surface; `set` also works in a verified sole-writer or admin-only shared thread, returning only an acknowledgement.
 Authorization is rechecked on every call.
 
 Approval criteria live in the repository's `.open-swe/auto-approve-rules/` (one rule per Markdown file, optionally scoped by `match-all-files` or `match-any-files` globs in its frontmatter), read from the repository's default branch; this tool does not edit them.
