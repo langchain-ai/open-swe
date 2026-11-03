@@ -1832,9 +1832,14 @@ function configureFraming() {
   session.defaultSession.webRequest.onHeadersReceived(
     { urls: ["https://*/*"] },
     (details, callback) => {
-      const page = webContents.fromId(details.webContentsId)?.getURL();
+      // Requests no page made, like the main process's own, carry no webContentsId.
+      const page =
+        details.resourceType === "subFrame" &&
+        details.webContentsId !== undefined
+          ? webContents.fromId(details.webContentsId)?.getURL()
+          : undefined;
       callback(
-        details.resourceType === "subFrame" && isAppUrl(page ?? "")
+        isAppUrl(page ?? "")
           ? { responseHeaders: headersFramedByApp(details.responseHeaders) }
           : {},
       );
@@ -1844,11 +1849,11 @@ function configureFraming() {
 
 function configurePermissions() {
   session.defaultSession.setPermissionRequestHandler(
-    (webContents, permission, callback, details) => {
+    (requester, permission, callback, details) => {
       callback(
         isTrustedPermissionRequest(
           permission,
-          details.requestingUrl || webContents.getURL(),
+          details.requestingUrl || requester.getURL(),
         ),
       );
     },
