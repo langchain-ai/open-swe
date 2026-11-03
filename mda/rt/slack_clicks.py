@@ -22,6 +22,11 @@ from managed_deepagents import (
     SlackChannelThread,
     SlackInteractionEvent,
 )
+from managed_deepagents._channels.slack.api import (  # noqa: PLC2701
+    slack_api,
+    slack_bot_token,
+)
+from managed_deepagents._channels.types import ChannelError  # noqa: PLC2701
 from runtime_api.slack import (
     ACT_ON_SLACK_CLICK,
     PLAN_SLACK_CLICK,
@@ -223,15 +228,26 @@ class _Click:
         return ((text if isinstance(text, str) else "") or fallback).strip()[:_LABEL_LIMIT]
 
     async def _tell_clicker(self, text: str) -> None:
-        # Without thread_ts, Slack shows the note in the channel, not the clicked thread.
-        await self._respond(
-            {
-                "response_type": "ephemeral",
-                "replace_original": False,
-                "thread_ts": self.thread_ts,
-                "text": text,
-            }
-        )
+        # Slack shows a response_url note in the channel, even for a click in a thread.
+        try:
+            await slack_api(
+                await slack_bot_token(),
+                "chat.postEphemeral",
+                {
+                    "channel": self.event.channel_id,
+                    "user": self.clicker,
+                    "thread_ts": self.thread_ts,
+                    "text": text,
+                },
+            )
+        except ChannelError as error:
+            logger.warning(
+                "Could not tell the clicker in the Slack thread",
+                extra={"slack_error": getattr(error, "provider_error", "")},
+            )
+            await self._respond(
+                {"response_type": "ephemeral", "replace_original": False, "text": text}
+            )
 
     async def _replace_buttons(self, text: str) -> None:
         blocks = replaced_buttons(self.message.get("blocks"), text)
