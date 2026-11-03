@@ -429,7 +429,8 @@ posted = await origin.channel.post(
 
 To move the conversation instead, pass `hand_off=True`. The new Slack thread
 takes the current run's thread, with its history: replies, Stop and decision
-buttons there reach it, and `thread_id` is the current thread's. The old Slack
+buttons there reach it, and `thread_id` is the current thread's. The rest of
+the run answers, and waits on decisions, in the new Slack thread too. The old Slack
 thread no longer has a thread, so a run its later messages would start is
 refused; a handler that knows about the move can `reply()` instead. Only a
 channel conversation's run can hand off its thread, and not together with
