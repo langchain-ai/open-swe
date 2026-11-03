@@ -2,11 +2,15 @@
 
 import logging
 import re
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from uuid import uuid4
 
+from fastapi import BackgroundTasks
+
+from openswe.prompts import prompt
 from openswe.slack import webhook as service
 from openswe.slack.blocks import block_payload, section
+from openswe.slack.breakout_choice import BreakoutChoice
 from openswe.slack.breakout_destination import resolve_breakout_destination
 from openswe.slack.breakout_links import (
     breakout_root_blocks,
@@ -19,12 +23,17 @@ from openswe.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_message,
     post_slack_top_level_message_with_ts,
+    respond_to_slack_interaction,
     update_slack_message,
 )
 from openswe.slack.http import SlackRequestError
 from openswe.slack.move import move_slack_thread
 from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
+from openswe.slack.payloads import SlackButtonValue, SlackInteraction
 from openswe.slack.request import SlackRequest
+from openswe.slack.responses import WebhookResponse, accepted, ignored
+from openswe.slack.thread_owner import wake_thread_owner
+from openswe.users.models import User
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
@@ -308,16 +317,84 @@ async def process_slack_breakout(
         if error := await destination.channel_error(request.channel_id):
             await _tell_sender(request, error)
             return
+        if not command.channel_id and (choices := await destination.choices(request.channel_id)):
+            if not await BreakoutChoice.offer(
+                request.channel_id,
+                request.thread_ts,
+                request.user_id,
+                choices,
+                breakout_command={
+                    "request": request.model_dump(mode="json"),
+                    "command": asdict(command),
+                },
+            ):
+                await _tell_sender(
+                    request,
+                    "Choose a breakout destination: `/breakout #channel`, "
+                    "naming this channel to stay here.",
+                )
+            return
         if command.instruction:
             await _start(
                 request,
                 command,
                 target,
                 repo,
-                inherited_workspace=destination.workspace if not command.channel_id else None,
+                inherited_workspace=destination.workspace if target == request.channel_id else None,
             )
         else:
             await _move(request, target)
     except Exception:
         logger.exception("Slack breakout failed", extra={"agent_thread_id": request.thread_id})
         await _tell_sender(request, "Could not break out this thread; try again.")
+
+
+async def handle_destination_button(
+    interaction: SlackInteraction, value: SlackButtonValue, background_tasks: BackgroundTasks
+) -> WebhookResponse:
+    """Break out where the requester chose from a breakout's private destination buttons."""
+    destination = value.action
+    choice = await BreakoutChoice.pending(value.subject)
+    if choice is None:
+        await respond_to_slack_interaction(
+            interaction.response_url,
+            {"replace_original": True, "text": "This breakout choice expired.", "blocks": []},
+        )
+        return ignored("Breakout choice expired")
+    clicker = await User.for_identity("slack", interaction.user.id)
+    if clicker is None or clicker.id != choice.created_by:
+        return ignored("Breakout choice belongs to another requester")
+    if destination not in choice.destination_channel_ids:
+        return ignored("Unknown breakout destination")
+    if not await choice.claim():
+        return ignored("Breakout destination already chosen")
+    await respond_to_slack_interaction(
+        interaction.response_url,
+        {"replace_original": True, "text": f"Breaking out in <#{destination}>…", "blocks": []},
+    )
+    if choice.breakout_command is None:
+        background_tasks.add_task(
+            wake_thread_owner,
+            choice.channel_id,
+            choice.thread_ts,
+            interaction.user.id,
+            prompt("slack/breakout-destination-chosen", channel_id=destination),
+        )
+        return accepted("Breakout destination handed to the agent")
+    stored = choice.breakout_command
+    request = SlackRequest.model_validate(stored["request"])
+    command = BreakoutCommand(**stored["command"])
+    repo = await common.get_slack_repo_config(
+        request.channel_id,
+        request.thread_ts,
+        slack_user_id=request.user_id,
+        channel_context=request.channel_context,
+        thread_id=request.thread_id,
+    )
+    background_tasks.add_task(
+        process_slack_breakout,
+        request,
+        replace(command, channel=f"<#{destination}>", channel_id=destination),
+        repo,
+    )
+    return accepted("Breakout destination chosen")

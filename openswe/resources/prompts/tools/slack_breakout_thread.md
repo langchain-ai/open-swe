@@ -6,9 +6,11 @@ A model without effort uses its default; effort alone applies to the parent's cu
 Invalid selections return `available_models` with valid IDs and efforts without creating a thread.
 This is only for requested breakouts, not a general mechanism for creating Slack threads.
 Same-channel breakouts also work in private channels.
-Changing channels requires a public source channel and destination.
+Changing channels requires a public source channel and destination, except that a public source may break out to a private kitchen channel.
 Omit `channel_id` to use the current channel.
 Pass `channel_id` only when the user explicitly chooses a destination.
+Without `channel_id`, the tool may return `awaiting_destination` instead of posting: when the channel has a kitchen channel named after it, or a large or unknown audience, the requester gets private buttons to choose the destination.
+Their choice wakes you to call this tool again with that `channel_id`; until then, end the turn with `slack_no_reply_needed`.
 The current conversation remains active; to move the current conversation and stop listening to the original thread, use `slack_move_thread` instead.
 
 Choose the breakout's model deliberately rather than automatically inheriting the parent's.

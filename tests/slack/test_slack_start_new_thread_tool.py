@@ -12,9 +12,11 @@ from openswe.credential_scope import (
     private_credential_login,
 )
 from openswe.dashboard.workspace_settings import WorkspaceSettings
-from openswe.slack import solo_threads, staged_files
+from openswe.slack import breakout_destination, solo_threads, staged_files
+from openswe.slack.breakout_choice import BreakoutChoice
 from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SlackRequestError
+from openswe.slack.kitchen_links import KitchenLink
 from openswe.users.models import User, UserIdentity
 from tests.slack.test_slack_solo_threads import _Harness
 
@@ -26,6 +28,7 @@ def _channel(*, private: bool) -> SlackChannel | None:
         {
             "id": "C1",
             "is_channel": True,
+            "num_members": 10,
             "is_private": private,
             "is_ext_shared": False,
             "is_pending_ext_shared": False,
@@ -36,6 +39,8 @@ def _channel(*, private: bool) -> SlackChannel | None:
 @pytest.fixture(autouse=True)
 def public_channel(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=_channel(private=False)))
+    monkeypatch.setattr(breakout_destination, "is_kitchen_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(KitchenLink, "kitchen_for", AsyncMock(return_value=None))
 
 
 @pytest.mark.parametrize("private_source", [True, False])
@@ -152,6 +157,30 @@ def parent_client(monkeypatch: pytest.MonkeyPatch) -> None:
         "cached_workspace_settings",
         AsyncMock(return_value=WorkspaceSettings({"fable_enabled": False})),
     )
+
+
+@pytest.mark.parametrize("offered", [True, False])
+async def test_default_breakout_tool_offers_destination_buttons(
+    monkeypatch: pytest.MonkeyPatch, offered: bool
+) -> None:
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
+    monkeypatch.setattr(
+        slack_breakout_tool,
+        "get_active_slack_thread",
+        AsyncMock(return_value={"channel_id": "C1", "thread_ts": "1700000000.000001"}),
+    )
+    monkeypatch.setattr(KitchenLink, "kitchen_for", AsyncMock(return_value="CK"))
+    offer = AsyncMock(return_value=offered)
+    monkeypatch.setattr(BreakoutChoice, "offer", offer)
+    post = AsyncMock()
+    monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
+
+    result = await slack_breakout_tool.slack_breakout_thread("Title", "Do the thing.")
+
+    assert result["success"] is False
+    assert result.get("awaiting_destination") is (True if offered else None)
+    offer.assert_awaited_once_with("C1", "1700000000.000001", "U1", ["CK", "C1"])
+    post.assert_not_awaited()
 
 
 @pytest.mark.parametrize("failure", [None, "fetch"])

@@ -16,7 +16,13 @@ from openswe.review_guide.advance import advance
 from openswe.review_guide.buttons import NEXT_LABELS
 from openswe.review_guide.launch import close_guide_for_channel
 from openswe.review_guide.sessions import ReviewGuideSession
-from openswe.slack import mda_forwarding, retry, suggested_actions, workflow_approval
+from openswe.slack import (
+    breakout_choice,
+    mda_forwarding,
+    retry,
+    suggested_actions,
+    workflow_approval,
+)
 from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
 from openswe.slack.ask import (
@@ -27,7 +33,12 @@ from openswe.slack.ask import (
     ask_thread_id,
     process_slack_ask,
 )
-from openswe.slack.breakout import BreakoutCommand, process_slack_breakout, process_slack_web
+from openswe.slack.breakout import (
+    BreakoutCommand,
+    handle_destination_button,
+    process_slack_breakout,
+    process_slack_web,
+)
 from openswe.slack.channels import DIRECTORY_EVENTS, SlackChannel
 from openswe.slack.dm import CONCIERGE_TS, is_dm_channel
 from openswe.slack.failures import (
@@ -1272,6 +1283,8 @@ async def slack_interactivity(
             return await human_review.handle_button(interaction, button, background_tasks)
         if button.type == suggested_actions.BUTTON_TYPE:
             return await suggested_actions.handle_button(interaction, button, background_tasks)
+        if button.type == breakout_choice.BUTTON_TYPE:
+            return await handle_destination_button(interaction, button, background_tasks)
 
         if button.type == workflow_approval.BUTTON_TYPE:
             return await workflow_approval.handle_button(

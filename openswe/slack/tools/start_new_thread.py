@@ -15,6 +15,7 @@ from openswe.prompts import prompt
 from openswe.run_config import Repo, RunConfig
 from openswe.slack import webhook
 from openswe.slack.blocks import block_payload
+from openswe.slack.breakout_choice import BreakoutChoice
 from openswe.slack.breakout_destination import resolve_breakout_destination
 from openswe.slack.breakout_links import breakout_root_blocks, mark_broken_out, source_thread_line
 from openswe.slack.client import (
@@ -373,6 +374,25 @@ async def slack_breakout_thread(
         return {
             "success": False,
             "error": "Breakouts between channels require a public source thread and destination.",
+        }
+    if channel_id is None and (choices := await destination.choices(source_channel)):
+        if not await BreakoutChoice.offer(
+            source_channel,
+            current_thread_ts if isinstance(current_thread_ts, str) else "",
+            requester_context.triggering_user_id,
+            choices,
+        ):
+            return {
+                "success": False,
+                "error": "This breakout needs a destination choice, but the requester could not "
+                "be asked privately. Ask them where to break out, then pass channel_id.",
+            }
+        return {
+            "success": False,
+            "awaiting_destination": True,
+            "next_step": "The requester got private buttons to choose the destination; their "
+            "choice wakes you to retry with channel_id. End the turn with "
+            "slack_no_reply_needed.",
         }
     source_line = (
         await source_thread_line(

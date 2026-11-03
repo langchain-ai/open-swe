@@ -1,16 +1,23 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock
+from uuid import uuid4
 
 import pytest
+from fastapi import BackgroundTasks
 
-from openswe.slack import breakout, breakout_links
+from openswe.slack import breakout, breakout_destination, breakout_links
+from openswe.slack.breakout_choice import BreakoutChoice
 from openswe.slack.channels import SlackChannel
+from openswe.slack.kitchen_links import KitchenLink
 from openswe.slack.parsed_message import ParsedSlackMessage
+from openswe.slack.payloads import SlackButtonValue, SlackInteraction
 from openswe.slack.request import SlackRequest
 from openswe.users import User
 from openswe.workspaces import routing
 
 Command = breakout.BreakoutCommand
+_KITCHEN_FOR = KitchenLink.__dict__["kitchen_for"]
 
 
 def _channel(channel_id: str, *, private: bool) -> SlackChannel | None:
@@ -19,6 +26,7 @@ def _channel(channel_id: str, *, private: bool) -> SlackChannel | None:
             "id": channel_id,
             "name": channel_id.lower(),
             "is_channel": True,
+            "num_members": 10,
             "is_private": private,
             "is_ext_shared": False,
             "is_pending_ext_shared": False,
@@ -35,6 +43,8 @@ def public_channels(monkeypatch):
     )
     monkeypatch.setattr(breakout.common, "thread_exists", AsyncMock(return_value=False))
     monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value="alice"))
+    monkeypatch.setattr(breakout_destination, "is_kitchen_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(KitchenLink, "kitchen_for", AsyncMock(return_value=None))
     return load
 
 
@@ -162,7 +172,9 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     await breakout.process_slack_breakout(request, command, None)
 
     assert mention.await_args is not None
-    assert mention.await_args.kwargs["inherited_workspace"] == (None if explicit else "engineering")
+    assert mention.await_args.kwargs["inherited_workspace"] == (
+        "engineering" if expected == "C1" else None
+    )
     assert root.await_args is not None
     assert root.await_args.args[0] == expected
     assert root.await_args.args[1] == (
@@ -203,6 +215,95 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     )
     assert sent.breakout_root_suffix == " · <https://slack/p105|(source)> · <@U_ALICE>"
     posted.ephemeral.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("count", "kitchen", "choices"),
+    [(50, None, ["C1"]), (None, None, ["C1"]), (3, "CK", ["CK", "C1"])],
+)
+async def test_default_breakout_offers_destination_buttons(
+    monkeypatch, public_channels, count, kitchen, choices
+):
+    public_channels.side_effect = lambda channel_id, **_: SlackChannel.from_payload(
+        {"id": channel_id, "is_channel": True, "num_members": count, "is_private": False}
+    )
+    monkeypatch.setattr(KitchenLink, "kitchen_for", AsyncMock(return_value=kitchen))
+    posted = _patch_slack(monkeypatch)
+    offer = AsyncMock(return_value=True)
+    monkeypatch.setattr(BreakoutChoice, "offer", offer)
+    start = AsyncMock()
+    monkeypatch.setattr(breakout, "_start", start)
+
+    await breakout.process_slack_breakout(_request(), Command("fix it"), None)
+
+    start.assert_not_awaited()
+    posted.ephemeral.assert_not_awaited()
+    assert offer.await_args.args == ("C1", "100.0", "U_ALICE", choices)
+    stored = offer.await_args.kwargs["breakout_command"]
+    assert stored["command"]["instruction"] == "fix it"
+
+    await breakout.process_slack_breakout(_request(), Command("fix it", channel_id="C1"), None)
+
+    start.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_breakout_choice_runs_only_for_its_requester(monkeypatch):
+    request = _request()
+    choice = BreakoutChoice(
+        channel_id="C1",
+        thread_ts="100.0",
+        destination_channel_ids=["CK", "C1"],
+        breakout_command={
+            "request": request.model_dump(mode="json"),
+            "command": {"instruction": "fix it"},
+        },
+        created_by=uuid4(),
+    )
+    monkeypatch.setattr(BreakoutChoice, "pending", AsyncMock(return_value=choice))
+    claim = AsyncMock(return_value=True)
+    monkeypatch.setattr(BreakoutChoice, "claim", claim)
+    monkeypatch.setattr(breakout, "respond_to_slack_interaction", AsyncMock())
+    monkeypatch.setattr(breakout.common, "get_slack_repo_config", AsyncMock(return_value=None))
+    requester = SimpleNamespace(id=choice.created_by)
+    identity = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
+    monkeypatch.setattr(User, "for_identity", identity)
+    interaction = SlackInteraction.model_validate(
+        {"user": {"id": "U_ALICE"}, "channel": {"id": "C1"}, "response_url": "https://hooks"}
+    )
+    value = SlackButtonValue(type="breakout_destination", subject=str(choice.id), action="CK")
+    tasks = BackgroundTasks()
+
+    await breakout.handle_destination_button(interaction, value, tasks)
+
+    claim.assert_not_awaited()
+    assert not tasks.tasks
+
+    identity.return_value = requester
+    await breakout.handle_destination_button(interaction, value, tasks)
+
+    claim.assert_awaited_once()
+    (task,) = tasks.tasks
+    assert task.func is breakout.process_slack_breakout
+    assert task.args[1] == Command("fix it", "<#CK>", "CK")
+
+
+@pytest.mark.asyncio
+async def test_breakout_may_go_to_a_private_kitchen_channel(monkeypatch, public_channels):
+    public_channels.side_effect = lambda channel_id, **_: _channel(
+        channel_id, private=channel_id == "CK"
+    )
+    destination = breakout_destination.BreakoutDestination("CK", "engineering")
+
+    assert await destination.channel_error("C1") is not None
+
+    monkeypatch.setattr(
+        breakout_destination,
+        "is_kitchen_channel",
+        AsyncMock(side_effect=lambda channel_id: channel_id == "CK"),
+    )
+    assert await destination.channel_error("C1") is None
 
 
 @pytest.mark.asyncio
@@ -332,3 +433,54 @@ async def test_breakout_never_leaves_a_private_channel(monkeypatch, public_chann
     root.assert_not_awaited()
     posted.notifications.assert_not_awaited()
     assert "public source channel and destination" in posted.ephemeral.await_args.args[2]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_kitchen_link_matches_by_name_and_is_cached(monkeypatch):
+    from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+
+    await SlackChannel.save_all(
+        {"id": "C0TEAM", "name": "team-open-swe"},
+        {"id": "C0KITCHEN", "name": "team-openswe-kitchen"},
+        {"id": "C0OTHER", "name": "other"},
+    )
+    await WORKSPACES.create(
+        WorkspaceCreate(
+            name="Core",
+            repos=["acme/api"],
+            slack_channel_ids=["C0KITCHEN"],
+            kitchen_channel_ids=["C0KITCHEN"],
+        ),
+        "alice",
+    )
+    monkeypatch.setattr(KitchenLink, "kitchen_for", _KITCHEN_FOR)
+    name_for = AsyncMock(side_effect=SlackChannel.name_for)
+    monkeypatch.setattr(SlackChannel, "name_for", name_for)
+
+    assert await KitchenLink.kitchen_for("C0TEAM") == "C0KITCHEN"
+    assert await KitchenLink.kitchen_for("C0TEAM") == "C0KITCHEN"
+    assert await KitchenLink.kitchen_for("C0OTHER") is None
+    assert await KitchenLink.kitchen_for("C0OTHER") is None
+    assert name_for.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_breakout_choice_is_claimed_once(monkeypatch):
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
+    requester = await User.sign_in("github", "1", login="alice")
+    monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=requester))
+    ephemeral = AsyncMock(return_value=True)
+    monkeypatch.setattr("openswe.slack.breakout_choice.post_slack_ephemeral_message", ephemeral)
+    monkeypatch.setattr(SlackChannel, "name_for", AsyncMock(return_value="team-kitchen"))
+
+    assert await BreakoutChoice.offer("C1", "100.0", "U_ALICE", ["CK", "C1"])
+
+    value = json.loads(ephemeral.await_args.kwargs["blocks"][1]["elements"][0]["value"])
+    choice = await BreakoutChoice.pending(value["subject"])
+    assert choice is not None and choice.created_by == requester.id
+    assert await choice.claim()
+    assert not await choice.claim()
+    assert await BreakoutChoice.pending(value["subject"]) is None
