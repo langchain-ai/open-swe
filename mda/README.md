@@ -38,6 +38,8 @@ Every call is authenticated with the run token.
   The backend names a person's connection only in the catalog of a run that acts as one (the run token's `acting_user_id`, never `user_id`, whom the run is only attributed to), so a run it starts for no one asks no one to connect it: on a channel's thread MDA reads it as its channel service principal (`mda:channel`), which reads no user connections, and on any other thread as the backend's own key, one principal all such runs share.
   A person's connection the run cannot read otherwise (no grant given, Agent Auth not reached) is left out, and the tool works as it did without; a call whose deployment connection is missing or unreadable fails and names it.
   The backend runs no tools node and no tool-call middleware.
+  A tool that reads nothing of the backend's, which the backend marks (`runtime_runs`), MDA runs itself and answers as its operation would, byte for byte, reported to the transcript alike (`rt/local_tools.py`, `rt/local_results.py`): `web_search` (where `MDA_EXA_CONNECTION` names the Exa key, which MDA reads), `fetch_url` and `http_request`, whose requests go only to public addresses, each redirect checked (`rt/public_http.py`), and `slack_no_reply_needed`, `suggest_task`, `cli_result`, `record_human_input`, `note_on_diff`, `propose_review_comment` and `propose_pr_review`.
+  A large search result or response goes to the sandbox MDA owns; a run without one calls those two as operations, and MDA calls any marked tool it does not have as one.
   An operation whose sandbox stopped answering ends the run; the backend has told the person.
   Tools the graph hides from the model are dropped from each request.
 - **`search_tools`, `resolve_tool`:** the catalog leaves the run's integrations (MCP tools) out: hundreds of them would put about a megabyte in each run's context, which the Agent Server copies into every checkpoint.
@@ -153,7 +155,7 @@ The backend:
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
 | `MDA_SERVICE_SECRET` | The same value as this deployment's; `/mda/channel-api/*` and `/github/channel/*` answer only calls signed with it |
 | `MDA_GITHUB_PROXY_CONNECTION` | `mda/github-token`: MDA writes the proxy config of the sandboxes it owns whose thread reaches the whole App installation, their GitHub rules filled from that connection. Set it only once this deployment runs a build that writes it: an older one leaves those sandboxes without one. Unset: the backend writes every sandbox's |
-| `MDA_EXA_CONNECTION` | The deployment's agent connection holding the Exa key (`open-swe-exa`), which `web_search` then uses. Unset: the backend's `EXA_API_KEY` |
+| `MDA_EXA_CONNECTION` | The deployment's agent connection holding the Exa key (`open-swe-exa`), which `web_search` then uses, run in MDA. Unset: the backend runs it with its `EXA_API_KEY` |
 | `MDA_GITHUB_USER_CONNECTION` | The deployment's user GitHub OAuth connection (`open-swe-github-<env>`): `open_pull_request` opens the requester's own PR with their grant there when it is the account Open SWE knows them by. Unset, or for another participant: their dashboard GitHub sign-in |
 
 ## Run locally
