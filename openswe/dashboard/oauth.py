@@ -542,7 +542,7 @@ async def require_session(
 
     principal = DashboardPrincipal.from_session(session)
     principal.authorize_path(request.url.path, request.scope.get("method", "GET"))
-    await principal.authorize()
+    await principal.authorize(path=request.url.path)
     bind_audit_session(request, session)
     return session
 

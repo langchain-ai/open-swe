@@ -95,6 +95,8 @@ class Topic(BaseTopic):
     INCIDENT_SETTINGS: ClassVar[Topic]
     """The incident policy, which decides which incidents anyone can see."""
 
+    REQUIRED_CHECKS: ClassVar[KeyedTopic[str]]
+
     PULL_REQUESTS: ClassVar[KeyedTopic[PullRequestKey]]
     """Keyed: one pull request's live state and review page, from its GitHub
     reviews, checks and comments to the reviewer's findings and the walkthrough."""
@@ -188,6 +190,16 @@ async def _readable_incidents(session: Session, incident_ids: set[str]) -> set[s
     return {key for key, ok in zip(ordered, visible, strict=True) if ok}
 
 
+async def _readable_required_checks(session: Session, keys: set[str]) -> set[str]:
+    from openswe.github.repos import accessible_repo_full_names
+
+    try:
+        return keys & set(await accessible_repo_full_names(session["sub"]))
+    except Exception:
+        logger.warning("Could not authorize required-check invalidations", exc_info=True)
+        return set()
+
+
 async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
     # Imported on use: most of the app imports this module, which stays light.
     from openswe.github.repos import accessible_repo_full_names
@@ -235,6 +247,7 @@ Topic.WORKSPACES = Topic("workspaces")
 Topic.REVIEW_STYLES = KeyedTopic("review-styles")
 Topic.INCIDENTS = KeyedTopic("incidents", authorize_keys=_readable_incidents)
 Topic.INCIDENT_SETTINGS = Topic("incident-settings")
+Topic.REQUIRED_CHECKS = KeyedTopic("required-checks", authorize_keys=_readable_required_checks)
 Topic.PULL_REQUESTS = KeyedTopic("pull-requests", authorize_keys=_readable_pull_requests)
 Topic.THREAD_QUEUES = KeyedTopic("thread-queues", authorize_keys=_readable_threads)
 Topic.THREAD_BROWSERS = KeyedTopic("thread-browsers", authorize_keys=_readable_threads)

@@ -20,11 +20,12 @@ the GraphQL ``resolveReviewThread`` mutation (REST doesn't expose this).
 import json
 import logging
 import re
+from collections.abc import Sequence
 from html import escape
 from typing import Any, Literal, TypedDict
 
 import httpx2
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from openswe.github.checks import CheckConclusion, complete_review_check_run
 from openswe.github.http import (
@@ -279,23 +280,55 @@ def render_out_of_diff_section(findings: list[Finding]) -> str:
     )
 
 
+APPROVAL_CONDITION_MAX_CHARS = 200
+AUTO_APPROVED_MAX_CHARS = 500
+
+ReviewDecision = Literal["would_approve", "would_approve_conditionally", "needs_human_review"]
+
+
 class ReviewAssessment(BaseModel):
     """Advisory judgment for the exact commit the reviewer inspected."""
 
     head_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
     risk_score: int = Field(ge=1, le=5, strict=True)
-    decision: Literal["would_approve", "needs_human_review"]
+    decision: ReviewDecision
     explanation: str = Field(min_length=1, max_length=1500)
+    approval_condition: str | None = Field(
+        default=None, min_length=1, max_length=APPROVAL_CONDITION_MAX_CHARS
+    )
+    auto_approved: str | None = Field(
+        default=None, min_length=1, max_length=AUTO_APPROVED_MAX_CHARS
+    )
+
+    @model_validator(mode="after")
+    def _condition_only_when_conditional(self) -> ReviewAssessment:
+        conditional = self.decision == "would_approve_conditionally"
+        if conditional != bool(self.approval_condition) or conditional != bool(self.auto_approved):
+            raise ValueError(
+                "Give an `approval_condition` and `auto_approved` exactly when the decision is "
+                "would_approve_conditionally"
+            )
+        return self
+
+    @property
+    def verdict(self) -> str:
+        if self.decision == "would_approve":
+            return "Would approve"
+        if self.decision == "would_approve_conditionally":
+            return "Would approve subject to human approval of the stated condition"
+        return "Needs human review"
 
     def settled(self, findings: list[Finding]) -> ReviewAssessment:
         """This assessment as published: unresolved findings always need a human."""
-        if self.decision != "would_approve" or not any(
+        if self.decision == "needs_human_review" or not any(
             finding.get("status", "open") == "open" for finding in findings
         ):
             return self
         return self.model_copy(
             update={
                 "decision": "needs_human_review",
+                "approval_condition": None,
+                "auto_approved": None,
                 "explanation": f"Unresolved findings remain. {self.explanation}",
             }
         )
@@ -377,6 +410,8 @@ def render_review_body(
     assessment: ReviewAssessment | None = None,
     approved: bool = False,
     dry_run: bool = False,
+    approval_errors: Sequence[str] = (),
+    config_errors: Sequence[str] = (),
 ) -> str:
     """Compose the top-level review body.
 
@@ -398,25 +433,41 @@ def render_review_body(
         headline = f"**Open SWE Review** found {surfaced_count} potential {issue_word}."
 
     parts = [headline]
+    if config_errors:
+        parts.append(
+            "**Changes requested: invalid Open SWE configuration.** "
+            "This pull request changes Open SWE configuration that cannot be applied:\n\n"
+            + "\n".join(f"- {escape(error)}" for error in config_errors)
+        )
+    if approval_errors:
+        parts.append(
+            "**Auto approval did not run:** the auto-approve rules on the default branch "
+            "could not be applied:\n\n"
+            + "\n".join(f"- {escape(error)}" for error in approval_errors)
+        )
     if has_additional:
         noun = "finding" if additional_findings_count == 1 else "findings"
         parts.append(f"{additional_findings_count} additional {noun} can be viewed in the web app.")
     if out_of_diff_findings:
         parts.append(render_out_of_diff_section(out_of_diff_findings))
     if assessment is not None:
-        decision = (
-            "Would approve" if assessment.decision == "would_approve" else "Needs human review"
-        )
+        decision = assessment.verdict
         if approved:
             decision = "Approved"
         suffix = "automatic approval" if approved else "dry run" if dry_run else "advisory"
         parts.append(f"**Risk: {assessment.risk_score}/5 · {decision}** ({suffix})")
+        if assessment.approval_condition:
+            parts.append(f"**Approval condition:** {escape(assessment.approval_condition)}")
+        if assessment.auto_approved:
+            parts.append(
+                f"**Already covered by auto-approval:** {escape(assessment.auto_approved)}"
+            )
         parts.append(
             "<details>\n<summary>Why?</summary>\n\n"
             f"{escape(assessment.explanation)}\n\n"
             f"Reviewed commit: `{assessment.head_sha}`. Risk ranges from 1 (low) to 5 (high). "
             + (
-                "Approved automatically under the repository's `.open-swe/APPROVALS.md`. No merge is performed."
+                "Approved automatically under the repository's `.open-swe/auto-approve-rules/`. No merge is performed."
                 if approved
                 else "Dry run: this assessment does not approve or merge the PR."
                 if dry_run
@@ -710,7 +761,7 @@ async def post_pull_request_review(
     body: str,
     inline_comments: list[dict[str, Any]],
     token: str,
-    event: Literal["COMMENT", "APPROVE"] = "COMMENT",
+    event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT",
 ) -> dict[str, Any] | None:
     """POST one GitHub PR Review with inline comments. Returns the API response or None."""
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
@@ -766,11 +817,8 @@ async def post_pull_request_review(
                     error_kind = "unresolved_anchor"
                 for error in error_messages:
                     message = error.get("message") if isinstance(error, dict) else error
-                    if (
-                        isinstance(message, str)
-                        and "Can not approve your own pull request" in message
-                    ):
-                        error_kind = "self_approval"
+                    if isinstance(message, str) and "your own pull request" in message:
+                        error_kind = "self_review"
                         break
             return {
                 "_error": f"HTTP {e.response.status_code}: {body}",

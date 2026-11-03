@@ -392,7 +392,7 @@ async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
     if cfg.repo:
         return {"owner": cfg.repo.owner, "name": cfg.repo.name}
 
-    if cfg.repo_explicitly_none is True or cfg.experience == "agent_workspace":
+    if cfg.repo_explicitly_none is True:
         return None
 
     try:
@@ -1558,7 +1558,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 sender_messages = self._participants_messages(state, participants)
         turn = TurnContext(
             working_dir=work_dir,
-            agent_workspace=cfg.experience == "agent_workspace",
+            agent_workspace=cfg.repo_explicitly_none is True,
             source="background_task" if cfg.background_task_completion else self._source,
             slack_context=cfg.slack_context,
             slack_ask=cfg.slack_ask_mode,
@@ -1622,7 +1622,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 else ""
             )
         return construct_system_prompt(
-            agent_workspace=cfg.experience == "agent_workspace",
+            agent_workspace=cfg.repo_explicitly_none is True,
             dashboard_base_url=dashboard_base_url(),
             artifact_url=dashboard_plan_url(self._thread_id),
             default_repo=default_repo,

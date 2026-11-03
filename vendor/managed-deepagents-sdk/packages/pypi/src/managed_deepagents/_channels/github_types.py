@@ -18,6 +18,8 @@ from managed_deepagents._channels.github_schema import (
     _IssuePayload,
     _LabeledIssuePayload,
     _LabeledPullRequestPayload,
+    _MergeGroupDestroyedPayload,
+    _MergeGroupPayload,
     _PullRequestPayload,
     _PushPayload,
     _ReviewCommentPayload,
@@ -228,6 +230,12 @@ GitHubEndpointRequest = (
     | EndpointRequest[GitHubEndpointEvent[Literal["check_run.completed"], _CheckRunPayload]]
     | EndpointRequest[GitHubEndpointEvent[Literal["check_suite.completed"], _CheckSuitePayload]]
     | EndpointRequest[GitHubEndpointEvent[Literal["workflow_run.completed"], _WorkflowPayload]]
+    | EndpointRequest[
+        GitHubEndpointEvent[Literal["merge_group.checks_requested"], _MergeGroupPayload]
+    ]
+    | EndpointRequest[
+        GitHubEndpointEvent[Literal["merge_group.destroyed"], _MergeGroupDestroyedPayload]
+    ]
 )
 """What a GitHub channel POSTs an endpoint: its event key picks the payload's type,
 so one receiver validates every key it is sent with
@@ -253,6 +261,8 @@ __all__ = [
     "GitHubIssuePayload",
     "GitHubLabeledIssuePayload",
     "GitHubLabeledPullRequestPayload",
+    "GitHubMergeGroupDestroyedPayload",
+    "GitHubMergeGroupPayload",
     "GitHubPayload",
     "GitHubPullRequestPayload",
     "GitHubPushPayload",
@@ -294,6 +304,8 @@ GitHubHandlers = TypedDict(
         "check_run.completed": GitHubEventCallback[_CheckRunPayload] | EventEndpoint,
         "check_suite.completed": GitHubEventCallback[_CheckSuitePayload] | EventEndpoint,
         "workflow_run.completed": GitHubEventCallback[_WorkflowPayload] | EventEndpoint,
+        "merge_group.checks_requested": GitHubEventCallback[_MergeGroupPayload] | EventEndpoint,
+        "merge_group.destroyed": GitHubEventCallback[_MergeGroupDestroyedPayload] | EventEndpoint,
     },
     total=False,
 )
@@ -318,5 +330,7 @@ GitHubReviewCommentPayload = _ReviewCommentPayload
 GitHubWorkflowPayload = _WorkflowPayload
 GitHubCheckRunPayload = _CheckRunPayload
 GitHubCheckSuitePayload = _CheckSuitePayload
+GitHubMergeGroupPayload = _MergeGroupPayload
+GitHubMergeGroupDestroyedPayload = _MergeGroupDestroyedPayload
 GitHubPushPayload = _PushPayload
 GitHubStatusPayload = _StatusPayload

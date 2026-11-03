@@ -34,15 +34,26 @@ The reviewers are already in the Slack thread.
   20 is what the agent is told; 25 is what is enforced, since bouncing a change that lands a few lines over costs more than the slack costs the voters.
 - Test files sit outside both gates: they do not count toward the limit and they may arrive without a patch.
   CI judges tests, and counting them would price a small fix out of shipping with its tests.
-- Generated declarative files (`swagger.*` and `openapi.*` API specs, test snapshots) sit outside both gates as well, whatever APPROVALS.md says: they follow from the source change the card draws, cannot run, and decide nothing on their own.
+- Generated declarative files (`swagger.*` and `openapi.*` API specs, test snapshots) sit outside both gates as well, whatever the auto-approve rules say: they follow from the source change the card draws, cannot run, and decide nothing on their own.
   The card lists them like tests, and they stay out of the fingerprint.
   Generated code (bundles, protobuf stubs, `generated/` directories) can run, so it is drawn like any other code, and a path the exclusion deny-list covers is never treated as generated.
-- Hunks that qualify under the target repository's `.open-swe/APPROVALS.md` (read at the PR's base commit) sit outside both gates too, so a larger PR qualifies when all but a small part of it would be auto-approved.
+- Hunks that qualify under an applicable rule in the target repository's [`.open-swe/auto-approve-rules/`](auto-approve-rules.md) (read from its default branch) sit outside both gates too, so a larger PR qualifies when all but a small part of it would be auto-approved.
   The agent names them in `excluded` (path, hunk start lines or the whole file, the guideline, and why); the backend trusts that judgment within fixed bounds: every excluded file must have a text diff, and CI workflows, migrations, dependency manifests and lockfiles, environment files, and paths naming auth, credentials, secrets or tokens can never be excluded.
-  Each call that excludes something writes every excluded hunk, its guideline and reason, the base and head SHAs, and a hash of APPROVALS.md to the audit log.
+  Each call that excludes something writes every excluded hunk, its guideline and reason, the base and head SHAs, and a hash of the applicable approval criteria to the audit log.
   The card lists exclusions by guideline with line counts, and a PR whose drawn, excluded and test lines do not add up to its total is refused, so no change is ever neither drawn nor listed.
   Each exclusion hides exactly one hunk, so identical hunk bodies elsewhere in the file stay drawn.
   Exclusions stay in the fingerprint: a commit that changes an excluded hunk is a diff change, and the changed hunk no longer matches its exclusion, so the card draws it.
+- Conditional auto-approval is off by default and requires the PR author to opt in under Settings → Experiments → Conditional approval.
+  The requester’s or reviewer’s preference cannot opt another author in.
+  Publishing downgrades conditional assessments for authors who have not opted in, and nomination rechecks the author’s current preference.
+- Conditional auto-approval: when Open SWE's review of the current head decides `would_approve_conditionally`, it would approve the pull request once a person approves one succinct condition it names, such as "Remove the legacy `foo` exporter" or "Rename `Workspace` to `Project`".
+  The reviewer uses it only when that condition entirely, completely and unambiguously captures every part of the change the approval criteria do not already cover.
+  Alongside the decision it records `auto_approved`: the rest of the change it believes those criteria already cover, naming each criterion and what it covers.
+  The review comment, the dashboard and the card all show it next to the condition.
+  Only a review published with the repository's approval mode set to `approve` counts, the same switch that lets Open SWE approve on its own, and only for the head it reviewed.
+  The card then shows the condition as what voters approve and hides every remaining hunk except paths the exclusion deny-list covers, which are drawn and must fit the line limit, so a pull request of any size qualifies.
+  The condition comes from the review, not the agent asking for the card, and the hidden hunks are stored as exclusions, so they stay in the fingerprint and a commit that changes one draws it again.
+  Expedited reads list up to GitHub's 3000 changed files.
 - The card draws the source diff.
   It draws the test diff too when the change is test-only or test lines are the majority, because otherwise there would be nothing to look at; when tests are the minority of a mostly-source change it names them instead, so the thing being voted on stays readable.
 - A draft stays a draft.

@@ -3,7 +3,8 @@
   "private": true,
   "description": "Playwright E2E tests driving mock GitHub/Slack control panels against the real webhook routes.",
   "scripts": {
-    "test": "playwright test",
+    "test": "bash run-tests.sh",
+    "test:auth": "playwright test --config playwright.auth.config.ts",
     "test:desktop": "playwright test --config playwright.desktop.config.ts",
     "test:headed": "playwright test --headed",
     "report": "playwright show-report"

@@ -80,7 +80,7 @@ jobs:
           else
             echo "deploy=true" >>"$GITHUB_OUTPUT"
           fi
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         if: steps.changed.outputs.deploy == 'true'
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         if: steps.changed.outputs.deploy == 'true'
@@ -107,6 +107,7 @@ jobs:
           # own key and count against the workspace's gateway spend cap.
           # Each secret is named, so the runner gets only the one this deployment uses.
           LANGSMITH_GATEWAY_API_KEY: ${{ matrix.environment == 'prod' && secrets.LANGSMITH_GATEWAY_API_KEY_PROD || matrix.environment == 'staging' && secrets.LANGSMITH_GATEWAY_API_KEY_STAGING || '' }}
+          LANGSMITH_RUNS_ENDPOINTS: ${{ matrix.environment == 'prod' && secrets.LANGSMITH_RUNS_ENDPOINTS_PROD || '' }}
           # This deployment's Linear app, which deploy cannot ask for without a terminal. Deploy
           # hands it to Agent Auth and never to the deployment.
           MDA_LINEAR_CLIENT_ID: >-
@@ -176,6 +177,34 @@ jobs:
           # and the commit its traces name as their revision.
           # The backend acts on the channels' threads with the same secret, as MDA's ingress secret.
           printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\nMDA_INGRESS_SECRET=%s\nLANGSMITH_REVISION_ID=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" "$MDA_SERVICE_SECRET" "$(git rev-parse HEAD)" >mda/.env
+          if [[ "$ENVIRONMENT" == prod ]]; then
+            python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          try:
+              endpoints = json.loads(os.environ["LANGSMITH_RUNS_ENDPOINTS"])
+              required = {
+                  ("https://dev.api.smith.langchain.com", "d6684905-655c-429b-bd14-ba302d94c03b"),
+                  ("https://api.smith.langchain.com", "ebbaf2eb-769b-4505-aca2-d11de10372a4"),
+              }
+              valid = isinstance(endpoints, list) and all(
+                  isinstance(entry, dict)
+                  and isinstance(entry.get("api_key"), str)
+                  and bool(entry["api_key"].strip())
+                  and (entry.get("api_url"), entry.get("workspace_id")) in required
+                  for entry in endpoints
+              )
+              if not valid or {(entry["api_url"], entry["workspace_id"]) for entry in endpoints} != required:
+                  raise ValueError
+          except (ValueError, TypeError):
+              raise SystemExit("Set LANGSMITH_RUNS_ENDPOINTS_PROD to a JSON array with dev and prod API keys and their explicit workspace IDs.") from None
+          value = json.dumps(endpoints, separators=(",", ":")).replace("\\", "\\\\").replace("'", "\\'")
+          with Path("mda/.env").open("a") as env_file:
+              env_file.write(f"LANGSMITH_RUNS_ENDPOINTS='{value}'\n")
+          PY
+          fi
           # The GitHub channel's App is Open SWE's own, whose webhook stays at the backend,
           # which forwards issue mentions to the channel.
           export MDA_GITHUB_WEBHOOK_ELSEWHERE="$backend/webhooks/github"

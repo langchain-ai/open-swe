@@ -586,7 +586,6 @@ export type TaskMembership =
   | { role: "worker"; taskId: string; coordinatorThreadId: string | null }
 
 export interface AgentThread {
-  experience?: "coding" | "agent_workspace"
   waitingForDelegatedWork?: boolean
   taskMembership?: TaskMembership
   taskWorkers?: Array<AgentThread>
@@ -625,7 +624,6 @@ export interface AgentThread {
   status: AgentStatus
   viewed: boolean
   viewedAt?: number | null
-  latestRunId?: string | null
   resolved?: boolean
   resolvedAt?: number | null
   attentionReason?: string | null

@@ -15,10 +15,11 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from pydantic.alias_generators import to_camel
 
-from openswe.github.ci import RequiredCheck, unreported_required_checks
+from openswe.github.ci import unreported_required_checks
 from openswe.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient, or_none
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.queue import QueuePull, Review, ReviewPage
+from openswe.github.required_check_cache import RequiredCheckCache
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +220,7 @@ class OpenPullRequest(BaseModel):
     head_ref: str | None = None
     status_available: bool = False
     ci: CheckState = "unknown"
+    required_checks_passing: bool | None = None
     review_decision: ReviewDecision | None = None
     reviewers: list[PullRequestReviewer] | None = None
     review_required: bool = False
@@ -483,6 +485,9 @@ class PullRequestClient:
             raise ValueError("GitHub answered the pull request without an object")
         return payload
 
+    async def update_description(self, body: str) -> None:
+        await self.repo.patch(f"pulls/{self.number}", {"body": body})
+
     async def head_sha(self) -> str:
         head = (await self.pull()).get("head")
         sha = head.get("sha") if isinstance(head, dict) else None
@@ -651,8 +656,9 @@ class PullRequestClient:
         keep_review_id: int | None = None,
         keep_commit: str | None = None,
         scope_to_review_id: int | None = None,
+        state: Literal["approved", "changes_requested"] = "approved",
     ) -> list[int]:
-        """Dismiss Open SWE's standing approvals other than the kept ones; the ids GitHub refused.
+        """Dismiss Open SWE's standing reviews in ``state`` other than the kept ones; the ids GitHub refused.
 
         ``scope_to_review_id`` limits this to that review's login. An unknown review dismisses nothing.
         """
@@ -666,7 +672,7 @@ class PullRequestClient:
         refused: list[int] = []
         for review in reviews:
             if (
-                review.state != "approved"
+                review.state != state
                 or review.user is None
                 or review.user.login.lower() not in OPEN_SWE_GITHUB_LOGINS
                 or (only_login is not None and review.user.login.lower() != only_login)
@@ -1020,6 +1026,8 @@ class PullRequestClient:
         )
         if pull is None:
             return result
+        if result.merge_state == "clean":
+            result.required_checks_passing = True
         head = pull.get("head")
         if not isinstance(head, Mapping):
             return result
@@ -1072,10 +1080,23 @@ class PullRequestClient:
         )
         base = pull.get("base")
         base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
-        # A check gated on `needs:` has no run until its upstream jobs finish.
-        if base_ref is not None and result.merge_state == "blocked" and not pending:
-            required = await RequiredCheck.for_branch(self.repo, base_ref)
+        if base_ref is not None and result.merge_state != "clean":
+            required = await RequiredCheckCache(self.repo.full_name, base_ref).read(
+                self.repo.github.login
+            )
             if required is not None:
+                passing_runs = [
+                    run
+                    for run in runs
+                    if run.get("status") == "completed"
+                    and run.get("conclusion") in {"success", "neutral", "skipped"}
+                ]
+                passing_statuses = [
+                    status for status in statuses if status.get("state") == "success"
+                ]
+                result.required_checks_passing = all(
+                    check.reported_by(passing_runs, passing_statuses) for check in required
+                )
                 result.missing_checks = unreported_required_checks(required, runs, statuses)
         return result
 

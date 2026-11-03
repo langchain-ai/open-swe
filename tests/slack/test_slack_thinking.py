@@ -1,6 +1,7 @@
 import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Literal
 from unittest.mock import AsyncMock, call
 from uuid import uuid4
 
@@ -356,6 +357,43 @@ async def test_missing_worker_needs_retryable_delivery(monkeypatch: pytest.Monke
     assert not await RoutedWork("origin").delegated_active()
     pending.return_value = {"worker"}
     assert await RoutedWork("origin").delegated_active()
+
+
+@pytest.mark.parametrize("status", ["running", "success"])
+async def test_routed_answer_releases_background_server_after_run_finishes(
+    monkeypatch: pytest.MonkeyPatch, status: Literal["running", "success"]
+) -> None:
+    now = datetime.now(UTC)
+    thread = IndexedThread(
+        thread_id="destination",
+        runtime="mda",
+        metadata={routed_work.RUNNING_BACKGROUND_TASKS_KEY: ["dev-server"]},
+        status="idle",
+        created_at=now,
+        updated_at=now,
+    )
+    monkeypatch.setattr(routed_work.THREADS, "get", AsyncMock(return_value=thread))
+    run = MdaRun(run_id="run", status=status, created_at=now)
+    latest_run = AsyncMock(return_value=run)
+    monkeypatch.setattr(
+        routed_work.RUNTIMES, "runs_on", lambda _runtime: SimpleNamespace(latest_run=latest_run)
+    )
+    monkeypatch.setattr(routed_work, "sidebar_memberships", AsyncMock(return_value={}))
+    monkeypatch.setattr(routed_work.TaskMessage, "pending_threads", AsyncMock(return_value=set()))
+    monkeypatch.setattr(routed_work.postgres, "configured", lambda: True)
+    queued = AsyncMock(return_value=[])
+    monkeypatch.setattr(routed_work.QueuedMessage, "for_thread", queued)
+    origin = RoutedWork("origin")
+    metadata = {routed_work.DESTINATIONS_KEY: ["destination"]}
+    assert await origin.delegated_active(prune=False, metadata=metadata)
+    thread.metadata[routed_work.ANSWERED_RUN_KEY] = "run"
+    assert await origin.delegated_active(prune=False, metadata=metadata) == (status == "running")
+    if status == "success":
+        queued.return_value = [object()]
+        assert await origin.delegated_active(prune=False, metadata=metadata)
+        queued.return_value = []
+        latest_run.return_value = MdaRun(run_id="next", status="success", created_at=now)
+        assert await origin.delegated_active(prune=False, metadata=metadata)
 
 
 async def test_routed_listing_does_not_prune_idle_links(monkeypatch: pytest.MonkeyPatch) -> None:

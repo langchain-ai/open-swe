@@ -186,41 +186,42 @@ export function sortSidebarThreads(
   return [...threads].sort(mode === "created" ? byCreation : byRecency)
 }
 
-export interface SidebarDayGroup {
-  key: string
+export interface SidebarAgeGroup {
+  key: "today" | "yesterday" | "older"
   label: string
   threads: Array<SidebarThreadItem>
 }
 
-function dayLabel(day: Date, now: Date): string {
-  const today = new Date(now).setHours(0, 0, 0, 0)
-  const yesterday = new Date(today).setDate(new Date(today).getDate() - 1)
-  if (day.getTime() === today) return "Today"
-  if (day.getTime() === yesterday) return "Yesterday"
-  return day.toLocaleDateString([], {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: day.getFullYear() === now.getFullYear() ? undefined : "numeric",
-  })
-}
-
-/** Buckets threads by the local day they were last updated, newest first, each day ordered by creation. */
-export function groupSidebarThreadsByDay(
+/** Buckets threads into Today, Yesterday and Older by when they were last updated, each ordered by creation. */
+export function groupSidebarThreadsByAge(
   threads: ReadonlyArray<SidebarThreadItem>,
   now: Date = new Date()
-): Array<SidebarDayGroup> {
-  const days = new Map<number, Array<SidebarThreadItem>>()
+): Array<SidebarAgeGroup> {
+  const today = new Date(now).setHours(0, 0, 0, 0)
+  const yesterday = new Date(today).setDate(new Date(today).getDate() - 1)
+  const buckets: Record<SidebarAgeGroup["key"], Array<SidebarThreadItem>> = {
+    today: [],
+    yesterday: [],
+    older: [],
+  }
   for (const thread of threads) {
     const day = new Date(thread.updatedAt).setHours(0, 0, 0, 0)
-    days.set(day, [...(days.get(day) ?? []), thread])
+    buckets[
+      day >= today ? "today" : day >= yesterday ? "yesterday" : "older"
+    ].push(thread)
   }
-  return [...days.entries()]
-    .sort(([left], [right]) => right - left)
-    .map(([day, items]) => ({
-      key: String(day),
-      label: dayLabel(new Date(day), now),
-      threads: items.sort(byCreation),
+  return (
+    [
+      ["today", "Today"],
+      ["yesterday", "Yesterday"],
+      ["older", "Older"],
+    ] as const
+  )
+    .filter(([key]) => buckets[key].length > 0)
+    .map(([key, label]) => ({
+      key,
+      label,
+      threads: buckets[key].sort(byCreation),
     }))
 }
 

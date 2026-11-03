@@ -188,12 +188,29 @@ test("queued and steered mentions notify once per accepted message and skip self
   const recipient = await browser.newPage();
   await loginAs(recipient, OTHER_USER);
   await page.goto("/agents", { waitUntil: "domcontentloaded" });
-  const editor = page.getByTestId("composer-editor");
-  await editor.click();
-  await editor.pressSequentially("E2E_BUSY_HOLD:20 inspect the code");
-  await editor.press("Enter");
-  await expect(page).toHaveURL(/\/agents\/[a-f0-9-]+$/);
-  const threadId = new URL(page.url()).pathname.split("/").pop()!;
+  const threadId = crypto.randomUUID();
+  const started = await page.request.post(
+    `/dashboard/api/threads/${threadId}/commands`,
+    {
+      headers: { origin: new URL(page.url()).origin },
+      data: {
+        id: crypto.randomUUID(),
+        method: "run.start",
+        params: {
+          input: {
+            messages: [
+              {
+                id: crypto.randomUUID(),
+                type: "human",
+                content: "E2E_BUSY_HOLD:20 inspect the code",
+              },
+            ],
+          },
+        },
+      },
+    },
+  );
+  expect(started.ok(), await started.text()).toBeTruthy();
   for (const strategy of ["interrupt", "enqueue"]) {
     const response = await page.request.post(
       `/dashboard/api/threads/${threadId}/commands`,
@@ -222,8 +239,8 @@ test("queued and steered mentions notify once per accepted message and skip self
   await expect
     .poll(
       async () =>
-        (await new Notifications(recipient).pending()).filter((n) =>
-          n.url.endsWith(threadId),
+        (await new Notifications(page).dms()).filter((n) =>
+          n.text.includes(threadId),
         ).length,
     )
     .toBe(2);
@@ -239,7 +256,7 @@ test("queued and steered mentions notify once per accepted message and skip self
 });
 
 for (const review of [false, true]) {
-  test(`Slack-name mentions in ${review ? "Review" : "workspace"} chat notify the recipient with a desktop notification`, async ({
+  test(`Slack-name mentions in ${review ? "Review" : "workspace"} chat immediately DM the recipient even with desktop notifications enabled`, async ({
     page,
     browser,
   }) => {
@@ -267,26 +284,17 @@ for (const review of [false, true]) {
     await page.getByRole("option", { name: /@Bob @bob/ }).click();
     await expect(editor).toContainText("@Bob");
     await editor.pressSequentially(" about this change");
-    const notificationReceived = recipient.waitForResponse(
-      (response) =>
-        response.url().includes("/notifications/") &&
-        response.url().endsWith("/delivered") &&
-        response.ok(),
-    );
     await editor.press("Enter");
     await expect
-      .poll(() => desktop.titles())
-      .toContain("alice mentioned you in Open SWE");
-    await notificationReceived;
-    await desktop.click(0);
-    await expect(recipient).toHaveURL(/\/agents\/[0-9a-f-]{36}$/);
-    await new Notifications(page).fallback();
-    const dms = await new Notifications(page).dms();
-    expect(
-      dms
-        .slice(beforeDms)
-        .filter((n) => n.text.includes("alice mentioned you in Open SWE")),
-    ).toHaveLength(0);
+      .poll(async () =>
+        (await new Notifications(page).dms())
+          .slice(beforeDms)
+          .filter((n) => n.text.includes("alice mentioned you in Open SWE")),
+      )
+      .toHaveLength(1);
+    expect(await desktop.titles()).not.toContain(
+      "alice mentioned you in Open SWE",
+    );
     await recipient.close();
   });
 }

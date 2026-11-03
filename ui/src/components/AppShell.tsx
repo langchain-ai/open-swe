@@ -14,11 +14,6 @@ import { AppSidebar } from "@/components/AppSidebar"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
-import { useExperience } from "@/lib/experience"
-import {
-  AgentWorkspaceProvider,
-  useAgentWorkspace,
-} from "@/features/agents/lib/agentWorkspace"
 
 interface AppShellProps {
   user: SessionUser
@@ -42,7 +37,6 @@ export function AppShell({
   fill,
   children,
 }: AppShellProps) {
-  const agentWorkspace = useAgentWorkspace()
   if (fill) {
     return (
       <div className="flex h-svh overflow-hidden bg-surface-level-1 text-primary">
@@ -58,7 +52,6 @@ export function AppShell({
         <div
           className={cn(
             "mx-auto max-w-3xl px-space-4 pt-space-8 pb-space-9 sm:px-space-6 sm:py-space-8",
-            agentWorkspace && "max-w-4xl sm:px-space-9 sm:py-space-9",
             className
           )}
         >
@@ -73,9 +66,7 @@ export function AppShell({
           )}
           <header className="mb-space-6 flex flex-wrap items-center justify-between gap-space-4">
             <div>
-              <Text variant="h1" weight={agentWorkspace ? "medium" : undefined}>
-                {title}
-              </Text>
+              <Text variant="h1">{title}</Text>
               {description && (
                 <Text
                   as="p"
@@ -107,8 +98,6 @@ export function SettingsPage({
   children,
   ...props
 }: SettingsPageProps) {
-  const { experience } = useExperience()
-  const agentWorkspace = experience === "agent_workspace"
   const session = useSession()
   if (session.isLoading) {
     return (
@@ -120,11 +109,9 @@ export function SettingsPage({
   if (!session.data) return <RequireLogin />
   if (adminOnly && !session.data.is_admin) return <Navigate to="/my-settings" />
   return (
-    <AgentWorkspaceProvider enabled={agentWorkspace}>
-      <AppShell user={session.data} {...props}>
-        {typeof children === "function" ? children(session.data) : children}
-      </AppShell>
-    </AgentWorkspaceProvider>
+    <AppShell user={session.data} {...props}>
+      {typeof children === "function" ? children(session.data) : children}
+    </AppShell>
   )
 }
 
@@ -144,7 +131,6 @@ export function SettingsSection({
   action,
   children,
 }: SettingsSectionProps) {
-  const agentWorkspace = useAgentWorkspace()
   return (
     <section id={id} className="flex flex-col gap-space-3">
       <div className="flex items-start justify-between gap-space-4">
@@ -161,12 +147,7 @@ export function SettingsSection({
         {action}
       </div>
       {children && (
-        <Card
-          className={cn(
-            "divide-y divide-default overflow-hidden p-0",
-            agentWorkspace && "rounded-2xl shadow-none"
-          )}
-        >
+        <Card className="divide-y divide-default overflow-hidden p-0">
           {children}
         </Card>
       )}
@@ -195,14 +176,8 @@ export function SettingsRow({
   badge,
   badgeClassName,
 }: SettingsRowProps) {
-  const agentWorkspace = useAgentWorkspace()
   return (
-    <div
-      className={cn(
-        "flex flex-col gap-space-2 px-space-4 py-space-3 sm:flex-row sm:items-center sm:justify-between sm:gap-space-6",
-        agentWorkspace && "px-space-5 py-space-4"
-      )}
-    >
+    <div className="flex flex-col gap-space-2 px-space-4 py-space-3 sm:flex-row sm:items-center sm:justify-between sm:gap-space-6">
       <label className="flex flex-col gap-space-1" htmlFor={htmlFor}>
         <span className="flex items-center gap-space-2">
           <Text
