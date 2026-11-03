@@ -1,5 +1,9 @@
 Create a workspace automation.
 
+Every user can own at most three automations, including paused ones.
+Non-admin creators use the workspace Fast model and each automation has a 30M-token daily budget, including cached input, resetting at 00:00 UTC.
+Only the creator or an admin may edit, test, or delete an automation.
+
 Args:
 - prompt: Complete instructions for every run.
   Runs post nowhere on their own; say in the prompt if a run should report to a Slack channel.
@@ -15,7 +19,7 @@ Args:
     Optional filters: ``senders`` ("anyone", "people", or "bots"), ``match`` (a case-insensitive regular expression the text must match), and ``max_runs_per_hour``.
   - ``{"kind": "linear", "team": "ENG", "events": [...]}`` runs on issue events in a Linear team, passed to the run as untrusted context: "issue.created" and "issue.labeled" (a label was added).
     Optional filters: ``labels`` (names; the issue must carry, or for "issue.labeled" gain, one of them), ``project`` (a project name), and ``max_runs_per_hour``.
-    A GitHub trigger's ``repo`` must be one the configuring admin can access.
+    A GitHub trigger's ``repo`` must be one the configuring user can access.
 - name: Short display name.
 - model_id: Optional supported model ID.
 - effort: Optional reasoning effort for the model.

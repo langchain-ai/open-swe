@@ -71,9 +71,11 @@ from pydantic import BaseModel, JsonValue, TypeAdapter
 from runtime_api.catalog import InboxSpec
 from runtime_api.endpoint import call
 from runtime_api.loop import (
+    AUTOMATION_USAGE,
     INBOX,
     PREPARE,
     RUN_STARTED,
+    AutomationUsage,
     Inbox,
     InboxRead,
     InboxReceipt,
@@ -685,7 +687,22 @@ class ReportRepliesMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
+        if self._backend.run.catalog.loop.automation:
+            allowance = await call(
+                self._backend, AUTOMATION_USAGE, AutomationUsage(run_id=run_id())
+            )
+            if not allowance.allowed:
+                raise RuntimeError("Automation daily token limit reached")
         response = await handler(request)
+        if self._backend.run.catalog.loop.automation:
+            await call(
+                self._backend,
+                AUTOMATION_USAGE,
+                AutomationUsage(
+                    run_id=run_id(),
+                    response=_json_dicts.validate_python(messages_to_dict(response.result)),
+                ),
+            )
         held = request.state.get(STATE_KEY)
         held = held if isinstance(held, Mapping) else {}
         route = held.get("model_route")

@@ -117,7 +117,12 @@ export function AutomationEditor({
 }: AutomationEditorProps) {
   const navigate = useNavigate()
   const session = useSession()
-  const canManage = session.data?.is_admin === true
+  const isAdmin = session.data?.is_admin === true
+  const canManage =
+    Boolean(session.data) &&
+    (mode === "create" ||
+      isAdmin ||
+      (!!session.data?.user_id && schedule?.ownerId === session.data.user_id))
   const reposQuery = useRepos()
   const { models, defaultSelection } = useModelOptions()
   const workspaceOptionsQuery = useWorkspaceOptions(Boolean(session.data))
@@ -255,8 +260,10 @@ export function AutomationEditor({
   const handleSave = () => {
     if (!canSave || workspace === null) return
     const modelIsReal = models.some((m) => m.id === activeSelection?.modelId)
-    const modelId = modelIsReal ? (activeSelection?.modelId ?? null) : null
-    const effort = modelIsReal ? (activeSelection?.effort ?? null) : null
+    const modelId =
+      isAdmin && modelIsReal ? (activeSelection?.modelId ?? null) : null
+    const effort =
+      isAdmin && modelIsReal ? (activeSelection?.effort ?? null) : null
 
     if (mode === "create") {
       createSchedule.mutate(
@@ -396,8 +403,8 @@ export function AutomationEditor({
       <div className="mx-auto w-full max-w-3xl px-space-5 pt-space-2 pb-space-9">
         {!canManage && (
           <Banner intent="neutral" className="mb-space-4">
-            This workspace automation is read-only. Ask a workspace admin to
-            change it.
+            This automation is read-only. Only its creator or a workspace admin
+            can change it.
           </Banner>
         )}
         <Input
@@ -682,12 +689,18 @@ export function AutomationEditor({
             className="w-full resize-none bg-transparent text-sm leading-relaxed text-primary outline-none placeholder:text-placeholder"
           />
           <div className="mt-space-2 flex items-center">
-            <ModelPicker
-              models={models}
-              selection={activeSelection}
-              onSelectionChange={setSelectionOverride}
-              disabled={!canManage}
-            />
+            {isAdmin ? (
+              <ModelPicker
+                models={models}
+                selection={activeSelection}
+                onSelectionChange={setSelectionOverride}
+                disabled={!canManage}
+              />
+            ) : (
+              <span className="text-xs text-secondary">
+                Fast · 30M tokens per UTC day
+              </span>
+            )}
           </div>
           {session.data?.is_admin === true && (
             <div className="mt-space-3 border-t border-subtle pt-space-3">

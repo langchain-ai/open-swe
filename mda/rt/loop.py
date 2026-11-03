@@ -43,6 +43,7 @@ from runtime_api.catalog import (
 )
 from runtime_api.endpoint import call
 from runtime_api.loop import (
+    AUTOMATION_USAGE,
     FINISH_SCOUT_PLAN,
     INCIDENT_CONTEXT,
     MODEL_CHOICE,
@@ -53,6 +54,7 @@ from runtime_api.loop import (
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
     TASK_CONTEXT,
+    AutomationUsage,
     BeforeModel,
     ChosenModel,
     GitHubProxyRefreshed,
@@ -347,6 +349,14 @@ class RunLoop:
         held = _held(state)
         if self._stops(held) or self._awaits_client(state):
             return BeforeModel(jump_to="end")
+        if self.rules.automation:
+            allowance = await call(
+                self._backend, AUTOMATION_USAGE, AutomationUsage(run_id=run_id())
+            )
+            if not allowance.allowed:
+                if asked is not None:
+                    await asked.close()
+                return BeforeModel(jump_to="end")
         if asked is None:
             asked = Asked(self._task_context(), self._github_proxy(held))
         try:
@@ -503,6 +513,8 @@ class RunLoop:
 
     async def _model_for(self, held: Mapping[str, object]) -> ModelSpec | None:
         """The run's own model, a route's, or the one a person asked for."""
+        if self.rules.pinned_model:
+            return self._models.model if self._models else None
         requested = held.get("requested_model")
         if isinstance(requested, str) and requested:
             return await self._chosen_model(requested, held.get("requested_effort"))

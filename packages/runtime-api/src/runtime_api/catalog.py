@@ -208,6 +208,8 @@ class LoopRules(BaseModel):
     """What the runtime's middleware does around each of the run's model calls."""
 
     # Opens every call's system prompt where the deployment is not production.
+    automation: bool = False
+    pinned_model: bool = False
     deployment_prompt: str = ""
     # Tools kept from every model call.
     hidden_tools: list[str] = []

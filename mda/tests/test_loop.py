@@ -29,6 +29,7 @@ from runtime_api.catalog import (
 )
 from runtime_api.endpoint import Delivery
 from runtime_api.loop import (
+    AutomationAllowance,
     Done,
     GitHubProxyRefreshed,
     IncidentContext,
@@ -653,3 +654,24 @@ async def test_reports_carry_what_they_report_never_the_conversation(
     ]
     [started] = [body for name, body in calls if name == "tool_started"]
     assert started["message_id"] == "ai-1"
+
+
+async def test_automation_budget_stops_before_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend, calls = _backend(
+        monkeypatch,
+        {"automation_usage": AutomationAllowance(allowed=False)},
+        LoopRules(automation=True),
+    )
+    result = await RunLoop(backend).before_model(_state(HumanMessage(content="Work")))
+    assert result.jump_to == "end"
+    assert result.call is None
+
+
+async def test_pinned_automation_ignores_model_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend, calls = _backend(monkeypatch, {}, LoopRules(pinned_model=True))
+    result = await RunLoop(backend).before_model(
+        _state(HumanMessage(content="Work"), requested_model="expensive", model_route="fast")
+    )
+    assert result.call is not None
+    assert result.call.model == _MAIN
+    assert calls == []

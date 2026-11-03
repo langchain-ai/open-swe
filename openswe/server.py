@@ -1886,6 +1886,22 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             subagent_model_id = per_thread_model
             subagent_effort = per_thread_effort
 
+    from openswe.schedules.policy import AutomationPolicy
+    from openswe.schedules.store import get_agent_schedule
+
+    schedule = await get_agent_schedule(cfg.schedule_id) if cfg.schedule_id else None
+    restricted_automation = bool(cfg.schedule_id) and (
+        schedule is None or not (await AutomationPolicy.for_record(schedule)).admin
+    )
+    if restricted_automation:
+        model_id, profile_effort = settings.agent_routing_models["fast"]
+        subagent_model_id, subagent_effort = model_id, profile_effort
+        routing_defaults = dict.fromkeys(routing_defaults, (model_id, profile_effort))
+        adaptive_model_routing = False
+        image_model_override = None
+        thread_settings["requested_model"] = None
+        thread_settings["model_handoff_complete"] = True
+
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
@@ -1988,6 +2004,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     ]
     withheld = [
         *(() if goal_mode else (report_work_state,)),
+        *((switch_to_performance_model,) if restricted_automation else ()),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
         *(() if managed_gateway else (connect_managed_tools, discover_managed_tools)),
@@ -2142,11 +2159,17 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         if incident_session is not None
         else MODEL_CALL_RECURSION_LIMIT
     )
-    surface.delegates = task_coordination is not None and task_coordination.can_delegate
+    surface.delegates = (
+        task_coordination is not None
+        and task_coordination.can_delegate
+        and not restricted_automation
+    )
     reply_tool = _registered_tool_name(slack_reply)
     no_reply_tool = _registered_tool_name(slack_no_reply_needed)
     cli_result_tool = _registered_tool_name(cli_result)
     surface.loop = LoopRules(
+        automation=bool(cfg.schedule_id),
+        pinned_model=restricted_automation,
         hidden_tools=sorted(excluded_tools),
         routing=RoutingRules(mode=model_routing_mode, route_model_ids=route_model_ids),
         reply=ReplyRules(

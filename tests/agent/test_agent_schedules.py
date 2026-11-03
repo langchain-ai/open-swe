@@ -9,6 +9,7 @@ import httpx
 import httpx2
 import pytest
 from fastapi import HTTPException
+from langchain_core.messages import AIMessage
 from langgraph_sdk.errors import ConflictError
 from pydantic import ValidationError
 from sqlalchemy import text
@@ -21,6 +22,7 @@ from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.jobs import queue
 from openswe.jobs.queue import Job
 from openswe.schedules import store as schedules
+from openswe.schedules.policy import AutomationPolicy
 from openswe.schedules.store import (
     GitHubTrigger,
     LinearTrigger,
@@ -31,6 +33,7 @@ from openswe.schedules.store import (
     TriggerConfig,
 )
 from openswe.slack.payloads import SlackChannelContext, SlackEventEnvelope
+from openswe.users import User
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 SCHED_1 = "11111111-1111-4111-8111-111111111111"
@@ -137,7 +140,11 @@ def fake_client(monkeypatch) -> _FakeClient:  # noqa: ANN001
 
 
 @pytest.fixture
-def auth(monkeypatch) -> None:  # noqa: ANN001
+async def auth(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bob")
+    await User.sign_in("github", "alice", login="alice", email="alice@example.com")
+    await User.sign_in("github", "bob", login="bob", email="bob@example.com")
+
     async def fake_get_valid_access_token(login: str) -> str:
         return "gho_token"
 
@@ -182,18 +189,20 @@ async def _seed(record: dict[str, Any]) -> None:
     else:
         trigger = ScheduleTrigger(cron=record.get("schedule") or "0 9 * * *")
         cron_id = record.get("cron_id")
+    owner = await User.for_login("github", record.get("created_by") or "")
     workspace_id = await WORKSPACES.id_for_slug(record.get("workspace") or "default")
     async with transaction() as conn:
         await conn.execute(
             text(
                 "INSERT INTO automation (id, workspace_id, name, prompt, admin_thread, model, "
                 "effort, base_branch, branch_prefix, enabled, created_by, updated_by, "
-                "user_email) VALUES (:id, :workspace_id, :name, :prompt, :admin_thread, "
+                "user_email, owner_id) VALUES (:id, :workspace_id, :name, :prompt, :admin_thread, "
                 ":model, :effort, :base_branch, :branch_prefix, :enabled, :created_by, "
-                ":created_by, :user_email)"
+                ":created_by, :user_email, :owner_id)"
             ),
             {
                 "id": uuid.UUID(record["id"]),
+                "owner_id": owner.id if owner else None,
                 "workspace_id": workspace_id,
                 "name": record.get("name") or "Automation",
                 "prompt": record["prompt"],
@@ -645,6 +654,7 @@ async def test_an_automation_runs_in_its_own_workspace_not_its_repositorys(
 async def test_admin_automations_refuse_events_from_public_repositories(
     fake_client: _FakeClient, auth: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     visibility = {"langchain-ai/open-swe": False, "langchain-ai/private": True}
 
     async def repo_is_private(full_name: str) -> bool | None:
@@ -900,13 +910,14 @@ async def test_open_swe_events_do_not_trigger_automations(
 
 
 async def test_launch_scheduled_agent_run_gates_fable_by_the_automations_workspace(
-    fake_client, auth, registry_db
+    fake_client, auth, registry_db, monkeypatch
 ) -> None:  # noqa: ANN001, ARG001
     """Fable is a per-workspace kill switch, so the run's own workspace decides.
 
     `default` leaves it on here and the automation's workspace does not, so a
     flag read from `default` would let the Fable model through.
     """
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
     await upsert_workspace_overrides("default", WorkspaceSettingsUpdate(fable_enabled=True))
     await _seed(
@@ -1270,3 +1281,94 @@ async def test_a_scheduler_cron_from_before_trigger_ids_moves_for_the_trigger_ho
             {"id": uuid.UUID(SCHED_1)},
         )
     assert held == str(job.id)
+
+
+async def test_automation_limits_and_ownership(fake_client, auth, monkeypatch) -> None:  # noqa: ANN001, ARG001
+    import asyncio
+
+    body = ScheduleCreateBody(
+        workspace="default", prompt="Report", triggers=[ScheduleTrigger(cron="0 9 * * *")]
+    )
+    results = await asyncio.gather(
+        *(schedules.create_agent_schedule("alice", body) for _ in range(4)), return_exceptions=True
+    )
+    created = [r for r in results if isinstance(r, dict)]
+    assert len(created) == 3
+    assert sum(isinstance(r, HTTPException) and r.status_code == 422 for r in results) == 1
+    with pytest.raises(HTTPException) as denied:
+        await schedules.update_agent_schedule(
+            created[0]["id"], "bob", ScheduleUpdateBody(prompt="Changed")
+        )
+    assert denied.value.status_code == 403
+    with pytest.raises(HTTPException):
+        await schedules.delete_agent_schedule(created[0]["id"], login="bob")
+    with pytest.raises(HTTPException):
+        await schedules.trigger_agent_schedule(created[0]["id"], login="bob")
+    await schedules.delete_agent_schedule(created[0]["id"], login="alice")
+    assert (await schedules.create_agent_schedule("alice", body))["ownerId"] == str(
+        (await User.for_login("github", "alice")).id
+    )
+
+
+async def test_daily_budget_counts_cached_input_once_and_resets(
+    fake_client, auth, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    body = ScheduleCreateBody(
+        workspace="default", prompt="Report", triggers=[ScheduleTrigger(cron="0 9 * * *")]
+    )
+    created = await schedules.create_agent_schedule("alice", body)
+    policy = await AutomationPolicy.for_login("alice")
+    message = AIMessage(
+        content="Done",
+        id="model-1",
+        usage_metadata={
+            "input_tokens": 20_000_000,
+            "output_tokens": 0,
+            "total_tokens": 20_000_000,
+            "input_token_details": {"cache_read": 19_000_000},
+        },
+    )
+    assert await policy.permits_call(created["id"], [message])
+    assert await policy.permits_call(created["id"], [message])
+    second = AIMessage(
+        content="Done",
+        id="model-2",
+        usage_metadata={"input_tokens": 10_000_000, "output_tokens": 0, "total_tokens": 10_000_000},
+    )
+    assert not await policy.permits_call(created["id"], [second])
+    assert (await schedules.launch_scheduled_agent_run(created["id"]))["status"] == "token_limit"
+    async with transaction() as conn:
+        await conn.execute(
+            text("UPDATE automation_token_usage SET created_at = created_at - interval '1 day'")
+        )
+    assert await policy.permits_call(created["id"], [])
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
+    assert await policy.permits_call(created["id"], [second])
+
+
+async def test_member_automation_launch_pins_workspace_fast_model(fake_client, auth) -> None:  # noqa: ANN001, ARG001
+    from openswe.dashboard.workspace_settings import get_workspace_settings
+
+    body = ScheduleCreateBody(
+        workspace="default",
+        prompt="Report",
+        model_id="anthropic:claude-opus-5-5",
+        effort="high",
+        triggers=[ScheduleTrigger(cron="0 9 * * *")],
+    )
+    created = await schedules.create_agent_schedule("alice", body)
+    fast = (await get_workspace_settings("default")).agent_routing_models["fast"]
+    assert (created["model"], created["effort"]) == fast
+    async with transaction() as conn:
+        await conn.execute(
+            text(
+                "UPDATE automation SET model = 'anthropic:claude-opus-5-5', effort = 'high', admin_thread = true WHERE id = :id"
+            ),
+            {"id": uuid.UUID(created["id"])},
+        )
+    assert (await schedules.trigger_agent_schedule(created["id"], login="alice"))[
+        "status"
+    ] == "started"
+    config = fake_client.runs.created[0]["config"]["configurable"]
+    assert (config["agent_model_id"], config["agent_effort"]) == fast
+    assert not config.get("admin_thread")
