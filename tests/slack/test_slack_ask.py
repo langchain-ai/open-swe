@@ -266,3 +266,31 @@ async def test_a_by_the_way_question_for_mda_without_a_question_starts_nothing(
 
     assert await slack_ask.prepare_ask_channel_run(request) is None
     refuse.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_forked_question_quotes_only_what_its_thread_never_got(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = [
+        {"ts": "1.0", "user": "U2", "text": "the build is red"},
+        {"ts": "2.0", "user": "U3", "text": "only said in Slack"},
+    ]
+    monkeypatch.setattr(slack_ask, "fetch_slack_thread_messages", AsyncMock(return_value=raw))
+    monkeypatch.setattr(slack_ask, "get_slack_user_names", AsyncMock(return_value={}))
+    held = AsyncMock(return_value={"1.0"})
+    monkeypatch.setattr(slack_ask.forks, "held_timestamps", held)
+    request = slack_ask.SlackAskRequest(
+        channel_id="C1",
+        user_id="U1",
+        question="why?",
+        thread_id="forked-thread",
+        reply_thread_ts="1.0",
+        message_ts="3.0",
+    )
+
+    context = await slack_ask._request_context(request)
+
+    held.assert_awaited_once_with("forked-thread")
+    assert "only said in Slack" in context
+    assert "the build is red" not in context

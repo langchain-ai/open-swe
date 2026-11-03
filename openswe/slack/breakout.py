@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from uuid import uuid4
 
-from openswe.slack import mda_forwarding
+from openswe.slack import forks, mda_forwarding
 from openswe.slack import webhook as service
 from openswe.slack.blocks import block_payload, section
 from openswe.slack.breakout_destination import resolve_breakout_destination
@@ -204,13 +204,17 @@ async def _start(
     if hand_to_mda is None:
         thread_id = await common.resolve_slack_thread_id(langgraph_client(), target, new_ts)
     else:
-        # MDA's channel runs it on the command's own thread, which the new Slack thread joins.
-        thread_id = mda_forwarding.side_thread_id(request.channel_id, _command_ts(request))
+        # MDA's channel runs it on a thread of the command's own, which the new Slack thread
+        # joins: a fork of this conversation's thread, which knows what the agent did here,
+        # or one seeded from the Slack thread.
+        owner_login = await service.slack_login(request.user_id) if request.user_id else None
+        thread_id = await forks.fork_thread(
+            request.thread_id,
+            key=forks.branch_key(request.channel_id, _command_ts(request)),
+            login=owner_login,
+        ) or mda_forwarding.side_thread_id(request.channel_id, _command_ts(request))
         await bind_slack_thread_id(target, new_ts, thread_id)
-        await mda_forwarding.claim_side(
-            thread_id,
-            owner_login=await service.slack_login(request.user_id) if request.user_id else None,
-        )
+        await mda_forwarding.claim_side(thread_id, owner_login=owner_login)
     web_url = dashboard_thread_url(thread_id)
     if web_url:
         try:

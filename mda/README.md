@@ -333,6 +333,8 @@ When MDA retries `start_slack_turn` (same `webhook-id`), the backend builds the 
 Each forward logs one outcome line (`forward_outcome`: `delivered`, `refused` or `gave_up`, with `status` and `attempts`); each answer without a run logs its `no_run_reason`.
 A GitHub issue mention MDA's channel never takes gets a 😕 on its comment.
 
+A `/btw` question, a breakout into a new thread and a `/breakout:web` question branch off the conversation they're sent in (`openswe/slack/forks.py`). When MDA's channel holds that conversation and the person may read its thread (a private thread's owner), the branch's thread is a LangGraph fork of it (Agent Server's `threads/{id}/copy`, as the conversation): it knows what the agent did there, and its first turn adds only the Slack messages the agent never got. The fork starts clean: it keeps MDA's owner and thread record and nothing else of the original's metadata, so it gets a sandbox of its own, and it belongs to the person who asked. Otherwise, or when forking fails, the branch is seeded from the Slack thread as before. The original thread and its running work are left alone.
+
 Which conversations go where (`mda_can_start` in `openswe/slack/mda_forwarding.py`):
 
 | Goes to MDA | Stays on the backend, and why |
