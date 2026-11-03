@@ -1,6 +1,42 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const Module = require("node:module");
+const { readFileSync } = require("node:fs");
+const { runInNewContext } = require("node:vm");
+
+test("cached UI can still start LangSmith sign-in through the connection bridge", async () => {
+  const source = readFileSync(require.resolve("../build/main.cjs"), "utf8");
+  let connect;
+  const logins = [];
+  const context = {
+    APP_URL: "open-swe://app/",
+    ipcMain: {
+      handle: (_channel, handler) => {
+        connect = handler;
+      },
+    },
+    requireTrustedDesktopIpc: (event) => assert.equal(event, "trusted"),
+    startExternalLogin: async (url) => {
+      logins.push(url);
+    },
+    startConnectFlow: async (provider) => provider,
+  };
+  runInNewContext(
+    source.slice(
+      source.indexOf('ipcMain.handle("desktop:connect-service"'),
+      source.indexOf('ipcMain.handle("desktop:open-external"'),
+    ),
+    context,
+  );
+  await connect("trusted", "langsmith");
+  assert.deepEqual(logins, [
+    "open-swe://app/dashboard/api/auth/langsmith/login",
+  ]);
+  assert.equal(await connect("trusted", "github"), "github");
+  assert.equal(await connect("trusted", "slack"), "slack");
+  await assert.rejects(connect("untrusted", "langsmith"));
+  assert.equal(logins.length, 1);
+});
 
 test("preload command subscriptions validate IDs and unsubscribe", () => {
   let exposed;

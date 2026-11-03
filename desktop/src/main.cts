@@ -758,6 +758,8 @@ function configureDesktopIpc() {
 
   ipcMain.handle("desktop:connect-service", async (event, provider) => {
     requireTrustedDesktopIpc(event);
+    if (provider === "langsmith")
+      return startExternalLogin(`${APP_URL}dashboard/api/auth/langsmith/login`);
     return startConnectFlow(provider);
   });
 
