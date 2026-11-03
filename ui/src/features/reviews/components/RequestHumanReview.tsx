@@ -7,6 +7,7 @@ import {
 } from "@langchain/macaw-components/Popover"
 import { Text } from "@langchain/macaw-components/Text"
 import { InfoIcon } from "@phosphor-icons/react/dist/ssr/Info"
+import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -66,8 +67,11 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     retry: false,
   })
   if (pr.draft !== false) return null
-  const channelHint =
-    active || channel
+  const hint = active
+    ? permalink
+      ? null
+      : "Open SWE could not find this review request in Slack."
+    : channel
       ? null
       : availability.isPending
         ? "Checking the default Slack review channel…"
@@ -87,7 +91,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     <span
       className="inline-flex items-center gap-space-2"
       onClick={(event) => event.stopPropagation()}
-      title={channelHint ?? undefined}
+      title={hint ?? (active ? "Open the review request in Slack" : undefined)}
     >
       {(needsChannel || (availability.isError && !active)) &&
         !requestReview.isSuccess && (
@@ -102,18 +106,19 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
         )}
       <PullRequestActionButton
         label={label}
+        icon={active ? SlackLogoIcon : undefined}
+        href={active && permalink ? permalink : undefined}
         loading={requestReview.isPending}
-        disabled={Boolean(channelHint)}
-        onClick={() => {
-          if (requestReview.isPending) return
-          if (active && permalink) {
-            window.open(permalink, "_blank", "noopener,noreferrer")
-          } else if (channelHint) {
-            toast.error(channelHint)
-          } else {
-            requestReview.mutate()
-          }
-        }}
+        disabled={Boolean(hint)}
+        onClick={
+          active
+            ? undefined
+            : () => {
+                if (requestReview.isPending) return
+                if (hint) toast.error(hint)
+                else requestReview.mutate()
+              }
+        }
       />
       {availability.isError && (
         <PullRequestActionButton
@@ -123,20 +128,24 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
           onClick={() => void availability.refetch()}
         />
       )}
-      {channelHint && (
+      {hint && (
         <Popover>
           <PopoverTrigger asChild>
             <IconButton
               icon={InfoIcon}
-              label="Why a review can't be requested"
+              label={
+                active
+                  ? "Why the review request can't be opened"
+                  : "Why a review can't be requested"
+              }
               size="xs"
               color="secondary"
               variant="plain"
-              tooltipProps={{ title: channelHint }}
+              tooltipProps={{ title: hint }}
             />
           </PopoverTrigger>
           <PopoverContent align="end" className="w-72 max-w-[calc(100vw-2rem)]">
-            <Text variant="xs">{channelHint}</Text>
+            <Text variant="xs">{hint}</Text>
           </PopoverContent>
         </Popover>
       )}

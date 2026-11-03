@@ -126,10 +126,7 @@ async def test_dashboard_selects_review_workflow(
         ) as save,
         patch.object(HumanReviewRequest, "get", AsyncMock(return_value=approval)),
         patch.object(ReviewCard, "post_expedited", AsyncMock(return_value="1.0")) as post,
-        patch(
-            "openswe.human_review.dashboard.get_slack_permalink",
-            AsyncMock(return_value="https://slack/card"),
-        ),
+        patch.object(HumanReviewRequest, "permalink", AsyncMock(return_value="https://slack/card")),
     ):
         result = await DashboardReviewRequest(pr_ref, Origin(requester=requester), "token").request(
             channel="C1", inline_summary="Custom summary." if case == "custom_summary" else None

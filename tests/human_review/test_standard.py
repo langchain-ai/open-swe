@@ -297,7 +297,7 @@ async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
     monkeypatch.setattr(standard, "_request_github_review", AsyncMock(return_value=True))
     monkeypatch.setattr(standard, "_schedule", AsyncMock(return_value=True))
     monkeypatch.setattr(standard, "_assignment_minutes", AsyncMock(return_value=120))
-    monkeypatch.setattr(standard, "_permalink", AsyncMock(return_value=""))
+    monkeypatch.setattr(HumanReviewRequest, "permalink", AsyncMock(return_value=""))
 
     @asynccontextmanager
     async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
@@ -371,7 +371,7 @@ async def test_assignment_enforces_availability_before_contacting_reviewer(
         patch.object(standard, "send_dm_with_location", AsyncMock(return_value=None)) as dm,
         patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
         patch.object(standard, "_assignment_minutes", AsyncMock(return_value=120)),
-        patch.object(standard, "_permalink", AsyncMock(return_value="")),
+        patch.object(HumanReviewRequest, "permalink", AsyncMock(return_value="")),
     ):
         clock.now.return_value = now
         result = await standard.assign(request, "grace", "nearby reviewer", replace=named)
@@ -1047,7 +1047,7 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
         ),
         patch.object(standard, "_assignment_minutes", AsyncMock(return_value=120)),
         patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
-        patch.object(standard, "_permalink", AsyncMock(return_value="")),
+        patch.object(HumanReviewRequest, "permalink", AsyncMock(return_value="")),
         patch.object(ReviewCard, "post_standard", AsyncMock(return_value="1.0")),
         patch.object(ReviewCard, "link_on_github", AsyncMock()),
         patch.object(
@@ -1233,7 +1233,9 @@ async def test_existing_request_checks_explicit_channel_before_updating_summary(
             return_value=SlackChannel(id="C_NEW" if channel == "#requested" else "C_CURRENT")
         ),
     )
-    monkeypatch.setattr(standard, "_permalink", AsyncMock(return_value="https://slack/card"))
+    monkeypatch.setattr(
+        HumanReviewRequest, "permalink", AsyncMock(return_value="https://slack/card")
+    )
     monkeypatch.setattr(ReviewCard, "refresh", AsyncMock())
 
     @asynccontextmanager

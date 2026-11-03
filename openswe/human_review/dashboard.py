@@ -16,7 +16,7 @@ from openswe.human_review.standard import (
     review_blockers,
     target_channel,
 )
-from openswe.slack.client import GitHubPrRef, get_slack_permalink
+from openswe.slack.client import GitHubPrRef
 
 logger = logging.getLogger(__name__)
 
@@ -68,14 +68,7 @@ class DashboardReviewRequest:
                                 request_id=str(result["approval_id"]),
                                 channel=target.id,
                                 channel_name=target.name,
-                                permalink=(
-                                    await get_slack_permalink(
-                                        approval.slack_channel_id, approval.slack_message_ts
-                                    )
-                                    or ""
-                                    if approval is not None
-                                    else ""
-                                ),
+                                permalink=await approval.permalink() if approval else "",
                             )
             except GitHubAppUnavailable:
                 return RequestResult(

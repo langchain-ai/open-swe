@@ -80,7 +80,6 @@ from openswe.slack.cards import origin_footer
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     GitHubPrRef,
-    get_slack_permalink,
     get_slack_user_info,
     post_slack_thread_reply_with_ts,
 )
@@ -289,10 +288,6 @@ async def _point_to_card(request: HumanReviewRequest, origin: Origin, target: Sl
         )
 
 
-async def _permalink(request: HumanReviewRequest) -> str:
-    return await get_slack_permalink(request.slack_channel_id, request.slack_message_ts) or ""
-
-
 def review_reminder_at(start: datetime, timezone: ZoneInfo) -> datetime:
     """Add two hours within local weekday 9am–6pm windows."""
     cursor = start.astimezone(timezone)
@@ -315,10 +310,15 @@ async def _existing(
     active: HumanReviewRequest, auto_merge: bool | None = None, requested_channel: str = ""
 ) -> RequestResult:
     if active.kind == "expedited":
-        permalink = await _permalink(active)
+        permalink = await active.permalink()
         return RequestResult(
             success=False,
-            error=prompt("tools/human-review-existing-expedited", permalink=permalink),
+            error=prompt(
+                "tools/human-review-existing-expedited",
+                permalink=permalink,
+                awaiting_ready=active.awaiting_ready,
+                posted=bool(active.slack_message_ts),
+            ),
             request_id=str(active.id),
             channel=active.slack_channel_id,
             permalink=permalink,
@@ -334,7 +334,7 @@ async def _existing(
         auto_merge=enabled,
         request_id=str(active.id),
         channel=active.slack_channel_id,
-        permalink=await _permalink(active),
+        permalink=await active.permalink(),
         reused=True,
         channel_mismatch=bool(requested_channel and requested_channel != active.slack_channel_id),
         requested_channel=requested_channel,
@@ -603,7 +603,7 @@ async def _request_review(
         request_id=str(request.id),
         channel=target.id,
         channel_name=target.name,
-        permalink=await _permalink(request),
+        permalink=await request.permalink(),
     )
 
 
@@ -888,7 +888,7 @@ async def assign(
     why = f" {escape(reason.strip())}" if reason.strip() else ""
     deadline = f" Accept within {minutes} minutes, or Open SWE will ask someone else."
     accept = actions(accept_button(added), decline_button(added), snooze_button(added))
-    permalink = await _permalink(added)
+    permalink = await added.permalink()
     if user.slack_user_id:
         where = "review card" if added.has_card else "Slack post"
         card = f" (<{permalink}|{where}>)" if permalink else ""
@@ -1109,12 +1109,14 @@ async def _posted_deadline(request: HumanReviewRequest) -> str | None:
 
 
 async def settle(request: HumanReviewRequest) -> bool:
-    """Re-read the pull request and move the request on: react, update the card, or merge.
+    """Re-read the pull request and move the request on: react, publish or update the card, or merge.
 
     ``False`` only when GitHub could not be read, so nothing is known to have changed.
     """
     if request.kind == "posted" and skip_on_preview("settle_posted"):
         return True
+    if request.kind == "expedited":
+        return await ReviewCard(request).mark_ready_if_undrafted()
     if request.kind not in SETTLED_KINDS or request.state != "open":
         return True
     pr = request.pull_request

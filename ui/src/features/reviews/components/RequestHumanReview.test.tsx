@@ -59,6 +59,18 @@ const pr: OpenPullRequest = {
   unresolvedThreads: 1,
 }
 
+function expectOpensInSlack(control: HTMLElement, permalink: string) {
+  expect({
+    href: control.getAttribute("href"),
+    target: control.getAttribute("target"),
+    disabled: control.hasAttribute("disabled"),
+  }).toEqual(
+    permalink
+      ? { href: permalink, target: "_blank", disabled: false }
+      : { href: null, target: null, disabled: true }
+  )
+}
+
 it.each([
   "",
   "https://workspace.slack.com/archives/C0123456789/p1234567890123456",
@@ -66,7 +78,6 @@ it.each([
   "silently reuses an existing request returned after choosing a channel with permalink %j",
   async (permalink) => {
     const successToast = vi.spyOn(toast, "success")
-    const open = vi.spyOn(window, "open").mockReturnValue(null)
     vi.spyOn(api, "humanReviewAvailability").mockResolvedValue({
       available: false,
       active: false,
@@ -126,13 +137,11 @@ it.each([
         channel_name: "reviews",
       })
     )
-    const requested = await screen.findByRole("button", {
-      name: "Review requested",
-    })
-    await waitFor(() => expect(requested.hasAttribute("disabled")).toBe(false))
-    if (permalink) fireEvent.click(requested)
-    expect(open.mock.calls).toEqual(
-      permalink ? [[permalink, "_blank", "noopener,noreferrer"]] : []
+    expectOpensInSlack(
+      await screen.findByRole(permalink ? "link" : "button", {
+        name: "Review requested",
+      }),
+      permalink
     )
     expect(request).toHaveBeenCalledTimes(1)
     expect(successToast).not.toHaveBeenCalled()
@@ -147,7 +156,6 @@ it.each([
   "reuses persisted status and permalink %j on remount and focus",
   async (permalink) => {
     const successToast = vi.spyOn(toast, "success")
-    const open = vi.spyOn(window, "open").mockReturnValue(null)
     const request = vi.spyOn(api, "requestHumanReview")
     const result =
       Promise.withResolvers<
@@ -182,10 +190,11 @@ it.each([
         blockers: [],
       })
     )
-    const requested = await screen.findByRole("button", {
-      name: "Review requested",
-    })
-    expect(requested.hasAttribute("disabled")).toBe(false)
+    const role = permalink ? "link" : "button"
+    expectOpensInSlack(
+      await screen.findByRole(role, { name: "Review requested" }),
+      permalink
+    )
     expect(screen.queryByRole("button", { name: "Choose channel" })).toBeNull()
     view.unmount()
     render(content)
@@ -193,11 +202,9 @@ it.each([
       focusManager.setFocused(false)
       focusManager.setFocused(true)
     })
-    const restored = screen.getByRole("button", { name: "Review requested" })
-    expect(restored.hasAttribute("disabled")).toBe(false)
-    if (permalink) fireEvent.click(restored)
-    expect(open.mock.calls).toEqual(
-      permalink ? [[permalink, "_blank", "noopener,noreferrer"]] : []
+    expectOpensInSlack(
+      screen.getByRole(role, { name: "Review requested" }),
+      permalink
     )
     expect(request).not.toHaveBeenCalled()
     expect(successToast).not.toHaveBeenCalled()

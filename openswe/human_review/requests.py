@@ -45,6 +45,7 @@ from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
 from openswe.human_review.pick_message import PickMessage
 from openswe.run_config import RunConfig
+from openswe.slack.client import get_slack_permalink
 from openswe.slack.dm import DmOrigin
 from openswe.slack.records import lookup_slack_thread_id
 from openswe.users import User
@@ -259,6 +260,16 @@ class HumanReviewRequest(Base):
             return False
         owner = await lookup_slack_thread_id(self.slack_channel_id, root)
         return owner == thread_id
+
+    async def permalink(self) -> str:
+        """Where the request lives in Slack: its card, else the author's Mark ready DM."""
+        if self.slack_channel_id and self.slack_message_ts:
+            location = (self.slack_channel_id, self.slack_message_ts)
+        elif self.slack_dm_channel_id and self.slack_dm_message_ts:
+            location = (self.slack_dm_channel_id, self.slack_dm_message_ts)
+        else:
+            return ""
+        return await get_slack_permalink(*location) or ""
 
     @property
     def slack_location(self) -> tuple[str, str] | None:

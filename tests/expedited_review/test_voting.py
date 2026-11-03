@@ -17,7 +17,7 @@ from openswe.expedited_review.eligibility import ChangedFile
 from openswe.github import http as github_http
 from openswe.github.http import RepoClient
 from openswe.github.pull_request_status import PullRequestClient
-from openswe.human_review import lifecycle
+from openswe.human_review import lifecycle, standard
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.people import Outcome
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
@@ -275,6 +275,26 @@ async def test_a_draft_waits_for_its_author_to_mark_it_ready(
     assert harness.marked_ready == ["token-ada"]
     assert not stored.awaiting_ready
     assert stored.approvers == ["grace"]
+
+
+@pytest.mark.parametrize("draft", [True, False])
+async def test_a_draft_marked_ready_on_github_opens_its_card(
+    harness: _Harness,
+    open_approval: OpenApproval,
+    monkeypatch: pytest.MonkeyPatch,
+    draft: bool,
+) -> None:
+    approval = await open_approval(awaiting_ready=True)
+    monkeypatch.setattr(
+        PullRequestClient,
+        "pull",
+        AsyncMock(return_value={"state": "open", "draft": draft, "head": {"sha": "def456"}}),
+    )
+
+    assert await standard.settle(await _stored(approval))
+
+    assert (await _stored(approval)).awaiting_ready is draft
+    assert ReviewCard.refresh.await_count == (0 if draft else 1)
 
 
 async def test_readiness_button_is_delivered_only_to_the_author(

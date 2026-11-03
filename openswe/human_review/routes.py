@@ -23,7 +23,7 @@ from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.review_queue import ReviewQueue
 from openswe.human_review.standard import Origin, RequestResult, review_blockers
-from openswe.slack.client import GitHubPrRef, get_slack_permalink
+from openswe.slack.client import GitHubPrRef
 from openswe.users import User
 
 logger = logging.getLogger(__name__)
@@ -109,11 +109,7 @@ async def api_human_review_availability(
     return HumanReviewAvailability(
         available=bool(channel),
         active=active is not None,
-        permalink=(
-            await get_slack_permalink(active.slack_channel_id, active.slack_message_ts) or ""
-            if active is not None
-            else ""
-        ),
+        permalink=await active.permalink() if active is not None else "",
         blockers=blockers or [],
     )
 

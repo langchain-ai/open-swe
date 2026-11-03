@@ -251,6 +251,36 @@ class ReviewCard:
         await approval.save()
         return None
 
+    async def mark_ready(self) -> bool:
+        """Open a draft's card for approval now its PR is ready; ``False`` once the request closed."""
+        async with HumanReviewRequest.locked(self.request.id) as (_, row):
+            if row is None or row.state != "open":
+                return False
+            undrafted = row.awaiting_ready
+            row.awaiting_ready = False
+        if undrafted and (current := await HumanReviewRequest.get(self.request.id)) is not None:
+            self.request = current
+            await self.refresh()
+        return True
+
+    async def mark_ready_if_undrafted(self) -> bool:
+        """Open the card when its PR left draft outside Slack; ``False`` when GitHub was unreadable."""
+        request = self.request
+        if request.state != "open" or not request.awaiting_ready:
+            return True
+        pr = request.pull_request
+        try:
+            async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+                payload = await or_none(pull.pull())
+        except GitHubAppUnavailable:
+            return False
+        if payload is None:
+            return False
+        snapshot = PullRequestPayload.model_validate(payload)
+        if snapshot.state == "open" and not snapshot.draft:
+            await self.mark_ready()
+        return True
+
     async def post_standard(self) -> str:
         """Post a standard card: a thread reply also sent to the channel, or a top-level post."""
         request = self.request

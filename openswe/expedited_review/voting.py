@@ -159,16 +159,11 @@ async def _mark_ready(approval: HumanReviewRequest, *, voter: Participant) -> Ou
         )
     except HTTPException as exc:
         return Outcome(f"GitHub did not mark the pull request ready: {exc.detail}")
-    async with HumanReviewRequest.locked(approval.id) as (_, row):
-        if row is None or row.state != "open":
-            return Outcome("This expedited review closed before it was marked ready.")
-        row.awaiting_ready = False
-    marked = "Marked ready for review. Someone else can approve it now."
-    current = await HumanReviewRequest.get(approval.id)
-    if current is None:
-        return Outcome(marked, dm_card_success=True)
-    await ReviewCard(current).refresh()
-    return Outcome(marked, dm_card_success=True)
+    if not await ReviewCard(approval).mark_ready():
+        return Outcome("This expedited review closed before it was marked ready.")
+    return Outcome(
+        "Marked ready for review. Someone else can approve it now.", dm_card_success=True
+    )
 
 
 async def request_broadcast(approval: HumanReviewRequest) -> Outcome:
