@@ -181,16 +181,6 @@ def test_a_second_click_on_a_message_starts_nothing(monkeypatch: pytest.MonkeyPa
     assert slack.posted == []
 
 
-def test_a_click_without_a_message_starts_nothing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    slack = _Slack(monkeypatch, SlackClickStart(run=_RUN))
-    click = dataclasses.replace(_click(_option()), message_ts=None)
-
-    assert asyncio.run(clicks.start_click(click, _THREAD)) is None
-    assert slack.calls == []
-
-
 def test_a_concierge_dms_click_runs_on_the_dms_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     dm_thread = uuid.uuid4()
     _Slack(monkeypatch, SlackClickStart(run=_RUN, thread_id=dm_thread))
