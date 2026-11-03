@@ -332,3 +332,60 @@ async def test_breakout_never_leaves_a_private_channel(monkeypatch, public_chann
     root.assert_not_awaited()
     posted.notifications.assert_not_awaited()
     assert "public source channel and destination" in posted.ephemeral.await_args.args[2]
+
+
+@pytest.mark.asyncio
+async def test_a_breakout_handed_to_mda_opens_its_thread_then_hands_over_the_first_turn(
+    monkeypatch,
+):
+    posted = _patch_slack(monkeypatch)
+    root = AsyncMock(return_value="200.0")
+    monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
+    monkeypatch.setattr(breakout, "langgraph_client", lambda: object())
+    monkeypatch.setattr(breakout, "dashboard_thread_url", lambda _thread_id: "")
+    monkeypatch.setattr(breakout.common, "get_slack_repo_config", AsyncMock(return_value=None))
+    resolve = AsyncMock(return_value="new-thread")
+    monkeypatch.setattr(breakout.common, "resolve_slack_thread_id", resolve)
+    bind = AsyncMock()
+    monkeypatch.setattr(breakout, "bind_slack_thread_id", bind)
+    claim = AsyncMock()
+    monkeypatch.setattr(breakout.mda_forwarding, "claim_side", claim)
+    monkeypatch.setattr(breakout.service, "slack_login", AsyncMock(return_value="alice"))
+    mention = AsyncMock()
+    monkeypatch.setattr(breakout.service, "process_slack_mention", mention)
+    hand_to_mda = AsyncMock()
+
+    await breakout.process_slack_breakout(
+        _request(), Command("fix it"), None, hand_to_mda=hand_to_mda
+    )
+
+    side = breakout.mda_forwarding.side_thread_id("C1", "105.0")
+    # The new Slack thread joins the command's own thread, which MDA's channel runs.
+    bind.assert_awaited_once_with("C1", "200.0", side)
+    claim.assert_awaited_once_with(side, owner_login="alice")
+    resolve.assert_not_awaited()
+    mention.assert_not_awaited()
+    [opening, repo] = hand_to_mda.await_args.args
+    assert repo is None
+    assert (opening.channel_id, opening.thread_ts, opening.thread_id, opening.text) == (
+        "C1",
+        "200.0",
+        side,
+        "fix it",
+    )
+    assert (opening.context_channel_id, opening.context_thread_ts) == ("C1", "100.0")
+    assert opening.inherited_workspace == "engineering"
+    posted.notifications.assert_awaited_once_with("C1", "100.0", "C1", "200.0")
+
+
+@pytest.mark.asyncio
+async def test_moving_a_thread_stays_on_the_backend_even_with_mda(monkeypatch):
+    _patch_slack(monkeypatch)
+    move = AsyncMock()
+    monkeypatch.setattr(breakout, "_move", move)
+    hand_to_mda = AsyncMock()
+
+    await breakout.process_slack_breakout(_request(), Command(""), None, hand_to_mda=hand_to_mda)
+
+    move.assert_awaited_once()
+    hand_to_mda.assert_not_awaited()

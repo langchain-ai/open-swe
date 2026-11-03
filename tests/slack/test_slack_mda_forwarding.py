@@ -20,6 +20,7 @@ from starlette.requests import Request
 from openswe import dispatch, event_claims
 from openswe.agent_api.tokens import verify_runtime_token
 from openswe.mda_channels import api as channel_api
+from openswe.slack import ask as slack_ask
 from openswe.slack import channel as slack_channel
 from openswe.slack import events as slack_events
 from openswe.slack import failures as slack_failures
@@ -1633,3 +1634,139 @@ async def test_explain_this_through_trigger_server_is_answered_as_before(
         "What does this do?",
         "https://hooks.slack.com/app/T1/1/abc",
     )
+
+
+_COMMAND_TS = "1786573369.551099"
+
+
+async def test_a_by_the_way_question_goes_to_mda_on_a_thread_of_its_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = AsyncMock()
+    monkeypatch.setattr(mda_forwarding, "claim_side", claim)
+    request = _FakeRequest(_mention(text="<@BOT> /btw how does routing work?"), _SLACK_HEADERS)
+    tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, request), cast(BackgroundTasks, tasks)
+    )
+
+    assert response == {"status": "accepted", "message": "Slack by-the-way question handed to MDA"}
+    side = mda_forwarding.side_thread_id("C1", _COMMAND_TS)
+    claim.assert_awaited_once_with(side, owner_login="ada")
+    [remembered, repo, message_ts] = cast(AsyncMock, mda_forwarding.remember).await_args.args
+    assert (remembered.by_the_way, remembered.thread_id, remembered.thread_ts) == (
+        "how does routing work?",
+        side,
+        _COMMAND_TS,
+    )
+    assert remembered.explicit_mention is True
+    assert (repo, message_ts) == (None, _COMMAND_TS)
+    [(task, (url, _body, _headers))] = tasks.tasks
+    assert (task, url) == (mda_forwarding.forward_to_trigger_server, _EVENTS_URL)
+    assert tasks.kwargs[0]["thread_id"] == side
+    assert tasks.kwargs[0]["message_ts"] == _COMMAND_TS
+
+
+@pytest.mark.parametrize("owner", [None, _MDA_THREAD], ids=["backend", "mda"])
+async def test_a_breakout_into_a_new_thread_is_handed_to_mda_once_it_opens(
+    monkeypatch: pytest.MonkeyPatch, owner: str | None
+) -> None:
+    monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=owner))
+    request = _FakeRequest(_mention(text="<@BOT> /breakout fix the flaky test"), _SLACK_HEADERS)
+    tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, request), cast(BackgroundTasks, tasks)
+    )
+
+    # Even in a conversation MDA holds, it's a breakout, not a turn.
+    assert response == {"status": "accepted", "message": "Slack breakout queued"}
+    [(task, (source, command, _repo))] = tasks.tasks
+    assert task is slack_routes.process_slack_breakout
+    assert command.instruction == "fix the flaky test"
+    assert cast(SlackRequest, source).thread_id == (owner or "backend-thread")
+    forward = AsyncMock()
+    monkeypatch.setattr(mda_forwarding, "forward_to_trigger_server", forward)
+    opening = SlackRequest(channel_id="C2", thread_ts="200.0", thread_id="side-1")
+
+    hand_to_mda = cast(Callable[..., Awaitable[None]], tasks.kwargs[0]["hand_to_mda"])
+    await hand_to_mda(opening, None)
+
+    cast(AsyncMock, mda_forwarding.remember).assert_awaited_once_with(opening, None, _COMMAND_TS)
+    forward.assert_awaited_once_with(
+        _EVENTS_URL,
+        await request.body(),
+        mda_forwarding.forwarded_headers(_SLACK_HEADERS),
+        thread_id="side-1",
+        message_ts=_COMMAND_TS,
+        event_id="Ev-mda",
+    )
+
+
+@pytest.mark.parametrize("text", ["<@BOT> /breakout", "<@BOT> /breakout:web why?"])
+async def test_moving_a_thread_or_a_web_breakout_stays_on_the_backend(
+    monkeypatch: pytest.MonkeyPatch, text: str
+) -> None:
+    tasks = _FakeBackgroundTasks()
+
+    await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_mention(text=text), _SLACK_HEADERS)),
+        cast(BackgroundTasks, tasks),
+    )
+
+    [(task, _args)] = tasks.tasks
+    assert task in {slack_routes.process_slack_breakout, slack_routes.process_slack_web}
+    assert tasks.kwargs == [{}]
+
+
+async def test_the_handler_finds_a_by_the_way_question_on_its_own_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MDA_SERVICE_SECRET", _SERVICE_SECRET)
+    monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-signing-key-0123456789abcdef")
+    side = mda_forwarding.side_thread_id("C1", "1.2")
+    request = SlackRequest(
+        channel_id="C1",
+        thread_ts="1.0",
+        original_message_ts="1.2",
+        user_id="U1",
+        thread_id=side,
+        explicit_mention=True,
+        by_the_way="why?",
+    )
+    # Remembered on the question's own thread, not on the Slack thread's.
+    recall = AsyncMock(side_effect=lambda thread, *_: (request, None) if thread == side else None)
+    monkeypatch.setattr(mda_forwarding, "recall", recall)
+    monkeypatch.setattr(mda_forwarding, "owned_conversation", AsyncMock(return_value=None))
+    prepare = _prepared(monkeypatch)
+    asked = slack_ask.AskChannelRun(
+        input={"messages": [{"role": "user", "content": "why?"}]},
+        configurable={"source": "slack", "github_login": "ada"},
+    )
+    prepare_ask = AsyncMock(return_value=asked)
+    monkeypatch.setattr(slack_channel, "prepare_ask_channel_run", prepare_ask)
+    app = FastAPI()
+    app.include_router(channel_api.router)
+
+    answered = await _post_endpoint(
+        app,
+        {**_PLAN, "channel_id": "C1", "thread_ts": "1.0"},
+        signed=True,
+        path="/mda/channel-api/plan_slack_turn",
+    )
+
+    start = answered.json()
+    assert start["thread_id"] == side
+    assert start["interrupts"] is False
+    assert start["run"]["input"] == asked.input
+    assert verify_runtime_token(start["run"]["context"]["__run_token"]).thread_id == side
+    assert start["run"]["metadata"]["slack_trigger_ts"] == "1.2"
+    prepare.assert_not_awaited()
+    [question] = prepare_ask.await_args.args
+    assert (question.question, question.thread_id, question.reply_thread_ts) == (
+        "why?",
+        side,
+        "1.0",
+    )
+    assert question.message_ts == "1.2"

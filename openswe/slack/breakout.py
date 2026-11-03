@@ -2,9 +2,11 @@
 
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from uuid import uuid4
 
+from openswe.slack import mda_forwarding
 from openswe.slack import webhook as service
 from openswe.slack.blocks import block_payload, section
 from openswe.slack.breakout_destination import resolve_breakout_destination
@@ -24,6 +26,7 @@ from openswe.slack.client import (
 from openswe.slack.http import SlackRequestError
 from openswe.slack.move import move_slack_thread
 from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
+from openswe.slack.records import bind_slack_thread_id
 from openswe.slack.request import SlackRequest
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
@@ -35,6 +38,9 @@ logger = logging.getLogger(__name__)
 _CHANNEL_MENTION_RE = re.compile(r"<#(?P<channel_id>[CG][A-Z0-9]+)(?:\|[^>]*)?>")
 _TITLE_MAX_CHARS = 160
 _CHANNEL_REJECTED = {"channel_not_found", "not_in_channel", "is_archived"}
+
+#: Hands a new breakout thread's first turn to MDA's Slack channel.
+type HandToMda = Callable[[SlackRequest, common.SlackRepoResolution | None], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -166,6 +172,7 @@ async def _start(
     repo: common.SlackRepoResolution | None,
     *,
     inherited_workspace: str | None = None,
+    hand_to_mda: HandToMda | None = None,
 ) -> None:
     if (
         target != request.channel_id
@@ -194,7 +201,16 @@ async def _start(
         )
         return
     await _mark_done(request, target, new_ts)
-    thread_id = await common.resolve_slack_thread_id(langgraph_client(), target, new_ts)
+    if hand_to_mda is None:
+        thread_id = await common.resolve_slack_thread_id(langgraph_client(), target, new_ts)
+    else:
+        # MDA's channel runs it on the command's own thread, which the new Slack thread joins.
+        thread_id = mda_forwarding.side_thread_id(request.channel_id, _command_ts(request))
+        await bind_slack_thread_id(target, new_ts, thread_id)
+        await mda_forwarding.claim_side(
+            thread_id,
+            owner_login=await service.slack_login(request.user_id) if request.user_id else None,
+        )
     web_url = dashboard_thread_url(thread_id)
     if web_url:
         try:
@@ -218,27 +234,28 @@ async def _start(
             slack_user_id=request.user_id or None,
             thread_id=request.thread_id or thread_id,
         )
-    await service.process_slack_mention(
-        request.model_copy(
-            update={
-                "channel_id": target,
-                "thread_ts": new_ts,
-                "thread_id": thread_id,
-                "text": command.thread_text,
-                "context_channel_id": request.channel_id,
-                "context_thread_ts": request.thread_ts,
-                "breakout_root_suffix": root_text[len(heading) :],
-                "prior_message_text": command.prior_text,
-                **(
-                    {"channel_context": None, "concierge_mode": False, "reply_thread_ts": ""}
-                    if moved_channel
-                    else {}
-                ),
-            }
-        ),
-        repo,
-        inherited_workspace=inherited_workspace,
+    opening = request.model_copy(
+        update={
+            "channel_id": target,
+            "thread_ts": new_ts,
+            "thread_id": thread_id,
+            "text": command.thread_text,
+            "context_channel_id": request.channel_id,
+            "context_thread_ts": request.thread_ts,
+            "breakout_root_suffix": root_text[len(heading) :],
+            "prior_message_text": command.prior_text,
+            "inherited_workspace": inherited_workspace,
+            **(
+                {"channel_context": None, "concierge_mode": False, "reply_thread_ts": ""}
+                if moved_channel
+                else {}
+            ),
+        }
     )
+    if hand_to_mda is not None:
+        await hand_to_mda(opening, repo)
+        return
+    await service.process_slack_mention(opening, repo, inherited_workspace=inherited_workspace)
 
 
 async def process_slack_web(
@@ -282,9 +299,17 @@ async def process_slack_web(
 
 
 async def process_slack_breakout(
-    request: SlackRequest, command: BreakoutCommand, repo: common.SlackRepoResolution | None
+    request: SlackRequest,
+    command: BreakoutCommand,
+    repo: common.SlackRepoResolution | None,
+    *,
+    hand_to_mda: HandToMda | None = None,
 ) -> None:
-    """Move this thread when bare; otherwise start a new one seeded with this thread's transcript."""
+    """Move this thread when bare; otherwise start a new one seeded with this thread's transcript.
+
+    With ``hand_to_mda``, a new thread's first turn goes to MDA's Slack channel, which
+    runs the new Slack thread from then on; moving a thread stays here.
+    """
     try:
         if command.channel and not command.channel_id:
             await _tell_sender(
@@ -315,6 +340,7 @@ async def process_slack_breakout(
                 target,
                 repo,
                 inherited_workspace=destination.workspace if not command.channel_id else None,
+                hand_to_mda=hand_to_mda,
             )
         else:
             await _move(request, target)

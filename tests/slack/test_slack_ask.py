@@ -7,6 +7,7 @@ from openswe.slack import ask as slack_ask
 from openswe.slack import routes as slack_routes
 from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext, SlackMessage
+from openswe.slack.request import SlackRequest
 from openswe.slack.tools import reply as slack_reply
 from openswe.tasks import schemas as task_schemas
 from openswe.tasks import service as task_service
@@ -205,3 +206,63 @@ async def test_an_unreplaceable_acknowledgement_falls_back_to_a_fresh_ephemeral(
     assert await slack_reply.slack_reply("the answer", "final") == {"success": True}
 
     assert post.await_args.args == ("C1", "U1", "the answer")
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("linked_asker")
+async def test_a_by_the_way_question_for_mda_is_prepared_not_dispatched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reaction = AsyncMock()
+    monkeypatch.setattr(slack_ask, "add_slack_reaction", reaction)
+    monkeypatch.setattr(
+        slack_ask.common,
+        "get_slack_repo_config",
+        AsyncMock(return_value=slack_ask.common.SlackRepoResolution()),
+    )
+    upsert = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_ask.common, "upsert_agent_thread_metadata", upsert)
+    dispatch = AsyncMock()
+    monkeypatch.setattr(slack_ask, "dispatch_agent_run", dispatch)
+    monkeypatch.setattr(slack_ask, "fetch_slack_thread_messages", AsyncMock(return_value=[]))
+    remembered = SlackRequest(
+        channel_id="C1",
+        thread_ts="123.456",
+        original_message_ts="123.789",
+        user_id="U1",
+        team_id="T1",
+        thread_id="side-1",
+        by_the_way="why?",
+    )
+
+    run = await slack_ask.prepare_ask_channel_run(slack_ask.by_the_way_request(remembered))
+
+    assert run is not None
+    dispatch.assert_not_awaited()
+    # MDA's Slack channel shows the run as working; the backend adds no reaction of its own.
+    reaction.assert_not_awaited()
+    assert upsert.await_args.args[0] == "side-1"
+    assert upsert.await_args.kwargs["unlisted"] is True
+    assert run.configurable["slack_by_the_way_thread_ts"] == "123.456"
+    assert run.configurable["slack_by_the_way_message_ts"] == "123.789"
+    assert run.input["messages"]
+
+
+@pytest.mark.asyncio
+async def test_a_by_the_way_question_for_mda_without_a_question_starts_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    refuse = AsyncMock()
+    monkeypatch.setattr(slack_ask, "_refuse", refuse)
+    request = slack_ask.SlackAskRequest(
+        channel_id="C1",
+        user_id="U1",
+        question="",
+        thread_id="side-1",
+        command=slack_ask.BY_THE_WAY_COMMAND,
+        reply_thread_ts="123.456",
+        message_ts="123.789",
+    )
+
+    assert await slack_ask.prepare_ask_channel_run(request) is None
+    refuse.assert_awaited_once()

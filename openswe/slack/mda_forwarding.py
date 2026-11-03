@@ -34,6 +34,7 @@ from pydantic import JsonValue
 from openswe.dispatch import CHANNEL_METADATA_KEY, channel_of
 from openswe.jobs import queue
 from openswe.run_config import Repo
+from openswe.slack.ask import by_the_way_request, process_slack_ask
 from openswe.slack.client import SlackThreadMappingError
 from openswe.slack.dm import CONCIERGE_TS
 from openswe.slack.records import bind_slack_thread_id, lookup_slack_thread_id
@@ -102,7 +103,8 @@ def mda_can_start(*, subtype: str, code_channel: bool, breakout: bool) -> bool:
     :func:`startable_concierge`). The rest needs the backend:
 
     - A code channel is one session for the whole channel, which MDA can't hold yet.
-    - Breakouts open flows of their own.
+    - Breakouts open flows of their own; one into a new thread reaches MDA on a thread of
+      its own (:func:`side_thread_id`).
     - Trigger Server ignores subtypes outside :data:`FORWARDED_SUBTYPES`.
     """
     return trigger_server_takes(subtype) and not (code_channel or breakout)
@@ -172,6 +174,21 @@ async def _adopt(thread_id: str, owner_login: str | None) -> None:
     if owner_login:
         metadata["owner_login"] = owner_login
     await adopt_channel_run(thread_id, CHANNEL, metadata=metadata)
+
+
+def side_thread_id(channel_id: str, message_ts: str) -> str:
+    """The thread a `/btw` question or a new breakout runs on, apart from its Slack thread's.
+
+    Derived from the message, so MDA's Slack channel finds the request remembered there
+    when it asks about the message (``plan_slack_turn``).
+    """
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-side:{channel_id}:{message_ts}"))
+
+
+async def claim_side(thread_id: str, *, owner_login: str | None = None) -> None:
+    """Make a side thread (:func:`side_thread_id`) MDA's channel's, before its request is
+    remembered."""
+    await _adopt(thread_id, owner_login)
 
 
 def concierge_thread_id(app_id: str, team_id: str, channel_id: str) -> str:
@@ -344,7 +361,10 @@ async def take_back(thread_id: str, message_ts: str) -> bool:
     released: dict[str, JsonValue] = {CHANNEL_METADATA_KEY: None}
     await index.update(thread_id, released)
     await RUNTIMES.local.update(thread_id, released)
-    await process_slack_mention(request, repo)
+    if request.by_the_way is not None:
+        await process_slack_ask(by_the_way_request(request))
+    else:
+        await process_slack_mention(request, repo, inherited_workspace=request.inherited_workspace)
     return True
 
 

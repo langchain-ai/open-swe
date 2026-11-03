@@ -145,6 +145,42 @@ async def test_a_refused_new_conversation_goes_back_to_the_backend(
     assert not visibility_is_settled(thread.metadata)
 
 
+async def test_a_refused_by_the_way_question_is_answered_on_the_backend(
+    monkeypatch: pytest.MonkeyPatch, replies: AsyncMock
+) -> None:
+    local = AsyncMock()
+    monkeypatch.setattr(type(router.RUNTIMES), "local", property(lambda _self: local))
+    asked = AsyncMock()
+    monkeypatch.setattr(mda_forwarding, "process_slack_ask", asked)
+    mention = AsyncMock()
+    monkeypatch.setattr(mda_forwarding, "process_slack_mention", mention)
+    thread_id = mda_forwarding.side_thread_id("C1", "1.1")
+    await mda_forwarding.claim_side(thread_id, owner_login="ada")
+    await mda_forwarding.remember(
+        SlackRequest(
+            channel_id="C1",
+            thread_ts="1.0",
+            original_message_ts="1.1",
+            user_id="U1",
+            thread_id=thread_id,
+            by_the_way="why?",
+        ),
+        None,
+        "1.1",
+    )
+
+    assert await mda_forwarding.take_back(thread_id, "1.1") is True
+
+    [(question,)] = [call.args for call in asked.await_args_list]
+    assert (question.question, question.thread_id, question.reply_thread_ts) == (
+        "why?",
+        thread_id,
+        "1.0",
+    )
+    mention.assert_not_awaited()
+    replies.assert_not_awaited()
+
+
 async def test_a_message_the_channel_took_is_not_taken_back(replies: AsyncMock) -> None:
     await index.create(THREAD, runtime="mda", metadata={"channel": "slack"})
     await mda_forwarding.remember(_request("A"), None, "1.1")

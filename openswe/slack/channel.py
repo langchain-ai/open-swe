@@ -47,6 +47,7 @@ from openswe.mda_channels.api import ChannelCall
 from openswe.mda_channels.auth import require_mda_channel
 from openswe.slack import mda_forwarding
 from openswe.slack import webhook as service
+from openswe.slack.ask import by_the_way_request, prepare_ask_channel_run
 from openswe.slack.dm import CONCIERGE_TS
 from openswe.slack.payloads import SlackChannelContext, SlackInteraction
 from openswe.slack.request import SlackRequest
@@ -173,7 +174,7 @@ async def _turn(
     when the person is told so: the channel's handler replies with it."""
     fields = {"agent_thread_id": thread_id, "slack_message_ts": message_ts}
     remembered = None
-    for candidate in await _remembered_in(thread_id, channel_id, thread_ts):
+    for candidate in await _remembered_in(thread_id, channel_id, thread_ts, message_ts):
         remembered = await mda_forwarding.recall(candidate, message_ts, webhook_id)
         if remembered is not None:
             break
@@ -237,13 +238,18 @@ async def _refused_channel(request: SlackRequest, fields: dict[str, str]) -> Sla
     return SlackTurnStart()
 
 
-async def _remembered_in(thread_id: str, channel_id: str, thread_ts: str) -> list[str]:
-    """The Slack thread's own thread, then a concierge DM's it is bound to."""
+async def _remembered_in(
+    thread_id: str, channel_id: str, thread_ts: str, message_ts: str = ""
+) -> list[str]:
+    """The Slack thread's own thread, then a concierge DM's it is bound to, then the
+    message's own (a `/btw` question's or a new breakout's)."""
     threads = [thread_id]
     if channel_id and thread_ts:
         owner = await mda_forwarding.owned_conversation(channel_id, thread_ts)
         if owner is not None and owner not in threads:
             threads.append(owner)
+    if channel_id and message_ts:
+        threads.append(mda_forwarding.side_thread_id(channel_id, message_ts))
     return threads
 
 
@@ -373,6 +379,20 @@ async def _click_request(
     )
 
 
+async def _prepare_by_the_way(request: SlackRequest) -> service.SlackChannelRun | None:
+    """A `/btw` question's run on its own thread. Its refusals and the prompt to connect an
+    account reach the asker privately, as on the backend, so it never declines."""
+    asked = await prepare_ask_channel_run(by_the_way_request(request))
+    if asked is None:
+        return None
+    return service.SlackChannelRun(
+        input=asked.input,
+        configurable=cast(dict[str, JsonValue], asked.configurable),
+        trigger_ts=request.original_message_ts,
+        interrupts=False,
+    )
+
+
 async def _prepare_run(
     thread_id: str,
     request: SlackRequest,
@@ -380,7 +400,10 @@ async def _prepare_run(
     *,
     declines: bool = False,
 ) -> SlackTurnStart:
-    prepared = await service.prepare_slack_channel_run(request, repo, declines=declines)
+    if request.by_the_way is not None:
+        prepared = await _prepare_by_the_way(request)
+    else:
+        prepared = await service.prepare_slack_channel_run(request, repo, declines=declines)
     if prepared is None:
         return SlackTurnStart()
     if isinstance(prepared, SlackTurnDeclined):

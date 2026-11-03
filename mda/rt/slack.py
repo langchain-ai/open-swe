@@ -6,7 +6,8 @@ the backend what a message starts (``plan_slack_turn``): it builds the run from
 that request, as for its own Slack runs, and signs its context. A mention, a
 direct message or an explicit request redirects the thread's work in progress;
 any other follow-up waits its turn behind it, as on the backend's own Slack
-threads. A concierge DM's runs go on the DM's one thread, which the backend names.
+threads. A concierge DM's runs go on the DM's one thread, and a `/btw` question's or a
+new breakout's on one of its own, which the backend names.
 When the backend starts nothing and says why, such as a person who must sign in to
 Open SWE first, the handler replies with it in the Slack thread.
 """

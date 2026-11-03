@@ -790,7 +790,9 @@ async def prepare_slack_channel_run(
     nothing starts, and the channel's handler replies with it.
     """
     capture = _ChannelRunCapture(declines=declines)
-    await _process_slack_mention_impl(request, repo, channel_run=capture)
+    await _process_slack_mention_impl(
+        request, repo, inherited_workspace=request.inherited_workspace, channel_run=capture
+    )
     return capture.declined or capture.run
 
 

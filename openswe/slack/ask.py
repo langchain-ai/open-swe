@@ -10,11 +10,13 @@ never touches the agent thread that Slack thread already maps to.
 import logging
 import re
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel
 
-from openswe.dispatch import dispatch_agent_run
+from openswe.dispatch import dispatch_agent_run, dispatch_input
+from openswe.input_messages import RunInput
 from openswe.prompts import prompt
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
@@ -31,6 +33,7 @@ from openswe.slack.client import (
 )
 from openswe.slack.parsed_message import SlackAction
 from openswe.slack.payloads import SlackChannelContext, SlackMessage
+from openswe.slack.request import SlackRequest
 from openswe.slack.thinking import settle_slack_thread_status
 from openswe.slack.webhook import workspace_scoped_default_repo
 from openswe.source_context import SlackThreadRef, SourceContext
@@ -82,6 +85,33 @@ class SlackAskRequest(BaseModel):
     def in_slack_thread(self) -> bool:
         """Whether `/btw` was sent as a reply, so the thread rather than the channel is context."""
         return self.by_the_way and self.reply_thread_ts != self.message_ts
+
+
+@dataclass(frozen=True)
+class AskChannelRun:
+    """A `/btw` run, prepared for MDA's Slack channel to start on the question's own thread."""
+
+    input: RunInput
+    configurable: dict[str, Any]
+
+
+@dataclass
+class _AskRunCapture:
+    run: AskChannelRun | None = None
+
+
+def by_the_way_request(request: SlackRequest) -> SlackAskRequest:
+    """The `/btw` question a request handed to MDA's Slack channel asks, on its own thread."""
+    return SlackAskRequest(
+        channel_id=request.channel_id,
+        user_id=request.user_id,
+        question=request.by_the_way or "",
+        thread_id=request.thread_id or "",
+        command=BY_THE_WAY_COMMAND,
+        team_id=request.team_id,
+        reply_thread_ts=request.thread_ts,
+        message_ts=request.original_message_ts,
+    )
 
 
 def ask_thread_id(channel_id: str, user_id: str, invocation: str) -> str:
@@ -194,14 +224,20 @@ async def _runnable_login(request: SlackAskRequest, login: str | None, email: st
     return None
 
 
-async def _process_slack_ask(request: SlackAskRequest) -> None:
+async def _process_slack_ask(
+    request: SlackAskRequest, *, channel_run: _AskRunCapture | None = None
+) -> None:
     if request.response_url:
         await acknowledge_slack_command(
             request.response_url,
             _SHORTCUT_ACKNOWLEDGEMENT if request.selected_message else _ACKNOWLEDGEMENT,
         )
     if request.by_the_way:
-        await add_slack_reaction(request.channel_id, request.message_ts, "hourglass_flowing_sand")
+        # MDA's Slack channel shows a run it starts as working itself.
+        if channel_run is None:
+            await add_slack_reaction(
+                request.channel_id, request.message_ts, "hourglass_flowing_sand"
+            )
         if not request.question:
             await _refuse(request, _BY_THE_WAY_USAGE)
             return
@@ -304,6 +340,12 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         in_slack_thread=request.in_slack_thread,
         channel_context=await _request_context(request) or _NO_CHANNEL_CONTEXT,
     )
+    if channel_run is not None:
+        channel_run.run = AskChannelRun(
+            input=await dispatch_input(run_prompt, "slack", configurable),
+            configurable=configurable,
+        )
+        return
     await dispatch_agent_run(thread_id, run_prompt, configurable, source="slack", thread_title=None)
     logger.info(
         "Started a one-off Slack question run",
@@ -313,6 +355,18 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
             "by_the_way": request.by_the_way,
         },
     )
+
+
+async def prepare_ask_channel_run(request: SlackAskRequest) -> AskChannelRun | None:
+    """The run a `/btw` question starts, without starting it; ``None`` when it starts none.
+
+    Everything else happens as for the backend's own: the asker hears a refusal or the
+    prompt to connect an account privately, and the question's thread gets its metadata.
+    MDA's Slack channel starts the run (``openswe.slack.channel``).
+    """
+    capture = _AskRunCapture()
+    await _process_slack_ask(request, channel_run=capture)
+    return capture.run
 
 
 async def process_slack_ask(request: SlackAskRequest) -> None:

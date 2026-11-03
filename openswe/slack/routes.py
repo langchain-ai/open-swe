@@ -152,6 +152,32 @@ def _hand_to_mda(
     return accepted(message)
 
 
+async def _hand_breakout_to_mda(
+    body: bytes,
+    headers: dict[str, str],
+    event_id: str,
+    message_ts: str,
+    opening: SlackRequest,
+    repo: common.SlackRepoResolution | None,
+) -> None:
+    """Forward a breakout command to MDA's Slack channel once its new Slack thread is open.
+
+    ``opening`` is the new thread's first turn, remembered on the command's own thread,
+    which the channel asks about when Trigger Server hands it the command.
+    """
+    if opening.thread_id is None:
+        return
+    await mda_forwarding.remember(opening, repo, message_ts)
+    await mda_forwarding.forward_to_trigger_server(
+        mda_forwarding.TRIGGER_EVENTS_URL,
+        body,
+        headers,
+        thread_id=opening.thread_id,
+        message_ts=message_ts,
+        event_id=event_id,
+    )
+
+
 async def _queue_code_channel_turn(
     background_tasks: common.BackgroundTasks,
     *,
@@ -850,6 +876,40 @@ async def slack_webhook(
         if by_the_way is not None:
             if not await common.claim_slack_event(event_id, channel_id, event_ts):
                 return ignored("Duplicate Slack event delivery")
+            if mda_forwarding.trigger_server_takes(event.subtype):
+                # Answered by MDA's Slack channel on a thread of its own, whoever owns the
+                # Slack thread it was asked in.
+                side_thread = mda_forwarding.side_thread_id(channel_id, original_message_ts)
+                await mda_forwarding.claim_side(
+                    side_thread, owner_login=await service.slack_login(user_id)
+                )
+                await mda_forwarding.remember(
+                    SlackRequest(
+                        channel_id=channel_id,
+                        thread_ts=thread_ts,
+                        event_ts=event_ts,
+                        original_message_ts=original_message_ts,
+                        event_id=event_id,
+                        user_id=user_id,
+                        text=text,
+                        bot_user_id=bot_user_id,
+                        thread_id=side_thread,
+                        team_id=team_id,
+                        explicit_mention=True,
+                        by_the_way=by_the_way,
+                    ),
+                    None,
+                    original_message_ts,
+                )
+                return _hand_to_mda(
+                    background_tasks,
+                    body,
+                    slack_headers,
+                    "Slack by-the-way question handed to MDA",
+                    thread_id=side_thread,
+                    event_id=event_id,
+                    message_ts=original_message_ts,
+                )
             background_tasks.add_task(
                 process_slack_ask,
                 SlackAskRequest(
@@ -868,6 +928,17 @@ async def slack_webhook(
         # A conversation MDA owns, or a new one MDA's Slack channel can start, goes there.
         # A code channel stays on the backend; a concierge DM moves as a whole (``thread_ts``).
         root_ts = reply_thread_ts or original_message_ts
+        breakout = BreakoutCommand.from_message(message)
+        # A breakout into a new thread goes to MDA's Slack channel, which runs the new Slack
+        # thread; moving this thread, or breaking out to the web, stays here.
+        breakout_in_mda = (
+            message.action is SlackAction.BREAKOUT
+            and bool(breakout.instruction)
+            and explicit_mention
+            and not (in_code_channel or in_dm_channel)
+            and allowed_bot is None
+            and mda_forwarding.trigger_server_takes(event.subtype)
+        )
         can_start = mda_forwarding.mda_can_start(
             subtype=event.subtype,
             code_channel=in_code_channel,
@@ -957,6 +1028,17 @@ async def slack_webhook(
                 triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
                 triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
             )
+            if breakout_in_mda:
+                background_tasks.add_task(
+                    process_slack_breakout,
+                    request,
+                    breakout,
+                    repo,
+                    hand_to_mda=functools.partial(
+                        _hand_breakout_to_mda, body, slack_headers, event_id, original_message_ts
+                    ),
+                )
+                return accepted("Slack breakout queued")
             if new_mda_thread_id is not None:
                 # Claimed only now, so nothing that fails before the hand-off strands the
                 # conversation on MDA with no message for its channel.
@@ -996,18 +1078,14 @@ async def slack_webhook(
                 and not in_dm_channel
                 and allowed_bot is None
             ):
-                background_tasks.add_task(
-                    process_slack_web, request, BreakoutCommand.from_message(message), repo
-                )
+                background_tasks.add_task(process_slack_web, request, breakout, repo)
                 return accepted("Slack web question queued")
             if (
                 message.action is SlackAction.BREAKOUT
                 and not (in_code_channel or in_dm_channel)
                 and allowed_bot is None
             ):
-                background_tasks.add_task(
-                    process_slack_breakout, request, BreakoutCommand.from_message(message), repo
-                )
+                background_tasks.add_task(process_slack_breakout, request, breakout, repo)
                 return accepted("Slack breakout queued")
             background_tasks.add_task(service.process_slack_mention, request, repo)
             return accepted("Slack mention queued")

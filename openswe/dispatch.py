@@ -121,9 +121,10 @@ V3_RUN_STREAM_MODES: tuple[str, ...] = (
 )
 
 
-async def _dispatch_input(
+async def dispatch_input(
     content: ContentBlocks, source: str, configurable: dict[str, Any]
 ) -> RunInput:
+    """The input :func:`dispatch_agent_run` gives a run of ``content``."""
     surface: Surface = (
         source if source in {"slack", "linear", "github", "web", "eval"} else "automation"
     )  # type: ignore[assignment]
@@ -508,7 +509,7 @@ async def dispatch_agent_run(
                 systems=systems,
             )
             if context is not None
-            else await _dispatch_input(content, source, configurable)
+            else await dispatch_input(content, source, configurable)
         )
     client = client or dispatch_client()
     return await create_durable_run(

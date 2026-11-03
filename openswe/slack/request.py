@@ -33,6 +33,10 @@ class SlackRequest(BaseModel):
     context_channel_id: str = ""
     breakout_root_suffix: str | None = None
     prior_message_text: str = ""
+    # A breakout's workspace, inherited from the thread it broke out of.
+    inherited_workspace: str | None = None
+    # A `/btw` question, answered on this request's thread rather than as a turn.
+    by_the_way: str | None = None
     # Guidance for this turn alone, from whatever stood in for a typed message.
     turn_context: str = ""
     treat_all_messages_as_mentions: bool = False
