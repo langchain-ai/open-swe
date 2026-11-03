@@ -43,7 +43,10 @@ import {
   useModelOptions,
 } from "@/features/agents/lib/provider/useModelOptions"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
-import { localThreadKeys } from "@/features/agents/lib/desktopLocal"
+import {
+  localThreadKeys,
+  useLocalThreads,
+} from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { agentsApi } from "@/features/agents/lib/api"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
@@ -54,6 +57,7 @@ import {
 } from "@/features/agents/lib/gitPanelPreferences"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import { useCreateProject, useProjects } from "@/features/projects/lib/projects"
+import { useFolderProject } from "@/features/projects/lib/desktopFolders"
 import { api } from "@/lib/api"
 import { hasLinkedGitHub } from "@/lib/linkedGitHub"
 import { useProfile, useRepos } from "@/lib/profile"
@@ -129,11 +133,13 @@ export function AgentsHome({
   )
   const defaultWorkspaceSlug = workspaceOptionsQuery.data?.default_slug ?? null
   const { projects } = useProjects({ enabled: cloudEnabled })
+  const folderProject = useFolderProject()
+  const localThreads = useLocalThreads()
   const createProject = useCreateProject()
   const [projectId, setProjectId] = useState<string | null>(
     initialProject ?? null
   )
-  // A project brings its workspace and repository until the person picks others.
+  // A project brings its workspace and repository; picking a repository leaves it.
   const selectedProject = projects.find((project) => project.id === projectId)
   const [submitted, setSubmitted] = useState<{
     draft: CreateAgentThreadVariables
@@ -213,10 +219,13 @@ export function AgentsHome({
           (candidate) =>
             candidate.full_name.toLowerCase() === rememberedRepo?.toLowerCase()
         )?.full_name
+  // A project without a repository works without one, like "No project".
   const repoSelection =
     repoOverride !== undefined
       ? repoOverride
-      : (selectedProject?.repo_full_name ?? restoredRepo)
+      : selectedProject
+        ? selectedProject.repo_full_name
+        : restoredRepo
   const userDefaultRepo = profileQuery.data?.default_repo ?? null
 
   // Workspace first: an explicit pick, else the workspace preferring a
@@ -575,10 +584,12 @@ export function AgentsHome({
         visibility === "private" ? "private" : "workspace"
       if (selectedWorkspace) configurable.workspace = selectedWorkspace
     }
-    // A This Mac thread is filed in its folder's project.
-    const runProjectId = localRun
-      ? projects.find((project) => project.id === localCheckout?.projectId)?.id
-      : selectedProject?.id
+    // A This Mac thread is filed in its folder's project, linked first if the
+    // folder is new.
+    const runProjectId =
+      localRun && localCheckout
+        ? await folderProject(localCheckout, localThreads.data)
+        : selectedProject?.id
     if (runProjectId) configurable.project_id = runProjectId
 
     const threadId = crypto.randomUUID()

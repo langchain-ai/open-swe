@@ -863,14 +863,6 @@ export const ChatComposer = memo(function ChatComposer({
   )
   const targetControls = (onRepoChange || runTarget || onWorkspaceChange) && (
     <>
-      {runTarget !== "local" && onProjectChange && onCreateProject && (
-        <ProjectSelector
-          onCreate={onCreateProject}
-          onSelect={onProjectChange}
-          projects={projects}
-          selectedId={selectedProjectId}
-        />
-      )}
       {runTarget !== "local" && onWorkspaceChange && (
         <WorkspaceSelector
           workspaces={workspaceOptions}
@@ -879,21 +871,35 @@ export const ChatComposer = memo(function ChatComposer({
           side="top"
         />
       )}
+      {runTarget !== "local" && onProjectChange && onCreateProject && (
+        <ProjectSelector
+          onCreate={onCreateProject}
+          onRepoChange={gitHubLinkUser ? undefined : onRepoChange}
+          onSelect={onProjectChange}
+          projects={projects}
+          repos={gitHubLinkUser ? undefined : repos}
+          selectedId={selectedProjectId}
+          selectedRepo={selectedRepo}
+        />
+      )}
       {runTarget !== "local" && onRepoChange && gitHubLinkUser && (
         <GitHubLinkRepoSelector user={gitHubLinkUser} side="top" />
       )}
-      {runTarget !== "local" && onRepoChange && !gitHubLinkUser && (
-        <RepoSelector
-          emptySelectionLabel="Don't work in a repository"
-          noMatchesLabel="No matching repositories"
-          onRepoChange={onRepoChange}
-          placeholder="Select repository"
-          repos={repos}
-          searchPlaceholder="Search repositories…"
-          selectedRepo={selectedRepo}
-          side="top"
-        />
-      )}
+      {runTarget !== "local" &&
+        onRepoChange &&
+        !gitHubLinkUser &&
+        !onProjectChange && (
+          <RepoSelector
+            emptySelectionLabel="Don't work in a repository"
+            noMatchesLabel="No matching repositories"
+            onRepoChange={onRepoChange}
+            placeholder="Select repository"
+            repos={repos}
+            searchPlaceholder="Search repositories…"
+            selectedRepo={selectedRepo}
+            side="top"
+          />
+        )}
       {runTarget === "local" && (
         <LocalProjectSelector
           onAdd={onAddLocalRepo}
