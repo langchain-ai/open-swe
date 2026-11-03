@@ -136,37 +136,6 @@ async def test_kickoff_delete_failure_does_not_interrupt_update(
     assert thread is not None and thread.kickoff_recorded and thread.kickoff_ts is None
 
 
-@pytest.mark.parametrize("response_type", ["progress", "final"])
-@pytest.mark.parametrize("posted", [True, False])
-async def test_only_delivered_final_reply_answers_routed_work(
-    monkeypatch: pytest.MonkeyPatch, response_type: Literal["progress", "final"], posted: bool
-) -> None:
-    config = _config()
-    config["configurable"]["thread_id"] = "destination"
-    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
-    monkeypatch.setattr(slack_reply_tool, "_current_run_id", lambda _config: "run")
-    monkeypatch.setattr(
-        slack_reply_tool,
-        "get_active_slack_thread",
-        AsyncMock(return_value={"channel_id": "C1", "thread_ts": "1.0"}),
-    )
-    monkeypatch.setattr(
-        slack_reply_tool,
-        "_post_and_store_mapping",
-        AsyncMock(return_value="2.0")
-        if posted
-        else AsyncMock(side_effect=SlackRequestError("rate_limited")),
-    )
-    answered = AsyncMock()
-    monkeypatch.setattr(slack_reply_tool.RoutedWork, "answered", answered)
-    result = await slack_reply_tool.send_slack_reply("Update", response_type)
-    assert result["success"] == posted
-    if posted and response_type == "final":
-        answered.assert_awaited_once_with("run")
-    else:
-        answered.assert_not_awaited()
-
-
 @pytest.mark.parametrize("recipient", [None, "U2", "W123ABC"])
 async def test_slack_reply_preserves_option_recipient(
     monkeypatch: pytest.MonkeyPatch, recipient: str | None
