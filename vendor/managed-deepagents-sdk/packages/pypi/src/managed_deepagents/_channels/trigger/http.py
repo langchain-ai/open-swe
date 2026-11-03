@@ -15,6 +15,7 @@ from http import HTTPStatus
 from importlib import import_module
 from typing import (
     TYPE_CHECKING,
+    Any,
     Literal,
     NamedTuple,
     Never,
@@ -76,6 +77,7 @@ from managed_deepagents._channels.trigger.ingress import (
     ingress_resume_target,
     ingress_thread_exists,
     ingress_thread_interrupts,
+    ingress_thread_values,
     newer_ingress_run,
     observe_ingress_agent,
     other_active_ingress_run,
@@ -147,6 +149,9 @@ class TriggerChannelThread(TypedDict):
 
     id: str
     source_thread_key: str
+    read_state: NotRequired[Callable[[], Awaitable[dict[str, Any] | None]]]
+    """Reads the thread's state values as its conversation's runs do; set only
+    while a handler decides an event."""
 
 
 @dataclass(frozen=True)
@@ -263,6 +268,17 @@ class ThreadExistsFn(Protocol):
         source_thread_key: str,
         user_id: str,
     ) -> bool: ...
+
+
+class ThreadValuesFn(Protocol):
+    async def __call__(
+        self,
+        *,
+        thread_id: str,
+        source_provider: str,
+        source_thread_key: str,
+        user_id: str,
+    ) -> dict[str, Any] | None: ...
 
 
 class NewerRunFn(Protocol):
@@ -667,6 +683,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     resume_agent: ResumeAgentFn | None = None,
     thread_interrupts: ThreadInterruptsFn | None = None,
     thread_exists: ThreadExistsFn | None = None,
+    thread_values: ThreadValuesFn | None = None,
     newer_run: NewerRunFn | None = None,
     other_active_run: OtherActiveRunFn | None = None,
     resume_target: ResumeTargetFn | None = None,
@@ -859,6 +876,15 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     thread: TriggerChannelThread = {
         "id": thread_id,
         "source_thread_key": event["source_thread_key"],
+        # As the conversation's runs read it: under its owner key, which is a
+        # code channel's own.
+        "read_state": functools.partial(
+            thread_values or ingress_thread_values,
+            thread_id=thread_id,
+            source_provider=source_provider,
+            source_thread_key=owner_key,
+            user_id=user_id,
+        ),
     }
 
     # The interrupt a prompt response answers; one that answers none starts a
@@ -1901,6 +1927,7 @@ __all__ = [
     "NewerRunFn",
     "OnlyContinuesThreadFn",
     "ThreadExistsFn",
+    "ThreadValuesFn",
     "TriggerChannelThread",
     "TriggerFinishedEvent",
     "TriggerMessageBackground",
