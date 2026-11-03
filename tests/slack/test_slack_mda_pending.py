@@ -181,6 +181,38 @@ async def test_a_refused_by_the_way_question_is_answered_on_the_backend(
     replies.assert_not_awaited()
 
 
+async def test_a_refused_web_breakout_is_started_on_the_backend(
+    monkeypatch: pytest.MonkeyPatch, replies: AsyncMock
+) -> None:
+    local = AsyncMock()
+    monkeypatch.setattr(type(router.RUNTIMES), "local", property(lambda _self: local))
+    web = AsyncMock(return_value=True)
+    monkeypatch.setattr(mda_forwarding, "process_slack_web_mention", web)
+    notify = AsyncMock()
+    monkeypatch.setattr(mda_forwarding, "notify_web_breakout", notify)
+    thread_id = mda_forwarding.side_thread_id("C1", "1.1")
+    await mda_forwarding.claim_side(thread_id, owner_login="ada")
+    opening = SlackRequest(
+        channel_id="C1",
+        thread_ts="1.0",
+        user_id="U1",
+        thread_id=thread_id,
+        web_only=True,
+        context_channel_id="C1",
+        context_thread_ts="1.0",
+        inherited_workspace="engineering",
+    )
+    await mda_forwarding.remember(opening, None, "1.1")
+
+    assert await mda_forwarding.take_back(thread_id, "1.1") is True
+
+    [(request, repo)] = [call.args for call in web.await_args_list]
+    assert (request.thread_id, request.web_only, repo) == (thread_id, True, None)
+    assert web.await_args.kwargs == {"inherited_workspace": "engineering"}
+    notify.assert_awaited_once()
+    replies.assert_not_awaited()
+
+
 async def test_a_message_the_channel_took_is_not_taken_back(replies: AsyncMock) -> None:
     await index.create(THREAD, runtime="mda", metadata={"channel": "slack"})
     await mda_forwarding.remember(_request("A"), None, "1.1")

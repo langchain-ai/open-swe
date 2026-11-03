@@ -35,11 +35,16 @@ from openswe.dispatch import CHANNEL_METADATA_KEY, channel_of
 from openswe.jobs import queue
 from openswe.run_config import Repo
 from openswe.slack.ask import by_the_way_request, process_slack_ask
+from openswe.slack.breakout_links import notify_web_breakout
 from openswe.slack.client import SlackThreadMappingError
 from openswe.slack.dm import CONCIERGE_TS
 from openswe.slack.records import bind_slack_thread_id, lookup_slack_thread_id
 from openswe.slack.request import SlackRequest
-from openswe.slack.webhook import notify_slack_processing_error, process_slack_mention
+from openswe.slack.webhook import (
+    notify_slack_processing_error,
+    process_slack_mention,
+    process_slack_web_mention,
+)
 from openswe.threads import index
 from openswe.threads.router import adopt_channel_run
 from openswe.threads.runtimes import RUNTIMES
@@ -368,6 +373,11 @@ async def take_back(thread_id: str, message_ts: str) -> bool:
     await RUNTIMES.local.update(thread_id, released)
     if request.by_the_way is not None:
         await process_slack_ask(by_the_way_request(request))
+    elif request.web_only:
+        if await process_slack_web_mention(
+            request, repo, inherited_workspace=request.inherited_workspace
+        ):
+            await notify_web_breakout(request)
     else:
         await process_slack_mention(request, repo, inherited_workspace=request.inherited_workspace)
     return True

@@ -30,7 +30,12 @@ from openswe.slack.ask import (
     ask_thread_id,
     process_slack_ask,
 )
-from openswe.slack.breakout import BreakoutCommand, process_slack_breakout, process_slack_web
+from openswe.slack.breakout import (
+    BreakoutCommand,
+    process_slack_breakout,
+    process_slack_web,
+    web_opening,
+)
 from openswe.slack.channels import DIRECTORY_EVENTS, SlackChannel
 from openswe.slack.dm import CONCIERGE_TS, is_dm_channel
 from openswe.slack.failures import (
@@ -930,7 +935,7 @@ async def slack_webhook(
         root_ts = reply_thread_ts or original_message_ts
         breakout = BreakoutCommand.from_message(message)
         # A breakout into a new thread goes to MDA's Slack channel, which runs the new Slack
-        # thread; moving this thread, or breaking out to the web, stays here.
+        # thread.
         breakout_in_mda = (
             message.action is SlackAction.BREAKOUT
             and bool(breakout.instruction)
@@ -939,10 +944,23 @@ async def slack_webhook(
             and allowed_bot is None
             and mda_forwarding.trigger_server_takes(event.subtype)
         )
-        # A bare breakout moves this thread: in a conversation MDA holds, its run does.
+        # A web breakout goes to MDA's Slack channel too, on a thread of its own; its later
+        # turns happen on the dashboard.
+        web_in_mda = (
+            message.action is SlackAction.BREAKOUT_WEB
+            and bool(breakout.instruction)
+            and explicit_mention
+            and not (in_code_channel or in_dm_channel)
+            and allowed_bot is None
+            and mda_forwarding.trigger_server_takes(event.subtype)
+        )
+        # A bare breakout moves this thread: in a conversation MDA holds, its run does, into
+        # the channel the command names, if any. One naming no channel Slack knows is
+        # answered by the backend's breakout, which says so.
         moves_thread = (
             message.action is SlackAction.BREAKOUT
             and not breakout.instruction
+            and not (breakout.channel and not breakout.channel_id)
             and explicit_mention
             and not (in_code_channel or in_dm_channel or in_concierge_mode)
             and allowed_bot is None
@@ -1036,6 +1054,34 @@ async def slack_webhook(
                 triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
                 triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
             )
+            if web_in_mda:
+                side_thread = mda_forwarding.side_thread_id(channel_id, original_message_ts)
+                await mda_forwarding.claim_side(
+                    side_thread, owner_login=await service.slack_login(user_id)
+                )
+                await mda_forwarding.remember(
+                    await web_opening(request, breakout, side_thread), repo, original_message_ts
+                )
+                return _hand_to_mda(
+                    background_tasks,
+                    body,
+                    slack_headers,
+                    "Slack web question handed to MDA",
+                    thread_id=side_thread,
+                    event_id=event_id,
+                    message_ts=original_message_ts,
+                )
+            if (
+                message.action is SlackAction.BREAKOUT
+                and breakout.channel
+                and not breakout.channel_id
+                and mda_thread_id is not None
+                and not (in_code_channel or in_dm_channel)
+                and allowed_bot is None
+            ):
+                # Names no channel Slack knows: the backend's breakout says so.
+                background_tasks.add_task(process_slack_breakout, request, breakout, repo)
+                return accepted("Slack breakout queued")
             if breakout_in_mda:
                 background_tasks.add_task(
                     process_slack_breakout,
@@ -1073,7 +1119,9 @@ async def slack_webhook(
                     await mda_forwarding.join_concierge(channel_id, root_ts, mda_thread_id)
                 if moves_thread and new_mda_thread_id is None:
                     # The run on the conversation's thread moves it, through MDA.
-                    request = request.model_copy(update={"move_thread": True})
+                    request = request.model_copy(
+                        update={"move_thread": True, "move_channel_id": breakout.channel_id}
+                    )
                 await mda_forwarding.remember(request, repo, original_message_ts)
                 return _hand_to_mda(
                     background_tasks,

@@ -239,7 +239,9 @@ async def test_web_breakout_notifies_source_thread_only_after_starting(monkeypat
     monkeypatch.setattr(
         breakout.service, "process_slack_web_mention", AsyncMock(return_value=started)
     )
-    monkeypatch.setattr(breakout, "dashboard_thread_url", lambda _: "https://dashboard/agents/new")
+    monkeypatch.setattr(
+        breakout_links, "dashboard_thread_url", lambda _: "https://dashboard/agents/new"
+    )
     reply = AsyncMock()
     monkeypatch.setattr(breakout_links, "post_slack_thread_reply", reply)
 

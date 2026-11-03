@@ -190,17 +190,21 @@ class SlackMovePlan(BaseModel):
     # The new root's text; None when ``result`` answers already.
     root_text: str | None = None
     # Whether the run posts the root through MDA, which hands its thread to the new Slack
-    # thread: the move stays in the conversation's own Slack channel. Otherwise the
-    # backend's ``slack_move_thread`` moves it, as before.
+    # thread: the conversation is one MDA's Slack channel holds. Otherwise the backend's
+    # ``slack_move_thread`` moves it, as before.
     via_mda: bool = False
+    # Another Slack channel the new root goes into; None for the conversation's own.
+    channel_id: str | None = None
     # The answer when the checks stopped the move, or when it finished one an earlier
     # call left half done.
     result: dict[str, JsonValue] | None = None
 
 
 class SlackMoved(RunRequest):
-    # The new root the run posted through MDA, in the conversation's own Slack channel.
+    # The new root the run posted through MDA.
     thread_ts: Annotated[str, Field(pattern=r"^[0-9]+\.[0-9]+$")]
+    # The Slack channel it posted in, when not the conversation's own.
+    channel_id: Annotated[str | None, Field(pattern=r"^[CDG][A-Z0-9]+$")] = None
     # Whether the old Slack thread says where the conversation went, as ``/breakout`` does.
     mark_source: bool = False
 
@@ -211,7 +215,8 @@ class SlackMoveResult(BaseModel):
 
 
 #: On a run's last input message: a person's bare ``/breakout`` in the conversation, which
-#: the run moves before it calls the model.
+#: the run moves before it calls the model. ``True``, or the Slack channel id a
+#: ``/breakout #channel`` names.
 SLACK_MOVE_MARKER: Final = "open_swe_slack_move"
 
 SLACK_MOVE: Final = Endpoint(

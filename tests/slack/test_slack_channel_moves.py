@@ -43,15 +43,20 @@ def _checked(monkeypatch: pytest.MonkeyPatch, target: str = "C1") -> AsyncMock:
 def _held(monkeypatch: pytest.MonkeyPatch, channel: str | None = "slack") -> None:
     indexed = SimpleNamespace(metadata={"channel": channel})
     monkeypatch.setattr(channel_moves.index, "get", AsyncMock(return_value=indexed))
+    monkeypatch.setattr(channel_moves, "is_code_channel", AsyncMock(return_value=False))
 
 
 @pytest.mark.parametrize(
-    ("target", "channel", "via_mda"),
-    [("C1", "slack", True), ("C2", "slack", False), ("C1", None, False)],
+    ("target", "channel", "via_mda", "posts_in"),
+    [("C1", "slack", True, None), ("C2", "slack", True, "C2"), ("C1", None, False, None)],
     ids=["own channel", "another channel", "a thread the backend holds"],
 )
-async def test_only_a_move_in_its_own_channel_of_an_mda_conversation_goes_through_mda(
-    monkeypatch: pytest.MonkeyPatch, target: str, channel: str | None, via_mda: bool
+async def test_an_mda_conversation_moves_through_mda_into_any_channel(
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+    channel: str | None,
+    via_mda: bool,
+    posts_in: str | None,
 ) -> None:
     check = _checked(monkeypatch, target)
     _held(monkeypatch, channel)
@@ -62,10 +67,26 @@ async def test_only_a_move_in_its_own_channel_of_an_mda_conversation_goes_throug
 
     check.assert_awaited_once_with("Breakout", target)
     assert plan.via_mda is via_mda
+    assert plan.channel_id == posts_in
     assert plan.result is None
     assert plan.root_text is not None
     assert plan.root_text.startswith("Breakout")
     assert "https://dash/thread-1" in plan.root_text
+
+
+async def test_a_thread_never_moves_into_a_code_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _checked(monkeypatch, "C2")
+    _held(monkeypatch)
+    monkeypatch.setattr(channel_moves, "is_code_channel", AsyncMock(return_value=True))
+
+    plan = await channel_moves.prepare_channel_move(
+        SlackMoveRequest(run_id="run-1", message="Breakout", channel_id="C2")
+    )
+
+    assert plan.result == {"success": False, "error": "A thread cannot move into a code channel"}
+    assert (plan.root_text, plan.via_mda) == (None, False)
 
 
 async def test_a_move_the_checks_stop_answers_with_their_reason(
@@ -130,6 +151,51 @@ async def test_recording_a_move_rebinds_the_runs_own_thread_to_the_new_root(
         marked.assert_not_awaited()
 
 
-def test_a_recorded_move_names_a_slack_message() -> None:
+def _recording(monkeypatch: pytest.MonkeyPatch, *, private: bool = False) -> AsyncMock:
+    metadata = {"visibility": "private"} if private else {}
+    client = SimpleNamespace(
+        threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": metadata}))
+    )
+    monkeypatch.setattr(channel_moves, "langgraph_client", lambda: client)
+    monkeypatch.setattr(channel_moves, "get_active_slack_thread", AsyncMock(return_value=_ACTIVE))
+    record = AsyncMock(return_value={"success": True})
+    monkeypatch.setattr(channel_moves, "record_slack_move", record)
+    monkeypatch.setattr(channel_moves, "mark_broken_out", AsyncMock())
+    runtimes = SimpleNamespace(mda_runtime=SimpleNamespace(forget_channel_conversation=Mock()))
+    monkeypatch.setattr(channel_moves, "RUNTIMES", runtimes)
+    return record
+
+
+async def test_recording_a_move_into_another_channel_rebinds_the_thread_there(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = _recording(monkeypatch)
+
+    await channel_moves.record_channel_move(
+        SlackMoved(run_id="run-1", thread_ts="200.1", channel_id="C2", mark_source=True)
+    )
+
+    assert record.await_args.args[1:] == ("thread-1", _ACTIVE, "C2", "200.1")
+    cast(AsyncMock, channel_moves.mark_broken_out).assert_awaited_once_with(
+        "C1", "1.0", "C2", "200.1"
+    )
+
+
+async def test_a_private_thread_never_moves_into_another_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = _recording(monkeypatch, private=True)
+
+    result = await channel_moves.record_channel_move(
+        SlackMoved(run_id="run-1", thread_ts="200.1", channel_id="C2")
+    )
+
+    assert result.result["success"] is False
+    record.assert_not_awaited()
+
+
+def test_a_recorded_move_names_a_slack_message_and_channel() -> None:
     with pytest.raises(ValueError, match="pattern"):
         SlackMoved(thread_ts="C1/../2")
+    with pytest.raises(ValueError, match="pattern"):
+        SlackMoved(thread_ts="200.1", channel_id="general")

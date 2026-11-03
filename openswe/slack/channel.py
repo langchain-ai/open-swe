@@ -50,6 +50,7 @@ from openswe.mda_channels.auth import require_mda_channel
 from openswe.slack import mda_forwarding
 from openswe.slack import webhook as service
 from openswe.slack.ask import by_the_way_request, prepare_ask_channel_run
+from openswe.slack.breakout_links import notify_web_breakout
 from openswe.slack.dm import CONCIERGE_TS
 from openswe.slack.payloads import SlackChannelContext, SlackInteraction
 from openswe.slack.request import SlackRequest
@@ -71,6 +72,8 @@ _CLICK_CALL_TTL: Final = timedelta(minutes=10)
 #: A turn's decline is answered once per call; the claim outlives the call's retries.
 _DECLINE_SCOPE: Final = "slack_turn_decline"
 _DECLINE_TTL: Final = timedelta(minutes=10)
+#: Claims for the notice a ``/breakout:web`` posts in its Slack thread, one per call.
+_WEB_BREAKOUT_SCOPE: Final = "slack_web_breakout_notice"
 _WORKFLOW_PUSH_RETRY: Final = (
     "The workflow-file push approval was approved. Retry the blocked git push now; "
     "do not alter workflow files before pushing."
@@ -206,7 +209,16 @@ async def _turn(
         _no_run("no run prepared", **fields)
     elif run_thread != thread_id:
         start.thread_id = UUID(run_thread)
+    if start.run is not None and request.web_only:
+        await _notify_web_breakout(request, webhook_id)
     return start
+
+
+async def _notify_web_breakout(request: SlackRequest, webhook_id: str) -> None:
+    """Tell the Slack thread a ``/breakout:web`` came from where it continues, once."""
+    notice = f"{webhook_id}:{request.thread_id}"
+    if await event_claims.claim(_WEB_BREAKOUT_SCOPE, notice, ttl=_DECLINE_TTL):
+        await notify_web_breakout(request)
 
 
 async def _refused_channel(request: SlackRequest, fields: dict[str, str]) -> SlackTurnStart | None:
@@ -381,15 +393,16 @@ async def _click_request(
     )
 
 
-def _mark_move(run_input: RunInput) -> None:
-    """Have the run move its thread before it calls the model: a bare ``/breakout``.
+def _mark_move(run_input: RunInput, channel_id: str) -> None:
+    """Have the run move its thread before it calls the model: a bare ``/breakout``, into
+    ``channel_id`` when it names another Slack channel.
 
     MDA's ``rt.slack_move`` moves it and ends the run; what it posts and where it goes,
     the backend says as the run (``slack_move``).
     """
     messages = run_input["messages"]
     if messages:
-        messages[-1].setdefault("additional_kwargs", {})[SLACK_MOVE_MARKER] = True
+        messages[-1].setdefault("additional_kwargs", {})[SLACK_MOVE_MARKER] = channel_id or True
 
 
 async def _prepare_by_the_way(request: SlackRequest) -> service.SlackChannelRun | None:
@@ -422,7 +435,7 @@ async def _prepare_run(
     if isinstance(prepared, SlackTurnDeclined):
         return SlackTurnStart(declined=prepared)
     if request.move_thread:
-        _mark_move(prepared.input)
+        _mark_move(prepared.input, request.move_channel_id)
 
     run_config = await prepare_durable_run(
         "agent",

@@ -13,7 +13,7 @@ from openswe.slack.breakout_destination import resolve_breakout_destination
 from openswe.slack.breakout_links import (
     breakout_root_blocks,
     mark_broken_out,
-    notify_breakout,
+    notify_web_breakout,
     source_thread_line,
 )
 from openswe.slack.client import (
@@ -258,6 +258,29 @@ async def _start(
     await service.process_slack_mention(opening, repo, inherited_workspace=inherited_workspace)
 
 
+async def web_opening(
+    request: SlackRequest, command: BreakoutCommand, thread_id: str
+) -> SlackRequest:
+    """The first turn of the web conversation a ``/breakout:web`` starts on ``thread_id``,
+    seeded with the Slack thread it came from and that thread's workspace."""
+    return request.model_copy(
+        update={
+            "thread_id": thread_id,
+            "text": command.thread_text,
+            "context_channel_id": request.channel_id,
+            "context_thread_ts": request.thread_ts,
+            "prior_message_text": command.prior_text,
+            "web_only": True,
+            "code_channel": False,
+            "concierge_mode": False,
+            "reply_thread_ts": "",
+            "inherited_workspace": (
+                await common.get_thread_workspace(request.thread_id) if request.thread_id else None
+            ),
+        }
+    )
+
+
 async def process_slack_web(
     request: SlackRequest, command: BreakoutCommand, repo: common.SlackRepoResolution | None
 ) -> None:
@@ -267,32 +290,12 @@ async def process_slack_web(
         return
     thread_id = str(uuid4())
     try:
+        opening = await web_opening(request, command, thread_id)
         started = await service.process_slack_web_mention(
-            request.model_copy(
-                update={
-                    "thread_id": thread_id,
-                    "text": command.thread_text,
-                    "context_channel_id": request.channel_id,
-                    "context_thread_ts": request.thread_ts,
-                    "prior_message_text": command.prior_text,
-                    "web_only": True,
-                    "code_channel": False,
-                    "concierge_mode": False,
-                    "reply_thread_ts": "",
-                }
-            ),
-            repo,
-            inherited_workspace=(
-                await common.get_thread_workspace(request.thread_id) if request.thread_id else None
-            ),
+            opening, repo, inherited_workspace=opening.inherited_workspace
         )
         if started:
-            await notify_breakout(
-                request.channel_id,
-                request.thread_ts,
-                f"<@{request.user_id}> continued in a "
-                f"<{dashboard_thread_url(thread_id)}|private web breakout>.",
-            )
+            await notify_web_breakout(opening)
     except Exception:
         logger.exception("Slack web question failed", extra={"agent_thread_id": thread_id})
         await _tell_sender(request, "Could not start a web conversation; try again.")

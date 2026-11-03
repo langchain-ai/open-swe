@@ -3,12 +3,13 @@
 The run posts the new root through MDA with ``hand_off=True``, so the new Slack thread
 takes the run's own thread, history and all: its replies, Stop and buttons reach it from
 then on. The backend checks the move first and records where the thread went after,
-both as the run (``slack_move``, ``slack_moved``). A move into another Slack channel stays
-the backend's ``slack_move_thread``, which posts with the bot token, as before.
+both as the run (``slack_move``, ``slack_moved``). A move into another Slack channel
+posts there (``to=``). A thread the backend holds moves with the backend's
+``slack_move_thread``, which posts with the bot token, as before.
 
 Two things move a thread: the agent's ``slack_move_thread`` tool, and a person's bare
-``/breakout``, whose run the backend marks (``SLACK_MOVE_MARKER``) and which moves the
-thread before any model call, then ends.
+``/breakout`` or ``/breakout #channel``, whose run the backend marks
+(``SLACK_MOVE_MARKER``) and which moves the thread before any model call, then ends.
 """
 
 import json
@@ -22,7 +23,7 @@ from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
-from managed_deepagents import ManagedThread, RuntimeChannel
+from managed_deepagents import ManagedThread, RuntimeChannel, SlackChannelTarget
 from managed_deepagents._managed_thread import current_run_thread  # noqa: PLC2701
 from pydantic import JsonValue
 from runtime_api.endpoint import call
@@ -44,7 +45,7 @@ MOVE_TOOL: Final = "slack_move_thread"
 
 
 class SlackMoveMiddleware(AgentMiddleware):
-    """Move a Slack conversation through MDA when it stays in its own Slack channel.
+    """Move a Slack conversation MDA's Slack channel holds through MDA.
 
     Place it inside the transcript's reporting and outside ``RunToolsMiddleware``, which
     sends the tool to the backend otherwise.
@@ -72,7 +73,7 @@ class SlackMoveMiddleware(AgentMiddleware):
             channel_id=channel_id if isinstance(channel_id, str) and channel_id else None,
         )
         if result is None:
-            # Another channel: the backend's tool moves it, as before.
+            # A thread the backend holds: the backend's tool moves it, as before.
             return await handler(request)
         return ToolMessage(
             content=json.dumps(result), tool_call_id=call_["id"] or "", name=MOVE_TOOL
@@ -82,17 +83,25 @@ class SlackMoveMiddleware(AgentMiddleware):
     async def abefore_model(self, state: AgentState, runtime: Runtime) -> dict[str, object] | None:
         messages = state["messages"]
         last = messages[-1] if messages else None
-        if not (
-            isinstance(last, HumanMessage) and last.additional_kwargs.get(SLACK_MOVE_MARKER) is True
-        ):
+        marker = (
+            last.additional_kwargs.get(SLACK_MOVE_MARKER)
+            if isinstance(last, HumanMessage)
+            else None
+        )
+        if marker is not True and not isinstance(marker, str):
             return None
         channel = _slack_channel(runtime)
         post = channel.post if channel is not None else None
         if post is None:
             return None
-        result = await self._move(runtime, message=None, channel_id=None, mark_source=True)
+        result = await self._move(
+            runtime,
+            message=None,
+            channel_id=marker if isinstance(marker, str) else None,
+            mark_source=True,
+        )
         if result is None:
-            text = "I can move this conversation only within this Slack channel for now."
+            text = "Could not move this thread: try again."
         elif result.get("success") is True:
             text = "Moved this conversation to a new Slack thread."
         else:
@@ -109,7 +118,7 @@ class SlackMoveMiddleware(AgentMiddleware):
         channel_id: str | None,
         mark_source: bool = False,
     ) -> Mapping[str, JsonValue] | None:
-        """The move's answer, or ``None`` when the backend moves it into another channel."""
+        """The move's answer, or ``None`` when the backend holds the thread and moves it."""
         plan = await call(
             self._backend,
             SLACK_MOVE,
@@ -122,9 +131,13 @@ class SlackMoveMiddleware(AgentMiddleware):
         channel = _slack_channel(runtime)
         if channel is None or channel.post is None:
             return None
+        to = SlackChannelTarget(conversation_id=plan.channel_id) if plan.channel_id else None
         try:
             posted = await channel.post(
-                {"type": "content", "content": plan.root_text}, new_thread=True, hand_off=True
+                {"type": "content", "content": plan.root_text},
+                new_thread=True,
+                hand_off=True,
+                to=to,
             )
         except Exception as exc:  # noqa: BLE001 - the model or the person hears why
             logger.warning("Could not move a Slack conversation through MDA", exc_info=True)
@@ -132,7 +145,12 @@ class SlackMoveMiddleware(AgentMiddleware):
         moved = await call(
             self._backend,
             SLACK_MOVED,
-            SlackMoved(run_id=run_id(), thread_ts=posted["id"], mark_source=mark_source),
+            SlackMoved(
+                run_id=run_id(),
+                thread_ts=posted["id"],
+                channel_id=plan.channel_id,
+                mark_source=mark_source,
+            ),
         )
         return moved.result
 
