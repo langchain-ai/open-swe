@@ -942,7 +942,11 @@ async def test_a_person_who_cant_run_is_declined_before_anything_is_claimed_once
     again = await _start(app)
     other_call = await _start(app, msg_id="msg_delivery-2")
 
-    declined = {"reason": reason, "settings_url": "https://openswe.test/settings"}
+    declined = {
+        "reason": reason,
+        "settings_url": "https://openswe.test/settings",
+        "message": None,
+    }
     assert first == _NO_RUN | {"declined": declined}
     # MDA sends a call again under its webhook ID: the decline was answered already.
     assert again == _NO_RUN
@@ -1203,6 +1207,7 @@ async def test_a_breakout_opens_its_new_thread_and_runs_its_first_turn_there(
         *,
         hand_to_mda: Callable,
         branches: bool,
+        tell: Callable,
     ) -> None:
         seen.append((request, command))
         assert branches is False  # Not readable here: seeded from Slack.
@@ -1240,6 +1245,40 @@ async def test_a_breakout_that_opens_nothing_starts_nothing(
     prepare.assert_not_awaited()
     [record] = [r for r in caplog.records if hasattr(r, "no_run_reason")]
     assert record.no_run_reason == "breakout opened nothing"
+
+
+async def test_a_breakout_that_opens_nothing_says_why_in_the_thread_once_per_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
+    prepare = _prepared(monkeypatch)
+    why = "I can't post in <#C2>. Add me to that channel, then try again."
+
+    async def breakout(
+        request: SlackRequest,
+        command: object,
+        repo: object,
+        *,
+        hand_to_mda: Callable,
+        branches: bool,
+        tell: Callable,
+    ) -> None:
+        await tell(request, why)
+
+    monkeypatch.setattr(slack_channel, "process_slack_breakout", breakout)
+    app = _start_app(monkeypatch)
+    text = "<@BOT> /breakout <#C2|ops> fix the tests"
+
+    first = await _start(app, kind="breakout", text=text)
+    again = await _start(app, kind="breakout", text=text)
+
+    # Not privately to the sender: MDA's handler replies in the Slack thread with it.
+    assert first == _NO_RUN | {
+        "declined": {"reason": "breakout", "settings_url": None, "message": why}
+    }
+    # MDA sends a call again under its webhook ID: the thread heard it already.
+    assert again == _NO_RUN
+    prepare.assert_not_awaited()
 
 
 @pytest.mark.parametrize(("channel", "marker"), [("", True), ("C2", "C2")])
