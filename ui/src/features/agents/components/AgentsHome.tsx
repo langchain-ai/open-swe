@@ -328,6 +328,7 @@ export function AgentsHome({
       )
       setLocalRepoBranches(branches)
     }
+    return result?.branches ?? []
   }, [])
 
   const selectedLocalRef = localRepoBranches.find(
@@ -554,14 +555,16 @@ export function AgentsHome({
       let prepared = false
       try {
         if (localRun && desktop) {
-          await refreshLocalRepoBranch()
+          // Fresh refs, not this render's: a folder whose branches had not loaded
+          // yet would otherwise skip the chosen worktree and run in the checkout.
+          const branches = await refreshLocalRepoBranch()
           const local = await desktop.prepareLocalThread({
             threadId,
             cwd: localCheckout?.cwd,
             taskWorkspace: true,
             workspaceMode:
-              localCheckout && localRepoBranches.length
-                ? localWorkspaceMode
+              localCheckout && branches.length
+                ? localWorkspaceModeRef.current
                 : "local",
             baseBranch: localRepoBranch,
           })
