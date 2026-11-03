@@ -51,7 +51,6 @@ from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     ExcludeToolsMiddleware,
-    ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
@@ -1042,7 +1041,6 @@ async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
             refresh_github_proxy_before_model,
             RepairOrphanedToolCallsMiddleware(),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
-            ModelErrorMiddleware(),
             settle_review_check_on_exit,
         ],
     )

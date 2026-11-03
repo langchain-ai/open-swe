@@ -763,6 +763,33 @@ async def test_reviewer_runs_record_transcript_model_and_usage(
     assert schedule.await_args.args[0]["invocation_id"] == run_id
 
 
+async def test_a_model_failure_leaves_its_code_for_the_failure_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from openswe.agent_api.reviewer import REVIEWER
+    from openswe.completion import _failure_reason_code
+
+    metadata: dict[str, object] = {}
+    client = MagicMock()
+    client.threads.update = AsyncMock(side_effect=lambda *_, **kw: metadata.update(kw["metadata"]))
+    monkeypatch.setattr("openswe.agent_api.graph.langgraph_client", lambda: client)
+
+    await REVIEWER.api(
+        RUN,
+        "model_failed",
+        {"run_id": "run-1", "code": "context_too_long", "error_type": "BadRequestError"},
+    )
+
+    assert client.threads.update.await_args.kwargs["thread_id"] == RUN.thread_id
+    # The reply trusts the record only for the exception the run failed with.
+    assert _failure_reason_code({"error": "BadRequestError"}, metadata, "run-1") == (
+        "context_too_long"
+    )
+    assert _failure_reason_code({"error": "ValueError"}, metadata, "run-1") is None
+
+
 @pytest.mark.parametrize("additional", [True, {"type": "string"}, False, None])
 async def test_operation_respects_open_tool_argument_schemas(additional: JsonValue) -> None:
     from langchain_core.tools import StructuredTool

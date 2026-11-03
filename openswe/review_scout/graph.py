@@ -40,7 +40,6 @@ from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     ExcludeToolsMiddleware,
-    ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
 )
 from openswe.middleware.model_call_shape import CallShape
@@ -364,7 +363,6 @@ async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> Non
             ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
             RepairOrphanedToolCallsMiddleware(),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
-            ModelErrorMiddleware(),
             FinishPlanMiddleware(thread_id=thread_id, config=config),
         ],
     )

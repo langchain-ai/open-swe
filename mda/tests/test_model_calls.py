@@ -4,6 +4,8 @@ from copy import deepcopy
 from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx2
+import openai
 import pytest
 from deepagents.middleware._utils import append_to_system_message
 from langchain.agents.middleware import AgentMiddleware
@@ -30,9 +32,11 @@ from pydantic import SecretStr
 from rt.backend import Run, RunContext
 from rt.middleware import BackendRunMiddleware, ModelCall
 from rt.model_calls import (
+    MODEL_OUTAGE_MESSAGE,
     ModelCallTimeoutError,
     ModelCallTimeoutMiddleware,
     ReplayableHistoryMiddleware,
+    call_with_fallback,
     model_call_guards,
 )
 from rt.models import ModelSpec
@@ -276,7 +280,7 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
     async def handler(request: ModelRequest) -> ModelResponse:
         sent.append(request)
         if request.model is _ANTHROPIC:
-            raise RuntimeError("overloaded")
+            raise TimeoutError("overloaded")
         return ModelResponse(result=[AIMessage(content="ok")])
 
     layers: list[AgentMiddleware] = [
@@ -331,3 +335,120 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
     ]
     assert first_fallback.model_settings == {}
     assert static.content == "The graph's own instructions"
+
+
+def _status_error(status: int, body: dict[str, object] | None = None) -> openai.APIStatusError:
+    request = httpx2.Request("POST", "https://api.openai.com/v1/responses")
+    response = httpx2.Response(status, request=request, json=body or {})
+    return openai.APIStatusError("provider error", response=response, body=body)
+
+
+class _Attempts:
+    """A provider that fails each attempt with the next error, then answers."""
+
+    def __init__(self, *errors: BaseException) -> None:
+        self.errors = list(errors)
+        self.models: list[object] = []
+
+    async def __call__(self, request: ModelRequest) -> ModelResponse:
+        self.models.append(request.model)
+        if self.errors:
+            raise self.errors.pop(0)
+        return ModelResponse(result=[AIMessage(content="answered")])
+
+
+def _fallback_call(
+    attempts: _Attempts, schedule: tuple[float, ...] = (0.0, 0.0, 0.0)
+) -> Awaitable[ModelResponse]:
+    return call_with_fallback(
+        ModelRequest(model=_ANTHROPIC, messages=[]),
+        attempts,
+        lambda: _OPENAI,
+        backoff_schedule=schedule,
+    )
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TimeoutError("stalled"),
+        ModelCallTimeoutError("deadline"),
+        _status_error(503),
+        _status_error(529),
+        httpx2.RemoteProtocolError("peer closed connection (incomplete chunked read)"),
+        # A streamed overload carries no status, only its message.
+        openai.APIError(
+            "Our servers are currently overloaded. Please try again later.",
+            request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
+            body=None,
+        ),
+    ],
+)
+async def test_a_transient_failure_goes_to_the_fallback(error: BaseException) -> None:
+    attempts = _Attempts(error)
+
+    response = await _fallback_call(attempts)
+
+    assert response.result[0].content == "answered"
+    assert attempts.models == [_ANTHROPIC, _OPENAI]
+
+
+async def test_attempts_alternate_between_the_model_and_its_fallback() -> None:
+    attempts = _Attempts(_status_error(503), _status_error(502))
+
+    await _fallback_call(attempts)
+
+    assert attempts.models == [_ANTHROPIC, _OPENAI, _ANTHROPIC]
+
+
+async def test_attempts_wait_out_the_backoff_with_jitter(monkeypatch: pytest.MonkeyPatch) -> None:
+    sleep = AsyncMock()
+    monkeypatch.setattr("rt.model_calls.asyncio", MagicMock(sleep=sleep))
+    monkeypatch.setattr("rt.model_calls.random.uniform", lambda low, high: high)
+    attempts = _Attempts(TimeoutError(), TimeoutError())
+
+    await _fallback_call(attempts, schedule=(0.0, 8.0))
+
+    # The failover is immediate; the next attempt waits its delay and up to a quarter more.
+    sleep.assert_awaited_once_with(10.0)
+
+
+@pytest.mark.parametrize("error", [ValueError("not transient"), _status_error(400)])
+async def test_an_error_another_attempt_would_repeat_raises_at_once(error: BaseException) -> None:
+    attempts = _Attempts(error)
+
+    with pytest.raises(type(error)):
+        await _fallback_call(attempts)
+    assert attempts.models == [_ANTHROPIC]
+
+
+async def test_a_lasting_outage_ends_with_a_message_instead_of_failing_the_run() -> None:
+    attempts = _Attempts(*[_status_error(503) for _ in range(4)])
+
+    response = await _fallback_call(attempts, schedule=(0.0, 0.0, 0.0))
+
+    assert response.result[0].content == MODEL_OUTAGE_MESSAGE
+    assert attempts.models == [_ANTHROPIC, _OPENAI, _ANTHROPIC, _OPENAI]
+
+
+async def test_a_model_the_workspace_cannot_use_says_so() -> None:
+    body: dict[str, object] = {
+        "error": {"code": "model_not_found", "message": "The model does not exist."}
+    }
+    request = httpx2.Request("POST", "https://api.openai.com/v1/responses")
+    response = httpx2.Response(404, request=request, json=body)
+    attempts = _Attempts(openai.NotFoundError("not found", response=response, body=body))
+
+    answer = await _fallback_call(attempts)
+
+    content = answer.result[0].content
+    assert isinstance(content, str) and "OpenAI returned: The model does not exist." in content
+    assert attempts.models == [_ANTHROPIC]
+
+
+async def test_without_a_fallback_the_call_is_made_once() -> None:
+    attempts = _Attempts(TimeoutError("stalled"))
+
+    with pytest.raises(TimeoutError):
+        await call_with_fallback(ModelRequest(model=_ANTHROPIC, messages=[]), attempts, None)
+    assert attempts.models == [_ANTHROPIC]

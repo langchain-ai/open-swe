@@ -95,7 +95,8 @@ Every call is authenticated with the run token.
   Custom stream events the backend emits are re-emitted here, so the UI gets them too.
 - **MDA-native behaviour:** model-call shaping stays MDA's own: retries, the fallback model the backend names, call limits, caching, and automatic summarization.
   Innermost around every model call, subagents' included, `rt/model_calls.py` sends a history the provider accepts on replay (parallel tool results in call order, no empty Anthropic thinking blocks, no unresolvable OpenAI reasoning ids, no legacy Fireworks `function_call`) and fails a call that outlives 15 minutes, its retries included, with `ModelCallTimeoutError`.
-  An agent's call then goes to the fallback model and, failing that, ends the run with that error.
+  An agent's call that fails transiently (a timeout, a dropped connection, 429, 5xx, an overload) goes again, alternating between its model and the fallback model with waits of 0, 5, 15, 30 and 45 seconds; once every attempt failed, the run ends with a message saying so.
+  An error another attempt would repeat ends the run at once, after telling the backend why (`model_failed`), so the failure reply names it; a model the workspace may not use answers with that instead.
   A subagent has no fallback: its timed-out call becomes its answer, which its `task` call hands back to the agent that delegated it.
   A call to a model that reads no images (`reads_images` in the catalog's `RunModels`) goes to the catalog's vision model once the conversation holds an image.
 
@@ -137,7 +138,8 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 |---|---|
 | `OPEN_SWE_BACKEND_URL` | Public HTTPS origin of the Open SWE backend |
 | `LANGSMITH_API_KEY` | Authenticates the LLM Gateway and tracing |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `BASETEN_API_KEY`, … | Model keys for direct (non-gateway) model calls |
+| `OPENAI_BASE_URL`, `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | As the backend's: models are built the same way on both sides (`runtime_api.models`) |
 | `LANGSMITH_GATEWAY_API_KEY` | Gateway key, the backend's; falls back to `LANGSMITH_API_KEY` |
 | `MDA_SERVICE_SECRET` | Shared with the backend: MDA signs each call its channels make to the backend's endpoints with it, as Standard Webhooks does |
 

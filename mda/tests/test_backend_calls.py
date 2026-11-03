@@ -75,7 +75,7 @@ from rt.file_tools import FileToolsMiddleware
 from rt.git_evidence import TurnGit, turn_git
 from rt.managed_sandbox import declared_sandbox
 from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware, turn_trace
-from rt.model_calls import model_call_guards
+from rt.model_calls import MODEL_OUTAGE_MESSAGE, model_call_guards
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
 from rt.tools import operation_tool
 from rt.tracing import TurnTrace
@@ -97,11 +97,13 @@ from runtime_api.loop import (
     BEFORE_MODEL,
     PREPARE,
     BeforeModel,
+    Done,
     Inbox,
     InboxItems,
     InboxRead,
     InboxReceipt,
     ModelCall,
+    ModelFailed,
     PhaseResult,
     Prepare,
     RunCall,
@@ -2112,11 +2114,11 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
         (400, "No tool call found for function call output call_1", False),
         (400, "unexpected `tool_use_id` found in `tool_result` blocks", False),
         (400, "tool_use ids were found without `tool_result` blocks", False),
-        (400, "context window exceeded", True),
+        (400, "context window exceeded", False),
         (500, "No tool output found for function call", True),
     ],
 )
-async def test_mda_does_not_retry_tool_pairing_errors(
+async def test_mda_retries_only_transient_errors_on_the_fallback(
     monkeypatch: pytest.MonkeyPatch, status: int, message: str, retries: bool
 ) -> None:
     from langchain.agents.middleware.types import ModelRequest, ModelResponse
@@ -2177,6 +2179,108 @@ async def test_a_model_call_paused_for_a_connection_is_not_retried_on_the_fallba
             ModelRequest(model=model, messages=[], state=state), handler
         )
     assert caught.value is paused
+
+
+def _planned_with_fallback() -> RunState:
+    return {
+        "messages": [],
+        "open_swe_call": ModelCall(
+            system_prompt="test",
+            model=ModelSpec(model_id="primary", kwargs={}),
+            fallback=ModelSpec(model_id="fallback", kwargs={}),
+            use_gateway=False,
+        ).model_dump(mode="json"),
+    }
+
+
+def _reporting_backend(
+    monkeypatch: pytest.MonkeyPatch, reported: list[tuple[str, dict[str, JsonValue]]]
+) -> OpenSweBackend:
+    backend = _run_backend("token", invocation_id="run")
+
+    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        reported.append((name, body))
+        return Done()
+
+    _answering(monkeypatch, backend, answer)
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    return backend
+
+
+async def test_a_model_call_that_fails_the_run_reports_why_before_it_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain.agents.middleware.types import ModelRequest
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    model = FakeListChatModel(responses=["done"])
+    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
+    body: dict[str, object] = {"error": {"code": "context_length_exceeded"}}
+    request = httpx2.Request("POST", "https://api.openai.com/v1/responses")
+    error = openai.BadRequestError(
+        "too long", response=httpx2.Response(400, request=request, json=body), body=body
+    )
+    reported: list[tuple[str, dict[str, JsonValue]]] = []
+    middleware = BackendRunMiddleware(_reporting_backend(monkeypatch, reported))
+
+    with pytest.raises(openai.BadRequestError) as caught:
+        await middleware.awrap_model_call(
+            ModelRequest(model=model, messages=[], state=_planned_with_fallback()),
+            AsyncMock(side_effect=error),
+        )
+
+    assert caught.value is error
+    # Taken by the backend before the run fails, so the completion webhook finds it.
+    assert reported == [
+        (
+            "model_failed",
+            ModelFailed(
+                run_id="run-1", code="context_too_long", error_type="BadRequestError"
+            ).model_dump(mode="json"),
+        )
+    ]
+
+
+async def test_a_model_call_paused_for_a_connection_reports_no_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain.agents.middleware.types import ModelRequest
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    model = FakeListChatModel(responses=["done"])
+    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
+    reported: list[tuple[str, dict[str, JsonValue]]] = []
+    middleware = BackendRunMiddleware(_reporting_backend(monkeypatch, reported))
+
+    with pytest.raises(GraphInterrupt):
+        await middleware.awrap_model_call(
+            ModelRequest(model=model, messages=[], state=_planned_with_fallback()),
+            AsyncMock(side_effect=GraphInterrupt()),
+        )
+    assert reported == []
+
+
+async def test_a_lasting_provider_outage_ends_the_run_with_a_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.model_calls.BACKOFF_SCHEDULE", (0.0, 0.0))
+    model = FakeListChatModel(responses=["done"])
+    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
+    reported: list[tuple[str, dict[str, JsonValue]]] = []
+    middleware = BackendRunMiddleware(_reporting_backend(monkeypatch, reported))
+    handler = AsyncMock(side_effect=TimeoutError("overloaded"))
+
+    response = await middleware.awrap_model_call(
+        ModelRequest(model=model, messages=[], state=_planned_with_fallback()), handler
+    )
+
+    assert isinstance(response, ModelResponse)
+    assert response.result[0].content == MODEL_OUTAGE_MESSAGE
+    assert handler.await_count == 3
+    assert reported == []
 
 
 @pytest.mark.parametrize("managed", [False, True])

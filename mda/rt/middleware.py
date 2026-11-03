@@ -75,12 +75,14 @@ from runtime_api.loop import (
     AFTER_MODEL,
     BEFORE_MODEL,
     INBOX,
+    MODEL_FAILED,
     PREPARE,
     RUN_STARTED,
     Inbox,
     InboxRead,
     InboxReceipt,
     ModelCall,
+    ModelFailed,
     ModelResult,
     PhaseResult,
     Prepare,
@@ -88,6 +90,7 @@ from runtime_api.loop import (
     RunCall,
     RunStarted,
 )
+from runtime_api.model_errors import classify_exception
 from runtime_api.workers import LAUNCH_WORKER, WORKER_LAUNCHED, Launch, Launched
 
 from rt.backend import (
@@ -104,6 +107,7 @@ from rt.backend import (
 from rt.git_evidence import turn_git
 from rt.loop import RunLoop
 from rt.managed_sandbox import OpenedSandbox
+from rt.model_calls import call_with_fallback
 from rt.models import build_model
 from rt.outbox import OUTBOX_KEY, carry
 from rt.remote_files import RemoteFiles
@@ -141,32 +145,12 @@ def _merge(
     return {**(left or {}), **(right or {})}
 
 
-_TOOL_PAIRING_ERRORS: Final = (
-    "no tool output found for function call",
-    "no tool call found for function call output",
-    "unexpected `tool_use_id`",
-    "unexpected tool_use_id",
-    "without `tool_result`",
-    "must be followed by tool messages",
-    "must be a response to a preceeding message with 'tool_calls'",
-    "must be a response to a preceding message with 'tool_calls'",
-)
-
-
 def _has_image(request: ModelRequest) -> bool:
     return any(
         block.get("type") == "image"
         for message in request.messages
         for block in message.content_blocks
     )
-
-
-def _tool_pairing_error(exc: Exception) -> bool:
-    """A 400 over unpaired tool history, which the fallback would get as well."""
-    if getattr(exc, "status_code", None) != 400:
-        return False
-    message = str(exc).lower()
-    return any(marker in message for marker in _TOOL_PAIRING_ERRORS)
 
 
 class RunState(AgentState):
@@ -598,13 +582,29 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
+        try:
+            return await self._call_planned(request, handler)
+        except GraphBubbleUp:
+            # Paused before the call for an MCP server's connection the person has not
+            # granted; another model would be paused alike.
+            raise
+        except Exception as exc:
+            await self._report_failure(exc)
+            raise
+
+    async def _call_planned(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        trace = turn_trace(self._backend.run)
         own = self._own_model()
         if own is not None:
             # The run's own model, unless the loop names another for this call.
             request = request.override(model=own)
             models = self._backend.run.catalog.models
             if models is not None:
-                turn_trace(self._backend.run).record_model(models.model.model_id)
+                trace.record_model(models.model.model_id)
         raw = request.state.get("open_swe_call")
         if not isinstance(raw, Mapping):
             return await handler(request)
@@ -614,21 +614,42 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         )
         if model is not None:
             request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
-            turn_trace(self._backend.run).record_model(model.model_id)
-        try:
+            trace.record_model(model.model_id)
+        fallback = planned.fallback
+        if fallback is None:
             return await handler(request)
-        except GraphBubbleUp:
-            # Paused before the call for an MCP server's connection the person has not
-            # granted; another model would be paused alike.
-            raise
-        except Exception as exc:
-            if planned.fallback is None or _tool_pairing_error(exc):
-                raise
-            # As the in-process graph does: another provider before failing the run.
-            logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
-            fallback = build_model(planned.fallback, use_gateway=planned.use_gateway)
-            turn_trace(self._backend.run).record_model(planned.fallback.model_id)
-            return await handler(request.override(model=fallback))
+
+        def attempting(on_fallback: bool) -> None:
+            attempted = fallback if on_fallback else model
+            if attempted is not None:
+                trace.record_model(attempted.model_id)
+
+        # As the in-process graph did: another provider, and this one again, before
+        # failing the run.
+        return await call_with_fallback(
+            request,
+            handler,
+            lambda: build_model(fallback, use_gateway=planned.use_gateway),
+            attempting=attempting,
+        )
+
+    async def _report_failure(self, exc: Exception) -> None:
+        """Tell the backend why the model call failed the run, before the run fails.
+
+        The run never reaches its end-of-run report, and the completion webhook sees only
+        the exception's class name; the failure reply reads the code recorded here.
+        """
+        code = classify_exception(exc)
+        logger.exception("Model call failed the run", extra={"model_call_failure": {"code": code}})
+        if code is None:
+            return
+        try:
+            failed = ModelFailed(run_id=run_id(), code=code, error_type=type(exc).__name__)
+            self._backend.outbox.notify(MODEL_FAILED, failed)
+            await self._backend.outbox.drain()
+        except Exception:
+            # The run fails with the model's error either way, not with this one.
+            logger.exception("Could not report why the model call failed the run")
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002

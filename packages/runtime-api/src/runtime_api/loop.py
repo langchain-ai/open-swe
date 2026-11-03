@@ -180,6 +180,19 @@ class RunEnded(Report):
     replies: list[dict[str, JsonValue]] = []
 
 
+class ModelFailed(Report):
+    """A model call the run cannot recover from, classified while its exception is intact.
+
+    The run fails with it and never reports its end, and the completion webhook sees
+    only the exception's class name: the failure reply reads the code recorded here.
+    """
+
+    # ``runtime_api.model_errors.classify_exception``'s code for the exception.
+    code: str
+    # The exception's class name, which the run fails with.
+    error_type: str
+
+
 class Routed(RunRequest):
     # The run's human messages, the latest of which the route is for.
     humans: list[dict[str, JsonValue]] = []
@@ -319,6 +332,8 @@ REPLY_ON_BEHALF = Endpoint("reply_on_behalf", ReplyOnBehalf, Done, seconds=LOOP_
 RUN_STARTED = Endpoint("run_started", RunStarted, Done, seconds=LOOP_CALL_SECONDS)
 # The run ended: the transcript closes its turn and usage is finalized.
 RUN_ENDED = Endpoint("run_ended", RunEnded, Done, seconds=LOOP_CALL_SECONDS)
+# A model call failed the run: why, for the failure reply.
+MODEL_FAILED = Endpoint("model_failed", ModelFailed, Done, seconds=LOOP_CALL_SECONDS)
 # The run ended at its model-call limit: the person is told.
 STEP_LIMIT_REACHED = Endpoint("step_limit_reached", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
 # A review run ended: its check run on the pull request is settled if it was not.
