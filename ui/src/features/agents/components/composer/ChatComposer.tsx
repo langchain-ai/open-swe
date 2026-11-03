@@ -1109,7 +1109,7 @@ export const ChatComposer = memo(function ChatComposer({
       </div>
 
       {targetControls && (
-        <div className="mx-space-3 -mt-space-3 flex min-w-0 flex-wrap items-center gap-x-space-4 gap-y-space-2 rounded-b-xl border border-t-0 border-subtle bg-surface-level-2 px-space-4 dark:border-transparent pt-space-5 pb-space-2 text-xs">
+        <div className="mx-space-3 -mt-space-4 flex min-w-0 flex-wrap items-center gap-x-space-4 gap-y-space-2 rounded-b-xl border border-t-0 border-subtle bg-surface-level-2 px-space-4 dark:border-transparent pt-space-5 pb-space-2 text-xs">
           {targetControls}
           <div className="ml-auto">{executionTarget}</div>
         </div>
