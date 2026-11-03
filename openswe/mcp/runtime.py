@@ -31,7 +31,6 @@ from openswe.mcp.oauth import MCPOAuthError, connection_auth
 from openswe.mcp.transport import MCPDiscoveryError, mcp_http_client
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
-from openswe.sandboxes.state import get_sandbox_backend
 from openswe.utils.startup_trace import asubphase
 
 if TYPE_CHECKING:
@@ -287,11 +286,15 @@ def _wrap_tool(
                     content, artifact = await asyncio.wait_for(
                         fresh.coroutine(**arguments), timeout=_TIMEOUT_SECONDS
                     )
-                except ToolException:
-                    raise ToolException("MCP server reported a tool error") from None
+                except ToolException as exc:
+                    raise ToolException(McpResult.scrub(str(exc))) from None
                 result = McpResult(content, artifact)
-                thread_id = RunConfig.from_runtime().thread_id if result.secrets else None
-                sandbox = await get_sandbox_backend(thread_id) if thread_id else None
+                sandbox = None
+                if result.secrets and (thread_id := RunConfig.from_runtime().thread_id):
+                    # Lazy: the dashboard webapp imports this module without the agent stack.
+                    from openswe.sandboxes.state import get_sandbox_backend
+
+                    sandbox = await get_sandbox_backend(thread_id)
                 protected = await result.protect(sandbox)
             is_error = False
             return protected

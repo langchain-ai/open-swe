@@ -272,8 +272,9 @@ class McpServer:
                 content, artifact = await result.protect(
                     sandbox if isinstance(sandbox, SandboxBackendProtocol) else None
                 )
-        except ToolException:
-            return failed("MCP server reported a tool error; no response details were returned")
+        except ToolException as exc:
+            # The server ran the tool and says it failed.
+            return failed(McpResult.scrub(str(exc)))
         except Exception as exc:
             # What the request raised can quote what it carried, the credential included.
             logger.warning(

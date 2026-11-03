@@ -26,8 +26,9 @@ async def test_session_credentials_are_saved_privately_not_returned(tmp_path: Pa
     )
     returned = json.dumps([protected, saved_artifact])
     assert access not in returned and refresh not in returned
-    assert "beta.smith.langchain.com" in returned
-    assert isinstance(protected, list) and isinstance(protected[-1], dict)
+    assert isinstance(protected, list) and isinstance(protected[0], dict)
+    assert json.loads(protected[0]["text"])["storage_key"] == session["storage_key"]
+    assert isinstance(protected[-1], dict)
     text = protected[-1]["text"]
     assert isinstance(text, str)
     path = Path(json.loads(text)["session_file"])
@@ -39,4 +40,5 @@ async def test_session_credentials_are_saved_privately_not_returned(tmp_path: Pa
         assert McpResult(original["content"], original["artifact"]).session() == session
     finally:
         shutil.rmtree(path.parent)
-    assert await McpResult("ordinary result", None).protect(None) == ("ordinary result", None)
+    ordinary = [{"type": "text", "text": '{"access_token": null, "note": "café is null"}'}]
+    assert await McpResult(ordinary, None).protect(None) == (ordinary, None)

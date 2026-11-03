@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import posixpath
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from functools import partial
@@ -23,7 +24,7 @@ from managed_deepagents.browser import BrowserMiddleware, BrowserState, _Session
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.endpoint import call
 from runtime_api.loop import BROWSER, BrowserReport
-from runtime_api.mcp_secrets import McpResult
+from runtime_api.mcp_secrets import SESSION_FILE, McpResult
 
 from rt.backend import OpenSweBackend
 from rt.tools import run_id
@@ -71,11 +72,11 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
             return await original(runtime=runtime, **arguments)
         if arguments.get("code") or arguments.get("actions"):
             return "Install the session separately from browser code or actions."
-        if not re.fullmatch(r"/tmp/open-swe-secrets-[A-Za-z0-9]+/response\.json", session_file):
+        if not SESSION_FILE.fullmatch(session_file):
             return "Invalid private MCP session file."
+        files = self._files(runtime)
         try:
             with tracing_context(enabled=False):
-                files = self._files(runtime)
                 [saved] = await files.adownload_files([session_file])
                 if saved.error or saved.content is None:
                     raise ValueError("Session file unavailable")
@@ -93,11 +94,12 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
                 result, _ = await self._call(runtime, partial(self._install, host, key, session))
                 if result != "Session installed.":
                     raise ValueError("Browser installation failed")
-                await files.adelete(session_file)
                 return result
         except Exception:
             logger.warning("Private browser session installation failed")
             return "Could not install the private browser session; credentials were not returned."
+        finally:
+            await files.adelete(posixpath.dirname(session_file))
 
     async def _install(
         self, host: str, key: str, value: dict[str, JsonValue], session: _Session
