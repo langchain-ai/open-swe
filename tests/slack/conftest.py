@@ -28,9 +28,8 @@ def _backend_keeps_conversations(
 def _branches_seed_from_slack(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`/btw` and breakouts are seeded from Slack unless a test forks their thread."""
+    """`/btw` and breakouts are seeded from Slack unless a test branches their thread."""
     if request.node.get_closest_marker("real_forks"):
         return
-    monkeypatch.setattr(forks, "fork_thread", AsyncMock(return_value=None))
-    monkeypatch.setattr(forks, "find_fork", AsyncMock(return_value=None))
+    monkeypatch.setattr(forks, "branches_from", AsyncMock(return_value=False))
     monkeypatch.setattr(forks, "held_timestamps", AsyncMock(return_value=set()))

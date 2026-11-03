@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from uuid import uuid4
 
-from openswe.slack import forks, mda_forwarding
+from openswe.slack import mda_forwarding
 from openswe.slack import webhook as service
 from openswe.slack.blocks import block_payload, section
 from openswe.slack.breakout_destination import resolve_breakout_destination
@@ -173,6 +173,7 @@ async def _start(
     *,
     inherited_workspace: str | None = None,
     hand_to_mda: HandToMda | None = None,
+    branches: bool = False,
 ) -> None:
     if (
         target != request.channel_id
@@ -201,18 +202,16 @@ async def _start(
         )
         return
     await _mark_done(request, target, new_ts)
+    held_thread_id = ""
     if hand_to_mda is None:
         thread_id = await common.resolve_slack_thread_id(langgraph_client(), target, new_ts)
     else:
         # MDA's channel runs it on a thread of the command's own, which the new Slack thread
-        # joins: a fork of this conversation's thread, which knows what the agent did here,
-        # or one seeded from the Slack thread.
+        # joins. With ``branches``, the channel starts it with what this conversation's
+        # thread holds; otherwise it is seeded from the Slack thread.
         owner_login = await service.slack_login(request.user_id) if request.user_id else None
-        thread_id = await forks.fork_thread(
-            request.thread_id,
-            key=forks.branch_key(request.channel_id, _command_ts(request)),
-            login=owner_login,
-        ) or mda_forwarding.side_thread_id(request.channel_id, _command_ts(request))
+        thread_id = mda_forwarding.side_thread_id(request.channel_id, _command_ts(request))
+        held_thread_id = (request.thread_id or "") if branches else ""
         await bind_slack_thread_id(target, new_ts, thread_id)
         await mda_forwarding.claim_side(thread_id, owner_login=owner_login)
     web_url = dashboard_thread_url(thread_id)
@@ -243,6 +242,7 @@ async def _start(
             "channel_id": target,
             "thread_ts": new_ts,
             "thread_id": thread_id,
+            "held_thread_id": held_thread_id,
             "text": command.thread_text,
             "context_channel_id": request.channel_id,
             "context_thread_ts": request.thread_ts,
@@ -311,11 +311,13 @@ async def process_slack_breakout(
     repo: common.SlackRepoResolution | None,
     *,
     hand_to_mda: HandToMda | None = None,
+    branches: bool = False,
 ) -> None:
     """Move this thread when bare; otherwise start a new one seeded with this thread's transcript.
 
     With ``hand_to_mda``, a new thread's first turn goes to MDA's Slack channel, which
-    runs the new Slack thread from then on; moving a thread stays here.
+    runs the new Slack thread from then on; moving a thread stays here. ``branches``
+    says the channel starts that thread with what this conversation's thread holds.
     """
     try:
         if command.channel and not command.channel_id:
@@ -348,6 +350,7 @@ async def process_slack_breakout(
                 repo,
                 inherited_workspace=destination.workspace if not command.channel_id else None,
                 hand_to_mda=hand_to_mda,
+                branches=branches,
             )
         else:
             await _move(request, target)
