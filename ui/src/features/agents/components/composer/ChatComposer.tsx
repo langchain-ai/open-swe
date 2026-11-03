@@ -25,7 +25,7 @@ import {
 import { WorkspaceSelector } from "./WorkspaceSelector"
 import {
   LocalBranchSelector,
-  LocalRepoSelector,
+  LocalProjectSelector,
   LocalWorkspaceSelector,
   RunTargetSelector,
 } from "./RunTargetSelector"
@@ -203,7 +203,7 @@ export interface ChatComposerProps {
   localWorktreeLabel?: string
   onLocalWorkspaceModeChange?: (next: DesktopWorkspaceMode) => void
   onSelectLocalRepo?: (cwd: string) => void
-  onUseTaskFolder?: () => void
+  onClearLocalRepo?: () => void
   onAddLocalRepo?: () => void
   onRemoveLocalRepo?: (cwd: string) => void
   onRefreshLocalRepoBranch?: () => void
@@ -368,7 +368,7 @@ export const ChatComposer = memo(function ChatComposer({
   localWorktreeLabel,
   onLocalWorkspaceModeChange,
   onSelectLocalRepo,
-  onUseTaskFolder,
+  onClearLocalRepo,
   onAddLocalRepo,
   onRemoveLocalRepo,
   onRefreshLocalRepoBranch,
@@ -871,15 +871,14 @@ export const ChatComposer = memo(function ChatComposer({
         onSelectLocalRepo &&
         onAddLocalRepo &&
         onRemoveLocalRepo && (
-          <LocalRepoSelector
-            onAddRepo={onAddLocalRepo}
-            onRemoveRepo={onRemoveLocalRepo}
-            onSelectRepo={onSelectLocalRepo}
-            repos={localRepos}
-            selectedRepoPath={selectedLocalRepoPath}
+          <LocalProjectSelector
+            onAdd={onAddLocalRepo}
+            onClear={onClearLocalRepo}
+            onRemove={onRemoveLocalRepo}
+            onSelect={onSelectLocalRepo}
+            projects={localRepos}
+            selectedPath={selectedLocalRepoPath}
             side="top"
-            placeholder="Automatic task folder"
-            onUseTaskFolder={onUseTaskFolder}
           />
         )}
       {runTarget === "local" &&
@@ -1109,7 +1108,7 @@ export const ChatComposer = memo(function ChatComposer({
       </div>
 
       {targetControls && (
-        <div className="mx-space-3 -mt-space-4 flex min-w-0 flex-wrap items-center gap-x-space-4 gap-y-space-2 rounded-b-xl border border-t-0 border-subtle bg-surface-level-2 px-space-4 dark:border-transparent pt-space-5 pb-space-2 text-xs">
+        <div className="mx-space-3 -mt-space-4 flex min-w-0 flex-wrap items-center gap-x-space-4 gap-y-space-2 rounded-b-xl border border-t-0 border-subtle bg-surface-level-2 px-space-4 pt-space-5 pb-space-2 text-xs dark:border-transparent">
           {targetControls}
           <div className="ml-auto">{executionTarget}</div>
         </div>

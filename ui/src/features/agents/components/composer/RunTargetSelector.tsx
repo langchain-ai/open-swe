@@ -1,15 +1,24 @@
 import { Button } from "@langchain/macaw-components/Button"
-import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
+import {
+  CheckIcon,
+  LaptopRegularIcon,
+  MagnifyingGlassRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { useMemo, useState } from "react"
+import {
+  Command,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@langchain/macaw-components/Command"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Input } from "@langchain/macaw-components/Input"
 import {
   Popover,
@@ -18,7 +27,7 @@ import {
 } from "@langchain/macaw-components/Popover"
 import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
-import { FolderOpenIcon } from "@phosphor-icons/react/dist/ssr/FolderOpen"
+import { FolderDashedIcon } from "@phosphor-icons/react/dist/ssr/FolderDashed"
 import { FolderPlusIcon } from "@phosphor-icons/react/dist/ssr/FolderPlus"
 import { GitBranchIcon } from "@phosphor-icons/react/dist/ssr/GitBranch"
 import { GitForkIcon } from "@phosphor-icons/react/dist/ssr/GitFork"
@@ -31,7 +40,6 @@ import {
   ComposerMenuOption,
   ComposerTriggerIcon,
 } from "./ComposerControl"
-import { DropdownMenuSubTrigger } from "@/components/MenuItem"
 import type {
   DesktopProject,
   DesktopProjectRef,
@@ -109,112 +117,147 @@ export function RunTargetSelector({
   )
 }
 
-export function LocalRepoSelector({
-  repos,
-  selectedRepoPath,
-  onSelectRepo,
-  onAddRepo,
-  onRemoveRepo,
-  placeholder = "Select repository",
-  triggerClassName,
+const PROJECT_ROW_CLASS_NAME =
+  "group/project gap-space-2 rounded-md px-space-2 py-space-1 text-xs text-primary"
+
+function ProjectRowIcon({ icon: Icon }: { icon: IconComponent }) {
+  return (
+    <Icon className="size-3.5 shrink-0 text-icon-secondary" weight="regular" />
+  )
+}
+
+/**
+ * Picks the project a This Mac thread works in. With `onClear`, choosing none
+ * is allowed: the agent then works in a task folder of its own.
+ */
+export function LocalProjectSelector({
+  projects,
+  selectedPath,
+  onSelect,
+  onAdd,
+  onRemove,
+  onClear,
   side = "bottom",
-  onUseTaskFolder,
 }: {
-  repos: Array<DesktopProject>
-  selectedRepoPath: string | null
-  onUseTaskFolder?: () => void
-  onSelectRepo: (cwd: string) => void
-  onAddRepo: () => void
-  onRemoveRepo: (cwd: string) => void
-  placeholder?: string
-  triggerClassName?: string
+  projects: Array<DesktopProject>
+  selectedPath: string | null
+  onSelect: (cwd: string) => void
+  onAdd: () => void
+  onRemove: (cwd: string) => void
+  onClear?: () => void
   side?: "top" | "bottom"
 }) {
-  const selectedRepo = repos.find((repo) => repo.cwd === selectedRepoPath)
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const selected = projects.find((project) => project.cwd === selectedPath)
+  const needle = query.trim().toLowerCase()
+  const matches = needle
+    ? projects.filter((project) => project.name.toLowerCase().includes(needle))
+    : projects
+
+  const toggle = (next: boolean) => {
+    if (!next) setQuery("")
+    setOpen(next)
+  }
+  const choose = (action: () => void) => {
+    action()
+    toggle(false)
+  }
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        className={cn(
-          COMPOSER_TRIGGER_CLASS_NAME,
-          "max-w-[260px]",
-          triggerClassName
-        )}
-        title={selectedRepo?.cwd}
+    <Popover open={open} onOpenChange={toggle}>
+      <PopoverTrigger
+        className={cn(COMPOSER_TRIGGER_CLASS_NAME, "max-w-[260px] min-w-0")}
+        title={selected?.cwd}
       >
-        <ComposerTriggerIcon icon={FolderOpenIcon} />
-        <span className="truncate">{selectedRepo?.name ?? placeholder}</span>
+        <ComposerTriggerIcon icon={FolderIcon} />
+        <span className="truncate">{selected?.name ?? "Choose project"}</span>
         <ComposerControlChevron />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
+      </PopoverTrigger>
+      <PopoverContent
         align="start"
-        className="w-64"
         side={side}
         sideOffset={7}
+        className="w-72 overflow-hidden p-0"
       >
-        <DropdownMenuGroup>
-          <ComposerMenuLabel>
-            {onUseTaskFolder ? "Working folder" : "Repositories"}
-          </ComposerMenuLabel>
-          {onUseTaskFolder && (
-            <ComposerMenuOption
-              icon={FolderIcon}
-              onSelect={onUseTaskFolder}
-              selected={!selectedRepoPath}
+        <Command label="Projects" loop shouldFilter={false}>
+          <CommandInput
+            autoFocus
+            className="rounded-none border-0 border-b border-muted bg-transparent focus-within:border-muted"
+            leftDecorator={
+              <MagnifyingGlassRegularIcon
+                className="text-icon-secondary"
+                size={14}
+              />
+            }
+            onValueChange={setQuery}
+            placeholder="Search projects"
+            size="sm"
+            value={query}
+            variant="plain"
+          />
+          <CommandList className="max-h-72 p-space-1">
+            <CommandItem
+              className={PROJECT_ROW_CLASS_NAME}
+              onSelect={() => choose(onAdd)}
+              size="sm"
+              value="add-project"
             >
-              Automatic task folder
-            </ComposerMenuOption>
-          )}
-          {repos.length === 0 && !onUseTaskFolder && (
-            <ComposerMenuOption disabled>
-              No repositories added
-            </ComposerMenuOption>
-          )}
-          {repos.map((repo) => (
-            <ComposerMenuOption
-              icon={FolderOpenIcon}
-              key={repo.cwd}
-              onSelect={() => onSelectRepo(repo.cwd)}
-              selected={selectedRepoPath === repo.cwd}
-              title={repo.cwd}
-            >
-              {repo.name}
-            </ComposerMenuOption>
-          ))}
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuGroup>
-          <ComposerMenuOption icon={FolderPlusIcon} onSelect={onAddRepo}>
-            {onUseTaskFolder ? "Use another folder…" : "Add repository…"}
-          </ComposerMenuOption>
-          {repos.length > 0 && (
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger className="text-xs" size="sm">
-                <TrashIcon
-                  className="size-3.5 shrink-0 text-icon-secondary"
-                  weight="regular"
+              <ProjectRowIcon icon={FolderPlusIcon} />
+              Add project…
+            </CommandItem>
+            {selected && onClear && (
+              <CommandItem
+                className={PROJECT_ROW_CLASS_NAME}
+                onSelect={() => choose(onClear)}
+                size="sm"
+                title="Work in a task folder of its own"
+                value="no-project"
+              >
+                <ProjectRowIcon icon={FolderDashedIcon} />
+                No project
+              </CommandItem>
+            )}
+            {matches.map((project) => (
+              <CommandItem
+                className={PROJECT_ROW_CLASS_NAME}
+                key={project.cwd}
+                onSelect={() => choose(() => onSelect(project.cwd))}
+                size="sm"
+                title={project.cwd}
+                value={project.cwd}
+              >
+                <ProjectRowIcon icon={FolderIcon} />
+                <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                {project.cwd === selectedPath && (
+                  <CheckIcon
+                    className="size-3.5 shrink-0 text-icon-secondary"
+                    weight="regular"
+                  />
+                )}
+                <IconButton
+                  className="-my-space-1 opacity-0 group-hover/project:opacity-100 group-data-[selected=true]/project:opacity-100 focus-visible:opacity-100"
+                  color="secondary"
+                  icon={TrashIcon}
+                  label={`Remove ${project.name} from projects`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onRemove(project.cwd)
+                  }}
+                  size="xs"
+                  variant="plain"
                 />
-                Remove repository…
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-64">
-                <DropdownMenuGroup>
-                  {repos.map((repo) => (
-                    <ComposerMenuOption
-                      destructive
-                      icon={FolderOpenIcon}
-                      key={repo.cwd}
-                      onSelect={() => onRemoveRepo(repo.cwd)}
-                      title={repo.cwd}
-                    >
-                      {repo.name}
-                    </ComposerMenuOption>
-                  ))}
-                </DropdownMenuGroup>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          )}
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+              </CommandItem>
+            ))}
+            {needle && matches.length === 0 && (
+              <p className="px-space-2 py-space-1 text-xs text-secondary">
+                No matching projects
+              </p>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   )
 }
 

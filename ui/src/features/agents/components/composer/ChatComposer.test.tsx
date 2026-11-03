@@ -250,7 +250,7 @@ describe("ChatComposer drafts", () => {
 })
 
 describe("ChatComposer options", () => {
-  it("offers a task folder locally and shows branch controls only for Git folders", async () => {
+  it("offers a project picker locally and shows branch controls only for Git folders", async () => {
     const local = {
       runTarget: "local" as const,
       onRunTargetChange: vi.fn(),
@@ -263,9 +263,7 @@ describe("ChatComposer options", () => {
     }
     renderComposer(false, local)
     expect(screen.getByRole("button", { name: "This Mac" })).toBeTruthy()
-    expect(
-      screen.getByRole("button", { name: /Automatic task folder/ })
-    ).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Choose project/ })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "No branch" })).toBeNull()
     cleanup()
 

@@ -129,6 +129,11 @@ export function AgentsHome({
   )
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  // Without a project, the agent works in a task folder of its own; older
+  // desktop builds can't make one, so a project stays required there.
+  const taskWorkspaces =
+    typeof window !== "undefined" &&
+    window.openSweDesktop?.taskWorkspaces === true
   const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
   const [runTargetOverride, setRunTargetOverride] = useState<RunTarget | null>(
     initialLocalRepo ? "local" : initialRepo || initialNoRepo ? "cloud" : null
@@ -141,9 +146,6 @@ export function AgentsHome({
   const [localRepoPath, setLocalRepoPath] = useState<string | null>(
     initialLocalRepo ?? null
   )
-  // Choosing the automatic task folder must outlast the effect that otherwise
-  // reselects the last checkout.
-  const [taskFolder, setTaskFolder] = useState(false)
   const localRepoPathRef = useRef(localRepoPath)
   useEffect(() => {
     localRepoPathRef.current = localRepoPath
@@ -257,8 +259,7 @@ export function AgentsHome({
   }, [panelCollapsed, pendingThreadId])
 
   useEffect(() => {
-    if (!isDesktop || !localReposLoaded || profileQuery.isPending || taskFolder)
-      return
+    if (!isDesktop || !localReposLoaded || profileQuery.isPending) return
     const stored =
       window.localStorage.getItem(LAST_LOCAL_REPO_KEY) ??
       window.localStorage.getItem(LEGACY_LAST_LOCAL_REPO_KEY)
@@ -266,13 +267,15 @@ export function AgentsHome({
       (checkout) => checkout.cwd === localRepoPath || checkout.cwd === stored
     )
     // oxlint-disable-next-line react/set-state-in-effect
-    setLocalRepoPath(selected?.cwd ?? localRepos[0]?.cwd ?? null)
+    setLocalRepoPath(
+      selected?.cwd ?? (taskWorkspaces ? null : (localRepos[0]?.cwd ?? null))
+    )
   }, [
     isDesktop,
     localRepoPath,
     localRepos,
     localReposLoaded,
-    taskFolder,
+    taskWorkspaces,
     profileQuery.isPending,
   ])
 
@@ -387,7 +390,6 @@ export function AgentsHome({
       setLocalRepoBranch(null)
       setLocalRepoBranches([])
     }
-    setTaskFolder(false)
     setLocalRepoPath(cwd)
     setRunTargetOverride("local")
     window.localStorage.setItem(LAST_LOCAL_REPO_KEY, cwd)
@@ -469,10 +471,8 @@ export function AgentsHome({
       setLocalError("Choose or add a repository from This Mac before sending.")
       return
     }
-    if (localRun && !localCheckout && !desktop?.taskWorkspaces) {
-      setLocalError(
-        "Update Open SWE Desktop to start without selecting a folder."
-      )
+    if (localRun && !localCheckout && !taskWorkspaces) {
+      setLocalError("Update Open SWE Desktop to start without a project.")
       return
     }
     // Minted here so the seeded thread, the graph's HumanMessage and the
@@ -685,10 +685,11 @@ export function AgentsHome({
               selectedLocalRepoBranch={localRepoBranch}
               localRepoBranches={localRepoBranches}
               onSelectLocalRepo={handleSelectLocalRepo}
-              onUseTaskFolder={
-                !optimisticDraftThread
+              onClearLocalRepo={
+                !optimisticDraftThread && taskWorkspaces
                   ? () => {
-                      setTaskFolder(true)
+                      window.localStorage.removeItem(LAST_LOCAL_REPO_KEY)
+                      window.localStorage.removeItem(LEGACY_LAST_LOCAL_REPO_KEY)
                       setLocalRepoPath(null)
                       setLocalRepoBranch(null)
                       setLocalRepoBranches([])
