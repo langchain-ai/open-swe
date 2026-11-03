@@ -90,6 +90,10 @@ import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import {
+  boundToMacFolder,
+  useLocalThreads,
+} from "@/features/agents/lib/desktopLocal"
+import {
   cloudSidebarThread,
   DEFAULT_SIDEBAR_WORKSPACE_SLUG,
   groupRepoGroupsByWorkspace,
@@ -289,6 +293,7 @@ export function AgentsSidebar({
     addProject: addLocalRepo,
     removeProject: removeLocalRepo,
   } = useDesktopProjects()
+  const localThreadsQuery = useLocalThreads()
   const repoCommands = useMemo(
     () =>
       isDesktop
@@ -308,10 +313,14 @@ export function AgentsSidebar({
   )
   useRegisterAppCommands(repoCommands)
 
-  const pinnedThreads = pinnedQuery.data ?? []
+  // The web has no folder to file a This Mac thread without a repository under
+  // until projects live in the backend, so only the desktop app lists them.
+  const listed = (thread: AgentThread) =>
+    isDesktop || thread.id === activeThreadId || !boundToMacFolder(thread)
+  const pinnedThreads = (pinnedQuery.data ?? []).filter(listed)
   const cloudPinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
   const pageThreads = recentsQuery.items.filter(
-    (thread) => !cloudPinnedIds.has(thread.id)
+    (thread) => !cloudPinnedIds.has(thread.id) && listed(thread)
   )
   const activeThread = useSidebarActiveThread({
     activeThreadId,
@@ -372,6 +381,11 @@ export function AgentsSidebar({
     filterThreads(threadItems, prefs.filters, activeThreadId),
     prefs.sortChats
   )
+  // The folder each of this Mac's threads runs in, to file the ones without a
+  // repository under their project rather than under "No repository".
+  const macFolderOf = new Map(
+    (localThreadsQuery.data ?? []).map((thread) => [thread.id, thread.cwd])
+  )
   const repoGroups: Array<HydratedRepoGroup> = repoMode
     ? [
         ...keyedCloudRepos.map(({ repo, key }) => {
@@ -403,7 +417,9 @@ export function AgentsSidebar({
                   repoFullName: null,
                   localRepoPath: repo.cwd,
                   updatedAt: 0,
-                  threads: [],
+                  threads: recents.filter(
+                    (item) => macFolderOf.get(item.id) === repo.cwd
+                  ),
                 },
               ]
             : []
@@ -591,14 +607,22 @@ export function AgentsSidebar({
     ? ageGroups.map((group) => ({ ...group, key: `recents:${group.key}` }))
     : [{ key: "recents", label: "Recents", threads: recents }]
 
+  const macFolders = new Set(
+    repoGroups.flatMap((group) =>
+      group.localRepoPath ? [group.localRepoPath] : []
+    )
+  )
+  const unfiledRecents = recents.filter(
+    (item) => !macFolders.has(macFolderOf.get(item.id) ?? "")
+  )
   const noRepoGroup: HydratedRepoGroup = {
     key: NO_REPO_GROUP_KEY,
     label: "No repository",
     repoFullName: null,
-    updatedAt: recents[0]?.updatedAt ?? 0,
-    threads: recents,
+    updatedAt: unfiledRecents[0]?.updatedAt ?? 0,
+    threads: unfiledRecents,
   }
-  const noRepoAvailable = recents.length > 0 || recentsQuery.hasMore
+  const noRepoAvailable = unfiledRecents.length > 0 || recentsQuery.hasMore
   const noRepoPinned = pinnedRepoKeys.has(NO_REPO_GROUP_KEY)
 
   const renderRepoGroup = (group: HydratedRepoGroup) => (
@@ -1065,7 +1089,8 @@ function RepoGroup({
     includeClaudeCode,
     includeSlack,
     sort,
-    enabled: !collapsed,
+    // A This Mac folder has no repository to ask for: its threads are filed in.
+    enabled: !collapsed && group.repoFullName !== null,
   })
   const cloudThreads = withoutNestedWorkers([
     ...(group.activeThread ? [group.activeThread] : []),
