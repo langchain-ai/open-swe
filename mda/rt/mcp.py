@@ -40,7 +40,7 @@ from runtime_api.mcp_secrets import McpResult, Sessions
 
 from rt.backend import OpenSweBackend
 from rt.session_handoff import HeldSessions
-from rt.tools import _content, called
+from rt.tools import called, message_content
 
 logger = logging.getLogger(__name__)
 
@@ -282,7 +282,10 @@ class McpServer:
         if not isinstance(content, str | list):
             return failed("Invalid MCP content")
         return ToolMessage(
-            content=_content(content), artifact=artifact, tool_call_id=tool_call_id, name=name
+            content=message_content(content),
+            artifact=artifact,
+            tool_call_id=tool_call_id,
+            name=name,
         )
 
     def tool(

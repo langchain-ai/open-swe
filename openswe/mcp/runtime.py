@@ -7,7 +7,9 @@ import logging
 import re
 import weakref
 from collections import Counter
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
@@ -21,7 +23,7 @@ from langchain.mcp import as_langchain_tool
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from langsmith import tracing_context
 from runtime_api.catalog import McpServerSpec
-from runtime_api.mcp_secrets import HELD_SESSIONS, McpResult
+from runtime_api.mcp_secrets import McpResult, Sessions
 
 from mcp.shared.exceptions import MCPError
 from mcp.types import Tool
@@ -37,6 +39,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _TIMEOUT_SECONDS = 30
+# The browser sessions the operation in progress's MCP calls held back, for its run to keep.
+_held_sessions: ContextVar[Sessions | None] = ContextVar("held_mcp_sessions", default=None)
 _DISCOVERY_CONCURRENCY = 8
 _DISCOVERY_SLOTS: weakref.WeakValueDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
     weakref.WeakValueDictionary()
@@ -249,6 +253,17 @@ def _tool_name(connection_name: str, tool_name: str) -> str:
     return f"{safe[:53]}_{suffix}"
 
 
+@contextmanager
+def holding_sessions() -> Iterator[Sessions]:
+    """The browser sessions the block's MCP calls hold back, by handle."""
+    held: Sessions = {}
+    token = _held_sessions.set(held)
+    try:
+        yield held
+    finally:
+        _held_sessions.reset(token)
+
+
 def _wrap_tool(
     name: str,
     url: str,
@@ -287,7 +302,7 @@ def _wrap_tool(
                     )
                 except ToolException as exc:
                     raise ToolException(McpResult.scrub(str(exc))) from None
-                protected = McpResult(content, artifact).withheld(HELD_SESSIONS.get())
+                protected = McpResult(content, artifact).withheld(_held_sessions.get())
             is_error = False
             return protected
         except ToolException:

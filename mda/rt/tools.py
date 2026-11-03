@@ -144,7 +144,7 @@ def _seconds(spec: ToolSpec, arguments: Mapping[str, JsonValue]) -> float:
     return spec.seconds if spec.seconds is not None else LONG_CALL_SECONDS
 
 
-def _content(content: str | list[JsonValue]) -> str | list[str | dict]:
+def message_content(content: str | list[JsonValue]) -> str | list[str | dict]:
     if isinstance(content, str):
         return content
     return [block for block in content if isinstance(block, str | dict)]
@@ -152,7 +152,7 @@ def _content(content: str | list[JsonValue]) -> str | list[str | dict]:
 
 def _result(answer: OperationResult, tool_call_id: str, name: str) -> ToolMessage | Command:
     message = ToolMessage(
-        content=_content(answer.content),
+        content=message_content(answer.content),
         status=answer.status,
         artifact=answer.artifact,
         tool_call_id=tool_call_id,
@@ -181,7 +181,7 @@ async def cited(
     except BackendCallError:
         logger.warning("Could not record a tool result as incident evidence", exc_info=True)
         return result
-    return result.model_copy(update={"content": _content(reply.content)})
+    return result.model_copy(update={"content": message_content(reply.content)})
 
 
 async def _credentials(spec: ToolSpec) -> dict[str, str]:

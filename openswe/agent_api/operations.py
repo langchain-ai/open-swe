@@ -20,7 +20,6 @@ from langgraph.prebuilt import InjectedState
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from pydantic import JsonValue, TypeAdapter
-from runtime_api.mcp_secrets import HELD_SESSIONS, Sessions
 from runtime_api.operations import OperationResult, RunOperation
 
 from openswe.agent_api.connections import carrying
@@ -29,6 +28,7 @@ from openswe.agent_api.git_metadata import collect_pr_targets
 from openswe.agent_api.run_state import json_state, jsonable
 from openswe.agent_api.runs import in_graph_context
 from openswe.agent_api.shell_guards import ShellGuards
+from openswe.mcp.runtime import holding_sessions
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.sandboxes.tool_runtime import tool_parameters
 
@@ -197,7 +197,11 @@ class Operation:
             decision = await guards.decide(request.name, request.arguments)
             if decision.arguments is None:
                 return OperationResult(content=decision.refusal or "", status="error")
-            with collect_pr_targets() as pull_requests, carrying(request.credentials):
+            with (
+                collect_pr_targets() as pull_requests,
+                carrying(request.credentials),
+                holding_sessions() as sessions,
+            ):
                 try:
                     outcome = await invoke(tool, decision.arguments, state, request.request_id)
                 except NodeCancelledError:
@@ -213,14 +217,7 @@ class Operation:
                         sandbox_unreachable=failure.sandbox_unreachable,
                     )
             result = self._result(outcome)
-            return result.model_copy(update={"pull_requests": pull_requests})
+            return result.model_copy(update={"pull_requests": pull_requests, "sessions": sessions})
 
-        held: Sessions = {}
-        token = HELD_SESSIONS.set(held)
-        try:
-            result = await in_graph_context(
-                {**config, "run_name": request.name}, run, events=events
-            )
-        finally:
-            HELD_SESSIONS.reset(token)
-        return result.model_copy(update={"events": [jsonable(e) for e in events], "sessions": held})
+        result = await in_graph_context({**config, "run_name": request.name}, run, events=events)
+        return result.model_copy(update={"events": [jsonable(e) for e in events]})

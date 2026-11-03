@@ -372,6 +372,26 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
                     pending.cancel()
                 _RELEASES[key] = asyncio.create_task(_release_when_idle(key))
 
+    async def on_page(
+        self,
+        runtime: ManagedToolRuntime,
+        tool_name: str,
+        fn: Callable[[Page], Awaitable[str]],
+    ) -> Command | str:
+        """Run ``fn`` on the page the browser tools act on, as tool ``tool_name``'s reply.
+
+        For a subclass's own browser tools: the call waits, fails and notes its browser
+        sandbox as the built-in tools' calls do.
+        """
+
+        async def go(session: _Session) -> str:
+            page = await session.stagehand.browser.context.active_page()
+            if page is None:
+                raise StagehandFacadeInputError("The browser has no open page.")
+            return await fn(page)
+
+        return _reply(runtime, tool_name, *await self._call(runtime, go))
+
     def _files(self, runtime: ManagedToolRuntime) -> BackendProtocol:
         """The run's sandbox, or the agent's own files."""
         return runtime.backend if runtime.backend is not None else self.backend

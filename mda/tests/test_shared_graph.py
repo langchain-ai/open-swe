@@ -1397,7 +1397,7 @@ async def test_only_the_coding_agent_browses_and_never_hands_the_browser_over(
     await _run(store, "browsed", _context("agent", "agent", _catalog("lookup", "grant")))
     await asyncio.sleep(0)
 
-    tools = {"browser_run", "browser_snapshot", "browser_screenshot"}
+    tools = {"browser_run", "browser_snapshot", "browser_screenshot", "browser_sign_in"}
     assert tools <= offered["agent"] and "browser_handoff" not in offered["agent"]
     assert not {name for name in offered["reviewer"] if name.startswith("browser_")}
     assert instructed == {"agent": True, "reviewer": False}
