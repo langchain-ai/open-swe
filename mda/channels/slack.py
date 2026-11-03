@@ -27,10 +27,6 @@ channel = channels.slack(
     allow_bot_triggers=True,
     # The handler picks each message's strategy; anything else redirects the work in progress.
     multitask_strategy="interrupt",
-    # Trigger Server marks what comes from a code channel, and hands over a click in one of
-    # its views, which names no Slack thread. The channel's session runs on the thread that
-    # opened it, which this channel doesn't own, so the backend acts on those clicks.
-    code_channel=True,
     on_event={
         "mention": start_turn,
         "directMessage": start_turn,

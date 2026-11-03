@@ -63,16 +63,14 @@ async def start_click(
     event: SlackInteractionEvent, thread: SlackChannelThread
 ) -> ChannelRunResult | None:
     actor = event.actor
+    # The agent's buttons and the backend's cards sit on a message in a Slack
+    # thread.
     thread_ts, message_ts = event.thread_ts, event.message_ts
-    # The agent's buttons and the backend's cards sit on a message in a Slack thread. A
-    # click in a code channel's view has neither: the backend turns it into a turn of the
-    # channel's session, whose thread this channel doesn't own.
-    if actor is None or (thread_ts is None and event.view_id is None):
+    if actor is None:
         return None
     value = _button(event.value) if message_ts is not None else None
     if (
-        thread_ts is not None
-        and message_ts is not None
+        message_ts is not None
         and value is not None
         and not (value.get("type") == "slack_retry" and value.get("response"))
     ):

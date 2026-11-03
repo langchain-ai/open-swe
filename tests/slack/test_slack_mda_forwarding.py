@@ -1650,10 +1650,7 @@ async def test_a_click_in_the_backends_conversation_is_the_backends_to_act_on(
 
 
 async def _act(
-    app: FastAPI,
-    payload: dict[str, JsonValue],
-    msg_id: str = "msg_delivery-1",
-    **fields: str | None,
+    app: FastAPI, payload: dict[str, JsonValue], msg_id: str = "msg_delivery-1", **fields: str
 ) -> dict[str, JsonValue]:
     body = {"channel_id": "C1", "thread_ts": "171.1", "user_id": "U1", "payload": payload}
     answered = await _post_endpoint(
@@ -1685,33 +1682,6 @@ async def test_the_backend_acts_on_a_click_once_as_the_clicker_trigger_server_ve
     interaction = call.args[0]
     assert interaction.user.id == "U1"
     assert call.kwargs["origin"] == ("C1", "171.1")
-
-
-async def test_a_click_in_a_code_channel_view_becomes_a_turn_of_the_channels_session(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    app = _click_app(monkeypatch)
-    queue = AsyncMock(return_value={"status": "accepted"})
-    monkeypatch.setattr(slack_routes, "_queue_code_channel_turn", queue)
-    payload: dict[str, JsonValue] = {
-        "type": "block_actions",
-        "trigger_id": "trigger-1",
-        "user": {"id": "U9"},
-        "channel": {"id": "C7"},
-        "container": {"type": "code_channel_view", "view_id": "V1"},
-        "actions": [{"action_id": "pick_branch", "type": "static_select", "action_ts": "172.1"}],
-    }
-
-    # A view names no Slack thread.
-    acted = await _act(app, payload, channel_id="C7", thread_ts=None)
-
-    assert acted["acted"] is True
-    [call] = queue.await_args_list
-    kwargs = call.kwargs
-    # As the clicker Trigger Server verified, in the code channel.
-    assert (kwargs["channel_id"], kwargs["user_id"]) == ("C7", "U1")
-    assert kwargs["event_id"] == "code-channel-view:trigger-1"
-    assert "pick_branch" in kwargs["text"]
 
 
 async def test_a_review_card_click_reaches_the_cards_own_handling(
