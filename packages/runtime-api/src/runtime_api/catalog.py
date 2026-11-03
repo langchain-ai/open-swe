@@ -38,6 +38,9 @@ class RunModels(BaseModel):
     routes: dict[str, ModelSpec] = {}
     # What a text-only model's call goes to once the conversation holds an image.
     vision: ModelSpec | None = None
+    # The deployment's fallback model (``LLM_FALLBACK_MODEL_ID``) for a model the runtime
+    # picks itself, such as one a person asked for; None falls back to the other provider.
+    fallback_model_id: str | None = None
 
 
 class ToolSpec(BaseModel):

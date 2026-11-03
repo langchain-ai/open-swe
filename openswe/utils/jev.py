@@ -8,9 +8,8 @@ from typing import Literal
 import httpx2
 from langchain_typesafe import Choice, TypeSafeClassifier
 from langchain_typesafe.client import TypeSafePermissionDeniedError
+from runtime_api.models import gateway_api_key, gateway_base_url
 
-from openswe.config import ENV
-from openswe.utils.gateway import gateway_base_url
 from openswe.utils.http_pool import pooled_transport
 
 logger = logging.getLogger(__name__)
@@ -53,7 +52,7 @@ async def select_jev_choices(
     for decision in tracked.values():
         decision.outcome = "classifier_failure"
         decision.reason = "missing_credentials"
-    gateway_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
+    gateway_key = gateway_api_key()
     if not gateway_key:
         logger.warning("Jev classification has no API key", extra={"questions": list(questions)})
         return results

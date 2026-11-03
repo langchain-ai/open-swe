@@ -10,7 +10,7 @@ settings helpers serve both: ``chosen_model`` answers ``model_choice``.
 import inspect
 import logging
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
-from typing import Final, Literal, cast, get_args
+from typing import Final, Literal, cast
 from uuid import uuid4
 
 from langchain.agents.middleware import ModelCallLimitMiddleware
@@ -28,15 +28,12 @@ from langgraph.runtime import Runtime
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from runtime_api.catalog import ModelSpec, RunModels
 from runtime_api.loop import BeforeModel, ModelCall, PhaseResult, RunCall
+from runtime_api.models import model_for
 
 from openswe.dashboard.options import model_supports_images
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.model_call_shape import CallShape, ShapesModelCalls
-from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.prompts import common_prompt
-from openswe.runtime.constants import DEFAULT_LLM_MAX_TOKENS
-from openswe.server import fallback_model_choice
-from openswe.utils.model import provider_model_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +41,6 @@ logger = logging.getLogger(__name__)
 MESSAGE_KEY: Final = "__lc_message__"
 # Loop bookkeeping and code mode MDA's own middleware already does.
 _MDA_PHASES: Final = (ModelCallLimitMiddleware, CodeInterpreterMiddleware)
-# PersistedRoute is a union of literals: its arguments are the literals, not the names.
-_ROUTES: Final = frozenset(name for route in get_args(PersistedRoute) for name in get_args(route))
 
 _json = TypeAdapter(JsonValue)
 _json_object = TypeAdapter(dict[str, JsonValue])
@@ -173,31 +168,6 @@ async def run_hooks(
     return PhaseResult(update=json_state(update), messages=dump_messages(added), jump_to=jump_to)
 
 
-def model_spec(model_id: str, kwargs: Mapping[str, object]) -> ModelSpec:
-    """``model_id`` as the runtime calls it: whether it reads images, and its fallback."""
-    fallback = fallback_model_choice(model_id)
-    return ModelSpec(
-        model_id=model_id,
-        kwargs=_json_object.validate_python(dict(kwargs)),
-        reads_images=model_supports_images(model_id),
-        fallback=None
-        if fallback is None
-        else ModelSpec(
-            model_id=fallback.model_id,
-            kwargs=_json_object.validate_python(dict(fallback.kwargs)),
-            reads_images=model_supports_images(fallback.model_id),
-        ),
-    )
-
-
-def chosen_model(model_id: str, effort: object) -> ModelSpec:
-    """A model the run calls by id, such as one a person asked for, at ``effort``."""
-    kwargs = provider_model_kwargs(
-        model_id, effort if isinstance(effort, str) else None, max_tokens=DEFAULT_LLM_MAX_TOKENS
-    )
-    return model_spec(model_id, kwargs)
-
-
 class ModelChoices:
     """The model each call goes to: the run's own, a route's, or one the person asked for."""
 
@@ -206,19 +176,7 @@ class ModelChoices:
 
     def model_for(self, state: Mapping[str, object]) -> ModelSpec:
         """The model the graph's model selection would call next."""
-        requested = state.get("requested_model")
-        if isinstance(requested, str) and requested:
-            return chosen_model(requested, state.get("requested_effort"))
-        route = state.get("model_route")
-        if route in _ROUTES and route is not None:
-            selected_route = normalize_route(cast(PersistedRoute, route))
-            routed = self.models.routes.get(selected_route)
-            if routed is not None and selected_route != "default":
-                return routed
-        selected = state.get("selected_model_id")
-        if isinstance(selected, str) and selected and selected != self.models.model.model_id:
-            return chosen_model(selected, state.get("selected_effort"))
-        return self.models.model
+        return model_for(self.models, state)
 
     def vision_for(self, model: ModelSpec) -> ModelSpec | None:
         """What a call to ``model`` goes to instead once the conversation holds an image."""
@@ -228,18 +186,11 @@ class ModelChoices:
 
     def call(self, shaped: ModelCall, state: Mapping[str, object]) -> ModelCall:
         model = self.model_for(state)
-        vision = self.vision_for(model)
-        fallback = fallback_model_choice(model.model_id)
         return shaped.model_copy(
             update={
                 "model": model,
-                "vision": vision,
-                "fallback": None
-                if fallback is None
-                else ModelSpec(
-                    model_id=fallback.model_id,
-                    kwargs=_json_object.validate_python(dict(fallback.kwargs)),
-                ),
+                "vision": self.vision_for(model),
+                "fallback": model.fallback,
                 "use_gateway": self.models.use_gateway,
             }
         )

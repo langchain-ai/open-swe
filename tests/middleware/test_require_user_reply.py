@@ -21,6 +21,7 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import StateSnapshot
+from runtime_api.model_errors import MODEL_FAILURE_REPLY_KEY
 
 from openswe.input_messages import message_sender_id
 from openswe.middleware.require_user_reply import (
@@ -339,6 +340,25 @@ class TestRequireUserReplyMiddleware:
 
         assert result == {"reply_nudges": 0}
         assert posted.await_args.args[0] == "all good"
+
+    @pytest.mark.asyncio
+    async def test_an_answer_written_for_an_unreachable_model_is_posted_without_nudges(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import openswe.slack.tools.reply as reply_tool
+
+        posted = AsyncMock(return_value={"success": True})
+        monkeypatch.setattr(reply_tool, "send_slack_reply", posted)
+        outage = AIMessage(
+            content="The providers are down.", response_metadata={MODEL_FAILURE_REPLY_KEY: "outage"}
+        )
+
+        result = await _middleware().aafter_model(
+            _state(HumanMessage(content="what is up"), outage), _runtime()
+        )
+
+        assert result == {"reply_nudges": 0}
+        assert posted.await_args.args[0] == "The providers are down."
 
     @pytest.mark.asyncio
     async def test_blank_replies_to_the_nudges_still_post_the_earlier_answer(

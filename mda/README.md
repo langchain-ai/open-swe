@@ -139,7 +139,7 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 | `OPEN_SWE_BACKEND_URL` | Public HTTPS origin of the Open SWE backend |
 | `LANGSMITH_API_KEY` | Authenticates the LLM Gateway and tracing |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `BASETEN_API_KEY`, … | Model keys for direct (non-gateway) model calls |
-| `OPENAI_BASE_URL`, `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | As the backend's: models are built the same way on both sides (`runtime_api.models`) |
+| `OPENAI_BASE_URL`, `LANGSMITH_GATEWAY_BASE_URL`, `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | Optional, as the backend's: both sides build models with `runtime_api.models`. `deploy_mda.yml` forwards the repository variables of these names when set; unset, MDA uses the defaults (`wss://api.openai.com/v1`, `https://gateway.smith.langchain.com`, the Responses API) |
 | `LANGSMITH_GATEWAY_API_KEY` | Gateway key, the backend's; falls back to `LANGSMITH_API_KEY` |
 | `MDA_SERVICE_SECRET` | Shared with the backend: MDA signs each call its channels make to the backend's endpoints with it, as Standard Webhooks does |
 

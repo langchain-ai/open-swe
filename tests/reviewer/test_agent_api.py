@@ -95,9 +95,9 @@ async def test_backend_operation_traces_keep_runtime_events_and_errors(fails: bo
 @pytest.mark.parametrize("requested", ["anthropic:claude-opus-5-5", "openai:gpt-6.1-sol"])
 def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -> None:
     from runtime_api.catalog import ModelSpec, RunModels
+    from runtime_api.models import provider_model_kwargs
 
     from openswe.agent_api.loop import ModelChoices
-    from openswe.utils.model import provider_model_kwargs
 
     main = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
     choices = ModelChoices(RunModels(model=main, subagent_model=main, use_gateway=False))
@@ -119,6 +119,7 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     from unittest.mock import AsyncMock
 
     from langchain_core.messages import HumanMessage, messages_to_dict
+    from runtime_api.models import provider_model_kwargs
 
     from openswe.agent_api import agent
     from openswe.agent_api import graph as graph_module
@@ -126,7 +127,6 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     from openswe.middleware.model_selection import RouteSelection
     from openswe.middleware.task_coordination import TaskCoordinationMiddleware
     from openswe.sandboxes.tool_runtime import ToolSurface
-    from openswe.utils.model import provider_model_kwargs
 
     async def never_planned(config: object, surface: ToolSurface) -> None:
         raise AssertionError("A call around a model call never plans the run")

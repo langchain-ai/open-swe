@@ -155,6 +155,7 @@ from runtime_api.loop import (
     ToolResultReport,
 )
 from runtime_api.model_errors import LAST_MODEL_ERROR_KEY
+from runtime_api.models import chosen_model, model_spec
 from runtime_api.operations import (
     CHECK_SHELL,
     OPERATION,
@@ -202,11 +203,9 @@ from openswe.agent_api.loop import (
     as_list,
     as_messages,
     call_state,
-    chosen_model,
     decode_state,
     dump_messages,
     json_state,
-    model_spec,
     run_hooks,
 )
 from openswe.agent_api.operations import Injections, invoke
@@ -321,12 +320,6 @@ _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 
 type PhaseWork[R: PhaseResult] = Callable[[dict[str, object], Runtime], Awaitable[R]]
 RunPlanner = Callable[[RunnableConfig, ToolSurface], Awaitable[None]]
-
-
-def _model_spec(choice: ModelChoice) -> ModelSpec:
-    return ModelSpec(
-        model_id=choice.model_id, kwargs=_json_object.validate_python(dict(choice.kwargs))
-    )
 
 
 class _CarriedEvents(BaseModel):
@@ -625,8 +618,10 @@ class RunSession:
         return _ASYNC_TASK_TOOLS
 
     def start_models(self) -> RunModels:
+        fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional()
+
         def spec(choice: ModelChoice) -> ModelSpec:
-            return model_spec(choice.model_id, choice.kwargs)
+            return model_spec(choice.model_id, choice.kwargs, fallback_model_id=fallback_model_id)
 
         return RunModels(
             model=spec(self.models.main),
@@ -634,6 +629,7 @@ class RunSession:
             use_gateway=self.models.use_gateway,
             routes={route: spec(choice) for route, choice in self.models.routes.items()},
             vision=None if self.models.vision is None else spec(self.models.vision),
+            fallback_model_id=fallback_model_id,
         )
 
     @property
@@ -1242,7 +1238,10 @@ class TokenRun:
         return Route(route=selection.route, persist=selection.persist)
 
     async def model_choice(self, request: ChosenModel) -> ModelSpec:
-        return chosen_model(request.model_id, request.effort)
+        """A model a person asked for. MDA now answers this itself from the catalog's
+        models; kept for one release, for MDA deployments that still ask."""
+        fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional()
+        return chosen_model(request.model_id, request.effort, fallback_model_id=fallback_model_id)
 
     async def task_context(self, _request: RunRequest) -> TaskContext:
         """The task the thread belongs to, as each model call tells the model."""

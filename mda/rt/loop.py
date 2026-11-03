@@ -37,14 +37,12 @@ from runtime_api.catalog import (
     Catalog,
     CliResultRules,
     LoopRules,
-    ModelSpec,
     ReplyRules,
     RunModels,
 )
 from runtime_api.endpoint import call
 from runtime_api.loop import (
     FINISH_SCOUT_PLAN,
-    MODEL_CHOICE,
     REFRESH_GITHUB_PROXY,
     REPLY_ON_BEHALF,
     ROUTE_MODEL,
@@ -53,7 +51,6 @@ from runtime_api.loop import (
     STEP_LIMIT_REACHED,
     TASK_CONTEXT,
     BeforeModel,
-    ChosenModel,
     GitHubProxyRefreshed,
     ModelCall,
     PhaseResult,
@@ -65,6 +62,8 @@ from runtime_api.loop import (
     ScoutPlanEnd,
     TaskContext,
 )
+from runtime_api.model_errors import is_model_failure_reply
+from runtime_api.models import model_for
 from runtime_api.operations import RunRequest
 
 from rt.backend import (
@@ -303,7 +302,6 @@ class RunLoop:
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
         # Models each run calls by id, such as one a person asked for, as the backend sets them.
-        self._chosen: RunLocal[dict[tuple[str, str | None], ModelSpec]] = RunLocal(dict)
         self._guidance = RunLocal(_RunGuidance)
 
     @staticmethod
@@ -405,7 +403,7 @@ class RunLoop:
             else:
                 update["model_route_attempted_for"] = run_id()
         current = {**held, **update}
-        model = await self._model_for(current)
+        model = model_for(self._models, current)
         system_prompt, workspace_prompt, thread_prompt = self._system_prompt(current)
         return BeforeModel(
             update=update,
@@ -494,28 +492,6 @@ class RunLoop:
                 get_stream_writer()({"type": "model_routed", "route": route, "model_id": model_id})
         return Route(route=route, persist=persist)
 
-    async def _chosen_model(self, model_id: str, effort: object) -> ModelSpec:
-        key = (model_id, effort if isinstance(effort, str) else None)
-        chosen = self._chosen.get(self._backend.run)
-        if key not in chosen:
-            choice = ChosenModel(run_id=run_id(), model_id=key[0], effort=key[1])
-            chosen[key] = await call(self._backend, MODEL_CHOICE, choice)
-        return chosen[key]
-
-    async def _model_for(self, held: Mapping[str, object]) -> ModelSpec:
-        """The run's own model, a route's, or the one a person asked for."""
-        requested = held.get("requested_model")
-        if isinstance(requested, str) and requested:
-            return await self._chosen_model(requested, held.get("requested_effort"))
-        route = held.get("model_route")
-        routed = self._models.routes.get(_normalized(route)) if isinstance(route, str) else None
-        if routed is not None and route != "default":
-            return routed
-        selected = held.get("selected_model_id")
-        if isinstance(selected, str) and selected and selected != self._models.model.model_id:
-            return await self._chosen_model(selected, held.get("selected_effort"))
-        return self._models.model
-
     def _system_prompt(self, held: Mapping[str, object]) -> tuple[str, str, str]:
         """The prompt every thread shares, the part its workspace's threads share, and the
         part only this one's says, all fixed for the thread's life: a changed byte misses
@@ -551,6 +527,12 @@ class RunLoop:
             return PhaseResult()
         held = _held(state)
         update: dict[str, JsonValue] = {}
+        if is_model_failure_reply(last):
+            # Asking the model again would wait out the same outage or refusal: what was
+            # written for it is the run's answer.
+            if self.rules.reply is not None and held.get("reply_surface") == "slack":
+                await self._reply_on_behalf(state, content_text(last.content))
+            return PhaseResult(update={"reply_nudges": 0, "cli_result_nudges": 0})
         if self.rules.cli_result is not None:
             asked = self._cli_result(self.rules.cli_result, state, held, update)
             if asked is not None:
@@ -625,12 +607,15 @@ class RunLoop:
                 jump_to="model",
             )
         # Silence is the one outcome the person cannot recover from.
-        if text := turn.last_answer():
-            reply = run_call(ReplyOnBehalf, run_id(), state, text=text)
-            await call(self._backend, REPLY_ON_BEHALF, reply)
-        else:
-            logger.warning("Nothing to post on the model's behalf: it wrote no text this turn")
+        await self._reply_on_behalf(state, turn.last_answer())
         return PhaseResult(update={**update, "reply_nudges": 0})
+
+    async def _reply_on_behalf(self, state: Mapping[str, object], text: str) -> None:
+        if not text:
+            logger.warning("Nothing to post on the model's behalf: it wrote no text this turn")
+            return
+        reply = run_call(ReplyOnBehalf, run_id(), state, text=text)
+        await call(self._backend, REPLY_ON_BEHALF, reply)
 
     @staticmethod
     def _replied(rules: ReplyRules, turn: _Turn) -> bool:
