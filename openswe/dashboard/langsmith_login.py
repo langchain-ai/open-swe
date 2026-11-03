@@ -54,7 +54,7 @@ class LangSmithLogin:
         self.issuer = langsmith_issuer()
         self.client_id = ENV.LANGSMITH_OAUTH_CLIENT_ID.get()
         self.client_secret = ENV.LANGSMITH_OAUTH_CLIENT_SECRET.get()
-        self.org_id = ENV.LANGSMITH_LOGIN_ORG_ID.get()
+        self.org_id = ""
 
     async def allowed_org(self) -> str:
         if self.org_id:
