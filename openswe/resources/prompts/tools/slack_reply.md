@@ -11,6 +11,9 @@ Make `message` as concise as possible: default to one sentence with only the out
 Omit greetings, preambles, headings, recaps, implementation details, and redundant context; use bullets only when multiple items are essential.
 End the run by posting a concise final outcome here.
 
+In a concierge DM or code channel, replies post unthreaded unless the person wrote in a thread.
+Pass `thread_ts` (a message's timestamp) to reply in that message's thread instead; it is rejected anywhere else.
+
 Format `message` using standard Markdown: **bold**, _italic_, ~~strikethrough~~, [link text](url), and Markdown lists.
 Replies use Slack's native Markdown blocks.
 

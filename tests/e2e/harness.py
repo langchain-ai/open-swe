@@ -732,7 +732,9 @@ async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx2.Response
 async def _slack_send_result(payload: dict[str, Any], resp: httpx2.Response) -> JSONResponse:
     event = payload["event"]
     channel = str(event["channel"])
-    thread_ts = "0" if channel in fakes.CODE_CHANNELS else str(event["thread_ts"])
+    thread_ts = (
+        "0" if channel in fakes.CODE_CHANNELS else str(event.get("thread_ts") or event["ts"])
+    )
     thread_id = await lookup_slack_thread_id(channel, thread_ts)
     if thread_id is None and channel.startswith("D"):
         # A concierge-mode DM is one conversation keyed on the fixed "0" timestamp.
@@ -809,8 +811,10 @@ async def slack_send(request: Request) -> JSONResponse:
         "user": user_id,
         "text": text,
         "ts": event_ts,
-        "thread_ts": thread_ts,
     }
+    # Slack sets `thread_ts` only on a reply inside a thread.
+    if reply_thread_ts:
+        event["thread_ts"] = thread_ts
     if channel_type:
         event["channel_type"] = channel_type
     payload = {
