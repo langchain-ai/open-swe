@@ -390,7 +390,7 @@ test.describe("Human review in Slack", () => {
       .toBe(1);
     await expect
       .poll(async () =>
-        (await channelMessages(request, "C_DEMO", asked.thread_ts)).map(
+        (await channelMessages(request, "CDEMO01", asked.thread_ts)).map(
           (m) => m.text,
         ),
       )
