@@ -230,3 +230,69 @@ async def test_complete_records_the_run_that_completed_it(enrolled):
 
     await channels.apply_control(completed, "reopen", {"id": "slack:U1"})
     assert (await service.INCIDENTS.get(enrolled.id)).completed_run_id == ""
+
+
+@pytest.mark.parametrize(
+    ("text", "thread_ts", "history", "explicit"),
+    [
+        ("Could you open another PR?", "10.0", [{"ts": "10.0", "user": "UBOT"}], True),
+        (
+            "Please comment on the PR",
+            "",
+            [{"ts": "10.0", "user": "U1", "text": "<@UBOT> check errors"}],
+            True,
+        ),
+        ("Errors are down now", "10.0", [{"ts": "10.0", "user": "UBOT"}], False),
+        (
+            "I will open a PR",
+            "",
+            [{"ts": "10.0", "user": "U1", "text": "<@UBOT> check errors"}],
+            False,
+        ),
+        (
+            "Could you open another PR?",
+            "",
+            [{"ts": "10.0", "user": "U2", "text": "<@UBOT> check errors"}],
+            False,
+        ),
+        (
+            "Could you open another PR?",
+            "",
+            [{"ts": "1.0", "user": "U1", "text": "<@UBOT> check errors"}],
+            False,
+        ),
+        ("Could you open another PR?", "10.0", [{"ts": "10.0", "bot_id": "OTHER"}], False),
+    ],
+)
+async def test_followup_requests_need_both_intent_and_conversation(
+    monkeypatch, text, thread_ts, history, explicit
+):
+    policy = IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1")
+    record = Incident(id="incident", workspace_id="T1", channel_id="C1", thread_id="thread-1")
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setattr(service, "get_policy", AsyncMock(return_value=policy))
+    monkeypatch.setattr(service.INCIDENTS, "get", AsyncMock(return_value=record))
+    monkeypatch.setattr(channels, "claim_slack_event", AsyncMock(return_value=True))
+    monkeypatch.setattr(channels, "fetch_slack_thread_messages", AsyncMock(return_value=history))
+    actor = {"id": "github:sre", "github_login": "sre"}
+    monkeypatch.setattr(channels, "linked_slack_user", AsyncMock(return_value=actor))
+    monkeypatch.setattr(turns, "dispatch_turn", AsyncMock())
+    monkeypatch.setattr(turns, "queue_context", AsyncMock())
+    monkeypatch.setattr(turns, "schedule_automatic_turn", AsyncMock())
+    message = {
+        "type": "message",
+        "channel": "C1",
+        "user": "U1",
+        "text": text,
+        "ts": "310.0",
+        "thread_ts": thread_ts,
+    }
+    await handle(message)
+    if explicit:
+        turns.dispatch_turn.assert_awaited_once_with(
+            record, policy, request=text, requester=actor, reply_thread_ts=thread_ts
+        )
+        turns.queue_context.assert_not_awaited()
+    else:
+        turns.dispatch_turn.assert_not_awaited()
+        turns.queue_context.assert_awaited_once_with(record, message)

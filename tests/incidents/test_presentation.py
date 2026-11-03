@@ -13,12 +13,14 @@ def test_investigation_bounds_untrusted_sections_without_mentions_or_unsafe_link
         cause="Root cause. " * 1000,
         next_steps=["Do the thing. " * 1000] * 5,
         gaps=["Missing access. " * 1000],
+        questions=["Please @mention the bot to authorize opening a PR."],
         evidence=[Evidence(id="bad", source="slack", summary="Bad", url="javascript:alert(1)")],
     )
     text, blocks = report_message(report, report.summary, None)
     assert "<!channel>" not in text and "<@U1>" not in text
     assert "&lt;!channel&gt;" in text and "javascript:" not in text
     # Every section is over budget at once, so this is the widest the format can get.
+    assert "Please @mention the bot to authorize opening a PR." in text
     assert len(text) < 3200
     assert all(len(block.get("text", {}).get("text", "")) <= 3000 for block in blocks)
     # Only the three highest-priority steps are published.

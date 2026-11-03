@@ -787,6 +787,20 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
+        cfg = _configurable(request)
+        if cfg.source == "incidents_agent" and any(
+            _standalone_push_args(command) is not None or _chained_push_dirs(command)
+            for command in shell_commands(request)
+        ):
+            from openswe.incidents.runtime import load_incident_session
+
+            session = await load_incident_session(request.runtime.config, run_id=cfg.run_id)
+            if session.explicit_request is None:
+                return ToolMessage(
+                    content="Automatic incident turns cannot push code. Ask the responder to @mention the bot with the request using record_incident_report questions.",
+                    tool_call_id=_tool_call_id(request) or "",
+                    status="error",
+                )
         try:
             change = await self._change_for_request(request)
         except WorkflowPushInspectionError as exc:

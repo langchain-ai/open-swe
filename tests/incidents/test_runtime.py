@@ -2,12 +2,13 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import langgraph_sdk
 import pytest
 
 from openswe.incidents import documents, runtime, service
+from openswe.incidents.evidence_tools import EvidenceCollector
 from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.incidents.report import CONTEXT_MARKER
 from openswe.slack.channels import SlackChannel
@@ -211,3 +212,31 @@ async def test_questions_are_answered_after_the_investigation_is_published(incid
 
     assert answer["posted"] is True
     assert runtime.post_slack_thread_reply_with_ts.await_count == 2
+
+
+async def test_requester_questions_are_delivered_after_initial_findings(monkeypatch):
+    session = runtime.IncidentSession(
+        Incident(id="incident", workspace_id="T1", channel_id="C1"),
+        IncidentPolicy(),
+        run_id="run-1",
+    )
+    monkeypatch.setattr(session, "check", AsyncMock())
+    evidence = AsyncMock()
+    evidence.__aenter__.return_value = EvidenceCollector()
+    monkeypatch.setattr(service.RUN_EVIDENCE, "collecting", Mock(return_value=evidence))
+    monkeypatch.setattr(service.REPORTS, "get", AsyncMock(return_value=None))
+    monkeypatch.setattr(service.REPORTS, "put", AsyncMock())
+    monkeypatch.setattr(documents, "update_from_report", AsyncMock())
+    monkeypatch.setattr(runtime, "post_slack_thread_reply_with_ts", AsyncMock(return_value="7.0"))
+    await session.context([context_message()])
+    await session._record_incident_report(
+        summary=[{"text": "Errors reported", "evidence_ids": ["slack:1.0"]}]
+    )
+    service.REPORTS.get.return_value = service.REPORTS.put.await_args.args[1]
+    question = "Please @mention the bot to authorize opening the requested PR."
+    blocked = await session._record_incident_report(questions=[question])
+    service.REPORTS.get.return_value = service.REPORTS.put.await_args.args[1]
+    repeated = await session._record_incident_report(questions=[question])
+    assert blocked["posted"] is True
+    assert repeated["posted"] is False
+    assert question in runtime.post_slack_thread_reply_with_ts.await_args.args[2]
