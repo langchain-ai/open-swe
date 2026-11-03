@@ -31,11 +31,13 @@ _PR_LINK = re.compile(
 )
 _CODE = re.compile(r"```[\s\S]*?```|`[^`\n]*`")
 _GITHUB_MARK = "↗"
+_GITHUB_LABEL = "GitHub"
+_GITHUB_LABELS = (_GITHUB_MARK, _GITHUB_LABEL, ":arrow_upper_right:")
 
 
 @dataclass(frozen=True)
 class _PrLinks:
-    """How one Slack text field shows PR links: the review page, then a ↗ link to GitHub."""
+    """Show the review page followed by a format-appropriate GitHub link."""
 
     mrkdwn: bool
     github_mark: bool = True
@@ -51,7 +53,10 @@ class _PrLinks:
 
     def link(self, match: re.Match[str]) -> str:
         github = match["md"] or match["slack"] or match["bare"]
-        if _GITHUB_MARK in {match["md_label"], match["slack_label"]}:
+        label = match["md_label"] or match["slack_label"]
+        if label in (_GITHUB_MARK, ":arrow_upper_right:") or (
+            label == _GITHUB_LABEL and match.string[: match.start()].endswith("> (")
+        ):
             return match.group()
         owner, repo, number = cast(re.Match[str], _PR_PARTS.search(github)).groups()
         review = dashboard_review_url(owner, repo, int(number))
@@ -63,7 +68,7 @@ class _PrLinks:
             return f"[{match['md_label']}]({review})[{_GITHUB_MARK}]({github})"
         label = match["slack_label"] or f"{repo}#{number}"
         if match["slack"] or self.mrkdwn:
-            return f"<{review}|{label}><{github}|{_GITHUB_MARK}>"
+            return f"<{review}|{label}> (<{github}|{_GITHUB_LABEL}>)"
         return f"[{label}]({review})[{_GITHUB_MARK}]({github})"
 
     def block(self, value: object) -> object:
@@ -72,7 +77,7 @@ class _PrLinks:
         if (
             not isinstance(value, dict)
             or value.get("type") in {"plain_text", "rich_text_preformatted"}
-            or (value.get("type") == "link" and value.get("text") == _GITHUB_MARK)
+            or (value.get("type") == "link" and value.get("text") in _GITHUB_LABELS)
         ):
             return value
         nested = _PLAIN if value.get("type") == "rich_text" or not self.github_mark else self
