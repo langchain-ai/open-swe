@@ -34,6 +34,9 @@ class LangSmithServer:
     subject: str = "5bb3fb19-f328-4815-8fe8-0483b41312c2"
     organization: str = ALLOWED_ORG
     deployment_org: str = ALLOWED_ORG
+    discoveries: int = 0
+    discovery_unavailable: bool = False
+    clock: float = 0.0
     member: bool = True
     revoked: bool = False
     unavailable: bool = False
@@ -52,6 +55,9 @@ class LangSmithServer:
 
     async def respond(self, request: httpx2.Request) -> httpx2.Response:
         if request.url.path == "/auth/public":
+            self.discoveries += 1
+            if self.discovery_unavailable:
+                return httpx2.Response(503, json={"detail": "unavailable"})
             assert request.headers["x-api-key"] == "deployment-key"
             assert "authorization" not in request.headers
             return httpx2.Response(200, json={"organization_id": self.deployment_org})
@@ -149,6 +155,10 @@ async def langsmith_client(registry_db, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
     server = LangSmithServer()
+    monkeypatch.setattr(langsmith_login, "monotonic", lambda: server.clock)
+    monkeypatch.setattr(
+        langsmith_login, "LANGSMITH_ORG_DISCOVERY", langsmith_login.LangSmithOrgDiscovery()
+    )
     monkeypatch.setattr(
         langsmith_login, "pooled_transport", lambda: httpx2.MockTransport(server.respond)
     )
@@ -407,6 +417,7 @@ async def test_login_requires_an_org_source_and_org_changes_invalidate_cached_ac
     monkeypatch.setenv("LANGSMITH_API_KEY", "deployment-key")
     assert (await client.get("/dashboard/api/me")).status_code == 200
     server.deployment_org = "different-org"
+    server.clock += 61
     assert (await client.get("/dashboard/api/me")).status_code == 403
 
 
@@ -426,6 +437,9 @@ async def test_deployment_org_discovery_fails_closed(
     monkeypatch: pytest.MonkeyPatch, status: int, body: object
 ) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "deployment-key")
+    monkeypatch.setattr(
+        langsmith_login, "LANGSMITH_ORG_DISCOVERY", langsmith_login.LangSmithOrgDiscovery()
+    )
     transport = httpx2.MockTransport(lambda request: httpx2.Response(status, json=body))
     monkeypatch.setattr(langsmith_login, "pooled_transport", lambda: transport)
     with pytest.raises(HTTPException) as exc:
@@ -440,17 +454,25 @@ async def test_cached_authorization_uses_no_provider_calls_or_refresh_lock(
     exchanged = await server.exchange(client, await server.desktop_login(client))
     session = oauth.decode_session(exchanged.json()["session"])
     checks = server.authorizations
+    discoveries = server.discoveries
+    server.discovery_unavailable = True
     monkeypatch.setattr(langsmith_login, "refresh_guard", lambda *args: pytest.fail("refresh lock"))
     client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
     assert (await client.get("/dashboard/api/me")).status_code == 200
     assert await langsmith_oauth.langsmith_access_token(session["sub"]) == "access"
     assert server.authorizations == checks
+    assert server.discoveries == discoveries
     credential = await load_credential("langsmith_login", session["sub"])
     assert credential is not None and credential.login_authorized_until is not None
     assert credential.login_authorized_until <= datetime.now(UTC) + timedelta(seconds=60)
     await server.expire_authorization(session["sub"])
     assert (await client.get("/dashboard/api/me")).status_code == 200
     assert server.authorizations == checks + 1
+    server.clock += 61
+    assert (await client.get("/dashboard/api/me")).status_code == 503
+    server.discovery_unavailable = False
+    assert (await client.get("/dashboard/api/me")).status_code == 200
+    assert server.discoveries == discoveries + 2
 
 
 @pytest.mark.parametrize("unavailable", [False, True])
@@ -549,3 +571,25 @@ async def test_refresh_survives_transient_membership_failure(langsmith_client) -
     server.unavailable = False
     assert (await client.get("/dashboard/api/me")).status_code == 200
     assert server.refreshes == 1
+
+
+@pytest.mark.parametrize("setting", ["LANGSMITH_API_KEY", "LANGSMITH_ENDPOINT"])
+async def test_deployment_org_cache_is_bound_to_key_and_endpoint(
+    langsmith_client, monkeypatch: pytest.MonkeyPatch, setting: str
+) -> None:
+    server, client = langsmith_client
+    assert await langsmith_login.LangSmithLogin().allowed_org() == ALLOWED_ORG
+    server.discovery_unavailable = True
+    monkeypatch.setenv(
+        setting, "changed-value" if setting == "LANGSMITH_API_KEY" else "https://other.example"
+    )
+    assert (await client.get("/dashboard/api/auth/langsmith/login")).status_code == 503
+
+
+async def test_concurrent_org_discovery_reuses_one_lookup(langsmith_client) -> None:
+    server, _ = langsmith_client
+    results = await asyncio.gather(
+        *(langsmith_login.LangSmithLogin().allowed_org() for _ in range(10))
+    )
+    assert results == [ALLOWED_ORG] * 10
+    assert server.discoveries == 1

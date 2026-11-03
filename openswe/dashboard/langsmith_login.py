@@ -1,10 +1,13 @@
 """LangSmith login and live organization authorization for independent accounts."""
 
+import asyncio
 import logging
 import secrets
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
+from time import monotonic
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode, urlparse
 
@@ -49,25 +52,35 @@ class LangSmithAccount(BaseModel):
             raise UnauthorizedUser("This LangSmith organization is not authorized")
 
 
-class LangSmithLogin:
+class LangSmithOrgDiscovery:
     def __init__(self) -> None:
-        self.issuer = langsmith_issuer()
-        self.client_id = ENV.LANGSMITH_OAUTH_CLIENT_ID.get()
-        self.client_secret = ENV.LANGSMITH_OAUTH_CLIENT_SECRET.get()
+        self.identity: tuple[str, str] | None = None
         self.org_id = ""
+        self.expires_at = 0.0
+        self.lock = asyncio.Lock()
 
-    async def allowed_org(self) -> str:
-        if self.org_id:
-            return self.org_id
+    async def resolve(self) -> str:
         key = ENV.LANGSMITH_API_KEY.get()
         if not key:
             raise HTTPException(503, "LangSmith login is not configured")
+        endpoint = ENV.LANGSMITH_ENDPOINT.get().rstrip("/")
+        identity = (endpoint, sha256(key.encode()).hexdigest())
+        async with self.lock:
+            if self.identity == identity and monotonic() < self.expires_at:
+                return self.org_id
+            org_id = await self.discover(endpoint, key)
+            self.identity = identity
+            self.org_id = org_id
+            self.expires_at = monotonic() + LANGSMITH_AUTHORIZATION_TTL.total_seconds()
+            return org_id
+
+    async def discover(self, endpoint: str, key: str) -> str:
         try:
             async with httpx2.AsyncClient(
                 timeout=httpx2.Timeout(15.0, connect=5.0), transport=pooled_transport()
             ) as client:
                 response = await client.get(
-                    ENV.LANGSMITH_ENDPOINT.get().rstrip("/") + "/auth/public",
+                    endpoint + "/auth/public",
                     headers={"Accept": "application/json", "X-Api-Key": key},
                     follow_redirects=False,
                 )
@@ -80,8 +93,22 @@ class LangSmithLogin:
         org_id = data.get("organization_id") if isinstance(data, dict) else None
         if not isinstance(org_id, str) or not org_id.strip():
             raise HTTPException(503, "Invalid LangSmith deployment organization response")
-        self.org_id = org_id
         return org_id
+
+
+LANGSMITH_ORG_DISCOVERY = LangSmithOrgDiscovery()
+
+
+class LangSmithLogin:
+    def __init__(self) -> None:
+        self.issuer = langsmith_issuer()
+        self.client_id = ENV.LANGSMITH_OAUTH_CLIENT_ID.get()
+        self.client_secret = ENV.LANGSMITH_OAUTH_CLIENT_SECRET.get()
+        self.org_id = ""
+
+    async def allowed_org(self) -> str:
+        self.org_id = await LANGSMITH_ORG_DISCOVERY.resolve()
+        return self.org_id
 
     async def require_configured(self) -> None:
         if not langsmith_oauth_configured():
