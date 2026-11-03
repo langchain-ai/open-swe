@@ -471,6 +471,9 @@ async def test_cached_authorization_uses_no_provider_calls_or_refresh_lock(
     server.clock += 61
     assert (await client.get("/dashboard/api/me")).status_code == 503
     server.discovery_unavailable = False
+    assert (await client.get("/dashboard/api/me")).status_code == 503
+    assert server.discoveries == discoveries + 1
+    server.clock += 3
     assert (await client.get("/dashboard/api/me")).status_code == 200
     assert server.discoveries == discoveries + 2
 
@@ -586,10 +589,20 @@ async def test_deployment_org_cache_is_bound_to_key_and_endpoint(
     assert (await client.get("/dashboard/api/auth/langsmith/login")).status_code == 503
 
 
-async def test_concurrent_org_discovery_reuses_one_lookup(langsmith_client) -> None:
+@pytest.mark.parametrize("unavailable", [False, True])
+async def test_concurrent_org_discovery_reuses_one_lookup(
+    langsmith_client, unavailable: bool
+) -> None:
     server, _ = langsmith_client
+    server.discovery_unavailable = unavailable
     results = await asyncio.gather(
-        *(langsmith_login.LangSmithLogin().allowed_org() for _ in range(10))
+        *(langsmith_login.LangSmithLogin().allowed_org() for _ in range(10)),
+        return_exceptions=True,
     )
-    assert results == [ALLOWED_ORG] * 10
+    if unavailable:
+        assert all(
+            isinstance(result, HTTPException) and result.status_code == 503 for result in results
+        )
+    else:
+        assert results == [ALLOWED_ORG] * 10
     assert server.discoveries == 1

@@ -67,8 +67,18 @@ class LangSmithOrgDiscovery:
         identity = (endpoint, sha256(key.encode()).hexdigest())
         async with self.lock:
             if self.identity == identity and monotonic() < self.expires_at:
+                if not self.org_id:
+                    raise HTTPException(
+                        503, "LangSmith organization discovery is temporarily unavailable"
+                    )
                 return self.org_id
-            org_id = await self.discover(endpoint, key)
+            try:
+                org_id = await self.discover(endpoint, key)
+            except HTTPException:
+                self.identity = identity
+                self.org_id = ""
+                self.expires_at = monotonic() + 3
+                raise
             self.identity = identity
             self.org_id = org_id
             self.expires_at = monotonic() + LANGSMITH_AUTHORIZATION_TTL.total_seconds()
@@ -77,7 +87,7 @@ class LangSmithOrgDiscovery:
     async def discover(self, endpoint: str, key: str) -> str:
         try:
             async with httpx2.AsyncClient(
-                timeout=httpx2.Timeout(15.0, connect=5.0), transport=pooled_transport()
+                timeout=httpx2.Timeout(3.0, connect=1.0), transport=pooled_transport()
             ) as client:
                 response = await client.get(
                     endpoint + "/auth/public",
