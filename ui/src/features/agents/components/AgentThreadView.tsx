@@ -86,7 +86,6 @@ import { reportError } from "@/lib/errorReporting"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
-import { useWorkThreadRead } from "@/features/agents/lib/useWorkThreadRead"
 import { useConnectionStatus } from "@/features/agents/lib/stream/useReconnectStatus"
 import { runTranscriptCommitted } from "@/lib/perf/streaming"
 import { ReplyOptionContext } from "@/features/agents/components/chat/ReplyCard"
@@ -142,7 +141,6 @@ export function AgentThreadView({
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const source = useThreadSource()
-  useWorkThreadRead(thread, source)
   const [dismissedWarning, setDismissedWarning] = useState("")
   const workspaceWarningKey = JSON.stringify([
     thread.id,

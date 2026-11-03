@@ -13,7 +13,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ChatComposer, buildCommandItems } from "./ChatComposer"
 import { api } from "@/lib/api"
-import { AgentWorkspaceProvider } from "@/features/agents/lib/agentWorkspace"
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import { replaceTextRange } from "./composerTrigger"
 import type { ChatComposerProps } from "./ChatComposer"
@@ -72,8 +71,7 @@ beforeEach(() => {
 
 function renderComposer(
   running: boolean,
-  props: Partial<ChatComposerProps> = {},
-  workspace = false
+  props: Partial<ChatComposerProps> = {}
 ) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
@@ -82,12 +80,10 @@ function renderComposer(
     <QueryClientProvider client={client}>
       <AgentThreadStreamBoundary>
         <ThreadSourceProvider threadId="thread-1" transcript={false}>
-          <AgentWorkspaceProvider enabled={workspace}>
-            <ChatComposer
-              activeRun={{ threadId: "thread-1", running }}
-              {...props}
-            />
-          </AgentWorkspaceProvider>
+          <ChatComposer
+            activeRun={{ threadId: "thread-1", running }}
+            {...props}
+          />
         </ThreadSourceProvider>
       </AgentThreadStreamBoundary>
     </QueryClientProvider>,
@@ -215,14 +211,10 @@ describe("ChatComposer drafts", () => {
       mimeType: "image/png",
       fileName: "draft.png",
     }
-    renderComposer(
-      false,
-      {
-        draftKey: "draft-user:new:home",
-        restoreDraft: { key: 1, text: "Home draft", images: [image] },
-      },
-      true
-    )
+    renderComposer(false, {
+      draftKey: "draft-user:new:home",
+      restoreDraft: { key: 1, text: "Home draft", images: [image] },
+    })
     await waitFor(() =>
       expect(screen.getByRole("textbox").textContent).toContain("Home draft")
     )
@@ -235,11 +227,11 @@ describe("ChatComposer drafts", () => {
       expect(screen.getByRole("textbox").textContent).toContain("Code draft")
     )
     cleanup()
-    renderComposer(false, { draftKey: "other-user:new:home" }, true)
+    renderComposer(false, { draftKey: "other-user:new:home" })
     expect(screen.getByRole("textbox").textContent).toBe("")
     cleanup()
     const onSubmit = vi.fn()
-    renderComposer(false, { draftKey: "draft-user:new:home", onSubmit }, true)
+    renderComposer(false, { draftKey: "draft-user:new:home", onSubmit })
     expect(screen.getByRole("textbox").textContent).toContain("Home draft")
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" })
     await waitFor(() =>
@@ -252,67 +244,39 @@ describe("ChatComposer drafts", () => {
     renderComposer(false, { draftKey: "draft-user:new:code" })
     expect(screen.getByRole("textbox").textContent).toContain("Code draft")
     cleanup()
-    renderComposer(false, { draftKey: "draft-user:new:home" }, true)
+    renderComposer(false, { draftKey: "draft-user:new:home" })
     expect(screen.getByRole("textbox").textContent).toBe("")
   })
 })
 
 describe("ChatComposer options", () => {
-  it("keeps local setup reachable in workspace mode without taking Escape from the context popover", async () => {
-    const onTargetChange = vi.fn()
-    renderComposer(
-      true,
-      {
-        runTarget: "local",
-        onRunTargetChange: onTargetChange,
-        onSelectLocalRepo: vi.fn(),
-        onAddLocalRepo: vi.fn(),
-        onRemoveLocalRepo: vi.fn(),
-        onSelectLocalRepoBranch: vi.fn(),
-        onRefreshLocalRepoBranch: vi.fn(),
-        onLocalWorkspaceModeChange: vi.fn(),
-      },
-      true
-    )
-
+  it("offers a task folder locally and shows branch controls only for Git folders", async () => {
+    const local = {
+      runTarget: "local" as const,
+      onRunTargetChange: vi.fn(),
+      onSelectLocalRepo: vi.fn(),
+      onAddLocalRepo: vi.fn(),
+      onRemoveLocalRepo: vi.fn(),
+      onSelectLocalRepoBranch: vi.fn(),
+      onRefreshLocalRepoBranch: vi.fn(),
+      onLocalWorkspaceModeChange: vi.fn(),
+    }
+    renderComposer(false, local)
     expect(screen.getByRole("button", { name: "This Mac" })).toBeTruthy()
     expect(
-      screen.queryByRole("button", { name: "Select repository" })
-    ).toBeNull()
-    fireEvent.click(
-      screen.getByRole("button", { name: "Task context: Use a folder" })
-    )
-    const dialog = await screen.findByRole("dialog", { name: "Task context" })
-    expect(
-      screen.getByRole("button", { name: "Automatic task folder" })
+      screen.getByRole("button", { name: /Automatic task folder/ })
     ).toBeTruthy()
     expect(screen.queryByRole("button", { name: "No branch" })).toBeNull()
-    expect(
-      screen.queryByRole("button", { name: "Current checkout" })
-    ).toBeNull()
-    fireEvent.keyDown(dialog, { key: "Escape" })
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "Task context" })).toBeNull()
-    )
-    expect(cancelThread).not.toHaveBeenCalled()
-  })
+    cleanup()
 
-  it("keeps an existing local thread's branch controls in task context", async () => {
-    renderComposer(
-      false,
-      {
-        runTarget: "local",
-        selectedLocalRepoPath: "/projects/demo",
-        selectedLocalRepoBranch: "main",
-        localRepoBranches: [
-          { name: "main", current: true, isDefault: true, worktreePath: null },
-        ],
-        onSelectLocalRepoBranch: vi.fn(),
-        onRefreshLocalRepoBranch: vi.fn(),
-      },
-      true
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Task context: demo" }))
+    renderComposer(false, {
+      ...local,
+      selectedLocalRepoPath: "/projects/demo",
+      selectedLocalRepoBranch: "main",
+      localRepoBranches: [
+        { name: "main", current: true, isDefault: true, worktreePath: null },
+      ],
+    })
     expect(await screen.findByRole("button", { name: "main" })).toBeTruthy()
   })
 

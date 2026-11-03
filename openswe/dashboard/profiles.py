@@ -380,7 +380,6 @@ async def get_my_profile(
     return {
         **normalize_profile_for_response(profile or {}),
         **preferences.model_dump(),
-        "agent_workspace_tasks_supported": True,
     }
 
 
@@ -425,5 +424,4 @@ async def put_my_profile(
     return {
         **normalize_profile_for_response(profile),
         **(preferences or UserPreferences()).model_dump(),
-        "agent_workspace_tasks_supported": True,
     }

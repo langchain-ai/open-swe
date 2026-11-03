@@ -40,8 +40,14 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   expandedRepoKeys: [],
   collapsedSectionKeys: [],
   expandedSubagentKeys: [],
-  hiddenNavItems: ["/agents/bots", "/incidents"],
-  organize: "workspace",
+  hiddenNavItems: [
+    "/agents/skills",
+    "/agents/automations",
+    "/agents/bots",
+    "/agents/reviews",
+    "/incidents",
+  ],
+  organize: "list",
   sortChats: "created",
   sortPinned: "manual",
 }

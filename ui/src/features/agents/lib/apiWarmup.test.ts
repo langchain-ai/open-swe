@@ -35,8 +35,8 @@ async function recordedSidebarUrl({
   includeAutomations = false,
   includeResolved = false,
   includeClaudeCode = true,
-  repoMode = true,
-  sort = "created",
+  repoMode = false,
+  sort = "updated",
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
@@ -155,9 +155,9 @@ describe("apiWarmupScript", () => {
       prefs: { filters: { sources: ["schedule"] } },
     },
     {
-      name: "list mode",
-      expected: { repoMode: false, sort: "updated" as ChatSort },
-      prefs: { organize: "list" },
+      name: "repo mode",
+      expected: { repoMode: true, sort: "created" as ChatSort },
+      prefs: { organize: "repo" },
     },
     {
       name: "resolved included",
@@ -170,9 +170,9 @@ describe("apiWarmupScript", () => {
       prefs: { filters: { includeClaudeCode: false } },
     },
     {
-      name: "sorted by last update",
-      expected: { sort: "updated" as ChatSort },
-      prefs: { sortChats: "updated" },
+      name: "repo mode sorted by last update",
+      expected: { repoMode: true, sort: "updated" as ChatSort },
+      prefs: { organize: "repo", sortChats: "updated" },
     },
   ])(
     "warms the exact sidebar URL the app requests ($name)",

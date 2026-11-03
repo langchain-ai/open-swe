@@ -180,13 +180,7 @@ async def get_dashboard_thread(
             else None
         ),
     )
-    if (
-        mark_viewed
-        and status != "running"
-        and not (
-            metadata.get("experience") == "agent_workspace" and metadata.get("transcript") == "v2"
-        )
-    ):
+    if mark_viewed and status != "running":
         with phase(record, "mark_viewed"):
             metadata = await _mark_thread_viewed(
                 client,
@@ -455,7 +449,6 @@ _CONTINUED_METADATA_KEYS = (
     "repo_owner",
     "repo_name",
     "repo_explicitly_none",
-    "experience",
     THREAD_SETTINGS_KEY,
 )
 

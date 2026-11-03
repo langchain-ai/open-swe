@@ -27,13 +27,8 @@ Closing, archiving, or deleting a chat does not delete its automatic task files.
 These folders are starting locations, not filesystem security sandboxes.
 Git branch and worktree controls appear only for Git folders.
 
-The desktop header switches between **Home** (Work mode) and **Code** (Coding mode).
-Home is selected by default; the app remembers each account’s last selection on this device.
-Each experience has its own thread lists, pins and search results; switching never converts an existing thread.
-
-The general-purpose experience is saved on new threads before their first run and inherited by later runs and task workers.
-Existing conversations retain their coding experience.
-Testing requires this branch’s desktop shell and backend; a local UI against an older backend cannot enable the new prompting.
+Every chat lives in one list, whatever it works on.
+A chat started without a repository gets the general-purpose prompt; branch and worktree controls appear once a Git folder is chosen.
 
 The composer's workspace selector chooses where a local thread runs.
 **Current checkout** (the default) runs the agent in the project directory itself, on whichever branch the branch picker selects.
