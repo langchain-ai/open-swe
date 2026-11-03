@@ -411,7 +411,7 @@ export function AgentsSidebar({
     prefs.sortChats
   )
   // The folder each of this Mac's threads runs in, to file the ones without a
-  // repository under their project rather than under "No repository".
+  // repository under their folder rather than under "No project".
   const macFolderOf = new Map(
     (localThreadsQuery.data ?? []).map((thread) => [thread.id, thread.cwd])
   )
@@ -901,7 +901,7 @@ export function AgentsSidebar({
                     : () => toggleSectionCollapsed("repos")
                 }
                 menu={
-                  <SidebarSectionMenu label="Repositories options">
+                  <SidebarSectionMenu label="Projects options">
                     {viewMenuItems}
                     {removeProjectItems}
                   </SidebarSectionMenu>
