@@ -51,7 +51,6 @@ export function SidebarConversationRow({
   onDelete,
   projects = [],
   projectId,
-  projectLabel,
   onMove,
   onMoveUp,
   onMoveDown,
@@ -72,7 +71,6 @@ export function SidebarConversationRow({
   onDelete?: () => void
   projects?: ChatProject[]
   projectId?: string
-  projectLabel?: string
   onMove?: (projectId: string | null) => void
   onMoveUp?: () => void
   onMoveDown?: () => void
@@ -98,13 +96,8 @@ export function SidebarConversationRow({
   }
   const content = (
     <>
-      <span className="flex min-w-0 flex-1 flex-col" title={title}>
-        <span className="truncate text-sm">{title}</span>
-        {projectLabel && (
-          <span className="truncate text-xxs text-tertiary">
-            {projectLabel}
-          </span>
-        )}
+      <span className="min-w-0 flex-1 truncate text-sm" title={title}>
+        {title}
       </span>
       <span className="flex size-3.5 shrink-0 items-center justify-center">
         {status === "error" ? (
@@ -134,7 +127,7 @@ export function SidebarConversationRow({
     "aria-current": active ? ("page" as const) : undefined,
     className: cn(
       "flex min-w-0 items-center gap-space-2 rounded-lg pr-9 pl-space-2 text-secondary transition-colors hover:bg-surface-level-2-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
-      projectLabel ? "h-11" : compact ? "h-7" : "h-8",
+      compact ? "h-7" : "h-8",
       active && "bg-selected text-primary"
     ),
   }
@@ -275,7 +268,6 @@ export function SidebarThreadRow({
   archived,
   compact,
   pending = false,
-  projectLabel,
   onNavigate,
   onTogglePin,
   onToggleArchived,
@@ -290,7 +282,6 @@ export function SidebarThreadRow({
   archived: boolean
   compact?: boolean
   pending?: boolean
-  projectLabel?: string
   onNavigate?: () => void
   onTogglePin: () => void
   onToggleArchived: () => void
@@ -334,7 +325,6 @@ export function SidebarThreadRow({
         onDelete={() => setDeleteOpen(true)}
         projects={projects.data?.projects}
         projectId={projects.data?.memberships[item.id]}
-        projectLabel={projectLabel}
         onMove={(projectId) => assign.mutate({ threadId: item.id, projectId })}
         onMoveUp={onMoveUp}
         onMoveDown={onMoveDown}

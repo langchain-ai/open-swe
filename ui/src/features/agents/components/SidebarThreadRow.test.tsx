@@ -31,10 +31,16 @@ it("shows running before unread and retains unread until acknowledgement even on
     pending: false,
     onPin: vi.fn(),
     onArchive: vi.fn(),
+    projectId: "website",
+    projects: [
+      { id: "website", name: "Website", repo: null, localFolder: null },
+    ],
   }
   const { rerender } = render(<SidebarConversationRow {...props} />, {
     wrapper: TooltipProvider,
   })
+  expect(screen.getByText(props.title)).toBeTruthy()
+  expect(screen.queryByText("Website")).toBeNull()
   expect(screen.getByRole("img", { name: "Chat running" })).toBeTruthy()
   expect(screen.queryByRole("img", { name: "Unread chat" })).toBeNull()
 

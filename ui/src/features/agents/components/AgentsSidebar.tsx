@@ -154,8 +154,7 @@ export function AgentsSidebar({
     if (await desktop.installUpdate().catch(() => false)) return
     setUpdate(ready)
   }
-  const row = (thread: AgentThread, recent = false, index?: number) => {
-    const projectId = projects.data?.memberships[thread.id]
+  const row = (thread: AgentThread, index?: number) => {
     const busy =
       pendingPins.some((item) => item.threadId === thread.id) ||
       pendingArchives.some((item) => item.threadId === thread.id)
@@ -187,13 +186,6 @@ export function AgentsSidebar({
           if (!busy)
             archive.mutate({ threadId: thread.id, resolved: !thread.resolved })
         }}
-        projectLabel={
-          recent
-            ? projects.data?.projects.find(
-                (project) => project.id === projectId
-              )?.name
-            : undefined
-        }
         onMoveUp={index !== undefined && index > 0 ? () => move(-1) : undefined}
         onMoveDown={
           index !== undefined && index < pinnedThreads.length - 1
@@ -286,7 +278,7 @@ export function AgentsSidebar({
               onToggleCollapsed={() => toggleSectionCollapsed("pinned")}
             />
             {!prefs.collapsedSectionKeys.includes("pinned") &&
-              pinnedThreads.map((thread, index) => row(thread, false, index))}
+              pinnedThreads.map((thread, index) => row(thread, index))}
           </section>
         )}
         {projects.isError && (
@@ -380,7 +372,7 @@ export function AgentsSidebar({
               onToggleCollapsed={() => toggleSectionCollapsed("recents")}
             />
             {!prefs.collapsedSectionKeys.includes("recents") &&
-              recentThreads.map((thread) => row(thread, true))}
+              recentThreads.map((thread) => row(thread))}
           </section>
         )}
         {archivedThreads.length > 0 && (
