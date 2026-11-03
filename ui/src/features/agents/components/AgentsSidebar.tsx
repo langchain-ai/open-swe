@@ -36,6 +36,9 @@ import type {
   PullRequestSnapshot,
   SidebarRepo,
 } from "@/features/agents/lib/api"
+import { ProjectFolderMenu } from "@/features/projects/components/ProjectFolderMenu"
+import { useLinkDesktopFolders } from "@/features/projects/lib/desktopFolders"
+import { type Project, useProjects } from "@/features/projects/lib/projects"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type {
   SidebarRepoGroup,
@@ -89,10 +92,7 @@ import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
-import {
-  boundToMacFolder,
-  useLocalThreads,
-} from "@/features/agents/lib/desktopLocal"
+import { useLocalThreads } from "@/features/agents/lib/desktopLocal"
 import {
   cloudSidebarThread,
   DEFAULT_SIDEBAR_WORKSPACE_SLUG,
@@ -120,6 +120,7 @@ interface AgentsSidebarProps {
 
 interface HydratedRepoGroup extends SidebarRepoGroup {
   repoFullName: string | null
+  project?: Project
   localRepoPath?: string
   updatedAt: number
   activeThread?: AgentThread
@@ -313,21 +314,38 @@ export function AgentsSidebar({
   )
   useRegisterAppCommands(repoCommands)
 
-  // The web has no folder to file a This Mac thread without a repository under
-  // until projects live in the backend, so only the desktop app lists them.
-  const listed = (thread: AgentThread) =>
-    isDesktop || thread.id === activeThreadId || !boundToMacFolder(thread)
-  const pinnedThreads = (pinnedQuery.data ?? []).filter(listed)
+  const { projects } = useProjects({ enabled: true })
+  useLinkDesktopFolders(localRepos, localThreadsQuery.data, isDesktop)
+  const pinnedThreads = pinnedQuery.data ?? []
   const cloudPinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
   const pageThreads = recentsQuery.items.filter(
-    (thread) => !cloudPinnedIds.has(thread.id) && listed(thread)
+    (thread) => !cloudPinnedIds.has(thread.id)
   )
   const activeThread = useSidebarActiveThread({
     activeThreadId,
     loadedThreads: [...pinnedThreads, ...pageThreads],
     enabled: true,
   })
-  const activeInRepo = Boolean(repoMode && activeThread?.repoFullName.trim())
+  // Filed as the server files it: the thread's own project, else the project
+  // its repository is bound to, as long as the viewer is in that project.
+  const projectIds = new Set(projects.map((project) => project.id))
+  const projectOfRepo = new Map(
+    projects.flatMap((project) =>
+      project.repo_full_name
+        ? [[project.repo_full_name.toLowerCase(), project.id] as const]
+        : []
+    )
+  )
+  const activeProjectId =
+    repoMode && activeThread
+      ? activeThread.projectId && projectIds.has(activeThread.projectId)
+        ? activeThread.projectId
+        : (projectOfRepo.get(activeThread.repoFullName.trim().toLowerCase()) ??
+          null)
+      : null
+  const activeInRepo = Boolean(
+    repoMode && (activeProjectId || activeThread?.repoFullName.trim())
+  )
   const recentThreads = [
     ...(activeThread && !activeInRepo && !cloudPinnedIds.has(activeThread.id)
       ? [activeThread]
@@ -338,17 +356,26 @@ export function AgentsSidebar({
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
   useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
 
-  const serverRepos = sidebarReposQuery.data ?? []
-  const activeRepo: SidebarRepo | undefined = activeThread?.repoFullName.trim()
-    ? {
-        repoFullName: activeThread.repoFullName,
-        name: activeThread.repo,
-        updatedAt: activeThread.updatedAt,
-        // The server repo list hasn't caught up with this thread yet;
-        // it is re-grouped correctly as soon as `sidebarReposQuery` refetches.
-        workspace: DEFAULT_SIDEBAR_WORKSPACE_SLUG,
-      }
-    : undefined
+  const serverFolders = sidebarReposQuery.data ?? []
+  const serverRepos = serverFolders.filter(
+    (folder): folder is SidebarRepo => !folder.projectId
+  )
+  const projectActivity = new Map(
+    serverFolders.flatMap((folder) =>
+      folder.projectId ? [[folder.projectId, folder.updatedAt] as const] : []
+    )
+  )
+  const activeRepo: SidebarRepo | undefined =
+    !activeProjectId && activeThread?.repoFullName.trim()
+      ? {
+          repoFullName: activeThread.repoFullName,
+          name: activeThread.repo,
+          updatedAt: activeThread.updatedAt,
+          // The server repo list hasn't caught up with this thread yet;
+          // it is re-grouped correctly as soon as `sidebarReposQuery` refetches.
+          workspace: DEFAULT_SIDEBAR_WORKSPACE_SLUG,
+        }
+      : undefined
   const cloudRepos =
     activeRepo &&
     !serverRepos.some(
@@ -388,6 +415,21 @@ export function AgentsSidebar({
   )
   const repoGroups: Array<HydratedRepoGroup> = repoMode
     ? [
+        ...projects.map((project) => ({
+          key: `project:${project.id}`,
+          label: project.name,
+          repoFullName: project.repo_full_name,
+          project,
+          // A folder on this Mac linked to the project starts its threads here.
+          localRepoPath: localRepos.find(
+            (folder) => folder.projectId === project.id
+          )?.cwd,
+          updatedAt:
+            projectActivity.get(project.id) ?? Date.parse(project.updated_at),
+          activeThread:
+            activeProjectId === project.id ? activeThread : undefined,
+          threads: [],
+        })),
         ...keyedCloudRepos.map(({ repo, key }) => {
           return {
             key,
@@ -396,6 +438,7 @@ export function AgentsSidebar({
             updatedAt: repo.updatedAt,
             activeThread:
               activeInRepo &&
+              !activeProjectId &&
               activeThread?.repoFullName.toLowerCase() ===
                 repo.repoFullName.toLowerCase()
                 ? activeThread
@@ -406,6 +449,7 @@ export function AgentsSidebar({
         // "This Mac" projects with no cloud repo of the same name yet still
         // get a folder, so a thread can be started in them.
         ...localRepos.flatMap((repo) => {
+          if (repo.projectId && projectIds.has(repo.projectId)) return []
           const key =
             aliases.get(repo.name.trim().toLowerCase()) ??
             sidebarRepoKey(repo.cwd)
@@ -436,11 +480,18 @@ export function AgentsSidebar({
   // Each repository folder sits under the workspace that prefers it, even
   // though threads from other workspaces may use it; local-only folders (no
   // server-side repo) fall under the default workspace.
-  const repoWorkspaceOptions = keyedCloudRepos.map(({ repo, key }) => ({
-    key,
-    label: repo.name,
-    workspace: repo.workspace,
-  }))
+  const repoWorkspaceOptions = [
+    ...keyedCloudRepos.map(({ repo, key }) => ({
+      key,
+      label: repo.name,
+      workspace: repo.workspace,
+    })),
+    ...projects.map((project) => ({
+      key: `project:${project.id}`,
+      label: project.name,
+      workspace: project.workspace,
+    })),
+  ]
   const workspaceGroups: Array<SidebarWorkspaceGroup<HydratedRepoGroup>> =
     workspaceMode
       ? groupRepoGroupsByWorkspace(
@@ -534,7 +585,7 @@ export function AgentsSidebar({
         onChange={(organize) => setView({ organize })}
         options={[
           { value: "date", label: "Date" },
-          { value: "repo", label: "Repository" },
+          { value: "repo", label: "Project" },
           { value: "workspace", label: "Workspace" },
           { value: "none", label: "None" },
         ]}
@@ -617,7 +668,7 @@ export function AgentsSidebar({
   )
   const noRepoGroup: HydratedRepoGroup = {
     key: NO_REPO_GROUP_KEY,
-    label: "No repository",
+    label: "No project",
     repoFullName: null,
     updatedAt: unfiledRecents[0]?.updatedAt ?? 0,
     threads: unfiledRecents,
@@ -838,7 +889,7 @@ export function AgentsSidebar({
             (unpinnedGroups.length > 0 || noRepoAvailable || isDesktop) && (
               <section className="mb-space-3">
                 <SidebarSectionHeader
-                  label={workspaceMode ? "Workspaces" : "Repositories"}
+                  label={workspaceMode ? "Workspaces" : "Projects"}
                   collapsed={!workspaceMode && sectionCollapsed("repos")}
                   onToggleCollapsed={
                     workspaceMode
@@ -1083,6 +1134,7 @@ function RepoGroup({
   const Folder = collapsed ? FolderIcon : FolderOpenIcon
   const repo = useSidebarRepoThreads({
     repoFullName: group.repoFullName,
+    projectId: group.project?.id ?? null,
     includeResolved,
     includeAutomations,
     owned,
@@ -1090,7 +1142,7 @@ function RepoGroup({
     includeSlack,
     sort,
     // A This Mac folder has no repository to ask for: its threads are filed in.
-    enabled: !collapsed && group.repoFullName !== null,
+    enabled: !collapsed && Boolean(group.project || group.repoFullName),
   })
   const cloudThreads = withoutNestedWorkers([
     ...(group.activeThread ? [group.activeThread] : []),
@@ -1118,7 +1170,9 @@ function RepoGroup({
   const loading =
     repo.isFetchingNextPage ||
     loadingMore ||
-    (Boolean(group.repoFullName) && !collapsed && repo.isPending)
+    (Boolean(group.project || group.repoFullName) &&
+      !collapsed &&
+      repo.isPending)
   const hasMore = expanded
     ? (externalHasMore ?? repo.hasMore)
     : threads.length > REPO_PREVIEW_COUNT || (externalHasMore ?? repo.hasMore)
@@ -1139,6 +1193,7 @@ function RepoGroup({
           <Folder size={16} weight="regular" className="shrink-0" />
           <span className="min-w-0 flex-1 truncate">{group.label}</span>
         </Button>
+        {group.project && <ProjectFolderMenu project={group.project} />}
         <IconButton
           icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
           label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
@@ -1164,11 +1219,13 @@ function RepoGroup({
           <Link
             to={composeTo}
             search={
-              group.repoFullName
-                ? { repo: group.repoFullName }
-                : group.localRepoPath
-                  ? { localRepo: group.localRepoPath }
-                  : { noRepo: true }
+              group.localRepoPath
+                ? { localRepo: group.localRepoPath }
+                : group.project
+                  ? { project: group.project.id }
+                  : group.repoFullName
+                    ? { repo: group.repoFullName }
+                    : { noRepo: true }
             }
             onClick={onCompose}
           />

@@ -23,6 +23,8 @@ import {
   type ContextWindowMeterProps,
 } from "./ContextWindowMeter"
 import { WorkspaceSelector } from "./WorkspaceSelector"
+import { ProjectSelector } from "@/features/projects/components/ProjectSelector"
+import type { Project } from "@/features/projects/lib/projects"
 import {
   LocalBranchSelector,
   LocalProjectSelector,
@@ -212,6 +214,11 @@ export interface ChatComposerProps {
   onRemoveLocalRepo?: (cwd: string) => void
   onRefreshLocalRepoBranch?: () => void
   onSelectLocalRepoBranch?: (branch: string) => void
+  /** Projects a new cloud thread can be filed in; the picker shows with `onProjectChange`. */
+  projects?: Array<Project>
+  selectedProjectId?: string | null
+  onProjectChange?: (projectId: string | null) => void
+  onCreateProject?: (name: string) => void
   /** Workspaces a new thread can boot from. The picker appears only when there are several. */
   workspaceOptions?: Array<WorkspaceOption>
   selectedWorkspace?: string | null
@@ -378,6 +385,10 @@ export const ChatComposer = memo(function ChatComposer({
   onRemoveLocalRepo,
   onRefreshLocalRepoBranch,
   onSelectLocalRepoBranch,
+  projects = [],
+  selectedProjectId = null,
+  onProjectChange,
+  onCreateProject,
   workspaceOptions = [],
   selectedWorkspace = null,
   onWorkspaceChange,
@@ -852,6 +863,14 @@ export const ChatComposer = memo(function ChatComposer({
   )
   const targetControls = (onRepoChange || runTarget || onWorkspaceChange) && (
     <>
+      {runTarget !== "local" && onProjectChange && onCreateProject && (
+        <ProjectSelector
+          onCreate={onCreateProject}
+          onSelect={onProjectChange}
+          projects={projects}
+          selectedId={selectedProjectId}
+        />
+      )}
       {runTarget !== "local" && onWorkspaceChange && (
         <WorkspaceSelector
           workspaces={workspaceOptions}

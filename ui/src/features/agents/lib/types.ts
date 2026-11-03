@@ -580,6 +580,8 @@ export interface AgentThread {
   title: string
   repo: string
   repoFullName: string
+  /** The Open SWE project the thread was started in or moved to. */
+  projectId?: string | null
   branch: string
   model: string
   effort?: string | null

@@ -165,6 +165,8 @@ export interface ThreadsPageParams {
   /** An allowed Slack bot's `team_id:bot_id`, with `scope: "bot"`. */
   bot?: string
   repo?: string
+  /** A project id, or `"none"` for threads outside every project. */
+  project?: string
   ownerless?: boolean
   owned?: boolean
   /** Thread sources to leave out, such as `claude_code`. */
@@ -186,7 +188,20 @@ export interface SidebarRepo {
   updatedAt: number
   /** Slug of the workspace that owns this repository; `"default"` when unassigned. */
   workspace: string
+  projectId?: null
 }
+
+/** One of the viewer's projects, listed even before it has a thread. */
+export interface SidebarProjectFolder {
+  projectId: string
+  /** The repository bound to the project, whose threads it files. */
+  repoFullName: string | null
+  name: string
+  updatedAt: number
+  workspace: string
+}
+
+export type SidebarFolder = SidebarRepo | SidebarProjectFolder
 
 const API_BASE = dashboardApiBase()
 
@@ -322,6 +337,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.automationId) search.set("automation_id", params.automationId)
   if (params.bot) search.set("bot", params.bot)
   if (params.repo) search.set("repo", params.repo)
+  if (params.project) search.set("project", params.project)
   if (params.ownerless != null)
     search.set("ownerless", String(params.ownerless))
   if (params.owned) search.set("owned", "true")
@@ -375,7 +391,7 @@ export const agentsApi = {
       excludeSources?: Array<string>
     } = {}
   ) =>
-    agentsRequest<Array<SidebarRepo>>(
+    agentsRequest<Array<SidebarFolder>>(
       `/threads/repos${buildReposQuery(params)}`
     ),
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
