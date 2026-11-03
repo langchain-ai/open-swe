@@ -303,7 +303,7 @@ test.describe("review page", () => {
 
     await openReview(page, pr);
     const guidance = page.getByRole("group", {
-      name: "Requested behavior",
+      name: "Requested changes",
     });
     const request = guidance.getByText(
       "Asked to keep the constants in flat modules",

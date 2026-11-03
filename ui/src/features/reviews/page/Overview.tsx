@@ -85,12 +85,12 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
       <CommentFacts pr={pr} />
       {detail.walkthrough?.human_input && (
         <details
-          aria-label="Requested behavior"
+          aria-label="Requested changes"
           className="group/requested rounded-xl border border-dashed border-default px-space-4 py-space-3"
         >
           <summary className="flex cursor-pointer list-none items-center gap-space-2 text-xs font-medium text-secondary hover:text-primary [&::-webkit-details-marker]:hidden">
             <AgentMark />
-            Requested behavior
+            Requested changes
             <CaretDownIcon
               aria-hidden
               className="ml-auto size-3 -rotate-90 group-open/requested:rotate-0"
