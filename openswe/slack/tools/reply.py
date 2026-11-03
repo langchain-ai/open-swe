@@ -251,6 +251,7 @@ async def send_slack_reply(
         "message_ts": message_ts,
         "message_url": (
             f"https://slack.com/archives/{channel_id}/p{message_ts.replace('.', '')}"
+            f"?thread_ts={post_thread_ts}&cid={channel_id}"
             if message_ts
             else None
         ),

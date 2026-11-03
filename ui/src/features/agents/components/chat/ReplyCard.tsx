@@ -255,12 +255,16 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
     !isLinear && state === "delivered"
       ? replyResult(chunk.output)?.message_url
       : undefined
+  const destination =
+    typeof messageUrl === "string" && URL.canParse(messageUrl)
+      ? new URL(messageUrl)
+      : undefined
   const slackUrl =
-    typeof messageUrl === "string" &&
-    /^https:\/\/(?:[\w-]+\.)?slack\.com\/archives\/[A-Z0-9]+\/p\d+$/.test(
-      messageUrl
-    )
-      ? messageUrl
+    destination?.protocol === "https:" &&
+    (destination.hostname === "slack.com" ||
+      destination.hostname.endsWith(".slack.com")) &&
+    /^\/archives\/[A-Z0-9]+\/p\d+$/.test(destination.pathname)
+      ? destination.href
       : undefined
   const label = HEADER_LABELS[isLinear ? "linear" : "slack"][state]
   return (

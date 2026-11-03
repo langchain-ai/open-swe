@@ -14,7 +14,8 @@ describe("ReplyCard", () => {
     (blocks) => {
       const result = JSON.stringify({
         success: true,
-        message_url: "https://slack.com/archives/C123/p1793303440018049",
+        message_url:
+          "https://langchain.slack.com/archives/C123/p1793303440018049?thread_ts=1793303400.000001&cid=C123",
       })
       render(
         <QueryClientProvider client={new QueryClient()}>
@@ -35,7 +36,9 @@ describe("ReplyCard", () => {
       )
       expect(
         screen.getByRole("link", { name: "Sent to Slack" }).getAttribute("href")
-      ).toBe("https://slack.com/archives/C123/p1793303440018049")
+      ).toBe(
+        "https://langchain.slack.com/archives/C123/p1793303440018049?thread_ts=1793303400.000001&cid=C123"
+      )
     }
   )
 
@@ -44,6 +47,16 @@ describe("ReplyCard", () => {
     { status: "error", output: undefined },
     { status: "completed", output: undefined },
     { status: "completed", output: JSON.stringify({ success: false }) },
+    {
+      status: "completed",
+      output: JSON.stringify({
+        message_url: "https://slack.com.evil.example/archives/C123/p123",
+      }),
+    },
+    {
+      status: "completed",
+      output: JSON.stringify({ message_url: "not a URL" }),
+    },
     {
       status: "completed",
       output: JSON.stringify({ message_url: "javascript:alert(1)" }),
