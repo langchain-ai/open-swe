@@ -132,27 +132,6 @@ async def newer_ingress_run(
     return bool(runs) and runs[0]["run_id"] != run_id
 
 
-async def other_active_ingress_run(
-    *,
-    thread_id: str,
-    run_id: str,
-    source_provider: str,
-    source_thread_key: str,
-    user_id: str,
-) -> bool:
-    """Whether a run other than ``run_id`` is queued or running on the thread,
-    such as the next message's run under ``enqueue``."""
-    client = _create_trigger_ingress_loopback_client(
-        {
-            "provider": source_provider,
-            "thread_key": source_thread_key,
-            "user_id": user_id,
-        }
-    )
-    runs = await client.runs.list(thread_id, limit=20)
-    return any(run["run_id"] != run_id and run["status"] in ("pending", "running") for run in runs)
-
-
 async def ingress_thread_interrupts(
     *,
     thread_id: str,

@@ -28,7 +28,7 @@ use crate::compile::ChannelRequirements;
 use crate::deploy::helpers::validated_agent_server_url;
 use crate::error::is_cancellation;
 use crate::interrupt::Interrupt;
-use crate::langsmith::{self, ChannelSetupNote, ConnectionSummary};
+use crate::langsmith::{self, ConnectionSummary};
 
 /// Hidden overrides that send only Agent Auth calls to another LangSmith,
 /// e.g. a local Agent Auth while the deployment itself runs in the cloud.
@@ -351,47 +351,6 @@ pub(crate) fn show_warning(message: &str) -> Result<()> {
     Ok(log::warning(message)?)
 }
 
-/// What Trigger Server says about a channel's setup, at each note's level.
-/// Text that isn't printable is left out.
-pub(crate) fn show_notes(
-    ui: &mut (impl SetupUi + ?Sized),
-    notes: &[ChannelSetupNote],
-) -> Result<()> {
-    for (level, text) in notes.iter().filter_map(printable) {
-        match level {
-            "success" => ui.success(text)?,
-            "warning" => ui.warning(text)?,
-            _ => ui.info(text)?,
-        }
-    }
-    Ok(())
-}
-
-/// What an active channel's setup shows: `ready`, unless Trigger Server says
-/// the channel is ready itself, then its notes.
-pub(crate) fn show_active(
-    ui: &mut (impl SetupUi + ?Sized),
-    ready: &str,
-    notes: &[ChannelSetupNote],
-) -> Result<()> {
-    if !notes
-        .iter()
-        .filter_map(printable)
-        .any(|(level, _)| level == "success")
-    {
-        ui.success(ready)?;
-    }
-    show_notes(ui, notes)
-}
-
-/// A note's level and trimmed text, unless the text is empty or not
-/// printable.
-fn printable(note: &ChannelSetupNote) -> Option<(&str, &str)> {
-    let text = note.text.trim();
-    (!text.is_empty() && !text.chars().any(|c| c.is_control() && c != '\n'))
-        .then_some((note.level.as_str(), text))
-}
-
 #[cfg(test)]
 mod tests {
     use anyhow::anyhow;
@@ -643,42 +602,5 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.to_string(), "no");
         assert!(unattended.log.is_empty());
-    }
-
-    #[test]
-    fn notes_follow_the_ready_line_unless_one_says_it() {
-        let note = |level: &str, text: &str| ChannelSetupNote {
-            level: level.into(),
-            text: text.into(),
-        };
-        let mut ui = Ui::default();
-        show_active(
-            &mut ui,
-            "ready",
-            &[
-                note("warning", "Install it.\nAt the link."),
-                note("info", "token\u{1b}[31m"),
-                note("success", "  "),
-                note("note", "The token has issues: write."),
-            ],
-        )
-        .unwrap();
-        assert_eq!(
-            ui.log,
-            [
-                "success ready",
-                "warning Install it.\nAt the link.",
-                "info The token has issues: write.",
-            ]
-        );
-
-        let mut ui = Ui::default();
-        show_active(
-            &mut ui,
-            "ready",
-            &[note("success", "Channel ready · App acme")],
-        )
-        .unwrap();
-        assert_eq!(ui.log, ["success Channel ready · App acme"]);
     }
 }
