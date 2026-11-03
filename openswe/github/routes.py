@@ -4,6 +4,7 @@ from fastapi import APIRouter, Response
 
 from openswe.github import forwarding
 from openswe.github import webhook as service
+from openswe.github.notifications import react_to_kitchen_approval
 from openswe.github.repo_cache import forget_cached_repos
 from openswe.human_review.completed_reviews import CompletedReview
 from openswe.merge_queue.controller import wake_native_queue
@@ -221,6 +222,7 @@ async def github_webhook(
         background_tasks.add_task(service.settle_human_reviews, payload)
         if payload.get("action") == "submitted":
             background_tasks.add_task(CompletedReview.record, payload)
+            background_tasks.add_task(react_to_kitchen_approval, payload)
 
     if is_issue_event:
         action = payload.get("action", "")

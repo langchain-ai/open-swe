@@ -6,22 +6,67 @@ from datetime import timedelta
 from html import escape
 
 from langgraph_sdk import get_client
+from pydantic import AliasPath, Field
 
 from openswe import event_claims
 from openswe.config import ENV
+from openswe.github.pull_requests import PullRequest, PullRequestEvent
 from openswe.slack.client import (
+    add_slack_reaction,
     get_active_slack_thread,
     post_slack_thread_reply_with_ts,
     slack_thread_mutation_lock,
 )
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thinking import sync_slack_background_status
+from openswe.source_context import SourceContext
+from openswe.threads.store import THREADS
+from openswe.utils.preview import skip_on_preview
+from openswe.workspaces.routing import is_kitchen_channel
 
 logger = logging.getLogger(__name__)
 
 _NOTICE_SCOPE = "github_review_slack_notice"
 # Long enough to outlast GitHub's redeliveries and anyone redelivering by hand.
 _NOTICE_TTL = timedelta(days=30)
+
+
+class KitchenReviewEvent(PullRequestEvent):
+    action: str = ""
+    review_state: str = Field("", validation_alias=AliasPath("review", "state"))
+
+    async def react(self) -> None:
+        """Mark linked kitchen thread roots when GitHub receives an approval."""
+        if (
+            self.action != "submitted"
+            or self.review_state.lower() != "approved"
+            or skip_on_preview("kitchen_thread_approval_reaction")
+        ):
+            return
+        if self.identity is None:
+            return
+        pull_request = await PullRequest.load(*self.identity)
+        for thread_id in await pull_request.linked_threads():
+            try:
+                thread = await THREADS.get(thread_id)
+                if thread is None:
+                    continue
+                location = SourceContext.from_metadata(thread.metadata).slack_location
+                if location is not None and await is_kitchen_channel(location[0]):
+                    await add_slack_reaction(*location, "white_check_mark")
+            except Exception:
+                logger.warning(
+                    "Failed to react to GitHub approval in kitchen thread",
+                    extra={"agent_thread_id": thread_id, "pr_url": pull_request.url},
+                    exc_info=True,
+                )
+
+
+async def react_to_kitchen_approval(payload: dict[str, object]) -> None:
+    """Handle approvals independently of whether a review wakes the agent."""
+    event = KitchenReviewEvent.parse(payload)
+    if event is not None:
+        await event.react()
 
 
 async def notify_slack_review(

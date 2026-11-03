@@ -15,6 +15,59 @@ from openswe.users import User
 from openswe.webhooks import common
 
 
+@pytest.mark.parametrize(
+    ("action", "state", "kitchen", "linked", "expected"),
+    [
+        ("submitted", "approved", True, True, True),
+        ("submitted", "APPROVED", True, True, True),
+        ("submitted", "changes_requested", True, True, False),
+        ("submitted", "commented", True, True, False),
+        ("dismissed", "approved", True, True, False),
+        ("submitted", "approved", False, True, False),
+        ("submitted", "approved", True, False, False),
+    ],
+)
+async def test_approval_reacts_to_linked_kitchen_root(
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+    state: str,
+    kitchen: bool,
+    linked: bool,
+    expected: bool,
+) -> None:
+    pull_request = PullRequest(owner="o", repo="r", number=7)
+    monkeypatch.setattr(PullRequest, "load", AsyncMock(return_value=pull_request))
+    monkeypatch.setattr(PullRequest, "linked_threads", AsyncMock(return_value=["agent-thread"]))
+    thread = MagicMock(
+        metadata={
+            "source_context": {
+                "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.123456"}
+            }
+        }
+        if linked
+        else {}
+    )
+    monkeypatch.setattr(notifications.THREADS, "get", AsyncMock(return_value=thread))
+    monkeypatch.setattr(notifications, "is_kitchen_channel", AsyncMock(return_value=kitchen))
+    monkeypatch.setattr(notifications, "skip_on_preview", lambda _: False)
+    reaction = AsyncMock(return_value=True)
+    monkeypatch.setattr(notifications, "add_slack_reaction", reaction)
+
+    await notifications.react_to_kitchen_approval(
+        {
+            "action": action,
+            "review": {"state": state, "body": ""},
+            "repository": {"full_name": "o/r"},
+            "pull_request": {"number": 7},
+        }
+    )
+
+    if expected:
+        reaction.assert_awaited_once_with("C123", "1700000000.123456", "white_check_mark")
+    else:
+        reaction.assert_not_awaited()
+
+
 @pytest.fixture
 def review_notice(
     monkeypatch: pytest.MonkeyPatch, registry_db: None
