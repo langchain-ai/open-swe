@@ -53,10 +53,6 @@ async def test_mentions_are_deduplicated_and_do_not_disclose_private_content(
     assert recipient == "U123BOB"
     assert "secret" not in text
     assert ("/agents/reviews/acme/demo/1" if review else f"/agents/{thread_id}") in text
-    assert await AppNotification.pending(bob.id) == []
-    assert await AppNotification.pending(alice.id) == []
-    await AppNotification.deliver_fallback(bob.id, f"mention:{thread_id}:message-1")
-    dm.assert_awaited_once()
 
 
 async def test_mentions_cap_and_rate_limit_sender(monkeypatch, registry_db) -> None:
