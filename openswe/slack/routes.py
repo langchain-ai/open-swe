@@ -1165,8 +1165,14 @@ async def slack_interactivity(
 
 
 def _answered_here(interaction: SlackInteraction) -> bool:
-    """Explain this, code channel views and the options they load, and modals the backend
-    opened itself: Trigger Server takes none of them."""
+    """What the backend answers itself while Slack's URL points at it.
+
+    Explain this and clicks in code channel views: a Trigger Server without
+    langchain-ai/langchainplus#57241 or #57973 drops them and still answers 200. MDA's
+    channel takes both once Slack's URL moves, and hands them back here. The options a
+    code channel view loads, which Slack asks for at its own Options Load URL, and
+    modals the backend opened itself stay here.
+    """
     if interaction.type in {"message_action", "block_suggestion"}:
         return True
     if interaction.container.type == "code_channel_view":

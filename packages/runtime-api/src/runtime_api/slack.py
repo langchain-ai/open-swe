@@ -109,9 +109,10 @@ class SlackClickStart(SlackTurnStart):
 class ActOnSlackClick(BaseModel):
     """A click the backend acts on: Slack's payload, as Trigger Server forwarded it."""
 
-    # The Slack thread of the clicked message, or of the button that opened a modal.
+    # The Slack thread of the clicked message, or of the button that opened a modal;
+    # none for a click in a code channel's view, which is the whole channel's.
     channel_id: str = Field(min_length=1, max_length=64)
-    thread_ts: str = Field(min_length=1, max_length=64)
+    thread_ts: str | None = Field(default=None, min_length=1, max_length=64)
     # The person who clicked, as Trigger Server verified them from Slack's request.
     user_id: str = Field(min_length=1, max_length=64)
     payload: dict[str, JsonValue]
