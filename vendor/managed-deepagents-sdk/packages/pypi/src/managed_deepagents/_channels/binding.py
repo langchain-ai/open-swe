@@ -97,37 +97,11 @@ def resolve_channel_binding(
     user = configurable.get("langgraph_auth_user")
     if (
         _field(user, "mda_source_provider") != binding["provider"]
-        or (
-            _field(user, "mda_source_thread_id") != binding["source_thread_key"]
-            and not _is_code_channel_run(binding, user)
-        )
+        or _field(user, "mda_source_thread_id") != binding["source_thread_key"]
         or not _is_declared_route(binding)
     ):
         return None
     return binding
-
-
-def _is_code_channel_run(binding: ChannelBinding, user: object) -> bool:
-    """Whether a binding is a Slack code channel delivery's, for a run of that
-    channel's conversation.
-
-    Ingress runs a code channel under the channel's key, which only managed
-    ingress can stamp, while the binding keeps the delivery's own key, the one
-    Trigger Server knows the delivery by.
-    """
-    from managed_deepagents._channels.slack.code_channel import (  # noqa: PLC0415 - cycle
-        code_channel_conversation,
-    )
-
-    target = binding["target"]
-    if (
-        binding["provider"] != "slack"
-        or binding["transport"] != "trigger_server"
-        or not isinstance(target, Mapping)
-    ):
-        return False
-    found = code_channel_conversation(target.get("address"), binding["source_thread_key"])
-    return found is not None and _field(user, "mda_source_thread_id") == found[1]
 
 
 def _is_declared_route(binding: ChannelBinding) -> bool:

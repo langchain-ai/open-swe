@@ -201,7 +201,7 @@ _SCHEDULE_TARGETS = (
 
 def _slack_target_of(fields: Mapping[str, object]) -> SlackChannelTarget | None:
     """A ``{"provider": "slack", "conversation_id", "thread_ts"?, "channel"?}`` literal."""
-    known = {"provider", "conversation_id", "thread_ts", "channel", "code_channel"}
+    known = {"provider", "conversation_id", "thread_ts", "channel"}
     if fields.get("provider") != "slack" or not set(fields) <= known:
         return None
     try:
