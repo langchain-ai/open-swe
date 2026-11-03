@@ -159,6 +159,10 @@ class SlackMessageEvent:
     """Whether it happened inside a Slack code channel, with
     ``channels.slack(code_channel=True)``: a run on the event's conversation
     then runs on the channel's one thread."""
+    team_id: str | None = None
+    """The Slack workspace your app is installed in, as Trigger Server keyed
+    the conversation. In a Slack Connect channel the sender's own workspace is
+    ``actor.team_id``."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -293,6 +297,20 @@ class SlackChannelThread:
     source_thread_key: str
     """The key the thread is derived from, which names the Slack thread."""
     channel: ChannelName
+    _read_state: Callable[[], Awaitable[dict[str, Any] | None]] | None = field(
+        default=None, repr=False, compare=False
+    )
+
+    async def state(self) -> dict[str, Any] | None:
+        """The thread's state values, such as its ``messages``, as its last run
+        left them; ``None`` when no run started on it yet.
+
+        Read as the conversation's own runs read it, so in a code channel it is
+        the channel's one thread. Only a handler deciding an event can read it.
+        """
+        if self._read_state is None:
+            raise RuntimeError("only a handler deciding an event can read its thread's state")
+        return await self._read_state()
 
 
 SlackEventCallback = Callable[
@@ -399,7 +417,7 @@ class SlackEndpointFields(TypedDict, total=False):
     codeChannel: bool
     """``True`` when it happened inside a Slack code channel; absent otherwise."""
     teamId: str
-    """The Slack workspace of a channel's own change."""
+    """The Slack workspace your app is installed in, for a message or a channel's own change."""
 
 
 class SlackEndpointEvent(EndpointEvent[SlackEventKey, dict[str, JsonValue]], SlackEndpointFields):
@@ -446,6 +464,8 @@ def _message_endpoint_fields(event: SlackMessageEvent) -> SlackEndpointFields:
         fields["userId"] = event.user_id
     if event.actor is not None:
         fields["actor"] = endpoint_actor(event.actor)
+    if event.team_id is not None:
+        fields["teamId"] = event.team_id
     return fields
 
 
@@ -609,7 +629,17 @@ def slack_thread(thread: TriggerChannelThread, name: str) -> SlackChannelThread:
         id=thread["id"],
         source_thread_key=thread["source_thread_key"],
         channel=ChannelName(name=name),
+        _read_state=thread.get("read_state"),
     )
+
+
+def _key_team(source_thread_key: str) -> str | None:
+    """The workspace in Trigger Server's verified key, ``slack:v1:<app>:<team>:…``."""
+    match source_thread_key.split(":"):
+        case ["slack", "v1", _, team, *_]:
+            return _text(team)
+        case _:
+            return None
 
 
 def _finished_delivery(
@@ -713,6 +743,7 @@ def slack_event(
         # A Slack message's actor is a Slack user.
         actor=actor if isinstance(actor, SlackActor) else None,
         code_channel=address.get("code_channel") is True,
+        team_id=_key_team(event["source_thread_key"]),
     )
 
 
@@ -723,12 +754,7 @@ def slack_channel_event(
     kind = event["provider_event"]["type"]
     address = event["address"] if isinstance(event.get("address"), Mapping) else {}
     channel_id = _text(address.get("conversation_id"))
-    # Trigger Server's verified key: slack:v1:<app>:<team>:<channel>:channel.
-    match event["source_thread_key"].split(":"):
-        case ["slack", "v1", _, team, *_]:
-            team_id = _text(team)
-        case _:
-            team_id = None
+    team_id = _key_team(event["source_thread_key"])
     if kind not in SLACK_FORWARDED_EVENTS["channel"] or channel_id is None or team_id is None:
         return None
     raw = event["raw_event"]
