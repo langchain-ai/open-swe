@@ -1,1 +1,3 @@
-Replace a personal project’s name and optional context. Read its current settings first and preserve any context the requester did not ask to change. Changes affect future chats, not existing execution locations, permissions or conversation history.
+Replace a personal project’s name and optional context.
+Read its current settings first and preserve any context the requester did not ask to change.
+Changes affect future chats, not existing execution locations, permissions or conversation history.

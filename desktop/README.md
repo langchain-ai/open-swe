@@ -27,16 +27,20 @@ Closing, archiving, or deleting a chat does not delete its automatic task files.
 These folders are starting locations, not filesystem security sandboxes.
 Git branch and worktree controls appear only for Git folders.
 
-Home and Code share one chat UI and history. The sidebar shows **Pinned**, optional personal **Projects**, **Recents**, and **Archived**.
-Recents includes project chats, excluding pinned and archived chats. Projects group conversations without sharing their histories or changing access.
+Home and Code share one chat UI and history.
+The sidebar shows **Pinned**, optional personal **Projects**, **Recents**, and **Archived**.
+Recents includes project chats, excluding pinned and archived chats.
+Projects group conversations without sharing their histories or changing access.
 A project's optional folder or repository is a default for future chats; moving an existing chat changes only organization.
-Projects are saved on the backend, with local folder defaults bound to the device that selected them. There is no repository-group import.
+Projects are saved on the backend, with local folder defaults bound to the device that selected them.
+There is no repository-group import.
 
 **Working context** holds folder selection and advanced execution, environment, repository and Git controls.
 Git folders default to **New worktree**; ordinary folders are used directly.
 **Current checkout** runs the agent in the project directory itself, on whichever branch the branch picker selects.
 **New worktree** gives the thread its own git worktree, checked out from the selected base branch on a placeholder `open-swe/local-<id>` branch that the agent renames after it reads the request — so your own checkout is never touched and several local threads can run at once without contending for a working tree.
-Deleting a chat keeps its folders, worktrees, branches and uncommitted files. Updated shells disconnect its local session; downloaded UI skips cleanup on older shells that do not advertise file-preserving cleanup.
+Deleting a chat keeps its folders, worktrees, branches and uncommitted files.
+Updated shells disconnect its local session; downloaded UI skips cleanup on older shells that do not advertise file-preserving cleanup.
 Only one agent may work in a given tree at a time, so starting a thread in a checkout another agent is running in, or switching that checkout's branch under it, is refused.
 
 The side panel's **Changes** tab diffs the project against a git snapshot taken when the session started, so it shows what the agent changed and not the working tree's prior state.

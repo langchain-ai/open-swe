@@ -61,6 +61,7 @@ it("publishes first text immediately and flushes buffered text on completion", a
   const thread = {
     ...optimisticThread("completion", { prompt: "Work" }),
     experience: "agent_workspace" as const,
+    transcript: "v2" as const,
   }
   const detailKey = agentThreadKeys.detail(thread.id)
   client.setQueryData(detailKey, thread)
@@ -121,7 +122,7 @@ it("publishes first text immediately and flushes buffered text on completion", a
   expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true)
   client.setQueryData(detailKey, { ...thread, experience: "coding" })
   act(() => stream.handlers?.onSynchronized())
-  expect(client.getQueryState(detailKey)?.isInvalidated).toBe(false)
+  expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true)
 })
 
 it("acknowledges a hydrated failed run with no AI output instead of stranding its unread marker", async () => {
@@ -135,6 +136,7 @@ it("acknowledges a hydrated failed run with no AI output instead of stranding it
   const thread = {
     ...optimisticThread("failed-no-output", { prompt: "Work" }),
     experience: "agent_workspace" as const,
+    transcript: "v2" as const,
     status: "error" as const,
     latestRunId: "failed-run",
     viewed: false,

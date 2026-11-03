@@ -11,7 +11,11 @@ Default agent model and reasoning effort come from workspace settings, changed b
 A thread can override its own model, for example by asking the agent to switch to the performance model in that thread.
 Shadow reviews (experimental) run a second reviewer on another model over a sample of pull requests without posting anything; an admin sets them under **Defaults** (`/admin`), overrides them on a workspace's page, or uses `manage_review_shadow`.
 
-- **Chats** (`/agents`): one conversation UI for general and coding work, with Pinned, personal Projects, Recents and Archived. Recents includes active project chats, excluding pinned and archived chats. Projects organize chats and optionally default new chats to a working folder or repository; they do not change access, existing execution context, or share conversation history. Use `list_chat_projects`, `create_chat_project`, `update_chat_project`, `delete_chat_project` and `assign_chat_project` for authorized personal project operations. Removing a project keeps its chats and files.
+- **Chats** (`/agents`): one conversation UI for general and coding work, with Pinned, personal Projects, Recents and Archived.
+  Recents includes active project chats, excluding pinned and archived chats.
+  Projects organize chats and optionally default new chats to a working folder or repository; they do not change access, existing execution context, or share conversation history.
+  Use `list_chat_projects`, `create_chat_project`, `update_chat_project`, `delete_chat_project` and `assign_chat_project` for authorized personal project operations.
+  Removing a project keeps its chats and files.
 - **Settings → General** (`/my-settings`): theme, thread defaults (visibility, workspace, follow-up behavior), and notifications.
 - **Settings → Agent** (`/my-settings/agent`): automatic human-review assignment preferences.
 - **Settings → Git** (`/my-settings/git`): default repository, base branch, branch prefix, and pull request draft/review preferences.

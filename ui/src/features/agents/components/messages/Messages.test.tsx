@@ -199,7 +199,9 @@ describe("Messages", () => {
     const chip = screen.getByRole("button", {
       name: "Worker 2cfc31d4 · Started",
     })
-    const folds = screen.getAllByRole("button", { name: "Worked · 1 action" })
+    const folds = screen.getAllByRole("button", {
+      name: "Activity · Worked · 1 action",
+    })
     expect(folds).toHaveLength(2)
     for (const fold of folds) {
       expect(fold.getAttribute("aria-expanded")).toBe("false")
@@ -265,7 +267,9 @@ describe("Messages", () => {
 
       const link = screen.getByRole("link", { name: "Open destination thread" })
       expect(link.getAttribute("href")).toBe(`/agents/${recipient}`)
-      const folds = screen.getAllByRole("button", { name: "Worked · 1 action" })
+      const folds = screen.getAllByRole("button", {
+        name: "Activity · Worked · 1 action",
+      })
       expect(folds).toHaveLength(2)
       expect(
         folds.every((fold) => fold.getAttribute("aria-expanded") === "false")
@@ -406,7 +410,7 @@ describe("Messages", () => {
 
     const reply = screen.getByText("On it!")
     const work = screen.getByRole("button", {
-      name: "Running… · 1 action",
+      name: "Activity · Running… · 1 action",
     })
     expect(
       reply.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING
@@ -449,7 +453,9 @@ describe("Messages", () => {
       { wrapper }
     )
 
-    fireEvent.click(screen.getByRole("button", { name: /Worked/ }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Activity · Worked · 2 actions" })
+    )
     expect(screen.getByText("Ping service").closest("[aria-expanded]")).toBe(
       null
     )
@@ -513,15 +519,17 @@ describe("Messages", () => {
     )
 
     // A run that ends right after a reply never flashes an activity row under it.
-    expect(screen.queryByRole("button", { name: "Thinking…" })).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Activity · Thinking…" })
+    ).toBeNull()
     act(() => vi.advanceTimersByTime(800))
     vi.useRealTimers()
 
     const inOrder = [
       screen.getByText("On it!"),
-      screen.getByRole("button", { name: "Worked · 1 action" }),
+      screen.getByRole("button", { name: "Activity · Worked · 1 action" }),
       screen.getByText("Found the cause"),
-      screen.getByRole("button", { name: "Thinking…" }),
+      screen.getByRole("button", { name: "Activity · Thinking…" }),
     ]
     inOrder.slice(1).forEach((later, index) => {
       expect(
@@ -585,9 +593,13 @@ describe("Messages", () => {
 
     const inOrder = [
       screen.getByText("Checking the tests first."),
-      screen.getByRole("button", { name: "Worked for 2m 0s · 1 action" }),
+      screen.getByRole("button", {
+        name: "Activity · Worked for 2m 0s · 1 action",
+      }),
       screen.getByText("Found the cause."),
-      screen.getByRole("button", { name: "Worked for 8m 0s · 1 action" }),
+      screen.getByRole("button", {
+        name: "Activity · Worked for 8m 0s · 1 action",
+      }),
       screen.getByText("Fixed it."),
     ]
     inOrder.slice(1).forEach((later, index) => {
@@ -634,7 +646,9 @@ describe("Messages", () => {
     )
 
     const reply = screen.getByText("On it!")
-    const fold = screen.getByRole("button", { name: "Worked · 1 action" })
+    const fold = screen.getByRole("button", {
+      name: "Activity · Worked · 1 action",
+    })
     const groupedWork = screen.getByText("Task")
 
     expect(
@@ -674,7 +688,7 @@ describe("Messages", () => {
     render(<Messages messages={messages} isStreaming={false} />, { wrapper })
 
     expect(
-      screen.getByRole("button", { name: "Worked · 1 action" })
+      screen.getByRole("button", { name: "Activity · Worked · 1 action" })
     ).toBeTruthy()
     expect(screen.queryByText("README.md")).toBeNull()
     expect(screen.getByRole("img", { name: "image" }).getAttribute("src")).toBe(
