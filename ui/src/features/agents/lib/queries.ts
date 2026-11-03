@@ -869,7 +869,7 @@ export function useSidebarActiveThread({
     enabled && !listed && !rootDetail
   )
   const row = listed ?? rootDetail ?? fetched ?? active
-  return row && experienceStore.includes(row, experience)
+  return row && !row.concierge && experienceStore.includes(row, experience)
     ? experienceStore.filter(
         [
           mergeTaskFamily(

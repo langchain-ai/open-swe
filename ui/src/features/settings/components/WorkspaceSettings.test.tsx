@@ -444,7 +444,11 @@ describe("WorkspaceSettingsPanel", () => {
         expect(
           within(general).queryByRole("button", { name: "Cancel" })
         ).toBeNull()
-        expect(within(general).getByRole("status").textContent).toContain(
+        const sandbox = screen
+          .getByRole("heading", { name: "Sandbox Image" })
+          .closest("section")!
+        expect(within(general).queryByRole("status")).toBeNull()
+        expect(within(sandbox).getByRole("status").textContent).toContain(
           savedStatus === "refreshing"
             ? "Rebuilding sandbox image"
             : "rebuild queued"
@@ -477,7 +481,7 @@ describe("WorkspaceSettingsPanel", () => {
           await vi.advanceTimersByTimeAsync(65_001)
         })
         expect(
-          within(general).getByRole(outcome === "unknown" ? "alert" : "status")
+          within(sandbox).getByRole(outcome === "unknown" ? "alert" : "status")
             .textContent
         ).toContain(
           outcome === "unknown"
@@ -496,7 +500,7 @@ describe("WorkspaceSettingsPanel", () => {
         })
         await invalidateWorkspaces()
         expect(
-          within(general).getByRole(outcome === "success" ? "status" : "alert")
+          within(sandbox).getByRole(outcome === "success" ? "status" : "alert")
             .textContent
         ).toContain(
           outcome === "unknown"
@@ -788,6 +792,16 @@ describe("WorkspaceSettingsPanel", () => {
       name: "Rebuilding…",
     })
     expect((rebuilding as HTMLButtonElement).disabled).toBe(true)
+    const imageSection = rebuilding.closest("section")!
+    expect(within(imageSection).getByRole("status").textContent).toContain(
+      "Rebuilding sandbox image"
+    )
+    expect(within(imageSection).queryByText("Image ready")).toBeNull()
+    expect(
+      within(
+        screen.getByRole("button", { name: "Save" }).closest("section")!
+      ).queryByRole("status")
+    ).toBeNull()
   }, 15_000)
 
   it("offers every accessible repository as its default", async () => {

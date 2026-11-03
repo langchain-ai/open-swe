@@ -33,9 +33,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
 import type { DesktopUpdateState } from "@/desktop"
 import { api, type SessionUser } from "@/lib/api"
+import { hasLinkedGitHub } from "@/lib/linkedGitHub"
 import { useProfile } from "@/lib/profile"
 import { experienceStore, useExperience } from "@/lib/experience"
 import { ExperienceSelector } from "@/components/ExperienceSelector"
+import { GitHubLinkPrompt } from "@/features/agents/components/GitHubLinkPrompt"
 import { AgentWorkspaceProvider } from "@/features/agents/lib/agentWorkspace"
 import type {
   PullRequestSnapshot,
@@ -1465,7 +1467,11 @@ export function AgentsShell({
               key={experience}
               className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1"
             >
-              {children}
+              {experience === "coding" && !hasLinkedGitHub(user) ? (
+                <GitHubLinkPrompt user={user} />
+              ) : (
+                children
+              )}
             </main>
           </div>
         </TooltipProvider>
