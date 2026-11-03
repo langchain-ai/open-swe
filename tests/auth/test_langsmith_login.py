@@ -16,6 +16,7 @@ from openswe.dashboard import auth_routes, langsmith_login, langsmith_oauth, oau
 from openswe.dashboard.langsmith_login import LangSmithAccount
 from openswe.dashboard.oauth_credentials import load_credential, save_credential
 from openswe.dashboard.profiles import PROFILES, get_profile
+from openswe.dashboard.profiles import router as profiles_router
 from openswe.dashboard.user_preferences import USER_PREFERENCES
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.github import dashboard_routes
@@ -151,6 +152,7 @@ async def langsmith_client(registry_db, monkeypatch: pytest.MonkeyPatch):
         lambda _request, exc: JSONResponse({"detail": str(exc)}, status_code=409),
     )
     app.include_router(auth_routes.router, prefix="/dashboard/api")
+    app.include_router(profiles_router, prefix="/dashboard/api")
     app.include_router(dashboard_routes.router, prefix="/dashboard/api")
     app.include_router(review_router, prefix="/dashboard/api")
     async with httpx.AsyncClient(
@@ -193,6 +195,7 @@ async def test_desktop_login_is_independent_and_pkce_bound(langsmith_client) -> 
     me = await client.get("/dashboard/api/me")
     assert me.status_code == 200
     assert me.json()["github_login"] is None and me.json()["auth_provider"] == "langsmith"
+    assert me.json()["requires_github_link"] is False
     assert me.json()["follow_up_behavior"] == "queue" and not me.json()["is_admin"]
     assert any(
         header.startswith(oauth.COOKIE_NAME + "=") for header in me.headers.get_list("set-cookie")
@@ -209,7 +212,7 @@ async def test_desktop_login_is_independent_and_pkce_bound(langsmith_client) -> 
         await github_user.link("langsmith", server.subject)
 
 
-async def test_slack_email_does_not_block_langsmith_login(langsmith_client) -> None:
+async def test_slack_email_on_a_github_person_requires_linking(langsmith_client) -> None:
     server, client = langsmith_client
     github_user = await User.sign_in("github", "1", login="alice", email="alice@example.com")
     await github_user.link("slack", "slack-alice", email="same@example.com")
@@ -217,6 +220,10 @@ async def test_slack_email_does_not_block_langsmith_login(langsmith_client) -> N
     assert callback.status_code == 302
     user = await User.for_identity("langsmith", server.subject)
     assert user is not None and user.id != github_user.id
+    exchanged = await server.exchange(client, callback)
+    client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
+    assert (await client.get("/dashboard/api/me")).json()["requires_github_link"] is True
+    assert (await client.get("/dashboard/api/profile")).status_code == 403
 
 
 async def test_linking_github_returns_a_langsmith_person_to_their_github_account(
@@ -260,6 +267,7 @@ async def test_linking_github_returns_a_langsmith_person_to_their_github_account
     me = await client.get("/dashboard/api/me")
     assert me.status_code == 200
     assert me.json()["github_login"] == "alice" and me.json()["login"] == "alice"
+    assert me.json()["requires_github_link"] is False
     session = oauth.decode_session(me.cookies[oauth.COOKIE_NAME])
     assert (session["sub"], session["provider"]) == ("alice", "langsmith")
     assert me.json()["follow_up_behavior"] == "queue"
