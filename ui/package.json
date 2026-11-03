@@ -32,7 +32,7 @@
     "@tanstack/react-virtual": "^3.14.13",
     "@tanstack/router-plugin": "^1.168.42",
     "lexical": "^0.49.0",
-    "mermaid": "12.0.0",
+    "mermaid": "12.2.0",
     "monaco-editor": "^0.56.0",
     "nitro": "3.0.260903-beta",
     "posthog-js": "1.444.0",
