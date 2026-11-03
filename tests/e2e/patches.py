@@ -230,7 +230,7 @@ def apply() -> None:
 
     # Every module that bound the name at import time needs its own rebind, or
     # it keeps calling the real store and reports "no GitHub token for @user".
-    import httpx
+    import httpx2
     from githubkit import GitHub
     from githubkit.auth import BaseAuthStrategy
 
@@ -243,7 +243,7 @@ def apply() -> None:
         async with GitHub(
             auth,
             base_url=FAKE_GITHUB_API,
-            timeout=httpx.Timeout(timeout, connect=connect_timeout),
+            timeout=httpx2.Timeout(timeout, connect=connect_timeout),
             http_cache=False,
             auto_retry=False,
         ) as client:
