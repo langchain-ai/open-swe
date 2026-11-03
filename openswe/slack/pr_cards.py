@@ -29,18 +29,20 @@ from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repositories import Repository
 from openswe.jobs import queue
 from openswe.slack.blocks import (
-    CARD_HEADING_MAX_CHARS,
-    CARD_MAX_ACTIONS,
-    CARD_TEXT_MAX_CHARS,
+    CONTAINER_TITLE_MAX_CHARS,
     MARKDOWN_TEXT_MAX_CHARS,
     MESSAGE_MAX_BLOCKS,
     Block,
     ButtonElement,
-    CardBlock,
+    ContainerBlock,
+    ContainerChild,
+    actions,
     block_payload,
     button,
+    context,
     escape,
     mrkdwn,
+    section,
 )
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
@@ -128,22 +130,44 @@ class PullRequestCard:
         title = self.pull.title.replace("[", "(").replace("]", ")")
         return f"[{self.record.label}: {title}]({self.record.url})"
 
-    def block(self, card_id: UUID, *, live_until: datetime | None) -> CardBlock:
-        """The card as Slack's card block, tagged with ``card_id`` so a redraw can find it.
+    def block(self, card_id: UUID, *, live_until: datetime | None) -> ContainerBlock:
+        """The card as a full-width container, tagged with ``card_id`` so a redraw can find it.
 
         ``live_until`` is when its live updates end; ``None`` for a card nobody updates.
         """
         pull = self.pull
-        drawn: CardBlock = {
-            "type": "card",
+        children: list[ContainerChild] = []
+        if lines := self._status_lines():
+            children.append(section("\n".join(lines)))
+        children.append(context(self._details(live_until)))
+        children.append(actions(*self._buttons()))
+        title = pull.title
+        if len(title) > CONTAINER_TITLE_MAX_CHARS:
+            title = title[: CONTAINER_TITLE_MAX_CHARS - 1].rstrip() + "…"
+        drawn: ContainerBlock = {
+            "type": "container",
             "block_id": f"{_BLOCK_ID_PREFIX}{card_id}",
-            "title": mrkdwn(self._title()),
+            "width": "full",
+            "has_header_divider": True,
+            "rich_text_title": {
+                "type": "rich_text",
+                "elements": [
+                    {
+                        "type": "rich_text_section",
+                        "elements": [
+                            {
+                                "type": "link",
+                                "url": self.record.url,
+                                "text": title,
+                                "style": {"bold": True},
+                            }
+                        ],
+                    }
+                ],
+            },
             "subtitle": mrkdwn(self._state_line()),
-            "subtext": mrkdwn(self._subtext(live_until)),
-            "actions": self._buttons(),
+            "child_blocks": children,
         }
-        if body := self._fit(self._status_lines(), CARD_TEXT_MAX_CHARS, separator="\n"):
-            drawn["body"] = mrkdwn(body)
         if pull.author:
             path = f"u/{pull.author_id}" if pull.author_id is not None else quote(pull.author)
             drawn["icon"] = {
@@ -152,14 +176,6 @@ class PullRequestCard:
                 "alt_text": pull.author,
             }
         return drawn
-
-    def _title(self) -> str:
-        """The linked title, shortened so the link still fits Slack's limit."""
-        room = CARD_HEADING_MAX_CHARS - len(f"<{self.record.url}|>")
-        title = escape(self.pull.title)
-        if len(title) > room:
-            title = title[: room - 1].rstrip() + "…"
-        return f"<{self.record.url}|{title}>"
 
     def _state_line(self) -> str:
         pull = self.pull
@@ -170,12 +186,10 @@ class PullRequestCard:
             word = f"Closed {self._when(pull.closed_at, time=False)}"
         line = f"{emoji} {word} · {escape(self.record.label)}"
         author = f" by {escape(pull.author)}"
-        return (
-            line + author if pull.author and len(line + author) <= CARD_HEADING_MAX_CHARS else line
-        )
+        return line + author if pull.author else line
 
-    def _subtext(self, live_until: datetime | None) -> str:
-        """Diffstat, branches and labels as room allows, then whether the card is live."""
+    def _details(self, live_until: datetime | None) -> str:
+        """Diffstat, branches and labels, then whether the card is live."""
         pull = self.pull
         parts: list[str] = []
         if pull.additions is not None and pull.deletions is not None:
@@ -189,16 +203,14 @@ class PullRequestCard:
             parts.append(f"`{escape(pull.head_ref)}` → `{escape(pull.base_ref)}`")
         if pull.labels:
             parts.append(f":label: {self._names([label.name for label in pull.labels])}")
-        footer = self._footer(live_until)
-        room = CARD_TEXT_MAX_CHARS - len(footer) - len(" · ")
-        return " · ".join([*self._fit_parts(parts, room), footer])
+        return " · ".join([*parts, self._footer(live_until)])
 
     def _buttons(self) -> list[ButtonElement]:
         buttons: list[ButtonElement] = []
         if review := dashboard_review_url(self.record.owner, self.record.repo, self.record.number):
             buttons.append(button("Review", action_id=f"{_BUTTON_ID}_review", url=review))
         buttons.append(button("GitHub", action_id=f"{_BUTTON_ID}_github", url=self.record.url))
-        return buttons[:CARD_MAX_ACTIONS]
+        return buttons
 
     def _status_lines(self) -> list[str]:
         """What stands between an open pull request and its merge; nothing once it is done."""
@@ -284,25 +296,6 @@ class PullRequestCard:
     @staticmethod
     def _plural(count: int, noun: str) -> str:
         return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
-
-    @staticmethod
-    def _fit_parts(parts: Sequence[str], room: int, separator: str = " · ") -> list[str]:
-        """The leading ``parts`` that fit in ``room`` characters once joined."""
-        kept: list[str] = []
-        for part in parts:
-            if len(separator.join([*kept, part])) > room:
-                break
-            kept.append(part)
-        return kept
-
-    @classmethod
-    def _fit(cls, lines: Sequence[str], limit: int, *, separator: str = " · ") -> str:
-        """``lines`` joined within ``limit``, saying how many were left out."""
-        kept = cls._fit_parts(lines, limit - len(f"{separator}+99 more"), separator)
-        if len(kept) == len(lines):
-            kept = cls._fit_parts(lines, limit, separator)
-        dropped = len(lines) - len(kept)
-        return separator.join([*kept, *([f"+{dropped} more"] if dropped else [])])
 
     def _footer(self, live_until: datetime | None) -> str:
         if live_until is None:

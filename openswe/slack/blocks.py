@@ -23,9 +23,7 @@ CODE_TEXT_MAX_CHARS = 4000
 # Cumulative across every markdown block in one message.
 MARKDOWN_TEXT_MAX_CHARS = 12000
 MESSAGE_MAX_BLOCKS = 50
-CARD_HEADING_MAX_CHARS = 150
-CARD_TEXT_MAX_CHARS = 200
-CARD_MAX_ACTIONS = 3
+CONTAINER_TITLE_MAX_CHARS = 150
 BUTTON_TEXT_MAX_CHARS = 75
 OPTION_TEXT_MAX_CHARS = 75
 ButtonStyle = Literal["primary", "danger"]
@@ -87,9 +85,25 @@ class RichTextPreformatted(TypedDict):
     language: NotRequired[str]
 
 
+class RichTextStyle(TypedDict, total=False):
+    bold: bool
+
+
+class RichTextLink(TypedDict):
+    type: Literal["link"]
+    url: str
+    text: str
+    style: NotRequired[RichTextStyle]
+
+
+class RichTextSection(TypedDict):
+    type: Literal["rich_text_section"]
+    elements: list[RichTextText | RichTextLink]
+
+
 class RichTextBlock(TypedDict):
     type: Literal["rich_text"]
-    elements: list[RichTextPreformatted]
+    elements: list[RichTextPreformatted | RichTextSection]
 
 
 class ButtonElement(TypedDict):
@@ -161,22 +175,25 @@ class ImageElement(TypedDict):
     alt_text: str
 
 
-class CardBlock(TypedDict):
-    """Slack's card: a titled tile with an icon, a short body and up to three buttons."""
+type ContainerChild = SectionBlock | ContextBlock | ActionsBlock
 
-    type: Literal["card"]
+
+class ContainerBlock(TypedDict):
+    """A titled group of blocks; ``width`` ``full`` spans the whole message."""
+
+    type: Literal["container"]
+    child_blocks: list[ContainerChild]
     block_id: NotRequired[str]
-    icon: NotRequired[ImageElement]
-    title: NotRequired[Mrkdwn]
+    rich_text_title: NotRequired[RichTextBlock]
     subtitle: NotRequired[Mrkdwn]
-    body: NotRequired[Mrkdwn]
-    subtext: NotRequired[Mrkdwn]
-    actions: NotRequired[list[ButtonElement]]
+    icon: NotRequired[ImageElement]
+    width: NotRequired[Literal["narrow", "standard", "wide", "full"]]
+    has_header_divider: NotRequired[bool]
 
 
 type Block = (
     SectionBlock
-    | CardBlock
+    | ContainerBlock
     | MarkdownBlock
     | ContextBlock
     | DividerBlock

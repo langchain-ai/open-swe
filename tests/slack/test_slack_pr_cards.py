@@ -66,7 +66,7 @@ async def test_markers_become_cards_in_place_and_unreadable_ones_stay_links(
     assert carded.unavailable == [_URL.format(3)]
     assert "pr-card" not in carded.text
     blocks = block_payload(carded.blocks(live_until=carded.live_until) or [])
-    assert [block["type"] for block in blocks] == ["markdown", "card", "markdown"]
+    assert [block["type"] for block in blocks] == ["markdown", "container", "markdown"]
     card = _texts(blocks[1:2])
     assert "*lint* failing" in card
     assert "Waiting on bob" in card
