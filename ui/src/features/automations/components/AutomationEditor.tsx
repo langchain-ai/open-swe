@@ -119,7 +119,7 @@ export function AutomationEditor({
   const session = useSession()
   const canManage = session.data?.is_admin === true
   const reposQuery = useRepos()
-  const { models, defaultSelection } = useModelOptions()
+  const { models } = useModelOptions()
   const workspaceOptionsQuery = useWorkspaceOptions(Boolean(session.data))
 
   const createSchedule = useCreateAgentSchedule()
@@ -161,8 +161,7 @@ export function AutomationEditor({
     ModelSelection | null | undefined
   >(undefined)
 
-  const initialSelection =
-    scheduleToSelection(models, schedule) ?? defaultSelection
+  const initialSelection = scheduleToSelection(models, schedule)
   const activeSelection =
     selectionOverride !== undefined ? selectionOverride : initialSelection
   const isDirty =

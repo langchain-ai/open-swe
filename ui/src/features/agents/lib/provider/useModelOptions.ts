@@ -1,6 +1,5 @@
 import type { ModelOption } from "@/lib/api"
 import { useOptions } from "@/lib/profile"
-import { useSession } from "@/lib/session"
 
 export interface ModelSelection {
   modelId: string
@@ -9,63 +8,16 @@ export interface ModelSelection {
 
 export interface ModelOptionsResult {
   models: Array<ModelOption>
-  defaultSelection: ModelSelection | null
   isLoading: boolean
 }
 
-const STORAGE_KEY = "open-swe.agents.model-selection"
-
-function storedSelection(
-  models: Array<ModelOption>,
-  login: string
-): ModelSelection | null {
-  if (typeof window === "undefined" || !login) return null
-  try {
-    const selection = JSON.parse(
-      window.localStorage.getItem(STORAGE_KEY) ?? "null"
-    ) as (Partial<ModelSelection> & { login?: string; mode?: string }) | null
-    if (selection?.login === login && selection.mode === "auto") return null
-    return selection?.login === login &&
-      models.some(
-        (model) =>
-          model.id === selection.modelId &&
-          model.efforts.includes(selection.effort ?? "")
-      )
-      ? (selection as ModelSelection)
-      : null
-  } catch {
-    return null
-  }
-}
-
-export function persistModelSelection(
-  selection: ModelSelection | null,
-  login: string
-): void {
-  if (typeof window === "undefined" || !login) return
-  try {
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(
-        selection ? { ...selection, login } : { mode: "auto", login }
-      )
-    )
-  } catch {}
-}
-
-/** ``workspace`` is the workspace being composed in, whose defaults these are. */
+/** ``workspace`` is the workspace being composed in, whose models these are. */
 export function useModelOptions(workspace?: string | null): ModelOptionsResult {
   const optionsQuery = useOptions(workspace)
-  const session = useSession()
-  const models = optionsQuery.data?.models ?? []
-  const defaultSelection = optionsQuery.data
-    ? storedSelection(models, session.data?.login ?? "")
-    : null
 
   return {
-    models,
-    defaultSelection,
-    isLoading: optionsQuery.isLoading || session.isLoading,
+    models: optionsQuery.data?.models ?? [],
+    isLoading: optionsQuery.isLoading,
   }
 }
 

@@ -39,10 +39,7 @@ import {
   useAgentSkills,
   useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
-import {
-  persistModelSelection,
-  useModelOptions,
-} from "@/features/agents/lib/provider/useModelOptions"
+import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import { localThreadKeys } from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
@@ -96,11 +93,8 @@ export function AgentsHome({
     select: (state) => state.status === "pending",
   })
   const [selection, setSelection] = useState<ModelSelection | null>(null)
-  const [autoSelected, setAutoSelected] = useState(false)
   const handleSelectionChange = (next: ModelSelection | null) => {
-    setAutoSelected(next === null)
     setSelection(next)
-    persistModelSelection(next, session.data?.login ?? "")
   }
   const cloudEnabled = Boolean(session.data)
   const preferences = useQuery({
@@ -261,8 +255,8 @@ export function AgentsHome({
 
   // The picker offers the workspace being composed in its own models and
   // default, not the deployment default's.
-  const { models, defaultSelection } = useModelOptions(selectedWorkspace)
-  const activeSelection = autoSelected ? null : (selection ?? defaultSelection)
+  const { models } = useModelOptions(selectedWorkspace)
+  const activeSelection = selection
 
   // The thread id is minted here: the first `run.start` posted against it is
   // what creates the thread server-side.

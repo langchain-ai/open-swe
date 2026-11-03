@@ -250,7 +250,7 @@ export function AgentThreadView({
     ? undefined
     : pullRequestStatus.data?.pullRequests
 
-  const { models, defaultSelection } = useModelOptions()
+  const { models } = useModelOptions()
   const threadSelection = useMemo<ModelSelection | null>(() => {
     if (!thread.model || !thread.effort) return null
     const supported = models.some(
@@ -264,10 +264,7 @@ export function AgentThreadView({
   const [autoIntent] = useState(createAutoSelectionIntent)
   const activeSelection = autoSelected
     ? null
-    : (selection ??
-      (thread.modelSelection === "auto"
-        ? null
-        : (threadSelection ?? defaultSelection)))
+    : (selection ?? (thread.modelSelection === "auto" ? null : threadSelection))
   const handleSelectionChange = (next: ModelSelection | null) => {
     setAutoSelected(next === null)
     setSelection(next)
