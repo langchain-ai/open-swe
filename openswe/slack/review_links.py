@@ -24,7 +24,7 @@ def preserve_github_links(enabled: bool) -> Iterator[None]:
 _PR_URL = r"https?://(?:www\.)?github\.com/[\w.-]+/[\w.-]+/pull/[1-9]\d*/?"
 _PR_PARTS = re.compile(r"github\.com/([\w.-]+)/([\w.-]+)/pull/(\d+)", re.IGNORECASE)
 _PR_LINK = re.compile(
-    rf"\[(?P<md_label>[^\]\n]*)\]\((?P<md>{_PR_URL})\)"
+    rf"\[(?P<md_label>[^\]\n]*)\]\((?P<angle><)?(?P<md>{_PR_URL})(?(angle)>)\)"
     rf"|<(?P<slack>{_PR_URL})(?:\|(?P<slack_label>[^<>]*))?>"
     rf"|(?P<bare>{_PR_URL})(?=$|[\s<>|)\].,!;:'\"])",
     re.IGNORECASE,
