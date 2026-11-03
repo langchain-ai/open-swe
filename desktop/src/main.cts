@@ -1849,11 +1849,11 @@ function configureFraming() {
 
 function configurePermissions() {
   session.defaultSession.setPermissionRequestHandler(
-    (webContents, permission, callback, details) => {
+    (requester, permission, callback, details) => {
       callback(
         isTrustedPermissionRequest(
           permission,
-          details.requestingUrl || webContents.getURL(),
+          details.requestingUrl || requester.getURL(),
         ),
       );
     },
