@@ -4,6 +4,7 @@ import {
   parseManagedToolsCard,
   type ManagedToolsCardOffer,
 } from "@/features/agents/lib/managedToolsCard"
+import { showsInteractiveReviewCard } from "@/features/agents/lib/interactiveReviewCard"
 import type {
   AnyImageChunk,
   Chunk,
@@ -40,6 +41,7 @@ export type RenderItem =
       chunk: ToolExecutionChunk
       offer: ManagedToolsCardOffer
     }
+  | { type: "interactive-review-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
   /** A tool call that returned images, shown outside the fold so they are seen. */
   | {
@@ -57,6 +59,7 @@ const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "text-chunk",
   "reply-item",
   "managed-tools-item",
+  "interactive-review-item",
   "iframe-item",
   "worker-launch-item",
   "routed-message-item",
@@ -280,6 +283,15 @@ export function buildRenderItems(
         flushGroups()
         items.push({
           type: "worker-launch-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
+        })
+        continue
+      }
+      if (showsInteractiveReviewCard(chunk.toolName, chunk.output)) {
+        flushGroups()
+        items.push({
+          type: "interactive-review-item",
           key: `tool-${chunk.toolCallId}`,
           chunk,
         })

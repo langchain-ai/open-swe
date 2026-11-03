@@ -13,6 +13,7 @@ from openswe.review_guide.sessions import ARCHIVE_JOB, ReviewGuideSession
 from openswe.review_guide.walk import Walk
 from openswe.slack import code_channels
 from openswe.slack.http import SlackRequestError
+from openswe.source_context import SlackThreadRef
 from openswe.users.models import User
 from openswe.walkthrough.plan import Plan
 from openswe.walkthrough.record import Walkthrough
@@ -20,7 +21,9 @@ from openswe.walkthrough.record import Walkthrough
 pytestmark = pytest.mark.usefixtures("registry_db")
 
 
-@pytest.mark.parametrize("changed", ["none", "resumed", "head", "unfinished", "status_failed"])
+@pytest.mark.parametrize(
+    "changed", ["none", "resumed", "head", "unfinished", "status_failed", "slack_thread"]
+)
 async def test_completed_review_archives_after_a_day_unless_review_resumes(
     monkeypatch: pytest.MonkeyPatch, changed: str
 ) -> None:
@@ -33,7 +36,9 @@ async def test_completed_review_archives_after_a_day_unless_review_resumes(
         thread_id="thread-1",
         pull_request=pr,
         user_id=user.id,
-        slack_channel_id="C1",
+        location=SlackThreadRef(
+            channel_id="C1", thread_ts="1.0" if changed == "slack_thread" else "0"
+        ),
         workspace_slug=None,
         mode="reviewer",
     )
@@ -82,9 +87,50 @@ async def test_completed_review_archives_after_a_day_unless_review_resumes(
         assert await WORKER.run_due() == 1
         session = await ReviewGuideSession.get("thread-1")
         assert session is not None
-        assert session.closed == (changed in {"none", "status_failed"})
+        assert session.closed == (changed in {"none", "status_failed", "slack_thread"})
         assert await queue.get(f"{ARCHIVE_JOB}:thread-1") is None
     if changed in {"none", "status_failed"}:
         archive.assert_awaited_once_with("C1", summary_message_ts="")
     else:
         archive.assert_not_awaited()
+
+
+async def test_restarting_a_review_in_a_thread_replaces_its_closed_one() -> None:
+    first = await PullRequest(owner="o", repo="r", number=1).ensure()
+    second = await PullRequest(owner="o", repo="r", number=2).ensure()
+    user = User()
+    async with postgres.session() as db:
+        db.add(user)
+        await db.commit()
+    here = SlackThreadRef(channel_id="C1", thread_ts="1.0")
+    await ReviewGuideSession.create(
+        thread_id="thread-1",
+        pull_request=first,
+        user_id=user.id,
+        location=here,
+        workspace_slug=None,
+        mode="reviewer",
+    )
+    session = await ReviewGuideSession.get("thread-1")
+    assert session is not None
+    await session.save_walk(Walk(head_sha="head-1"))
+    await session.set_closed(True)
+
+    await ReviewGuideSession.create(
+        thread_id="thread-1",
+        pull_request=second,
+        user_id=user.id,
+        location=None,
+        workspace_slug=None,
+        mode="author",
+    )
+
+    session = await ReviewGuideSession.get("thread-1")
+    assert session is not None
+    assert session.pull_request_id == second.id
+    assert (session.closed, session.walk, session.surface, session.mode) == (
+        False,
+        None,
+        "web",
+        "author",
+    )

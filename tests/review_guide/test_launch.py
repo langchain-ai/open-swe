@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
@@ -33,8 +34,8 @@ async def test_requester_who_cannot_read_the_pull_request_gets_no_dm_or_channel(
 ) -> None:
     monkeypatch.setattr(
         launch.User,
-        "for_identity",
-        AsyncMock(return_value=SimpleNamespace(github_login="alice")),
+        "get",
+        AsyncMock(return_value=SimpleNamespace(id=uuid4(), github_login="alice")),
     )
     monkeypatch.setattr(launch, "get_valid_access_token", AsyncMock(return_value="token"))
     monkeypatch.setattr(launch, "fetch_head", AsyncMock(return_value=None))
@@ -49,7 +50,8 @@ async def test_requester_who_cannot_read_the_pull_request_gets_no_dm_or_channel(
                 owner="acme",
                 repo="private",
                 number=1,
-                origin=launch.GuideOrigin(requester_slack_id="U1", is_private=True),
+                origin=launch.GuideOrigin(requester_id=uuid4(), is_private=True),
+                code_channel=True,
             )
         )
 

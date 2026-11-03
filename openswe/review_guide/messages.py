@@ -1,7 +1,9 @@
 """The review guide's own Slack messages, which the server posts and edits without a model turn.
 
-- The progress message is the channel's summary message, which Slack shows in
-  the thread the channel came from.
+In the dashboard there are none: everything the reader sees comes from the guide's turns.
+
+- The progress message is edited in place. In a code channel it is the channel's
+  summary message, which Slack shows in the thread the channel came from.
 - A chunk's "Next" button is taken away once the chunk is settled, so only
   what is on screen ever offers it.
 - A pull request update pauses the walkthrough with a note, until the reader
@@ -16,7 +18,7 @@ from openswe.review_guide.buttons import CONTINUE
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.review_guide.walk import OnScreen, Reader
 from openswe.slack.blocks import block_payload, context, image, option_actions
-from openswe.slack.client import post_slack_top_level_message_with_ts, update_slack_message
+from openswe.slack.client import update_slack_message
 from openswe.slack.code_channels import set_summary_message
 from openswe.slack.diff_image import SlackDiffImage
 from openswe.slack.http import SlackRequestError
@@ -27,11 +29,11 @@ logger = logging.getLogger(__name__)
 
 Stage = Literal["starting", "walking", "paused", "finished", "ended"]
 _HEADINGS: dict[Stage, str] = {
-    "starting": "Starting the walkthrough",
-    "walking": "Walkthrough in progress",
-    "paused": "Walkthrough paused: the pull request changed",
-    "finished": "Walkthrough finished",
-    "ended": "Walkthrough ended",
+    "starting": "Starting the interactive review",
+    "walking": "Interactive review in progress",
+    "paused": "Interactive review paused: the pull request changed",
+    "finished": "Interactive review finished",
+    "ended": "Interactive review ended",
 }
 
 
@@ -82,7 +84,9 @@ class ChunkMessage:
 async def refresh_progress(
     session: ReviewGuideSession, reader: Reader | None = None, *, stage: Stage = "walking"
 ) -> None:
-    """Edit the progress message, posting it and making it the channel's summary the first time."""
+    """Edit the progress message, posting it the first time; a code channel makes it its summary."""
+    if session.slack_location is None:
+        return
     pr = session.pull_request
     lines = [f"*{_HEADINGS[stage]}* · <{pr.url}|{pr.repo}#{pr.number}>"]
     if reader is not None:
@@ -101,7 +105,7 @@ async def refresh_progress(
                 extra={"agent_thread_id": session.thread_id, "slack_error": str(exc)},
             )
     try:
-        message_ts = await post_slack_top_level_message_with_ts(channel_id, text)
+        message_ts = await session.post(text)
     except SlackRequestError as exc:
         logger.warning(
             "Could not post a review guide's progress message",
@@ -109,6 +113,8 @@ async def refresh_progress(
         )
         return
     await session.save_summary_message(message_ts)
+    if not session.in_code_channel:
+        return
     try:
         await set_summary_message(channel_id, message_ts)
     except SlackRequestError as exc:
@@ -127,9 +133,7 @@ async def post_with_buttons(
         await chunk.prepare()
     try:
         blocks = chunk.blocks(buttons=buttons) if chunk else _text_blocks(text, buttons=buttons)
-        return await post_slack_top_level_message_with_ts(
-            session.slack_channel_id, text, blocks=blocks
-        )
+        return await session.post(text, blocks=blocks)
     except SlackRequestError as exc:
         logger.warning(
             "Could not post a planned review guide chunk",
@@ -142,7 +146,7 @@ async def retire(
     channel_id: str, message_ts: str, text: str, note: str, *, shown: OnScreen | None = None
 ) -> None:
     """Take the buttons off a message the guide posted, saying why."""
-    if not message_ts:
+    if not channel_id or not message_ts:
         return
     try:
         await update_slack_message(
@@ -161,7 +165,12 @@ async def retire(
 
 
 async def pause(session: ReviewGuideSession, head_sha: str) -> None:
-    """Tell the reader the pull request changed, and wait for them to go on."""
+    """Tell the reader the pull request changed, and wait for them to go on.
+
+    The dashboard has no note to post: the reader's next turn starts with what changed.
+    """
+    if session.slack_location is None:
+        return
     text = (
         f"The pull request was updated (now at `{head_sha[:7]}`), so I've paused the "
         "walkthrough. Tell me when to continue and I'll pick up with what changed."
@@ -178,7 +187,7 @@ async def pause(session: ReviewGuideSession, head_sha: str) -> None:
                 extra={"agent_thread_id": session.thread_id, "slack_error": str(exc)},
             )
     try:
-        message_ts = await post_slack_top_level_message_with_ts(channel_id, text, blocks=blocks)
+        message_ts = await session.post(text, blocks=blocks)
     except SlackRequestError as exc:
         logger.warning(
             "Could not post a review guide's pause note",

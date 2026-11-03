@@ -203,18 +203,21 @@ async def test_option_interaction_schedules_update_only_for_authorized_actor(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("code_channel", [True, False])
 @pytest.mark.parametrize("reader", [True, False])
 async def test_next_in_a_review_guide_counts_only_for_its_reader(
-    monkeypatch: pytest.MonkeyPatch, reader: bool
+    monkeypatch: pytest.MonkeyPatch, reader: bool, code_channel: bool
 ) -> None:
     payload = _option_payload()
     payload["actions"][0]["value"] = json.dumps({"type": "open_swe_option", "response": "Next"})
     update = AsyncMock()
     advance = AsyncMock()
-    guide = SimpleNamespace(is_reader=AsyncMock(return_value=reader))
+    guide = SimpleNamespace(slack_channel_id="C1", is_reader=AsyncMock(return_value=reader))
     monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(slack_routes, "get_langgraph_client", lambda: object())
-    monkeypatch.setattr(slack_routes.common, "is_code_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        slack_routes.common, "is_code_channel", AsyncMock(return_value=code_channel)
+    )
     monkeypatch.setattr(
         slack_routes.common, "lookup_slack_thread_id", AsyncMock(return_value="thread-1")
     )
@@ -227,15 +230,15 @@ async def test_next_in_a_review_guide_counts_only_for_its_reader(
             )
         ),
     )
-    monkeypatch.setattr(
-        slack_routes.ReviewGuideSession, "for_channel", AsyncMock(return_value=guide)
-    )
+    get = AsyncMock(return_value=guide)
+    monkeypatch.setattr(slack_routes.ReviewGuideSession, "get", get)
     monkeypatch.setattr(slack_routes, "_update_selected_option_message", update)
     monkeypatch.setattr(slack_routes, "advance", advance)
     background_tasks = BackgroundTasks()
 
     result = await slack_routes.slack_interactivity(_request(payload), background_tasks)
 
+    get.assert_awaited_once_with("thread-1")
     guide.is_reader.assert_awaited_once_with("U1")
     if not reader:
         assert result["status"] == "ignored"
@@ -243,7 +246,7 @@ async def test_next_in_a_review_guide_counts_only_for_its_reader(
         return
     assert [task.func for task in background_tasks.tasks] == [update, advance]
     await background_tasks()
-    advance.assert_awaited_once_with("C1", "2.0")
+    advance.assert_awaited_once_with(guide, "2.0")
 
 
 @pytest.mark.asyncio

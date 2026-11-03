@@ -5,5 +5,5 @@ When the walkthrough is not finished, it posts only `message`, and nothing at al
 
 - `message`: optional.
   Leave it out unless there is something the reader needs to hear; a closing summary is only worth it when it adds something.
-- `archive`: `true` to also close the session and archive the channel, for good: nothing wakes the guide afterwards, not even a pull request update.
+- `archive`: `true` to also close the review for good, archiving its code channel if it has one: nothing wakes the guide afterwards, not even a pull request update.
   Use it when the reader asks you to stop, cancel or close the review, or when carrying on no longer makes sense, such as the pull request being closed or merged.

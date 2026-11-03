@@ -243,8 +243,8 @@ from openswe.tools import (
     slack_read_channel_messages,
     slack_read_thread_messages,
     slack_reply,
-    slack_start_review_channel,
     snapshotctl,
+    start_interactive_review,
     start_thread,
     submit_thread_feedback,
     suggest_task,
@@ -342,7 +342,7 @@ SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
         "slack_add_reaction",
         "slack_attach_html",
         "slack_move_thread",
-        "slack_start_review_channel",
+        "start_interactive_review",
     }
 )
 SLACK_BY_THE_WAY_EXCLUDED_TOOLS = SLACK_ASK_EXCLUDED_TOOLS | frozenset({"slack_breakout_thread"})
@@ -610,7 +610,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "slack_move_thread",
         "slack_post_message",
         "slack_breakout_thread",
-        "slack_start_review_channel",
+        "start_interactive_review",
         "publish_workspace",
         "snapshotctl",
         "configure_repository",
@@ -648,6 +648,8 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "code_channel_set_view",
         "manage_code_channel",
         "manage_incident",
+        # The review runs in the parent's own conversation.
+        "start_interactive_review",
         "list_threads",
         "listen_events",
         "request_rollout_check",
@@ -778,7 +780,7 @@ AGENT_TOOLS: Final = (
     slack_read_thread_messages,
     slack_reply,
     slack_breakout_thread,
-    slack_start_review_channel,
+    start_interactive_review,
     submit_thread_feedback,
     suggest_task,
     submit_review_assessment_feedback,
@@ -1984,7 +1986,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_post_message,
         slack_reply,
         slack_breakout_thread,
-        slack_start_review_channel,
     ]
     withheld = [
         *(() if goal_mode else (report_work_state,)),

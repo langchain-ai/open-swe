@@ -98,6 +98,12 @@ HUMAN_REVIEW_CORRECTED_SUMMARY = "Ends every greeting with one exclamation mark,
 HUMAN_REVIEW_DISMISS_MARKER = "E2E_HUMAN_REVIEW_DISMISS"
 HUMAN_REVIEW_DISMISS_REASON = "posted with the wrong summary"
 HUMAN_REVIEW_PICK = "bob"
+# Interactive review: the request names an existing PR; `_WEB` asks from the dashboard.
+INTERACTIVE_REVIEW_MARKER = "E2E_INTERACTIVE_REVIEW"
+INTERACTIVE_REVIEW_WEB_MARKER = "E2E_INTERACTIVE_REVIEW_WEB"
+INTERACTIVE_REVIEW_GREETING = "I'll walk you through this pull request one chunk at a time."
+_INTERACTIVE_REVIEW_KICKOFF = "Start the interactive review of pull request"
+_INTERACTIVE_REVIEW_NEXT = "The reader clicked"
 _UNCLAIMED_MARKER = "Nobody has signed up to review"
 _DECLINED_MARKER = "declined the review of"
 _PICK_REQUEST = "reviewer for it"
@@ -595,6 +601,23 @@ def _expedite_fixed_reply_step(messages: list[BaseMessage]) -> AIMessage:
 def _pr_url_in(text: str) -> str:
     match = re.search(r"https?://[^\s\"'<>|]+/pull/\d+", text)
     return match.group(0) if match else ""
+
+
+def _interactive_review_start_step(messages: list[BaseMessage]) -> AIMessage:
+    """Start an interactive review of the pull request the user named, right here."""
+    humans = _script_humans(messages)
+    text = _text(humans[0].content) if humans else ""
+    return AIMessage(
+        content="Starting the interactive review here.",
+        tool_calls=[
+            {
+                "name": "start_interactive_review",
+                "args": {"pr_url": _pr_url_in(text)},
+                "id": f"call-interactive-review-{len(messages)}",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
 
 
 def _human_review_request_step(messages: list[BaseMessage]) -> AIMessage:
@@ -1109,6 +1132,65 @@ _IMPLEMENT_STEPS: tuple[StepSpec, ...] = (
 )
 
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
+    # The guide reads the pull request through refs it pins in this checkout.
+    "interactive_review": (
+        _tool_step(
+            "Checking out the repository the pull request is in.",
+            "execute",
+            {"command": 'rm -rf demo && git clone -q "$E2E_REMOTE" demo'},
+            "call-interactive-review-clone",
+        ),
+        _dynamic_step(_interactive_review_start_step),
+        _tool_step(
+            "Telling the reader it starts here.",
+            "slack_reply",
+            {"message": "Starting the interactive review right here in this thread."},
+            "call-interactive-review-ack",
+        ),
+    ),
+    "interactive_review_web": (
+        _tool_step(
+            "Checking out the repository the pull request is in.",
+            "execute",
+            {"command": 'rm -rf demo && git clone -q "$E2E_REMOTE" demo'},
+            "call-interactive-review-clone",
+        ),
+        _dynamic_step(_interactive_review_start_step),
+        StepSpec(content="Starting the interactive review right here."),
+    ),
+    "interactive_review_kickoff": (
+        _tool_step(
+            "Greeting the reader.",
+            "slack_reply",
+            {"message": INTERACTIVE_REVIEW_GREETING, "response_type": "progress"},
+            "call-interactive-review-greeting",
+        ),
+        _tool_step(
+            "Showing the first chunk.",
+            "walkthrough_show_chunk",
+            {},
+            "call-interactive-review-show",
+        ),
+        StepSpec(content="Waiting for the reader."),
+    ),
+    "interactive_review_kickoff_web": (
+        _tool_step(
+            "Showing the first chunk.",
+            "walkthrough_show_chunk",
+            {},
+            "call-interactive-review-show",
+        ),
+        StepSpec(content=INTERACTIVE_REVIEW_GREETING),
+    ),
+    "interactive_review_next": (
+        _tool_step(
+            "Every chunk is done, so the review can close.",
+            "walkthrough_end",
+            {},
+            "call-interactive-review-end",
+        ),
+        StepSpec(content="That was the whole pull request."),
+    ),
     "review_chat_comments": (
         _tool_step(
             "Drafting the first comment.",
@@ -1676,6 +1758,35 @@ def _is_pull_request_fix(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule(
+        "interactive_review_next",
+        lambda ctx: (
+            INTERACTIVE_REVIEW_MARKER in ctx.first_text
+            and _INTERACTIVE_REVIEW_NEXT in ctx.pending_text
+        ),
+    ),
+    ScriptRule(
+        "interactive_review_kickoff_web",
+        lambda ctx: (
+            INTERACTIVE_REVIEW_WEB_MARKER in ctx.first_text
+            and _INTERACTIVE_REVIEW_KICKOFF in ctx.pending_text
+        ),
+    ),
+    ScriptRule(
+        "interactive_review_kickoff",
+        lambda ctx: (
+            INTERACTIVE_REVIEW_MARKER in ctx.first_text
+            and _INTERACTIVE_REVIEW_KICKOFF in ctx.pending_text
+        ),
+    ),
+    ScriptRule(
+        "interactive_review_web",
+        lambda ctx: ctx.human_count <= 1 and INTERACTIVE_REVIEW_WEB_MARKER in ctx.first_text,
+    ),
+    ScriptRule(
+        "interactive_review",
+        lambda ctx: ctx.human_count <= 1 and INTERACTIVE_REVIEW_MARKER in ctx.first_text,
+    ),
     ScriptRule("inbox", lambda ctx: INBOX_MARKER in ctx.first_text),
     ScriptRule("review_chat_comments", lambda ctx: REVIEW_CHAT_COMMENTS_MARKER in ctx.last_text),
     ScriptRule("review_chat_review", lambda ctx: REVIEW_CHAT_REVIEW_MARKER in ctx.last_text),

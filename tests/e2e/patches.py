@@ -334,6 +334,15 @@ def apply() -> None:
 
     for module in (review_reviews, review_chat):
         module.__dict__["get_github_app_installation_token"] = _dummy_install_token
+
+    # An interactive review reads the PR as its reader, and as the App once it runs.
+    from openswe.review_guide import github as review_guide_github
+    from openswe.review_guide import launch as review_guide_launch
+
+    review_guide_github.__dict__["GITHUB_API_BASE"] = FAKE_GITHUB_API
+    review_guide_github.__dict__["get_github_app_installation_token"] = _dummy_install_token
+    for module in (review_guide_github, review_guide_launch):
+        module.__dict__["get_valid_access_token"] = _dummy_user_token
     review_chat.__dict__["fetch_pr_diff"] = _fake_fetch_pr_diff
 
     # A scout sandbox clones the PR through the GitHub proxy, which the stand-in

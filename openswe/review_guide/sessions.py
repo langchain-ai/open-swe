@@ -1,9 +1,11 @@
-"""Review guide sessions and the changed lines each person has approved.
+"""Interactive review sessions and the changed lines each person has approved.
 
-A session is one code channel walking one person through one pull request,
-along with where the walkthrough of its current head stands. What they approved is kept per
-person and pull request as line ranges at one head, carried to each new head
-with the plan, so a rebase or force-push never asks them to reread it.
+A session is one conversation walking one person through one pull request,
+along with where the walkthrough of its current head stands. It talks in a Slack
+code channel, in an ordinary Slack thread, or in the dashboard with no Slack at
+all. What they approved is kept per person and pull request as line ranges at
+one head, carried to each new head with the plan, so a rebase or force-push
+never asks them to reread it.
 """
 
 from collections.abc import Callable
@@ -22,8 +24,18 @@ from openswe.github.repositories import Repository
 from openswe.jobs import queue
 from openswe.review_guide.github import fetch_head
 from openswe.review_guide.walk import Reader, Walk
-from openswe.slack.code_channels import archive_code_channel, set_session_status
+from openswe.slack.client import (
+    post_slack_thread_reply_with_ts,
+    post_slack_top_level_message_with_ts,
+)
+from openswe.slack.code_channels import (
+    CODE_CHANNEL_SESSION_TS,
+    archive_code_channel,
+    is_code_channel_session,
+    set_session_status,
+)
 from openswe.slack.http import SlackRequestError
+from openswe.source_context import SlackThreadRef
 from openswe.users.models import User
 from openswe.utils.json_types import JsonObject
 from openswe.walkthrough.diff import Carry
@@ -32,6 +44,7 @@ from openswe.walkthrough.record import Walkthrough
 
 # A reviewer ends by approving; the author, who cannot approve their own PR, ends by readying it.
 GuideMode = Literal["reviewer", "author"]
+GuideSurface = Literal["code_channel", "slack_thread", "web"]
 ARCHIVE_JOB = "review_guide_archive"
 
 
@@ -62,14 +75,19 @@ class ReviewGuideSeen(Base):
 class ReviewGuideSession(Base):
     __tablename__ = "review_guide_session"
 
-    # The LangGraph thread, which is also the code channel's session id.
+    # The agent thread, which is also a code channel's session id.
     thread_id: Mapped[str] = mapped_column(primary_key=True)
     pull_request_id: Mapped[UUID] = mapped_column(ForeignKey("pull_request.id", ondelete="CASCADE"))
     # The reader being walked through.
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # Where the guide talks: empty for the dashboard.
     slack_channel_id: Mapped[str]
     # Sandbox workspace the guide boots from; None is the default image.
     workspace_slug: Mapped[str | None] = mapped_column(default=None)
+    # The Slack thread the guide talks in: a code channel's whole-channel session, or a thread's ts.
+    slack_thread_ts: Mapped[str] = mapped_column(
+        server_default=CODE_CHANNEL_SESSION_TS, default=CODE_CHANNEL_SESSION_TS
+    )
     mode: Mapped[GuideMode] = mapped_column(Text, default="reviewer")
     # A serialized `Walk` for the head it was built at.
     walk_json: Mapped[JsonObject | None] = mapped_column("walkthrough", JSONB, default=None)
@@ -84,6 +102,36 @@ class ReviewGuideSession(Base):
     @property
     def closed(self) -> bool:
         return self.closed_at is not None
+
+    @property
+    def slack_location(self) -> SlackThreadRef | None:
+        """The Slack conversation the guide talks in; ``None`` in the dashboard."""
+        if not self.slack_channel_id:
+            return None
+        return SlackThreadRef(channel_id=self.slack_channel_id, thread_ts=self.slack_thread_ts)
+
+    @property
+    def in_code_channel(self) -> bool:
+        """Whether the guide has a whole code channel, with its tabs, context bar and archive."""
+        return bool(self.slack_channel_id) and is_code_channel_session(self.slack_thread_ts)
+
+    @property
+    def surface(self) -> GuideSurface:
+        if not self.slack_channel_id:
+            return "web"
+        return "code_channel" if self.in_code_channel else "slack_thread"
+
+    async def post(self, text: str, *, blocks: list[JsonObject] | None = None) -> str:
+        """Post in the guide's Slack conversation without a model turn; returns the message's ts."""
+        if not self.slack_channel_id:
+            raise SlackRequestError("not_in_slack")
+        if self.in_code_channel:
+            return await post_slack_top_level_message_with_ts(
+                self.slack_channel_id, text, blocks=blocks
+            )
+        return await post_slack_thread_reply_with_ts(
+            self.slack_channel_id, self.slack_thread_ts, text, blocks=blocks
+        )
 
     async def is_reader(self, slack_user_id: str) -> bool:
         """Whether this Slack member is the person being walked through; only they approve."""
@@ -102,14 +150,17 @@ class ReviewGuideSession(Base):
             await session.commit()
 
     @classmethod
-    async def for_channel(cls, channel_id: str) -> Self | None:
+    async def for_code_channel(cls, channel_id: str) -> Self | None:
         if not postgres.configured():
             return None
         async with postgres.session() as session:
             return await session.scalar(
                 select(cls)
                 .options(selectinload(cls.pull_request))
-                .where(cls.slack_channel_id == channel_id)
+                .where(
+                    cls.slack_channel_id == channel_id,
+                    cls.slack_thread_ts == CODE_CHANNEL_SESSION_TS,
+                )
             )
 
     async def save_summary_message(self, message_ts: str) -> None:
@@ -186,6 +237,10 @@ class ReviewGuideSession(Base):
         reader = Reader.of(walk, stored.plan, await self.seen_at(head_sha))
         if reader.unfinished(LineSet()):
             return
+        if not self.in_code_channel:
+            # The conversation goes on without the guide's rules and tools.
+            await self.set_closed(True)
+            return
         try:
             await archive_code_channel(
                 self.slack_channel_id, summary_message_ts=self.summary_message_ts
@@ -237,19 +292,33 @@ class ReviewGuideSession(Base):
         thread_id: str,
         pull_request: PullRequest,
         user_id: UUID,
-        slack_channel_id: str,
+        location: SlackThreadRef | None,
         workspace_slug: str | None,
         mode: GuideMode,
     ) -> None:
+        """Start a guide in a thread, replacing any earlier one the thread ran."""
+        values = {
+            "pull_request_id": pull_request.id,
+            "user_id": user_id,
+            "slack_channel_id": location.channel_id if location else "",
+            "slack_thread_ts": location.thread_ts if location else "",
+            "workspace_slug": workspace_slug,
+            "mode": mode,
+        }
         async with postgres.session() as session:
-            session.add(
-                cls(
-                    thread_id=thread_id,
-                    pull_request_id=pull_request.id,
-                    user_id=user_id,
-                    slack_channel_id=slack_channel_id,
-                    workspace_slug=workspace_slug,
-                    mode=mode,
+            await session.execute(
+                insert(cls)
+                .values(thread_id=thread_id, **values)
+                .on_conflict_do_update(
+                    index_elements=[cls.thread_id],
+                    set_={
+                        **values,
+                        "walkthrough": None,
+                        "summary_message_ts": "",
+                        "paused_message_ts": "",
+                        "closed_at": None,
+                        "created_at": func.clock_timestamp(),
+                    },
                 )
             )
             await session.commit()

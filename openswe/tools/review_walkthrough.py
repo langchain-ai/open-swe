@@ -1,7 +1,9 @@
-"""Tools that walk a reader through the shared plan in a review guide channel.
+"""Tools that walk a reader through the shared plan in an interactive review.
 
 The server renders, checks and tracks everything: chunks come from the plan,
-and the reader's walk records what is on screen, approved and skipped. A guide
+and the reader's walk records what is on screen, approved and skipped. In Slack
+a chunk is a message with a "Next" button; in the dashboard it is a card the
+transcript draws from the tool's result, whose "Next" calls the server. A guide
 that gets ahead of the review scout places the next chunk itself with the same
 planning tools the scout uses.
 """
@@ -11,6 +13,9 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import wraps
 from typing import Any, Self
+from uuid import uuid7
+
+from pydantic import BaseModel
 
 from openswe.review_guide.buttons import APPROVE, MARK_READY, NEXT
 from openswe.review_guide.context import GuideContext, GuideUnavailableError
@@ -55,6 +60,16 @@ def _one_at_a_time[**P](
             return await tool(*args, **kwargs)
 
     return serialized
+
+
+class WebCard(BaseModel):
+    """What the dashboard draws for a message the guide shows there instead of in Slack."""
+
+    text: str
+    # The "Next" button's message, which the server approves when the reader clicks it.
+    next_ts: str = ""
+    # Buttons that answer with their own label, as a Slack option does.
+    options: list[str] = []
 
 
 @dataclass
@@ -105,28 +120,35 @@ class _State:
 
     async def post(self, shown: OnScreen) -> dict[str, Any]:
         """Put ``shown`` on screen with its "Next" button, replacing what was there."""
-        chunk = ChunkMessage(shown)
-        await chunk.prepare()
-        try:
-            blocks = chunk.blocks(buttons=[NEXT])
-        except SlackRequestError as exc:
-            return {
-                "success": False,
-                "error": exc.code,
-                "retry": True,
-                "hint": "Shorten or split the chunk before showing it again.",
-            }
-        posted = await send_slack_reply(shown.message_text, "progress", blocks=blocks)
-        if posted["success"] is not True:
-            return posted
-        replaced = self.walk.withdraw()
-        shown.message_ts = str(posted["message_ts"] or "")
         shown.run_id = RunConfig.from_runtime().run_id or ""
+        if self.ctx.session.slack_location is None:
+            shown.message_ts = str(uuid7())
+            shown_in: dict[str, object] = {
+                "card": WebCard(text=shown.markdown, next_ts=shown.message_ts).model_dump()
+            }
+        else:
+            chunk = ChunkMessage(shown)
+            await chunk.prepare()
+            try:
+                blocks = chunk.blocks(buttons=[NEXT])
+            except SlackRequestError as exc:
+                return {
+                    "success": False,
+                    "error": exc.code,
+                    "retry": True,
+                    "hint": "Shorten or split the chunk before showing it again.",
+                }
+            posted = await send_slack_reply(shown.message_text, "progress", blocks=blocks)
+            if posted["success"] is not True:
+                return posted
+            shown.message_ts = str(posted["message_ts"] or "")
+            shown_in = {}
+        replaced = self.walk.withdraw()
         self.walk.on_screen = shown
         self.walk.shown_by_run = shown.run_id
         await self.retire(replaced, "Replaced by another chunk")
         await self.save("walking")
-        return self.report(shown=shown.title)
+        return self.report(shown=shown.title, **shown_in)
 
 
 @_one_at_a_time
@@ -311,14 +333,19 @@ async def walkthrough_end(message: str = "", archive: bool = False) -> dict[str,
     body = "\n\n".join(
         part for part in (message.strip(), f"_{state.walk.coverage()}_" if finished else "") if part
     )
-    if body or options:
+    session = state.ctx.session
+    shown_in: dict[str, object] = {}
+    if (body or options) and session.slack_location is None:
+        shown_in["card"] = WebCard(text=body, options=options).model_dump()
+    elif body or options:
         posted = await send_slack_reply(body, "progress", options=options or None)
         if posted["success"] is not True:
             warnings.append(f"could not post the message: {posted['error']}")
     await state.retire(state.walk.withdraw(), "The walkthrough ended")
     await state.save("finished" if finished else "ended")
     if archive:
-        await state.ctx.session.set_closed(True)
+        await session.set_closed(True)
+    if archive and session.in_code_channel:
         for what, close in (
             ("close the session", set_session_status_result(state.channel_id, "closed")),
             ("archive the channel", archive_code_channel(state.channel_id)),
@@ -331,6 +358,7 @@ async def walkthrough_end(message: str = "", archive: bool = False) -> dict[str,
         "success": True,
         "finished": finished,
         "archived": archive,
+        **shown_in,
         **({"warnings": warnings} if warnings else {}),
     }
 

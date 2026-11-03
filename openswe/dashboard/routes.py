@@ -28,6 +28,7 @@ from openswe.merge_queue.routes import router as merge_queue_router
 from openswe.notifications.routes import router as notifications_router
 from openswe.review.conversation import router as review_conversation_router
 from openswe.review.routes import router as review_router
+from openswe.review_guide.routes import router as interactive_review_router
 from openswe.schedules.routes import router as schedules_router
 from openswe.skill_store.routes import router as skills_router
 from openswe.slack.dashboard_routes import router as slack_router
@@ -63,6 +64,7 @@ router.include_router(pull_requests_router)
 router.include_router(human_review_router)
 router.include_router(review_router)
 router.include_router(review_conversation_router)
+router.include_router(interactive_review_router)
 router.include_router(agent_instructions_router)
 router.include_router(skills_router)
 router.include_router(analytics_router)

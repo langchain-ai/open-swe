@@ -41,6 +41,7 @@ import {
   replyBody,
 } from "@/features/agents/components/chat/ReplyCard"
 import { ManagedToolsConnectionCard } from "@/features/agents/components/chat/ManagedToolsConnectionCard"
+import { InteractiveReviewCard } from "@/features/agents/components/chat/InteractiveReviewCard"
 import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
@@ -419,6 +420,9 @@ export function AgentTurn({
             offer={item.offer}
           />
         )
+
+      case "interactive-review-item":
+        return <InteractiveReviewCard key={item.key} chunk={item.chunk} />
 
       case "iframe-item":
         return item.chunk.display ? (

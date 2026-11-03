@@ -1,8 +1,9 @@
 """The reader's "Next": approve what is on screen, then show what comes next.
 
-Only the button approves. A click approves what it was clicked on right away,
-then posts the reader's next planned chunk, or Other once every chunk is done,
-with no model turn in between. The guide gets a turn only when the plan has
+Only the button approves. In Slack, a click approves what it was clicked on right
+away, then posts the reader's next planned chunk, or Other once every chunk is
+done, with no model turn in between. The dashboard has no message the server can
+post, so there a click always starts a turn, which records it before the model runs. The guide gets a turn only when the plan has
 nothing ready for the reader yet, when the walkthrough is over, or when a turn
 is already running; a click that lands during a turn is recorded when the next
 one begins.
@@ -61,14 +62,19 @@ async def _post(session: ReviewGuideSession, walk: Walk, shown: OnScreen) -> boo
     return True
 
 
-async def advance(channel_id: str, message_ts: str) -> None:
-    """Handle a click on "Next" on the message at ``message_ts``."""
-    session = await ReviewGuideSession.for_channel(channel_id)
-    if session is None or session.closed:
-        logger.info("Ignoring Next in a closed review guide", extra={"slack_channel": channel_id})
+async def advance(session: ReviewGuideSession, message_ts: str) -> None:
+    """Handle the reader's click on "Next" on the message at ``message_ts``."""
+    if session.closed:
+        logger.info(
+            "Ignoring Next in a closed review guide", extra={"agent_thread_id": session.thread_id}
+        )
         return
     # A turn in flight owns the walk, and a pause waits for the pull request's new head.
-    if session.paused_message_ts or await _turn_running(session.thread_id):
+    if (
+        session.slack_location is None
+        or session.paused_message_ts
+        or await _turn_running(session.thread_id)
+    ):
         await _guide_turn(session, approve_ts=message_ts)
         return
     walk = session.walk

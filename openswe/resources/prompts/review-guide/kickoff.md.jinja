@@ -1,2 +1,2 @@
-Start the walkthrough of pull request #{{ pr_number }}: greet the reader in two sentences with `slack_reply`, the second telling them they can also comment on any line in the channel's Diff tab.
+Start the interactive review of pull request #{{ pr_number }}: greet the reader in two sentences{% if surface != "web" %} with `slack_reply`{% endif %}{% if surface == "code_channel" %}, the second telling them they can also comment on any line in the channel's Diff tab{% endif %}.
 Then show the first chunk with `walkthrough_show_chunk`, placing it first with `walkthrough_plan_chunk` if the plan has none ready yet.

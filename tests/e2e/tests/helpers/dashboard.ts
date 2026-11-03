@@ -189,6 +189,8 @@ export interface SeedPullRequestOptions {
   review_decision?: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED";
   // Committed to `head` off the base branch, so the PR carries a real diff.
   files?: Record<string, string>;
+  // Name the pushed branch tip as the head, for code that reads it from git.
+  real_head?: boolean;
 }
 
 export interface SeededPullRequest {

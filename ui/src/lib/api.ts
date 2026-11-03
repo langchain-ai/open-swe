@@ -1495,6 +1495,12 @@ function pullRequestThread(
 
 export const api = {
   me: () => request<SessionUser>("/me"),
+  /** Approve the interactive review chunk on screen as its reader, and go on. */
+  interactiveReviewNext: (threadId: string, messageTs: string) =>
+    request<{ accepted: boolean }>(
+      `/threads/${encodeURIComponent(threadId)}/interactive-review/next`,
+      { method: "POST", body: JSON.stringify({ message_ts: messageTs }) }
+    ),
   /** Model list and defaults for one workspace; model defaults are per workspace. */
   options: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>
     request<OptionsPayload>(
