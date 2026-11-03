@@ -1,4 +1,3 @@
-import { LogoMark } from "@/components/Branding"
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -648,9 +647,8 @@ export function AgentsSidebar({
       >
         <Link
           to="/my-settings"
-          className="flex min-w-0 items-center gap-space-2 font-heading text-sm font-medium tracking-tight text-primary"
+          className="min-w-0 truncate font-heading text-lg font-semibold tracking-tight text-primary"
         >
-          <LogoMark alt="" className="size-5 shrink-0" />
           Open SWE
         </Link>
         <div className="flex shrink-0 items-center gap-space-1">
