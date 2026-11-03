@@ -46,6 +46,7 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
 from openswe.human_review.card import accept_button, decline_button, mention, snooze_button
+from openswe.human_review.deadlines import PUBLISH_STEP
 from openswe.human_review.deadlines import schedule as _schedule
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.merging import merge_pull_request
@@ -1116,7 +1117,7 @@ async def settle(request: HumanReviewRequest) -> bool:
     if request.kind == "posted" and skip_on_preview("settle_posted"):
         return True
     if request.kind == "expedited":
-        return await ReviewCard(request).mark_ready_if_undrafted()
+        return await ReviewCard(request).publish_when_ready()
     if request.kind not in SETTLED_KINDS or request.state != "open":
         return True
     pr = request.pull_request
@@ -1683,7 +1684,7 @@ async def _auto_assign_hold(request: HumanReviewRequest, step: str) -> str | Non
 
 
 async def run_deadline(request_id: str, step: str) -> dict[str, str]:
-    """Scheduler entry point for the unclaimed, pick-expiry and auto-merge deadlines."""
+    """Scheduler entry point for the review deadlines and retried expedited card posts."""
     try:
         request = await HumanReviewRequest.get(UUID(request_id))
     except ValueError:
@@ -1769,4 +1770,8 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
     if step == "auto_merge":
         await settle(request)
         return {"status": "settled"}
+    if step == PUBLISH_STEP:
+        if not await ReviewCard(request).publish():
+            raise RuntimeError("Could not publish ready expedited card")
+        return {"status": "published"}
     return {"status": "unknown_step"}

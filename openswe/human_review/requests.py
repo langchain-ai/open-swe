@@ -168,6 +168,16 @@ class HumanReviewRequest(Base):
         return self.state == "open"
 
     @property
+    def unpublished(self) -> bool:
+        """An open expedited request, ready for approval, whose card is not posted yet."""
+        return (
+            self.kind == "expedited"
+            and self.state == "open"
+            and not self.awaiting_ready
+            and not self.slack_message_ts
+        )
+
+    @property
     def has_card(self) -> bool:
         """Whether the Slack message is Open SWE's card rather than someone's own post."""
         return self.kind != "posted"

@@ -6,7 +6,7 @@ just acted, a GitHub event arrived, or one of the request's deadlines passed.
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import httpx2
@@ -33,6 +33,7 @@ from openswe.github.pull_requests import PullRequestPayload
 from openswe.github.repo_files import RepoSettings
 from openswe.github.repositories import Repository
 from openswe.human_review import card as standard_card
+from openswe.human_review.deadlines import PUBLISH_STEP, schedule
 from openswe.human_review.people import Outcome
 from openswe.human_review.requests import (
     ChannelChoice,
@@ -65,6 +66,7 @@ logger = logging.getLogger(__name__)
 
 LEGACY_CRON_TASK = "expedited_review"
 _LEGACY_CRON_KIND = "expedited_review_watch"
+_PUBLISH_RETRY = timedelta(minutes=1)
 
 
 async def delete_legacy_crons(watch_key: str) -> dict[str, int]:
@@ -263,9 +265,12 @@ class ReviewCard:
             await self.refresh()
         return True
 
-    async def mark_ready_if_undrafted(self) -> bool:
-        """Open the card when its PR left draft outside Slack; ``False`` when GitHub was unreadable."""
+    async def publish_when_ready(self) -> bool:
+        """Post the card once its PR left draft, even outside Slack; ``False`` when GitHub was unreadable."""
         request = self.request
+        if request.unpublished:
+            await self.refresh()
+            return True
         if request.state != "open" or not request.awaiting_ready:
             return True
         pr = request.pull_request
@@ -279,6 +284,35 @@ class ReviewCard:
         snapshot = PullRequestPayload.model_validate(payload)
         if snapshot.state == "open" and not snapshot.draft:
             await self.mark_ready()
+        return True
+
+    async def publish(self) -> bool:
+        """Post a ready expedited card that has none yet; ``False`` when it could not be posted."""
+        if not self.request.unpublished:
+            return True
+        files = await self._files()
+        if files is None:
+            logger.warning(
+                "Could not publish ready expedited card without its changed files",
+                extra={"request_id": str(self.request.id)},
+            )
+            return False
+        async with HumanReviewRequest.locked(self.request.id) as (_, row):
+            if row is None or not row.unpublished:
+                return True
+            try:
+                row.slack_message_ts = await ReviewCard(row).post_expedited(
+                    title=row.pull_request.title, files=files
+                )
+            except SlackRequestError as exc:
+                logger.warning(
+                    "Could not publish ready expedited card",
+                    extra={"request_id": str(row.id), "slack_error": exc.code},
+                )
+                return False
+        self.request = row
+        await self.link_on_github()
+        await self.broadcast_configured()
         return True
 
     async def post_standard(self) -> str:
@@ -503,30 +537,9 @@ class ReviewCard:
         """Re-render the posted card from current state; used after clicks and outcomes."""
         request = self.request
         await self.refresh_author_dm(outcome)
-        if (
-            request.kind == "expedited"
-            and request.state == "open"
-            and not request.awaiting_ready
-            and not request.slack_message_ts
-            and outcome is None
-        ):
-            files = await self._files()
-            if files is None:
-                logger.warning("Could not publish ready expedited card without its changed files")
-                return
-            try:
-                message_ts = await self.post_expedited(
-                    title=request.pull_request.title, files=files
-                )
-            except SlackRequestError as exc:
-                logger.warning(
-                    "Could not publish ready expedited card", extra={"slack_error": exc.code}
-                )
-            else:
-                request.slack_message_ts = message_ts
-                await request.save()
-                await self.link_on_github()
-                await self.broadcast_configured()
+        if request.unpublished and outcome is None:
+            if not await self.publish():
+                await schedule(request, PUBLISH_STEP, _PUBLISH_RETRY)
             return
         if not request.has_card or not request.slack_channel_id or not request.slack_message_ts:
             return

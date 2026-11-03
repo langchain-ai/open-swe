@@ -18,6 +18,7 @@ from openswe.github import http as github_http
 from openswe.github.http import RepoClient
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review import lifecycle, standard
+from openswe.human_review.deadlines import PUBLISH_STEP
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.people import Outcome
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
@@ -295,6 +296,29 @@ async def test_a_draft_marked_ready_on_github_opens_its_card(
 
     assert (await _stored(approval)).awaiting_ready is draft
     assert ReviewCard.refresh.await_count == (0 if draft else 1)
+
+
+async def test_a_failed_card_publish_is_retried_by_its_deadline(
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock
+) -> None:
+    approval = await open_approval()
+    approval.slack_message_ts = ""
+    approval = await approval.save()
+    monkeypatch.setattr(ChangedFile, "of_pull", AsyncMock(return_value=[]))
+    monkeypatch.setattr(lifecycle, "channel_choices", AsyncMock(return_value=[]))
+    monkeypatch.setattr(lifecycle, "get_slack_permalink", AsyncMock(return_value=None))
+    posted = AsyncMock(side_effect=[SlackRequestError("ratelimited"), "3.0"])
+    monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", posted)
+    scheduled = AsyncMock(return_value=True)
+    monkeypatch.setattr(lifecycle, "schedule", scheduled)
+
+    await ReviewCard(approval).refresh()
+
+    assert not (await _stored(approval)).slack_message_ts
+    assert scheduled.await_args is not None
+    assert scheduled.await_args.args[1] == PUBLISH_STEP
+    assert await standard.run_deadline(str(approval.id), PUBLISH_STEP) == {"status": "published"}
+    assert (await _stored(approval)).slack_message_ts == "3.0"
 
 
 async def test_readiness_button_is_delivered_only_to_the_author(
