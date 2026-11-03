@@ -8,3 +8,4 @@
 1212 d53181fc6a1344b350113c2376824a554f8f9461 feat(channels): Slack code channels
 1218 8a41f58a8efdaada4b52ceea00918287f3146e41 feat(channels): give a runtime channel a typed target
 1222 750f37feb1691ccd1e3efd46dcf902952fd7555e feat(channels): Slack code channel view clicks reach the interaction handler
+1228 14c3dcf2c4a8b9068a8d2dd537265077cb8fb67c feat(channels): let a channel run hand its thread to a new Slack thread

@@ -427,6 +427,22 @@ posted = await origin.channel.post(
 )
 ```
 
+To move the conversation instead, pass `hand_off=True`. The new Slack thread
+takes the current run's thread, with its history: replies, Stop and decision
+buttons there reach it, and `thread_id` is the current thread's. The old Slack
+thread no longer has a thread, so a run its later messages would start is
+refused; a handler that knows about the move can `reply()` instead. Only a
+channel conversation's run can hand off its thread, and not together with
+`run=`:
+
+```python
+await origin.channel.post(
+    {"type": "content", "content": "Moved here from the old thread."},
+    new_thread=True,
+    hand_off=True,
+)
+```
+
 When a run with a thread origin ends, MDA posts the run's answers to that
 origin. A Studio resume of a channel thread answers in the channel, and the
 run that a finished async task starts posts only its new answers. A run that

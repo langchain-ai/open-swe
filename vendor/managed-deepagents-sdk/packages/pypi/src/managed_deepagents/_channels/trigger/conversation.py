@@ -1,4 +1,7 @@
-"""Start a new Trigger conversation from a run: a followed top-level post, and optionally a run."""
+"""Start a new Trigger conversation from a run: a followed top-level post, and optionally a run.
+
+With ``hand_off``, the new thread's conversation takes the run's own thread instead.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +16,9 @@ from managed_deepagents._channels.runtime import require_text_content
 from managed_deepagents._channels.trigger.ingress import source_thread_id, start_ingress_agent
 from managed_deepagents._channels.trigger.transport import start_trigger_thread
 from managed_deepagents._identity_runtime import _field
+from managed_deepagents._managed_thread import current_run_thread
+from managed_deepagents._schedule_auth import channel_run_execution
+from managed_deepagents._thread_handoff import hand_off_thread
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.binding import ChannelBinding
@@ -23,6 +29,8 @@ if TYPE_CHECKING:
         JsonValue,
         PostedChannelThread,
     )
+    from managed_deepagents._managed_thread import ManagedThread
+    from managed_deepagents._schedule_auth import ExecutionUser
 
 _ASSISTANT_ID_ENV = "MDA_ASSISTANT_ID"
 
@@ -32,15 +40,20 @@ async def start_trigger_conversation(
     origin: ChannelBinding,
     message: ChannelMessage,
     run: ChannelRunResult | None,
+    *,
+    hand_off: bool = False,
 ) -> PostedChannelThread:
     """Post ``message`` at top level in the origin's conversation, and start ``run`` there.
 
     Trigger follows the new thread. The run starts as the current run's
-    principal. The input is checked before anything is posted.
+    principal. With ``hand_off``, the new thread's conversation takes the
+    current run's thread instead, as a scheduled run's post does. The input is
+    checked before anything is posted.
     """
     text = require_text_content(message)
     run_input = normalize_run_input(run)
     caller = _run_caller() if run_input is not None else None
+    source = _hand_off_source() if hand_off else None
     action_id = str(uuid.uuid4())
     started = await start_trigger_thread(
         client, target=origin["target"], text=text, action_id=action_id
@@ -49,7 +62,22 @@ async def start_trigger_conversation(
         raise RuntimeError("Trigger did not name the new thread")
     key = started["source_thread_key"]
     thread_id = source_thread_id(key)
-    if run_input is not None and caller is not None:
+    if source is not None:
+        thread, execution = source
+        await hand_off_thread(
+            thread,
+            execution,
+            {
+                "name": origin["name"],
+                "provider": origin["provider"],
+                "source_thread_key": key,
+                "delivery_id": action_id,
+                "transport": "trigger_server",
+                "target": cast("JsonValue", started),
+            },
+        )
+        thread_id = thread.id
+    elif run_input is not None and caller is not None:
         user_id, assistant_id = caller
         options = run_start_options(run_input)
         await start_ingress_agent(
@@ -79,6 +107,16 @@ async def start_trigger_conversation(
         conversation = started["address"]["conversation_id"]
         posted["url"] = f"https://slack.com/archives/{conversation}/p{message_id.replace('.', '')}"
     return posted
+
+
+def _hand_off_source() -> tuple[ManagedThread, ExecutionUser]:
+    """The current run's thread and the conversation principal that owns it."""
+    configurable = get_config().get("configurable", {})
+    execution = channel_run_execution(configurable)
+    thread = current_run_thread(None, configurable).thread
+    if execution is None or not thread.id:
+        raise RuntimeError("only a channel conversation's run can hand off its thread")
+    return thread, execution
 
 
 def _run_caller() -> tuple[str, str]:

@@ -215,9 +215,11 @@ def runtime_channel(
             transport = TriggerTransport(client)
 
             async def start_thread(
-                message: ChannelMessage, run: ChannelRunResult | None
+                message: ChannelMessage, run: ChannelRunResult | None, *, hand_off: bool = False
             ) -> PostedChannelThread:
-                return await start_trigger_conversation(client, binding, message, run)
+                return await start_trigger_conversation(
+                    client, binding, message, run, hand_off=hand_off
+                )
     else:
         transport = messaging_transport_for_name(binding["name"])
         if transport is None and transport_factory is not None:
