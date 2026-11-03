@@ -169,7 +169,15 @@ class _Click:
         return ((text if isinstance(text, str) else "") or fallback).strip()[:_LABEL_LIMIT]
 
     async def _tell_clicker(self, text: str) -> None:
-        await self._respond({"response_type": "ephemeral", "replace_original": False, "text": text})
+        # Without thread_ts, Slack shows the note in the channel, not the clicked thread.
+        await self._respond(
+            {
+                "response_type": "ephemeral",
+                "replace_original": False,
+                "thread_ts": self.thread_ts,
+                "text": text,
+            }
+        )
 
     async def _replace_buttons(self, text: str) -> None:
         blocks = replaced_buttons(self.message.get("blocks"), text)
