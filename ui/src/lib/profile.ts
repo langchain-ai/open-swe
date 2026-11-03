@@ -5,7 +5,8 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 
-import { ApiError, api, DEFAULT_WORKSPACE_SLUG, hasLinkedGitHub } from "./api"
+import { ApiError, api, DEFAULT_WORKSPACE_SLUG } from "./api"
+import { hasLinkedGitHub } from "./linkedGitHub"
 import {
   REPOS_CACHE_MAX_AGE_MS,
   readCachedRepos,

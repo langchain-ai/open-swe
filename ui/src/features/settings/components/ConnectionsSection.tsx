@@ -7,7 +7,8 @@ import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 
 import type { SessionUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { connectService, hasLinkedGitHub, loginUrl } from "@/lib/api"
+import { connectService, loginUrl } from "@/lib/api"
+import { hasLinkedGitHub } from "@/lib/linkedGitHub"
 
 function StatusPill({ connected }: { connected: boolean }) {
   return (
