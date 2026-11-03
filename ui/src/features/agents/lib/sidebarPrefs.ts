@@ -6,7 +6,7 @@ import type { SidebarFilters } from "./sidebarFilter"
 export const SIDEBAR_PREFS_STORAGE_KEY = "open-swe.agents.sidebar-prefs"
 const STORAGE_KEY = SIDEBAR_PREFS_STORAGE_KEY
 
-const ORGANIZE_MODES = ["workspace", "repo", "list"] as const
+const ORGANIZE_MODES = ["date", "repo", "workspace", "none"] as const
 const CHAT_SORTS = ["created", "updated"] as const
 const PINNED_SORTS = ["updated", "manual"] as const
 
@@ -40,8 +40,14 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   expandedRepoKeys: [],
   collapsedSectionKeys: [],
   expandedSubagentKeys: [],
-  hiddenNavItems: ["/agents/bots", "/incidents"],
-  organize: "workspace",
+  hiddenNavItems: [
+    "/agents/skills",
+    "/agents/automations",
+    "/agents/bots",
+    "/agents/reviews",
+    "/incidents",
+  ],
+  organize: "date",
   sortChats: "created",
   sortPinned: "manual",
 }
@@ -92,8 +98,14 @@ function sanitizeFilters(value: unknown): SidebarFilters {
 /**
  * Stored keys predate repositories replacing "projects" in the sidebar: pins
  * and folds were saved under `project:` keys and a `"project"` organize mode.
- * Read them once under their new names so nobody loses their layout.
+ * Read them once under their new names so nobody loses their layout. The
+ * `"list"` mode grouped by day, which is what `"date"` does now.
  */
+const LEGACY_ORGANIZE_MODES: Record<string, OrganizeMode> = {
+  project: "repo",
+  list: "date",
+}
+
 function migrateRepoKey(key: string): string {
   if (key === "project:no-project") return "repo:no-repo"
   return key.startsWith("project:")
@@ -138,7 +150,9 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
       ? asStringArray(raw.hiddenNavItems)
       : DEFAULT_SIDEBAR_PREFS.hiddenNavItems,
     organize: asEnum(
-      raw.organize === "project" ? "repo" : raw.organize,
+      (typeof raw.organize === "string" &&
+        LEGACY_ORGANIZE_MODES[raw.organize]) ||
+        raw.organize,
       ORGANIZE_MODES,
       DEFAULT_SIDEBAR_PREFS.organize
     ),

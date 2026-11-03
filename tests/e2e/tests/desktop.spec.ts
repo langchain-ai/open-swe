@@ -136,20 +136,7 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     const task = tasks.find((thread) => thread.id === taskThreadId);
     expect(task?.managedTaskFolder).toBe(true);
     expect(task?.cwd).toContain(taskThreadId);
-    const work = page.getByRole("button", { name: "Home", exact: true });
-    const coding = page.getByRole("button", { name: "Code", exact: true });
-    await expect(work).toHaveAttribute("aria-pressed", "true");
     await expect(page).toHaveTitle(/Open SWE/);
-    const workBounds = await work.boundingBox();
-    const codingBounds = await coding.boundingBox();
-    expect(workBounds).not.toBeNull();
-    expect(codingBounds).not.toBeNull();
-    expect(workBounds!.x).toBeLessThan(codingBounds!.x);
-    expect(Math.abs(workBounds!.width - codingBounds!.width)).toBeLessThan(1);
-    await coding.click();
-    await expect(coding).toHaveAttribute("aria-pressed", "true");
-    await page.reload();
-    await expect(coding).toHaveAttribute("aria-pressed", "true");
 
     await expect(
       page.getByRole("button", { name: /Cloud threads, \d+/ }),
@@ -162,6 +149,12 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     await expect(
       composer.getByRole("button", { name: "This Mac", exact: true }),
     ).toBeVisible();
+    // New threads start without a project (the agent gets a task folder), so
+    // choose the registered one.
+    await composer
+      .getByRole("button", { name: "Choose project", exact: true })
+      .click();
+    await page.getByRole("option").filter({ hasText: "demo" }).click();
     await expect(
       composer.getByRole("button", { name: "demo", exact: true }),
     ).toBeVisible();

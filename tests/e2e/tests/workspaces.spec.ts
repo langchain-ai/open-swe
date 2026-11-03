@@ -1,5 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
+import { seedRepoSidebar } from "./helpers/dashboard";
+
 // Workspaces end-to-end: dashboard management, the admin gate, and an admin
 // thread that creates, provisions, and captures its own sandbox. The agent, the
 // tools, store writes, and prompt injection are real; only the LLM and snapshot
@@ -45,9 +47,7 @@ interface Workspace {
 async function loginAs(page: Page, user: { login: string; email: string }) {
   const res = await page.request.post("/control/login", { data: user });
   expect(res.ok()).toBeTruthy();
-  await page.addInitScript((login) => {
-    localStorage.setItem(`open-swe.desktop.experience:${login}`, "coding");
-  }, user.login);
+  await seedRepoSidebar(page);
 }
 
 async function listWorkspaces(page: Page): Promise<Array<Workspace>> {

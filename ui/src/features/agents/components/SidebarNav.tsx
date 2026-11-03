@@ -8,6 +8,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
+import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
@@ -15,6 +16,7 @@ import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SirenIcon } from "@phosphor-icons/react/dist/ssr/Siren"
 import { SparkleIcon } from "@phosphor-icons/react/dist/ssr/Sparkle"
 import { Link, useRouterState } from "@tanstack/react-router"
+import { useRef } from "react"
 
 import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
 import { MenuCheckItem } from "@/features/agents/components/MenuCheckItem"
@@ -50,6 +52,9 @@ export function SidebarNav({
     select: (state) => sectionOf(state.location.pathname),
   })
   const linkTarget = useHrefLinkOptions()
+  // Set when a page is picked: the menu then closes onto that page, so focus
+  // stays put instead of returning to the trigger, which would draw its ring.
+  const navigated = useRef(false)
   const hidden = NAV.filter((item) => prefs.hiddenNavItems.includes(item.to))
   const target = (to: (typeof NAV)[number]["to"]) =>
     linkTarget(activeSection === to ? to : getLastSectionLocation(to))
@@ -77,20 +82,35 @@ export function SidebarNav({
             type="button"
             className={cn(
               ROW,
-              // Match the Link rows' height and hover; Macaw's plain variant adds its own dark hover.
-              "h-auto justify-start text-secondary data-[state=open]:bg-surface-level-2-hover dark:hover:bg-surface-level-2-hover",
+              // Match the Link rows' box and hover: Macaw's plain variant adds a
+              // 1px transparent border that shifts the label, and its own dark hover.
+              "h-auto justify-start border-0 text-secondary data-[state=open]:bg-surface-level-2-hover dark:hover:bg-surface-level-2-hover",
               hidden.some((item) => item.to === activeSection) &&
                 cn(SELECTED_ROW, "text-primary dark:hover:bg-selected-hover")
             )}
           >
-            <CaretRightIcon size={16} weight="regular" className="shrink-0" />
+            <DotsThreeIcon size={16} weight="bold" className="shrink-0" />
             More
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="right" align="start" className="w-48">
+        <DropdownMenuContent
+          side="right"
+          align="start"
+          className="w-48"
+          onCloseAutoFocus={(event) => {
+            if (navigated.current) event.preventDefault()
+            navigated.current = false
+          }}
+        >
           {hidden.map((item) => (
             <DropdownMenuItem key={item.to} asChild>
-              <Link {...target(item.to)} onClick={onNavigate}>
+              <Link
+                {...target(item.to)}
+                onClick={() => {
+                  navigated.current = true
+                  onNavigate()
+                }}
+              >
                 <item.icon size={14} weight="regular" className="shrink-0" />
                 {item.label}
               </Link>

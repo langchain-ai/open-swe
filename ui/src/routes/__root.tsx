@@ -150,6 +150,14 @@ function RootDocument({ children }: { children: React.ReactNode }) {
             )}
           </TooltipProvider>
         </QueryClientProvider>
+        {typeof window !== "undefined" &&
+          window.openSweDesktop && (
+            // The title-bar buttons portal here. Electron applies app regions
+            // in DOM order, so they must follow every draggable header; a
+            // portal into <body> lands wherever mount timing puts it, while
+            // React keeps this, its last child, after the app on every remount.
+            <div data-desktop-window-controls="" />
+          )}
         <Scripts />
       </body>
     </html>

@@ -29,13 +29,13 @@ function warmApiRequests(
     let owned = false
     let includeClaudeCode = true
     let includeSlack = true
-    let repoMode = true
+    let repoMode = false
     let sortByCreated = true
     try {
       const raw = localStorage.getItem(prefsKey)
       const prefs = raw ? JSON.parse(raw) : null
       const filters = prefs?.filters
-      repoMode = prefs?.organize !== "list"
+      repoMode = prefs?.organize === "repo" || prefs?.organize === "workspace"
       sortByCreated = repoMode && prefs?.sortChats !== "updated"
       if (filters) {
         includeAutomations =

@@ -155,6 +155,14 @@ declare global {
   interface Window {
     /** This bundle's own build identity, stamped by vite.config.ts at build time. */
     __OPEN_SWE_BUNDLE__?: { commit: string | null; built_at: string }
+    /** The Navigation API: Chromium, and so the desktop app, has it; TypeScript's DOM types don't yet. */
+    navigation?: Pick<
+      EventTarget,
+      "addEventListener" | "removeEventListener"
+    > & {
+      readonly canGoBack: boolean
+      readonly canGoForward: boolean
+    }
     openSweDesktop?: {
       isDesktop: true
       taskWorkspaces?: boolean

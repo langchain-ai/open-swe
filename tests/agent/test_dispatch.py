@@ -235,18 +235,15 @@ async def test_create_durable_run_preserves_existing_prepare_id(
     assert created["config"]["configurable"]["__event_streaming_v2"] is True
 
 
-@pytest.mark.parametrize("experience", ["coding", "agent_workspace"])
-def test_langsmith_system_followup_preserves_experience_without_github(experience: str) -> None:
+def test_langsmith_system_followup_runs_without_github() -> None:
     configurable = dispatch.follow_up_configurable(
         {
             "owner_login": "user:019abcde-0000-7000-8000-000000000001",
-            "experience": experience,
             "github_login": "admin",
             "repo": {"owner": "private", "name": "repo"},
         },
         "thread-1",
     )
-    assert configurable["experience"] == experience
     assert configurable["auth_provider"] == "langsmith"
     assert configurable["user_id"] == "019abcde-0000-7000-8000-000000000001"
     assert configurable["repo_explicitly_none"] is True
