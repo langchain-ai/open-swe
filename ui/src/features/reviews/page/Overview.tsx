@@ -8,6 +8,10 @@ import type { ReactNode } from "react"
 import { reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
 import { cn, INHERITED_LINK } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import {
+  ImageAnnotationContext,
+  type ImageAnnotation,
+} from "@/components/ImageLightbox"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { HumanInputText } from "@/features/reviews/components/HumanInputCard"
 import { PullRequestLabels } from "@/features/reviews/components/PullRequestLabels"
@@ -17,6 +21,7 @@ import { AgentMark } from "./AgentMark"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { StandingPanel } from "./Standing"
 import { RelativeTimestamp } from "./RelativeTimestamp"
+import { useReviewPage } from "./store"
 import { commentFacts } from "./commentFacts"
 
 const CLAMP_PX = 320
@@ -166,6 +171,9 @@ function Description({
     (src: string) => reviewImageProxyUrl(owner, repo, number, src),
     [owner, repo, number]
   )
+  const attachToChat = useReviewPage((state) => state.attachToChat)
+  const replyWithImage = ({ image, comment }: ImageAnnotation) =>
+    attachToChat([{ kind: "image", image, comment }])
   const [overflows, setOverflows] = useState(false)
   const [expanded, setExpanded] = useState(false)
   useLayoutEffect(() => {
@@ -210,11 +218,12 @@ function Description({
         style={clamped ? { maxHeight: CLAMP_PX } : undefined}
       >
         {body.trim() ? (
-          <Markdown
-            content={linkGithubRefs(body, pr, pullRequests)}
-            transformImageUrl={proxyImage}
-            enlargeImages
-          />
+          <ImageAnnotationContext.Provider value={replyWithImage}>
+            <Markdown
+              content={linkGithubRefs(body, pr, pullRequests)}
+              transformImageUrl={proxyImage}
+            />
+          </ImageAnnotationContext.Provider>
         ) : (
           <p className="text-secondary italic">No description.</p>
         )}
