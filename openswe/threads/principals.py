@@ -107,8 +107,6 @@ class Principal:
     @classmethod
     def of_person(cls, session: dict[str, Any]) -> Principal:
         principal = DashboardPrincipal.from_session(session)
-        if principal.provider != "github":
-            raise HTTPException(403, "Agent execution is not enabled for this account")
         email = session.get("email")
         return cls.of_login(principal.subject.strip(), email if isinstance(email, str) else None)
 
@@ -214,6 +212,12 @@ async def require_principal(request: Request) -> Principal:
     session = optional_session(request)
     if session is None:
         raise HTTPException(401, _UNAUTHENTICATED, headers={"WWW-Authenticate": "Bearer"})
+    from openswe.dashboard.principal import DashboardPrincipal
+
+    dashboard = DashboardPrincipal.from_session(session)
+    if request.url.path.startswith("/dashboard/api/"):
+        dashboard.authorize_path(request.url.path, request.method)
+    await dashboard.authorize()
     principal = Principal.of_person(session)
     bind_audit_session(request, session)
     return principal

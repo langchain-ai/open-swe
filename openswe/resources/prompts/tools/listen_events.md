@@ -1,5 +1,7 @@
 Listen for inbound events in this thread's workspace and have each matching one delivered to this thread.
 
+Event visibility is enforced per item: public by default, private only in its user’s private thread, and admin-only only in an admin thread for its workspace.
+
 Events come from GitHub (repositories bound to the workspace) and Slack (channels bound to the workspace).
 Slack events from public and private channels Open SWE has joined are published to the event log and subscriptions.
 Inviting Open SWE to a private channel consents to making its events readable within the workspace.
@@ -16,8 +18,8 @@ For CI, `event_types=["check_suite.completed"]` gives one event per finished sui
 
 Args:
 - action: `subscribe` creates a subscription and returns its `subscription_id`; `list` shows this thread's outstanding subscriptions, each with `trigger_count` (events matched) and `last_triggered_at`; `cancel` removes the one named by `subscription_id`.
-- sources: `github` and/or `slack`; admin threads may also name `workspace` for workspace snapshot refreshes (`refresh.success`, `refresh.failed`) or `human_review` for review requests, assignment, notifications, and deadlines.
-  Empty excludes admin-only sources (`workspace`, `human_review`), which must be named.
+- sources: `github` and/or `slack`; admin threads may also name `workspace` for workspace snapshot refreshes (`refresh.success`, `refresh.failed`) or `human_review` for review requests, assignment, notifications, and deadlines; `reviewer` covers automated review runs, findings, and publication outcomes.
+  Empty excludes admin-only sources (`workspace`, `human_review`, `reviewer`), which must be named.
 - repo: A GitHub repository (`owner/name`) of this workspace; only its events match.
 - pr_url: A GitHub pull request URL; only that pull request's events match (reviews, comments, pushes, CI).
 - event_types: Event types to match, as `list_event_types` names them.

@@ -464,6 +464,49 @@
         "title": "ApiKeyView",
         "type": "object"
       },
+      "AppNotification": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The in-app route for ``url``; ``None`` when it points outside the dashboard.",
+            "readOnly": true,
+            "title": "Path"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "body",
+          "url",
+          "path"
+        ],
+        "title": "AppNotification",
+        "type": "object"
+      },
       "AppUser": {
         "description": "MDA's ``ResolvedAppUser``: run as this Open SWE user. The only answer besides ``None``.",
         "properties": {
@@ -3498,6 +3541,11 @@
             "title": "Action",
             "type": "string"
           },
+          "auto_merge": {
+            "default": false,
+            "title": "Auto Merge",
+            "type": "boolean"
+          },
           "merge_method": {
             "enum": [
               "squash",
@@ -4104,6 +4152,27 @@
             ],
             "title": "Additions"
           },
+          "assignment": {
+            "anyOf": [
+              {
+                "enum": [
+                  "assigned",
+                  "tentative",
+                  "mentioned"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignment"
+          },
+          "autoMerge": {
+            "default": false,
+            "title": "Automerge",
+            "type": "boolean"
+          },
           "ci": {
             "default": "unknown",
             "enum": [
@@ -4429,33 +4498,6 @@
         "title": "OutputTokensDetails",
         "type": "object"
       },
-      "PageView": {
-        "properties": {
-          "page_name": {
-            "enum": [
-              "agents",
-              "review",
-              "usage",
-              "settings",
-              "workspaces",
-              "integrations",
-              "admin",
-              "assistant",
-              "incidents",
-              "cloud-agents",
-              "feature-flags",
-              "other"
-            ],
-            "title": "Page Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "page_name"
-        ],
-        "title": "PageView",
-        "type": "object"
-      },
       "PauseChange": {
         "additionalProperties": false,
         "properties": {
@@ -4693,6 +4735,24 @@
           }
         },
         "title": "PlanUpdate",
+        "type": "object"
+      },
+      "PostHogProject": {
+        "properties": {
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "host"
+        ],
+        "title": "PostHogProject",
         "type": "object"
       },
       "PostedReviewComment": {
@@ -4981,7 +5041,7 @@
             ],
             "title": "Experimental Background Callbacks"
           },
-          "experimental_fleet": {
+          "experimental_classify": {
             "anyOf": [
               {
                 "type": "boolean"
@@ -4990,7 +5050,7 @@
                 "type": "null"
               }
             ],
-            "title": "Experimental Fleet"
+            "title": "Experimental Classify"
           },
           "experimental_memory": {
             "anyOf": [
@@ -5002,6 +5062,17 @@
               }
             ],
             "title": "Experimental Memory"
+          },
+          "goal_mode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Mode"
           },
           "pr_failure_reactions": {
             "anyOf": [
@@ -7688,6 +7759,50 @@
         "title": "SlackTrigger",
         "type": "object"
       },
+      "SlackUserDirectory": {
+        "properties": {
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/SlackUserOption"
+            },
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "required": [
+          "users"
+        ],
+        "title": "SlackUserDirectory",
+        "type": "object"
+      },
+      "SlackUserOption": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "real_name": {
+            "title": "Real Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "display_name",
+          "real_name"
+        ],
+        "title": "SlackUserOption",
+        "type": "object"
+      },
       "SlashCommandResponse": {
         "properties": {
           "response_type": {
@@ -7797,10 +7912,21 @@
           "environment": {
             "title": "Environment",
             "type": "string"
+          },
+          "posthog": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PostHogProject"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
-          "environment"
+          "environment",
+          "posthog"
         ],
         "title": "TelemetryConfig",
         "type": "object"
@@ -8032,6 +8158,20 @@
           }
         },
         "title": "ThreadResolveBody",
+        "type": "object"
+      },
+      "ThreadViewedBody": {
+        "properties": {
+          "run_id": {
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "ThreadViewedBody",
         "type": "object"
       },
       "ToolCallView": {
@@ -8512,6 +8652,43 @@
           "status"
         ],
         "title": "WebhookResponse",
+        "type": "object"
+      },
+      "WorkRunView": {
+        "properties": {
+          "runId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runid"
+          },
+          "viewed": {
+            "title": "Viewed",
+            "type": "boolean"
+          },
+          "viewedAt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Viewedat"
+          }
+        },
+        "required": [
+          "runId",
+          "viewed",
+          "viewedAt"
+        ],
+        "title": "WorkRunView",
         "type": "object"
       },
       "WorkerActivity": {
@@ -9437,6 +9614,41 @@
               }
             ],
             "title": "Review Draft Prs"
+          },
+          "review_shadow_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Shadow Model"
+          },
+          "review_shadow_percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Shadow Percent"
+          },
+          "review_shadow_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Shadow Reasoning Effort"
           },
           "review_trace_links": {
             "agent_feature_flag": true,
@@ -10559,46 +10771,6 @@
           }
         ],
         "summary": "Api Analytics Outbox Status",
-        "tags": [
-          "dashboard",
-          "analytics"
-        ]
-      }
-    },
-    "/dashboard/api/analytics/page": {
-      "post": {
-        "operationId": "api_page_view_dashboard_api_analytics_page_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PageView"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Page View",
         "tags": [
           "dashboard",
           "analytics"
@@ -13878,6 +14050,90 @@
         "summary": "Api Reveal My Mcp Headers",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/notifications": {
+      "get": {
+        "operationId": "api_notifications_dashboard_api_notifications_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AppNotification"
+                  },
+                  "title": "Response Api Notifications Dashboard Api Notifications Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Notifications",
+        "tags": [
+          "dashboard",
+          "notifications"
+        ]
+      }
+    },
+    "/dashboard/api/notifications/{notification_id}/delivered": {
+      "post": {
+        "operationId": "api_notification_delivered_dashboard_api_notifications__notification_id__delivered_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Notification Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Api Notification Delivered Dashboard Api Notifications  Notification Id  Delivered Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Notification Delivered",
+        "tags": [
+          "dashboard",
+          "notifications"
         ]
       }
     },
@@ -19462,6 +19718,33 @@
         ]
       }
     },
+    "/dashboard/api/slack/users": {
+      "get": {
+        "operationId": "api_slack_users_dashboard_api_slack_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackUserDirectory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Slack Users",
+        "tags": [
+          "dashboard",
+          "slack"
+        ]
+      }
+    },
     "/dashboard/api/slack/users/{user_id}/name": {
       "get": {
         "operationId": "api_slack_user_name_dashboard_api_slack_users__user_id__name_get",
@@ -19538,6 +19821,26 @@
               "default": 25,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "experience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "coding",
+                    "agent_workspace"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Experience"
             }
           }
         ],
@@ -19844,6 +20147,26 @@
           },
           {
             "in": "query",
+            "name": "experience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "coding",
+                    "agent_workspace"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Experience"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
@@ -19906,6 +20229,28 @@
     "/dashboard/api/threads/pinned": {
       "get": {
         "operationId": "api_list_pinned_threads_dashboard_api_threads_pinned_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "experience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "coding",
+                    "agent_workspace"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Experience"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -19921,6 +20266,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -20047,6 +20402,26 @@
                 }
               ],
               "title": "Exclude Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "experience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "coding",
+                    "agent_workspace"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Experience"
             }
           }
         ],
@@ -22044,6 +22419,64 @@
         "tags": [
           "dashboard",
           "transcript"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/viewed": {
+      "post": {
+        "operationId": "api_mark_thread_viewed_dashboard_api_threads__thread_id__viewed_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThreadViewedBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkRunView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Mark Thread Viewed",
+        "tags": [
+          "dashboard",
+          "threads"
         ]
       }
     },

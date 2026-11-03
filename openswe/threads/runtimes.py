@@ -1,8 +1,8 @@
 """Where a thread's runs live: this deployment's Agent Server, or Managed Deep Agents.
 
-Both keep a copy of the thread's metadata for their runs and traces; the index in
-PostgreSQL answers every thread read. A thread starts on the local Agent Server,
-which also runs the graphs Managed Deep Agents does not host.
+The index in PostgreSQL answers every thread read. Every new thread is created and
+run on MDA; the local Agent Server keeps only the threads made before that, for
+reads, and refuses to create any thread or run (``openswe.threads.local_writes``).
 
 MDA scopes threads by owner. The backend reads through a second client that also
 says ``x-auth-scheme: langsmith``, as LangSmith Studio does, so it can read the
@@ -25,7 +25,6 @@ import httpx
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import NotFoundError
-from langsmith.utils import get_tracer_project
 from managed_deepagents._agent_auth import AgentAuth, AgentAuthContext
 from managed_deepagents._connections import (
     PLATFORM_API_URL_ENV,
@@ -184,6 +183,15 @@ class _SdkThreads:
         """The thread's status here; one this runtime does not have has nothing running."""
         thread = await self.indexed(thread_id)
         return "idle" if thread is None else thread.status
+
+    async def latest_run(self, thread_id: str) -> MdaRun | None:
+        try:
+            runs = await self.client.runs.list(thread_id, limit=1)
+            if runs and runs[0]["status"] in {"pending", "interrupted"}:
+                runs = await self.client.runs.list(thread_id, status="running", limit=1) or runs
+        except NotFoundError:
+            return None
+        return MdaRun.model_validate(runs[0]) if runs else None
 
     async def run_error(self, thread_id: str) -> str | None:
         """Why the thread's latest run here failed, or ``None`` when it recorded no error."""
@@ -419,9 +427,6 @@ class MdaRuntime:
             "context": context,
             "metadata": run_metadata,
         }
-        if not payload.get("langsmith_tracer"):
-            # Traced into this deployment's project, beside its in-process runs.
-            rewritten["langsmith_tracer"] = {"project_name": get_tracer_project()}
         if config:
             rewritten["config"] = config
         else:
@@ -528,6 +533,22 @@ class _MdaThreads(_SdkThreads):
             (thread for raw in found if (thread := IndexedThread.from_agent_server(raw))), None
         )
 
+    async def latest_run(self, thread_id: str) -> MdaRun | None:
+        response = await self.reads.get(f"/threads/{thread_id}/runs", params={"limit": 1})
+        if response.status_code == httpx.codes.NOT_FOUND:
+            return None
+        response.raise_for_status()
+        runs = _runs.validate_python(response.json())
+        if runs and runs[0].status in {"pending", "interrupted"}:
+            response = await self.reads.get(
+                f"/threads/{thread_id}/runs", params={"status": "running", "limit": 1}
+            )
+            if response.status_code == httpx.codes.NOT_FOUND:
+                return None
+            response.raise_for_status()
+            runs = _runs.validate_python(response.json()) or runs
+        return runs[0] if runs else None
+
     async def state(self, thread_id: str) -> dict[str, JsonValue]:
         response = await self.reads.get(f"/threads/{thread_id}/state")
         response.raise_for_status()
@@ -558,10 +579,6 @@ class Runtimes:
 
     def runs_on(self, runtime: Runtime) -> _SdkThreads:
         return self.mda if runtime == "mda" else self.local
-
-    def copies(self, runtime: Runtime) -> list[_SdkThreads]:
-        """Every runtime that keeps a copy of a thread on ``runtime``."""
-        return [self.local, self.mda] if runtime == "mda" else [self.local]
 
 
 RUNTIMES: Final = Runtimes()

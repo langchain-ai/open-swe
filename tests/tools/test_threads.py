@@ -186,6 +186,34 @@ async def test_github_sender_can_use_thread_tools_only_when_authorized(
         assert sent["run_id"] == "run-2"
 
 
+@pytest.mark.parametrize("authorized", [True, False])
+async def test_langsmith_thread_actor_requires_current_authorization(
+    monkeypatch: pytest.MonkeyPatch, authorized: bool
+) -> None:
+    user_id = "01900000-0000-7000-8000-000000000001"
+    monkeypatch.setattr(
+        threads_tool,
+        "get_config",
+        lambda: {"configurable": {"auth_provider": "langsmith", "user_id": user_id}},
+    )
+    monkeypatch.setattr(
+        threads_tool.ThreadIdentity,
+        "authorize",
+        AsyncMock(side_effect=None if authorized else HTTPException(403, "Membership revoked")),
+    )
+    monkeypatch.setattr(
+        threads_tool.ThreadIdentity,
+        "user",
+        AsyncMock(return_value=SimpleNamespace(display_name="Member")),
+    )
+    actor = await threads_tool.resolve_thread_actor()
+    assert actor == (
+        threads_tool._Actor(login=f"user:{user_id}", email=None, name="Member")
+        if authorized
+        else None
+    )
+
+
 async def test_list_threads_denies_actor_outside_allowed_org(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1002,6 +1030,20 @@ async def test_manage_thread_uses_followup_sender_for_owner_checks(
     cancel.assert_awaited_once_with("thread-1", "reviewer", email=None)
 
 
+@pytest.mark.parametrize("action", ["approve_workflow_push", "reject_workflow_push"])
+async def test_manage_thread_cannot_decide_workflow_approval(
+    monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+
+    result = await threads_tool.manage_thread("thread-1", action, fingerprint="fp")
+
+    assert result == {
+        "success": False,
+        "error": f"Unexpected arguments for {action}: fingerprint",
+    }
+
+
 async def test_manage_thread_rechecks_admin_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
     cancel = AsyncMock()
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
@@ -1038,7 +1080,10 @@ async def test_manage_thread_sends_to_busy_thread_like_the_dashboard(
 
     sent = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
 
-    assert sent == {"success": True, "mode": mode, "run_id": result["run_id"]}
+    assert sent["success"] is True
+    assert sent["mode"] == mode
+    assert sent["run_id"] == result["run_id"]
+    assert sent["recipient_thread_id"] == "thread-1"
 
 
 async def test_manage_thread_starts_idle_message_with_fixed_command(
@@ -1166,7 +1211,13 @@ async def test_public_worker_can_only_reply_to_its_owners_relaying_private_threa
     )
 
     if allowed:
-        assert result == {"success": True, "mode": "started", "run_id": "report-run"}
+        assert result == {
+            "success": True,
+            "mode": "started",
+            "run_id": "report-run",
+            "recipient_thread_id": "coordinator",
+            "web_url": None,
+        }
     else:
         assert result == {
             "success": False,

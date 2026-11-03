@@ -10,6 +10,7 @@ import pytest
 
 from openswe import completion
 from openswe.slack import client as slack_utils
+from openswe.slack import review_links
 from openswe.slack.blocks import actions, block_payload, button, code_blocks, markdown, section
 from openswe.threads.runs import _SlackWebHandoff
 from openswe.utils import url_safety
@@ -232,7 +233,7 @@ async def test_web_handoff_posts_a_quiet_link_without_a_trace_message(
     [posted] = posts
     assert posted["channel"] == "C1"
     assert posted["thread_ts"] == "1.0"
-    assert "<https://dashboard.example/agents/t1|web UI>" in posted["text"]
+    assert posted["text"] == "<https://dashboard.example/agents/t1|Continued on Web>"
     blocks = posted["blocks"]
     assert isinstance(blocks, list)
     assert [block["type"] for block in blocks] == ["context"]
@@ -244,6 +245,69 @@ async def test_web_handoff_posts_a_quiet_link_without_a_trace_message(
     slack_api.respond({"ok": True, "messages": [{"ts": "2.0", "blocks": blocks}]})
     await _SlackWebHandoff("t1", metadata).notify()
     assert len([method for method, _ in slack_api.calls if method == "chat.postMessage"]) == 1
+
+
+@pytest.mark.parametrize("author", ["UBOT", "UHUMAN", "UOTHERBOT"])
+async def test_web_handoff_updates_only_our_latest_reply_footer(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, author: str
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    link = "<https://dashboard.example/agents/t1|Open in Web>"
+    footer = f"{link} • model • $0.02"
+    blocks = [
+        section("Answer"),
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]},
+    ]
+    message = {"ts": "2.0", "user": author, "text": f"Answer {footer}", "blocks": blocks}
+    metadata = {
+        "source": "slack",
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+    }
+    slack_api.respond({"ok": True, "messages": [{"ts": "1.0", "latest_reply": "2.0"}]})
+    slack_api.respond({"ok": True, "messages": [message]})
+    if author == "UBOT":
+        slack_api.respond({"ok": True, "ts": "2.0"})
+    else:
+        slack_api.respond({"ok": True, "ts": "3.0"})
+        slack_api.respond({"ok": True, "messages": [{"ts": "1.0"}]})
+
+    await _SlackWebHandoff("t1", metadata).notify()
+
+    updates = [params for method, params in slack_api.calls if method == "chat.update"]
+    posts = [params for method, params in slack_api.calls if method == "chat.postMessage"]
+    if author != "UBOT":
+        assert not updates
+        assert len(posts) == 1
+        return
+    assert not posts
+    [updated] = updates
+    assert updated["ts"] == "2.0"
+    assert updated["text"] == f"Answer {footer.replace('|Open in Web>', '|Continued in Web>')}"
+    assert updated["blocks"] == [
+        blocks[0],
+        {
+            "type": "context",
+            "elements": [
+                {"type": "mrkdwn", "text": footer.replace("|Open in Web>", "|Continued in Web>")}
+            ],
+        },
+    ]
+    slack_api.respond({"ok": True, "messages": [{"ts": "1.0", "latest_reply": "2.0"}]})
+    slack_api.respond(
+        {"ok": True, "messages": [message | {"text": updated["text"], "blocks": updated["blocks"]}]}
+    )
+    await _SlackWebHandoff("t1", metadata).notify()
+    assert (
+        len(
+            [
+                method
+                for method, _ in slack_api.calls
+                if method in {"chat.update", "chat.postMessage"}
+            ]
+        )
+        == 1
+    )
 
 
 @pytest.mark.parametrize(
@@ -343,17 +407,53 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
                 "https://hooks.slack.com/commands/test", text, blocks=blocks
             )
     payload = slack_api.calls[0][1]
-    expected = (
-        f"[PR]({target}), <{target}|PR> and {target}.\n`{url}`\n```bash\n{url}\n```\n{unchanged}"
-    )
-    assert payload["text"] == expected
+    code = f"`{url}`\n```bash\n{url}\n```\n{unchanged}"
+    assert payload["text"] == f"[PR]({target}), <{target}|PR> and {target}.\n{code}"
     sent_blocks = payload["blocks"]
-    assert sent_blocks[0]["text"] == expected
-    assert sent_blocks[1]["text"]["text"] == f"<{target}|PR>"
+    assert sent_blocks[0]["text"] == (
+        f"[PR]({target})[↗]({url}), <{target}|PR><{url}|↗> and [app#7]({target})[↗]({url}).\n{code}"
+    )
+    assert sent_blocks[1]["text"]["text"] == f"<{target}|PR><{url}|↗>"
     assert sent_blocks[2]["elements"][0]["url"] == target
     assert sent_blocks[2]["elements"][0]["value"] == url
     assert sent_blocks[3] == blocks[3]
     assert blocks[0]["text"] == text
+    resent = await review_links.pr_review_links(payload["text"], sent_blocks)
+    assert resent == (payload["text"], sent_blocks)
+
+    fetched: list[dict[str, object]] = [
+        {
+            "type": "rich_text",
+            "elements": [
+                {
+                    "type": "rich_text_section",
+                    "elements": [
+                        {"type": "link", "url": url, "text": "PR"},
+                        {"type": "link", "url": url, "text": "↗"},
+                        {"type": "text", "text": f"see {url}"},
+                    ],
+                }
+            ],
+        }
+    ]
+    assert await review_links.pr_review_links("", fetched) == (
+        "",
+        [
+            {
+                "type": "rich_text",
+                "elements": [
+                    {
+                        "type": "rich_text_section",
+                        "elements": [
+                            {"type": "link", "url": target, "text": "PR"},
+                            {"type": "link", "url": url, "text": "↗"},
+                            {"type": "text", "text": f"see {target}"},
+                        ],
+                    }
+                ],
+            }
+        ],
+    )
 
 
 @pytest.mark.parametrize("fail", [False, True])
@@ -382,7 +482,9 @@ async def test_direct_github_reply_override_is_scoped_to_one_delivery(
     assert slack_api.calls[-1][1]["text"] == url
     assert slack_api.calls[-1][1]["blocks"] == blocks
     await slack_utils.post_slack_top_level_message_with_ts("C1", url)
-    assert slack_api.calls[-1][1]["text"] == "https://openswe.example/agents/reviews/acme/app/7"
+    assert slack_api.calls[-1][1]["text"] == (
+        f"<https://openswe.example/agents/reviews/acme/app/7|app#7><{url}|↗>"
+    )
 
 
 async def test_review_links_fall_back_to_github_without_a_dashboard(

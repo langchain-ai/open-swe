@@ -75,6 +75,20 @@ describe("Messages", () => {
     expect(queued.querySelector("example")).toBeNull()
   })
 
+  it("shows delegated activity while the parent is idle and clears it when settled", () => {
+    const { rerender } = render(
+      <Messages messages={[]} isStreaming={false} isWaitingForDelegatedWork />,
+      { wrapper }
+    )
+
+    expect(screen.getByRole("status").textContent).toContain(
+      "Waiting for delegated work…"
+    )
+
+    rerender(<Messages messages={[]} isStreaming={false} />)
+    expect(screen.queryByRole("status")).toBeNull()
+  })
+
   it("renders attributed task activity with safe expandable details", async () => {
     const source = {
       version: 1,
@@ -211,6 +225,65 @@ describe("Messages", () => {
     expect(screen.getByText("Investigate <login> & validation")).toBeTruthy()
     expect(container.querySelector("login")).toBeNull()
   })
+
+  it.each(["manage_thread", "message_task_thread"])(
+    "keeps a successful %s message between separate work folds",
+    (name) => {
+      const recipient = "553f74de-534d-5377-815d-c14b58b21ea2"
+      const messages = streamMessagesToUi([
+        new AIMessage({
+          id: "routed-turn",
+          content: "",
+          tool_calls: [
+            { id: "read", name: "read_file", args: { file_path: "AGENTS.md" } },
+            {
+              id: "send",
+              name,
+              args: {
+                action: "send_message",
+                message: "Check token validation",
+              },
+            },
+            {
+              id: "later-read",
+              name: "read_file",
+              args: { file_path: "README.md" },
+            },
+          ],
+        }),
+        new ToolMessage({ tool_call_id: "read", content: "Instructions" }),
+        new ToolMessage({
+          tool_call_id: "send",
+          content: JSON.stringify({
+            success: true,
+            recipient_thread_id: recipient,
+          }),
+        }),
+        new ToolMessage({ tool_call_id: "later-read", content: "Docs" }),
+      ])
+      render(<Messages messages={messages} isStreaming={false} />, { wrapper })
+
+      const link = screen.getByRole("link", { name: "Open destination thread" })
+      expect(link.getAttribute("href")).toBe(`/agents/${recipient}`)
+      const folds = screen.getAllByRole("button", { name: "Worked · 1 action" })
+      expect(folds).toHaveLength(2)
+      expect(
+        folds.every((fold) => fold.getAttribute("aria-expanded") === "false")
+      ).toBe(true)
+      expect(
+        folds[0]!.compareDocumentPosition(link) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(
+        link.compareDocumentPosition(folds[1]!) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(screen.queryByText("AGENTS.md")).toBeNull()
+      fireEvent.click(folds[0]!)
+      expect(screen.getByText("AGENTS.md")).toBeTruthy()
+      expect(screen.queryByText("README.md")).toBeNull()
+    }
+  )
 
   it.each([
     ["in_progress", undefined, "Starting…"],

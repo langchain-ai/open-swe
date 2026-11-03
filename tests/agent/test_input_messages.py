@@ -2,7 +2,7 @@ from xml.etree import ElementTree
 
 from langchain_core.messages import AIMessage, HumanMessage, get_notification_metadata
 
-from openswe.agent_api.loop import as_messages
+from openswe.agent_api.run_state import as_messages
 from openswe.input_messages import (
     dynamic_context_hash,
     human_input,

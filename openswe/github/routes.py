@@ -52,6 +52,13 @@ async def github_webhook(
     event_type = request.headers.get("X-GitHub-Event", "")
     delivery_id = request.headers.get("X-GitHub-Delivery", "")
     refs = EventRefs.github(body)
+    named_repo = {"owner": refs.github_owner, "name": refs.github_repository.partition("/")[2]}
+    if refs.github_owner and not common.is_repo_allowed(named_repo):
+        common.logger.info(
+            "Dropping GitHub delivery for a repository outside the allowlist",
+            extra={"github_owner": refs.github_owner, "github_delivery": delivery_id},
+        )
+        return {"status": "ignored", "reason": "Repository not in allowlist"}
     await EventLog.record(
         request,
         body,
@@ -145,8 +152,7 @@ async def github_webhook(
             if gate_rejection is not None:
                 return gate_rejection
             background_tasks.add_task(service.process_github_pr_walkthrough, payload)
-        # The same repository allowlist as issue automations, checked below for them.
-        if action in {"opened", "closed"} and common.is_repo_allowed(webhook_repo_config):
+        if action in {"opened", "closed"}:
             background_tasks.add_task(_launch_automations, event_type, payload, delivery_id)
         if action in {"opened", "edited"} or action in common.GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(common.update_agent_thread_pr_state, payload)
@@ -194,14 +200,6 @@ async def github_webhook(
         background_tasks.add_task(service.process_github_push_event, payload)
         return {"status": "accepted", "message": "Processing GitHub push for reviewer watch"}
 
-    if not common.is_repo_allowed(webhook_repo_config):
-        common.logger.debug(
-            "Rejecting GitHub webhook: repo '%s/%s' not in allowlist",
-            webhook_repo_config.get("owner"),
-            webhook_repo_config.get("name"),
-        )
-        return {"status": "ignored", "reason": "Repository not in allowlist"}
-
     if event_type in common.GITHUB_CI_EVENTS:
         background_tasks.add_task(
             service.process_github_ci_event,
@@ -210,6 +208,13 @@ async def github_webhook(
             delivery_id,
         )
         return {"status": "accepted", "message": "Processing GitHub CI event"}
+
+    if event_type == "pull_request_review_thread" and payload.get("action") in {
+        "resolved",
+        "unresolved",
+    }:
+        background_tasks.add_task(service.process_github_review_thread, payload)
+        return {"status": "accepted", "message": "Processing review thread resolution"}
 
     if event_type == "pull_request_review" and payload.get("action") in {"submitted", "dismissed"}:
         # Any reviewer's verdict can complete a review request, registered with Open SWE or not.

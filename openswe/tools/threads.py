@@ -29,13 +29,15 @@ from openswe.schedules import store as schedules
 from openswe.slack.allowed_bots import authorized_slack_bot_run
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.records import lookup_slack_link_thread_id
-from openswe.threads import plan_api, workflow_approval_api
+from openswe.slack.workflow_approval_cards import share_workflow_approval
+from openswe.threads import plan_api
 from openswe.threads.handlers import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     get_dashboard_thread,
     resolve_dashboard_thread,
 )
+from openswe.threads.identity import ThreadIdentity
 from openswe.threads.listing import list_dashboard_threads_page
 from openswe.threads.plan_store import get_plan_content, list_plan_comments
 from openswe.threads.proxy import proxy_dashboard_thread_commands
@@ -77,8 +79,7 @@ ThreadAction = Literal[
     "add_plan_comment",
     "delete_plan_comment",
     "update_plan",
-    "approve_workflow_push",
-    "reject_workflow_push",
+    "share_workflow_approval",
 ]
 PlanFormat = Literal["html", "markdown"]
 _MAX_MESSAGE_CHARS = 20_000
@@ -110,11 +111,25 @@ class _Actor:
 
     @property
     def session(self) -> dict[str, Any]:
-        return {"sub": self.login, "email": self.email, "name": self.name}
+        identity = ThreadIdentity(self.login)
+        return {
+            "sub": self.login,
+            "email": self.email,
+            "name": self.name,
+            **(
+                {"provider": "langsmith", "user_id": str(identity.user_id)}
+                if identity.user_id
+                else {}
+            ),
+        }
 
     @property
     def admin(self) -> bool:
-        return not self.automation and is_admin(self.email, login=self.login)
+        return (
+            not self.automation
+            and ThreadIdentity(self.login).github_login is not None
+            and is_admin(self.email, login=self.login)
+        )
 
     async def mirror_of(self, session_id: str) -> tuple[str, Mapping[str, Any]] | None:
         """The thread mirroring this person's Claude Code session, if it has one."""
@@ -146,6 +161,21 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
     configurable = as_json_object(config.get("configurable"))
     email_value = configurable.get("user_email")
     email = email_value.strip() if isinstance(email_value, str) and email_value.strip() else None
+    cfg = RunConfig.parse(configurable)
+    if cfg.auth_provider == "langsmith":
+        if not cfg.user_id:
+            return None
+        identity = ThreadIdentity(f"user:{cfg.user_id}")
+        try:
+            await identity.authorize()
+        except HTTPException:
+            return None
+        user = await identity.user()
+        if user is None:
+            return None
+        return _Actor(
+            login=identity.subject, email=email, name=user.display_name or identity.subject
+        )
     login_value = configurable.get("github_login")
     login = login_value.strip() if isinstance(login_value, str) and login_value.strip() else None
     if not login:
@@ -915,7 +945,7 @@ def _available_actions(
     if plan_status:
         actions.append("update_plan")
     if any(record.get("status") == WORKFLOW_APPROVAL_PENDING for record in approvals.values()):
-        actions.extend(["approve_workflow_push", "reject_workflow_push"])
+        actions.append("share_workflow_approval")
     if admin and running:
         actions.append("admin_cancel")
     return actions
@@ -1077,7 +1107,25 @@ async def _send_message(
         return _failure(reply.detail or "Could not start thread run", status_code=status_code)
     result = reply.result
     mode = "steered" if result.steered else "queued" if result.queued else "started"
-    return {"success": True, "mode": mode, "run_id": result.run_id}
+    if isinstance(caller_thread_id, str) and caller_thread_id != thread_id:
+        from openswe.slack.routed_work import RoutedWork
+
+        work = RoutedWork(caller_thread_id)
+        try:
+            await work.track(thread_id)
+            await work.sync_slack_status()
+        except Exception:
+            logger.exception(
+                "Could not track routed thread progress",
+                extra={"origin_thread_id": caller_thread_id, "destination_thread_id": thread_id},
+            )
+    return {
+        "success": True,
+        "mode": mode,
+        "run_id": result.run_id,
+        "recipient_thread_id": thread_id,
+        "web_url": dashboard_thread_url(thread_id),
+    }
 
 
 class _CommandResult(BaseModel):
@@ -1124,8 +1172,7 @@ def _unexpected_action_arguments(
         "add_plan_comment": {"comment"},
         "delete_plan_comment": {"comment_id"},
         "update_plan": {"content", "content_format"},
-        "approve_workflow_push": {"fingerprint"},
-        "reject_workflow_push": {"fingerprint"},
+        "share_workflow_approval": {"fingerprint"},
     }.get(action, set())
     provided = {
         key
@@ -1278,15 +1325,18 @@ async def manage_thread(
                 "content_length": len(content or ""),
                 "plan_url": dashboard_plan_url(thread_id),
             }
-        if action in {"approve_workflow_push", "reject_workflow_push"}:
+        if action == "share_workflow_approval":
             if error := _required(fingerprint, "fingerprint", action):
                 return error
-            handler = (
-                workflow_approval_api.approve_workflow_push
-                if action == "approve_workflow_push"
-                else workflow_approval_api.reject_workflow_push
+            current_thread_id = RunConfig.parse(_config().get("configurable")).thread_id
+            if not current_thread_id:
+                return _failure("A current thread is required to share a workflow approval")
+            result = await share_workflow_approval(
+                thread_id,
+                fingerprint or "",
+                current_thread_id=current_thread_id,
+                actor_login=actor.login,
             )
-            result = await handler(thread_id, fingerprint or "", session=actor.session)
             return {"success": True, **result}
         return _failure(f"unsupported action: {action}")
     except HTTPException as exc:

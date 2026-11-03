@@ -16,12 +16,15 @@ ON_THE_MAC = {
 }
 
 
+@pytest.mark.parametrize("login", ["alice", "user:019abcde-0000-7000-8000-000000000001"])
 async def test_moving_to_the_cloud_leaves_the_sandbox_and_the_carry_to_mda(
     monkeypatch: pytest.MonkeyPatch,
+    login: str,
 ) -> None:
     """The cloud sandbox is MDA's to create when the thread's next run starts; the checkout
     comes over when that run connects to it."""
-    stored: dict[str, object] = dict(ON_THE_MAC)
+    metadata = {**ON_THE_MAC, "owner_login": login}
+    stored: dict[str, object] = dict(metadata)
 
     async def update(*, thread_id: str, metadata: dict[str, object]) -> None:
         stored.update(metadata)
@@ -36,7 +39,7 @@ async def test_moving_to_the_cloud_leaves_the_sandbox_and_the_carry_to_mda(
     monkeypatch.setattr(moves.BridgeStore, "is_connected", AsyncMock(return_value=True))
 
     move = await SandboxMove.requested(
-        "thread-1", ON_THE_MAC, login="alice", bridge=None, target="cloud"
+        "thread-1", metadata, login=login, bridge=None, target="cloud"
     )
     assert move is not None
     await move.carry_out()

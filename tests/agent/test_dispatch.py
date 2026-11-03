@@ -97,13 +97,13 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
             "slack_channel_id": "C123",
             "slack_channel_name": "team-openswe",
             "invocation_id": invocation_id,
-            "prepare_run_id": invocation_id,
             "invocation_started_at": created["config"]["configurable"]["invocation_started_at"],
         }.items()
     )
     assert created["metadata"] == created["config"]["metadata"]
     assert created["config"]["configurable"]["thread_id"] == "thread-1"
-    assert created["config"]["configurable"]["prepare_run_id"] == invocation_id
+    assert "prepare_run_id" not in created["config"]["configurable"]
+    assert "prepare_run_id" not in created["metadata"]
     assert isinstance(invocation_id, str)
 
 
@@ -230,8 +230,28 @@ async def test_create_durable_run_preserves_existing_prepare_id(
     created = client.runs.created[0]
     assert "webhook" not in created
     assert created["config"]["configurable"]["invocation_id"] == "existing"
-    assert created["config"]["configurable"]["prepare_run_id"] == "existing"
+    assert "prepare_run_id" not in created["config"]["configurable"]
+    assert "prepare_run_id" not in created["metadata"]
     assert created["config"]["configurable"]["__event_streaming_v2"] is True
+
+
+@pytest.mark.parametrize("experience", ["coding", "agent_workspace"])
+def test_langsmith_system_followup_preserves_experience_without_github(experience: str) -> None:
+    configurable = dispatch.follow_up_configurable(
+        {
+            "owner_login": "user:019abcde-0000-7000-8000-000000000001",
+            "experience": experience,
+            "github_login": "admin",
+            "repo": {"owner": "private", "name": "repo"},
+        },
+        "thread-1",
+    )
+    assert configurable["experience"] == experience
+    assert configurable["auth_provider"] == "langsmith"
+    assert configurable["user_id"] == "019abcde-0000-7000-8000-000000000001"
+    assert configurable["repo_explicitly_none"] is True
+    assert "github_login" not in configurable
+    assert "repo" not in configurable
 
 
 def test_prepare_run_config_rejects_conflicting_invocation_ids() -> None:

@@ -154,7 +154,7 @@ export function pullRequestStanding(
       tone: "waiting",
       headline: "Checks are running.",
       details,
-      next: null,
+      next: canAttemptMerge(status) ? { kind: "merge" } : null,
     }
   if (status.mergeState === "behind")
     return {

@@ -25,14 +25,17 @@ from runtime_api.catalog import (
     ReplyRules,
     RoutingRules,
     RunModels,
+    WorkStateRules,
 )
 from runtime_api.endpoint import Delivery
 from runtime_api.loop import (
     Done,
     GitHubProxyRefreshed,
+    IncidentContext,
     PhaseResult,
     Prepared,
     Route,
+    Routed,
     TaskContext,
 )
 from runtime_api.reports import REPORTS, Reports, ReportsTaken
@@ -130,6 +133,28 @@ async def test_a_failed_github_token_refresh_waits_before_the_next_try(
 
     assert first.call is not None and second.call is not None
     assert [name for name, _ in calls] == ["refresh_github_proxy"]
+
+
+async def test_an_incident_run_asks_for_its_incident_before_each_model_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, calls = _backend(
+        monkeypatch,
+        {"incident_context": IncidentContext(instructions="Investigate the incident.")},
+        LoopRules(incident=True),
+    )
+
+    planned = await RunLoop(backend).before_model(
+        _state(HumanMessage(content="What broke?", id="human-1"))
+    )
+
+    assert planned.call is not None
+    assert planned.call.system_prompt.endswith("Investigate the incident.")
+    [(name, body)] = calls
+    assert name == "incident_context"
+    assert [m.content for m in messages_from_dict(Routed.model_validate(body).humans)] == [
+        "What broke?"
+    ]
 
 
 async def test_failed_task_context_preserves_error_and_cleans_up_refresh(
@@ -431,6 +456,59 @@ async def test_an_answer_that_owes_a_slack_reply_is_asked_again_then_posted_for_
         ("reply_on_behalf", "Fixed the login.")
     ]
     assert on_the_web == PhaseResult()
+
+
+async def test_goal_mode_work_is_sent_back_until_it_reports_its_state_or_waits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    guard = "system:work-state-guard"
+    nudge = (
+        f'<input-message sender="{guard}" surface="automation" kind="system">'
+        "Keep working.</input-message>"
+    )
+    rules = LoopRules(
+        reply=_REPLY,
+        work_state=WorkStateRules(
+            tool="report_work_state",
+            waits=["schedule_thread_wakeup"],
+            nudge=[nudge],
+            nudge_sender=guard,
+        ),
+    )
+    backend, _calls = _backend(monkeypatch, {}, rules)
+    loop = RunLoop(backend)
+    asked = HumanMessage(content="Fix it", id="human-1")
+    stopped = AIMessage(content="", id="ai-1")
+
+    def finished(tool: str) -> list[BaseMessage]:
+        call = AIMessage(content="", id="ai-0", tool_calls=[{"id": "c1", "name": tool, "args": {}}])
+        return [asked, call, ToolMessage(content='{"success": true}', tool_call_id="c1")]
+
+    nudged = await loop.after_model(_state(asked, stopped, reply_surface="web"))
+    again = await loop.after_model(
+        _state(
+            *finished("slack_no_reply_needed")[1:],
+            HumanMessage(content=nudge, id="nudge-1"),
+            stopped,
+            reply_surface="web",
+        )
+    )
+    reported = await loop.after_model(
+        _state(*finished("report_work_state"), stopped, reply_surface="web")
+    )
+    waiting = await loop.after_model(
+        _state(*finished("schedule_thread_wakeup"), stopped, reply_surface="web")
+    )
+    gave_up = await loop.after_model(
+        _state(asked, stopped, reply_surface="web", work_state_nudges=5)
+    )
+
+    assert nudged.jump_to == "model" and nudged.update == {"work_state_nudges": 1}
+    assert [message.content for message in messages_from_dict(nudged.messages)] == [nudge]
+    assert again.jump_to == "model"
+    assert reported.jump_to is None and reported.update == {"work_state_nudges": 0}
+    assert waiting.jump_to is None
+    assert gave_up.jump_to is None and gave_up.update == {"work_state_nudges": 0}
 
 
 @pytest.mark.parametrize(

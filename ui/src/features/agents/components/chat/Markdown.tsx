@@ -18,7 +18,10 @@ import type { Components, ExtraProps } from "streamdown"
 import "streamdown/styles.css"
 import { cn } from "@/lib/utils"
 import { ExpandableImage } from "@/components/ImageLightbox"
-import { PreviewablePullRequestLink } from "@/features/agents/components/PullRequestPreview"
+import {
+  PreviewablePullRequestCard,
+  PreviewablePullRequestLink,
+} from "@/features/agents/components/PullRequestPreview"
 import { CodeBlock } from "./CodeBlock"
 import { MermaidDiagram } from "./MermaidDiagram"
 import { TableScroll } from "./TableScroll"
@@ -163,7 +166,23 @@ const COMPONENTS: Components = {
           <GithubAttachment key={href} href={href} />
         </p>
       )
-    return <p {...props}>{children}</p>
+    const paragraph = <p {...props}>{children}</p>
+    const label = link?.type === "element" ? link.children[0] : undefined
+    if (
+      link?.type === "element" &&
+      link.tagName === "a" &&
+      typeof href === "string" &&
+      link.children.length === 1 &&
+      label?.type === "text"
+    )
+      return (
+        <PreviewablePullRequestCard
+          href={href}
+          label={label.value}
+          fallback={paragraph}
+        />
+      )
+    return paragraph
   },
   ul: passthrough("ul"),
   li: passthrough("li"),

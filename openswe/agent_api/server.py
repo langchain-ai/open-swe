@@ -1,8 +1,8 @@
 """What Managed Deep Agents runs call back into, behind the run token.
 
 Every call is ``POST /agent-api/{endpoint}``, the typed API in
-``runtime_api``: the graph's catalog, each phase of the run's model loop and the
-work of its tools (see ``openswe.agent_api.graph``), and the launch of its
+``runtime_api``: the graph's catalog, the calls of the run's model loop and the
+work of its tools (see ``openswe.agent_api.run_calls``), and the launch of its
 task workers (``openswe.agent_api.async_workers``). The middleware verifies
 the bearer token once per request and leaves the verified run for the handler,
 which picks the graph the token was signed for and reads the thread and run
@@ -15,8 +15,10 @@ coordinator's catalog and ``adopt`` a run token of its own, nothing else.
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
+from functools import partial
 from typing import Final
 
+from fastapi import HTTPException
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from runtime_api.endpoint import API_PATH as _API_PATH
 from runtime_api.endpoint import InvalidRequestError, UnknownEndpointError
@@ -53,9 +55,12 @@ class CallerHungUpError(ConnectionError):
 
 def _graphs() -> Mapping[str, Api]:
     # The webapp must not import the agent stack at startup.
-    from openswe.agent_api.hosted import hosted_graphs
+    from openswe.agent_api.hosted import run_kinds
+    from openswe.agent_api.run_calls import TokenRun
 
-    return {assistant_id: graph.api for assistant_id, graph in hosted_graphs().items()}
+    return {
+        assistant_id: partial(TokenRun.answer, kind) for assistant_id, kind in run_kinds().items()
+    }
 
 
 def _scope_principal(scope: Scope) -> RemoteRun | WorkerGrant:
@@ -200,6 +205,21 @@ class RunTokenMiddleware:
                 'Bearer error="invalid_token"',
             )
             return
+        run = principal.coordinator if isinstance(principal, WorkerGrant) else principal
+        if run.configurable.get("auth_provider") == "langsmith":
+            from openswe.threads.identity import ThreadIdentity
+
+            user_id = run.configurable.get("user_id")
+            if not isinstance(user_id, str):
+                await _refuse(scope, receive, send, "The run has no user identity", "Bearer")
+                return
+            try:
+                await ThreadIdentity(f"user:{user_id}").authorize()
+            except HTTPException as exc:
+                await JSONResponse({"detail": exc.detail}, status_code=exc.status_code)(
+                    scope, receive, send
+                )
+                return
         scope.setdefault("state", {})[_RUN_STATE_KEY] = principal
         await self.app(scope, receive, send)
 
