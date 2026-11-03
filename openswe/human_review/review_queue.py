@@ -1,11 +1,12 @@
 """One person's To Review list.
 
-First other people's ready pull requests waiting on them: those Open SWE assigned
-them, those GitHub asks them to review, those its unclaimed deadline may pick them
-for, and those linked in Slack threads that mention them, either by their GitHub
-URL or by this deployment's review page. Then their own drafts, then speculative
-reviews of others' recently reviewed pull requests. A pull request they already
-approved or requested changes on drops off, unless GitHub asks them to review it again.
+Other people's ready pull requests waiting on them: those Open SWE assigned them,
+those GitHub asks them to review, those its unclaimed deadline may pick them for,
+and those linked in Slack threads that mention them, either by their GitHub URL or
+by this deployment's review page. Then their own drafts and speculative reviews of
+others' recently reviewed pull requests. Rows are ordered by ``Relevance``, most
+relevant first. A pull request they already approved or requested changes on
+drops off, unless GitHub asks them to review it again.
 """
 
 import asyncio
@@ -25,6 +26,7 @@ from openswe.github.pull_request_status import OpenPullRequest, list_open_pull_r
 from openswe.github.pull_request_status import ReviewAssignment as Assignment
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repos import accessible_repo_full_names
+from openswe.human_review.relevance import Relevance
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.tentative import TentativeReviewers
 from openswe.slack.client import GitHubPrRef, parse_github_pr_url
@@ -275,7 +277,7 @@ class ReviewQueue:
     async def rows(
         self, sort: Literal["created", "updated"], direction: Literal["asc", "desc"]
     ) -> list[OpenPullRequest]:
-        """Every row in ``_ORDER``'s groups, each group sorted."""
+        """Every row, most relevant first; ties by ``_ORDER``, then ``sort``."""
         assigned, unclaimed, mentioned, requested, drafts, speculative = await asyncio.gather(
             self.assigned(),
             self.unclaimed(),
@@ -306,5 +308,8 @@ class ReviewQueue:
             ),
             reverse=direction == "desc",
         )
-        rows.sort(key=lambda row: _ORDER.index(row.assignment or "mentioned"))
+        relevance = await Relevance.of(self.user.id, rows)
+        rows.sort(
+            key=lambda row: (-relevance.score(row), _ORDER.index(row.assignment or "mentioned"))
+        )
         return rows

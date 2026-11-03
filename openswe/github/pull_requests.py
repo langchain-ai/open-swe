@@ -290,6 +290,21 @@ class PullRequest(Base):
                 if (stats := row.diff_stats) is not None
             }
 
+    @classmethod
+    async def built_in(cls, keys: Collection[tuple[str, int]]) -> dict[tuple[str, int], str]:
+        """The Slack channel each stored PR was opened from, keyed by lowercased ``(repo, number)``."""
+        if not keys or not postgres.configured():
+            return {}
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(Repository.key, cls.number, cls.slack_channel_id)
+                .join(cls.repository)
+                .where(
+                    tuple_(Repository.key, cls.number).in_(list(keys)), cls.slack_channel_id != ""
+                )
+            )
+            return {(key, number): channel_id for key, number, channel_id in rows}
+
     @property
     def diff_stats(self) -> DiffStats | None:
         if self.additions is None or self.deletions is None or self.changed_files is None:

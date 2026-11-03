@@ -224,25 +224,38 @@ class Coverage:
             areas.append(Area(handles, frozenset(owners), tuple(files)))
         return cls(tuple(sorted(areas, key=lambda area: (-len(area.files), area.handles))))
 
+    def sole_owners(self, author: str) -> set[str]:
+        """Owners whose approval nobody else but the author could give for some area."""
+        sole: set[str] = set()
+        for area in self.areas:
+            if len(others := area.owners - {author.lower()}) == 1:
+                sole |= others
+        return sole
+
+    @classmethod
+    async def of_pull(cls, pull: PullRequestClient, base_ref: str | None) -> Self | None:
+        """``None`` without CODEOWNERS or changed files GitHub will list."""
+        files = await ChangedFile.of_pull(pull)
+        if not files:
+            return None
+        codeowners = await CodeOwners.fetch(pull.repo, base_ref)
+        if codeowners is None:
+            return None
+        return await cls.build(codeowners, [changed.filename for changed in files])
+
     @classmethod
     async def load(cls, request: HumanReviewRequest) -> Self | None:
         """The request's coverage; ``None`` without CODEOWNERS or when GitHub cannot be read."""
         pr = request.pull_request
         try:
             async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
-                files = await ChangedFile.of_pull(pull)
-                if not files:
-                    return None
-                codeowners = await CodeOwners.fetch(pull.repo, pr.base_ref or None)
+                return await cls.of_pull(pull, pr.base_ref or None)
         except GitHubAppUnavailable:
             logger.warning(
                 "No GitHub App token to read code-owner coverage",
                 extra={"request_id": str(request.id)},
             )
             return None
-        if codeowners is None:
-            return None
-        return await cls.build(codeowners, [changed.filename for changed in files])
 
 
 async def _touched(repo: RepoClient, ref: str | None, files: list[ChangedFile]) -> Counter[str]:

@@ -33,6 +33,7 @@ from sqlalchemy import (
     inspect,
     or_,
     select,
+    tuple_,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -294,6 +295,32 @@ class HumanReviewRequest(Base):
                     cls.state == "open",
                 )
             )
+
+    @classmethod
+    async def posted_in(cls, keys: Collection[tuple[str, int]]) -> dict[tuple[str, int], set[str]]:
+        """Slack channels each PR's open requests went to, by lowercased ``(repo, number)``."""
+        if not keys or not postgres.configured():
+            return {}
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(
+                    Repository.key,
+                    PullRequest.number,
+                    cls.slack_channel_id,
+                    cls.slack_copy_channel_id,
+                )
+                .join(cls.pull_request)
+                .join(PullRequest.repository)
+                .where(
+                    tuple_(Repository.key, PullRequest.number).in_(list(keys)), cls.state == "open"
+                )
+            )
+            channels: dict[tuple[str, int], set[str]] = {}
+            for key, number, channel_id, copy_channel_id in rows:
+                channels.setdefault((key, number), set()).update(
+                    c for c in (channel_id, copy_channel_id) if c
+                )
+            return channels
 
     @classmethod
     async def assigned_to(cls, user_id: UUID) -> list[Self]:

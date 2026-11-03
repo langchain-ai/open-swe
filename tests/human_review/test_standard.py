@@ -829,6 +829,7 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         (7, None, False, "open", "standard"),
         (8, None, False, "open", "standard"),
         (14, None, False, "open", "standard"),
+        (12, None, False, "open", "posted"),
     ]
     for number, user, assigned, state, kind in cases:
         pr = await PullRequest(
@@ -837,12 +838,14 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
             number=number,
             title=f"PR {number}",
             author="grace",
+            slack_channel_id="CKITCHEN" if number in {7, 12} else "",
         ).save()
         await HumanReviewRequest(
             pull_request_id=pr.id,
             head_sha="abc",
             kind=kind,
             state=state,
+            slack_channel_id="CREVIEW" if number == 12 else "",
             participants=[
                 HumanReviewParticipant(
                     user_id=user.id, decision="review", assigned_by_agent=assigned
@@ -903,6 +906,28 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
             reviews=[ReviewLink(reviewer_thread_id=str(number))],
         ).save()
 
+    from openswe.human_review.code_owners import CodeOwnerCache
+    from openswe.human_review.picking import Area, Coverage
+    from openswe.slack.channel_members import SlackChannelMember
+    from openswe.slack.channels import SlackChannel
+
+    owned = Coverage((Area(("@o/team",), frozenset({"ada", "grace"}), ("a.py",)),))
+    with (
+        patch.object(GitHubClient, "as_app", _review_github_app),
+        patch.object(
+            PullRequestClient, "pull", AsyncMock(return_value={"user": {"login": "grace"}})
+        ),
+        patch.object(Coverage, "of_pull", AsyncMock(return_value=owned)),
+    ):
+        await CodeOwnerCache.refresh("o/r", 30)
+    async with postgres.session() as session:
+        await SlackChannel.ensure(session, "CKITCHEN", "CREVIEW", "COTHER")
+        await session.execute(update(SlackChannel).values(members_synced_at=func.now()))
+        session.add_all(
+            SlackChannelMember(channel_id=channel_id, user_id=user.id)
+            for channel_id, user in [("CKITCHEN", ada), ("CREVIEW", ada), ("COTHER", grace)]
+        )
+
     async def search(github, login, repo, *, scope, **kwargs):
         listed = {"review-requested": [(20, "grace", False), (21, "grace", True)]}
         rows = listed.get(scope, [(22, "ada", True)])
@@ -946,11 +971,11 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         result = await api_review_assignments(page=1, session={"sub": "ada"})
     assert [(row.number, row.assignment) for row in result.pull_requests] == [
         (1, "assigned"),
-        (20, "requested"),
-        (7, "tentative"),
-        (12, "mentioned"),
-        (22, "draft"),
         (30, "speculative"),
+        (20, "requested"),
+        (12, "mentioned"),
+        (7, "tentative"),
+        (22, "draft"),
     ]
 
 

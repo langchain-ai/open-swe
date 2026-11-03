@@ -28,6 +28,8 @@ from openswe.github.forwarding import FORWARD_JOB as GITHUB_CHANNEL_FORWARD
 from openswe.github.forwarding import ForwardJob
 from openswe.github.required_check_cache import REFRESH_JOB as REQUIRED_CHECK_REFRESH
 from openswe.github.required_check_cache import refresh_required_checks
+from openswe.human_review.code_owners import REFRESH_JOB as CODE_OWNER_REFRESH
+from openswe.human_review.code_owners import refresh_code_owners
 from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.standard import run_deadline
 from openswe.jobs import queue
@@ -56,6 +58,8 @@ from openswe.sandboxes.retry import (
 )
 from openswe.schedules.store import AGENT_SCHEDULE_JOB_KIND, launch_scheduled_agent_run
 from openswe.session_cost import run_session_cost_refresh
+from openswe.slack.channel_members import SYNC_JOB as SLACK_CHANNEL_MEMBERS
+from openswe.slack.channel_members import sync_channel_members
 from openswe.slack.channel_options import DIRECTORY_JOB as SLACK_CHANNEL_DIRECTORY
 from openswe.slack.channel_options import ensure_directory_sync, sync_directory
 from openswe.slack.mda_forwarding import SWEEP_JOB as SLACK_LOST_REQUESTS
@@ -78,6 +82,8 @@ _FIRE_CLAIM_TTL: Final = timedelta(days=2)
 
 WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
 WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
+WORKER.register(CODE_OWNER_REFRESH)(refresh_code_owners)
+WORKER.register(SLACK_CHANNEL_MEMBERS)(sync_channel_members)
 
 
 def _text(job: Job, key: str) -> str | None:

@@ -105,6 +105,8 @@ class SlackChannel(Base):
     payload: Mapped[JsonObject] = mapped_column(JSONB, default_factory=dict)
     listed: Mapped[bool] = mapped_column(default=False)
     fetched_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    # When ``slack_channel_member`` last took in this channel's members.
+    members_synced_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
 
     @property
     def fresh(self) -> bool:
@@ -225,11 +227,20 @@ class SlackChannel(Base):
         elif event_type in REFETCH_EVENTS:
             await cls.load(channel_id, use_cache=False)
 
-    @staticmethod
+    @classmethod
     async def _pages(
-        fetch: _PageFetch, *, patient: bool = False
+        cls, fetch: _PageFetch, *, patient: bool = False
     ) -> AsyncIterator[list[JsonObject]]:
         """Each page of channels ``fetch`` returns; ``patient`` waits out rate limits."""
+        async for data in cls.responses(fetch, patient=patient):
+            listed = data.get("channels")
+            yield [item for item in listed if isinstance(item, dict)] if listed else []
+
+    @staticmethod
+    async def responses(
+        fetch: _PageFetch, *, patient: bool = False
+    ) -> AsyncIterator[AsyncSlackResponse]:
+        """Each response of a paginated Slack call; ``patient`` waits out rate limits."""
         cursor: str | None = None
         seen_cursors: set[str] = set()
         rate_limits = 0
@@ -247,8 +258,7 @@ class SlackChannel(Base):
                 )
                 await asyncio.sleep(wait)
                 continue
-            listed = data.get("channels")
-            yield [item for item in listed if isinstance(item, dict)] if listed else []
+            yield data
             metadata = data.get("response_metadata")
             cursor = metadata.get("next_cursor") if isinstance(metadata, dict) else None
             if not cursor:

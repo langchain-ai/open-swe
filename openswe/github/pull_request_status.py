@@ -234,6 +234,11 @@ class OpenPullRequest(BaseModel):
     # Why it is on the To Review list; ``None`` on every other list.
     assignment: ReviewAssignment | None = None
 
+    @property
+    def key(self) -> tuple[str, int]:
+        """Lowercased ``(repo, number)``, as stored pull requests are looked up."""
+        return self.repo.lower(), self.number
+
 
 class OpenPullRequests(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
