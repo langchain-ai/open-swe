@@ -1,10 +1,10 @@
-1073 17c2e4c9deac10088c09d5cfd656c65ff43d56a6 feat(linear): let an endpoint tell a declined session why
+1073 b53671dabe691845d8ae8ff5d183e1c771512a09 feat(channels): reply from a handler or endpoint, as resolveUser does
 1143 d031eb7d3f3b155698cdcee1a92bceb42042f795 feat(channels): let a GitHub channel handle its own App's events
-1147 c4cebb2f72cbe8f7f24ee3d71108fdcc3bcddbe4 feat(channels): let handlers start runs on threads they choose
+1147 5bbcd8b1b1a0eb28eca28d0bcf8adb6bbc216c67 feat(channels): let handlers start runs on threads they choose
 1149 8bc4e362d4375238316e69972944e6386effa0b0 feat(channels): answer the provider first, then ask the channel's handler
-1171 d4d8906acf069394594610c291a52106f4f137e6 feat(channels): let Slack handlers choose each run's thread
+1171 1ac6cad48c955d98f729a3a270e137e3ebafcc2b feat(channels): let Slack handlers choose each run's thread
 1174 48365c151ff3dabfd9ac10665565c3dfcce59e23 feat(channels): handle every GitHub action of handled events, and installation events
-1175 2c57fcd95e09654d4baa2441d17d637ae9fd4321 feat(channels): let Slack handlers take edits, deletions and reactions
+1175 707e3e4ec9ccc0174cf810a2e7b29a224378c9c6 feat(channels): let Slack handlers take edits, deletions and reactions
 1212 6bf01c5e404dc220dbcadcd2a261c30ca6800cf6 feat(channels): Slack code channels
 1218 5a8ebcecd5b55d8f5508b6dc8077c4939229c0f2 feat(channels): give a runtime channel a typed target
 1222 f682afc2a761b4b8e36ac21ad9b0aa3c70636488 feat(channels): Slack code channel view clicks reach the interaction handler

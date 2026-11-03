@@ -57,6 +57,7 @@ from managed_deepagents._channels.http.provider import (
 )
 from managed_deepagents._channels.http.studio import interrupted_notice, pending_decision
 from managed_deepagents._channels.http.types import ChannelName
+from managed_deepagents._channels.reply import ChannelReplyResult
 from managed_deepagents._channels.resolve_user import checked_resolve_user
 from managed_deepagents._channels.run_input import starts_on_conversation
 from managed_deepagents._log import logger
@@ -167,7 +168,7 @@ def github_channel(
 
     async def run_input(
         message: HttpChannelInboundMessage, raw_event: JsonValue | None
-    ) -> ChannelRunResult | None:
+    ) -> ChannelRunResult | ChannelReplyResult | None:
         return await _handler_input(
             handlers,
             raw_event,
@@ -180,7 +181,7 @@ def github_channel(
 
     async def interrupted_input(
         message: HttpChannelInboundMessage, raw_event: JsonValue | None
-    ) -> ChannelRunResult | None:
+    ) -> ChannelRunResult | ChannelReplyResult | None:
         delivery_id = _delivery_id(raw_event)
         if delivery_id is not None:
             asked_interrupted.add(delivery_id)
@@ -213,7 +214,10 @@ def github_channel(
                 id=delivery["thread_id"], channel=ChannelName(name=name()), interrupted=True
             )
             result = await _handler_input(handlers, delivery.get("raw_event"), thread)
-            if not starts_on_conversation(result, delivery["thread_id"]):
+            # A reply would start nothing either, so the handler wouldn't act on it.
+            if isinstance(result, ChannelReplyResult) or not starts_on_conversation(
+                result, delivery["thread_id"]
+            ):
                 return
         await _post_interrupted_notice(target, delivery, pending)
 
@@ -450,8 +454,9 @@ async def _handler_input(
     handlers: Mapping[str, _Handler],
     raw_event: JsonValue | None,
     thread: GitHubChannelThread,
-) -> ChannelRunResult | None:
-    """What the event's handler starts a run with; ``None`` when it skips or fails."""
+) -> ChannelRunResult | ChannelReplyResult | None:
+    """What the event's handler starts a run with, or the reply MDA posts instead;
+    ``None`` when it skips or fails."""
     event = _event(raw_event) or _installation_event(raw_event)
     handler = None if event is None else handlers.get(event.key)
     if event is None or handler is None:
@@ -459,7 +464,7 @@ async def _handler_input(
     outcome = await run_event_handler(
         "GitHub", event.key, event.delivery_id, lambda: handler(event, thread)
     )
-    return outcome.input
+    return outcome.reply if outcome.reply is not None else outcome.input
 
 
 def _delivery_id(raw_event: JsonValue | None) -> str | None:
