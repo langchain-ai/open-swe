@@ -33,9 +33,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
 import type { DesktopUpdateState } from "@/desktop"
 import { api, type SessionUser } from "@/lib/api"
+import { hasLinkedGitHub } from "@/lib/linkedGitHub"
 import { useProfile } from "@/lib/profile"
-import { desktopExperience, useDesktopExperience } from "@/lib/experience"
+import { experienceStore, useExperience } from "@/lib/experience"
 import { ExperienceSelector } from "@/components/ExperienceSelector"
+import { GitHubLinkPrompt } from "@/features/agents/components/GitHubLinkPrompt"
 import { AgentWorkspaceProvider } from "@/features/agents/lib/agentWorkspace"
 import type {
   PullRequestSnapshot,
@@ -193,7 +195,7 @@ export function AgentsSidebar({
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
   const profile = useProfile()
-  const { experience } = useDesktopExperience()
+  const { experience } = useExperience()
   const agentWorkspaceEnabled = experience === "agent_workspace"
   const newThreadShortcut = useShortcutLabel("mod+n")
   const concierge = useQuery({
@@ -648,10 +650,7 @@ export function AgentsSidebar({
   return (
     <SidebarFrame
       {...layout}
-      className={cn(
-        "border-r border-default bg-surface-level-2",
-        agentWorkspaceEnabled && "border-subtle"
-      )}
+      className="border-r border-default bg-surface-level-2"
     >
       <div
         className={cn(
@@ -1365,7 +1364,7 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
-  const { experience, select: selectExperience } = useDesktopExperience()
+  const { experience, select: selectExperience } = useExperience()
   // `useMutation` returns a fresh object every render; only `mutate` is stable,
   // and an unstable command array re-registers on every commit.
   const pinThread = usePinAgentThread().mutate
@@ -1377,7 +1376,7 @@ export function AgentsShell({
     enabled: Boolean(activeThreadId),
   })
   const threadExperience = activeThread
-    ? desktopExperience.thread(activeThread)
+    ? experienceStore.thread(activeThread)
     : undefined
   useEffect(() => {
     if (threadExperience) selectExperience(threadExperience)
@@ -1468,7 +1467,11 @@ export function AgentsShell({
               key={experience}
               className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1"
             >
-              {children}
+              {experience === "coding" && !hasLinkedGitHub(user) ? (
+                <GitHubLinkPrompt user={user} />
+              ) : (
+                children
+              )}
             </main>
           </div>
         </TooltipProvider>

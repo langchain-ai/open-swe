@@ -14,6 +14,7 @@ _TOOL_MODULES = {
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "delete_automation": ".automations",
     "delete_workspace": ".workspaces",
+    "discover_managed_tools": ".discover_managed_tools",
     "dismiss_human_review_request": ".request_human_review",
     "expedite_pr_approval": ".expedite_pr_approval",
     "expose_port": ".expose_port",
@@ -22,6 +23,7 @@ _TOOL_MODULES = {
     "get_human_review_status": ".request_human_review",
     "get_thread": ".threads",
     "http_request": ".http_request",
+    "classify": ".classify",
     "list_automations": ".automations",
     "list_event_types": ".listen_events",
     "listen_events": ".listen_events",
@@ -105,6 +107,7 @@ __all__ = [
     "create_sandbox_file_download_url",
     "delete_automation",
     "delete_workspace",
+    "discover_managed_tools",
     "dismiss_human_review_request",
     "expedite_pr_approval",
     "expose_port",
@@ -113,6 +116,7 @@ __all__ = [
     "get_human_review_status",
     "get_thread",
     "http_request",
+    "classify",
     "list_automations",
     "list_event_types",
     "listen_events",
@@ -212,6 +216,7 @@ if TYPE_CHECKING:
     )
     from openswe.tools.background_execute import background_execute
     from openswe.tools.background_task import background_task
+    from openswe.tools.classify import classify
     from openswe.tools.code_channel_set_view import code_channel_set_view
     from openswe.tools.connect_managed_tools import connect_managed_tools
     from openswe.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
@@ -221,6 +226,7 @@ if TYPE_CHECKING:
         publish_workspace_prompt,
         read_workspace_prompt,
     )
+    from openswe.tools.discover_managed_tools import discover_managed_tools
     from openswe.tools.expedite_pr_approval import expedite_pr_approval
     from openswe.tools.expose_port import expose_port
     from openswe.tools.fetch_review_diff import fetch_review_diff

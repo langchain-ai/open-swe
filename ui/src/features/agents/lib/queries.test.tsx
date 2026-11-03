@@ -1,4 +1,4 @@
-import { desktopExperience } from "@/lib/experience"
+import { experienceStore } from "@/lib/experience"
 /** @vitest-environment jsdom */
 
 import {
@@ -54,8 +54,8 @@ vi.mock("@/lib/experience", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/experience")>()
   return {
     ...actual,
-    useDesktopExperience: () => {
-      const state = actual.useDesktopExperience()
+    useExperience: () => {
+      const state = actual.useExperience()
       return {
         ...state,
         experience: window.openSweDesktop ? state.experience : undefined,
@@ -598,6 +598,32 @@ describe("sidebar queries", () => {
       await waitFor(() => expect(result.current).toEqual(updated))
     }
   )
+
+  it("does not reinsert an open concierge conversation into the sidebar", () => {
+    const opened = {
+      id: "concierge-thread",
+      concierge: true,
+    } as AgentThread
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.detail(opened.id), opened)
+    const { result } = renderHook(
+      () =>
+        useSidebarActiveThread({
+          activeThreadId: opened.id,
+          loadedThreads: [],
+        }),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+
+    expect(result.current).toBeUndefined()
+    expect(client.getQueryData(agentThreadKeys.detail(opened.id))).toEqual(
+      opened
+    )
+  })
 
   it("refetches detail after sidebar rerenders", async () => {
     const opened = { id: "opened-thread", status: "idle" } as AgentThread
@@ -1263,7 +1289,7 @@ describe("desktop experience segregation", () => {
     ])
     expect(result.current.pins.data?.[0]?.taskWorkers).toEqual([])
     expect(result.current.active).toBeUndefined()
-    act(() => desktopExperience.write("mode-test", "coding"))
+    act(() => experienceStore.write("mode-test", "coding"))
     expect(result.current.recents.items).toEqual([])
     expect(result.current.pins.data).toBeUndefined()
     await waitFor(() =>

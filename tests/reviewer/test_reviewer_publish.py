@@ -1,6 +1,6 @@
 """Unit tests for the publish_review rendering and orchestration helpers."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any, Literal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -195,13 +195,15 @@ async def test_eval_run_publishes_the_findings_it_recorded_without_postgres() ->
     )
     from openswe.tools.publish_review import publish_review
 
-    start_run_scoped_findings("tid")
+    # Run-scoped findings outlive the test in this process; another thread id keeps them
+    # out of the PostgreSQL findings tests that use "tid".
+    start_run_scoped_findings("eval-tid")
     await append_finding(
-        "tid", _f(id="f_one", severity="high", file="a.py", start_line=1, end_line=1)
+        "eval-tid", _f(id="f_one", severity="high", file="a.py", start_line=1, end_line=1)
     )
     with (
         patch("openswe.tools.publish_review.get_config", return_value=_eval_config()),
-        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="eval-tid"),
         patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
     ):
         result = await publish_review(ranking=["f_one"])
@@ -581,6 +583,11 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
         resolution_note="The duplicate threads are fixed by the latest commit.",
     )
     findings = [finding]
+
+    async def mutate(_thread_id: str, update: Callable[[list[Finding]], bool]) -> list[Finding]:
+        update(findings)
+        return findings
+
     threads = [
         {
             "id": "THREAD_1",
@@ -618,8 +625,7 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
             "openswe.tools.publish_review.fetch_pr_review_threads", AsyncMock(return_value=threads)
         ),
         patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
-        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("openswe.review.reconcile.replace_findings", AsyncMock()),
+        patch("openswe.review.reconcile.mutate_findings", side_effect=mutate),
         patch("openswe.tools.publish_review.post_pull_request_review", AsyncMock()),
         patch("openswe.tools.publish_review.resolve_review_thread", resolve_thread),
         patch(
@@ -661,6 +667,11 @@ async def test_publish_review_backfills_from_threads_when_review_comments_are_em
 
     finding = _f(id="f_new", first_seen_sha="sha")
     findings = [finding]
+
+    async def mutate(_thread_id: str, update: Callable[[list[Finding]], bool]) -> list[Finding]:
+        update(findings)
+        return findings
+
     thread = {
         "id": "THREAD_1",
         "is_resolved": False,
@@ -680,8 +691,7 @@ async def test_publish_review_backfills_from_threads_when_review_comments_are_em
         patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("openswe.tools.publish_review.fetch_pr_review_threads", fetch_threads),
         patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
-        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("openswe.review.reconcile.replace_findings", AsyncMock()),
+        patch("openswe.review.reconcile.mutate_findings", side_effect=mutate),
         patch(
             "openswe.tools.publish_review.post_pull_request_review",
             AsyncMock(return_value={"id": 999}),

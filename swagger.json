@@ -464,6 +464,49 @@
         "title": "ApiKeyView",
         "type": "object"
       },
+      "AppNotification": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The in-app route for ``url``; ``None`` when it points outside the dashboard.",
+            "readOnly": true,
+            "title": "Path"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "body",
+          "url",
+          "path"
+        ],
+        "title": "AppNotification",
+        "type": "object"
+      },
       "AppUser": {
         "description": "MDA's ``ResolvedAppUser``: run as this Open SWE user. The only answer besides ``None``.",
         "properties": {
@@ -4459,33 +4502,6 @@
         "title": "OutputTokensDetails",
         "type": "object"
       },
-      "PageView": {
-        "properties": {
-          "page_name": {
-            "enum": [
-              "agents",
-              "review",
-              "usage",
-              "settings",
-              "workspaces",
-              "integrations",
-              "admin",
-              "assistant",
-              "incidents",
-              "cloud-agents",
-              "feature-flags",
-              "other"
-            ],
-            "title": "Page Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "page_name"
-        ],
-        "title": "PageView",
-        "type": "object"
-      },
       "PauseChange": {
         "additionalProperties": false,
         "properties": {
@@ -4723,6 +4739,24 @@
           }
         },
         "title": "PlanUpdate",
+        "type": "object"
+      },
+      "PostHogProject": {
+        "properties": {
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "host"
+        ],
+        "title": "PostHogProject",
         "type": "object"
       },
       "PostedReviewComment": {
@@ -5010,6 +5044,17 @@
               }
             ],
             "title": "Experimental Background Callbacks"
+          },
+          "experimental_classify": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Classify"
           },
           "experimental_conditional_approval": {
             "anyOf": [
@@ -7729,6 +7774,50 @@
         "title": "SlackTrigger",
         "type": "object"
       },
+      "SlackUserDirectory": {
+        "properties": {
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/SlackUserOption"
+            },
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "required": [
+          "users"
+        ],
+        "title": "SlackUserDirectory",
+        "type": "object"
+      },
+      "SlackUserOption": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "real_name": {
+            "title": "Real Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "display_name",
+          "real_name"
+        ],
+        "title": "SlackUserOption",
+        "type": "object"
+      },
       "SlashCommandResponse": {
         "properties": {
           "response_type": {
@@ -7838,10 +7927,21 @@
           "environment": {
             "title": "Environment",
             "type": "string"
+          },
+          "posthog": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PostHogProject"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
-          "environment"
+          "environment",
+          "posthog"
         ],
         "title": "TelemetryConfig",
         "type": "object"
@@ -9530,6 +9630,41 @@
             ],
             "title": "Review Draft Prs"
           },
+          "review_shadow_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Shadow Model"
+          },
+          "review_shadow_percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Shadow Percent"
+          },
+          "review_shadow_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Shadow Reasoning Effort"
+          },
           "review_trace_links": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -10657,46 +10792,6 @@
         ]
       }
     },
-    "/dashboard/api/analytics/page": {
-      "post": {
-        "operationId": "api_page_view_dashboard_api_analytics_page_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PageView"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Page View",
-        "tags": [
-          "dashboard",
-          "analytics"
-        ]
-      }
-    },
     "/dashboard/api/analytics/pr-merge-rate-by-model": {
       "get": {
         "operationId": "api_pr_merge_rate_by_model_dashboard_api_analytics_pr_merge_rate_by_model_get",
@@ -11107,63 +11202,6 @@
         ]
       }
     },
-    "/dashboard/api/auth/langsmith/callback": {
-      "get": {
-        "operationId": "auth_langsmith_callback_dashboard_api_auth_langsmith_callback_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "state",
-            "required": true,
-            "schema": {
-              "title": "State",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "code",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Code"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Auth Langsmith Callback",
-        "tags": [
-          "dashboard",
-          "auth"
-        ]
-      }
-    },
     "/dashboard/api/auth/langsmith/login": {
       "get": {
         "operationId": "auth_langsmith_login_dashboard_api_auth_langsmith_login_get",
@@ -11258,6 +11296,7 @@
     },
     "/dashboard/api/auth/login": {
       "get": {
+        "description": "Everyone signs in with LangSmith; locally without it, as the `gh` CLI's user.",
         "operationId": "auth_login_dashboard_api_auth_login_get",
         "parameters": [
           {
@@ -11274,50 +11313,6 @@
                 }
               ],
               "title": "Redirect To"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Desktop",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_handoff",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Handoff"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_port",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 65535,
-                  "minimum": 1024,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Port"
             }
           }
         ],
@@ -11918,6 +11913,144 @@
         ]
       }
     },
+    "/dashboard/api/github/desktop/exchange": {
+      "post": {
+        "description": "Finish a desktop GitHub link with the app's own session.",
+        "operationId": "github_link_desktop_exchange_dashboard_api_github_desktop_exchange_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopConnectExchange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Github Link Desktop Exchange Dashboard Api Github Desktop Exchange Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Github Link Desktop Exchange",
+        "tags": [
+          "dashboard",
+          "auth"
+        ]
+      }
+    },
+    "/dashboard/api/github/login": {
+      "get": {
+        "description": "Start linking a GitHub account to the signed-in LangSmith person.",
+        "operationId": "github_link_login_dashboard_api_github_login_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "redirect_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Redirect To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop_handoff",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desktop Handoff"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop_port",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 1024,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desktop Port"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Github Link Login",
+        "tags": [
+          "dashboard",
+          "auth"
+        ]
+      }
+    },
     "/dashboard/api/incidents/documents/history": {
       "get": {
         "operationId": "search_history_dashboard_api_incidents_documents_history_get",
@@ -12382,7 +12515,8 @@
     },
     "/dashboard/api/langsmith/callback": {
       "get": {
-        "operationId": "langsmith_callback_dashboard_api_langsmith_callback_get",
+        "description": "Finish LangSmith sign-in on the callback the LangSmith OAuth client registers.",
+        "operationId": "auth_langsmith_callback_dashboard_api_langsmith_callback_get",
         "parameters": [
           {
             "in": "query",
@@ -12408,38 +12542,6 @@
               ],
               "title": "Code"
             }
-          },
-          {
-            "in": "query",
-            "name": "error",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Error"
-            }
-          },
-          {
-            "in": "query",
-            "name": "error_description",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Error Description"
-            }
           }
         ],
         "responses": {
@@ -12462,149 +12564,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Langsmith Callback",
+        "summary": "Auth Langsmith Callback",
         "tags": [
           "dashboard",
-          "langsmith"
-        ]
-      }
-    },
-    "/dashboard/api/langsmith/desktop/exchange": {
-      "post": {
-        "description": "Finish a desktop LangSmith connection with the app's own session.",
-        "operationId": "langsmith_desktop_exchange_dashboard_api_langsmith_desktop_exchange_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DesktopConnectExchange"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Langsmith Desktop Exchange Dashboard Api Langsmith Desktop Exchange Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Langsmith Desktop Exchange",
-        "tags": [
-          "dashboard",
-          "langsmith"
-        ]
-      }
-    },
-    "/dashboard/api/langsmith/login": {
-      "get": {
-        "operationId": "langsmith_login_dashboard_api_langsmith_login_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "redirect_to",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Redirect To"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_handoff",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Handoff"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_port",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 65535,
-                  "minimum": 1024,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Port"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Langsmith Login",
-        "tags": [
-          "dashboard",
-          "langsmith"
+          "auth"
         ]
       }
     },
@@ -13443,62 +13406,6 @@
         ]
       }
     },
-    "/dashboard/api/my-credentials/langsmith": {
-      "delete": {
-        "operationId": "disconnect_my_langsmith_dashboard_api_my_credentials_langsmith_delete",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Disconnect My Langsmith Dashboard Api My Credentials Langsmith Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Disconnect My Langsmith",
-        "tags": [
-          "dashboard",
-          "langsmith"
-        ]
-      },
-      "get": {
-        "operationId": "get_my_langsmith_status_dashboard_api_my_credentials_langsmith_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get My Langsmith Status Dashboard Api My Credentials Langsmith Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Get My Langsmith Status",
-        "tags": [
-          "dashboard",
-          "langsmith"
-        ]
-      }
-    },
     "/dashboard/api/my-managed-tools": {
       "get": {
         "operationId": "api_my_managed_tools_dashboard_api_my_managed_tools_get",
@@ -13970,6 +13877,90 @@
         "summary": "Api Reveal My Mcp Headers",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/notifications": {
+      "get": {
+        "operationId": "api_notifications_dashboard_api_notifications_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AppNotification"
+                  },
+                  "title": "Response Api Notifications Dashboard Api Notifications Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Notifications",
+        "tags": [
+          "dashboard",
+          "notifications"
+        ]
+      }
+    },
+    "/dashboard/api/notifications/{notification_id}/delivered": {
+      "post": {
+        "operationId": "api_notification_delivered_dashboard_api_notifications__notification_id__delivered_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Notification Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Api Notification Delivered Dashboard Api Notifications  Notification Id  Delivered Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Notification Delivered",
+        "tags": [
+          "dashboard",
+          "notifications"
         ]
       }
     },
@@ -19550,6 +19541,33 @@
         "tags": [
           "dashboard",
           "slack",
+          "slack"
+        ]
+      }
+    },
+    "/dashboard/api/slack/users": {
+      "get": {
+        "operationId": "api_slack_users_dashboard_api_slack_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackUserDirectory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Slack Users",
+        "tags": [
+          "dashboard",
           "slack"
         ]
       }

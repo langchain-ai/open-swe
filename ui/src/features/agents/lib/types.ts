@@ -562,6 +562,7 @@ export type TaskMembership =
 
 export interface AgentThread {
   experience?: "coding" | "agent_workspace"
+  waitingForDelegatedWork?: boolean
   taskMembership?: TaskMembership
   taskWorkers?: Array<AgentThread>
   ownerLogin?: string | null
@@ -586,6 +587,7 @@ export interface AgentThread {
   modelSelection?: "auto" | "explicit" | null
   planStatus?: string | null
   adminThread?: boolean
+  concierge?: boolean
   source?: AgentSource
   origin?: AgentSource | string
   threadCategory?: AgentThreadCategory | string

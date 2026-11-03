@@ -10,6 +10,7 @@ from openswe.github.http import GitHubClient
 from openswe.github.pull_request_status import PullRequestClient
 
 expedite = importlib.import_module("openswe.tools.expedite_pr_approval")
+nomination = importlib.import_module("openswe.expedited_review.nomination")
 
 
 @pytest.mark.parametrize(
@@ -65,7 +66,7 @@ async def test_nomination_requires_outstanding_review(
             ]
         ),
     )
-    monkeypatch.setattr(expedite, "latest_review_states", AsyncMock(return_value=reviews))
+    monkeypatch.setattr(nomination, "latest_review_states", AsyncMock(return_value=reviews))
     monkeypatch.setattr(
         CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse(owners) if owners else None)
     )
@@ -75,9 +76,9 @@ async def test_nomination_requires_outstanding_review(
     monkeypatch.setattr(
         expedite.User, "preferences_for_login", AsyncMock(return_value=UserPreferences())
     )
-    monkeypatch.setattr(expedite.PublishedAssessment, "latest", AsyncMock(return_value=None))
+    monkeypatch.setattr(nomination.PublishedAssessment, "latest", AsyncMock(return_value=None))
     monkeypatch.setattr(
-        expedite, "assess_eligibility", lambda *_: Ineligible("diff exceeds the limit")
+        nomination, "assess_eligibility", lambda *_: Ineligible("diff exceeds the limit")
     )
     result = await expedite.expedite_pr_approval("https://github.com/lc/repo/pull/7")
     assert result["success"] is False

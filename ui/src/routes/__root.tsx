@@ -19,10 +19,11 @@ import { resolveSessionOnServer } from "@/lib/session-ssr"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { Text } from "@langchain/macaw-components/Text"
 import { Toaster } from "@/components/Toaster"
+import { AppNotifications } from "@/components/AppNotifications"
 import { VersionMismatchBanner } from "@/components/VersionMismatchBanner"
 import { ThemeSync } from "@/lib/ThemeSync"
 import { Favicon } from "@/components/Branding"
-import { PageTracking } from "@/lib/PageTracking"
+import { AnalyticsIdentity } from "@/lib/AnalyticsIdentity"
 import { InvalidationStream } from "@/lib/invalidations/InvalidationStream"
 import { THEME_COLOR } from "@/lib/theme"
 import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
@@ -109,8 +110,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <QueryClientProvider client={queryClient}>
           <Favicon />
           <TooltipProvider>
-            <PageTracking />
+            <AnalyticsIdentity />
             <InvalidationStream />
+            <AppNotifications />
             <VersionMismatchBanner />
             <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
             <PerfHudMount />

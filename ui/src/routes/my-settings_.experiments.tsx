@@ -48,6 +48,11 @@ function ExperimentsPage() {
           description="Threads you start include what your workspace's curator learned from everyone's memories, in place of your own memories it superseded."
         />
         <ProfileSwitchRow
+          field="experimental_classify"
+          label="Classify tool"
+          description="Open SWE can classify text or JSON from code mode with TypeSafe's System One model: fast, typed decisions with calibrated confidence."
+        />
+        <ProfileSwitchRow
           field="experimental_background_callbacks"
           label="Background command callbacks"
           description="Background commands you start report completion from the sandbox instead of being polled every minute."

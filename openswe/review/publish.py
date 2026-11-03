@@ -37,10 +37,16 @@ from openswe.github.thread_token import GitHubAuthError
 from openswe.review.findings import (
     DiffSide,
     Finding,
+    Severity,
+    comment_ids_for_finding,
+    filter_findings_for_publish,
     get_thread_metadata,
+    is_surfaced,
     normalize_finding_title,
+    review_id_for_finding,
     set_reviewer_thread_metadata,
 )
+from openswe.run_config import ReviewDestination
 from openswe.utils.dashboard_links import dashboard_thread_url
 
 logger = logging.getLogger(__name__)
@@ -310,6 +316,86 @@ class ReviewAssessment(BaseModel):
         if self.decision == "would_approve_conditionally":
             return "Would approve subject to human approval of the stated condition"
         return "Needs human review"
+
+    def settled(self, findings: list[Finding]) -> ReviewAssessment:
+        """This assessment as published: unresolved findings always need a human."""
+        if self.decision == "needs_human_review" or not any(
+            finding.get("status", "open") == "open" for finding in findings
+        ):
+            return self
+        return self.model_copy(
+            update={
+                "decision": "needs_human_review",
+                "approval_condition": None,
+                "auto_approved": None,
+                "explanation": f"Unresolved findings remain. {self.explanation}",
+            }
+        )
+
+
+class PublishSelection:
+    """Which of a reviewer's findings one publish would post, by the rules every publish shares.
+
+    ``destination`` says how an earlier publish marked what it posted. A re-review
+    posts only what its head introduced; anything older was reviewed before.
+    """
+
+    def __init__(
+        self,
+        findings: list[Finding],
+        *,
+        destination: ReviewDestination,
+        re_review: bool,
+        head_sha: str,
+        severity_threshold: Severity = "medium",
+    ) -> None:
+        self.unpublished = [
+            finding
+            for finding in findings
+            if not self._published(finding, destination)
+            and (not re_review or finding.get("first_seen_sha") == head_sha)
+        ]
+        self.severity_threshold: Severity = severity_threshold
+
+    @staticmethod
+    def _published(finding: Finding, destination: ReviewDestination) -> bool:
+        match destination:
+            case "github":
+                return bool(comment_ids_for_finding(finding))
+            case "shadow":
+                # A shadow's findings never reach GitHub; its publish marks the ones it would post.
+                return is_surfaced(finding)
+            case "eval":
+                return bool(comment_ids_for_finding(finding)) or (
+                    review_id_for_finding(finding) is not None
+                )
+
+    @property
+    def open(self) -> list[Finding]:
+        return [f for f in self.unpublished if f.get("status", "open") == "open"]
+
+    @property
+    def in_diff(self) -> list[Finding]:
+        # Out-of-diff findings are disabled: they never surface on the PR.
+        return [f for f in self.unpublished if f.get("in_diff", True)]
+
+    @property
+    def rankable(self) -> list[Finding]:
+        """The findings the reviewer ranks before this publish."""
+        return [f for f in self.open if f.get("in_diff", True)]
+
+    @property
+    def eligible(self) -> list[Finding]:
+        return filter_findings_for_publish(self.in_diff, severity_threshold=self.severity_threshold)
+
+    @property
+    def postable(self) -> list[tuple[Finding, dict[str, Any]]]:
+        """The eligible findings that render as inline comments, with their payloads."""
+        return [
+            (finding, payload)
+            for finding in self.eligible
+            if (payload := render_inline_comment_payload(finding)) is not None
+        ]
 
 
 def render_review_body(
@@ -790,7 +876,7 @@ async def fetch_pr_review_threads(
     repo: str,
     pr_number: int,
     token: str,
-    max_threads: int = 100,
+    max_threads: int | None = None,
     max_comments_per_thread: int = 20,
 ) -> list[dict[str, Any]]:
     """Fetch all inline review threads on a PR (across reviewers, with replies).
@@ -840,8 +926,9 @@ async def fetch_pr_review_threads(
     """
     out: list[dict[str, Any]] = []
     cursor: str | None = None
+    seen: set[str] = set()
     async with github_client(token=token) as client:
-        while len(out) < max_threads:
+        while max_threads is None or len(out) < max_threads:
             try:
                 response = await github_request(
                     client,
@@ -866,9 +953,12 @@ async def fetch_pr_review_threads(
                     repo,
                     pr_number,
                 )
-                return out
+                return []
             data = response.json()
-            data_root = data.get("data") if isinstance(data, dict) else None
+            if not isinstance(data, dict) or data.get("errors"):
+                logger.warning("Incomplete GitHub review-thread response")
+                return []
+            data_root = data.get("data")
             repository = data_root.get("repository") if isinstance(data_root, dict) else None
             if not isinstance(repository, dict):
                 logger.warning(
@@ -878,14 +968,19 @@ async def fetch_pr_review_threads(
                     repo,
                     pr_number,
                 )
-                return out
+                return []
             pull_request = repository.get("pullRequest")
             threads = pull_request.get("reviewThreads") if isinstance(pull_request, dict) else None
             if not isinstance(threads, dict):
-                return out
-            for thread in threads.get("nodes", []) or []:
-                if not isinstance(thread, dict):
-                    continue
+                return []
+            nodes = threads.get("nodes")
+            if not isinstance(nodes, list):
+                logger.warning("GitHub review threads missing nodes")
+                return []
+            for thread in nodes:
+                if not isinstance(thread, dict) or not isinstance(thread.get("isResolved"), bool):
+                    logger.warning("Invalid GitHub review-thread resolution state")
+                    return []
                 comments_block = thread.get("comments") or {}
                 comments_nodes = comments_block.get("nodes") or []
                 comments: list[dict[str, Any]] = []
@@ -924,13 +1019,21 @@ async def fetch_pr_review_threads(
                         "comments": comments,
                     }
                 )
-                if len(out) >= max_threads:
-                    break
-            page_info = threads.get("pageInfo") or {}
-            if not page_info.get("hasNextPage"):
-                break
+            page_info = threads.get("pageInfo")
+            if not isinstance(page_info, dict) or not isinstance(
+                page_info.get("hasNextPage"), bool
+            ):
+                logger.warning("GitHub review threads missing pagination")
+                return []
+            if not page_info["hasNextPage"]:
+                return out
             cursor = page_info.get("endCursor")
-    return out
+            if not isinstance(cursor, str) or not cursor or cursor in seen:
+                logger.warning("GitHub review-thread pagination did not advance")
+                return []
+            seen.add(cursor)
+    logger.warning("GitHub review-thread snapshot exceeded its limit")
+    return []
 
 
 async def fetch_review_thread_id_for_comment(

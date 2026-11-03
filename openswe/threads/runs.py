@@ -59,6 +59,7 @@ from openswe.slack.client import (
     post_slack_thread_reply,
     update_slack_message,
 )
+from openswe.slack.user_options import SlackUserOption
 from openswe.source_context import SourceContext
 from openswe.threads.access import (
     _ensure_dashboard_github_token,
@@ -299,7 +300,7 @@ async def create_dashboard_thread_record(
         metadata_model = resolved_model
         metadata_effort = resolved_effort
     has_repo = bool(repo_config.get("owner") and repo_config.get("name"))
-    initial_title = title or prompt[:80] or "New agent"
+    initial_title = title or (await SlackUserOption.readable(prompt))[:80] or "New agent"
     metadata: dict[str, Any] = {
         "source": DASHBOARD_SOURCE,
         "origin": DASHBOARD_SOURCE,
