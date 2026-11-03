@@ -19,7 +19,7 @@ from openswe.review_guide.advance import advance
 from openswe.review_guide.buttons import NEXT_LABELS
 from openswe.review_guide.launch import close_guide_for_channel
 from openswe.review_guide.sessions import ReviewGuideSession
-from openswe.slack import app_modals, mda_forwarding, retry, suggested_actions
+from openswe.slack import app_modals, forks, mda_forwarding, retry, suggested_actions
 from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
 from openswe.slack.ask import (
@@ -883,11 +883,15 @@ async def slack_webhook(
                 return ignored("Duplicate Slack event delivery")
             if mda_forwarding.trigger_server_takes(event.subtype):
                 # Answered by MDA's Slack channel on a thread of its own, whoever owns the
-                # Slack thread it was asked in.
-                side_thread = mda_forwarding.side_thread_id(channel_id, original_message_ts)
-                await mda_forwarding.claim_side(
-                    side_thread, owner_login=await service.slack_login(user_id)
-                )
+                # Slack thread it was asked in: a fork of its conversation's thread, which
+                # knows what the agent did there, or one seeded from Slack.
+                asker = await service.slack_login(user_id)
+                side_thread = await forks.fork_thread(
+                    await mda_forwarding.owned_thread(channel_id, thread_ts),
+                    key=forks.branch_key(channel_id, original_message_ts),
+                    login=asker,
+                ) or mda_forwarding.side_thread_id(channel_id, original_message_ts)
+                await mda_forwarding.claim_side(side_thread, owner_login=asker)
                 await mda_forwarding.remember(
                     SlackRequest(
                         channel_id=channel_id,
