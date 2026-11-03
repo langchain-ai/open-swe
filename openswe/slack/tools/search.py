@@ -1,8 +1,12 @@
+import hashlib
 import logging
+import uuid
+from datetime import timedelta
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from openswe import event_claims
 from openswe.run_config import RunConfig
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
 from openswe.tools import access as tool_access
@@ -11,6 +15,9 @@ from openswe.tools.admin_gate import configurable
 logger = logging.getLogger(__name__)
 
 MAX_SEARCH_RESULTS = 20
+# Slack allows about ten searches a minute per person, so one message's grant gets six.
+SEARCHES_PER_GRANT = 6
+_GRANT_WINDOW = timedelta(hours=1)
 
 _NO_ACTION_TOKEN = (
     "Slack grants search only for a message that @mentions Open SWE or is sent to it in a "
@@ -19,6 +26,10 @@ _NO_ACTION_TOKEN = (
 _SHARED_CHANNEL = (
     "Search is unavailable in a channel shared with another organization, because its "
     "results would reach people outside the workspace."
+)
+_BUDGET_SPENT = (
+    f"This message's {SEARCHES_PER_GRANT} Slack searches are spent. Answer with what you "
+    "already found."
 )
 _ERRORS = {
     "invalid_action_token": "Slack no longer accepts this message's search grant. Ask the "
@@ -80,14 +91,31 @@ class SlackSearch:
             raise SlackSearchRefused(_NO_ACTION_TOKEN)
         return cls(cfg.slack_action_token, slack.channel_id)
 
+    async def spend(self) -> None:
+        """Take one of the grant's searches, shared by every run and subagent holding it."""
+        grant = hashlib.sha256(self.action_token.encode()).hexdigest()[:32]
+        outcome = await event_claims.claim_within_limit(
+            "slack-search",
+            f"{grant}:{uuid.uuid4()}",
+            ttl=_GRANT_WINDOW,
+            group=f"{grant}:",
+            limit=SEARCHES_PER_GRANT,
+            within=_GRANT_WINDOW,
+        )
+        if outcome != "claimed":
+            raise SlackSearchRefused(_BUDGET_SPENT)
+
     async def messages(
         self, query: str, *, limit: int, cursor: str, sort: str
     ) -> dict[str, object]:
+        await self.spend()
         payload: dict[str, object] = {
             "query": query,
             "action_token": self.action_token,
             "channel_types": ["public_channel"],
             "content_types": ["messages"],
+            # Open SWE's own posts would read back as the team corroborating it.
+            "include_bots": False,
             "limit": limit,
             "sort": sort,
         }
@@ -116,16 +144,14 @@ async def slack_search(
     if not query or not query.strip():
         return {"success": False, "error": "query is required"}
     try:
-        search = SlackSearch.for_run(configurable())
-    except SlackSearchRefused as exc:
-        return {"success": False, "error": str(exc)}
-    try:
-        return await search.messages(
+        return await SlackSearch.for_run(configurable()).messages(
             query.strip(),
             limit=min(max(limit, 1), MAX_SEARCH_RESULTS),
             cursor=cursor.strip(),
             sort=sort,
         )
+    except SlackSearchRefused as exc:
+        return {"success": False, "error": str(exc)}
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
         logger.warning("Slack search failed", extra={"slack_error": error})

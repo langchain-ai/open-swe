@@ -930,7 +930,7 @@ async def slack_webhook(
                 user_id=user_id,
                 text=text,
                 attachments=attachments,
-                action_token=event.action_token,
+                action_token=event.search_grant,
                 bot_user_id=bot_user_id,
                 thread_id=thread_id,
                 treat_all_messages_as_mentions=is_direct_message

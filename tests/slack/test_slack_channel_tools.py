@@ -285,6 +285,7 @@ async def test_slack_search_refuses_shared_channels_and_runs_without_a_grant(
     assert slack_api.calls == []
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_slack_search_searches_public_channels_with_the_runs_grant(
     slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -314,4 +315,17 @@ async def test_slack_search_searches_public_channels_with_the_runs_grant(
     assert method == "assistant.search.context"
     assert payload["action_token"] == "grant"
     assert payload["channel_types"] == ["public_channel"]
+    assert payload["include_bots"] is False
     assert payload["limit"] == 20
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_slack_search_stops_once_the_grants_searches_are_spent(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _search_run(monkeypatch, shared=False, token="grant")
+    for _ in range(6):
+        assert (await tools.slack_search("launch plan"))["success"] is True
+    refused = await tools.slack_search("launch plan")
+    assert refused["success"] is False
+    assert len(slack_api.calls) == 6
