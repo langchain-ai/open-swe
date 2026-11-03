@@ -242,12 +242,12 @@ async def test_complete_records_the_run_that_completed_it(enrolled):
             [{"ts": "10.0", "user": "U1", "text": "<@UBOT> check errors"}],
             True,
         ),
-        ("Errors are down now", "10.0", [{"ts": "10.0", "user": "UBOT"}], False),
+        ("Errors are down now", "10.0", [{"ts": "10.0", "user": "UBOT"}], True),
         (
-            "I will open a PR",
+            "Run the focused tests and send the result to <@U2>",
             "",
             [{"ts": "10.0", "user": "U1", "text": "<@UBOT> check errors"}],
-            False,
+            True,
         ),
         (
             "Could you open another PR?",
@@ -262,10 +262,17 @@ async def test_complete_records_the_run_that_completed_it(enrolled):
             False,
         ),
         ("Could you open another PR?", "10.0", [{"ts": "10.0", "bot_id": "OTHER"}], False),
+        (
+            "Run the focused tests",
+            "5.0",
+            [{"ts": "10.0", "user": "U1", "text": "<@UBOT> check errors"}],
+            True,
+        ),
     ],
 )
-async def test_followup_requests_need_both_intent_and_conversation(
-    monkeypatch, text, thread_ts, history, explicit
+@pytest.mark.parametrize("linked", [True, False])
+async def test_linked_followups_continue_bot_conversations(
+    monkeypatch, text, thread_ts, history, explicit, linked
 ):
     policy = IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1")
     record = Incident(id="incident", workspace_id="T1", channel_id="C1", thread_id="thread-1")
@@ -275,7 +282,9 @@ async def test_followup_requests_need_both_intent_and_conversation(
     monkeypatch.setattr(channels, "claim_slack_event", AsyncMock(return_value=True))
     monkeypatch.setattr(channels, "fetch_slack_thread_messages", AsyncMock(return_value=history))
     actor = {"id": "github:sre", "github_login": "sre"}
-    monkeypatch.setattr(channels, "linked_slack_user", AsyncMock(return_value=actor))
+    monkeypatch.setattr(
+        channels, "linked_slack_user", AsyncMock(return_value=actor if linked else None)
+    )
     monkeypatch.setattr(turns, "dispatch_turn", AsyncMock())
     monkeypatch.setattr(turns, "queue_context", AsyncMock())
     monkeypatch.setattr(turns, "schedule_automatic_turn", AsyncMock())
@@ -288,7 +297,7 @@ async def test_followup_requests_need_both_intent_and_conversation(
         "thread_ts": thread_ts,
     }
     await handle(message)
-    if explicit:
+    if explicit and linked:
         turns.dispatch_turn.assert_awaited_once_with(
             record, policy, request=text, requester=actor, reply_thread_ts=thread_ts
         )

@@ -197,7 +197,10 @@ _SHELL_OPERATOR = re.compile(r"(&&|\|\||[;&|()])")
 def _command_words(command: str) -> list[str]:
     """``command``'s words, with control operators split off even where written unspaced."""
     return [
-        part for token in shell_tokens(command) for part in _SHELL_OPERATOR.split(token) if part
+        part
+        for token in shell_tokens(command.replace("\\\n", ""))
+        for part in _SHELL_OPERATOR.split(token)
+        if part
     ]
 
 
@@ -217,13 +220,27 @@ def _chained_push_dirs(command: str) -> list[str | None]:
         repo_dir = cwd
         position = index + 1
         while position < len(tokens) and tokens[position].startswith("-"):
-            if tokens[position] in {"-C", "-c"} and position + 1 < len(tokens):
+            if tokens[position] in {
+                "-C",
+                "-c",
+                "--git-dir",
+                "--work-tree",
+                "--namespace",
+                "--config-env",
+                "--super-prefix",
+            } and position + 1 < len(tokens):
+                if (
+                    tokens[position] == "-c"
+                    and tokens[position + 1].startswith("alias.")
+                    and "push" in tokens[position + 1]
+                ):
+                    dirs.append(repo_dir)
                 if tokens[position] == "-C":
                     repo_dir = tokens[position + 1]
                 position += 2
                 continue
             position += 1
-        if position < len(tokens) and tokens[position] == "push":
+        if position < len(tokens) and tokens[position].removeprefix("$") == "push":
             dirs.append(repo_dir)
     return dirs
 

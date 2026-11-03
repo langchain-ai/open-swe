@@ -765,6 +765,11 @@ async def _check_shell(command: str) -> ShellVerdict:
         "git -C /repo -c x=y push --all",
         "git status&&git push origin feature",
         "bash -c 'git push origin feature'",
+        "git --git-dir /repo/.git --work-tree /repo push origin feature",
+        "git --namespace example push origin feature",
+        "git pu\\\nsh origin feature",
+        "git $'push' origin feature",
+        "git -c alias.publish=push publish origin feature",
     ],
 )
 async def test_incident_pushes_require_current_explicit_request(monkeypatch, explicit, command):

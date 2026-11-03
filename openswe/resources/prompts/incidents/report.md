@@ -46,3 +46,4 @@ Use next_steps for up to three concrete recommendations, highest priority first,
 Leave next_steps empty when there is no useful recommendation.
 Use an empty summary when no supported observation can be made.
 Use gaps to describe missing coverage and questions for the few missing facts a responder could supply.
+When a gap needs requester input or action, also state the concrete request in questions so it reaches the channel; never leave a requester-dependent blocker only in gaps.

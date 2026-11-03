@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 CONTROL_WORDS = frozenset({"pause", "resume", "complete", "reopen"})
 HISTORY_LIMIT = 100
+FOLLOWUP_WINDOW_SECONDS = 300
 _HANDLED_EVENTS = frozenset(
     {
         "channel_created",
@@ -277,15 +278,7 @@ class IncidentConversation:
 
     async def request(self) -> str:
         text = str(self.message.get("text") or "").strip()
-        if self.message.get("subtype") or "<@" in text:
-            return ""
-        if not re.match(
-            r"(?i)^(?:(?:(?:can|could|would|will) you|please(?: can you)?)\s+(?:also\s+)?"
-            r"(?:check|investigate|explain|show|find|add|update|fix|open|create|push|post|comment)\b|"
-            r"(?:open|create|push|post|add|update|fix)\s+(?:a|an|another|the|this|that|my|our)\b|"
-            r"comment\s+on\b)",
-            text,
-        ):
+        if self.message.get("subtype") or not text:
             return ""
         thread_ts = str(self.message.get("thread_ts") or "")
         ts = str(self.message.get("ts") or "")
@@ -294,13 +287,19 @@ class IncidentConversation:
         history = await fetch_slack_thread_messages(
             self.record.channel_id, thread_ts or turns.SESSION_TS
         )
+        if thread_ts and any(
+            _own_message(previous, self.policy)
+            and 0 < parse_slack_ts(str(previous.get("ts") or "")) < parse_slack_ts(ts)
+            for previous in history
+        ):
+            return text[:8000]
+        if thread_ts:
+            history = await fetch_slack_thread_messages(self.record.channel_id, turns.SESSION_TS)
         for previous in history[-HISTORY_LIMIT:]:
             previous_ts = str(previous.get("ts") or "")
             elapsed = parse_slack_ts(ts) - parse_slack_ts(previous_ts)
             if not parse_slack_ts(previous_ts) or elapsed <= 0:
                 continue
-            if thread_ts and _own_message(previous, self.policy):
-                return text[:8000]
             if previous.get("user") != self.message.get("user"):
                 continue
             bot_user = ENV.SLACK_BOT_USER_ID.get()
@@ -310,7 +309,7 @@ class IncidentConversation:
             action, question = parse_mention(previous_text)
             if action != "ask" or not question:
                 continue
-            if elapsed <= 300:
+            if elapsed <= FOLLOWUP_WINDOW_SECONDS:
                 return text[:8000]
         return ""
 
@@ -378,20 +377,24 @@ async def handle_slack_event(
     mentioned = kind == "app_mention" or bool(bot_user and f"<@{bot_user}>" in text)
     if isinstance(user, str) and user and not slack_message_bot_id(message):
         action, question = parse_mention(text) if mentioned else ("", "")
+        actor = None
         if (
             not mentioned
             and record.status in {"watching", "needs_attention"}
             and not _own_message(message, policy)
             and event.get("subtype") != "message_changed"
         ):
-            question = await IncidentConversation(record, policy, message).request()
+            actor = await linked_slack_user(user)
+            if actor is not None:
+                question = await IncidentConversation(record, policy, message).request()
         if action in CONTROL_WORDS:
             background_tasks.add_task(control_by_slack_user, record, action, user)
             return {"status": "accepted"}
         if question:
             ts = str(message.get("ts") or "")
             thread_ts = str(message.get("thread_ts") or "")
-            actor = await linked_slack_user(user)
+            if mentioned:
+                actor = await linked_slack_user(user)
             if actor is None:
                 # A question unlocks the agent's tools, so it needs a connected account.
                 background_tasks.add_task(
