@@ -15,7 +15,9 @@ from collections import Counter
 from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
+from functools import partial
 from typing import Self
+from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx2
@@ -308,6 +310,51 @@ async def choose_reviewer(
         return None
 
 
+class ReviewChannelMembers(BaseModel):
+    channel_id: str
+    user_ids: frozenset[UUID]
+
+    @classmethod
+    async def load(cls, channel_id: str) -> Self:
+        members: set[UUID] = set()
+        async with SlackClient.bot() as client:
+            cursor: str | None = None
+            seen: set[str] = set()
+            while True:
+                response = await client.conversations_members(
+                    channel=channel_id, limit=200, cursor=cursor
+                )
+                ids = TypeAdapter(list[str]).validate_python(response.get("members"))
+                users = await asyncio.gather(
+                    *(User.for_identity("slack", member) for member in ids)
+                )
+                members.update(user.id for user in users if user is not None)
+                metadata = TypeAdapter(dict[str, str]).validate_python(
+                    response.get("response_metadata") or {}
+                )
+                cursor = metadata.get("next_cursor")
+                if not cursor:
+                    break
+                if cursor in seen:
+                    raise ValueError("Slack repeated a channel membership cursor")
+                seen.add(cursor)
+        return cls(channel_id=channel_id, user_ids=frozenset(members))
+
+    @classmethod
+    async def cached(cls, channel_id: str) -> Self:
+        """Postgres-backed membership, revalidated on access after eight hours."""
+        from langgraph_api.cache import swr
+
+        result = await swr(
+            f"review-channel-members:{channel_id}",
+            partial(cls.load, channel_id),
+            fresh_for=timedelta(hours=8),
+            max_age=timedelta(hours=24),
+            model=cls,
+        )
+        return result.value
+
+
 @dataclass(frozen=True, slots=True)
 class Candidates:
     """File-based reviewers and members of review channels carrying the request."""
@@ -335,35 +382,16 @@ class Candidates:
                 channel = await SlackChannel.resolve(configured)
                 if channel is not None and channel.id in posted:
                     channels.add(channel.id)
-            members: set[str] = set()
-            if channels:
-                async with SlackClient.bot() as client:
-                    for channel_id in sorted(channels):
-                        cursor: str | None = None
-                        seen: set[str] = set()
-                        while True:
-                            response = await client.conversations_members(
-                                channel=channel_id, limit=200, cursor=cursor
-                            )
-                            ids = TypeAdapter(list[str]).validate_python(response.get("members"))
-                            users = await asyncio.gather(
-                                *(User.for_identity("slack", member) for member in ids)
-                            )
-                            members.update(
-                                user.github_login.lower()
-                                for user in users
-                                if user is not None and user.github_login
-                            )
-                            metadata = TypeAdapter(dict[str, str]).validate_python(
-                                response.get("response_metadata") or {}
-                            )
-                            cursor = metadata.get("next_cursor")
-                            if not cursor:
-                                break
-                            if cursor in seen:
-                                raise ValueError("Slack repeated a channel membership cursor")
-                            seen.add(cursor)
-            return frozenset(members)
+            memberships = await asyncio.gather(
+                *(ReviewChannelMembers.cached(channel_id) for channel_id in sorted(channels))
+            )
+            user_ids = {user_id for members in memberships for user_id in members.user_ids}
+            users = await asyncio.gather(*(User.get(user_id) for user_id in user_ids))
+            return frozenset(
+                user.github_login.lower()
+                for user in users
+                if user is not None and user.github_login
+            )
         except (RepoFileUnreadableError, HTTPException, *SLACK_REQUEST_ERRORS):
             logger.warning(
                 "Could not read review channel members; using file-based candidates",

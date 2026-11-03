@@ -1,3 +1,4 @@
+import asyncio
 from collections import Counter
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
@@ -220,5 +221,29 @@ async def test_review_channel_members_include_later_pages_only_when_posted(
         "for_identity",
         AsyncMock(side_effect=lambda _, member: ada if member == "UADA" else None),
     )
+    monkeypatch.setattr(User, "get", AsyncMock(return_value=ada))
     members = await picking.Candidates.review_channel_members(request, MagicMock())
     assert members == (frozenset() if destination == "unposted" else frozenset({"ada"}))
+
+
+async def test_review_channel_members_revalidate_after_eight_hours(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langgraph_api import cache
+
+    from openswe.human_review.picking import ReviewChannelMembers
+
+    ada, grace = User(), User()
+    initial = ReviewChannelMembers(channel_id="CREVIEW", user_ids=frozenset({ada.id}))
+    updated = ReviewChannelMembers(channel_id="CREVIEW", user_ids=frozenset({grace.id}))
+    loader = AsyncMock(side_effect=[initial, updated])
+    monkeypatch.setattr(ReviewChannelMembers, "load", loader)
+    assert await ReviewChannelMembers.cached("CREVIEW") == initial
+    now = cache._now_ms()
+    monkeypatch.setattr(cache, "_now_ms", lambda: now + 7 * 60 * 60 * 1000)
+    assert await ReviewChannelMembers.cached("CREVIEW") == initial
+    assert loader.await_count == 1
+    monkeypatch.setattr(cache, "_now_ms", lambda: now + 8 * 60 * 60 * 1000)
+    assert await ReviewChannelMembers.cached("CREVIEW") == initial
+    await asyncio.gather(*(state.task for state in cache._SWR_STATES.values() if state.task))
+    assert await ReviewChannelMembers.cached("CREVIEW") == updated
