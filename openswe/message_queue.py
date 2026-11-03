@@ -23,6 +23,9 @@ from openswe.utils.json_types import JsonObject
 logger = logging.getLogger(__name__)
 
 MAX_QUEUED_MESSAGES = 100
+# A message addressed to people rather than the agent: it waits for the next run
+# and never starts one.
+PASSIVE_KEY = "passive"
 
 type QueuedContent = str | list[JsonObject] | JsonObject
 
@@ -120,6 +123,10 @@ class QueuedMessage(Base):
             message is not None
             and message_sender_id(message["content"], kind="system") == "system:slack-note"
         )
+
+    @property
+    def passive(self) -> bool:
+        return isinstance(self.content, dict) and self.content.get(PASSIVE_KEY) is True
 
     async def preview(self) -> QueuedPreview:
         """What a person sees of this message while it waits for the agent."""

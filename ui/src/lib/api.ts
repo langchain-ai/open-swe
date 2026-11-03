@@ -846,12 +846,15 @@ export interface WorkspaceOption {
   refresh_steps?: Array<WorkspaceRefreshStep>
 }
 
-/** A person in the Slack workspace, offered when mentioning someone in a composer. */
-export interface SlackUserOption {
+/** A person Open SWE knows, offered when mentioning someone in a composer. */
+export interface MentionablePerson {
+  /** Their Open SWE user id. */
   id: string
   name: string
-  display_name: string
-  real_name: string
+  login: string
+  avatar_url: string
+  /** Part of the current conversation: a participant, or someone on its pull requests. */
+  involved: boolean
 }
 
 /** A channel the Slack bot can see, offered when binding channels to a workspace. */
@@ -1698,7 +1701,10 @@ export const api = {
       `/notifications/${encodeURIComponent(id)}/delivered`,
       { method: "POST" }
     ),
-  listSlackUsers: () => request<{ users: SlackUserOption[] }>("/slack/users"),
+  listMentionablePeople: (threadId?: string) =>
+    request<{ people: MentionablePerson[] }>(
+      `/people/mentionable${threadId ? `?thread_id=${encodeURIComponent(threadId)}` : ""}`
+    ),
   slackUserName: (userId: string) =>
     request<{ name: string }>(
       `/slack/users/${encodeURIComponent(userId)}/name`

@@ -44,6 +44,18 @@ class Notifications {
   }
 }
 
+// Another person's mention token, as the composer would write it, from the viewer's directory.
+async function mentionToken(page: Page, login: string): Promise<string> {
+  const response = await page.request.get("/dashboard/api/people/mentionable");
+  expect(response.ok(), await response.text()).toBeTruthy();
+  const { people } = (await response.json()) as {
+    people: Array<{ id: string; name: string; login: string }>;
+  };
+  const person = people.find((candidate) => candidate.login === login);
+  expect(person, `${login} is mentionable`).toBeTruthy();
+  return `<@user:${person!.id}|${person!.name}>`;
+}
+
 // The OS notification center is outside the browser, so the spec stands in for it:
 // a granted Notification that records each one and reports it shown, or never does.
 class DesktopNotifications {
@@ -187,6 +199,8 @@ test("queued and steered mentions notify once per accepted message and skip self
   await loginAs(page, SAME_USER);
   const recipient = await browser.newPage();
   await loginAs(recipient, OTHER_USER);
+  const bob = await mentionToken(page, "bob");
+  const alice = await mentionToken(recipient, "alice");
   await page.goto("/agents", { waitUntil: "domcontentloaded" });
   const editor = page.getByTestId("composer-editor");
   await editor.click();
@@ -209,7 +223,7 @@ test("queued and steered mentions notify once per accepted message and skip self
                 {
                   id: crypto.randomUUID(),
                   type: "human",
-                  content: "Please ask <@W123BOB> <@W123BOB> <@W123ALICE>",
+                  content: `Please ask ${bob} ${bob} ${alice}`,
                 },
               ],
             },
@@ -239,7 +253,7 @@ test("queued and steered mentions notify once per accepted message and skip self
 });
 
 for (const review of [false, true]) {
-  test(`Slack-name mentions in ${review ? "Review" : "workspace"} chat notify the recipient with a desktop notification`, async ({
+  test(`Mentions in ${review ? "Review" : "workspace"} chat notify the recipient with a desktop notification`, async ({
     page,
     browser,
   }) => {
@@ -264,8 +278,8 @@ for (const review of [false, true]) {
     await expect(editor).toBeVisible();
     await editor.click();
     await editor.pressSequentially("Please ask @bob");
-    await page.getByRole("option", { name: /@Bob @bob/ }).click();
-    await expect(editor).toContainText("@Bob");
+    await page.getByRole("option", { name: /@bob/i }).first().click();
+    await expect(editor.getByTitle(/^@Bob$/)).toBeVisible();
     await editor.pressSequentially(" about this change");
     const notificationReceived = recipient.waitForResponse(
       (response) =>

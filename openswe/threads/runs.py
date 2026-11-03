@@ -51,7 +51,7 @@ from openswe.input_messages import (
     injected_dynamic_context_hashes_from_metadata,
 )
 from openswe.invocation import new_invocation_id, with_invocation_id
-from openswe.message_queue import QueuedMessage
+from openswe.message_queue import PASSIVE_KEY, QueuedMessage
 from openswe.prompts import prompt
 from openswe.slack.client import (
     SlackNotice,
@@ -59,7 +59,6 @@ from openswe.slack.client import (
     post_slack_thread_reply,
     update_slack_message,
 )
-from openswe.slack.user_options import SlackUserOption
 from openswe.source_context import SourceContext
 from openswe.threads.access import (
     _ensure_dashboard_github_token,
@@ -87,12 +86,14 @@ from openswe.transcript.events import (
     MessageCompleted,
     MessageSender,
     ThreadCreated,
+    TurnCompleted,
     TurnFailed,
     TurnQueued,
     TurnRequested,
 )
 from openswe.transcript.turns import OpenTurn, recorded_turn_id
 from openswe.users import User
+from openswe.users.mentions import PersonMention
 from openswe.users.repository_defaults import RepositoryDefaults
 from openswe.utils.dashboard_handoff import (
     DASHBOARD_HANDOFF_BODY,
@@ -300,7 +301,7 @@ async def create_dashboard_thread_record(
         metadata_model = resolved_model
         metadata_effort = resolved_effort
     has_repo = bool(repo_config.get("owner") and repo_config.get("name"))
-    initial_title = title or (await SlackUserOption.readable(prompt))[:80] or "New agent"
+    initial_title = title or PersonMention.readable(prompt)[:80] or "New agent"
     metadata: dict[str, Any] = {
         "source": DASHBOARD_SOURCE,
         "origin": DASHBOARD_SOURCE,
@@ -1245,6 +1246,7 @@ async def steer_running_thread(
     metadata: dict[str, Any],
     turn: OpenTurn | None,
     email: str | None = None,
+    for_people: bool = False,
 ) -> dict[str, Any]:
     """Deliver a ``run.start`` sent while a run is live into that run.
 
@@ -1252,6 +1254,10 @@ async def steer_running_thread(
     the transcript right away and left for the run to pick up before its next
     model call. The reply mirrors the protocol's success envelope so the caller
     cannot tell a steer from a start.
+
+    A message ``for_people`` (it opens by mentioning someone) never starts a run:
+    with no open turn it is recorded as a turn of its own that is already over,
+    and it waits, passive, for whichever run comes next.
     """
     params = command.get("params")
     if not isinstance(params, dict):
@@ -1297,7 +1303,36 @@ async def steer_running_thread(
     )
     structured[-1]["id"] = message_id
 
-    if turn is not None:
+    text = _command_prompt_text(structured[-1].get("content"))
+    sender = MessageSender(login=login, kind=DASHBOARD_SOURCE)
+    if turn is None and for_people:
+        turn_id = uuid.uuid7()
+        attachments, pending = _transcript_attachments(command_images, message_id)
+        await append(
+            thread_id,
+            [
+                Command(
+                    command_id=f"message:{message_id}:requested",
+                    event=TurnRequested(
+                        turn_id=turn_id,
+                        message_id=message_id,
+                        text=text,
+                        sender=sender,
+                        attachments=attachments,
+                    ),
+                    actor_kind="user",
+                    turn_id=turn_id,
+                    attachments=pending,
+                ),
+                Command(
+                    command_id=f"message:{message_id}:settled",
+                    event=TurnCompleted(turn_id=turn_id),
+                    actor_kind="user",
+                    turn_id=turn_id,
+                ),
+            ],
+        )
+    elif turn is not None:
         turn_id = turn.turn_id
         attachments, pending = _transcript_attachments(command_images, message_id)
         await append(
@@ -1309,8 +1344,8 @@ async def steer_running_thread(
                         turn_id=turn_id,
                         message_id=message_id,
                         role="human",
-                        text=_command_prompt_text(structured[-1].get("content")),
-                        sender=MessageSender(login=login, kind=DASHBOARD_SOURCE),
+                        text=text,
+                        sender=sender,
                         attachments=attachments or None,
                         created_at=datetime.now(UTC),
                     ),
@@ -1334,7 +1369,9 @@ async def steer_running_thread(
         "surface": "automation" if relayed_from else "web",
         "created_at_ms": _now_ms(),
     }
-    if relayed_from:
+    if for_people:
+        payload[PASSIVE_KEY] = True
+    elif relayed_from:
         payload[RELAYED_FROM_KEY] = relayed_from
     elif metadata.get("source") == "slack":
         payload["source"] = DASHBOARD_SOURCE
@@ -1343,7 +1380,7 @@ async def steer_running_thread(
     # The run may have ended between the busy check and the store write, past
     # the completion hook's own look at the store. ``reject`` keeps the two
     # from racing each other into a second run.
-    if not await _run_is_live(client, thread_id, live_run_id):
+    if not for_people and not await _run_is_live(client, thread_id, live_run_id):
         try:
             dispatched = await dispatch_pending_follow_ups(
                 thread_id, login, metadata, client=client, multitask_strategy="reject"
@@ -1365,7 +1402,7 @@ async def steer_running_thread(
             **await participant_metadata(metadata, login=login, email=email),
         },
     )
-    if not relayed_from:
+    if not relayed_from and not for_people:
         await _SlackWebHandoff(thread_id, metadata).notify()
     return {
         "id": command.get("id"),
@@ -1374,7 +1411,7 @@ async def steer_running_thread(
             "thread_id": thread_id,
             "run_id": live_run_id,
             "message_id": message_id,
-            "steered": True,
+            "steered": not for_people,
         },
     }
 
@@ -1526,7 +1563,7 @@ async def dispatch_pending_follow_ups(
     the store; the new run's first model call picks it up. Returns the run id,
     or ``None`` when nothing was waiting.
     """
-    if not await QueuedMessage.for_thread(thread_id):
+    if all(message.passive for message in await QueuedMessage.for_thread(thread_id)):
         return None
     configurable = await _build_dashboard_configurable(thread_id, login, metadata)
     run = await dispatch_agent_run(

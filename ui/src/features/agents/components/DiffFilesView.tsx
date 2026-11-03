@@ -7,7 +7,8 @@ import {
   useFileTreeSelection,
 } from "@pierre/trees/react"
 import { Button } from "@langchain/macaw-components/Button"
-import { Textarea } from "@langchain/macaw-components/Textarea"
+import { PersonMentionTextarea } from "@/components/PersonMentionTextarea"
+import { tagPeople, useMentionablePeople } from "@/lib/people"
 import type { FileContents } from "@pierre/diffs/react"
 import { useDiffLineSelection } from "@/features/agents/utils/diffSelection"
 import {
@@ -293,6 +294,7 @@ const FileDiffSection = memo(
     const draft = lineSelection.committed?.range ?? null
     const [comment, setComment] = useState("")
     const [sending, setSending] = useState(false)
+    const people = useMentionablePeople(undefined, comment.includes("@"))
     const [selectedFile, setSelectedFile] = useState(file)
     if (
       selectedFile.originalContent !== file.originalContent ||
@@ -311,7 +313,7 @@ const FileDiffSection = memo(
       try {
         await onComment(
           serializeExcerpts(
-            comment,
+            tagPeople(comment, people.data?.people ?? []),
             selectionExcerpts(file.filePath, file, draft)
           )
         )
@@ -430,13 +432,13 @@ const FileDiffSection = memo(
                     : `lines ${Math.min(draft.start, draft.end)}–${Math.max(draft.start, draft.end)}`}
                 </div>
               )}
-              <Textarea
-                ref={textareaRef}
+              <PersonMentionTextarea
+                textareaRef={textareaRef}
                 size="md"
                 aria-label="Comment on selected code"
                 placeholder="Ask Open SWE about these lines…"
                 value={comment}
-                onChange={setComment}
+                onValueChange={setComment}
                 onKeyDown={(event) => {
                   if (
                     event.key === "Enter" &&

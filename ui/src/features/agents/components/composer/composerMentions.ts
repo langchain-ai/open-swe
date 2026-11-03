@@ -19,7 +19,7 @@ export type ComposerPromptSegment =
   | { type: "text"; text: string }
   | { type: "mention"; path: string; source: string }
   | { type: "skill"; name: string; source: string }
-  | { type: "user"; userId: string; source: string }
+  | { type: "user"; userId: string; name: string; source: string }
   | { type: "channel"; channelId: string; name: string; source: string }
 
 interface ComposerChannelToken {
@@ -32,6 +32,7 @@ interface ComposerChannelToken {
 
 interface ComposerUserToken {
   readonly userId: string
+  readonly name: string
   readonly source: string
   readonly start: number
   readonly end: number
@@ -53,7 +54,19 @@ const URI_SCHEME_REGEX = /^[A-Za-z][A-Za-z0-9+.-]*:/
 const WINDOWS_DRIVE_PATH_REGEX = /^[A-Za-z]:[\\/]/
 const SKILL_TOKEN_REGEX = /(^|\s)\/([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$)/g
 const CHANNEL_TOKEN_REGEX = /<#([CG][A-Z0-9]+)\|([^>|\s]+)>/g
-const USER_TOKEN_REGEX = /<@([UW][A-Z0-9]+)>/g
+// `<@user:{Open SWE user id}|{name}>`: the name rides along so a chip never waits on a lookup.
+const USER_TOKEN_REGEX = /<@user:([0-9a-fA-F-]{36})\|([^>|]*)>/g
+const LEADING_USER_TOKEN_REGEX = /^\s*<@user:[0-9a-fA-F-]{36}\|[^>|]*>/
+
+/** The mention token for a person, carrying the name the menu showed. */
+export function personMentionToken(userId: string, name: string): string {
+  return `<@user:${userId}|${name.replace(/[<>|]/g, "")}>`
+}
+
+/** A message that opens by mentioning someone is for them: it starts no agent run. */
+export function opensWithPersonMention(text: string): boolean {
+  return LEADING_USER_TOKEN_REGEX.test(text)
+}
 
 function collectChannelTokens(text: string): Array<ComposerChannelToken> {
   return [...text.matchAll(CHANNEL_TOKEN_REGEX)].map((match) => ({
@@ -68,6 +81,7 @@ function collectChannelTokens(text: string): Array<ComposerChannelToken> {
 function collectUserTokens(text: string): Array<ComposerUserToken> {
   return [...text.matchAll(USER_TOKEN_REGEX)].map((match) => ({
     userId: match[1] ?? "",
+    name: match[2] ?? "",
     source: match[0],
     start: match.index,
     end: match.index + match[0].length,
@@ -161,7 +175,12 @@ export function splitPromptIntoSegments(
 
   const segments: Array<ComposerPromptSegment> = []
   let cursor = 0
-  const tokens = [
+  const tokens: Array<
+    | ComposerMentionToken
+    | ComposerSkillToken
+    | ComposerChannelToken
+    | ComposerUserToken
+  > = [
     ...collectComposerMentions(prompt),
     ...skills,
     ...collectChannelTokens(prompt),
@@ -174,7 +193,12 @@ export function splitPromptIntoSegments(
       segments.push({ type: "text", text: prompt.slice(cursor, token.start) })
     segments.push(
       "userId" in token
-        ? { type: "user", userId: token.userId, source: token.source }
+        ? {
+            type: "user",
+            userId: token.userId,
+            name: token.name,
+            source: token.source,
+          }
         : "channelId" in token
           ? {
               type: "channel",

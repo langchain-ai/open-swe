@@ -1003,6 +1003,7 @@ export function AgentThreadView({
               {reviewChat && <ReviewExcerptChips />}
               <AgentPromptBar
                 key={`${session.data?.user_id}:${thread.id}`}
+                threadId={thread.id}
                 draftKey={
                   session.data?.user_id
                     ? `${session.data.user_id}:thread:${thread.id}`

@@ -9,11 +9,11 @@ from typing import ClassVar
 from openswe import event_claims
 from openswe.notifications.service import AppNotification
 from openswe.review.session import ReviewSessionMetadata
-from openswe.slack.client import slack_mentioned_user_ids
 from openswe.slack.dm import DmOrigin
 from openswe.source_context import SourceContext
 from openswe.threads.store import THREADS
 from openswe.users import User
+from openswe.users.mentions import PersonMention
 from openswe.utils.dashboard_links import dashboard_review_url, dashboard_thread_url
 
 logger = logging.getLogger(__name__)
@@ -28,22 +28,18 @@ class ThreadMentions:
     _pending: ClassVar[set[asyncio.Task[None]]] = set()
 
     def dispatch(self) -> None:
-        if not slack_mentioned_user_ids(self.text):
+        if not PersonMention.all_in(self.text):
             return
         task = asyncio.create_task(self.notify())
         self._pending.add(task)
         task.add_done_callback(self._pending.discard)
 
     async def notify(self) -> None:
-        recipients = list(dict.fromkeys(slack_mentioned_user_ids(self.text)))[:10]
+        recipients = [mention.user_id for mention in PersonMention.all_in(self.text)][:10]
         if not recipients:
             return
         try:
             sender = await User.for_login("github", self.login)
-            if sender is not None:
-                recipients = [
-                    recipient for recipient in recipients if recipient != sender.slack_user_id
-                ]
             thread = await THREADS.get(self.thread_id)
             if thread is None:
                 return
@@ -62,12 +58,14 @@ class ThreadMentions:
                 else None
             )
             group = f"{sender.id if sender else self.login.casefold()}:"
-            for recipient in recipients:
-                claim_key = f"{group}{self.thread_id}:{self.message_id}:{recipient}"
+            for recipient_id in recipients:
+                if sender is not None and recipient_id == sender.id:
+                    continue
+                claim_key = f"{group}{self.thread_id}:{self.message_id}:{recipient_id}"
                 claimed = False
                 try:
-                    person = await User.for_identity("slack", recipient)
-                    if sender is not None and person is not None and person.id == sender.id:
+                    person = await User.get(recipient_id)
+                    if person is None:
                         continue
                     if (
                         await event_claims.claim_within_limit(
@@ -82,8 +80,8 @@ class ThreadMentions:
                     ):
                         continue
                     claimed = True
-                    await AppNotification.send_to_slack(
-                        recipient,
+                    await AppNotification.send(
+                        person,
                         key=f"mention:{self.thread_id}:{self.message_id}",
                         title=f"{self.login} mentioned you in Open SWE",
                         body="Open the conversation with an account that has access.",
@@ -98,7 +96,7 @@ class ThreadMentions:
                         await event_claims.release("mention-notification", claim_key)
                     logger.exception(
                         "Could not notify mentioned person",
-                        extra={"thread_id": self.thread_id, "recipient": recipient},
+                        extra={"thread_id": self.thread_id, "recipient": str(recipient_id)},
                     )
         except Exception:
             logger.exception(

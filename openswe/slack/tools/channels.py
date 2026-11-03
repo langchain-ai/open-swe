@@ -21,6 +21,7 @@ from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestEr
 from openswe.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from openswe.slack.payloads import SlackChannelPayload
 from openswe.users import User
+from openswe.users.mentions import PersonMention
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class SlackChannelList(TypedDict):
 
 class SlackChannelMember(TypedDict):
     id: str
+    user_id: str | None
     name: str
     github_login: str | None
     status_text: str | None
@@ -160,14 +162,17 @@ async def slack_list_channel_members(
     if not isinstance(next_cursor, str):
         return {"success": False, "error": "invalid_slack_response"}
     infos = await asyncio.gather(*(get_slack_user_info(member) for member in member_ids))
+    people = await User.for_identities("slack", member_ids)
     members: list[SlackChannelMember] = []
     for member, info in zip(member_ids, infos, strict=True):
         user = SlackUserInfo.model_validate(info) if info is not None else None
+        person = people.get(member)
         members.append(
             {
                 "id": member,
+                "user_id": f"user:{person.id}" if person else None,
                 "name": user.display_name or member if user else member,
-                "github_login": await User.login_for_slack(member),
+                "github_login": (person.github_login or None) if person else None,
                 "status_text": user.profile.status_text if user else None,
                 "status_emoji": user.profile.status_emoji if user else None,
                 "status_expiration": user.profile.status_expiration if user else None,
@@ -216,6 +221,9 @@ async def slack_post_message(
 ) -> SlackMessageReceipt | SlackChannelError:
     """Post a standalone message to a channel the Open SWE bot belongs to."""
     channel_id = channel_id.strip()
+    if not _CHANNEL_ID_RE.fullmatch(channel_id) and (person := await User.resolve(channel_id)):
+        channel_id = person.slack_user_id or channel_id
+    message = await PersonMention.to_slack(message)
     if SLACK_USER_ID_RE.fullmatch(channel_id):
         return await _dm_automation_creator(channel_id, message)
     if not _CHANNEL_ID_RE.fullmatch(channel_id):

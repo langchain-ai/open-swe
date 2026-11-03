@@ -337,6 +337,7 @@ class ThreadInbox:
                             person["id"],
                             relayed_from if isinstance(relayed_from, str) else None,
                             passage_replies(content.get(REPLIES_KEY)),
+                            addressed_to_agent=not queued.passive,
                         ),
                         injected_dynamic_context_hashes=injected,
                     )

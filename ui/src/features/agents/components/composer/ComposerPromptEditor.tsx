@@ -15,6 +15,7 @@ import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin"
 import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { FileIcon } from "@phosphor-icons/react/dist/ssr/File"
+import { PersonTag } from "../PersonTag"
 import { HashIcon } from "@phosphor-icons/react/dist/ssr/Hash"
 import {
   $applyNodeReplacement,
@@ -38,7 +39,6 @@ import {
   KEY_TAB_COMMAND,
 } from "lexical"
 
-import { SlackUserMention } from "../messages/SlackMrkdwn"
 import { SkillBadge } from "../SkillBadge"
 import { splitPromptIntoSegments } from "./composerMentions"
 import { basenameOfPath, serializeComposerFileLink } from "./composerTrigger"
@@ -244,33 +244,33 @@ function $createComposerSkillNode(
   return $applyNodeReplacement(new ComposerSkillNode(name, source))
 }
 
-type SlackReferenceKind = "user" | "channel"
+type ReferenceKind = "user" | "channel"
 
-type SerializedComposerSlackNode = Spread<
+type SerializedComposerReferenceNode = Spread<
   {
-    kind: SlackReferenceKind
+    kind: ReferenceKind
     referenceId: string
     name: string
     source: string
-    type: "composer-slack"
+    type: "composer-reference"
     version: 1
   },
   SerializedLexicalNode
 >
 
-/** A Slack reference rendered as a chip over its canonical token. */
-class ComposerSlackNode extends DecoratorNode<React.ReactElement> {
-  __kind: SlackReferenceKind
+/** A person or Slack channel reference rendered as a chip over its canonical token. */
+class ComposerReferenceNode extends DecoratorNode<React.ReactElement> {
+  __kind: ReferenceKind
   __referenceId: string
   __name: string
   __source: string
 
   static override getType(): string {
-    return "composer-slack"
+    return "composer-reference"
   }
 
-  static override clone(node: ComposerSlackNode): ComposerSlackNode {
-    return new ComposerSlackNode(
+  static override clone(node: ComposerReferenceNode): ComposerReferenceNode {
+    return new ComposerReferenceNode(
       node.__kind,
       node.__referenceId,
       node.__name,
@@ -280,9 +280,9 @@ class ComposerSlackNode extends DecoratorNode<React.ReactElement> {
   }
 
   static override importJSON(
-    serialized: SerializedComposerSlackNode
-  ): ComposerSlackNode {
-    return $createComposerSlackNode(
+    serialized: SerializedComposerReferenceNode
+  ): ComposerReferenceNode {
+    return $createComposerReferenceNode(
       serialized.kind,
       serialized.referenceId,
       serialized.name,
@@ -291,7 +291,7 @@ class ComposerSlackNode extends DecoratorNode<React.ReactElement> {
   }
 
   constructor(
-    kind: SlackReferenceKind,
+    kind: ReferenceKind,
     referenceId: string,
     name: string,
     source: string,
@@ -304,14 +304,14 @@ class ComposerSlackNode extends DecoratorNode<React.ReactElement> {
     this.__source = source
   }
 
-  override exportJSON(): SerializedComposerSlackNode {
+  override exportJSON(): SerializedComposerReferenceNode {
     return {
       ...super.exportJSON(),
       kind: this.__kind,
       referenceId: this.__referenceId,
       name: this.__name,
       source: this.__source,
-      type: "composer-slack",
+      type: "composer-reference",
       version: 1,
     }
   }
@@ -335,6 +335,12 @@ class ComposerSlackNode extends DecoratorNode<React.ReactElement> {
   }
 
   override decorate(): React.ReactElement {
+    if (this.__kind === "user")
+      return (
+        <span contentEditable={false} spellCheck={false}>
+          <PersonTag name={this.__name} className="text-xxs" />
+        </span>
+      )
     return (
       <span
         className={MENTION_CHIP_CLASS_NAME}
@@ -342,45 +348,37 @@ class ComposerSlackNode extends DecoratorNode<React.ReactElement> {
         spellCheck={false}
         title={this.__referenceId}
       >
-        {this.__kind === "user" ? (
-          <span className="truncate leading-tight select-none">
-            <SlackUserMention userId={this.__referenceId} />
-          </span>
-        ) : (
-          <>
-            <HashIcon
-              aria-hidden
-              className="size-3.5 shrink-0 opacity-70"
-              weight="regular"
-            />
-            <span className="truncate leading-tight select-none">
-              {this.__name}
-            </span>
-          </>
-        )}
+        <HashIcon
+          aria-hidden
+          className="size-3.5 shrink-0 opacity-70"
+          weight="regular"
+        />
+        <span className="truncate leading-tight select-none">
+          {this.__name}
+        </span>
       </span>
     )
   }
 }
 
-function $createComposerSlackNode(
-  kind: SlackReferenceKind,
+function $createComposerReferenceNode(
+  kind: ReferenceKind,
   referenceId: string,
   name: string,
   source: string
-): ComposerSlackNode {
+): ComposerReferenceNode {
   return $applyNodeReplacement(
-    new ComposerSlackNode(kind, referenceId, name, source)
+    new ComposerReferenceNode(kind, referenceId, name, source)
   )
 }
 
 function isDecoratorNode(
   node: unknown
-): node is ComposerMentionNode | ComposerSkillNode | ComposerSlackNode {
+): node is ComposerMentionNode | ComposerSkillNode | ComposerReferenceNode {
   return (
     node instanceof ComposerMentionNode ||
     node instanceof ComposerSkillNode ||
-    node instanceof ComposerSlackNode
+    node instanceof ComposerReferenceNode
   )
 }
 
@@ -566,11 +564,16 @@ function $setComposerPrompt(
       paragraph.append($createComposerMentionNode(segment.path, segment.source))
     } else if (segment.type === "user") {
       paragraph.append(
-        $createComposerSlackNode("user", segment.userId, "", segment.source)
+        $createComposerReferenceNode(
+          "user",
+          segment.userId,
+          segment.name,
+          segment.source
+        )
       )
     } else if (segment.type === "channel") {
       paragraph.append(
-        $createComposerSlackNode(
+        $createComposerReferenceNode(
           "channel",
           segment.channelId,
           segment.name,
@@ -816,7 +819,7 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
     () => ({
       namespace: "open-swe-composer",
       editable: true,
-      nodes: [ComposerMentionNode, ComposerSkillNode, ComposerSlackNode],
+      nodes: [ComposerMentionNode, ComposerSkillNode, ComposerReferenceNode],
       editorState: () => {
         $setComposerPrompt(
           initialValueRef.current,

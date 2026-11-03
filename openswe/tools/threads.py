@@ -359,6 +359,8 @@ async def list_threads(
     requested = (
         participant.strip() if isinstance(participant, str) and participant.strip() else None
     )
+    if requested and (person := await User.resolve(requested)) and person.github_login:
+        requested = person.github_login
     if requested and all_users:
         return _failure("participant and all_users cannot be used together")
     if scope not in {"all", "interactive", "automation"}:

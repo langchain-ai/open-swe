@@ -1,3 +1,4 @@
+import { PersonTag } from "../PersonTag"
 import { useQueries, useQuery } from "@tanstack/react-query"
 import { Fragment } from "react"
 import { api } from "@/lib/api"
@@ -125,6 +126,9 @@ function slackTokenNode(token: string, key: string): ReactNode {
 
   if (!label && USER_MENTION.test(target)) {
     return <SlackUserMention key={key} userId={target.slice(1)} />
+  }
+  if (label && target.startsWith("@user:")) {
+    return <PersonTag key={key} name={label} />
   }
 
   const tokenLabel = slackTokenLabel(target, label)

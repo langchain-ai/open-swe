@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from openswe.run_config import RunConfig
+from openswe.users import User
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
 from openswe.utils.thread_reads import read_thread
@@ -120,6 +121,8 @@ async def pr_author_login(requested: str | None = None) -> str | None:
     cfg, metadata = await _thread_scope()
     if cfg.auth_provider == "langsmith":
         raise PermissionError("Agent Workspace has no GitHub repository access")
+    if requested and (person := await User.resolve(requested)) and person.github_login:
+        requested = person.github_login
     if metadata.get("visibility", "public") == "private":
         return _private_owner_login(cfg, metadata)
     owner = metadata.get("owner_login")

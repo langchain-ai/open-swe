@@ -7,6 +7,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -333,7 +334,7 @@ describe("ChatComposer options", () => {
 
 describe("ChatComposer people autocomplete", () => {
   it("dismisses an empty people menu with Escape without stopping a run", async () => {
-    vi.spyOn(api, "listSlackUsers").mockResolvedValue({ users: [] })
+    vi.spyOn(api, "listMentionablePeople").mockResolvedValue({ people: [] })
     renderComposer(true, {
       restoreDraft: { key: 1, text: "@nobody", images: [] },
     })
@@ -347,7 +348,7 @@ describe("ChatComposer people autocomplete", () => {
     vi.restoreAllMocks()
   })
 
-  it("inserts a canonical Slack mention by keyboard and submits it", async () => {
+  it("inserts a person mention by keyboard, named at once, and submits it", async () => {
     Object.defineProperty(Range.prototype, "getBoundingClientRect", {
       configurable: true,
       value: () => new DOMRect(),
@@ -356,30 +357,33 @@ describe("ChatComposer people autocomplete", () => {
       configurable: true,
       value: () => [],
     })
-    vi.spyOn(api, "listSlackUsers").mockResolvedValue({
-      users: [
+    const bobId = "01900000-0000-7000-8000-000000000002"
+    vi.spyOn(api, "listMentionablePeople").mockResolvedValue({
+      people: [
         {
-          id: "U123BOB",
-          name: "bob",
-          display_name: "Bob",
-          real_name: "Bob Smith",
+          id: bobId,
+          name: "Bob",
+          login: "bob",
+          avatar_url: "",
+          involved: true,
         },
       ],
     })
-    vi.spyOn(api, "slackUserName").mockResolvedValue({ name: "Bob" })
     const onSubmit = vi.fn()
     renderComposer(false, {
       onSubmit,
       restoreDraft: { key: 1, text: "Ask @bob", images: [] },
     })
-    await screen.findByRole("option", { name: /@Bob .*@bob/ })
+    await screen.findByRole("option", {
+      name: /@Bob .*@bob · in this conversation/,
+    })
     const editor = screen.getByTestId("composer-editor")
     fireEvent.keyDown(editor, { key: "Tab", code: "Tab" })
-    await screen.findByText("@Bob")
+    await within(editor).findByTitle("@Bob")
     fireEvent.keyDown(editor, { key: "Enter", code: "Enter" })
     await waitFor(() =>
       expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({ text: "Ask <@U123BOB>" }),
+        expect.objectContaining({ text: `Ask <@user:${bobId}|Bob>` }),
         expect.anything()
       )
     )

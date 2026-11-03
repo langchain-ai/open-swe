@@ -8,20 +8,18 @@ import pytest
 from openswe.jobs import queue
 from openswe.notifications import service
 from openswe.notifications.service import AppNotification
-from openswe.slack.user_options import SlackUserOption
 from openswe.threads import index, mentions
+from openswe.threads.mention_directory import MentionDirectory
 from openswe.users import User
+from openswe.users.mentions import PersonMention
 
 
-async def test_titles_show_mentions_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
-    people = [SlackUserOption(id="W123BOB", name="bob", display_name="Bob", real_name="Bob B")]
-    monkeypatch.setattr(SlackUserOption, "all", AsyncMock(return_value=people))
-    assert (
-        await SlackUserOption.readable("Ask <@W123BOB> and <@U999> in <#C123|eng>")
-        == "Ask @Bob and @someone in #eng"
-    )
-    monkeypatch.setattr(SlackUserOption, "all", AsyncMock(side_effect=RuntimeError("down")))
-    assert await SlackUserOption.readable("Ask <@W123BOB>") == "Ask @someone"
+def test_mentions_carry_the_name_they_showed() -> None:
+    bob = "<@user:01900000-0000-7000-8000-000000000002|Bob B>"
+    assert PersonMention.readable(f"Ask {bob} in <#C123|eng>") == "Ask @Bob B in #eng"
+    assert PersonMention.leads(f"  {bob} take a look")
+    assert not PersonMention.leads(f"take a look {bob}")
+    assert not PersonMention.leads("<@U123BOB> take a look")
 
 
 @pytest.mark.parametrize("review", [False, True])
@@ -31,16 +29,17 @@ async def test_mentions_are_deduplicated_and_do_not_disclose_private_content(
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bob")
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
     alice = await User.sign_in("github", "1", login="alice")
-    await alice.link("slack", "U123SELF")
     bob = await User.sign_in("github", "2", login="bob")
-    await bob.link("slack", "U123BOB")
     metadata = {"source": "dashboard", "visibility": "private"}
     if review:
         metadata.update(source="review_chat", repo_owner="acme", repo_name="demo", pr_number=1)
     thread_id = str(uuid7())
     await index.create(thread_id, runtime="mda", metadata=metadata)
     notification = mentions.ThreadMentions(
-        thread_id, "alice", "message-1", "secret <@U123SELF> <@U123BOB> <@U123BOB>"
+        thread_id,
+        "alice",
+        "message-1",
+        f"secret <@user:{alice.id}|Alice> <@user:{bob.id}|Bob> <@user:{bob.id}|Bob>",
     )
     await notification.notify()
     await notification.notify()
@@ -58,14 +57,15 @@ async def test_mentions_are_deduplicated_and_do_not_disclose_private_content(
 
 
 async def test_mentions_cap_and_rate_limit_sender(monkeypatch, registry_db) -> None:
-    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", ",".join(["alice", *(f"p{i}" for i in range(100))]))
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
     await User.sign_in("github", "1", login="alice")
+    people = [await User.sign_in("github", str(100 + i), login=f"p{i}") for i in range(100)]
     thread_id = str(uuid7())
     await index.create(thread_id, runtime="mda", metadata={"source": "dashboard"})
     send = AsyncMock()
-    monkeypatch.setattr(AppNotification, "send_to_slack", send)
-    tokens = " ".join(f"<@U123{i:03}>" for i in range(100))
+    monkeypatch.setattr(AppNotification, "send", send)
+    tokens = " ".join(f"<@user:{person.id}|{i}>" for i, person in enumerate(people))
     for number in range(5):
         await mentions.ThreadMentions(thread_id, "alice", str(number), tokens).notify()
         assert send.await_count <= min(10 * (number + 1), 30)
@@ -73,14 +73,17 @@ async def test_mentions_cap_and_rate_limit_sender(monkeypatch, registry_db) -> N
 
 
 async def test_one_failed_recipient_does_not_stop_other_mentions(monkeypatch, registry_db) -> None:
-    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bad,good")
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
     await User.sign_in("github", "1", login="alice")
+    bad = await User.sign_in("github", "2", login="bad")
+    good = await User.sign_in("github", "3", login="good")
     thread_id = str(uuid7())
     await index.create(thread_id, runtime="mda", metadata={"source": "dashboard"})
     send = AsyncMock(side_effect=[RuntimeError("offline"), None])
-    monkeypatch.setattr(AppNotification, "send_to_slack", send)
-    await mentions.ThreadMentions(thread_id, "alice", "m1", "<@U123BAD> <@U123GOOD>").notify()
+    monkeypatch.setattr(AppNotification, "send", send)
+    text = f"<@user:{bad.id}|Bad> <@user:{good.id}|Good>"
+    await mentions.ThreadMentions(thread_id, "alice", "m1", text).notify()
     assert send.await_count == 2
 
 
@@ -93,7 +96,7 @@ async def test_dispatch_does_not_wait_for_notification_delivery(monkeypatch) -> 
             entered.set()
             await release.wait()
 
-    notification = HeldMentions("tid", "alice", "m1", "<@U123BOB>")
+    notification = HeldMentions("tid", "alice", "m1", f"<@user:{uuid7()}|Bob>")
     notification.dispatch()
     await entered.wait()
     assert notification._pending
@@ -120,3 +123,37 @@ async def test_recent_desktop_users_get_a_longer_slack_fallback_delay(
         delays[user.login_for("github")] = job.due_at - job.created_at
     assert delays["alice"] < timedelta(minutes=2)
     assert timedelta(hours=7, minutes=59) < delays["bob"] <= timedelta(hours=8, seconds=5)
+
+
+async def test_directory_offers_people_in_the_conversation_first(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "viewer,ada,zed")
+    viewer = await User.sign_in("github", "1", login="viewer")
+    await User.sign_in("github", "2", login="ada")
+    zed = await User.sign_in("github", "3", login="zed")
+    metadata = {f"participant_identity:user:{zed.id}": f"user:{zed.id}"}
+    directory = await MentionDirectory.for_conversation(viewer.id, str(uuid7()), metadata)
+    assert [(person.login, person.involved) for person in directory.people] == [
+        ("zed", True),
+        ("ada", False),
+    ]
+
+
+async def test_tools_resolve_a_person_from_any_reference(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "bob")
+    bob = await User.sign_in("github", "2", login="bob")
+    await bob.link("slack", "U123BOB")
+    for reference in (
+        f"user:{bob.id}",
+        str(bob.id),
+        f"<@user:{bob.id}|Bob>",
+        "U123BOB",
+        "<@U123BOB>",
+        "@bob",
+    ):
+        person = await User.resolve(reference)
+        assert person is not None and person.id == bob.id, reference
+    assert await User.resolve("nobody") is None
