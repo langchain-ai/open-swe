@@ -3,7 +3,8 @@
 Starting a run marks its thread busy. What the run left behind (idle, an
 interrupt waiting on a person, an error) is the runtime's to say, so the
 run-complete webhook asks it, and a reconcile job asks again for any thread
-still marked busy long after a webhook should have come. A run that froze while
+still marked busy long after a webhook should have come, closing the transcript
+turn of the run that ended as the webhook would have. A run that froze while
 still reporting itself running is failed by ``openswe.threads.stalls``.
 """
 
@@ -19,6 +20,7 @@ from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadStatus
 from openswe.threads.runtimes import RUNTIMES, now_ms
 from openswe.threads.store import THREADS
+from openswe.transcript.turns import RUN_OUTCOMES, settle_run_turn
 from openswe.ui_invalidations import Topic
 
 
@@ -160,12 +162,26 @@ async def reconcile_busy_threads() -> int:
     unstarted = {thread.thread_id for thread in await index.busy_since(now - UNSTARTED_CHANNEL_RUN)}
     for thread in await index.busy_since(now - STALE_BUSY):
         try:
+            # The ended run's turn first: no webhook closed it, and a run that failed never
+            # reported its end itself. While the thread is still busy, the next reconcile
+            # tries again if this fails.
+            runtime = RUNTIMES.runs_on(thread.runtime)
+            run = await runtime.latest_run(thread.thread_id)
+            if run is not None and (outcome := RUN_OUTCOMES.get(run.status)) is not None:
+                await settle_run_turn(
+                    thread.thread_id,
+                    run.run_id,
+                    outcome=outcome,
+                    error=await runtime.run_error(thread.thread_id)
+                    if outcome == "failed"
+                    else None,
+                )
             status = await refresh_thread_status(
                 thread.thread_id, unstarted_is_idle=thread.thread_id in unstarted
             )
         except Exception:
             logger.warning(
-                "Could not refresh a busy thread's status",
+                "Could not settle a busy thread",
                 extra={"thread_id": thread.thread_id},
                 exc_info=True,
             )

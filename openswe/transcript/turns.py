@@ -1,17 +1,17 @@
-"""Closing a turn from outside the graph: the completion webhook and cancels.
+"""Closing a turn from outside the graph: the completion webhook, the status reconcile and cancels.
 
 The middleware normally ends a turn itself. These helpers are the safety net for
-the cases where it cannot — the process died, or the user cancelled the run —
-and they only ever act on a turn that is still open. The command ids match the
-ones the middleware uses, so whichever writer gets there first wins and the
-other is deduplicated by its receipt.
+the cases where it cannot — the process died, the run failed before it could
+report its end, or the user cancelled the run — and they only ever act on a turn
+that is still open. The command ids match the ones the middleware uses, so
+whichever writer gets there first wins and the other is deduplicated by its receipt.
 """
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Final, Literal
 from uuid import UUID
 
 from sqlalchemy import text
@@ -23,6 +23,13 @@ from openswe.transcript.events import TurnCompleted, TurnFailed, TurnInterrupted
 logger = logging.getLogger(__name__)
 
 type TurnOutcome = Literal["completed", "failed", "interrupted"]
+# How a run that ended, by its status on the runtime, leaves its turn.
+RUN_OUTCOMES: Final[Mapping[str, TurnOutcome]] = {
+    "success": "completed",
+    "interrupted": "interrupted",
+    "error": "failed",
+    "timeout": "failed",
+}
 _OPEN_STATES = frozenset({"requested", "running"})
 
 
