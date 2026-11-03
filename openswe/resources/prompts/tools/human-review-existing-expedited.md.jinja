@@ -3,6 +3,7 @@ This pull request has an open expedited review request waiting for its author to
 {%- elif posted -%}
 This pull request has an open expedited review card, which already satisfies the review request; a standard review cannot run concurrently.{% if permalink %} Open in Slack: {{ permalink }}{% endif %} Tell the requester that review is already in progress; do not retry a standard review.
 {%- else -%}
-This pull request has an open expedited review request whose card was never posted in Slack, and a standard review cannot run concurrently. Tell the requester no reviewer has been asked yet; do not retry a standard review.
+This pull request has an open expedited review request whose card was never posted in Slack, and a standard review cannot run concurrently.
+Tell the requester no reviewer has been asked yet; do not retry a standard review.
 {%- endif %}
 Do not cancel the expedited request unless the requester explicitly asks.
