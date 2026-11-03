@@ -31,6 +31,21 @@ test("email-match recovery verifies GitHub and survives the next login", async (
   });
   expect(blocked.status()).toBe(403);
 
+  await page.evaluate(() =>
+    localStorage.setItem("open-swe.repos.cache.v2", "stale"),
+  );
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect(page).toHaveURL(/\/login(?:\?|$)/);
+  expect((await page.request.get("/dashboard/api/me")).status()).toBe(401);
+  expect(
+    await page.evaluate(() => localStorage.getItem("open-swe.repos.cache.v2")),
+  ).toBeNull();
+  await page.getByRole("link", { name: "Continue with LangSmith" }).click();
+  await page
+    .getByRole("textbox", { name: "Email" })
+    .fill(thread.email.toUpperCase());
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+
   await page.getByRole("button", { name: "Link GitHub", exact: true }).click();
   await page.getByRole("textbox", { name: "GitHub user" }).fill(thread.login);
   await page.getByRole("button", { name: "Authorize GitHub" }).click();

@@ -1,5 +1,9 @@
 import { Card } from "@langchain/macaw-components/Card"
 import { Button } from "@langchain/macaw-components/Button"
+import { useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
+import { productAnalytics } from "@/lib/posthog"
+import { clearCachedRepos } from "@/lib/repoCache"
 import { api } from "@/lib/api"
 import { Text } from "@langchain/macaw-components/Text"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
@@ -9,6 +13,8 @@ import { LinkGitHubButton } from "@/features/settings/components/ConnectionsSect
 
 /** Stands in for the coding features until the signed-in person links GitHub. */
 export function GitHubLinkPrompt({ user }: { user: SessionUser }) {
+  const qc = useQueryClient()
+  const navigate = useNavigate()
   return (
     <div className="flex flex-1 items-center justify-center p-space-5">
       <Card
@@ -36,7 +42,10 @@ export function GitHubLinkPrompt({ user }: { user: SessionUser }) {
             size="sm"
             onClick={async () => {
               await api.logout()
-              window.location.assign("/login")
+              productAnalytics.reset()
+              clearCachedRepos()
+              qc.setQueryData(["session"], null)
+              navigate({ to: "/login" })
             }}
           >
             Sign out
