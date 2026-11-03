@@ -15,6 +15,7 @@ from managed_deepagents import (
     SlackInteractionEvent,
 )
 from managed_deepagents._channels.http.types import ChannelName
+from managed_deepagents._channels.run_input import RunChannel, normalize_run_inputs
 from pydantic import BaseModel
 from runtime_api.endpoint import Endpoint
 from runtime_api.slack import (
@@ -138,6 +139,11 @@ def test_an_option_answers_for_the_person_it_was_for(monkeypatch: pytest.MonkeyP
     assert _options(result)["input"] == _RUN.input
     # A click waits behind the work in progress, as the person's message would.
     assert _options(result)["multitask_strategy"] == "enqueue"
+    # MDA starts it on the click's conversation.
+    [run] = normalize_run_inputs(
+        result, RunChannel(name="slack", provider="slack", conversation_thread_id=_THREAD.id)
+    )
+    assert "thread" not in run
     [asked] = slack.asked
     assert asked.click == OptionClick(text="Option B")
     assert (asked.user_id, asked.message_ts, asked.action_ts, asked.team_id) == (
