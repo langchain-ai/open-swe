@@ -1895,6 +1895,7 @@ async def slack_delete_message(request: Request) -> JSONResponse:
 async def slack_conversations_open(request: Request) -> JSONResponse:
     body = await _slack_form(request)
     user = str(body.get("users") or "")
+    user = {"W123BOB": "U_BOB", "W123ALICE": "U_ALICE"}.get(user, user)
     return _ok({"channel": {"id": f"D_{user.removeprefix('U_')}"}})
 
 

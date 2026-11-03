@@ -9,7 +9,6 @@ from pydantic import BaseModel, computed_field
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 
-from openswe import event_claims
 from openswe.database import postgres
 from openswe.jobs import queue
 from openswe.notifications.models import Notification
@@ -89,43 +88,6 @@ class AppNotification(BaseModel):
             key=f"{JOB_KIND}:{recipient.id}:{key}",
             by=by,
             replace=False,
-        )
-
-    @classmethod
-    async def send_to_slack(
-        cls,
-        slack_user_id: str,
-        *,
-        key: str,
-        title: str,
-        body: str,
-        url: str,
-        fallback_text: str,
-        origin: DmOrigin | None = None,
-        by: UUID | None = None,
-    ) -> None:
-        recipient = await User.for_identity("slack", slack_user_id)
-        if recipient is None:
-            claim_key = f"{slack_user_id}:{key}"
-            if not await event_claims.claim(
-                "notification-fallback", claim_key, ttl=timedelta(days=7)
-            ):
-                return
-            try:
-                await post_dm(slack_user_id, fallback_text, origin=origin)
-            except Exception:
-                await event_claims.release("notification-fallback", claim_key)
-                raise
-            return
-        await cls.send(
-            recipient,
-            key=key,
-            title=title,
-            body=body,
-            url=url,
-            fallback_text=fallback_text,
-            origin=origin,
-            by=by,
         )
 
     @classmethod
