@@ -42,6 +42,7 @@ from openswe.slack.orphan import (
 )
 from openswe.slack.records import SlackRun, SlackThread, store_slack_message_run_mapping
 from openswe.slack.review_links import preserve_github_links as github_link_delivery
+from openswe.slack.routed_work import RoutedWork
 from openswe.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
 from openswe.slack.tools.read_thread_messages import fetch_and_format_thread
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
@@ -240,6 +241,8 @@ async def send_slack_reply(
                     "Could not update Slack investigation kickoff state",
                     extra={"slack_channel": channel_id, "slack_thread_ts": thread_ts},
                 )
+    if message_ts and response_type == "final" and thread_id and run_id:
+        await RoutedWork(thread_id).answered(run_id)
     if run_id and not is_code_channel_session(str(thread_ts)):
         # Slack drops the status when the app posts.
         await restore_slack_thinking_status(str(channel_id), str(thread_ts))
