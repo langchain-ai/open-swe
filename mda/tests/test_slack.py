@@ -379,13 +379,6 @@ def test_an_untagged_kitchen_channel_message_or_solo_followup_is_a_turn(
         assert turn.kitchen_channel is facts.kitchen_channel
 
 
-def test_a_code_channels_message_asks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    backend = _backend(monkeypatch, SlackTurnStarted())
-
-    assert asyncio.run(slack.start_turn(_event(code_channel=True), _thread())) is None
-    assert backend.asked_facts == []
-
-
 def test_the_channel_asks_its_handlers_for_every_message_and_click() -> None:
     from channels.slack import channel  # noqa: PLC0415
     from rt.slack_clicks import start_click  # noqa: PLC0415

@@ -112,8 +112,6 @@ async def start_turn(
 ) -> ChannelRunResult | ChannelReplyResult | None:
     """The run a message starts on its conversation's thread, the reply that says why
     it starts none, or ``None``."""
-    if event.code_channel:
-        return None
     raw = event.payload
     app_id = thread.source_thread_key.split(":")[2:3]
     bot_user_id, bot_username = await _bot_identity()
@@ -377,7 +375,6 @@ async def _start_turn(
             request="\n\n".join(prompt.turn_sections), resolved_links=links_section
         ),
         constant_context=slack_prompt.thread_constant_context(
-            code_channel=False,
             review_guide=prompt.review_guide,
             concierge=facts.concierge,
             kitchen=turn.kitchen_channel,
@@ -409,8 +406,6 @@ async def start_edit(
     agent never got starts nothing; a concierge DM's runs go on another thread, whose
     state the handler can't read, so its edits start nothing.
     """
-    if event.code_channel:
-        return None
     raw = event.payload
     edited, previous = raw.get("message"), raw.get("previous_message")
     if not (isinstance(edited, Mapping) and isinstance(previous, Mapping)):

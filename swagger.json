@@ -7524,10 +7524,6 @@
             "title": "Channelid",
             "type": "string"
           },
-          "codeChannel": {
-            "title": "Codechannel",
-            "type": "boolean"
-          },
           "deliveryId": {
             "title": "Deliveryid",
             "type": "string"
@@ -7576,10 +7572,6 @@
           },
           "value": {
             "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-          },
-          "viewId": {
-            "title": "Viewid",
-            "type": "string"
           }
         },
         "required": [
