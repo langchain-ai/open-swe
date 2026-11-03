@@ -109,9 +109,11 @@ html.dark,
     /* Compact control geometry — keep semantic so chat controls, menus, and
        tooltips cannot quietly drift apart. */
     --control-radius: var(--radius-md);
-    /* Height of the right panel's tab bar; the empty-state launcher offsets by
-       it so its cards center against the whole panel. */
-    --workspace-topbar-height: 2.25rem;
+    /* Height of the right panel's tab bar. It matches the thread header (h-11)
+       so their lines meet and the panel toggle keeps its spot whether the
+       panel is open or collapsed; the empty-state launcher offsets by it so
+       its cards center against the whole panel. */
+    --workspace-topbar-height: 2.75rem;
 }
 
 @layer utilities {
