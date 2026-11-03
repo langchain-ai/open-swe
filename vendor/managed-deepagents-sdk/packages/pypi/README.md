@@ -392,8 +392,9 @@ the conversation it posts to, in every run of the thread, typed by `provider`:
 - `LinearChannelTarget`: `organization_id`, `issue_id`, and `identifier`,
   `comment_id` or `session_id` when the conversation has one.
 
-`target` is `None` for a channel without a typed target, such as
-`channels.http()`.
+In a scheduled run that starts a new thread, `post` posts at top level, so
+`target` has no `thread_ts`, `comment_id` or `session_id`. `target` is `None` for
+a channel without a typed target, such as `channels.http()`.
 
 ```python
 origin = runtime.thread.origin

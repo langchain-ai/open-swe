@@ -6,5 +6,5 @@
 1174 48365c151ff3dabfd9ac10665565c3dfcce59e23 feat(channels): handle every GitHub action of handled events, and installation events
 1175 707e3e4ec9ccc0174cf810a2e7b29a224378c9c6 feat(channels): let Slack handlers take edits, deletions and reactions
 1212 6bf01c5e404dc220dbcadcd2a261c30ca6800cf6 feat(channels): Slack code channels
-1218 5a8ebcecd5b55d8f5508b6dc8077c4939229c0f2 feat(channels): give a runtime channel a typed target
+1218 8a41f58a8efdaada4b52ceea00918287f3146e41 feat(channels): give a runtime channel a typed target
 1222 f682afc2a761b4b8e36ac21ad9b0aa3c70636488 feat(channels): Slack code channel view clicks reach the interaction handler

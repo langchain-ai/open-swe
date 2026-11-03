@@ -178,7 +178,7 @@ def resolve_channel_info(
         provider=binding["provider"],
         event=binding.get("event"),
         raw_event=binding.get("raw_event"),
-        channel_target=channel_target(binding),
+        channel_target=channel_target(binding, binding.get("event")),
     )
 
 
@@ -230,7 +230,7 @@ def runtime_channel(
         target=binding["target"],
         transport=cast("ChannelMessagingAdapter | None", transport),
         start_thread=start_thread,
-        channel_target=channel_target(binding),
+        channel_target=channel_target(binding, binding.get("event")),
     )
 
 
