@@ -149,6 +149,47 @@ test.describe("my pull requests", () => {
     await expect(page.getByText("Someone else's change")).toHaveCount(0);
   });
 
+  test("enlarges Markdown and HTML description images through the PR image proxy", async ({
+    page,
+  }) => {
+    const image =
+      "https://raw.githubusercontent.com/langchain-ai/open-swe/main/assets/threads-kanban-prototype.png";
+    const mine = await seedOpenPullRequest(page, {
+      repo: DEMO,
+      title: "Preview screenshots",
+      body: `![Dashboard](${image})\n\n<table><tr><td><img src="${image}" alt="Comparison" /></td></tr></table>`,
+      ...approved,
+    });
+    const proxy = `/dashboard/api/reviews/fakeorg/demo/${mine.number}/image?url=${encodeURIComponent(image)}`;
+    await page.route(`**${proxy}`, (route) =>
+      route.fulfill({
+        contentType: "image/png",
+        path: "../../assets/threads-kanban-prototype.png",
+      }),
+    );
+    await openMine(page);
+    await card(page, mine)
+      .getByRole("button", { name: "Preview screenshots", exact: true })
+      .click();
+    const preview = page.getByRole("complementary", {
+      name: `Pull request ${DEMO} #${mine.number}`,
+    });
+    const dashboard = preview.getByRole("button", {
+      name: "Enlarge Dashboard",
+    });
+    await expect(dashboard).toHaveAttribute("src", proxy);
+    await dashboard.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "Dashboard" });
+    await expect(dialog.getByRole("img")).toHaveAttribute("src", proxy);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await preview.getByRole("button", { name: "Enlarge Comparison" }).click();
+    await expect(
+      page.getByRole("dialog", { name: "Comparison" }).getByRole("img"),
+    ).toHaveAttribute("src", proxy);
+  });
+
   test("keeps pending review requests separate from authored PRs", async ({
     page,
   }) => {
