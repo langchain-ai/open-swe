@@ -139,7 +139,7 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 | `OPEN_SWE_BACKEND_URL` | Public HTTPS origin of the Open SWE backend |
 | `LANGSMITH_API_KEY` | Authenticates the LLM Gateway and tracing |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `BASETEN_API_KEY`, … | Model keys for direct (non-gateway) model calls |
-| `OPENAI_BASE_URL`, `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | As the backend's: models are built the same way on both sides (`runtime_api.models`) |
+| `OPENAI_BASE_URL`, `LANGSMITH_GATEWAY_BASE_URL`, `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | Optional, as the backend's: both sides build models with `runtime_api.models`. `deploy_mda.yml` forwards the repository variables of these names when set; unset, MDA uses the defaults (`wss://api.openai.com/v1`, `https://gateway.smith.langchain.com`, the Responses API) |
 | `LANGSMITH_GATEWAY_API_KEY` | Gateway key, the backend's; falls back to `LANGSMITH_API_KEY` |
 | `MDA_SERVICE_SECRET` | Shared with the backend: MDA signs each call its channels make to the backend's endpoints with it, as Standard Webhooks does |
 
@@ -332,6 +332,8 @@ A message lost between Trigger Server and the channel (a deployment restart) is 
 When MDA retries `start_slack_turn` (same `webhook-id`), the backend builds the run again, but answers a decline once.
 Each forward logs one outcome line (`forward_outcome`: `delivered`, `refused` or `gave_up`, with `status` and `attempts`); each answer without a run logs its `no_run_reason`.
 A GitHub issue mention MDA's channel never takes gets a 😕 on its comment.
+
+A `/btw` question, a breakout into a new thread and a `/breakout:web` question branch off the conversation they're sent in (`openswe/slack/forks.py`). When MDA's channel holds that conversation and the person may read its thread (a private thread's owner), the branch's thread is a LangGraph fork of it (Agent Server's `threads/{id}/copy`, as the conversation): it knows what the agent did there, and its first turn adds only the Slack messages the agent never got. The fork starts clean: it keeps MDA's owner and thread record and nothing else of the original's metadata, so it gets a sandbox of its own, and it belongs to the person who asked. Otherwise, or when forking fails, the branch is seeded from the Slack thread as before. The original thread and its running work are left alone.
 
 Which conversations go where (`mda_can_start` in `openswe/slack/mda_forwarding.py`):
 

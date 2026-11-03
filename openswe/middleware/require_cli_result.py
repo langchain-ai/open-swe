@@ -8,6 +8,7 @@ from typing import Annotated, Any, NotRequired
 from langchain.agents.middleware.types import AgentState, OmitFromOutput, hook_config
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.runtime import Runtime
+from runtime_api.model_errors import is_model_failure_reply
 
 from openswe.input_messages import (
     SystemIdentity,
@@ -87,7 +88,8 @@ class RequireCliResultMiddleware(OpenSWEMiddleware):
         last = messages[-1] if messages else None
         if not isinstance(last, AIMessage) or last.tool_calls:
             return None
-        if self._satisfied(messages):
+        # A model that could not be reached cannot give the result either.
+        if self._satisfied(messages) or is_model_failure_reply(last):
             return {"cli_result_nudges": 0}
         nudges = state.get("cli_result_nudges") or 0
         if nudges >= self._max_retries:

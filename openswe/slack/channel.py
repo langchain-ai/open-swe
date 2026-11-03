@@ -42,7 +42,7 @@ from openswe.dashboard.oauth import build_settings_url
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.input_messages import RunInput
 from openswe.mda_channels.api import ChannelCall
-from openswe.slack import mda_forwarding
+from openswe.slack import forks, mda_forwarding
 from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
 from openswe.slack.ask import by_the_way_request, prepare_ask_channel_run
@@ -208,8 +208,14 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
         turn.text, common.SLACK_BOT_USER_ID, common.SLACK_BOT_USERNAME
     )
     if turn.kind in {"by_the_way", "web"}:
-        # On a thread of its own, whoever holds the Slack thread it was asked in.
-        conversation = mda_forwarding.side_thread_id(turn.channel_id, turn.message_ts)
+        # On a thread of its own, whoever holds the Slack thread it was asked in: a fork of
+        # its conversation's thread, which knows what the agent did there, or one seeded
+        # from the Slack thread.
+        conversation = await forks.fork_thread(
+            await mda_forwarding.owned_thread(turn.channel_id, key_ts),
+            key=forks.branch_key(turn.channel_id, turn.message_ts),
+            login=owner_login,
+        ) or mda_forwarding.side_thread_id(turn.channel_id, turn.message_ts)
         await mda_forwarding.claim_side(conversation, owner_login=owner_login)
     elif (owned := await mda_forwarding.owned_thread(turn.channel_id, key_ts)) is not None:
         conversation = owned

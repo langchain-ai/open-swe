@@ -90,12 +90,13 @@ def test_a_gateway_routed_openai_model_can_use_chat_completions(
     assert model.reasoning_effort == "high"
 
 
-def test_an_anthropic_model_is_built_as_the_backend_builds_it() -> None:
+def test_an_anthropic_model_streams() -> None:
     model = build_model(_spec("anthropic:claude-opus-5-5", "high"), use_gateway=False)
 
     assert isinstance(model, ChatAnthropic)
-    # The backend never asked for streaming; the agent streams on its own when it may.
-    assert model.streaming is False
+    # Runs aren't streamed: without it LangSmith has no time to first token, and a long
+    # answer is cut off by the non-streaming request timeout.
+    assert model.streaming is True
     assert model.max_retries == 6
 
 

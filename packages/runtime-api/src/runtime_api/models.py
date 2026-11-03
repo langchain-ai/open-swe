@@ -12,12 +12,22 @@ model, never from what the other side sends.
 import logging
 import os
 from collections.abc import Mapping
+from datetime import timedelta
 from typing import Any, Final, Literal, NotRequired, TypedDict, Unpack, cast
 
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
+from pydantic import JsonValue, TypeAdapter
+
+from runtime_api.catalog import ModelSpec, RunModels, kept_route
 
 logger = logging.getLogger(__name__)
+
+# The most a model call may take, its retries across the fallback included. The
+# backend fails a run that went quiet for twice this (``openswe/threads/stalls.py``).
+MODEL_CALL_BUDGET: Final = timedelta(minutes=45)
+# Output tokens a call may produce, unless the run's settings say otherwise.
+DEFAULT_LLM_MAX_TOKENS: Final = 64_000
 
 
 class ModelOption(TypedDict):
@@ -535,6 +545,10 @@ def model_init_kwargs(
     if model_id.startswith(_TIMEOUT_PROVIDER_PREFIXES):
         model_kwargs.setdefault("timeout", DEFAULT_REQUEST_TIMEOUT_SECONDS)
 
+    if model_id.startswith("anthropic:"):
+        # Runs aren't streamed, and without a stream LangSmith has no time to first
+        # token and a long answer is cut off by the non-streaming request timeout.
+        model_kwargs.setdefault("streaming", True)
     if model_id.startswith("openai:"):
         model_kwargs["base_url"] = (
             _env("OPENAI_BASE_URL", "OPENAI_API_BASE") or OPENAI_RESPONSES_WS_BASE_URL
@@ -583,3 +597,76 @@ def make_model(
 ) -> BaseChatModel:
     """Build a chat model, optionally routed through the LangSmith LLM Gateway."""
     return build_chat_model(model_id, kwargs, use_gateway=use_gateway)
+
+
+# --- The model each call goes to ----------------------------------------------------------------
+
+_json_object = TypeAdapter(dict[str, JsonValue])
+
+
+def fallback_spec(
+    primary_model_id: str, *, fallback_model_id: str | None = None
+) -> ModelSpec | None:
+    """The model a call on ``primary_model_id`` falls back to, if any.
+
+    ``fallback_model_id`` is the deployment's choice (the backend's
+    ``LLM_FALLBACK_MODEL_ID``), which the catalog carries; without it, the other
+    provider's default.
+    """
+    model_id = fallback_model_id or fallback_model_id_for(primary_model_id)
+    if not model_id or model_id == primary_model_id:
+        return None
+    kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
+    if model_id.startswith("openai:"):
+        kwargs["reasoning"] = DEFAULT_LLM_REASONING
+    return ModelSpec(
+        model_id=model_id,
+        kwargs=_json_object.validate_python(dict(kwargs)),
+        reads_images=model_supports_images(model_id),
+    )
+
+
+def model_spec(
+    model_id: str, kwargs: Mapping[str, object], *, fallback_model_id: str | None = None
+) -> ModelSpec:
+    """``model_id`` as the runtime calls it: whether it reads images, and its fallback."""
+    return ModelSpec(
+        model_id=model_id,
+        kwargs=_json_object.validate_python(dict(kwargs)),
+        reads_images=model_supports_images(model_id),
+        fallback=fallback_spec(model_id, fallback_model_id=fallback_model_id),
+    )
+
+
+def chosen_model(
+    model_id: str, effort: object, *, fallback_model_id: str | None = None
+) -> ModelSpec:
+    """A model the run calls by id, such as one a person asked for, at ``effort``."""
+    kwargs = provider_model_kwargs(
+        model_id, effort if isinstance(effort, str) else None, max_tokens=DEFAULT_LLM_MAX_TOKENS
+    )
+    return model_spec(model_id, kwargs, fallback_model_id=fallback_model_id)
+
+
+def model_for(models: RunModels, held: Mapping[str, object]) -> ModelSpec:
+    """The model the next call goes to: one a person asked for, a route's, or the run's own.
+
+    ``held`` is the run's held state: what a person asked for (``requested_model``),
+    the route the run took (``model_route``) and the thread's model
+    (``selected_model_id``), each with its effort.
+    """
+    requested = held.get("requested_model")
+    if isinstance(requested, str) and requested:
+        return chosen_model(
+            requested, held.get("requested_effort"), fallback_model_id=models.fallback_model_id
+        )
+    route = kept_route(held.get("model_route"))
+    routed = models.routes.get(route) if route not in (None, "default") else None
+    if routed is not None:
+        return routed
+    selected = held.get("selected_model_id")
+    if isinstance(selected, str) and selected and selected != models.model.model_id:
+        return chosen_model(
+            selected, held.get("selected_effort"), fallback_model_id=models.fallback_model_id
+        )
+    return models.model

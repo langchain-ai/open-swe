@@ -22,9 +22,7 @@ from uuid import UUID
 
 from langchain_core.language_models import BaseChatModel
 from langsmith.schemas import Example, Run
-
-from openswe.utils.gateway import gateway_overrides
-from openswe.utils.model import make_model
+from runtime_api.models import gateway_overrides, make_model
 
 JUDGE_MODEL = "anthropic:claude-opus-4-5"
 

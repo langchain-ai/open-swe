@@ -12,6 +12,8 @@ dependencies = [
     "langchain-anthropic>=1.7.7",
     # Fireworks models the dashboard offers, such as Kimi.
     "langchain-fireworks>=1.7.1,<2.0.0",
+    # Gemini models the dashboard offers; it arrived only through deepagents before.
+    "langchain-google-genai>=4.4.2",
     "langchain-openai>=1.7.3,<2.0.0",
     "langchain-quickjs>=0.3.10,<0.4.0",
     "langsmith>=0.14.16",

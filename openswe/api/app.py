@@ -53,6 +53,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.bridge import listener as bridge_listener
     from openswe.dashboard.admin import configured_admins
     from openswe.dashboard.oauth import validate_github_login_allowlist
+    from openswe.dashboard.options import validate_local_dev_llm_config
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
     from openswe.jobs.kinds import WORKER as JOB_WORKER
@@ -63,7 +64,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.transcript import listener as transcript_listener
     from openswe.ui_invalidations.hub import HUB
     from openswe.users import User
-    from openswe.utils.model import validate_local_dev_llm_config
 
     pin_single_event_loop()
     validate_github_login_allowlist()

@@ -35,12 +35,18 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
-from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
+from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
+from runtime_api.models import (
+    DEFAULT_LLM_REASONING,
+    ModelKwargs,
+    make_model,
+    provider_model_kwargs,
+)
 
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.dashboard.options import gate_fable_model
@@ -51,7 +57,6 @@ from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     ExcludeToolsMiddleware,
-    RepairOrphanedToolCallsMiddleware,
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
@@ -105,12 +110,6 @@ from openswe.utils import ttl_cache
 from openswe.utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from openswe.utils.api_standards_skill import fetch_api_standards_skill
 from openswe.utils.deferred_model import make_deferred_error_model
-from openswe.utils.model import (
-    DEFAULT_LLM_REASONING,
-    ModelKwargs,
-    make_model,
-    provider_model_kwargs,
-)
 from openswe.utils.startup_trace import aphase
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = prompt("reviewer/subagent")
@@ -1039,8 +1038,6 @@ async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
             refresh_github_proxy_before_model,
-            RepairOrphanedToolCallsMiddleware(),
-            ModelRetryMiddleware(retry_on=(TimeoutError,)),
             settle_review_check_on_exit,
         ],
     )
