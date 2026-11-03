@@ -149,6 +149,12 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     await expect(
       composer.getByRole("button", { name: "This Mac", exact: true }),
     ).toBeVisible();
+    // New threads start without a project (the agent gets a task folder), so
+    // choose the registered one.
+    await composer
+      .getByRole("button", { name: "Choose project", exact: true })
+      .click();
+    await page.getByRole("option").filter({ hasText: "demo" }).click();
     await expect(
       composer.getByRole("button", { name: "demo", exact: true }),
     ).toBeVisible();
