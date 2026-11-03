@@ -32,6 +32,7 @@ if TYPE_CHECKING:
         ChannelInfo,
         ChannelMessage,
         ChannelReply,
+        ChannelTarget,
         JsonValue,
         PostedChannelThread,
     )
@@ -215,10 +216,14 @@ def runtime_channel(
             transport = TriggerTransport(client)
 
             async def start_thread(
-                message: ChannelMessage, run: ChannelRunResult | None, *, hand_off: bool = False
+                message: ChannelMessage,
+                run: ChannelRunResult | None,
+                *,
+                hand_off: bool = False,
+                to: ChannelTarget | None = None,
             ) -> PostedChannelThread:
                 return await start_trigger_conversation(
-                    client, binding, message, run, hand_off=hand_off
+                    client, binding, message, run, hand_off=hand_off, to=to
                 )
     else:
         transport = messaging_transport_for_name(binding["name"])
