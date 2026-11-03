@@ -875,20 +875,17 @@ export const ChatComposer = memo(function ChatComposer({
           side="top"
         />
       )}
-      {runTarget === "local" &&
-        onSelectLocalRepo &&
-        onAddLocalRepo &&
-        onRemoveLocalRepo && (
-          <LocalProjectSelector
-            onAdd={onAddLocalRepo}
-            onClear={onClearLocalRepo}
-            onRemove={onRemoveLocalRepo}
-            onSelect={onSelectLocalRepo}
-            projects={localRepos}
-            selectedPath={selectedLocalRepoPath}
-            side="top"
-          />
-        )}
+      {runTarget === "local" && (
+        <LocalProjectSelector
+          onAdd={onAddLocalRepo}
+          onClear={onClearLocalRepo}
+          onRemove={onRemoveLocalRepo}
+          onSelect={onSelectLocalRepo}
+          projects={localRepos}
+          selectedPath={selectedLocalRepoPath}
+          side="top"
+        />
+      )}
       {runTarget === "local" &&
         localRepoBranches.length > 0 &&
         onRefreshLocalRepoBranch &&

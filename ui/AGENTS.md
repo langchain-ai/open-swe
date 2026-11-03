@@ -37,7 +37,7 @@ The dashboard aims for quiet, deliberate minimalism: structure comes from surfac
 - Section view menus use the three-line filter icon (`FunnelSimpleIcon`) and show on hover; overflow menus such as the sidebar's More use three dots (`DotsThreeIcon`).
 - A menu item that navigates away must not hand focus back to its trigger (`onCloseAutoFocus` → `preventDefault()`), or Chromium draws a focus ring on it.
   Escape and outside clicks still return focus.
-- Decorative display headings, such as the empty-state "What should we work on?", are not selectable (`select-none cursor-default`).
+- Decorative display headings, such as the empty-state "What should we work on?", and read-only labels inside controls, such as a started thread's project in the composer, are not selectable (`select-none cursor-default`).
 
 ## Desktop title bar
 

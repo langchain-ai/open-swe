@@ -74,7 +74,7 @@ export function RunTargetSelector({
   if (!onChange)
     return (
       <span
-        className="flex items-center gap-space-1 text-secondary"
+        className="flex cursor-default items-center gap-space-1 text-secondary select-none"
         title={title}
       >
         {current}
@@ -128,7 +128,8 @@ function ProjectRowIcon({ icon: Icon }: { icon: IconComponent }) {
 
 /**
  * Picks the project a This Mac thread works in. With `onClear`, choosing none
- * is allowed: the agent then works in a task folder of its own.
+ * is allowed: the agent then works in a task folder of its own. Without the
+ * picking callbacks, as on a started thread, it only shows the project.
  */
 export function LocalProjectSelector({
   projects,
@@ -141,15 +142,16 @@ export function LocalProjectSelector({
 }: {
   projects: Array<DesktopProject>
   selectedPath: string | null
-  onSelect: (cwd: string) => void
-  onAdd: () => void
-  onRemove: (cwd: string) => void
+  onSelect?: (cwd: string) => void
+  onAdd?: () => void
+  onRemove?: (cwd: string) => void
   onClear?: () => void
   side?: "top" | "bottom"
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const selected = projects.find((project) => project.cwd === selectedPath)
+  const name = selected?.name ?? selectedPath?.split("/").filter(Boolean).at(-1)
   const needle = query.trim().toLowerCase()
   const matches = needle
     ? projects.filter((project) => project.name.toLowerCase().includes(needle))
@@ -164,6 +166,17 @@ export function LocalProjectSelector({
     toggle(false)
   }
 
+  if (!onSelect || !onAdd || !onRemove)
+    return (
+      <span
+        className="flex min-w-0 cursor-default items-center gap-space-1 text-secondary select-none"
+        title={selectedPath ?? "Works in a task folder of its own"}
+      >
+        <ComposerTriggerIcon icon={FolderIcon} />
+        <span className="truncate">{name ?? "No project"}</span>
+      </span>
+    )
+
   return (
     <Popover open={open} onOpenChange={toggle}>
       <PopoverTrigger
@@ -171,7 +184,7 @@ export function LocalProjectSelector({
         title={selected?.cwd}
       >
         <ComposerTriggerIcon icon={FolderIcon} />
-        <span className="truncate">{selected?.name ?? "Choose project"}</span>
+        <span className="truncate">{name ?? "Choose project"}</span>
         <ComposerControlChevron />
       </PopoverTrigger>
       <PopoverContent
@@ -276,7 +289,7 @@ export function LocalWorkspaceSelector({
   const label = value === "worktree" ? worktreeLabel : "Current checkout"
   if (!onChange)
     return (
-      <span className="flex items-center gap-space-1 text-secondary">
+      <span className="flex cursor-default items-center gap-space-1 text-secondary select-none">
         <ComposerTriggerIcon icon={icon} />
         {label}
       </span>

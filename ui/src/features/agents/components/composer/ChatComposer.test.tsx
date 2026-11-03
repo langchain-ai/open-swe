@@ -278,6 +278,19 @@ describe("ChatComposer options", () => {
     expect(await screen.findByRole("button", { name: "main" })).toBeTruthy()
   })
 
+  it("shows a started thread's project, or no project, without a picker", () => {
+    renderComposer(false, {
+      runTarget: "local",
+      selectedLocalRepoPath: "/projects/demo",
+    })
+    expect(screen.getByText("demo")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /Choose project/ })).toBeNull()
+    cleanup()
+
+    renderComposer(false, { runTarget: "local", selectedLocalRepoPath: null })
+    expect(screen.getByText("No project")).toBeTruthy()
+  })
+
   it("asks someone without GitHub to link it before choosing a repository", async () => {
     const onRepoChange = vi.fn()
     renderComposer(false, {

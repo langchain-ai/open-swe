@@ -1042,7 +1042,10 @@ export function AgentThreadView({
                 {...(localThread
                   ? {
                       runTarget: "local" as const,
-                      selectedLocalRepoPath: localThread.cwd,
+                      // A task folder is the thread's own, not a project.
+                      selectedLocalRepoPath: localThread.managedTaskFolder
+                        ? null
+                        : localThread.cwd,
                       localRepoBranches: localRepoRefs,
                       selectedLocalRepoBranch: localBranch,
                       onRefreshLocalRepoBranch: () =>
