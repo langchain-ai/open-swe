@@ -6,8 +6,7 @@ from typing import Any, cast, get_args
 import pytest
 import rt.github as github
 from managed_deepagents import (
-    ChannelRunInput,
-    ChannelRunOptions,
+    ChannelRun,
     GitHubAccount,
     GitHubChannelThread,
     GitHubEvent,
@@ -401,15 +400,16 @@ async def test_an_issue_mention_starts_the_planned_run_on_the_issues_thread(
     started = await github.on_event(_event("issues", _issue()), _THREAD)
 
     assert started == [
-        (
-            {"messages": [{"role": "user", "content": "Fix the crash"}]},
-            {
-                "context": {"__run_token": "signed"},
-                "metadata": {"channel": "github"},
-                "webhook": "https://backend.example/webhooks/run-complete",
-            },
-        )
+        {
+            "input": {"messages": [{"role": "user", "content": "Fix the crash"}]},
+            "context": {"__run_token": "signed"},
+            "metadata": {"channel": "github"},
+            "webhook": "https://backend.example/webhooks/run-complete",
+        }
     ]
+    # A list of one run, as a dict alone would be state: MDA starts it on the conversation.
+    [run] = normalize_run_inputs(started, RunChannel(name="github", provider="github"))
+    assert "thread" not in run
     # Two calls: log it and learn the facts, then act.
     assert [msg_id for *_, msg_id in backend.calls] == [
         "msg_delivery-1_record",
@@ -432,12 +432,12 @@ async def test_a_mention_while_the_thread_waits_only_points_to_the_decision(
         _event("issue_comment", _comment("@openswe go", on_pr=False)), waiting
     )
 
-    assert started == [(github.ACTS_WHILE_WAITING, {})]
+    assert started == [{"input": github.ACTS_WHILE_WAITING}]
     [act] = backend.called(ACT_ON_GITHUB_DELIVERY)
     assert act.issue_run is not None and act.issue_run.waiting is True
 
 
-def _runs(started: GitHubEventResult) -> list[tuple[ChannelRunInput, ChannelRunOptions]]:
+def _runs(started: GitHubEventResult) -> list[ChannelRun]:
     """The runs a handler started, as a list."""
     assert isinstance(started, list)
     return started
@@ -462,18 +462,16 @@ async def test_each_automation_starts_on_the_thread_the_backend_planned(
 
     # The mention's run on the issue's conversation, and each automation's on its own thread.
     assert len(started) == 3
-    assert [options.get("thread") for _, options in started[1:]] == [
+    assert [run.get("thread") for run in started[1:]] == [
         {"mode": "persistent", "id": str(triage.thread_id)},
         {"mode": "persistent", "id": str(label.thread_id)},
     ]
-    assert started[1] == (
-        triage.input,
-        {
-            "context": triage.context,
-            "metadata": triage.metadata,
-            "thread": {"mode": "persistent", "id": str(triage.thread_id)},
-        },
-    )
+    assert started[1] == {
+        "input": triage.input,
+        "context": triage.context,
+        "metadata": triage.metadata,
+        "thread": {"mode": "persistent", "id": str(triage.thread_id)},
+    }
     # Still two calls.
     assert len(backend.calls) == 2
     # MDA takes the list: one run on the conversation, the others on their threads.
@@ -488,9 +486,9 @@ async def test_automations_start_while_the_issues_thread_waits(backend: _Backend
 
     started = _runs(await github.on_event(_event("issues", _issue()), waiting))
 
-    assert started[0] == (github.ACTS_WHILE_WAITING, {})
+    assert started[0] == {"input": github.ACTS_WHILE_WAITING}
     assert len(normalize_run_inputs(started, RunChannel(name="github", provider="github"))) == 2
-    assert started[1][1].get("thread") == {
+    assert started[1].get("thread") == {
         "mode": "persistent",
         "id": str(backend.automations[0].thread_id),
     }
@@ -537,15 +535,13 @@ async def test_a_comment_starts_on_the_pull_requests_own_thread(backend: _Backen
     thread = {"mode": "persistent", "id": str(backend.comment_run.thread_id)}
     # A newer comment replaces the work on an older one, as the backend's dispatch did.
     assert started == [
-        (
-            backend.comment_run.input,
-            {
-                "context": backend.comment_run.context,
-                "metadata": backend.comment_run.metadata,
-                "thread": thread,
-                "multitask_strategy": "interrupt",
-            },
-        )
+        {
+            "input": backend.comment_run.input,
+            "context": backend.comment_run.context,
+            "metadata": backend.comment_run.metadata,
+            "thread": thread,
+            "multitask_strategy": "interrupt",
+        }
     ]
     [run] = normalize_run_inputs(started, RunChannel(name="github", provider="github"))
     assert (run.get("thread"), run.get("multitask_strategy")) == (thread, "interrupt")

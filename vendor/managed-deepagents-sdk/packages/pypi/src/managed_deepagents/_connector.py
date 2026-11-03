@@ -24,6 +24,7 @@ __all__ = [
     "has_sandbox_connectors",
     "is_connector",
     "load_connector_tools",
+    "load_tools_by_connector",
     "requirements_from_connectors",
     "run_connector_sandbox_hooks",
 ]
@@ -191,12 +192,18 @@ def load_connector_tools(
     Connectors without a ``tools`` hook (e.g. HTTP-only connectors) contribute
     nothing. Order is preserved.
     """
-    tools: ConnectorToolList = []
+    return [tool for _, tools in load_tools_by_connector(connectors, ctx) for tool in tools]
+
+
+def load_tools_by_connector(
+    connectors: Sequence[Connector], ctx: ToolContext | None = None
+) -> list[tuple[Connector, ConnectorToolList]]:
+    loaded: list[tuple[Connector, ConnectorToolList]] = []
     for connector in connectors:
         hook = getattr(connector, "tools", None)
-        if callable(hook):
-            tools.extend(hook(ctx if ctx is not None else {}))
-    return tools
+        tools = list(hook(ctx if ctx is not None else {})) if callable(hook) else []
+        loaded.append((connector, tools))
+    return loaded
 
 
 def has_sandbox_connectors(connectors: Sequence[object] | None) -> bool:
