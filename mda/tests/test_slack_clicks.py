@@ -172,6 +172,7 @@ def test_an_option_for_someone_else_starts_nothing_and_tells_only_the_clicker(
     [told] = slack.posted
     assert told["response_type"] == "ephemeral"
     assert told["replace_original"] is False
+    assert told["thread_ts"] == "171.1"
 
 
 def test_a_second_click_on_a_message_starts_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
