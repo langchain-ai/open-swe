@@ -12,6 +12,7 @@ approved reaction, and once its pull request has sat green and unapproved for
 the workspace auto-assignment timeout the agent picks a reviewer, the same way.
 """
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -799,8 +800,7 @@ async def assign(
     owns, and unasked only once someone approved. ``replace`` is a person naming the reviewer:
     Open SWE's pending picks for the same code are withdrawn first.
     """
-    approvers = await _github_approvers(request)
-    coverage = await Coverage.load(request)
+    approvers, coverage = await asyncio.gather(_github_approvers(request), Coverage.load(request))
     if approvers and (coverage is None or not coverage.uncovered(approvers)):
         names = ", ".join(f"@{login}" for login in approvers)
         return _failure(
@@ -966,8 +966,9 @@ class ReviewStatus(BaseModel):
                 )
             )
         requester = request.requested_by
-        approvers = await _github_approvers(request)
-        coverage = await Coverage.load(request)
+        approvers, coverage = await asyncio.gather(
+            _github_approvers(request), Coverage.load(request)
+        )
         assigned = [p.github_login for p in request.reviewers + request.picks]
         return cls(
             requested_by=requester.login_for("github") if requester else "",

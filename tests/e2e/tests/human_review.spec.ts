@@ -807,25 +807,7 @@ test.describe("Human review in Slack", () => {
         name: "GitHub-only review request",
         exact: true,
       }),
-    ).toHaveCount(0);
-    await page
-      .getByRole("button", { name: "Show my GitHub review requests" })
-      .click();
-    await expect(
-      page.getByRole("button", {
-        name: "GitHub-only review request",
-        exact: true,
-      }),
     ).toBeVisible();
-    await page
-      .getByRole("button", { name: "Back to Open SWE assignments" })
-      .click();
-    await expect(
-      page.getByRole("button", {
-        name: "GitHub-only review request",
-        exact: true,
-      }),
-    ).toHaveCount(0);
 
     // 4. Bob is the only reviewer, so his approval merges it at once.
     await approveOnGitHub(request, seeded.number, BOB.login);

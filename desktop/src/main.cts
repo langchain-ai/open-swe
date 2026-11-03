@@ -812,13 +812,13 @@ function configureDesktopIpc() {
         thread = await startThreadWorktree(thread, input?.baseBranch);
       if (!thread.managedTaskFolder)
         thread = await recordLocalCheckpoint(thread);
-      const bridgeId = await localBridges.ensure(thread.id);
-      return {
-        bridgeId,
-        repo: thread.managedTaskFolder
-          ? null
-          : await originRepo(threadRoot(thread)),
-      };
+      const [bridgeId, repo] = await Promise.all([
+        localBridges.ensure(thread.id),
+        thread.managedTaskFolder
+          ? Promise.resolve(null)
+          : originRepo(threadRoot(thread)),
+      ]);
+      return { bridgeId, repo };
     } catch (error) {
       await discardLocalThread(thread);
       throw error;

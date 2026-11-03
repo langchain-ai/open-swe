@@ -1061,6 +1061,7 @@ export interface ReviewListPayload {
 }
 
 export interface OpenPullRequest {
+  author?: string | null
   detailsLoading?: boolean
   detailsError?: boolean
   repo: string
@@ -1095,7 +1096,14 @@ export interface OpenPullRequest {
   unresolvedThreads: number | null
   // Why it is on the To Review list: Open SWE assigned it, may assign it once
   // its review goes unclaimed, or it was linked in a Slack thread naming you.
-  assignment?: "assigned" | "tentative" | "mentioned" | null
+  assignment?:
+    | "assigned"
+    | "requested"
+    | "tentative"
+    | "mentioned"
+    | "draft"
+    | "speculative"
+    | null
 }
 
 export interface PullRequestReviewer {
