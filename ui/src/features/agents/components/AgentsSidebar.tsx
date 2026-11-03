@@ -913,6 +913,10 @@ export function AgentsSidebar({
                 <div key={day.key} className={cn(index > 0 && "mt-space-2")}>
                   <SidebarSectionHeader
                     label={day.label}
+                    collapsed={sectionCollapsed(`recents:${day.key}`)}
+                    onToggleCollapsed={() =>
+                      toggleSectionCollapsed(`recents:${day.key}`)
+                    }
                     menu={
                       index === 0 && (
                         <SidebarSectionMenu label="Recents options">
@@ -933,9 +937,10 @@ export function AgentsSidebar({
                       )
                     }
                   />
-                  {day.threads.map((item) => (
-                    <SidebarThreadRow key={item.key} {...rowProps(item)} />
-                  ))}
+                  {!sectionCollapsed(`recents:${day.key}`) &&
+                    day.threads.map((item) => (
+                      <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                    ))}
                 </div>
               ))}
               {recentsQuery.hasMore && (
