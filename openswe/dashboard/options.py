@@ -35,6 +35,7 @@ __all__ = [
     "model_supports_images",
     "normalize_model_choice",
     "provider_fallback_pair",
+    "validate_local_dev_llm_config",
 ]
 
 
@@ -208,3 +209,34 @@ def default_vision_model_pair() -> tuple[str, str]:
         if model["id"].startswith(("openai:", "anthropic:")) and model["supports_images"]:
             return model["id"], model["default_effort"]
     return default_model_pair()
+
+
+def validate_local_dev_llm_config() -> None:
+    """Validate API keys for the locally configured default model.
+
+    This check only runs in localhost development environments and is
+    intended to catch missing credentials for the default model specified
+    via LLM_MODEL_ID/DEFAULT_MODEL_ID. Runtime model selection may come
+    from workspace, profile, or thread configuration and is not validated here.
+
+    Only an explicitly configured localhost dashboard URL counts: the derived
+    default follows LANGGRAPH_URL, which is unset (so localhost) on a fresh
+    LangGraph Platform deployment until its URL exists, and failing startup
+    there would leave the deployment unable to ever get one.
+    """
+    dashboard_url = ENV.DASHBOARD_BASE_URL.optional() or ""
+    if not dashboard_url.startswith("http://localhost"):
+        return
+
+    model_id = ENV.LLM_MODEL_ID.get(DEFAULT_MODEL_ID)
+
+    if model_id.startswith("openai:") and not ENV.OPENAI_API_KEY.optional():
+        raise ValueError(f"OPENAI_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("anthropic:") and not ENV.ANTHROPIC_API_KEY.optional():
+        raise ValueError(f"ANTHROPIC_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("google_genai:") and not ENV.GOOGLE_API_KEY.optional():
+        raise ValueError(f"GOOGLE_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("groq:") and not ENV.GROQ_API_KEY.optional():
+        raise ValueError(f"GROQ_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("fireworks:") and not ENV.FIREWORKS_API_KEY.optional():
+        raise ValueError(f"FIREWORKS_API_KEY is required for configured model {model_id}")

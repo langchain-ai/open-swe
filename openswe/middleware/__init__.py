@@ -13,7 +13,6 @@ _MIDDLEWARE_MODULES = {
     "PullRequestCreationGuardMiddleware": ".pr_creation_guard",
     "record_run_usage": ".record_run_usage",
     "refresh_github_proxy_before_model": ".refresh_github_proxy",
-    "RepairOrphanedToolCallsMiddleware": ".repair_orphaned_tool_calls",
     "RequireUserReplyMiddleware": ".require_user_reply",
     "settle_review_check_on_exit": ".settle_review_check",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
@@ -27,7 +26,6 @@ __all__ = [
     "BasePrepareRunMiddleware",
     "PrepareRunState",
     "PullRequestCreationGuardMiddleware",
-    "RepairOrphanedToolCallsMiddleware",
     "RequireUserReplyMiddleware",
     "WorkflowPushGuardMiddleware",
     "notify_step_limit_reached",
@@ -45,7 +43,6 @@ if TYPE_CHECKING:
     from openswe.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
     from openswe.middleware.record_run_usage import record_run_usage
     from openswe.middleware.refresh_github_proxy import refresh_github_proxy_before_model
-    from openswe.middleware.repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
     from openswe.middleware.require_user_reply import RequireUserReplyMiddleware
     from openswe.middleware.settle_review_check import settle_review_check_on_exit
     from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware

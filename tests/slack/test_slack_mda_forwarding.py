@@ -25,7 +25,7 @@ from openswe.slack import ask as slack_ask
 from openswe.slack import channel as slack_channel
 from openswe.slack import events as slack_events
 from openswe.slack import failures as slack_failures
-from openswe.slack import mda_forwarding
+from openswe.slack import forks, mda_forwarding
 from openswe.slack import routes as slack_routes
 from openswe.slack import webhook as slack_service
 from openswe.slack.allowed_bots import AllowedSlackBot
@@ -1125,6 +1125,37 @@ async def test_a_web_breakout_runs_on_a_thread_of_its_own_and_its_thread_hears_o
     assert request.inherited_workspace == "engineering"
     # MDA asking again under the same webhook id gets the run, not a second notice.
     notify.assert_awaited_once()
+
+
+@pytest.mark.parametrize("kind", ["by_the_way", "web"])
+async def test_a_question_in_an_mda_conversation_runs_on_a_fork_of_its_thread(
+    monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    prepare = _prepared(monkeypatch)
+    asked = slack_ask.AskChannelRun(
+        input={"messages": [{"role": "user", "content": "why?"}]},
+        configurable={"source": "slack", "github_login": "ada"},
+    )
+    prepare_ask = AsyncMock(return_value=asked)
+    monkeypatch.setattr(slack_channel, "prepare_ask_channel_run", prepare_ask)
+    monkeypatch.setattr(slack_channel, "notify_web_breakout", AsyncMock())
+    monkeypatch.setattr(
+        webhook_common, "get_thread_workspace", AsyncMock(return_value="engineering")
+    )
+    monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
+    forked = str(uuid.uuid4())
+    fork = AsyncMock(return_value=forked)
+    monkeypatch.setattr(forks, "fork_thread", fork)
+    text = "<@BOT> /btw why?" if kind == "by_the_way" else "<@BOT> /breakout:web why?"
+
+    start = await _start(_start_app(monkeypatch), kind=kind, text=text)
+
+    # It knows what the agent did in the conversation, and belongs to the one who asked.
+    fork.assert_awaited_once_with(_MDA_THREAD, key=forks.branch_key("C1", "1.2"), login="ada")
+    cast(AsyncMock, mda_forwarding.claim_side).assert_awaited_once_with(forked, owner_login="ada")
+    assert start["thread_id"] == forked
+    built = prepare_ask.await_args.args[0] if kind == "by_the_way" else prepare.await_args.args[0]
+    assert built.thread_id == forked
 
 
 @pytest.mark.parametrize("owner", [_MDA_THREAD, None], ids=["mda", "backend"])

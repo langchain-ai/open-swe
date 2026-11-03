@@ -17,7 +17,7 @@ from typing import Any, NotRequired, cast
 
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
-from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
+from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import (
     AgentMiddleware,
     hook_config,
@@ -29,6 +29,7 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 from runtime_api.catalog import LoopRules
+from runtime_api.models import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -40,7 +41,6 @@ from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     ExcludeToolsMiddleware,
-    RepairOrphanedToolCallsMiddleware,
 )
 from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.prepare_run import PrepareRunState
@@ -65,7 +65,6 @@ from openswe.tools.plan_walkthrough import (
 from openswe.tools.record_human_input import record_human_input
 from openswe.ui_invalidations import Topic
 from openswe.utils.deferred_model import make_deferred_error_model
-from openswe.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from openswe.walkthrough.checkout import CheckoutError, PinnedCheckout
 from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
 from openswe.walkthrough.record import PlanMovedError, Walkthrough
@@ -361,8 +360,6 @@ async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> Non
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
             ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
-            RepairOrphanedToolCallsMiddleware(),
-            ModelRetryMiddleware(retry_on=(TimeoutError,)),
             FinishPlanMiddleware(thread_id=thread_id, config=config),
         ],
     )

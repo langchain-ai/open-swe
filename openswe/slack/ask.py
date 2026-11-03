@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from openswe.dispatch import dispatch_agent_run, dispatch_input
 from openswe.input_messages import RunInput
 from openswe.prompts import prompt
+from openswe.slack import forks
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     acknowledge_slack_command,
@@ -150,20 +151,27 @@ async def _channel_context(channel_id: str) -> str:
     return await _budgeted_transcript(messages)
 
 
-async def _thread_context(channel_id: str, thread_ts: str) -> str:
-    """The Slack thread `/btw` was sent in, oldest trimmed away until it fits the budget."""
+async def _thread_context(channel_id: str, thread_ts: str, held: set[str]) -> str:
+    """The Slack thread `/btw` was sent in, oldest trimmed away until it fits the budget.
+
+    A question forked from the thread's conversation has the messages the agent got
+    there (``held``), so only the rest are quoted.
+    """
     raw = await fetch_slack_thread_messages(channel_id, thread_ts)
     messages = [
         message
         for item in raw
-        if (message := SlackMessage.parse(item)) is not None and not message.is_noise
+        if (message := SlackMessage.parse(item)) is not None
+        and not message.is_noise
+        and message.ts not in held
     ]
     return await _budgeted_transcript(messages)
 
 
 async def _request_context(request: SlackAskRequest) -> str:
     if request.in_slack_thread:
-        context = await _thread_context(request.channel_id, request.reply_thread_ts)
+        held = await forks.held_timestamps(request.thread_id) if request.thread_id else set()
+        context = await _thread_context(request.channel_id, request.reply_thread_ts, held)
     else:
         context = await _channel_context(request.channel_id)
     return _CONTEXT_FENCE_RE.sub(r"&lt;\1", context)

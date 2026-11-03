@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
+from datetime import timedelta
 from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -42,6 +43,7 @@ from rt.model_calls import (
 from rt.models import ModelSpec
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
 from runtime_api.catalog import Catalog
+from runtime_api.model_errors import is_model_failure_reply
 
 _ANTHROPIC = ChatAnthropic(model_name="claude-opus-5-5", api_key=SecretStr("test"))
 _OPENAI = ChatOpenAI(
@@ -403,7 +405,14 @@ async def test_attempts_alternate_between_the_model_and_its_fallback() -> None:
 
 async def test_attempts_wait_out_the_backoff_with_jitter(monkeypatch: pytest.MonkeyPatch) -> None:
     sleep = AsyncMock()
-    monkeypatch.setattr("rt.model_calls.asyncio", MagicMock(sleep=sleep))
+    monkeypatch.setattr(
+        "rt.model_calls.asyncio",
+        MagicMock(
+            sleep=sleep,
+            get_running_loop=asyncio.get_running_loop,
+            timeout_at=asyncio.timeout_at,
+        ),
+    )
     monkeypatch.setattr("rt.model_calls.random.uniform", lambda low, high: high)
     attempts = _Attempts(TimeoutError(), TimeoutError())
 
@@ -428,6 +437,7 @@ async def test_a_lasting_outage_ends_with_a_message_instead_of_failing_the_run()
     response = await _fallback_call(attempts, schedule=(0.0, 0.0, 0.0))
 
     assert response.result[0].content == MODEL_OUTAGE_MESSAGE
+    assert is_model_failure_reply(response.result[0])
     assert attempts.models == [_ANTHROPIC, _OPENAI, _ANTHROPIC, _OPENAI]
 
 
@@ -444,6 +454,7 @@ async def test_a_model_the_workspace_cannot_use_says_so() -> None:
     content = answer.result[0].content
     assert isinstance(content, str) and "OpenAI returned: The model does not exist." in content
     assert attempts.models == [_ANTHROPIC]
+    assert is_model_failure_reply(answer.result[0])
 
 
 async def test_without_a_fallback_the_call_is_made_once() -> None:
@@ -451,4 +462,58 @@ async def test_without_a_fallback_the_call_is_made_once() -> None:
 
     with pytest.raises(TimeoutError):
         await call_with_fallback(ModelRequest(model=_ANTHROPIC, messages=[]), attempts, None)
+    assert attempts.models == [_ANTHROPIC]
+
+
+async def test_a_fallback_that_cannot_be_built_leaves_the_retries_to_the_model() -> None:
+    attempts = _Attempts(TimeoutError("stalled"), TimeoutError("stalled"))
+
+    def unbuildable() -> BaseChatModel:
+        raise ValueError("BASETEN_API_KEY is required when Gateway routing is disabled")
+
+    response = await call_with_fallback(
+        ModelRequest(model=_ANTHROPIC, messages=[]),
+        attempts,
+        unbuildable,
+        backoff_schedule=(0.0, 0.0, 0.0),
+    )
+
+    assert response.result[0].content == "answered"
+    assert attempts.models == [_ANTHROPIC, _ANTHROPIC, _ANTHROPIC]
+
+
+async def test_the_retries_end_within_the_budget() -> None:
+    """However the attempts stall, the call answers before the budget is out, so the
+    backend's stalled-run sweep (twice ``MODEL_CALL_BUDGET``) never takes a live run."""
+
+    async def stalled(request: ModelRequest) -> ModelResponse:
+        await asyncio.sleep(60)
+        raise AssertionError("cut off by the budget")
+
+    clock = asyncio.get_running_loop()
+    started = clock.time()
+    response = await call_with_fallback(
+        ModelRequest(model=_ANTHROPIC, messages=[]),
+        stalled,
+        lambda: _OPENAI,
+        backoff_schedule=(0.0, 0.0),
+        budget=timedelta(seconds=0.05),
+    )
+
+    assert response.result[0].content == MODEL_OUTAGE_MESSAGE
+    assert clock.time() - started < 1
+
+
+async def test_a_wait_that_would_outlast_the_budget_is_not_waited() -> None:
+    attempts = _Attempts(TimeoutError("stalled"))
+
+    response = await call_with_fallback(
+        ModelRequest(model=_ANTHROPIC, messages=[]),
+        attempts,
+        lambda: _OPENAI,
+        backoff_schedule=(30.0,),
+        budget=timedelta(seconds=5),
+    )
+
+    assert response.result[0].content == MODEL_OUTAGE_MESSAGE
     assert attempts.models == [_ANTHROPIC]
