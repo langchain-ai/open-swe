@@ -14,7 +14,9 @@ from typing import Any, cast
 import httpx2
 from langchain_core.messages.content import create_text_block
 from pydantic import JsonValue
+from runtime_api.slack import SlackTurnDeclined
 
+from openswe.dashboard.oauth import build_settings_url
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.input_messages import (
@@ -770,20 +772,26 @@ class SlackChannelRun:
 @dataclass
 class _ChannelRunCapture:
     run: SlackChannelRun | None = None
+    # Whether MDA's Slack channel tells the person why nothing starts: the gates
+    # record why (``declined``) instead of posting it.
+    declines: bool = False
+    declined: SlackTurnDeclined | None = None
 
 
 async def prepare_slack_channel_run(
-    request: SlackRequest, repo: common.SlackRepoResolution | None
-) -> SlackChannelRun | None:
+    request: SlackRequest, repo: common.SlackRepoResolution | None, *, declines: bool = False
+) -> SlackChannelRun | SlackTurnDeclined | None:
     """The run a message in an MDA-owned Slack conversation starts, without starting it.
 
     Everything else happens as for the backend's own Slack runs (the gates, the
     account-link prompt, the thread's metadata, files staged in the sandbox);
     MDA's Slack channel starts the run and shows its status (``openswe.slack.channel``).
+    With ``declines``, the account-link prompt isn't posted: the decline says why
+    nothing starts, and the channel's handler replies with it.
     """
-    capture = _ChannelRunCapture()
+    capture = _ChannelRunCapture(declines=declines)
     await _process_slack_mention_impl(request, repo, channel_run=capture)
-    return capture.run
+    return capture.declined or capture.run
 
 
 async def _process_slack_mention_impl(
@@ -1115,7 +1123,13 @@ async def _process_slack_mention_impl(
             thread_id,
             account_link_reason,
         )
-        if user_id:
+        if user_id and channel_run is not None and channel_run.declines:
+            # MDA's Slack channel replies with it in the Slack thread.
+            channel_run.declined = SlackTurnDeclined(
+                reason="sign_in_again" if account_link_reason == "revoked" else "sign_in",
+                settings_url=build_settings_url(),
+            )
+        elif user_id:
             await common.post_account_link_prompt(
                 channel_id,
                 thread_ts,

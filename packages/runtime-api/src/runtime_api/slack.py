@@ -5,7 +5,8 @@ MDA's conversations own to Trigger Server, remembering the request. The channel'
 handler then asks here what the message starts (``plan_slack_turn``): the backend
 builds the run from the request it remembered, as for its own Slack runs, signs
 its context, and says whether the message redirects the thread's work in
-progress or waits its turn behind it, which the channel starts the run with.
+progress or waits its turn behind it, which the channel starts the run with; or
+why it starts nothing, which the handler replies with.
 ``plan_slack_click`` does the same for a click on the agent's buttons. Every other
 click, and one in a conversation the backend holds, goes to ``act_on_slack_click``:
 the backend acts on it as it always has.
@@ -37,10 +38,21 @@ class SlackTurnRun(BaseModel):
     webhook: str | None = None
 
 
+class SlackTurnDeclined(BaseModel):
+    """Start nothing; the channel's handler tells the Slack thread why."""
+
+    # ``external_channel``: Open SWE doesn't operate in a channel with external
+    # participants. ``sign_in``: the person hasn't signed in to Open SWE with
+    # GitHub; ``sign_in_again``: their GitHub sign-in is no longer valid.
+    reason: Literal["external_channel", "sign_in", "sign_in_again"]
+    # Where the person signs in, when the backend has a dashboard URL.
+    settings_url: str | None = None
+
+
 class SlackTurnStart(BaseModel):
     # The run, or none: the message wasn't one the backend handed over, gating
-    # answered it already (such as asking the person to connect an account), or
-    # building the run failed, which the Slack thread heard about.
+    # answered it already, gating declined it (``declined``), or building the run
+    # failed, which the Slack thread heard about.
     run: SlackTurnRun | None = None
     # A mention, a direct message or an explicit request redirects the thread's
     # work in progress; any other follow-up waits for it, as on the backend's own
@@ -48,6 +60,9 @@ class SlackTurnStart(BaseModel):
     interrupts: bool = True
     # A concierge DM's thread, when the run doesn't go on the Slack thread's own.
     thread_id: UUID | None = None
+    # Why no run starts, which the handler replies with in the Slack thread; set at
+    # most once per webhook ID.
+    declined: SlackTurnDeclined | None = None
 
 
 class OptionClick(BaseModel):
@@ -131,7 +146,8 @@ PLAN_SLACK_TURN: Final = Endpoint(
     seconds=120.0,
     # Building the run takes the remembered request, so a call is sent again only
     # where the backend never got it; one sent again under the same webhook ID
-    # builds the run again.
+    # builds the run again, but gets no decline a call answered already. The
+    # backend answers 503 while it can't verify the message's channel.
     prefix=CHANNEL_API_PREFIX,
 )
 

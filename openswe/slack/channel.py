@@ -7,8 +7,10 @@ runs; its handler asks ``plan_slack_turn`` (``runtime_api.slack``) what each mes
 starts. The backend gated each message when Slack delivered it and remembered the
 request; here it builds the run from that request as it would for its own Slack
 runs, with the signed run token, and says whether the message redirects the
-thread's work in progress or waits its turn. ``plan_slack_click`` does the same
-for a click on the agent's buttons.
+thread's work in progress or waits its turn, or why it starts nothing, which the
+channel's handler replies with: a channel with external participants, or a person
+who must sign in first. ``plan_slack_click`` does the same for a click on the
+agent's buttons.
 
 ``/slack/channel/events`` answers a deployment whose channel still names it as an
 endpoint, until every deployment runs the handler.
@@ -32,6 +34,7 @@ from runtime_api.slack import (
     RetryClick,
     SlackClickActed,
     SlackClickStart,
+    SlackTurnDeclined,
     SlackTurnRun,
     SlackTurnStart,
     WorkflowPushClick,
@@ -62,6 +65,9 @@ _CLICK_TTL: Final = timedelta(days=7)
 #: The call that claimed a message, which may be sent again.
 _CLICK_CALL_SCOPE: Final = "slack_click_call"
 _CLICK_CALL_TTL: Final = timedelta(minutes=10)
+#: A turn's decline is answered once per call; the claim outlives the call's retries.
+_DECLINE_SCOPE: Final = "slack_turn_decline"
+_DECLINE_TTL: Final = timedelta(minutes=10)
 _WORKFLOW_PUSH_RETRY: Final = (
     "The workflow-file push approval was approved. Retry the blocked git push now; "
     "do not alter workflow files before pushing."
@@ -127,23 +133,44 @@ async def plan_slack_turn(call: ChannelCall, plan: PlanSlackTurn) -> SlackTurnSt
 
     No run when the message wasn't one the backend handed over (the backend gates
     every message before it forwards one), when gating posted the reply itself,
-    such as the prompt to connect an account, or when building the run failed,
-    which the Slack thread hears about. A call sent again under the same
-    ``webhook-id`` gets the run built again.
+    or when building the run failed, which the Slack thread hears about. When the
+    message's channel has external participants, or the person must sign in to
+    Open SWE first, the start says why instead (``declined``), and the channel's
+    handler replies with it. A call sent again under the same ``webhook-id`` gets
+    the run built again, but no decline it answered already. While Slack can't
+    confirm the channel has no external participants the call fails with a 503,
+    so it is sent again.
     """
     webhook_id = call.request.headers.get("webhook-id", "")
-    return await _turn(
-        str(plan.thread_id),
+    thread_id = str(plan.thread_id)
+    start = await _turn(
+        thread_id,
         plan.message_ts,
         webhook_id,
         channel_id=plan.channel_id,
         thread_ts=plan.thread_ts,
+        declines=True,
     )
+    if start.declined is None:
+        return start
+    decline = f"{webhook_id}:{thread_id}:{plan.message_ts}"
+    if not await event_claims.claim(_DECLINE_SCOPE, decline, ttl=_DECLINE_TTL):
+        _no_run("declined already", agent_thread_id=thread_id, slack_message_ts=plan.message_ts)
+        return SlackTurnStart()
+    return start
 
 
 async def _turn(
-    thread_id: str, message_ts: str, webhook_id: str, *, channel_id: str = "", thread_ts: str = ""
+    thread_id: str,
+    message_ts: str,
+    webhook_id: str,
+    *,
+    channel_id: str = "",
+    thread_ts: str = "",
+    declines: bool = False,
 ) -> SlackTurnStart:
+    """The run a remembered message starts. With ``declines``, why it starts nothing
+    when the person is told so: the channel's handler replies with it."""
     fields = {"agent_thread_id": thread_id, "slack_message_ts": message_ts}
     remembered = None
     for candidate in await _remembered_in(thread_id, channel_id, thread_ts):
@@ -158,19 +185,56 @@ async def _turn(
         _no_run("not handed over", **fields)
         return SlackTurnStart()
     request, repo = remembered
+    if declines:
+        refused = await _refused_channel(request, fields)
+        if refused is not None:
+            return refused
     run_thread = request.thread_id or thread_id
     try:
-        start = await _prepare_run(run_thread, request, repo)
+        start = await _prepare_run(run_thread, request, repo, declines=declines)
     except Exception as exc:  # noqa: BLE001 - the person hears about it instead
         # The request was taken: nothing else will tell the Slack thread.
         await service.notify_slack_processing_error(request, repo.repo if repo else None, exc)
         _no_run("building the run failed", **fields)
         return SlackTurnStart()
-    if start.run is None:
+    if start.declined is not None:
+        _no_run(f"declined: {start.declined.reason}", **fields)
+    elif start.run is None:
         _no_run("no run prepared", **fields)
     elif run_thread != thread_id:
         start.thread_id = UUID(run_thread)
     return start
+
+
+async def _refused_channel(request: SlackRequest, fields: dict[str, str]) -> SlackTurnStart | None:
+    """No run when the message's channel isn't one Open SWE operates in, as Slack has it
+    now; ``None`` when it is.
+
+    A channel with external participants declines a mention or an explicit request, so
+    the person hears why, and starts nothing for any other message. One Slack can't
+    confirm yet fails the call with a 503, so MDA sends it again.
+    """
+    channel = await common.resolve_slack_channel_context(request.channel_id, use_cache=False)
+    if channel.allows_operations:
+        return None
+    if channel.is_ext_shared is True:
+        if request.explicit_mention or request.explicit_request:
+            _no_run("declined: external_channel", **fields)
+            return SlackTurnStart(declined=SlackTurnDeclined(reason="external_channel"))
+        _no_run("external channel", **fields)
+        return SlackTurnStart()
+    if channel.is_pending_ext_shared is not True and channel.lookup_retry_after is not None:
+        logger.warning(
+            "Slack channel verification unavailable; MDA's Slack channel asks again",
+            extra={**fields, "slack_channel_id": request.channel_id},
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Slack channel verification is temporarily unavailable.",
+            headers={"Retry-After": str(channel.lookup_retry_after)},
+        )
+    _no_run("channel not verified", **fields)
+    return SlackTurnStart()
 
 
 async def _remembered_in(thread_id: str, channel_id: str, thread_ts: str) -> list[str]:
@@ -310,11 +374,17 @@ async def _click_request(
 
 
 async def _prepare_run(
-    thread_id: str, request: SlackRequest, repo: common.SlackRepoResolution | None
+    thread_id: str,
+    request: SlackRequest,
+    repo: common.SlackRepoResolution | None,
+    *,
+    declines: bool = False,
 ) -> SlackTurnStart:
-    prepared = await service.prepare_slack_channel_run(request, repo)
+    prepared = await service.prepare_slack_channel_run(request, repo, declines=declines)
     if prepared is None:
         return SlackTurnStart()
+    if isinstance(prepared, SlackTurnDeclined):
+        return SlackTurnStart(declined=prepared)
 
     run_config = await prepare_durable_run(
         "agent",

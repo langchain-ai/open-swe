@@ -4,7 +4,7 @@ import json
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import cast
+from typing import Literal, cast
 from unittest.mock import AsyncMock
 
 import httpx
@@ -12,6 +12,7 @@ import httpx2
 import pytest
 from fastapi import BackgroundTasks, FastAPI
 from pydantic import JsonValue
+from runtime_api.slack import SlackTurnDeclined
 from standardwebhooks import Webhook
 from starlette.datastructures import URL
 from starlette.requests import Request
@@ -728,9 +729,117 @@ async def test_the_handler_gets_no_run_for_a_message_the_backend_didnt_hand_over
         answered = await _plan(app)
 
     assert answered.status_code == 200
-    assert answered.json() == {"run": None, "interrupts": True, "thread_id": None}
+    assert answered.json() == {"run": None, "interrupts": True, "thread_id": None, "declined": None}
     [record] = [r for r in caplog.records if hasattr(r, "no_run_reason")]
     assert record.no_run_reason == "not handed over"
+
+
+def _gated(
+    monkeypatch: pytest.MonkeyPatch, channel: SlackChannelContext, **request: JsonValue
+) -> AsyncMock:
+    """A handed-over message in ``channel``, as Slack has it now; what builds its run."""
+    monkeypatch.setenv("MDA_SERVICE_SECRET", _SERVICE_SECRET)
+    remembered = SlackRequest.model_validate(
+        {"channel_id": "C1", "thread_ts": "1.2", "thread_id": _MDA_THREAD, **request}
+    )
+    monkeypatch.setattr(mda_forwarding, "recall", AsyncMock(return_value=(remembered, None)))
+
+    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
+        assert use_cache is False
+        return channel
+
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
+    prepare = AsyncMock(return_value=None)
+    monkeypatch.setattr(slack_service, "prepare_slack_channel_run", prepare)
+    return prepare
+
+
+_EXTERNAL = SlackChannelContext(id="C1", is_ext_shared=True, is_pending_ext_shared=False)
+
+
+@pytest.mark.parametrize("explicit", ["explicit_mention", "explicit_request"])
+async def test_a_mention_in_a_channel_with_external_participants_is_declined(
+    monkeypatch: pytest.MonkeyPatch, explicit: str
+) -> None:
+    prepare = _gated(monkeypatch, _EXTERNAL, **{explicit: True})
+    app = FastAPI()
+    app.include_router(channel_api.router)
+
+    answered = await _plan(app)
+
+    assert answered.status_code == 200
+    start = answered.json()
+    assert start["run"] is None
+    assert start["declined"] == {"reason": "external_channel", "settings_url": None}
+    prepare.assert_not_awaited()
+
+
+async def test_any_other_message_there_starts_nothing_and_says_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepare = _gated(monkeypatch, _EXTERNAL)
+    app = FastAPI()
+    app.include_router(channel_api.router)
+
+    answered = await _plan(app)
+
+    assert answered.status_code == 200
+    assert answered.json() == {"run": None, "interrupts": True, "thread_id": None, "declined": None}
+    prepare.assert_not_awaited()
+
+
+async def test_a_channel_slack_cant_confirm_yet_fails_the_call_so_it_comes_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepare = _gated(
+        monkeypatch, SlackChannelContext(id="C1", lookup_retry_after=7), explicit_mention=True
+    )
+    app = FastAPI()
+    app.include_router(channel_api.router)
+
+    answered = await _plan(app)
+
+    assert answered.status_code == 503
+    assert answered.headers["retry-after"] == "7"
+    prepare.assert_not_awaited()
+
+
+@pytest.mark.parametrize("reason", ["sign_in", "sign_in_again"])
+async def test_a_turn_the_backend_declines_is_declined_once_per_call(
+    monkeypatch: pytest.MonkeyPatch, reason: Literal["sign_in", "sign_in_again"]
+) -> None:
+    prepare = _gated(
+        monkeypatch,
+        SlackChannelContext(id="C1", is_ext_shared=False, is_pending_ext_shared=False),
+        explicit_mention=True,
+    )
+    declined = SlackTurnDeclined(reason=reason, settings_url="https://openswe.test/settings")
+    prepare.return_value = declined
+    claims: set[tuple[str, str]] = set()
+
+    async def claim(scope: str, key: str, *, ttl: object) -> bool:
+        if (scope, key) in claims:
+            return False
+        claims.add((scope, key))
+        return True
+
+    monkeypatch.setattr(slack_channel.event_claims, "claim", claim)
+    app = FastAPI()
+    app.include_router(channel_api.router)
+
+    first = await _plan(app)
+    again = await _plan(app)
+    other_call = await _post_endpoint(
+        app, _PLAN, signed=True, path="/mda/channel-api/plan_slack_turn", msg_id="msg_delivery-2"
+    )
+
+    assert first.json()["declined"] == declined.model_dump(mode="json")
+    assert first.json()["run"] is None
+    # MDA sends a call again under its webhook ID: the decline was answered already.
+    assert again.json() == {"run": None, "interrupts": True, "thread_id": None, "declined": None}
+    assert other_call.json()["declined"] == declined.model_dump(mode="json")
+    assert prepare.await_args is not None
+    assert prepare.await_args.kwargs == {"declines": True}
 
 
 @pytest.mark.parametrize(
@@ -1175,6 +1284,7 @@ async def test_an_option_click_is_the_persons_message_and_is_acted_on_once(
         "run": None,
         "interrupts": True,
         "thread_id": None,
+        "declined": None,
         "acted": False,
         "backend": False,
         "workflow_push": None,
