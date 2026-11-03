@@ -17,7 +17,7 @@ from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
 
 _MESSAGE_MAX_CHARS = 2800
-_CHANNEL_ID_RE = re.compile(r"^[CG][A-Z0-9]+$")
+_CHANNEL_ID_RE = re.compile(r"^[CGD][A-Z0-9]+$")
 
 
 async def _finish_existing_move(
@@ -41,7 +41,7 @@ async def _finish_existing_move(
 
 async def slack_move_thread(
     message: str,
-    destination: Annotated[str, Field(pattern=r"^[CG][A-Z0-9]+$")],
+    destination: Annotated[str, Field(pattern=r"^[CGD][A-Z0-9]+$")],
 ) -> dict[str, Any]:
     """Implement the `slack_move_thread` tool."""
     if not _CHANNEL_ID_RE.fullmatch(destination):

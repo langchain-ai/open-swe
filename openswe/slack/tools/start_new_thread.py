@@ -44,7 +44,7 @@ _TITLE_MAX_CHARS = 160
 _INSTRUCTIONS_MAX_CHARS = 12000
 _VISIBLE_INSTRUCTIONS_MAX_CHARS = 2800
 _REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-_CHANNEL_ID_PATTERN = r"^[CG][A-Z0-9]+$"
+_CHANNEL_ID_PATTERN = r"^[CGD][A-Z0-9]+$"
 logger = logging.getLogger(__name__)
 
 
@@ -177,7 +177,7 @@ def _new_slack_thread_context(
 async def slack_breakout_thread(
     title: str,
     instructions: str,
-    destination: Annotated[str, Field(pattern=r"^(?:[CG][A-Z0-9]+|web)$")],
+    destination: Annotated[str, Field(pattern=r"^(?:[CGD][A-Z0-9]+|web)$")],
     default_repo: str | None = None,
     model: str | None = None,
     effort: str | None = None,

@@ -39,17 +39,21 @@ def public_channel(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize("private_source", [True, False])
+@pytest.mark.parametrize("source", ["C1", "D1"])
 async def test_slack_breakout_thread_refuses_private_channel(
     monkeypatch: pytest.MonkeyPatch,
     private_source: bool,
+    source: str,
 ) -> None:
-    monkeypatch.setattr("openswe.run_config.get_config", _config)
+    config = _config()
+    config["configurable"]["slack_thread"]["channel_id"] = source
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
     monkeypatch.setattr(
         SlackChannel,
         "load",
         AsyncMock(
             side_effect=lambda channel_id, **_: _channel(
-                private=(channel_id == "C1") == private_source
+                private=(channel_id == source) == private_source
             )
         ),
     )
@@ -298,6 +302,7 @@ async def test_web_breakout_does_not_post_or_bind_slack(
     ("explicit", "target", "model", "effort", "expected_model", "expected_effort"),
     [
         ("C1", "C1", None, None, "anthropic:claude-sonnet-4-5", "high"),
+        ("D1", "D1", None, None, "anthropic:claude-sonnet-4-5", "high"),
         ("C3", "C3", None, None, "anthropic:claude-sonnet-4-5", "high"),
         ("C1", "C1", "anthropic:claude-opus-5-5", "max", "anthropic:claude-opus-5-5", "max"),
         (
@@ -321,8 +326,9 @@ async def test_slack_breakout_thread_success(
     expected_model: str,
     expected_effort: str,
 ) -> None:
+    source = "D1" if target == "D1" else "C1"
     monkeypatch.setattr(
-        SlackChannel, "load", AsyncMock(return_value=_channel(private=target == "C1"))
+        SlackChannel, "load", AsyncMock(return_value=_channel(private=target == source))
     )
     permalink = None
     captured: dict[str, Any] = {"stored_mappings": []}
@@ -419,6 +425,7 @@ async def test_slack_breakout_thread_success(
     monkeypatch.setattr(solo_threads.SlackClient, "bot", routing.bot)
     monkeypatch.setattr(solo_threads, "slack_thread_mutation_lock", routing.mutation_lock)
     config = _config()
+    config["configurable"]["slack_thread"]["channel_id"] = source
     config["configurable"]["resolved_agent_model_id"] = "openai:gpt-6.1-sol"
     monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
     monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", fake_bind)
@@ -452,14 +459,16 @@ async def test_slack_breakout_thread_success(
         effort=effort,
     )
 
-    assert await solo_threads.allow_solo_thread_followup(
-        fake_client,
-        channel_id=target,
-        thread_ts=new_ts,
-        message_ts="1700000001.0",
-        user_id="U1",
-        explicit_mention=False,
-    )
+    assert result["success"] is True
+    if not target.startswith("D"):
+        assert await solo_threads.allow_solo_thread_followup(
+            fake_client,
+            channel_id=target,
+            thread_ts=new_ts,
+            message_ts="1700000001.0",
+            user_id="U1",
+            explicit_mention=False,
+        )
     expected_thread_id = captured["thread_create"]["thread_id"]
     assert uuid.UUID(expected_thread_id).version == 4
     assert result == {
@@ -494,8 +503,8 @@ async def test_slack_breakout_thread_success(
             ],
         },
     ]
-    source_line.assert_awaited_once_with("C1", "1700000000.000002")
-    notification.assert_awaited_once_with("C1", "1700000000.000001", target, new_ts)
+    source_line.assert_awaited_once_with(source, "1700000000.000002")
+    notification.assert_awaited_once_with(source, "1700000000.000001", target, new_ts)
     assert captured["top_level_post"]["unfurl_links"] is False
     assert captured["thread_reply"] == {
         "channel_id": target,
@@ -526,7 +535,7 @@ async def test_slack_breakout_thread_success(
     assert metadata["source_context"]["slack_thread"]["thread_ts"] == new_ts
     assert metadata["source_context"]["slack_thread"]["triggering_user_id"] == "U1"
     assert metadata["source_context"]["breakout_from"] == {
-        "channel_id": "C1",
+        "channel_id": source,
         "thread_ts": "1700000000.000001",
         "message_ts": "1700000000.000002",
     }
