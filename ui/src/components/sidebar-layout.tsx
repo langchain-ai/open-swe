@@ -167,7 +167,8 @@ export function SidebarFrame({
       data-sidebar-frame=""
       style={{ width }}
       className={cn(
-        "relative flex h-svh shrink-0 flex-col",
+        // Navigation chrome: rows and labels are clicked, never selected.
+        "relative flex h-svh shrink-0 flex-col select-none",
         "max-md:fixed max-md:inset-0 max-md:z-pane max-md:!w-full",
         "max-md:duration-normal max-md:ease-out max-md:animate-in max-md:fade-in-0 max-md:slide-in-from-left-4",
         className

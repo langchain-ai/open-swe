@@ -38,6 +38,7 @@ The dashboard aims for quiet, deliberate minimalism: structure comes from surfac
 - A menu item that navigates away must not hand focus back to its trigger (`onCloseAutoFocus` → `preventDefault()`), or Chromium draws a focus ring on it.
   Escape and outside clicks still return focus.
 - Decorative display headings, such as the empty-state "What should we work on?", and read-only labels inside controls, such as a started thread's project in the composer, are not selectable (`select-none cursor-default`).
+- Navigation chrome is not selectable either: the sidebar frame sets `select-none`, so its rows, headers and labels never highlight on a double-click (text fields inside it stay editable).
 
 ## Desktop title bar
 
