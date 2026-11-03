@@ -1,3 +1,4 @@
+import { externalNavigation } from "@/lib/externalNavigation"
 import { useEffect, useRef } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
@@ -30,7 +31,7 @@ export function AppNotifications() {
         onClick: () => {
           if (notification.path)
             void router.navigate(linkOptions(notification.path))
-          else window.open(notification.url, "_blank", "noopener")
+          else externalNavigation.open(notification.url)
         },
         onShow: () =>
           void api

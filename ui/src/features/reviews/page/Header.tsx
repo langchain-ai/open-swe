@@ -1,3 +1,4 @@
+import { externalNavigation } from "@/lib/externalNavigation"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { CircularProgress } from "@langchain/macaw-components/CircularProgress"
 import { ArrowLeftIcon, ArrowUpIcon } from "@langchain/macaw-components/icons"
@@ -407,9 +408,7 @@ export function Header({
               </DropdownMenuItem>
             )}
             <DropdownMenuItem
-              onSelect={() =>
-                window.open(githubUrl, "_blank", "noopener,noreferrer")
-              }
+              onSelect={() => externalNavigation.open(githubUrl)}
             >
               <GithubLogoIcon aria-hidden size={16} weight="regular" />
               Open on GitHub

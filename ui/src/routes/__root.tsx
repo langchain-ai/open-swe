@@ -20,6 +20,7 @@ import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { Text } from "@langchain/macaw-components/Text"
 import { Toaster } from "@/components/Toaster"
 import { AppNotifications } from "@/components/AppNotifications"
+import { GitHubNavigationConfirmation } from "@/components/GitHubNavigationConfirmation"
 import { VersionMismatchBanner } from "@/components/VersionMismatchBanner"
 import { ThemeSync } from "@/lib/ThemeSync"
 import { Favicon } from "@/components/Branding"
@@ -131,6 +132,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <QueryClientProvider client={queryClient}>
           <Favicon />
           <TooltipProvider>
+            <GitHubNavigationConfirmation />
             <AnalyticsIdentity />
             <AccountGate>{children ?? <Outlet />}</AccountGate>
             <PerfHudMount />

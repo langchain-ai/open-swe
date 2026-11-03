@@ -1,3 +1,4 @@
+import { externalNavigation } from "@/lib/externalNavigation"
 import { CaretDownIcon, CheckIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { ButtonGroup } from "@langchain/macaw-components/ButtonGroup"
@@ -145,8 +146,7 @@ export function ReviewButton({
         {
           action: {
             label: "View on GitHub",
-            onClick: () =>
-              window.open(result.html_url, "_blank", "noopener,noreferrer"),
+            onClick: () => externalNavigation.open(result.html_url),
           },
         }
       )

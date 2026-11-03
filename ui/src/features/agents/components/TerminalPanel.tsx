@@ -1,3 +1,4 @@
+import { externalNavigation } from "@/lib/externalNavigation"
 import { PlusIcon, XIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
@@ -151,7 +152,7 @@ function TerminalViewport({
         if (/^https?:\/\//i.test(text)) {
           if (target.kind === "local")
             void window.openSweDesktop?.openExternal(text)
-          else window.open(text, "_blank", "noopener,noreferrer")
+          else externalNavigation.open(text)
           return
         }
         const openFile = onOpenFileRef.current
