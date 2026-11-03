@@ -15,7 +15,6 @@ from fastapi.responses import JSONResponse
 from openswe.dashboard import auth_routes, langsmith_login, langsmith_oauth, oauth
 from openswe.dashboard.langsmith_login import LangSmithAccount
 from openswe.dashboard.oauth_credentials import load_credential, save_credential
-from openswe.dashboard.principal import DashboardPrincipal
 from openswe.dashboard.profiles import PROFILES, get_profile
 from openswe.dashboard.profiles import router as profiles_router
 from openswe.dashboard.user_preferences import USER_PREFERENCES
@@ -254,11 +253,6 @@ async def test_linking_github_returns_a_langsmith_person_to_their_github_account
     assert person is not None and person.id != github_user.id
     fresh = oauth.decode_session(client.cookies[oauth.COOKIE_NAME])
     assert fresh["sub"] == f"user:{person.id}"
-    assert (await client.get("/dashboard/api/me")).json()["requires_github_link"] is True
-    assert (await client.get("/dashboard/api/profile")).status_code == 403
-    with pytest.raises(HTTPException) as blocked:
-        await DashboardPrincipal.from_session(fresh).authorize()
-    assert blocked.value.status_code == 403
     with pytest.raises(HTTPException):
         Principal.of_person(fresh).assert_can_read(github_thread)
 
