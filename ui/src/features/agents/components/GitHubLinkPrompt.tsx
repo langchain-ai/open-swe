@@ -25,12 +25,12 @@ export function GitHubLinkPrompt({ user }: { user: SessionUser }) {
         <div className="flex flex-col gap-space-2">
           <Text as="h1" variant="h3">
             {user.requires_github_link
-              ? "Return to your existing account"
+              ? "Link GitHub to use Open SWE"
               : "Link GitHub to start coding"}
           </Text>
           <Text as="p" variant="sm" color="secondary">
             {user.requires_github_link
-              ? "Your email matches an existing Open SWE account. Link the GitHub account you used before to verify ownership and restore your threads and settings."
+              ? "GitHub is required to use Open SWE. If you've used Open SWE before, link the GitHub account you used then to return to your existing account, threads, and settings."
               : "Coding agents clone repositories, push branches and open pull requests as you. Link your GitHub account to use them and return to your existing coding threads."}
           </Text>
         </div>

@@ -193,24 +193,10 @@ class User(Base):
             )
 
     async def requires_github_link(self) -> bool:
-        """Require proof of GitHub when a LangSmith email matches an existing person."""
-        email = self._identity_field("langsmith", "email").strip().lower()
-        if self.github_login or not email:
-            return False
-        github_people = select(UserIdentity.user_id).where(UserIdentity.provider == "github")
-        async with postgres.session() as session:
-            return bool(
-                await session.scalar(
-                    select(UserIdentity.user_id)
-                    .where(
-                        UserIdentity.user_id != self.id,
-                        UserIdentity.user_id.in_(github_people),
-                        UserIdentity.provider != "langsmith",
-                        func.lower(UserIdentity.email) == email,
-                    )
-                    .limit(1)
-                )
-            )
+        """Require every LangSmith person to link GitHub before using Open SWE."""
+        return not self.github_login and any(
+            identity.provider == "langsmith" for identity in self.identities
+        )
 
     @classmethod
     async def for_person(cls, person: PersonIdentity) -> Self | None:
