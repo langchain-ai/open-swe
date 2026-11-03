@@ -93,6 +93,7 @@ class ProfileUpdate(BaseModel):
     experimental_memory: bool | None = None
     experimental_conditional_approval: bool | None = None
     experimental_classify: bool | None = None
+    experimental_vibe_check: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_background_callbacks: bool | None = Field(
@@ -412,6 +413,7 @@ async def put_my_profile(
             experimental_memory=update.experimental_memory,
             experimental_conditional_approval=update.experimental_conditional_approval,
             experimental_classify=update.experimental_classify,
+            experimental_vibe_check=update.experimental_vibe_check,
         ),
     )
     if preferences is None and (
@@ -421,6 +423,7 @@ async def put_my_profile(
         or update.experimental_memory
         or update.experimental_conditional_approval
         or update.experimental_classify
+        or update.experimental_vibe_check
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)
