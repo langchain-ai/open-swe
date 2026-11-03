@@ -21,7 +21,7 @@ import logging
 import threading
 import uuid
 from collections import OrderedDict
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from typing import Any, Literal, Self, TypedDict, cast
 from uuid import UUID, uuid7
@@ -623,6 +623,27 @@ class FindingRow(Base):
         values["interactions"] = [row.to_interaction() for row in self.interaction_rows]
         return cast(Finding, values)
 
+    @classmethod
+    async def open_by_github_thread(cls, owner: str, repo: str, number: int) -> dict[str, str]:
+        """Open findings' ids on a pull request, by the GitHub review thread each was posted as."""
+        # pull_requests imports this module.
+        from openswe.github.pull_requests import PullRequest
+
+        pull = await PullRequest.get(owner, repo, number)
+        if pull is None:
+            return {}
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(cls.id, cls.github_review_thread_ids).where(
+                    cls.pull_request_id == pull.id, cls.status == "open"
+                )
+            )
+        return {
+            thread_id: finding_id
+            for finding_id, thread_ids in rows.tuples()
+            for thread_id in thread_ids
+        }
+
 
 FINDING_FIELDS: tuple[str, ...] = tuple(Finding.__annotations__)
 COLUMN_FIELDS: tuple[str, ...] = tuple(field for field in FINDING_FIELDS if field != "interactions")
@@ -946,6 +967,8 @@ def thread_missing_tool_result(exc: ReviewerThreadMissingError) -> dict[str, Any
 async def mutate_findings(
     thread_id: str,
     mutator: Callable[[list[Finding]], bool],
+    *,
+    alongside: Callable[[AsyncSession, UUID], Awaitable[None]] | None = None,
 ) -> list[Finding]:
     """Read the latest findings, apply ``mutator`` in place, persist iff changed.
 
@@ -953,6 +976,8 @@ async def mutate_findings(
     persisted list rather than a stale in-memory snapshot. ``mutator`` edits the
     list in place and returns ``True`` when it changed something; we only write
     on change, so a no-op mutation never clobbers a concurrent update.
+    ``alongside`` writes more rows in the same transaction as a stored change,
+    given the pull request the findings are stored under.
     """
     from openswe.github.pull_requests import PullRequest
     from openswe.review.events import ReviewEvents
@@ -996,6 +1021,8 @@ async def mutate_findings(
         for removed in rows_by_id.values():
             await session.delete(removed)
         await _link_interaction_authors(session, written)
+        if alongside is not None:
+            await alongside(session, pull_request_id)
         await _invalidate_review_page(session, pull_request_id)
     if pull is not None:
         await ReviewEvents(

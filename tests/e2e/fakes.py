@@ -563,6 +563,7 @@ def review_thread_graphql(thread: dict[str, Any]) -> dict[str, Any]:
             }
         ]
     return {
+        "id": thread.get("id"),
         "isResolved": bool(thread.get("is_resolved", False)),
         "isOutdated": bool(thread.get("is_outdated", False)),
         "path": thread.get("path", ""),

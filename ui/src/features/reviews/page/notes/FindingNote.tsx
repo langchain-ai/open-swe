@@ -9,6 +9,7 @@ import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Button } from "@langchain/macaw-components/Button"
 import { cn, INHERITED_LINK } from "@/lib/utils"
+import { DismissFinding } from "@/features/reviews/components/DismissFinding"
 import { AgentMark } from "@/features/reviews/page/AgentMark"
 import {
   askAboutFinding,
@@ -139,6 +140,7 @@ export function FindingNote({
                   Fix it
                 </Button>
               )}
+              {!settled && <DismissFinding pr={pr} findingId={finding.id} />}
               <Button
                 size="sm"
                 color="secondary"

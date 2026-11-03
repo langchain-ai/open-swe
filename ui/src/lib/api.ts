@@ -1348,6 +1348,8 @@ export interface PreviewThread {
   line: number | null
   url: string | null
   replies: Array<PreviewReply>
+  /** The open Open SWE finding this thread was posted as. */
+  finding_id: string | null
 }
 
 export interface PreviewCheck {
@@ -1972,6 +1974,17 @@ export const api = {
   getReview: (owner: string, repo: string, number: number) =>
     request<ReviewDetail>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`
+    ),
+  dismissFinding: (
+    owner: string,
+    repo: string,
+    number: number,
+    findingId: string,
+    reason: string
+  ) =>
+    request<void>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/findings/${encodeURIComponent(findingId)}/dismissal`,
+      { method: "POST", body: JSON.stringify({ reason: reason || null }) }
     ),
   updatePullRequestDescription: (
     owner: string,

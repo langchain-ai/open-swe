@@ -29,6 +29,7 @@ import { useSession } from "@/lib/session"
 import { cn, INHERITED_LINK } from "@/lib/utils"
 import { subtleLink } from "@/features/reviews/lib/styles"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { DismissFinding } from "@/features/reviews/components/DismissFinding"
 import { MarkPullRequestReady } from "@/features/reviews/components/MarkPullRequestReady"
 import { MergePullRequest } from "@/features/reviews/components/MergePullRequest"
 import { PullRequestThreadAction } from "@/features/reviews/components/PullRequestThreadAction"
@@ -849,7 +850,7 @@ function OpenSweRow({
           )}
         >
           {detail.findings.length > 0 && (
-            <FindingQueue findings={detail.findings} />
+            <FindingQueue pr={pr} findings={detail.findings} />
           )}
           {assessment && (
             <div className="mt-space-2 [&>section]:mt-0 [&>section]:border-dashed [&>section]:bg-transparent [&>section]:p-space-3 [&>section]:text-xs">
@@ -868,7 +869,13 @@ function OpenSweRow({
   )
 }
 
-function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
+function FindingQueue({
+  pr,
+  findings,
+}: {
+  pr: PullRequestRef
+  findings: Array<ReviewFinding>
+}) {
   const showFinding = useReviewPage((state) => state.showFinding)
   const askInChat = useReviewPage((state) => state.askInChat)
   const [openId, setOpenId] = useState<string | null>(null)
@@ -955,6 +962,9 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                   >
                     Fix it
                   </Button>
+                )}
+                {!settled && (
+                  <DismissFinding pr={pr} findingId={finding.id} size="xs" />
                 )}
               </span>
             </div>
