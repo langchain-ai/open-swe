@@ -485,14 +485,14 @@ export function AgentsHome({
     resetPendingSubmit()
   }
 
-  const handleSubmit = ({ text: prompt, images }: ComposerSubmission) => {
+  const handleSubmit = async ({ text: prompt, images }: ComposerSubmission) => {
     void requestNotificationPermission().then((perm) => {
       if (perm === "granted") setNotificationsPref(true)
     })
-    if (
-      agentWorkspace &&
-      profileQuery.data?.agent_workspace_tasks_supported !== true
-    ) {
+    const profile = agentWorkspace
+      ? (profileQuery.data ?? (await profileQuery.refetch()).data)
+      : undefined
+    if (agentWorkspace && profile?.agent_workspace_tasks_supported !== true) {
       setLocalError(
         "The connected backend needs an update before it can start Work chats."
       )
@@ -722,10 +722,7 @@ export function AgentsHome({
               }
               onSubmit={handleSubmit}
               onStop={optimisticDraftThread ? stopPendingSubmit : undefined}
-              disabled={
-                Boolean(submittedDraft) ||
-                (agentWorkspace && profileQuery.isPending)
-              }
+              disabled={Boolean(submittedDraft)}
               busy={Boolean(optimisticDraftThread)}
               models={models}
               selection={activeSelection}
