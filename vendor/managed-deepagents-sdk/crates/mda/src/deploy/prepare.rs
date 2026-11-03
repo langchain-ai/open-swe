@@ -27,25 +27,25 @@ use reqwest::header::HeaderValue;
 use serde_json::{json, Value};
 
 use super::helpers::{
-    deployment_is_managed_deep_agent, resolve_context_hub_base_url, resolve_langsmith_api_bases,
-    resolve_platform_api_url, secrets_from_env, REMOVED_WORKSPACE_ID_ENVS, RESERVED_ENV_VARS,
-    WORKSPACE_ID_ENV,
+    deployment_is_managed_deep_agent, is_reserved_env_var, secrets_from_env, WORKSPACE_ID_ENV,
 };
+use super::langsmith_context::LangSmithContext;
 use super::{
     bake_sandbox_recipe_step, compile_for_deploy_step, emit_requirements_step,
     ensure_channel_requirements_secrets, ensure_connector_requirements_secrets,
     ensure_ingress_secret, ensure_model_api_key, ensure_project, ensure_workspace_connections,
     link_context_repo_to_agent, recipe_spec_from_project, schedule_cron_request, sync_context_hub,
-    trigger_channels, ChannelSetup, ContextStrategy, EmittedRequirements, WorkspaceSecretKeys,
+    trigger_channels, warn_unprovided_reserved_connections, ChannelSetup, ContextStrategy,
+    EmittedRequirements, WorkspaceSecretKeys,
 };
 use crate::agent_config;
 use crate::cli_output::{show_sequence, SequenceItem};
 use crate::command::CommandCompletion;
-use crate::error::{categorized, category_of, ErrorCategory};
+use crate::error::{categorized, ErrorCategory, Failure};
 use crate::install::Installation;
 use crate::langsmith::{
-    self, require_str, resolve_preferred_env, ContextHubClient, Credential, RepoOwnership,
-    API_KEY_ENV, REMOVED_API_KEY_ENVS,
+    self, require_str, resolve_preferred_env, ApiKey, ContextHubClient, RepoOwnership, API_KEY_ENV,
+    REMOVED_API_KEY_ENVS,
 };
 use crate::telemetry::{otel_logger, update_facts};
 use crate::{compile, project};
@@ -103,7 +103,7 @@ pub fn run(opts: PrepareOptions) -> Result<CommandCompletion> {
         Err(err) => {
             otel_logger::error(&err);
             show_sequence(&failed_items(&project, &err))?;
-            Ok(CommandCompletion::Failed(category_of(&err)))
+            Ok(CommandCompletion::Failed(Failure::of(&err)))
         }
     }
 }
@@ -171,33 +171,14 @@ fn run_inner(
         Some(path) => read_env_json(path)?,
         None => BTreeMap::new(),
     };
-    let (default_host, _) = resolve_langsmith_api_bases(&env_vars);
-    let host_url = opts
-        .host_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(default_host.as_str());
-    let platform_api_url = resolve_platform_api_url(host_url, &env_vars);
-    let credential = resolve_api_key_headless(&env_vars)?;
-    let workspace_id = resolve_preferred_env(
-        WORKSPACE_ID_ENV,
-        REMOVED_WORKSPACE_ID_ENVS,
-        None,
-        &env_vars,
-        |key| std::env::var(key).ok(),
-        "",
-    )?;
-    if workspace_id.is_none() {
+    let ctx = LangSmithContext::resolve(&env_vars, opts.host_url.as_deref(), None, "", |_| {
+        resolve_api_key_headless(&env_vars)
+    })?;
+    if ctx.workspace_id.is_none() {
         bail!("{WORKSPACE_ID_ENV} is required so platform calls are scoped to the deployment's workspace");
     }
 
-    let client = langsmith::Client::with_credential_and_platform(
-        host_url,
-        Some(platform_api_url.as_str()),
-        credential.clone(),
-        workspace_id.clone(),
-    )?;
+    let client = ctx.client()?;
     let dashboard_url = client.dashboard_url().ok();
 
     let deployment = client
@@ -217,12 +198,14 @@ fn run_inner(
     // The deployment's secrets stand in for `.env` in every preflight; the
     // host-backend-owned MDA_* values are already excluded by the reserved list.
     let secrets = secrets_from_env(&env_vars);
+    // A checkout has no `.env`; preflight errors still name the conventional one.
+    let env_path = project.root.join(".env");
 
     // -- 2. Preflight -------------------------------------------------------
     let mut workspace_keys = WorkspaceSecretKeys::Unloaded;
     ensure_model_api_key(
         agent.model.as_deref(),
-        project,
+        &env_path,
         &env_vars,
         &secrets,
         &client,
@@ -231,6 +214,7 @@ fn run_inner(
     )?;
     ensure_ingress_secret(
         project,
+        &env_path,
         &env_vars,
         &secrets,
         &client,
@@ -247,13 +231,9 @@ fn run_inner(
     // -- 3. Context Hub sync: the repository wins ---------------------------
     // The Hub UI reads this tag to make GitHub-owned instructions and skills
     // read-only there (ADR 0001): the repository wins on every build.
-    let context_client = ContextHubClient::with_credential_and_host(
-        &resolve_context_hub_base_url(host_url, &platform_api_url),
-        host_url,
-        credential,
-        workspace_id.clone(),
-    )?
-    .with_extra_repo_tags([GITHUB_SOURCED_REPO_TAG.to_string()]);
+    let context_client = ctx
+        .context_hub_client()?
+        .with_extra_repo_tags([GITHUB_SOURCED_REPO_TAG.to_string()]);
     ensure_hub_repo_is_ours(&context_client, &name)?;
     let context = sync_context_hub(
         &context_client,
@@ -292,21 +272,22 @@ fn run_inner(
     } = emit_requirements_step(project, &out_dir, &summary)?;
     ensure_workspace_connections(
         &client,
-        workspace_id.as_deref(),
+        ctx.workspace_id.as_deref(),
         &connector_requirements,
+        &channel_requirements,
         &mcp_connections,
     )?;
+    warn_unprovided_reserved_connections(&connector_requirements, &channel_requirements)?;
     // Validation only: setup needs the live deployment.
     let channel_setup = ChannelSetup::prepare(
         &channel_requirements,
-        true,
         &project.root,
         &project.files,
         project.language,
         &assistant_id,
     )?;
     ensure_connector_requirements_secrets(
-        project,
+        &env_path,
         &env_vars,
         &secrets,
         &client,
@@ -315,7 +296,7 @@ fn run_inner(
         &mut workspace_keys,
     )?;
     ensure_channel_requirements_secrets(
-        project,
+        &env_path,
         &env_vars,
         &secrets,
         &client,
@@ -366,7 +347,7 @@ fn read_env_json(path: &Path) -> Result<BTreeMap<String, String>> {
         .into_iter()
         // Deployment owners set these secrets; never let them steer where the
         // runner's platform credential is sent.
-        .filter(|(key, _)| !RESERVED_ENV_VARS.contains(&key.as_str()))
+        .filter(|(key, _)| !is_reserved_env_var(key))
         .map(|(key, value)| match value {
             Value::String(text) => Ok((key, text)),
             _ => bail!("env var {key} must be a string"),
@@ -375,7 +356,7 @@ fn read_env_json(path: &Path) -> Result<BTreeMap<String, String>> {
 }
 
 /// The API key from the env file or process env, never a prompt.
-fn resolve_api_key_headless(env_vars: &BTreeMap<String, String>) -> Result<Credential> {
+fn resolve_api_key_headless(env_vars: &BTreeMap<String, String>) -> Result<ApiKey> {
     match resolve_preferred_env(
         API_KEY_ENV,
         REMOVED_API_KEY_ENVS,
@@ -384,7 +365,7 @@ fn resolve_api_key_headless(env_vars: &BTreeMap<String, String>) -> Result<Crede
         |key| std::env::var(key).ok(),
         " instead (same value, renamed)",
     )? {
-        Some(key) => Ok(Credential::ApiKey(key)),
+        Some(key) => Ok(ApiKey::new(key)),
         None => Err(categorized(
             ErrorCategory::Authentication,
             format!("{API_KEY_ENV} is required; `mda prepare` never prompts"),
@@ -441,7 +422,8 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{build_artifacts, read_env_json, resolve_context_hub_base_url};
+    use super::{build_artifacts, read_env_json};
+    use crate::deploy::helpers::resolve_context_hub_base_url;
 
     #[test]
     fn build_token_is_required_and_never_in_error_or_debug_output() {

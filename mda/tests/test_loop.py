@@ -1,4 +1,6 @@
+import asyncio
 from collections.abc import Mapping
+from datetime import UTC, datetime
 
 import pytest
 from langchain.agents import create_agent
@@ -23,9 +25,20 @@ from runtime_api.catalog import (
     ReplyRules,
     RoutingRules,
     RunModels,
+    WorkStateRules,
 )
 from runtime_api.endpoint import Delivery
-from runtime_api.loop import Done, PhaseResult, Route, TaskContext
+from runtime_api.loop import (
+    Done,
+    GitHubProxyRefreshed,
+    IncidentContext,
+    PhaseResult,
+    Prepared,
+    Route,
+    Routed,
+    TaskContext,
+)
+from runtime_api.reports import REPORTS, Reports, ReportsTaken
 
 _MAIN = ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})
 _FALLBACK = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
@@ -45,6 +58,8 @@ _REPLY = ReplyRules(
     nudge=[_NUDGE],
     nudge_sender=_GUARD,
 )
+
+_TOKEN_EXPIRES = datetime(2999, 1, 1, 12, tzinfo=UTC)
 
 type Calls = list[tuple[str, dict[str, JsonValue]]]
 
@@ -73,11 +88,24 @@ def _backend(
         headers: Mapping[str, str] | None = None,
     ) -> JsonValue:
         name = path.rsplit("/", 1)[-1]
+        if name == REPORTS.name:
+            return (await _taking(body)).model_dump(mode="json")
         calls.append((name, body))
         answer = answers[name]
         if isinstance(answer, BackendCallError):
             raise answer
         return answer.model_dump(mode="json")
+
+    async def _taking(body: dict[str, JsonValue]) -> ReportsTaken:
+        """Each item of a batch, answered as the call it stands for."""
+        replies: list[dict[str, JsonValue]] = []
+        for item in Reports.model_validate(body).items:
+            calls.append((item.endpoint, item.request.model_dump(mode="json")))
+            answer = answers[item.endpoint]
+            if isinstance(answer, BackendCallError):
+                return ReportsTaken(replies=replies, refused=str(answer))
+            replies.append(answer.model_dump(mode="json"))
+        return ReportsTaken(replies=replies)
 
     monkeypatch.setattr(backend, "post", post)
     return backend, calls
@@ -87,56 +115,230 @@ def _state(*messages: BaseMessage, **held: JsonValue) -> dict[str, object]:
     return {"messages": list(messages), STATE_KEY: held}
 
 
+async def test_a_failed_github_token_refresh_waits_before_the_next_try(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, calls = _backend(
+        monkeypatch,
+        {"refresh_github_proxy": BackendCallError("refresh_github_proxy failed: timed out")},
+        LoopRules(refresh_github_proxy=True),
+    )
+    loop = RunLoop(backend)
+
+    first = await loop.before_model(_state(HumanMessage(content="Fix the login", id="human-1")))
+    held = {"github_proxy_refresh_at": first.update["github_proxy_refresh_at"]}
+    second = await loop.before_model(
+        _state(HumanMessage(content="Fix the login", id="human-1"), **held)
+    )
+
+    assert first.call is not None and second.call is not None
+    assert [name for name, _ in calls] == ["refresh_github_proxy"]
+
+
+async def test_an_incident_run_asks_for_its_incident_before_each_model_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, calls = _backend(
+        monkeypatch,
+        {"incident_context": IncidentContext(instructions="Investigate the incident.")},
+        LoopRules(incident=True),
+    )
+
+    planned = await RunLoop(backend).before_model(
+        _state(HumanMessage(content="What broke?", id="human-1"))
+    )
+
+    assert planned.call is not None
+    assert planned.call.system_prompt.endswith("Investigate the incident.")
+    [(name, body)] = calls
+    assert name == "incident_context"
+    assert [m.content for m in messages_from_dict(Routed.model_validate(body).humans)] == [
+        "What broke?"
+    ]
+
+
+async def test_failed_task_context_preserves_error_and_cleans_up_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = BackendCallError("context unavailable")
+    backend, _ = _backend(monkeypatch, {}, LoopRules())
+    loop = RunLoop(backend)
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def refresh(_held: Mapping[str, object]) -> dict[str, JsonValue]:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+        return {}
+
+    async def context() -> TaskContext:
+        await started.wait()
+        raise failure
+
+    monkeypatch.setattr(loop, "_github_proxy", refresh)
+    monkeypatch.setattr(loop, "_task_context", context)
+
+    with pytest.raises(BackendCallError) as caught:
+        await loop.before_model(_state())
+
+    assert caught.value is failure
+    assert stopped.is_set()
+
+
 async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     context = '<dynamic-context kind="task" id="task-1">Fix login</dynamic-context>'
+    role = '<dynamic-context kind="run" id="task-role">You coordinate the task.</dynamic-context>'
     rules = LoopRules(
         deployment_prompt="This is a preview deployment.",
         hidden_tools=["grep"],
         hidden_unless={"has_human_input": ["record_human_input"]},
         routing=RoutingRules(mode="fast", route_model_ids={"fast": _FAST.model_id}),
-        review_guide=True,
         task_coordination=True,
         refresh_github_proxy=True,
     )
-    backend, calls = _backend(
-        monkeypatch,
-        {
-            "task_context": TaskContext(instructions="You coordinate the task.", message=context),
-            "refresh_github_proxy": Done(),
-        },
-        rules,
-    )
+    answers: dict[str, BaseModel | BackendCallError] = {
+        "task_context": TaskContext(instructions=role, message=context),
+        "refresh_github_proxy": GitHubProxyRefreshed(expires_at=_TOKEN_EXPIRES),
+    }
+    backend, calls = _backend(monkeypatch, answers, rules)
     loop = RunLoop(backend)
     state = _state(
         HumanMessage(content="Fix the login", id="human-1"),
-        rendered_system_prompt="You are Open SWE.",
-        review_guide_rules="Walk the reviewer through it.",
+        rendered_system_prompt=(
+            "You are Open SWE.\n\nWe deploy on Fridays.\n\nThis thread's artifacts are here."
+        ),
+        rendered_workspace_prompt="We deploy on Fridays.",
+        rendered_thread_prompt="This thread's artifacts are here.",
     )
 
-    planned = await loop.before_model(state)
-    await backend.reports.settled()
+    barrier = asyncio.Barrier(2)
+    post = backend.post
+
+    async def overlapping_post(
+        path: str,
+        body: dict[str, JsonValue],
+        *,
+        timeout: float,
+        delivery: Delivery,
+        headers: Mapping[str, str] | None = None,
+    ) -> JsonValue:
+        await asyncio.wait_for(barrier.wait(), timeout=1)
+        return await post(path, body, timeout=timeout, delivery=delivery, headers=headers)
+
+    with monkeypatch.context() as preparation:
+        preparation.setattr(backend, "post", overlapping_post)
+        planned = await loop.before_model(state)
+    await backend.outbox.drain()
 
     assert planned.call is not None
-    assert planned.call.system_prompt == (
-        "This is a preview deployment.\n\nYou are Open SWE.\n\n"
-        "Walk the reviewer through it.\n\nYou coordinate the task."
-    )
+    # What the workspace's threads and this thread alone say go apart, after what every
+    # thread shares.
+    assert planned.call.system_prompt == "This is a preview deployment.\n\nYou are Open SWE."
+    assert planned.call.workspace_prompt == "We deploy on Fridays."
+    assert planned.call.thread_prompt == "This thread's artifacts are here."
     assert planned.call.hidden_tools == ["grep", "record_human_input"]
-    assert planned.update == {"model_route": "fast"}
+    assert planned.update == {
+        "github_proxy_refresh_at": "2999-01-01T11:50:00+00:00",
+        "model_route": "fast",
+    }
     # The fast route's model reads no images, so a call with one goes to the vision model.
     assert (planned.call.model, planned.call.vision) == (_FAST, _VISION)
     assert planned.call.fallback == _FALLBACK
     assert planned.call.use_gateway is True
-    assert [message.content for message in messages_from_dict(planned.messages)] == [context]
+    assert [message.content for message in messages_from_dict(planned.messages)] == [
+        role,
+        context,
+    ]
     assert sorted(name for name, _ in calls) == ["refresh_github_proxy", "task_context"]
 
-    # The task's context the model still sees is not added again.
+    # The task's context and role the model still sees are not added again, and a token
+    # with time left is not replaced.
+    seen = _state(
+        HumanMessage(content=role, id="task-role:1"),
+        HumanMessage(content=context, id="task-context:1"),
+        rendered_system_prompt="You are Open SWE.",
+        model_route="fast",
+        github_proxy_refresh_at=planned.update["github_proxy_refresh_at"],
+    )
+    again = await loop.before_model(seen)
+    assert again.messages == []
+    assert [name for name, _ in calls].count("refresh_github_proxy") == 1
+
+    # A new role joins the conversation and leaves the system prompt, and the cache with
+    # it, as it was.
+    worker = role.replace("You coordinate the task.", "You work on the task.")
+    answers["task_context"] = TaskContext(instructions=worker, message=context)
+    demoted = await loop.before_model(seen)
+    assert demoted.call is not None
+    assert demoted.call.system_prompt == planned.call.system_prompt
+    assert [message.content for message in messages_from_dict(demoted.messages)] == [worker]
+
+
+async def test_a_run_context_summarized_away_is_sent_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, _ = _backend(monkeypatch, {}, LoopRules())
+    loop = RunLoop(backend)
+    history = [
+        HumanMessage(content="Review this PR", id="human-1"),
+        HumanMessage(content="# Run context\nhead_sha: old", id="run-context:1"),
+        HumanMessage(content="# Run context\nhead_sha: new", id="run-context:2"),
+        HumanMessage(content='<dynamic-context kind="run" id="source">Slack</dynamic-context>'),
+        HumanMessage(content='<dynamic-context kind="run" id="source">Dashboard</dynamic-context>'),
+        HumanMessage(
+            content='<dynamic-context kind="run" id="environment">Local</dynamic-context>'
+        ),
+        HumanMessage(
+            content='<dynamic-context kind="run" id="review-guide">Active</dynamic-context>'
+        ),
+        HumanMessage(
+            content='<dynamic-context kind="run" id="review-guide">Closed</dynamic-context>'
+        ),
+        HumanMessage(content='<dynamic-context kind="person" id="alice">Alice</dynamic-context>'),
+        AIMessage(content="Reading the diff", id="ai-1"),
+    ]
+
+    seen = await loop.before_model({"messages": history, STATE_KEY: {}})
+    summarized = await loop.before_model(
+        {"messages": history, STATE_KEY: {}, "_summarization_event": {"cutoff_index": 8}}
+    )
+
+    assert seen.messages == []
+    restored = messages_from_dict(summarized.messages)
+    assert [message.content for message in restored] == [
+        history[4].content,
+        history[5].content,
+        history[7].content,
+        "# Run context\nhead_sha: new",
+    ]
     again = await loop.before_model(
-        _state(HumanMessage(content=context, id="task-context:1"), model_route="fast")
+        {
+            "messages": [*history, *restored],
+            STATE_KEY: {},
+            "_summarization_event": {"cutoff_index": 8},
+        }
     )
     assert again.messages == []
+
+    edited = '<dynamic-context kind="run" id="source">Edited</dynamic-context>'
+    history[4].content = [{"type": "text", "text": edited}]
+    history[7] = HumanMessage(
+        content='<dynamic-context kind="run" id="review-guide">Reopened</dynamic-context>'
+    )
+    history[5] = AIMessage(content=history[5].content)
+    changed = await loop.before_model(
+        {"messages": history, STATE_KEY: {}, "_summarization_event": {"cutoff_index": 8}}
+    )
+    assert [message.content for message in messages_from_dict(changed.messages)] == [
+        edited,
+        history[7].content,
+        "# Run context\nhead_sha: new",
+    ]
 
 
 async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the_rest(
@@ -175,6 +377,37 @@ async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the
             {"run_id": "run-1", "model_id": requested.model_id, "effort": "high"},
         )
     ]
+
+
+async def test_a_route_the_classifier_fell_back_to_is_not_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answers: dict[str, BaseModel | BackendCallError] = {
+        "route_model": Route(route="default", persist=False)
+    }
+    backend, calls = _backend(
+        monkeypatch,
+        answers,
+        LoopRules(routing=RoutingRules(mode="auto")),
+    )
+    loop = RunLoop(backend)
+    human = HumanMessage(content="Fix the login", id="human-1")
+
+    first = await loop.before_model(_state(human))
+    second = await loop.before_model(_state(human, **first.update))
+
+    assert first.call is not None and first.call.model == _MAIN
+    assert "model_route" not in first.update
+    assert [name for name, _ in calls] == ["route_model"]
+    assert second.call is not None and second.call.model == _MAIN
+
+    monkeypatch.setattr("rt.loop.run_id", lambda: "run-2")
+    answers["route_model"] = Route(route="fast")
+    recovered = await loop.before_model(_state(human, **first.update))
+
+    assert recovered.call is not None and recovered.call.model == _FAST
+    assert recovered.update["model_route"] == "fast"
+    assert [name for name, _ in calls] == ["route_model", "route_model"]
 
 
 @pytest.mark.parametrize(
@@ -225,6 +458,59 @@ async def test_an_answer_that_owes_a_slack_reply_is_asked_again_then_posted_for_
     assert on_the_web == PhaseResult()
 
 
+async def test_goal_mode_work_is_sent_back_until_it_reports_its_state_or_waits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    guard = "system:work-state-guard"
+    nudge = (
+        f'<input-message sender="{guard}" surface="automation" kind="system">'
+        "Keep working.</input-message>"
+    )
+    rules = LoopRules(
+        reply=_REPLY,
+        work_state=WorkStateRules(
+            tool="report_work_state",
+            waits=["schedule_thread_wakeup"],
+            nudge=[nudge],
+            nudge_sender=guard,
+        ),
+    )
+    backend, _calls = _backend(monkeypatch, {}, rules)
+    loop = RunLoop(backend)
+    asked = HumanMessage(content="Fix it", id="human-1")
+    stopped = AIMessage(content="", id="ai-1")
+
+    def finished(tool: str) -> list[BaseMessage]:
+        call = AIMessage(content="", id="ai-0", tool_calls=[{"id": "c1", "name": tool, "args": {}}])
+        return [asked, call, ToolMessage(content='{"success": true}', tool_call_id="c1")]
+
+    nudged = await loop.after_model(_state(asked, stopped, reply_surface="web"))
+    again = await loop.after_model(
+        _state(
+            *finished("slack_no_reply_needed")[1:],
+            HumanMessage(content=nudge, id="nudge-1"),
+            stopped,
+            reply_surface="web",
+        )
+    )
+    reported = await loop.after_model(
+        _state(*finished("report_work_state"), stopped, reply_surface="web")
+    )
+    waiting = await loop.after_model(
+        _state(*finished("schedule_thread_wakeup"), stopped, reply_surface="web")
+    )
+    gave_up = await loop.after_model(
+        _state(asked, stopped, reply_surface="web", work_state_nudges=5)
+    )
+
+    assert nudged.jump_to == "model" and nudged.update == {"work_state_nudges": 1}
+    assert [message.content for message in messages_from_dict(nudged.messages)] == [nudge]
+    assert again.jump_to == "model"
+    assert reported.jump_to is None and reported.update == {"work_state_nudges": 0}
+    assert waiting.jump_to is None
+    assert gave_up.jump_to is None and gave_up.update == {"work_state_nudges": 0}
+
+
 @pytest.mark.parametrize(
     ("replied", "result", "satisfied"),
     [
@@ -265,18 +551,23 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
     backend, calls = _backend(
         monkeypatch,
         {
-            "prepare": PhaseResult(update={"rendered_system_prompt": "You review."}),
+            "prepare": Prepared(
+                update={"rendered_system_prompt": "You review."},
+                github_proxy=GitHubProxyRefreshed(expires_at=_TOKEN_EXPIRES),
+            ),
+            "run_started": Done(),
             # Neither a report nor a notice that fails takes the review check's settling with it.
             "run_ended": BackendCallError("run_ended failed: timed out"),
             "step_limit_reached": BackendCallError("step_limit_reached failed: Slack is down"),
             "settle_review_check": Done(),
         },
-        LoopRules(at_end=["settle_review_check"]),
+        LoopRules(at_end=["settle_review_check"], refresh_github_proxy=True),
     )
     monkeypatch.setattr(
         "rt.middleware.build_model",
         lambda spec, use_gateway: FakeListChatModel(responses=["Model call limits exceeded"]),
     )
+    monkeypatch.setattr("rt.outbox._RETRY_SECONDS", (0.0,))
     backend.run.invocation_id = "turn"
     graph = create_agent(
         model=FakeListChatModel(responses=["unused"]),
@@ -284,16 +575,23 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
     )
 
     await graph.ainvoke({"messages": [("user", "Review it")]})
-    await backend.reports.settled()
 
-    # Only preparation is a phase call: the loop and the end of the run are named calls,
-    # and the graph's own work goes out whether or not the run's end is recorded.
-    assert calls[0][0] == "prepare"
-    assert sorted(name for name, _ in calls[1:]) == [
-        "run_ended",
-        "settle_review_check",
+    # Only preparation is a phase call: the loop and the end of the run are named calls.
+    # The graph's own work goes out before the run's end, in the order asked for, and
+    # what the backend keeps failing is tried again, then let go of for the rest. The
+    # run is done only once the backend took its reports, the last as the invocation it is.
+    assert [name for name, _ in calls] == [
+        "prepare",
+        "run_started",
         "step_limit_reached",
+        "step_limit_reached",
+        "step_limit_reached",
+        "settle_review_check",
+        "run_ended",
+        "run_ended",
+        "run_ended",
     ]
+    assert calls[-1][1]["invocation_id"] == "turn"
 
 
 async def test_reports_carry_what_they_report_never_the_conversation(
@@ -303,14 +601,14 @@ async def test_reports_carry_what_they_report_never_the_conversation(
     from langchain_core.messages import ToolCall
     from langchain_core.tools import tool
     from rt.middleware import ReportRepliesMiddleware, RuntimeToolsMiddleware
-    from runtime_api.loop import ModelResult, ToolResultReply
+    from runtime_api.loop import ModelResult
 
     backend, calls = _backend(
         monkeypatch,
         {
             "model_result": Done(),
             "tool_started": Done(),
-            "tool_result": ToolResultReply(),
+            "tool_result": Done(),
         },
     )
     monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
@@ -337,7 +635,7 @@ async def test_reports_carry_what_they_report_never_the_conversation(
         {"messages": [HumanMessage(content="hello", id="human-1")]},
         {"configurable": {"thread_id": "thread-1"}},
     )
-    await backend.reports.settled()
+    await backend.outbox.drain()
 
     # The run's usage counts its own replies by the invocation stamped on them here.
     assert [

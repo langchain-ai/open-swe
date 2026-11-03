@@ -24,7 +24,7 @@ from openswe.federation.github_oidc import verify as verify_github_oidc
 from openswe.github.http import GitHubAppUnavailable, GitHubClient
 from openswe.github.repositories import Repository
 from openswe.prompts import prompt
-from openswe.source_context import SourceContext
+from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.webhooks.event_subscriptions import EventSubscription
 from openswe.workspaces.routing import workspace_for_repo
@@ -45,6 +45,7 @@ _AUDIENCE = "openswe-rollout"
 ROLLOUT_CHECK_REQUESTED = "rollout_check"
 MERGE_COMMIT_SHA = "merge_commit_sha"
 MERGE_COMMIT_PR_URL = "merge_commit_pr_url"
+ROLLOUT_CHECK_CONTEXT = "rollout_check_context"
 _DEPLOYED = "deployed"
 _MAX_COMMITS = 5000
 _MAX_SUBSCRIPTIONS = 5
@@ -161,8 +162,18 @@ def merged_pull_request(metadata: dict[str, object]) -> tuple[str, str, int, str
     return match.group(1), match.group(2), int(match.group(3)), sha
 
 
-def _instructions(sha: str) -> str:
-    return prompt("runs/rollout-deployed", merge_sha=sha)
+def _requested_slack_thread(metadata: dict[str, object]) -> SlackThreadRef | None:
+    """The Slack thread the rollout check was requested from, which keeps its results."""
+    thread = SourceContext.parse(metadata.get(ROLLOUT_CHECK_CONTEXT)).slack_thread
+    return thread if thread and thread.location else None
+
+
+def _instructions(sha: str, metadata: dict[str, object]) -> str:
+    return prompt(
+        "runs/rollout-deployed",
+        merge_sha=sha,
+        slack_thread=_requested_slack_thread(metadata),
+    )
 
 
 def _copy_config(config: dict[str, JsonValue], values: dict[str, object]) -> None:
@@ -185,6 +196,8 @@ def _run_config(
     email = metadata.get("triggering_user_email")
     if not isinstance(config.get("user_email"), str) and isinstance(email, str) and email:
         config["user_email"] = email
+    if slack_thread := _requested_slack_thread(metadata):
+        config["slack_thread"] = slack_thread.dump()
     config["thread_id"] = thread_id
     config["source"] = config.get("source") if isinstance(config.get("source"), str) else "github"
     config["repo"] = {"owner": owner, "name": repo}
@@ -302,7 +315,7 @@ async def subscribe_merged_thread(
             payload_match={"commits": [merge_sha]},
             multitask_strategy="enqueue",
             one_shot=False,
-            instructions=_instructions(merge_sha),
+            instructions=_instructions(merge_sha, metadata),
             run_config=_run_config(thread_id, owner, repo, number, workspace, metadata),
             expires_at=datetime.now(UTC) + timedelta(days=_LISTEN_DAYS),
         ).create()

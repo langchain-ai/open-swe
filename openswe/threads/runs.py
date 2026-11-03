@@ -1,10 +1,13 @@
 """Turning a dashboard request into a LangGraph run: bodies, models, images, commands."""
 
+import asyncio
 import base64
 import binascii
+import copy
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
@@ -13,7 +16,7 @@ from langchain_core.messages.content import ImageContentBlock, create_image_bloc
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
-from openswe.dashboard.admin import is_admin
+from openswe.config import ENV
 from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     default_vision_model_pair,
@@ -50,8 +53,13 @@ from openswe.input_messages import (
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import update_slack_trace_reply_for_web_handoff
-from openswe.slack.records import lookup_slack_thread_run_mapping
+from openswe.slack.client import (
+    SlackNotice,
+    fetch_latest_slack_thread_message,
+    post_slack_thread_reply,
+    update_slack_message,
+)
+from openswe.slack.user_options import SlackUserOption
 from openswe.source_context import SourceContext
 from openswe.threads.access import (
     _ensure_dashboard_github_token,
@@ -59,6 +67,7 @@ from openswe.threads.access import (
     resolve_run_email,
 )
 from openswe.threads.creation import create_thread
+from openswe.threads.identity import ThreadIdentity
 from openswe.threads.moves import SANDBOX_HANDOFF_SYSTEM, SANDBOX_MOVED_KEY, SandboxMove
 from openswe.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
 from openswe.threads.store import THREADS
@@ -93,7 +102,8 @@ from openswe.utils.dashboard_handoff import (
     dashboard_input_context,
     passage_replies,
 )
-from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
+from openswe.utils.dashboard_links import dashboard_thread_url
+from openswe.utils.json_types import as_thread_dict, thread_metadata
 from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
 from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
@@ -255,6 +265,7 @@ async def create_dashboard_thread_record(
     email: str | None = None,
     repo_config: dict[str, str],
     repo_explicitly_none: bool = False,
+    experience: Literal["coding", "agent_workspace"] = "coding",
     prompt: str,
     images: list[DashboardImageBody] | None = None,
     title: str | None = None,
@@ -264,9 +275,13 @@ async def create_dashboard_thread_record(
     visibility: Literal["public", "private"] = "public",
     workspace: str | None = None,
     extra_metadata: Mapping[str, Any] | None = None,
+    profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Create a dashboard thread with immutable ownership and visibility."""
-    profile = await get_profile(login) or {}
+    """Create a dashboard thread with immutable ownership and visibility.
+
+    ``profile`` is the person's profile when the caller already read it.
+    """
+    profile = profile if profile is not None else await get_profile(login) or {}
     now_ms = _now_ms()
     prompt = prompt.strip()
     resolved_model, resolved_effort = await _resolve_agent_model_choice(
@@ -285,12 +300,17 @@ async def create_dashboard_thread_record(
         metadata_model = resolved_model
         metadata_effort = resolved_effort
     has_repo = bool(repo_config.get("owner") and repo_config.get("name"))
-    initial_title = title or prompt[:80] or "New agent"
+    initial_title = title or (await SlackUserOption.readable(prompt))[:80] or "New agent"
     metadata: dict[str, Any] = {
         "source": DASHBOARD_SOURCE,
         "origin": DASHBOARD_SOURCE,
         "owner_type": "user",
         "owner_login": login.strip(),
+        **(
+            {"owner_user_id": str(ThreadIdentity(login).user_id)}
+            if ThreadIdentity(login).user_id
+            else {}
+        ),
         "visibility": visibility,
         "thread_category": "interactive",
         "trigger_kind": "user",
@@ -306,7 +326,8 @@ async def create_dashboard_thread_record(
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
-    if visibility == "private" and is_admin(email, login=login):
+    metadata["experience"] = experience
+    if visibility == "private" and ThreadIdentity(login).is_admin(email):
         metadata["admin_thread"] = True
     if workspace:
         metadata["workspace"] = workspace
@@ -375,10 +396,15 @@ async def _build_dashboard_configurable(
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
         "source": source,
-        "github_login": login,
+        **(
+            {"github_login": login}
+            if ThreadIdentity(login).github_login
+            else {"user_id": str(ThreadIdentity(login).user_id), "auth_provider": "langsmith"}
+        ),
         "user_email": await resolve_run_email(login, profile),
         "background_task_completion": False,
     }
+    configurable["experience"] = metadata.get("experience", "coding")
     repo_config = repo_config_from_metadata(metadata)
     if repo_config:
         configurable["repo"] = repo_config
@@ -422,9 +448,16 @@ async def create_dashboard_session(
 ) -> str:
     """Create a fresh owned thread using the person's dashboard defaults."""
     profile = RepositoryDefaults.model_validate(await get_profile(login) or {})
-    repo = body.repo if body.repo is not None else profile.repository()
+    identity = ThreadIdentity(login)
+    if identity.user_id is not None and body.repo:
+        raise HTTPException(403, "This account has no GitHub repository access")
+    repo = (
+        None
+        if identity.user_id is not None
+        else (body.repo if body.repo is not None else profile.repository())
+    )
     workspace = await _resolve_requested_workspace(body.workspace, _parse_repo(repo), login=login)
-    if body.repo is None:
+    if body.repo is None and identity.user_id is None:
         preferred_workspace = await _resolve_requested_workspace(body.workspace, None, login=login)
         if profile.workspace_default_repos.get(preferred_workspace):
             workspace = preferred_workspace
@@ -441,7 +474,11 @@ async def create_dashboard_session(
         email=email,
         repo_config=repo_config,
         prompt=body.prompt,
-        visibility=await _requested_visibility({"visibility": body.visibility}, login=login),
+        visibility="private"
+        if identity.user_id is not None
+        else await _requested_visibility({"visibility": body.visibility}, login=login),
+        repo_explicitly_none=identity.user_id is not None,
+        experience="agent_workspace" if identity.user_id is not None else "coding",
         workspace=workspace,
     )
     return str(thread["thread_id"])
@@ -455,8 +492,12 @@ async def start_dashboard_thread(
     prompt: str,
     repos: Sequence[str],
     visibility: Literal["public", "private"],
+    unlisted: bool = False,
 ) -> str:
     """Start a person's dashboard thread; the first repo is the one its sandbox opens in."""
+    identity = ThreadIdentity(login)
+    if identity.user_id is not None and repos:
+        raise HTTPException(403, "This account has no GitHub repository access")
     repo_configs: list[dict[str, str]] = []
     for repo in repos:
         repo_config = _parse_repo(repo)
@@ -473,8 +514,11 @@ async def start_dashboard_thread(
         repo_config=primary,
         prompt=prompt,
         title=title,
-        visibility=visibility,
+        visibility="private" if identity.user_id is not None else visibility,
+        repo_explicitly_none=identity.user_id is not None,
+        experience="agent_workspace" if identity.user_id is not None else "coding",
         workspace=await _resolve_requested_workspace(None, primary, login=login),
+        extra_metadata={"unlisted": True} if unlisted else None,
     )
     thread_id = str(thread["thread_id"])
     client = langgraph_client()
@@ -733,47 +777,68 @@ async def _requested_visibility(
     return cast(Literal["public", "private"], visibility)
 
 
+@dataclass(frozen=True)
+class _ThreadHistory:
+    """What the graph already holds of a thread's conversation, read from its state.
+
+    Only the state carries the dynamic context a run injected, so this is a full
+    state read; callers start it early so it overlaps their other lookups.
+    """
+
+    read: bool = False
+    context_hashes: frozenset[str] | None = None
+    message_ids: frozenset[str] = frozenset()
+
+    @classmethod
+    async def of(cls, thread_id: str) -> _ThreadHistory:
+        """The thread's history, empty when its state cannot be read."""
+        try:
+            state = await THREADS.state(thread_id)
+        except Exception:
+            logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
+            return cls()
+        if state is None:
+            return cls()
+        values = state.get("values")
+        messages = values.get("messages") if isinstance(values, dict) else None
+        if not isinstance(messages, list):
+            return cls(read=True)
+        return cls(
+            read=True,
+            context_hashes=frozenset(dynamic_context_hashes_from_messages(messages)),
+            message_ids=frozenset(
+                message_id
+                for message in messages
+                if isinstance(message, Mapping) and isinstance(message_id := message.get("id"), str)
+            ),
+        )
+
+
 async def _attributed_run_messages(
-    thread_id: str,
     login: str,
     *,
     metadata: Mapping[str, Any],
+    history: _ThreadHistory,
     content: Any,
-    creating: bool,
     email: str | None,
     review_chat_pr_url: str | None = None,
     relayed_from: str | None = None,
     replies: Sequence[PassageReply] = (),
-) -> tuple[list[RunMessage], set[str], set[str]]:
+) -> tuple[list[RunMessage], set[str]]:
     """The human message a dashboard command carries, attributed to its sender.
 
-    Returns the structured messages, the dynamic-context hashes already in the
-    conversation, and the ids of the messages the graph already holds.
+    Returns the structured messages and the dynamic-context hashes already in the
+    conversation.
     """
     if content is None:
         content = ""
-    sender_id = f"github:{login}"
-    injected = injected_dynamic_context_hashes_from_metadata(metadata)
-    persisted_message_ids: set[str] = set()
-    history_read = False
-    if not creating:
-        try:
-            prior_state = await THREADS.state(thread_id)
-            history_read = prior_state is not None
-            values = prior_state.get("values") if prior_state is not None else None
-            if isinstance(values, dict):
-                messages = values.get("messages")
-                if isinstance(messages, list):
-                    injected = dynamic_context_hashes_from_messages(messages)
-                    persisted_message_ids = {
-                        message_id
-                        for message in messages
-                        if isinstance(message, Mapping)
-                        and isinstance(message_id := message.get("id"), str)
-                    }
-        except Exception:
-            logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
-    person: PersonIdentity = {"id": sender_id, "github_login": login}
+    sender_id = ThreadIdentity(login).sender_id
+    injected = (
+        set(history.context_hashes)
+        if history.context_hashes is not None
+        else injected_dynamic_context_hashes_from_metadata(metadata)
+    )
+    person: PersonIdentity = ThreadIdentity(login).person
     if email:
         person["email"] = email
     sender_id = (await User.canonical_person(person))["id"]
@@ -793,7 +858,7 @@ async def _attributed_run_messages(
             )
         )
     pr_url = _LinkedPullRequest.model_validate(metadata).pr_url
-    if pr_url and history_read and not persisted_message_ids:
+    if pr_url and history.read and not history.message_ids:
         notices.append(
             (_PULL_REQUEST_THREAD_SYSTEM, prompt("runs/pull-request-thread", url=pr_url))
         )
@@ -819,7 +884,7 @@ async def _attributed_run_messages(
                 injected_dynamic_context_hashes={system["id"]},
             )[0],
         )
-    return structured, injected, persisted_message_ids
+    return structured, injected
 
 
 async def _enrich_run_start_command(
@@ -833,125 +898,159 @@ async def _enrich_run_start_command(
 ) -> dict[str, Any]:
     if command.get("method") != "run.start":
         return command
+    if not creating and ThreadIdentity(login).user_id is not None:
+        if metadata.get("visibility") != "private":
+            raise HTTPException(403, "LangSmith accounts require private tasks")
 
     params = command.get("params")
     if not isinstance(params, dict):
         params = {}
         command["params"] = params
 
-    await _ensure_dashboard_github_token(login)
+    # The state read is the slowest lookup before dispatch, and nothing below
+    # changes the conversation or the profile, so both run alongside the checks
+    # and any sandbox move.
+    history = None if creating else asyncio.ensure_future(_ThreadHistory.of(thread_id))
+    profile_read = asyncio.ensure_future(get_profile(login))
+    try:
+        await _ensure_dashboard_github_token(login)
 
-    client_config = params.get("config")
-    if not isinstance(client_config, dict):
-        client_config = {}
-    client_configurable = client_config.get("configurable")
-    if not isinstance(client_configurable, dict):
-        client_configurable = {}
+        client_config = params.get("config")
+        if not isinstance(client_config, dict):
+            client_config = {}
+        client_configurable = client_config.get("configurable")
+        if not isinstance(client_configurable, dict):
+            client_configurable = {}
 
-    chosen_model, chosen_effort = normalize_model_choice(
-        client_configurable.get("agent_model_id"),
-        client_configurable.get("agent_effort"),
-    )
-    model_selection = client_configurable.get("model_selection")
-    if model_selection not in {"auto", "explicit"}:
-        if client_configurable.get("agent_model_id"):
-            model_selection = "explicit"
+        chosen_model, chosen_effort = normalize_model_choice(
+            client_configurable.get("agent_model_id"),
+            client_configurable.get("agent_effort"),
+        )
+        model_selection = client_configurable.get("model_selection")
+        if model_selection not in {"auto", "explicit"}:
+            if client_configurable.get("agent_model_id"):
+                model_selection = "explicit"
+            else:
+                model_selection = "auto" if creating else metadata.get("model_selection")
+        offloading = offload_requested(params)
+        sandbox_bridge = await _resolve_sandbox_bridge(
+            client_configurable.get("sandbox_bridge_id"),
+            owner_id=Principal.of_login(login, email).sender_id,
+        )
+        move = (
+            None
+            if creating
+            else await SandboxMove.requested(
+                thread_id,
+                metadata,
+                login=login,
+                bridge=sandbox_bridge,
+                target=client_configurable.get("sandbox_target"),
+            )
+        )
+        if move is not None:
+            # A client that still moves a thread with its next message gets the same
+            # move, finished before the run starts.
+            try:
+                await move.carry_out()
+            except Exception as exc:
+                raise HTTPException(502, f"could not move this thread: {exc}") from exc
+            metadata = {**metadata, **move.update}
+        content = _command_message_content(params)
+        replies = _command_message_replies(params)
+        relayed_from = _relayed_from(params)
+        if offloading and creating:
+            raise HTTPException(400, "offloading requires an existing conversation")
+        command_images = _dashboard_images_from_content(content)
+        invocation_id = new_invocation_id()
+        invocation_started_at = datetime.now(UTC).isoformat()
+        overrides = with_invocation_id(None, invocation_id)
+        overrides["invocation_started_at"] = invocation_started_at
+        overrides[RELAYED_FROM_KEY] = relayed_from
+        run_model: str | None = None
+        run_effort: str | None = None
+
+        if creating:
+            # First ``run.start`` for a client-minted thread id: stamp the full
+            # dashboard thread record (owner, title, repo, model) and validate any
+            # attached images against the resolved model before the run is
+            # forwarded to LangGraph. The repo hint rides in the client
+            # configurable; it never reaches the run config (which is rebuilt from
+            # the stamped metadata below).
+            visibility = await _requested_visibility(client_configurable, login=login)
+            if sandbox_bridge is not None:
+                # Whoever can prompt a thread runs commands on its machine.
+                visibility = "private"
+            requested_experience = client_configurable.get("experience", "coding")
+            if requested_experience not in ("coding", "agent_workspace"):
+                raise HTTPException(422, "Unknown agent experience")
+            experience: Literal["coding", "agent_workspace"] = (
+                "agent_workspace" if requested_experience == "agent_workspace" else "coding"
+            )
+            identity = ThreadIdentity(login)
+            if identity.user_id is not None:
+                visibility = "private"
+                if client_configurable.get("repo"):
+                    raise HTTPException(403, "Agent Workspace has no GitHub repository access")
+            repo_config = _parse_repo(client_configurable.get("repo")) or {}
+            workspace = await _resolve_requested_workspace(
+                client_configurable.get("workspace") or client_configurable.get("environment"),
+                repo_config,
+                login=login,
+            )
+            thread = await create_dashboard_thread_record(
+                thread_id,
+                login=login,
+                email=email,
+                repo_config=repo_config,
+                repo_explicitly_none=identity.user_id is not None
+                or client_configurable.get("repo_explicitly_none") is True
+                or (experience == "agent_workspace" and not repo_config),
+                experience=experience,
+                visibility=visibility,
+                prompt=_command_prompt_text(content),
+                images=command_images,
+                model_id=client_configurable.get("agent_model_id"),
+                effort=client_configurable.get("agent_effort"),
+                model_selection=model_selection or "auto",
+                workspace=workspace,
+                profile=await profile_read or {},
+            )
+            metadata = thread_metadata(thread)
+            if sandbox_bridge is not None:
+                metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
+            run_model, run_effort = normalize_model_choice(
+                metadata.get("resolved_model"), metadata.get("resolved_effort")
+            )
+            if command_images and run_model and run_effort:
+                overrides["agent_model_id"] = run_model
+                overrides["agent_effort"] = run_effort
+            elif chosen_model and chosen_effort:
+                overrides["agent_model_id"] = chosen_model
+                overrides["agent_effort"] = chosen_effort
         else:
-            model_selection = "auto" if creating else metadata.get("model_selection")
-    offloading = offload_requested(params)
-    sandbox_bridge = await _resolve_sandbox_bridge(
-        client_configurable.get("sandbox_bridge_id"),
-        owner_id=Principal.of_login(login, email).sender_id,
-    )
-    move = (
-        None
-        if creating
-        else await SandboxMove.requested(
-            thread_id,
-            metadata,
-            login=login,
-            bridge=sandbox_bridge,
-            target=client_configurable.get("sandbox_target"),
-        )
-    )
-    if move is not None:
-        # A client that still moves a thread with its next message gets the same
-        # move, finished before the run starts.
-        try:
-            await move.carry_out()
-        except Exception as exc:
-            raise HTTPException(502, f"could not move this thread: {exc}") from exc
-        metadata = {**metadata, **move.update}
-    content = _command_message_content(params)
-    replies = _command_message_replies(params)
-    relayed_from = _relayed_from(params)
-    if offloading and creating:
-        raise HTTPException(400, "offloading requires an existing conversation")
-    command_images = _dashboard_images_from_content(content)
-    invocation_id = new_invocation_id()
-    invocation_started_at = datetime.now(UTC).isoformat()
-    overrides = with_invocation_id(None, invocation_id)
-    overrides["invocation_started_at"] = invocation_started_at
-    run_model: str | None = None
-    run_effort: str | None = None
+            run_model, run_effort = (
+                (chosen_model, chosen_effort) if chosen_model else thread_model_choice(metadata)
+            )
+            if command_images and run_model and run_effort:
+                run_model, run_effort = _with_vision_fallback(
+                    run_model, run_effort, has_images=True
+                )
+            _validate_command_images(content, model_id=run_model)
 
-    if creating:
-        # First ``run.start`` for a client-minted thread id: stamp the full
-        # dashboard thread record (owner, title, repo, model) and validate any
-        # attached images against the resolved model before the run is
-        # forwarded to LangGraph. The repo hint rides in the client
-        # configurable; it never reaches the run config (which is rebuilt from
-        # the stamped metadata below).
-        visibility = await _requested_visibility(client_configurable, login=login)
-        if sandbox_bridge is not None:
-            # Whoever can prompt a thread runs commands on its machine.
-            visibility = "private"
-        repo_config = _parse_repo(client_configurable.get("repo")) or {}
-        workspace = await _resolve_requested_workspace(
-            client_configurable.get("workspace") or client_configurable.get("environment"),
-            repo_config,
-            login=login,
-        )
-        thread = await create_dashboard_thread_record(
-            thread_id,
-            login=login,
-            email=email,
-            repo_config=repo_config,
-            repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
-            visibility=visibility,
-            prompt=_command_prompt_text(content),
-            images=command_images,
-            model_id=client_configurable.get("agent_model_id"),
-            effort=client_configurable.get("agent_effort"),
-            model_selection=model_selection or "auto",
-            workspace=workspace,
-        )
-        metadata = thread_metadata(thread)
-        if sandbox_bridge is not None:
-            metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
-        run_model, run_effort = normalize_model_choice(
-            metadata.get("resolved_model"), metadata.get("resolved_effort")
-        )
-        if command_images and run_model and run_effort:
-            overrides["agent_model_id"] = run_model
-            overrides["agent_effort"] = run_effort
-        elif chosen_model and chosen_effort:
-            overrides["agent_model_id"] = chosen_model
-            overrides["agent_effort"] = chosen_effort
-    else:
-        run_model, run_effort = (
-            (chosen_model, chosen_effort) if chosen_model else thread_model_choice(metadata)
-        )
-        if command_images and run_model and run_effort:
-            run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
-        _validate_command_images(content, model_id=run_model)
+        prior = await history if history is not None else _ThreadHistory()
+        profile = await profile_read or {}
+    finally:
+        reads = (profile_read,) if history is None else (history, profile_read)
+        for read in reads:
+            read.cancel()
+        await asyncio.gather(*reads, return_exceptions=True)
 
-    structured, injected, persisted_message_ids = await _attributed_run_messages(
-        thread_id,
+    structured, injected = await _attributed_run_messages(
         login,
         metadata=metadata,
+        history=prior,
         content=content,
-        creating=creating,
         email=email,
         review_chat_pr_url=client_configurable.get("review_chat_pr_url"),
         relayed_from=relayed_from,
@@ -964,7 +1063,7 @@ async def _enrich_run_start_command(
     ) == TRANSCRIPT_VERSION
     client_message_id = _command_message_id(params)
     message_id: str | None = None
-    if client_message_id and client_message_id not in persisted_message_ids:
+    if client_message_id and client_message_id not in prior.message_ids:
         message_id = client_message_id
     elif transcribed:
         message_id = str(uuid.uuid7())
@@ -1070,6 +1169,7 @@ async def _enrich_run_start_command(
         thread_id,
         login,
         metadata,
+        profile=profile,
         overrides=overrides,
     )
 
@@ -1171,18 +1271,20 @@ async def steer_running_thread(
         live_run_id = latest_run_id
     # The run keeps the model it started with, so images are held to it. Thread
     # metadata may already name the model of a follow-up queued behind it.
-    run_model = (await _run_metadata(client, thread_id, live_run_id)).get(RUN_MODEL_KEY)
+    live_run_metadata, history = await asyncio.gather(
+        _run_metadata(client, thread_id, live_run_id), _ThreadHistory.of(thread_id)
+    )
+    run_model = live_run_metadata.get(RUN_MODEL_KEY)
     image_blocks = _image_blocks(
         command_images,
         model_id=run_model if isinstance(run_model, str) else thread_model_choice(metadata)[0],
     )
 
-    structured, _, persisted_message_ids = await _attributed_run_messages(
-        thread_id,
+    structured, _ = await _attributed_run_messages(
         login,
         metadata=metadata,
+        history=history,
         content=content,
-        creating=False,
         email=email,
         relayed_from=relayed_from,
         replies=replies,
@@ -1190,7 +1292,7 @@ async def steer_running_thread(
     client_message_id = _command_message_id(params)
     message_id = (
         client_message_id
-        if client_message_id and client_message_id not in persisted_message_ids
+        if client_message_id and client_message_id not in history.message_ids
         else str(uuid.uuid7())
     )
     structured[-1]["id"] = message_id
@@ -1223,9 +1325,8 @@ async def steer_running_thread(
         "text": _command_prompt_text(content),
         "images": list(image_blocks),
         "sender": {
-            "id": f"github:{login}",
-            "platform": "github",
-            "github_login": login,
+            **ThreadIdentity(login).person,
+            "platform": "langsmith" if ThreadIdentity(login).user_id else "github",
             **({"email": email} if email else {}),
         },
         "queue_id": message_id,
@@ -1265,12 +1366,7 @@ async def steer_running_thread(
         },
     )
     if not relayed_from:
-        try:
-            await _notify_slack_web_handoff(thread_id, metadata)
-        except Exception:
-            logger.exception(
-                "Failed to update Slack message for dashboard handoff on %s", thread_id
-            )
+        await _SlackWebHandoff(thread_id, metadata).notify()
     return {
         "id": command.get("id"),
         "type": "success",
@@ -1322,6 +1418,10 @@ async def queue_follow_up_run(
     with this browser long gone. The transcript records the turn as requested
     right away and learns the run id so it can be cancelled before it starts.
     """
+    params = command.get("params")
+    # An agent's relayed message is not its sender's own: it acts as no one.
+    relayed = isinstance(params, dict) and bool(params.get(RELAYED_FROM_KEY))
+    handoff = _SlackWebHandoff(thread_id, metadata)
     enriched = await _enrich_run_start_command(
         thread_id, login, command, metadata=metadata, email=email
     )
@@ -1347,6 +1447,8 @@ async def queue_follow_up_run(
             thread_title=None,
             client=langgraph_client(),
             multitask_strategy="enqueue",
+            # On a channel's thread it starts as its sender, as their message would.
+            as_sender=not relayed,
         )
         run_id = run.get("run_id") if isinstance(run, dict) else None
         if not isinstance(run_id, str) or not run_id:
@@ -1401,6 +1503,8 @@ async def queue_follow_up_run(
                 exc_info=True,
                 extra={"queue": {"thread_id": thread_id, "run_id": run_id}},
             )
+    if not relayed:
+        await handoff.notify()
     return {
         "id": command.get("id"),
         "type": "success",
@@ -1440,38 +1544,85 @@ async def dispatch_pending_follow_ups(
     return run_id if isinstance(run_id, str) else None
 
 
-def _slack_thread_context(metadata: Mapping[str, Any]) -> JsonObject | None:
-    context = SourceContext.from_metadata(metadata)
-    if context.slack_thread is None:
-        return None
-    return context.dump()["slack_thread"]
-
-
-async def _notify_slack_web_handoff(thread_id: str, metadata: Mapping[str, Any]) -> None:
-    if metadata.get("source") != "slack":
-        return
-    slack_thread = _slack_thread_context(metadata)
-    if not slack_thread:
-        return
-    channel_id = slack_thread.get("channel_id")
-    thread_ts = slack_thread.get("thread_ts")
-    if not isinstance(channel_id, str) or not channel_id:
-        return
-    if not isinstance(thread_ts, str) or not thread_ts:
-        return
-
-    trace_message_ts = slack_thread.get("trace_message_ts")
-    if not isinstance(trace_message_ts, str) or not trace_message_ts:
-        mapping = await lookup_slack_thread_run_mapping(channel_id, thread_ts)
-        if mapping is not None:
-            trace_message_ts = mapping.trace_message_ts
-    if not isinstance(trace_message_ts, str) or not trace_message_ts:
-        logger.info(
-            "Skipping Slack web handoff update for thread %s: missing trace message ts", thread_id
+class _SlackWebHandoff:
+    def __init__(self, thread_id: str, metadata: Mapping[str, object]) -> None:
+        self.thread_id = thread_id
+        self.location = (
+            SourceContext.from_metadata(metadata).slack_location
+            if metadata.get("source") == "slack"
+            else None
         )
-        return
 
-    await update_slack_trace_reply_for_web_handoff(channel_id, trace_message_ts, thread_id)
+    async def notify(self) -> None:
+        if self.location is None:
+            return
+        url = dashboard_thread_url(self.thread_id)
+        if not url:
+            return
+        notice = SlackNotice(kind="web_handoff", key=self.thread_id)
+        text = f"<{url}|Continued on Web>"
+        try:
+            latest = await fetch_latest_slack_thread_message(*self.location)
+            if latest is not None and (
+                notice.repeats(latest) or await self.update_footer(latest, url)
+            ):
+                return
+            await post_slack_thread_reply(
+                *self.location,
+                text,
+                blocks=[
+                    {
+                        "type": "context",
+                        "block_id": notice.block_id,
+                        "elements": [{"type": "mrkdwn", "text": text}],
+                    }
+                ],
+                unfurl_links=False,
+                unfurl_media=False,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to post Slack web handoff notice",
+                extra={"thread_id": self.thread_id},
+            )
+
+    async def update_footer(self, message: Mapping[str, object], url: str) -> bool:
+        bot_user_id = ENV.SLACK_BOT_USER_ID.get()
+        message_ts = message.get("ts")
+        if not bot_user_id or message.get("user") != bot_user_id or not isinstance(message_ts, str):
+            return False
+        blocks = message.get("blocks")
+        if not isinstance(blocks, list):
+            return False
+        old_link = f"<{url}|Open in Web>"
+        new_link = f"<{url}|Continued in Web>"
+        updated_blocks = copy.deepcopy(blocks)
+        changed = False
+        for block in updated_blocks:
+            if not isinstance(block, dict) or block.get("type") != "context":
+                continue
+            elements = block.get("elements")
+            for element in elements if isinstance(elements, list) else []:
+                if not isinstance(element, dict) or element.get("type") != "mrkdwn":
+                    continue
+                text = element.get("text")
+                if isinstance(text, str) and new_link in text:
+                    return True
+                if isinstance(text, str) and old_link in text:
+                    element["text"] = text.replace(old_link, new_link)
+                    changed = True
+        if not changed or self.location is None:
+            return False
+        text = message.get("text")
+        await update_slack_message(
+            self.location[0],
+            message_ts,
+            text.replace(old_link, new_link) if isinstance(text, str) else "",
+            blocks=updated_blocks,
+            unfurl_links=False,
+            unfurl_media=False,
+        )
+        return True
 
 
 async def _create_system_thread_record(

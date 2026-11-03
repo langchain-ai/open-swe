@@ -7,6 +7,7 @@ import pytest
 from openswe.run_config import RunConfig
 from openswe.tools import access as tool_access
 from openswe.tools.access import Policy, ack, resolve_access
+from tests.support.slack_api import SlackAPI
 
 _OWN = Policy(trusted="private", actor="owner", sole=ack("id"))
 _SLACK = {"channel_id": "C1", "thread_ts": "1.0"}
@@ -159,3 +160,87 @@ async def test_unreadable_slack_history_is_not_sole(
     assert (await resolve_access(cfg)).mode(_OWN) is None
     assert fetch.await_args is not None
     assert fetch.await_args.kwargs == {"complete": True}
+
+
+@pytest.mark.parametrize(
+    "scope, run_fields",
+    [
+        ({"owner_type": "user"}, {}),
+        ({"visibility": "private"}, {}),
+        ({"source_context": {}}, {}),
+        ({}, {"source": "dashboard"}),
+        ({}, {"slack_thread": {**_SLACK, "triggering_bot_id": "OTHER"}}),
+        ({}, {"slack_thread": {**_SLACK, "channel_id": "C2", "triggering_bot_id": "B1"}}),
+    ],
+)
+async def test_bot_channel_history_requires_matching_system_thread_context(
+    metadata: dict[str, object], scope: dict[str, object], run_fields: dict[str, object]
+) -> None:
+    slack = {**_SLACK, "triggering_bot_id": "B1"}
+    metadata.update(owner_type="system", source_context={"slack_thread": slack})
+    metadata.update(scope)
+    cfg = _cfg(**{"source": "slack", "slack_thread": slack, "github_login": None, **run_fields})
+    resolved = await resolve_access(cfg)
+    assert resolved.mode(Policy(trusted="channel_history")) is None
+
+
+async def test_bot_channel_history_is_scoped_and_revocable(
+    metadata: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    slack_api: SlackAPI,
+) -> None:
+    from openswe.slack.tools.read_channel_messages import slack_read_channel_messages
+
+    slack = {**_SLACK, "triggering_bot_id": "B1", "team_id": "T1"}
+    metadata.update(owner_type="system", source_context={"slack_thread": slack})
+    cfg = _cfg(source="slack", slack_thread=slack, github_login=None)
+    monkeypatch.setattr(tool_access, "configurable", lambda: cfg)
+    resolved = await resolve_access(cfg)
+    assert not resolved.private
+    assert resolved.mode(_OWN) is None
+
+    refused = await slack_read_channel_messages("C2")
+    assert refused["success"] is False
+    assert not slack_api.calls
+
+    slack_api.respond(
+        {
+            "ok": True,
+            "channel": {
+                "id": "C1",
+                "is_channel": True,
+                "is_private": False,
+                "is_ext_shared": False,
+                "is_pending_ext_shared": False,
+            },
+        }
+    )
+    slack_api.respond({"ok": True, "messages": [{"ts": "0.5", "text": "Earlier alert"}]})
+    assert (await slack_read_channel_messages("C1"))["success"] is True
+
+    metadata["source_context"] = {}
+    assert (await slack_read_channel_messages("C1"))["ok"] is False
+
+
+@pytest.mark.parametrize(
+    ("owner_type", "curates", "run", "expected"),
+    [
+        ("system", "platform", {}, "full"),
+        ("system", "billing", {}, None),
+        ("user", "platform", {}, None),
+        # A person posting in the public curator thread starts a run of their own.
+        ("system", "platform", {"source": "dashboard", "github_login": "alice"}, None),
+        ("system", "platform", {"github_login": "alice"}, None),
+        ("system", "platform", {"started_by_id": "api_key:1"}, None),
+    ],
+)
+async def test_only_the_curators_own_wake_curates_its_workspace(
+    metadata: dict[str, object],
+    owner_type: str,
+    curates: str,
+    run: dict[str, object],
+    expected: tool_access.Mode | None,
+) -> None:
+    metadata.update(owner_type=owner_type, curator=curates)
+    cfg = _cfg(**{"workspace": "platform", "source": "curator", "github_login": None, **run})
+    assert (await resolve_access(cfg)).mode(Policy(trusted="curator")) == expected

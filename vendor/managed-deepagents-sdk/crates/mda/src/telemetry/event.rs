@@ -4,7 +4,7 @@ use serde::{Serialize, Serializer};
 use uuid::Uuid;
 
 use crate::command::CommandCompletion;
-use crate::error::ErrorCategory;
+use crate::error::{ErrorCategory, ErrorCode};
 use crate::logs::rfc3339_from_epoch_millis;
 
 use super::facts::ReportableFacts;
@@ -22,12 +22,6 @@ pub(super) enum CommandOutcome {
     Success,
     Failure,
     Cancelled,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum ErrorCode {
-    Unclassified,
 }
 
 pub(super) enum EventType {
@@ -64,10 +58,10 @@ impl From<CommandCompletion> for CommandCompleted {
         let (outcome, error_code, error_category) = match completion {
             CommandCompletion::Succeeded => (CommandOutcome::Success, None, None),
             CommandCompletion::Cancelled => (CommandOutcome::Cancelled, None, None),
-            CommandCompletion::Failed(category) => (
+            CommandCompletion::Failed(failure) => (
                 CommandOutcome::Failure,
-                Some(ErrorCode::Unclassified),
-                Some(category),
+                Some(failure.code),
+                Some(failure.category),
             ),
         };
         Self {
@@ -174,6 +168,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::error::Failure;
 
     #[test]
     fn successful_command_has_the_expected_json() {
@@ -229,7 +224,7 @@ mod tests {
     fn a_failure_reports_its_category() {
         let event = EventEnvelope::command_completed_at(
             fixture_facts(),
-            CommandCompletion::Failed(ErrorCategory::Deployment),
+            CommandCompletion::Failed(ErrorCategory::Deployment.into()),
             "22222222-2222-4222-8222-222222222222".to_string(),
             UNIX_EPOCH,
         )
@@ -246,10 +241,33 @@ mod tests {
     }
 
     #[test]
+    fn a_coded_failure_reports_its_code() {
+        let event = EventEnvelope::command_completed_at(
+            fixture_facts(),
+            CommandCompletion::Failed(Failure {
+                category: ErrorCategory::Authentication,
+                code: ErrorCode::ChannelRequiresUserKey,
+            }),
+            "22222222-2222-4222-8222-222222222222".to_string(),
+            UNIX_EPOCH,
+        )
+        .unwrap();
+
+        assert_eq!(
+            serde_json::to_value(event.command_completed).unwrap(),
+            json!({
+                "outcome": "failure",
+                "error_code": "channel_requires_user_key",
+                "error_category": "authentication"
+            })
+        );
+    }
+
+    #[test]
     fn an_unrecognized_failure_reports_unclassified() {
         let event = EventEnvelope::command_completed_at(
             fixture_facts(),
-            CommandCompletion::Failed(ErrorCategory::Unclassified),
+            CommandCompletion::Failed(ErrorCategory::Unclassified.into()),
             "22222222-2222-4222-8222-222222222222".to_string(),
             UNIX_EPOCH,
         )

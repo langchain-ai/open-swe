@@ -8,6 +8,7 @@ from openswe.input_messages import RunMessage
 from openswe.message_queue import QueuedMessage
 from openswe.middleware.require_user_reply import ReplySurface
 from openswe.threads.inbox import Taken, ThreadInbox
+from openswe.utils.thread_ops import queue_system_note_for_thread
 
 
 def _envelope(message: RunMessage) -> str:
@@ -45,8 +46,35 @@ async def test_inbox_announces_the_move_to_web_only_once(registry_db: None) -> N
 
 
 @pytest.mark.asyncio
-async def test_inbox_keeps_slack_for_a_message_relayed_by_another_thread(
+async def test_system_notes_reach_the_agent_without_waiting_in_the_dashboard(
     registry_db: None,
+) -> None:
+    from openswe.threads.handlers import get_dashboard_thread_queued_messages
+
+    await queue_system_note_for_thread("thread-1", "Review accepted")
+
+    with patch("openswe.threads.handlers._authorized_thread", AsyncMock()):
+        assert await get_dashboard_thread_queued_messages("thread-1", "octocat") == []
+    await QueuedMessage.put("thread-1", {"text": "My follow-up"})
+    with patch("openswe.threads.handlers._authorized_thread", AsyncMock()):
+        previews = await get_dashboard_thread_queued_messages("thread-1", "octocat")
+    assert [preview.text for preview in previews] == ["My follow-up"]
+    taken = await _read()
+    envelope = _envelope(taken.messages[0])
+    assert envelope.startswith(
+        '<input-message sender="system:slack-note" surface="automation" kind="system">'
+    )
+    assert envelope.count("<input-message") == 1
+    assert "Review accepted" in envelope
+    assert "My follow-up" in _envelope(taken.messages[-1])
+    await ThreadInbox("thread-1").receive(taken.queued)
+    assert await QueuedMessage.for_thread("thread-1") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("system_note", [False, True])
+async def test_inbox_keeps_slack_for_a_message_relayed_by_another_thread(
+    registry_db: None, system_note: bool
 ) -> None:
     await QueuedMessage.put(
         "thread-1",
@@ -58,6 +86,9 @@ async def test_inbox_keeps_slack_for_a_message_relayed_by_another_thread(
         },
     )
 
+    if system_note:
+        await queue_system_note_for_thread("thread-1", "Review accepted")
+
     taken = await _read("slack")
 
     assert taken.reply_surface is None
@@ -65,6 +96,24 @@ async def test_inbox_keeps_slack_for_a_message_relayed_by_another_thread(
     assert "system:dashboard-handoff" not in envelopes
     assert 'surface="automation"' in envelopes
     assert 'relayed_from_thread="worker-thread"' in envelopes
+    assert taken.state_update("run-1") == {
+        "relayed_from_thread_id": "worker-thread",
+        "relay_run_id": "run-1",
+    }
+
+    await ThreadInbox("thread-1").receive(taken.queued)
+    await queue_system_note_for_thread("thread-1", "Another review accepted")
+    notes = await _read("slack")
+    assert notes.queued
+    assert notes.state_update("run-1") == {}
+
+    await QueuedMessage.put("thread-1", {"text": "My follow-up", "source": "dashboard"})
+    direct = await _read("slack")
+    assert direct.state_update("run-1") == {
+        "reply_surface": "web",
+        "relayed_from_thread_id": None,
+        "relay_run_id": "run-1",
+    }
 
 
 @pytest.mark.asyncio
@@ -98,14 +147,18 @@ async def test_inbox_receives_only_the_follow_ups_it_read(
 
 @pytest.mark.asyncio
 async def test_a_run_holds_the_events_it_was_started_with_once_prepared(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch
+    registry_db: None,
 ) -> None:
     from runtime_api.loop import Prepare
 
-    from openswe.agent_api.graph import RunSession
+    from openswe.agent_api.run_calls import TokenRun
+    from openswe.agent_api.run_kinds import RunKind
+    from openswe.agent_api.tokens import RemoteRun
     from openswe.database import postgres
-    from openswe.sandboxes.tool_runtime import ToolSurface
     from openswe.webhooks.event_matches import EventMatch
+
+    class Parts(RunKind):
+        assistant_id = "agent"
 
     carried = EventMatch(
         thread_id="thread-1", source="sandbox", delivery_id="m:1", content="ran", run_config={}
@@ -116,14 +169,14 @@ async def test_a_run_holds_the_events_it_was_started_with_once_prepared(
     async with postgres.session() as session:
         await carried.record(session)
         await pending.record(session)
-    surface = ToolSurface(inbox=InboxSpec(events=True))
-    config = {
-        "configurable": {"thread_id": "thread-1"},
-        "metadata": {"event_match_ids": [str(carried.id)]},
-    }
+    run = RemoteRun(
+        thread_id="thread-1",
+        assistant_id="agent",
+        configurable={},
+        metadata={"event_match_ids": [str(carried.id)]},
+    )
 
-    # The thread has no box here; preparing would otherwise connect to it.
-    monkeypatch.setattr(RunSession, "bind_sandbox", AsyncMock())
-    await RunSession(surface, config, None, started_here=True).prepare(Prepare(run_id="run-1"))
+    # The thread has no sandbox here: MDA opened none for the run.
+    await TokenRun.answer(Parts(), run, "prepare", Prepare(run_id="run-1").model_dump(mode="json"))
 
     assert [match.id for match in await EventMatch.owed("thread-1")] == [pending.id]

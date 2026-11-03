@@ -23,10 +23,14 @@ class PickMessage(BaseModel):
         blocks: list[Block] = [section(self.text), context(status)]
         if buttons:
             blocks.append(actions(*buttons))
+        return await self._update(self.text, blocks)
+
+    async def replace(self, text: str) -> bool:
+        return await self._update(text, [section(text)])
+
+    async def _update(self, text: str, blocks: Sequence[Block]) -> bool:
         try:
-            await update_slack_message(
-                self.channel_id, self.ts, self.text, blocks=block_payload(blocks)
-            )
+            await update_slack_message(self.channel_id, self.ts, text, blocks=block_payload(blocks))
         except SlackRequestError as exc:
             logger.warning(
                 "Could not update a reviewer pick message",

@@ -204,25 +204,34 @@ def _object(value: JsonValue | None) -> dict[str, JsonValue] | None:
     return value if isinstance(value, dict) else None
 
 
-async def run_thread_wakeup(payload: Mapping[str, JsonValue]) -> str | None:
-    """Wake the thread a wakeup job names; the run it started, queued behind any running one.
-
-    A wakeup the worker reaches after its expiry is dropped, as its cron's
-    ``end_time`` dropped it before wakeups were jobs.
-    """
+async def run_thread_wakeup(
+    payload: Mapping[str, JsonValue], *, job_id: str, due_at: datetime
+) -> str | None:
+    """Wake the queued thread, noting delays beyond the wakeup's padding interval."""
     thread_id = payload.get("thread_id")
     if not isinstance(thread_id, str):
         return None
-    expires_at = _parse_iso(payload.get("expires_at"))
-    if expires_at is not None and expires_at < datetime.now(UTC):
-        logger.info("Thread wakeup expired before it ran", extra={"thread_id": thread_id})
-        return None
-    run_input, config = _object(payload.get("input")), _object(payload.get("config"))
+    raw_input, config = _object(payload.get("input")), _object(payload.get("config"))
+    run_input = None if raw_input is None else _run_input.validate_python(raw_input)
+    lateness_seconds = (datetime.now(UTC) - due_at).total_seconds()
+    if lateness_seconds > _END_TIME_PADDING_SECONDS:
+        late_input = build_run_input(
+            prompt("runs/thread-wakeup-late", lateness_minutes=f"{lateness_seconds / 60:.1f}"),
+            {"sender_id": _WAKEUP_SENDER_ID, "surface": "automation", "kind": "system"},
+        )
+        if run_input is None:
+            run_input = late_input
+        else:
+            run_input["messages"] = late_input["messages"] + run_input["messages"]
+        logger.warning(
+            "Thread wakeup is running late",
+            extra={"thread_id": thread_id, "job_id": job_id, "lateness_seconds": lateness_seconds},
+        )
     run = await get_client(url=langgraph_url()).runs.create(
         thread_id,
         _AGENT_ASSISTANT_ID,
         # ty does not match a TypedDict against the SDK's TypedDict-like protocol.
-        input=None if run_input is None else _run_input.validate_python(run_input),  # ty: ignore[invalid-argument-type]
+        input=run_input,  # ty: ignore[invalid-argument-type]
         config=None if config is None else _run_config.validate_python(config),
         metadata=_object(payload.get("metadata")),
         multitask_strategy="enqueue",

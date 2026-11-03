@@ -52,6 +52,41 @@ async def test_tool_audit_outcome_without_payloads(
     assert "returned-secret" not in entry.model_dump_json()
 
 
+async def test_mcp_caller_writes_are_attributed_and_filed_under_their_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entries: list[AuditLog] = []
+    filed: list[str] = []
+    user = User(id=uuid4())
+    monkeypatch.setattr(
+        tools, "configurable", lambda: RunConfig(source="mcp", github_login="alice")
+    )
+
+    async def lookup(*_args: object) -> User:
+        return user
+
+    async def enrich(_entry: AuditLog, workspace: str) -> None:
+        filed.append(workspace)
+
+    async def append(entry: AuditLog) -> None:
+        entries.append(entry)
+
+    monkeypatch.setattr(User, "for_login", lookup)
+    monkeypatch.setattr(tools, "enrich_workspace", enrich)
+    monkeypatch.setattr(tools, "append_safely", append)
+
+    @tools.audit_tool(reads={"status"}, target_workspace="workspace")
+    async def control(action: str, workspace: str) -> dict[str, object]:
+        return {"ok": True}
+
+    await control("status", "core")
+    assert entries == []
+    await control("edit", "core")
+    (entry,) = entries
+    assert entry.user_id == user.id
+    assert filed == ["core"]
+
+
 async def test_tool_audit_records_exception_but_not_reads_or_background_owner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -67,7 +102,7 @@ async def test_tool_audit_records_exception_but_not_reads_or_background_owner(
 
     monkeypatch.setattr(tools, "append_safely", append)
 
-    @tools.audit_tool(skip_read=True)
+    @tools.audit_tool(reads={"read"})
     async def mutate(action: Literal["read", "set"]) -> dict[str, object]:
         if action == "set":
             raise ValueError("exception-secret")
@@ -91,7 +126,11 @@ async def test_tool_audit_records_exception_but_not_reads_or_background_owner(
         ("update_automation", {"automation_id": "secret"}),
         ("trigger_automation", {"automation_id": "secret"}),
         ("delete_automation", {"automation_id": "secret"}),
-        ("refresh_workspace_start", {"name": "secret"}),
+        ("snapshotctl", {"action": "rebuild", "workspace": "secret"}),
+        (
+            "snapshotctl",
+            {"action": "edit", "workspace": "secret", "setup_script": "secret"},
+        ),
         ("delete_workspace", {"name": "secret"}),
         ("configure_repository", {"workspace": "secret", "repo": "secret"}),
         ("save_organization_skill", {"name": "secret", "description": "secret"}),

@@ -62,7 +62,7 @@ export function BotThreadsList({
             color="secondary"
             variant="underlined"
             leftDecorator={ArrowLeftIcon}
-            className="mb-space-3"
+            className="mb-space-3 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
             onClick={() => onBotChange(undefined)}
           >
             Bots
@@ -112,11 +112,15 @@ export function BotThreadsList({
                 />
               ) : (
                 bots.map((entry) => (
-                  <button
+                  <Button
+                    color="secondary"
+                    variant="plain"
+                    size="sm"
+                    aria-label={entry.name}
                     key={entry.key}
                     type="button"
                     onClick={() => onBotChange(entry.key)}
-                    className="flex w-full items-center gap-space-3 px-space-4 py-space-3 text-left hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                    className="h-auto w-full justify-start gap-space-3 px-space-4 py-space-3 text-left whitespace-normal hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                   >
                     <BotAvatar entry={entry} />
                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">
@@ -131,7 +135,7 @@ export function BotThreadsList({
                       weight="regular"
                       className="text-icon-secondary"
                     />
-                  </button>
+                  </Button>
                 ))
               )}
             </div>

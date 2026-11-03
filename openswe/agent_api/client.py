@@ -6,7 +6,6 @@ the run starts, into that context, and the deployment calls back with the token 
 and run hooks.
 """
 
-import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final, Literal, NotRequired, TypedDict, get_args
@@ -18,8 +17,6 @@ from runtime_api.catalog import Catalog
 from openswe.agent_api.tokens import RemoteRun, runtime_tokens_configured, sign_runtime_token
 from openswe.config import ENV
 from openswe.run_config import RunConfig
-
-logger = logging.getLogger(__name__)
 
 # The graph id `mda build` derives from the project's agent name.
 MDA_GRAPH_ID: Final = "open-swe"
@@ -48,7 +45,7 @@ RemoteRunContext = TypedDict(
     {
         "graph": HostedGraph,
         "__run_token": str,
-        "__catalog": NotRequired[dict[str, JsonValue]],
+        "__catalog": dict[str, JsonValue],
         "invocation_id": NotRequired[str],
     },
 )
@@ -91,22 +88,30 @@ def mda_runtime_api_key() -> str | None:
     return ENV.MDA_RUNTIME_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
 
 
+#: Sent with the LangSmith key on reads only: MDA then treats the call as LangSmith
+#: Studio's, which may read and search every thread, channel threads included. Writes
+#: go without it, so MDA keeps them scoped to the threads the backend owns.
+MDA_STUDIO_READ_HEADERS: Final[Mapping[str, str]] = {"x-auth-scheme": "langsmith"}
+
+
 @dataclass(frozen=True)
 class StartedRun:
     """An MDA run as the backend starts it: who it is, and what its graph is built from."""
 
     graph: HostedGraph
     token: str
-    # None when working it out failed here: the run then asks for its catalog itself.
-    catalog: Catalog | None
+    catalog: Catalog
     invocation_id: str | None = None
 
     def context(self) -> RemoteRunContext:
-        context: RemoteRunContext = {"graph": self.graph, "__run_token": self.token}
-        if self.catalog is not None:
-            context["__catalog"] = _json_object.validate_python(
-                self.catalog.model_dump(mode="json")
-            )
+        context: RemoteRunContext = {
+            "graph": self.graph,
+            "__run_token": self.token,
+            # Its tools by name alone; the run reads their specs from the backend.
+            "__catalog": _json_object.validate_python(
+                self.catalog.names_only().model_dump(mode="json")
+            ),
+        }
         if self.invocation_id:
             context["invocation_id"] = self.invocation_id
         return context
@@ -119,11 +124,19 @@ async def start_remote_run(
     thread_id: str,
     assistant_id: str,
 ) -> StartedRun:
-    """Work out the run's catalog and settings, once, and sign its token, before MDA starts it.
+    """Resolve the run's catalog and settings, once, and sign its token, before MDA starts it.
 
     The configurable and metadata ride inside the signed token; the deployment calls
-    back with the token rather than reading it.
+    back with the token rather than reading it. A run whose catalog cannot be resolved is
+    not started: resolving it raises here, to whoever asked for the run.
     """
+    if configurable.get("auth_provider") == "langsmith":
+        from openswe.threads.identity import ThreadIdentity
+
+        user_id = configurable.get("user_id")
+        if not isinstance(user_id, str):
+            raise PermissionError("Agent Workspace requires a user identity")
+        await ThreadIdentity(f"user:{user_id}").authorize()
     if assistant_id not in HOSTED_GRAPHS:
         raise RemoteRuntimeConfigurationError(f"Managed Deep Agents does not host {assistant_id}")
     graph = _hosted_graph.validate_python(assistant_id)
@@ -132,26 +145,18 @@ async def start_remote_run(
         assistant_id=assistant_id,
         configurable=_json_object.validate_python(configurable),
         metadata=_json_object.validate_python(metadata),
-    ).granting()
+    )
     # The webapp must not import the agent stack at startup.
-    from openswe.agent_api.hosted import hosted_graphs
+    from openswe.agent_api.hosted import run_kinds
+    from openswe.agent_api.run_catalog import RunCatalog
 
-    catalog: Catalog | None = None
-    try:
-        started = await hosted_graphs()[graph].start_run(run)
-    except Exception:
-        # The run still starts, and fails on its own catalog call if this keeps failing.
-        logger.exception(
-            "Starting an MDA run failed", extra={"thread_id": thread_id, "graph": graph}
-        )
-    else:
-        catalog = started.catalog
-        # Signed, so every later call reads the settings the run started with.
-        run = run.model_copy(update={"settings": started.settings})
+    started = await (await RunCatalog.of(run_kinds()[graph], run)).start()
+    # Signed, so every later call reads the settings the run started with.
+    run = run.model_copy(update={"settings": started.settings})
     return StartedRun(
         graph=graph,
         token=sign_runtime_token(run),
-        catalog=catalog,
+        catalog=started.catalog,
         invocation_id=RunConfig.parse(configurable).invocation_id,
     )
 

@@ -90,8 +90,8 @@ async def test_automatic_turns_go_quiet_once_the_investigation_is_published(
     assert await turns.schedule_automatic_turn(record, policy) is True
 
     rendered = json.dumps(turns.create_durable_run.await_args.kwargs["input"])
-    assert turns.AUTOMATIC_REQUEST in rendered
-    assert turns.FIRST_INVESTIGATION_REQUEST not in rendered
+    assert json.dumps(turns.AUTOMATIC_REQUEST)[1:-1] in rendered
+    assert json.dumps(turns.FIRST_INVESTIGATION_REQUEST)[1:-1] not in rendered
 
 
 async def test_explicit_turn_interrupts_and_carries_request_and_thread(record, policy, platform):

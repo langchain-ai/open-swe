@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+import uuid
 from collections.abc import Mapping
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
@@ -14,23 +14,25 @@ from langgraph_sdk.schema import Interrupt
 from managed_deepagents._channels.types import ChannelError
 from managed_deepagents._identity_auth import (
     AGENT_AUTH_PRINCIPAL_HEADER,
-    LANGCHAIN_API_KEY_ENV,
     SOURCE_PROVIDER_HEADER,
     SOURCE_THREAD_HEADER,
     USER_HEADER,
 )
 from managed_deepagents._ingress import build_ingress_run_context
 from managed_deepagents._ingress_runs import (
+    cancel_ingress_runs,
     lookup_status,
     observe_ingress_run,
     resume_ingress_run,
     start_ingress_run,
 )
+from managed_deepagents._langsmith_env import resolve_platform_injected_api_key
 from managed_deepagents._loopback import resolve_loopback_api_url
+from managed_deepagents._thread_record import THREAD_CONVERSATION_METADATA
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.binding import ChannelBinding
-    from managed_deepagents._ingress_runs import StartedIngressRun
+    from managed_deepagents._ingress_runs import MultitaskStrategy, StartedIngressRun
 
 
 #: Terminal subset of ``langgraph_sdk.schema.RunStatus`` a joined run may report;
@@ -51,6 +53,54 @@ class _IngressSource(TypedDict):
 
 #: One parked interrupt; ``value`` is what the app passed to ``interrupt()``.
 PendingInterrupt = Interrupt
+
+
+async def ingress_thread_exists(
+    *,
+    thread_id: str,
+    source_provider: str,
+    source_thread_key: str,
+    user_id: str,
+) -> bool:
+    """Whether the agent has run on a thread: ingress creates a thread only to
+    start a run on it, so one that does not exist never ran. Any other lookup
+    failure propagates."""
+    client = _create_trigger_ingress_loopback_client(
+        {
+            "provider": source_provider,
+            "thread_key": source_thread_key,
+            "user_id": user_id,
+        }
+    )
+    try:
+        await client.threads.get(thread_id)
+    except Exception as error:
+        if lookup_status(error) == HTTPStatus.NOT_FOUND:
+            return False
+        raise
+    return True
+
+
+async def newer_ingress_run(
+    *,
+    thread_id: str,
+    run_id: str,
+    source_provider: str,
+    source_thread_key: str,
+    user_id: str,
+) -> bool:
+    """Whether a newer run than ``run_id`` started on its thread, as one does when
+    a newer message replaces it under ``interrupt`` or ``rollback``. Agent Server
+    lists a thread's runs newest first."""
+    client = _create_trigger_ingress_loopback_client(
+        {
+            "provider": source_provider,
+            "thread_key": source_thread_key,
+            "user_id": user_id,
+        }
+    )
+    runs = await client.runs.list(thread_id, limit=1)
+    return bool(runs) and runs[0]["run_id"] != run_id
 
 
 async def ingress_thread_interrupts(
@@ -104,6 +154,32 @@ def _parked_interrupts(thread: object) -> list[PendingInterrupt]:
                 seen.add(interrupt_id)
                 pending.append(Interrupt(id=interrupt_id, value=entry.get("value")))
     return pending
+
+
+async def conversation_thread_id(
+    *, source_provider: str, source_thread_key: str, user_id: str
+) -> str:
+    """The thread a Trigger conversation runs on.
+
+    The thread a scheduled run handed to it, else the one its source thread key names.
+    """
+    client = _create_trigger_ingress_loopback_client(
+        {"provider": source_provider, "thread_key": source_thread_key, "user_id": user_id}
+    )
+    handed = await client.threads.search(
+        metadata={THREAD_CONVERSATION_METADATA: source_thread_key}, limit=1
+    )
+    thread_id = handed[0].get("thread_id") if handed else None
+    return (
+        thread_id
+        if isinstance(thread_id, str) and thread_id
+        else source_thread_id(source_thread_key)
+    )
+
+
+def source_thread_id(source_thread_key: str) -> str:
+    """The thread id a source thread key names."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, source_thread_key))
 
 
 class ResumeTarget(TypedDict):
@@ -186,8 +262,16 @@ async def start_ingress_agent(
     user_id: str,
     context: Mapping[str, object] | None = None,
     binding: ChannelBinding,
+    state: Mapping[str, object] | None = None,
+    metadata: Mapping[str, object] | None = None,
+    webhook: str | None = None,
+    multitask_strategy: MultitaskStrategy = "enqueue",
 ) -> StartedIngressRun:
-    """Enqueue a Trigger run as its identity_context principal."""
+    """Enqueue a Trigger run as its identity_context principal.
+
+    ``state`` holds other state keys to start with; the Agent Server POSTs the
+    finished run to ``webhook``.
+    """
     client = _create_trigger_ingress_loopback_client(
         {"provider": source_provider, "thread_key": source_thread_key, "user_id": user_id}
     )
@@ -196,6 +280,11 @@ async def start_ingress_agent(
         thread_id=thread_id,
         assistant_id=assistant_id,
         messages=messages,
+        state=state,
+        metadata=metadata,
+        webhook=webhook,
+        multitask_strategy=multitask_strategy,
+        thread_origin={"binding": binding, "sender": user_id},
         **build_ingress_run_context(binding=binding, context=context),
     )
 
@@ -220,6 +309,7 @@ async def resume_ingress_agent(
         thread_id=thread_id,
         assistant_id=assistant_id,
         resume=resume,
+        thread_origin={"binding": binding, "sender": user_id},
         **build_ingress_run_context(binding=binding, context=context),
     )
 
@@ -243,10 +333,26 @@ async def observe_ingress_agent(
     return {"values": observed["values"], "status": status}
 
 
+async def cancel_ingress_thread_runs(
+    *,
+    thread_id: str,
+    source_provider: str,
+    source_thread_key: str,
+    user_id: str,
+) -> int:
+    """Interrupt a Trigger thread's queued and active runs as its owning principal."""
+    client = _create_trigger_ingress_loopback_client(
+        {"provider": source_provider, "thread_key": source_thread_key, "user_id": user_id}
+    )
+    return len(await cancel_ingress_runs(client=client, thread_id=thread_id))
+
+
 def _create_trigger_ingress_loopback_client(
     source: _IngressSource,
 ) -> LangGraphClient:
-    api_key = os.environ.get(LANGCHAIN_API_KEY_ENV, "").strip()
+    # Hosted injects the deployment key as LANGCHAIN_API_KEY; some BYOC and
+    # self-hosted Hosts inject it only as LANGSMITH_API_KEY.
+    api_key = resolve_platform_injected_api_key()
     if not api_key:
         raise ChannelError(
             "channel_run_failed",

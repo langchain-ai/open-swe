@@ -17,6 +17,7 @@ const {
   powerMonitor,
   session,
   shell,
+  webContents,
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const {
@@ -73,18 +74,21 @@ const {
   SESSION_COOKIE_NAME,
   appRedirectUrl,
   backendRequestUrl,
+  desktopEnvironmentsUrl,
   desktopExchangeUrl,
+  desktopLoginUrl,
+  resolveAppRuntime,
+  resolveBackendUrl,
   connectExchangeUrl,
   connectLoginUrl,
-  desktopLoginUrl,
   isAppLoginUrl,
   isAppUrl,
+  headersFramedByApp,
   isConnectProvider,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,
-  resolveBackendUrl,
-  resolveAppRuntime,
+  parseDesktopEnvironments,
   validateBackendUrl,
 } = require("./config.cjs");
 const {
@@ -124,6 +128,10 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let backendUrl = null;
+// The backend the app started on; `backendUrl` differs only while switched to
+// one of its alternate environments, which lasts until the app restarts.
+let primaryBackendUrl = null;
+let alternativeEnvironments = [];
 let desktopUi: InstanceType<typeof DesktopUi> | null = null;
 let mainWindow = null;
 
@@ -201,8 +209,8 @@ function failDesktopUpdate(error: unknown) {
   quitting = false;
   dialog.showErrorBox(
     "Could not install the update",
-    "The update did not complete. Quit and reopen Open SWE before continuing. " +
-      "If updating still fails, install the latest release from https://github.com/langchain-ai/open-swe/releases/latest.\n\n" +
+    `The update did not complete. Quit and reopen ${appRuntime.name} before continuing. ` +
+      `If updating still fails, install the latest release from https://github.com/langchain-ai/open-swe/releases/latest.\n\n` +
       String(error),
   );
 }
@@ -337,6 +345,7 @@ function registeredProject(cwd) {
 }
 
 function threadRoot(thread) {
+  if (thread?.managedTaskFolder) return localThreadStore.taskRoot(thread);
   const project = thread ? registeredProject(thread.cwd) : null;
   if (!project) return null;
   return thread.worktreePath || project;
@@ -463,7 +472,7 @@ async function createThreadWorktree(thread, baseBranch) {
     worktreesPath(),
     `${path.basename(repo)}-${token}`,
   );
-  await addWorktree(repo, worktree, `open-swe/local-${token}`, base);
+  await addWorktree(repo, worktree, `open-swe/local-${token}`, base, true);
   return localThreadStore.setWorktree(thread.id, worktree, true);
 }
 
@@ -792,17 +801,24 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     const cwd =
       typeof input?.cwd === "string" ? registeredProject(input.cwd) : null;
-    if (!cwd)
-      throw new Error(
-        "Add a valid project to Open SWE before starting a local agent",
-      );
-    let thread = localThreadStore.create({ id: input?.threadId, cwd });
+    if (!cwd && input?.taskWorkspace !== true)
+      throw new Error("Choose a folder before starting a local agent");
+    if (!cwd && input?.cwd != null) throw new Error("Folder is not registered");
+    let thread = cwd
+      ? localThreadStore.create({ id: input?.threadId, cwd })
+      : localThreadStore.createTask(input?.threadId);
     try {
-      if (input?.workspaceMode === "worktree")
+      if (cwd && input?.workspaceMode === "worktree")
         thread = await startThreadWorktree(thread, input?.baseBranch);
-      thread = await recordLocalCheckpoint(thread);
+      if (!thread.managedTaskFolder)
+        thread = await recordLocalCheckpoint(thread);
       const bridgeId = await localBridges.ensure(thread.id);
-      return { bridgeId, repo: await originRepo(threadRoot(thread)) };
+      return {
+        bridgeId,
+        repo: thread.managedTaskFolder
+          ? null
+          : await originRepo(threadRoot(thread)),
+      };
     } catch (error) {
       await discardLocalThread(thread);
       throw error;
@@ -816,6 +832,7 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:take-over-thread", async (event, input) => {
     requireTrustedDesktopIpc(event);
     const existing = localThreadStore.get(input?.threadId);
+    if (existing?.managedTaskFolder) return localBridges.ensure(existing.id);
     if (existing) {
       // Its worktree and bridge may be the source of a handoff still pending.
       // A thread that ran in the user's own checkout moves to a worktree, so
@@ -827,7 +844,18 @@ function configureDesktopIpc() {
           );
       return localBridges.ensure(thread.id);
     }
-    const cwd = await projectForRepo(input?.repo);
+    if (input?.repo != null && typeof input.repo !== "string")
+      throw new Error("Invalid thread repository");
+    if (!input?.repo?.trim()) {
+      const thread = localThreadStore.createTask(input?.threadId);
+      try {
+        return await localBridges.ensure(thread.id);
+      } catch (error) {
+        await discardLocalThread(thread);
+        throw error;
+      }
+    }
+    const cwd = await projectForRepo(input.repo);
     if (!cwd)
       throw new Error(`Add a checkout of ${input?.repo} to Open SWE first`);
     let thread = localThreadStore.create({ id: input?.threadId, cwd });
@@ -847,6 +875,14 @@ function configureDesktopIpc() {
     if (!thread?.bridgeId)
       throw new Error("This thread does not run on This Mac");
     await localBridges.ensure(thread.id);
+    return true;
+  });
+  ipcMain.handle("desktop:open-task-folder", async (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    const root = threadRoot(localThreadStore.get(threadId));
+    if (!root) throw new Error("Task folder is unavailable");
+    const error = await shell.openPath(root);
+    if (error) throw new Error(error);
     return true;
   });
   ipcMain.handle("desktop:get-local-thread", (event, threadId) => {
@@ -994,11 +1030,11 @@ function profileConfigPath() {
   return path.join(app.getPath("userData"), "desktop-config.json");
 }
 
-/** Development builds keep their own profile, so they never repoint the packaged app or the CLI. */
+/** Only packaged apps share configuration with the CLI. */
 function configPath() {
-  return isDevelopment
-    ? profileConfigPath()
-    : sharedConfigPath(require("node:os").homedir());
+  return !isDevelopment
+    ? sharedConfigPath(require("node:os").homedir())
+    : profileConfigPath();
 }
 
 function migrateStoredConfig() {
@@ -1069,6 +1105,59 @@ function storeBackendUrl(value) {
   return url;
 }
 
+/** Ask the backend the app started on which others it offers to switch to. */
+async function loadAlternativeEnvironments() {
+  const url = primaryBackendUrl;
+  if (!url) return;
+  let environments = [];
+  try {
+    const response = await fetch(desktopEnvironmentsUrl(url), {
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (response.ok)
+      environments = parseDesktopEnvironments(await response.json());
+  } catch (error) {
+    console.warn("Could not read the alternate environments", error);
+  }
+  if (url !== primaryBackendUrl) return;
+  alternativeEnvironments = environments;
+  createMenu();
+}
+
+/** Point the app at `url` and reload it there, dropping the last backend's page state. */
+async function connectToBackend(url) {
+  const previousUrl = backendUrl;
+  backendUrl = url;
+  if (previousUrl && previousUrl !== url)
+    await session.defaultSession.clearStorageData({ origin: APP_URL });
+  createMenu();
+  if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow);
+  else createWindow();
+}
+
+function environmentMenuItem() {
+  if (
+    !primaryBackendUrl ||
+    (!alternativeEnvironments.length && backendUrl === primaryBackendUrl)
+  )
+    return null;
+  const environments = [
+    { name: "Main", url: primaryBackendUrl },
+    ...alternativeEnvironments,
+  ];
+  return {
+    label: "Environment",
+    submenu: environments.map(({ name, url }) => ({
+      label: `${name} (${new URL(url).host})`,
+      type: "radio",
+      checked: url === backendUrl,
+      click: () => {
+        if (url !== backendUrl) void connectToBackend(url);
+      },
+    })),
+  };
+}
+
 function iconPath() {
   return app.isPackaged
     ? path.join(process.resourcesPath, "icon.png")
@@ -1083,7 +1172,7 @@ function errorPage(error) {
     <meta charset="utf-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
     <meta name="color-scheme" content="light dark">
-    <title>Startup error - Open SWE</title>
+    <title>Startup error - ${appRuntime.name}</title>
     <style>
       body { margin: 0; min-height: 100vh; display: grid; place-items: center; font: 14px system-ui, sans-serif; }
       main { max-width: 520px; padding: 32px; text-align: center; }
@@ -1093,7 +1182,7 @@ function errorPage(error) {
   </head>
   <body>
     <main>
-      <h1>Open SWE could not start</h1>
+      <h1>${appRuntime.name} could not start</h1>
       <p>${escapeHtml(message)}</p>
       <p>Use View → Reload to try again.</p>
     </main>
@@ -1228,9 +1317,8 @@ async function serveDesktopUi(request: Request) {
       () =>
         void dialog.showMessageBox({
           type: "warning",
-          message: "Open SWE needs an update",
-          detail:
-            "Your backend has a newer UI than this version of Open SWE can run. You are still on the previous UI; update the desktop app to get the new one.",
+          message: `${appRuntime.name} needs an update`,
+          detail: `Your backend has a newer UI than this version of ${appRuntime.name} can run. You are still on the previous UI; update the desktop app to get the new one.`,
         }),
     );
   }
@@ -1271,6 +1359,10 @@ function createMenu() {
     label: "Backend URL…",
     click: () => createSetupWindow(),
   };
+  const environmentItem = environmentMenuItem();
+  const backendItems = environmentItem
+    ? [backendSettingsItem, environmentItem]
+    : [backendSettingsItem];
   const settingsItem = {
     id: "open-settings",
     label: "Settings…",
@@ -1291,7 +1383,7 @@ function createMenu() {
               { role: "about" },
               settingsItem,
               checkForUpdatesItem,
-              backendSettingsItem,
+              ...backendItems,
               { type: "separator" },
               { role: "services" },
               { type: "separator" },
@@ -1320,7 +1412,7 @@ function createMenu() {
         },
         ...(process.platform === "darwin"
           ? []
-          : [{ type: "separator" }, settingsItem, backendSettingsItem]),
+          : [{ type: "separator" }, settingsItem, ...backendItems]),
         { type: "separator" },
         { role: process.platform === "darwin" ? "close" : "quit" },
       ],
@@ -1388,7 +1480,7 @@ function createMenu() {
         },
         { type: "separator" },
         {
-          label: "Open SWE on GitHub",
+          label: `${appRuntime.name} on GitHub`,
           click: () =>
             void shell.openExternal("https://github.com/langchain-ai/open-swe"),
         },
@@ -1403,7 +1495,7 @@ function createMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-async function startExternalLogin() {
+async function startExternalLogin(navigationUrl: string) {
   if (!backendUrl) return;
   loginFlow?.cancel();
   loginFlow = null;
@@ -1419,7 +1511,7 @@ async function startExternalLogin() {
     return;
   }
   loginFlow = flow;
-  void shell.openExternal(desktopLoginUrl(backendUrl, flow));
+  void shell.openExternal(desktopLoginUrl(backendUrl, flow, navigationUrl));
 
   const code = await flow.code;
   if (loginFlow !== flow) return;
@@ -1548,7 +1640,7 @@ async function completeExternalLogin(verifier, code) {
 function handleNavigation(window, event, url) {
   if (isAppLoginUrl(url)) {
     event.preventDefault();
-    void startExternalLogin();
+    void startExternalLogin(url);
     return;
   }
   const callback = backendUrl ? localCallbackUrl(url, backendUrl) : null;
@@ -1598,7 +1690,7 @@ function createWindow(initialUrl = APP_URL) {
   window.webContents.setWindowOpenHandler(({ url }) => {
     const scheme = new URL(url).protocol;
     if (isAppLoginUrl(url)) {
-      void startExternalLogin();
+      void startExternalLogin(url);
     } else if (["http:", "https:", "mailto:"].includes(scheme)) {
       void shell.openExternal(url);
     }
@@ -1714,14 +1806,13 @@ function createSetupWindow() {
     try {
       const value = new URL(targetUrl).searchParams.get("url");
       if (!value) throw new Error("Enter a backend URL");
-      const previousUrl = backendUrl;
-      backendUrl = storeBackendUrl(value);
-      if (previousUrl && previousUrl !== backendUrl) {
-        await clearBackendCookies(previousUrl);
-        await session.defaultSession.clearStorageData({ origin: APP_URL });
-      }
-      if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow);
-      else createWindow();
+      const url = storeBackendUrl(value);
+      if (primaryBackendUrl && primaryBackendUrl !== url)
+        await clearBackendCookies(primaryBackendUrl);
+      primaryBackendUrl = url;
+      alternativeEnvironments = [];
+      await connectToBackend(url);
+      void loadAlternativeEnvironments();
       window.close();
     } catch (error) {
       dialog.showErrorBox(
@@ -1736,13 +1827,33 @@ function createSetupWindow() {
   return window;
 }
 
+/** The thread's browser panel frames a LangSmith page, which cannot name the app as a frame ancestor. */
+function configureFraming() {
+  session.defaultSession.webRequest.onHeadersReceived(
+    { urls: ["https://*/*"] },
+    (details, callback) => {
+      // Requests no page made, like the main process's own, carry no webContentsId.
+      const page =
+        details.resourceType === "subFrame" &&
+        details.webContentsId !== undefined
+          ? webContents.fromId(details.webContentsId)?.getURL()
+          : undefined;
+      callback(
+        isAppUrl(page ?? "")
+          ? { responseHeaders: headersFramedByApp(details.responseHeaders) }
+          : {},
+      );
+    },
+  );
+}
+
 function configurePermissions() {
   session.defaultSession.setPermissionRequestHandler(
-    (webContents, permission, callback, details) => {
+    (requester, permission, callback, details) => {
       callback(
         isTrustedPermissionRequest(
           permission,
-          details.requestingUrl || webContents.getURL(),
+          details.requestingUrl || requester.getURL(),
         ),
       );
     },
@@ -1814,6 +1925,7 @@ if (!hasSingleInstanceLock) {
       app.exit(1);
       return;
     }
+    primaryBackendUrl = backendUrl;
     void shareBackendSession();
 
     localThreadStore = new LocalThreadStore(
@@ -1837,8 +1949,10 @@ if (!hasSingleInstanceLock) {
     });
     protocol.handle("open-swe", serveDesktopUi);
     configurePermissions();
+    configureFraming();
     configureDesktopIpc();
     createMenu();
+    void loadAlternativeEnvironments();
     if (!desktopLinks.ready()) createWindow();
     configureAutoUpdater();
     configureTerminalIpc({

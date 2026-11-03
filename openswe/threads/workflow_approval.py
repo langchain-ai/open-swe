@@ -1,10 +1,13 @@
 """Workflow-file push approval state."""
 
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from typing import Any
 
 from langgraph_sdk import get_client
+from sqlalchemy import text
 
+from openswe.database.postgres import transaction
 from openswe.utils.time import now_iso
 
 WORKFLOW_PUSH_APPROVALS_KEY = "workflow_push_approvals"
@@ -56,39 +59,39 @@ async def ensure_workflow_push_pending(
     approval_url: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Store a pending approval unless a terminal record already exists."""
-    approvals = await get_workflow_push_approvals(thread_id)
-    existing = approvals.get(fingerprint)
-    if existing and existing.get("status") in _TERMINAL_STATUSES:
-        return existing, False
+    async with _locked_approvals(thread_id) as approvals:
+        existing = approvals.get(fingerprint)
+        if existing and existing.get("status") in _TERMINAL_STATUSES:
+            return existing, False
 
-    review_fields = {
-        "repo": repo,
-        "branch": branch,
-        "base_sha": base_sha,
-        "head_sha": head_sha,
-        "files": list(files),
-        "diff_stats": _normalize_diff_stats(diff_stats, len(files)),
-        "diff_preview": diff_preview or "",
-        "diff_preview_truncated": diff_preview_truncated,
-        "inherited_from": inherited_from,
-        "approval_url": approval_url,
-    }
-    if existing and existing.get("status") == WORKFLOW_APPROVAL_PENDING:
-        record = {**existing, **review_fields}
+        review_fields = {
+            "repo": repo,
+            "branch": branch,
+            "base_sha": base_sha,
+            "head_sha": head_sha,
+            "files": list(files),
+            "diff_stats": _normalize_diff_stats(diff_stats, len(files)),
+            "diff_preview": diff_preview or "",
+            "diff_preview_truncated": diff_preview_truncated,
+            "inherited_from": inherited_from,
+            "approval_url": approval_url,
+        }
+        if existing and existing.get("status") == WORKFLOW_APPROVAL_PENDING:
+            record = {**existing, **review_fields}
+            approvals[fingerprint] = record
+            await _save_approvals(thread_id, approvals)
+            return record, False
+
+        record = {
+            "fingerprint": fingerprint,
+            "status": WORKFLOW_APPROVAL_PENDING,
+            **review_fields,
+            "requested_at": now_iso(),
+            "notified": False,
+        }
         approvals[fingerprint] = record
         await _save_approvals(thread_id, approvals)
-        return record, False
-
-    record = {
-        "fingerprint": fingerprint,
-        "status": WORKFLOW_APPROVAL_PENDING,
-        **review_fields,
-        "requested_at": now_iso(),
-        "notified": False,
-    }
-    approvals[fingerprint] = record
-    await _save_approvals(thread_id, approvals)
-    return record, True
+        return record, True
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -148,14 +151,14 @@ def workflow_push_approval_responses(
 
 
 async def mark_workflow_push_notified(thread_id: str, fingerprint: str) -> None:
-    approvals = await get_workflow_push_approvals(thread_id)
-    record = approvals.get(fingerprint)
-    if not record:
-        return
-    record["notified"] = True
-    record["notified_at"] = now_iso()
-    approvals[fingerprint] = record
-    await _save_approvals(thread_id, approvals)
+    async with _locked_approvals(thread_id) as approvals:
+        record = approvals.get(fingerprint)
+        if not record:
+            return
+        record["notified"] = True
+        record["notified_at"] = now_iso()
+        approvals[fingerprint] = record
+        await _save_approvals(thread_id, approvals)
 
 
 async def decide_workflow_push_approval(
@@ -164,17 +167,29 @@ async def decide_workflow_push_approval(
     *,
     approved: bool,
     actor: str,
-) -> dict[str, Any] | None:
-    approvals = await get_workflow_push_approvals(thread_id)
-    record = approvals.get(fingerprint)
-    if not record:
-        return None
-    record["status"] = WORKFLOW_APPROVAL_APPROVED if approved else WORKFLOW_APPROVAL_REJECTED
-    record["decided_at"] = now_iso()
-    record["decided_by"] = actor
-    approvals[fingerprint] = record
-    await _save_approvals(thread_id, approvals)
-    return record
+) -> tuple[dict[str, object], bool] | None:
+    async with _locked_approvals(thread_id) as approvals:
+        record = approvals.get(fingerprint)
+        if not record:
+            return None
+        if record.get("status") in _TERMINAL_STATUSES:
+            return record, False
+        record["status"] = WORKFLOW_APPROVAL_APPROVED if approved else WORKFLOW_APPROVAL_REJECTED
+        record["decided_at"] = now_iso()
+        record["decided_by"] = actor
+        approvals[fingerprint] = record
+        await _save_approvals(thread_id, approvals)
+        return record, True
+
+
+@asynccontextmanager
+async def _locked_approvals(thread_id: str) -> AsyncIterator[dict[str, dict[str, object]]]:
+    async with transaction() as conn:
+        await conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": f"workflow_push_approvals:{thread_id}"},
+        )
+        yield await get_workflow_push_approvals(thread_id)
 
 
 async def _save_approvals(thread_id: str, approvals: dict[str, dict[str, Any]]) -> None:

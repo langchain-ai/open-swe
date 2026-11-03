@@ -412,12 +412,16 @@ export function OwnershipPicker({
                       " and "
                     )}. Change the filters above to show more ${pluralNoun}.`}
                 >
-                  <button
+                  <Button
+                    color="secondary"
+                    variant="plain"
+                    size="sm"
+                    aria-label={`${hiddenCount} hidden by the filter`}
                     type="button"
-                    className="cursor-help underline decoration-dotted underline-offset-4"
+                    className="h-auto cursor-help border-0 px-0 underline decoration-dotted underline-offset-4"
                   >
                     {hiddenCount} hidden by the filter
-                  </button>
+                  </Button>
                 </Tooltip>
               )}
             </span>

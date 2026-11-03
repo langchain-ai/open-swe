@@ -21,10 +21,8 @@ from openswe.run_config import RunConfig
 from openswe.slack.blocks import (
     MARKDOWN_TEXT_MAX_CHARS,
     MESSAGE_MAX_BLOCKS,
-    SECTION_TEXT_MAX_CHARS,
     block_payload,
     option_actions,
-    section,
 )
 from openswe.slack.client import (
     get_active_slack_thread,
@@ -43,7 +41,7 @@ from openswe.slack.orphan import (
     slack_thread_detached,
 )
 from openswe.slack.records import SlackRun, SlackThread, store_slack_message_run_mapping
-from openswe.slack.run_feedback import feedback_block
+from openswe.slack.review_links import preserve_github_links as github_link_delivery
 from openswe.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
 from openswe.slack.tools.read_thread_messages import fetch_and_format_thread
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
@@ -85,11 +83,13 @@ async def slack_reply(
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
     *,
     option_user_id: str | None = None,
+    preserve_github_links: bool = False,
 ) -> dict[str, Any] | list[dict[str, object]]:
     """Implement the `slack_reply` tool."""
-    result = await send_slack_reply(
-        message, response_type, options, blocks, state, option_user_id=option_user_id
-    )
+    with github_link_delivery(preserve_github_links):
+        result = await send_slack_reply(
+            message, response_type, options, blocks, state, option_user_id=option_user_id
+        )
     image_urls = result.pop("image_urls", None)
     if not image_urls:
         return result
@@ -177,25 +177,25 @@ async def send_slack_reply(
             conflict = await _stale_reply_guard(state, channel_id, post_thread_ts, run_id)
             if conflict is not None:
                 return conflict
-        if options and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+        has_options = bool(options) or bool(
+            blocks and any(block.get("type") == "actions" for block in blocks)
+        )
+        if has_options and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             return _oversized_options_error(message)
-        feedback = bool(response_type == "final" and run_id and _triggering_user_id(cfg))
+        if blocks is not None and len(blocks) + _WEB_LINK_BLOCKS > MESSAGE_MAX_BLOCKS:
+            return {
+                "success": False,
+                "error": "Message exceeds Slack's block budget",
+                "retry": True,
+                "hint": "Retry with fewer blocks, leaving room for the dashboard link.",
+            }
         slack_blocks = blocks
         if blocks is None:
             slack_blocks = _reply_blocks(
-                message, options, reserve=_WEB_LINK_BLOCKS + feedback, option_user_id=option_user_id
+                message, options, reserve=_WEB_LINK_BLOCKS, option_user_id=option_user_id
             )
             if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
                 message = markdown_to_mrkdwn(message)
-        if feedback and run_id:
-            if slack_blocks is None:
-                slack_blocks = block_payload(
-                    [
-                        section(message[start : start + SECTION_TEXT_MAX_CHARS])
-                        for start in range(0, len(message), SECTION_TEXT_MAX_CHARS)
-                    ]
-                )
-            slack_blocks = [*slack_blocks, *block_payload([feedback_block(run_id)])]
         usage = _usage_with_effort(summarize_run_usage(state), state, cfg)
         try:
             message_ts = await _post_and_store_mapping(
@@ -526,7 +526,9 @@ def _reply_blocks(
     return [*block_payload(body), *actions]
 
 
-def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[str, Any]]:
+def build_workflow_approval_blocks(
+    message: str, fingerprint: str, *, thread_id: str | None = None
+) -> list[dict[str, Any]]:
     return [
         {"type": "section", "text": {"type": "mrkdwn", "text": message}},
         {
@@ -545,6 +547,7 @@ def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[
                             "type": "workflow_push_approval",
                             "action": "approve",
                             "fingerprint": fingerprint,
+                            "thread_id": thread_id or "",
                         }
                     ),
                     "action_id": "open_swe_option_select_approve",
@@ -558,6 +561,7 @@ def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[
                             "type": "workflow_push_approval",
                             "action": "reject",
                             "fingerprint": fingerprint,
+                            "thread_id": thread_id or "",
                         }
                     ),
                     "action_id": "open_swe_option_select_reject",

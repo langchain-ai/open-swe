@@ -347,6 +347,9 @@ async function shootCard(page: Page, name: string) {
 test.describe("Human review in Slack", () => {
   test.beforeEach(async ({ request }) => {
     await request.post("/control/reset");
+    await control(request, "/control/team-settings", {
+      expedited_review_enabled: false,
+    });
     await grantWrite(request);
   });
 
@@ -361,6 +364,7 @@ test.describe("Human review in Slack", () => {
   test("the agent posts a card in the review channel; two sign up; it merges two hours after one approval", async ({
     page,
     request,
+    baseURL,
   }) => {
     test.setTimeout(240_000);
     await setReviewChannel(request);
@@ -411,7 +415,7 @@ test.describe("Human review in Slack", () => {
       .flatMap((block) => block.elements ?? [])
       .find((element) => element.action_id === "open_swe_option_select_review");
     expect(review?.url).toBe(
-      `https://github.com/${REPO.owner}/${REPO.repo}/pull/${seeded.number}`,
+      `${baseURL}/agents/reviews/${REPO.owner}/${REPO.repo}/${seeded.number}`,
     );
     await shootCard(page, "open");
     await loginAs(page, ALICE);
@@ -702,7 +706,7 @@ test.describe("Human review in Slack", () => {
       .getByRole("listitem")
       .filter({ hasText: new RegExp(`#${seeded.number}(?!\\d)`) });
     await row.getByRole("button", { name: "Request review in Slack" }).click();
-    await expect(page.getByText(/Asked Slack to review/)).toBeVisible({
+    await expect(page.getByText(/Asked #reviews to review/)).toBeVisible({
       timeout: 30_000,
     });
     const posted = await latestRequest(request);
@@ -861,7 +865,7 @@ test.describe("Human review in Slack", () => {
       .filter({ hasText: new RegExp(`#${seeded.number}(?!\\d)`) })
       .getByRole("button", { name: "Request review in Slack" })
       .click();
-    await expect(page.getByText(/Asked Slack to review/)).toBeVisible({
+    await expect(page.getByText(/Asked #reviews to review/)).toBeVisible({
       timeout: 30_000,
     });
     const posted = await latestRequest(request);
@@ -959,7 +963,7 @@ test.describe("Human review in Slack", () => {
       .filter({ hasText: new RegExp(`#${seeded.number}(?!\\d)`) })
       .getByRole("button", { name: "Request review in Slack" })
       .click();
-    await expect(page.getByText(/Asked Slack to review/)).toBeVisible({
+    await expect(page.getByText(/Asked #reviews to review/)).toBeVisible({
       timeout: 30_000,
     });
     const posted = await latestRequest(request);
@@ -1128,8 +1132,6 @@ test.describe("Human review in Slack", () => {
         { timeout: 90_000 },
       )
       .not.toBe("");
-    const posted = await latestRequest(request);
-
     await control(request, "/mock/slack/send", {
       thread_ts: asked.thread_ts,
       text: "<@U0BOT> take that review request down E2E_HUMAN_REVIEW_DISMISS",
@@ -1140,9 +1142,13 @@ test.describe("Human review in Slack", () => {
         timeout: 60_000,
       })
       .toBe("cancelled");
-    expect(cardText(await reviewCard(request, posted))).toContain(
-      "Review request: dismissed by Open SWE: posted with the wrong summary",
-    );
+    await expect
+      .poll(async () =>
+        cardText(await reviewCard(request, await latestRequest(request))),
+      )
+      .toContain(
+        "Review request: dismissed by Open SWE: posted with the wrong summary",
+      );
   });
 
   test("the oswe MCP tools' endpoints post a card with their summary, re-summarize it, and dismiss it", async ({

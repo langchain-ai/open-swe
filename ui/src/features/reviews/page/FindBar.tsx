@@ -1,3 +1,4 @@
+import { Input } from "@langchain/macaw-components/Input"
 import {
   CaretDownIcon,
   CaretUpIcon,
@@ -98,7 +99,10 @@ export function FindBar() {
       style={{ top: FILE_HEADER_HEIGHT + 8 }}
       className="absolute right-4 z-floating-bar flex items-center gap-space-1 rounded-lg border border-default bg-surface-level-1 py-space-1 pr-space-1 pl-space-3 shadow-md"
     >
-      <input
+      <Input
+        inputContainerClassName="border-strong/70 [&:hover:not(:focus-within)]:border-strong"
+        size="sm"
+        debounceMs={0}
         id={FIND_INPUT_ID}
         type="text"
         value={query}
@@ -106,7 +110,7 @@ export function FindBar() {
         aria-label="Find in files and changes"
         spellCheck={false}
         autoComplete="off"
-        onChange={(event) => setFindQuery(event.target.value)}
+        onChange={setFindQuery}
         onKeyDown={(event) => {
           const mod = event.metaKey || event.ctrlKey
           if (event.key === "Escape") {
@@ -120,7 +124,7 @@ export function FindBar() {
             focusFindInput()
           }
         }}
-        className="w-56 bg-transparent text-xs text-primary outline-none placeholder:text-tertiary max-sm:w-36"
+        className="w-56 max-sm:w-36"
       />
       <span
         aria-live="polite"

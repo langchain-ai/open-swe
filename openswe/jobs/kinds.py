@@ -8,29 +8,45 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Final
+from uuid import UUID
 
 from pydantic import JsonValue
 
 from openswe import event_claims
+from openswe.agent_api.report_receipts import PURGE_JOB as REPORT_RECEIPT_PURGE
+from openswe.agent_api.report_receipts import PURGE_SCHEDULE as REPORT_RECEIPT_SCHEDULE
+from openswe.agent_api.report_receipts import purge_report_receipts
+from openswe.agent_api.tool_sets import PURGE_JOB as TOOL_SETS_PURGE
+from openswe.agent_api.tool_sets import PURGE_SCHEDULE as TOOL_SETS_SCHEDULE
+from openswe.agent_api.tool_sets import purge_tool_sets
 from openswe.agent_cost import run_agent_cost_refresh
 from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announcement
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
 from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
-from openswe.human_review.standard import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
+from openswe.github.forwarding import FORWARD_JOB as GITHUB_CHANNEL_FORWARD
+from openswe.github.forwarding import ForwardJob
+from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.standard import run_deadline
 from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
 from openswe.jobs.worker import WORKER
+from openswe.memories.curator import WAKE_JOB as CURATOR_WAKE
+from openswe.memories.curator import WAKE_SCHEDULE as CURATOR_SCHEDULE
+from openswe.memories.curator import WorkspaceCurator
 from openswe.merge_queue.controller import start_queue
 from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
 from openswe.merge_queue.runtime import reconcile_queue
 from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
 from openswe.monitors.delivery import poll_monitors
+from openswe.notifications.service import JOB_KIND as NOTIFICATION_FALLBACK
+from openswe.notifications.service import AppNotification
 
 __all__ = ["WORKER"]
 from openswe.reconcile import reconcile_stale_runs
+from openswe.review_guide.sessions import ARCHIVE_JOB as REVIEW_GUIDE_ARCHIVE
+from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.sandboxes.retry import (
     SANDBOX_ATTACH_MAX_ELAPSED,
     is_transient_sandbox_error,
@@ -40,7 +56,11 @@ from openswe.schedules.store import AGENT_SCHEDULE_JOB_KIND, launch_scheduled_ag
 from openswe.session_cost import run_session_cost_refresh
 from openswe.slack.channel_options import DIRECTORY_JOB as SLACK_CHANNEL_DIRECTORY
 from openswe.slack.channel_options import ensure_directory_sync, sync_directory
+from openswe.slack.mda_forwarding import SWEEP_JOB as SLACK_LOST_REQUESTS
+from openswe.slack.mda_forwarding import schedule_sweep as schedule_slack_lost_requests
+from openswe.slack.mda_forwarding import sweep_lost_requests
 from openswe.threads.index_import import import_agent_server_threads
+from openswe.threads.stalls import fail_stalled_runs
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
 from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads
 from openswe.tools.schedule_thread_wakeup import WAKE_THREAD_JOB, run_thread_wakeup
@@ -169,7 +189,20 @@ async def _reconcile(_job: Job) -> object:
 
 @_sandbox_work(THREAD_STATUS_RECONCILE)
 async def _thread_status_reconcile(_job: Job) -> object:
-    return {"threads_settled": await reconcile_busy_threads()}
+    return {
+        "threads_settled": await reconcile_busy_threads(),
+        "stalled_runs_failed": await fail_stalled_runs(),
+    }
+
+
+@WORKER.register(REVIEW_GUIDE_ARCHIVE)
+async def _review_guide_archive(job: Job) -> None:
+    thread_id, head_sha = _text(job, "thread_id"), _text(job, "head_sha")
+    if thread_id is None or head_sha is None:
+        return
+    session = await ReviewGuideSession.get(thread_id)
+    if session is not None:
+        await session.archive_finished(head_sha)
 
 
 @WORKER.register(SLACK_CHANNEL_DIRECTORY)
@@ -177,15 +210,54 @@ async def _slack_channel_directory(_job: Job) -> None:
     await sync_directory()
 
 
+@WORKER.register(SLACK_LOST_REQUESTS)
+async def _slack_lost_requests(_job: Job) -> None:
+    reported = await sweep_lost_requests()
+    if reported:
+        logger.info("Reported lost Slack messages", extra={"reported": reported})
+
+
+@WORKER.register(REPORT_RECEIPT_PURGE)
+async def _report_receipt_purge(_job: Job) -> None:
+    logger.info("Report receipts purged", extra={"purged": await purge_report_receipts()})
+
+
+@WORKER.register(TOOL_SETS_PURGE)
+async def _tool_sets_purge(_job: Job) -> None:
+    logger.info("Tool sets purged", extra={"purged": await purge_tool_sets()})
+
+
+WORKER.register(CURATOR_WAKE)(WorkspaceCurator.wake_pending)
+
+
+@WORKER.register(GITHUB_CHANNEL_FORWARD)
+async def _github_channel_forward(job: Job) -> None:
+    # Retried, like a lost lease, without harm: MDA dedupes by X-GitHub-Delivery.
+    await ForwardJob.model_validate(job.payload).run()
+
+
 @WORKER.register(WAKE_THREAD_JOB)
 async def _wake_thread(job: Job) -> None:
+    if job.lapsed_lease is not None:
+        logger.warning(
+            "Reclaimed thread wakeup skipped because its run may have started",
+            extra={"job_id": str(job.id), "lapsed_lease": job.lapsed_lease.isoformat()},
+        )
+        return
     # Never retried: a run the server started before the client saw an error would start twice.
     try:
-        run_id = await run_thread_wakeup(job.payload)
+        run_id = await run_thread_wakeup(job.payload, job_id=str(job.id), due_at=job.due_at)
     except Exception:
         logger.exception("Thread wakeup failed", extra={"job_id": str(job.id)})
         return
     logger.info("Thread woken", extra={"job_id": str(job.id), "run_id": run_id})
+
+
+@WORKER.register(NOTIFICATION_FALLBACK)
+async def notification_fallback(job: Job) -> None:
+    await AppNotification.deliver_fallback(
+        UUID(str(job.payload["recipient_id"])), str(job.payload["key"])
+    )
 
 
 async def start_jobs() -> None:
@@ -195,9 +267,15 @@ async def start_jobs() -> None:
         import_agent_server_threads,
         start_queue,
         ensure_directory_sync,
+        schedule_slack_lost_requests,
         lambda: queue.schedule(
             THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
         ),
+        lambda: queue.schedule(
+            REPORT_RECEIPT_PURGE, cron=REPORT_RECEIPT_SCHEDULE, key=REPORT_RECEIPT_PURGE
+        ),
+        lambda: queue.schedule(TOOL_SETS_PURGE, cron=TOOL_SETS_SCHEDULE, key=TOOL_SETS_PURGE),
+        lambda: queue.schedule(CURATOR_WAKE, cron=CURATOR_SCHEDULE, key=CURATOR_WAKE),
     ]
     for step in steps:
         try:

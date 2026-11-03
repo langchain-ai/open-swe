@@ -41,6 +41,54 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 )
 
 describe("Messages", () => {
+  it("renders queued passage replies even without plain text", () => {
+    render(
+      <Messages
+        messages={[]}
+        isStreaming={false}
+        queuedMessages={[
+          {
+            id: "quoted-follow-up",
+            content: "",
+            createdAt: 2000,
+            replies: [
+              {
+                source: "conversation",
+                before: "",
+                selection: "The selected passage <example>",
+                after: "",
+                comment: "Please explain this & its tradeoffs.",
+              },
+            ],
+          },
+        ]}
+      />,
+      { wrapper }
+    )
+
+    const queued = screen.getByTestId("queued-message")
+    expect(queued.querySelector("blockquote")?.textContent).toBe(
+      "The selected passage <example>"
+    )
+    expect(queued.textContent).toContain("Please explain this & its tradeoffs.")
+    expect(queued.textContent).toContain("Queued")
+    expect(queued.querySelector("example")).toBeNull()
+  })
+
+  it("shows delegated activity while the parent is idle and clears it when settled", () => {
+    const { rerender } = render(
+      <Messages messages={[]} isStreaming={false} isWaitingForDelegatedWork />,
+      { wrapper }
+    )
+
+    expect(screen.getByRole("status").textContent).toContain(
+      "Waiting for delegated work…"
+    )
+
+    rerender(<Messages messages={[]} isStreaming={false} />)
+    expect(screen.queryByRole("status")).toBeNull()
+  })
+
   it("renders attributed task activity with safe expandable details", async () => {
     const source = {
       version: 1,
@@ -178,6 +226,65 @@ describe("Messages", () => {
     expect(container.querySelector("login")).toBeNull()
   })
 
+  it.each(["manage_thread", "message_task_thread"])(
+    "keeps a successful %s message between separate work folds",
+    (name) => {
+      const recipient = "553f74de-534d-5377-815d-c14b58b21ea2"
+      const messages = streamMessagesToUi([
+        new AIMessage({
+          id: "routed-turn",
+          content: "",
+          tool_calls: [
+            { id: "read", name: "read_file", args: { file_path: "AGENTS.md" } },
+            {
+              id: "send",
+              name,
+              args: {
+                action: "send_message",
+                message: "Check token validation",
+              },
+            },
+            {
+              id: "later-read",
+              name: "read_file",
+              args: { file_path: "README.md" },
+            },
+          ],
+        }),
+        new ToolMessage({ tool_call_id: "read", content: "Instructions" }),
+        new ToolMessage({
+          tool_call_id: "send",
+          content: JSON.stringify({
+            success: true,
+            recipient_thread_id: recipient,
+          }),
+        }),
+        new ToolMessage({ tool_call_id: "later-read", content: "Docs" }),
+      ])
+      render(<Messages messages={messages} isStreaming={false} />, { wrapper })
+
+      const link = screen.getByRole("link", { name: "Open destination thread" })
+      expect(link.getAttribute("href")).toBe(`/agents/${recipient}`)
+      const folds = screen.getAllByRole("button", { name: "Worked · 1 action" })
+      expect(folds).toHaveLength(2)
+      expect(
+        folds.every((fold) => fold.getAttribute("aria-expanded") === "false")
+      ).toBe(true)
+      expect(
+        folds[0]!.compareDocumentPosition(link) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(
+        link.compareDocumentPosition(folds[1]!) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(screen.queryByText("AGENTS.md")).toBeNull()
+      fireEvent.click(folds[0]!)
+      expect(screen.getByText("AGENTS.md")).toBeTruthy()
+      expect(screen.queryByText("README.md")).toBeNull()
+    }
+  )
+
   it.each([
     ["in_progress", undefined, "Starting…"],
     ["error", "launch failed", "Launch failed"],
@@ -304,6 +411,64 @@ describe("Messages", () => {
     expect(
       reply.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+  })
+
+  it("expands a tool call to its arguments as formatted JSON", () => {
+    const { container } = render(
+      <Messages
+        isStreaming={false}
+        messages={[
+          {
+            id: "agent-turn",
+            author: "agent",
+            timestamp: "2026-09-03T10:30:00.000Z",
+            chunks: [
+              {
+                kind: "tool-execution",
+                toolCallId: "report",
+                title: "report_platform_issue",
+                toolKind: "other",
+                status: "completed",
+                input: {
+                  problem_description: "Sandbox disconnected",
+                  keywords: ["sandbox"],
+                },
+                output: "Recorded",
+              },
+              {
+                kind: "tool-execution",
+                toolCallId: "ping",
+                title: "ping_service",
+                toolKind: "other",
+                status: "completed",
+              },
+            ],
+          },
+        ]}
+      />,
+      { wrapper }
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Worked/ }))
+    expect(screen.getByText("Ping service").closest("[aria-expanded]")).toBe(
+      null
+    )
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Report platform issue Sandbox disconnected",
+      })
+    )
+    expect(container.textContent).toContain(
+      JSON.stringify(
+        {
+          problem_description: "Sandbox disconnected",
+          keywords: ["sandbox"],
+        },
+        null,
+        2
+      )
+    )
+    expect(container.textContent).toContain("Recorded")
   })
 
   it("folds each stretch of work between the Slack replies around it", () => {
@@ -482,6 +647,40 @@ describe("Messages", () => {
 
     fireEvent.click(fold)
     expect(screen.getByText("subagent")).toBeTruthy()
+  })
+
+  it("shows a tool result's image on its card outside the folded work", () => {
+    const dataUrl = "data:image/png;base64,iVBORw0KGgo="
+    const messages = streamMessagesToUi([
+      new AIMessage({
+        id: "browse",
+        content: "",
+        tool_calls: [
+          { id: "ls", name: "execute", args: { command: "ls" } },
+          { id: "shot", name: "screenshot", args: {} },
+        ],
+      }),
+      new ToolMessage({ tool_call_id: "ls", content: "README.md" }),
+      new ToolMessage({
+        tool_call_id: "shot",
+        // The block MDA's browser `screenshot` tool returns.
+        content: [
+          { type: "text", text: "Captured the page" },
+          { type: "image", url: dataUrl },
+        ],
+      }),
+      new AIMessage({ id: "reply", content: "The page is shown above." }),
+    ])
+    render(<Messages messages={messages} isStreaming={false} />, { wrapper })
+
+    expect(
+      screen.getByRole("button", { name: "Worked · 1 action" })
+    ).toBeTruthy()
+    expect(screen.queryByText("README.md")).toBeNull()
+    expect(screen.getByRole("img", { name: "image" }).getAttribute("src")).toBe(
+      dataUrl
+    )
+    expect(screen.getByText("Captured the page")).toBeTruthy()
   })
 
   it("keeps workflow approval available alongside an empty-state error", () => {

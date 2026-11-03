@@ -12,17 +12,21 @@ from managed_deepagents._channels.linear_connections import (
     LINEAR_TOKEN_SLUG,
     linear_app_connection_slug,
 )
+from managed_deepagents._channels.slack_connections import SLACK_BOT_TOKEN_SLUG
 
 # First-party channels' reserved names, listed here so resolution does not
 # depend on adapter modules being loaded.
 _BUILTIN_RESERVED_CONNECTIONS: dict[str, Callable[[str], str]] = {
     GITHUB_TOKEN_SLUG: github_app_connection_slug,
     LINEAR_TOKEN_SLUG: linear_app_connection_slug,
+    # The Slack app's connection has the reserved name itself.
+    SLACK_BOT_TOKEN_SLUG: lambda _deployment_id: SLACK_BOT_TOKEN_SLUG,
 }
 # What each reserved token is, and what the agent acts as with it.
 _RESERVED_TOKEN_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     GITHUB_TOKEN_SLUG: ("the GitHub App's installation token", "act on GitHub as the App"),
     LINEAR_TOKEN_SLUG: ("the Linear app's token", "act in Linear as the app"),
+    SLACK_BOT_TOKEN_SLUG: ("the Slack app's bot token", "act in Slack as the app"),
 }
 
 

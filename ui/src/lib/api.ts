@@ -15,6 +15,15 @@ import {
   newRequestId,
 } from "./dashboard-fetch"
 
+export interface AppNotification {
+  id: string
+  title: string
+  body: string
+  url: string
+  /** The in-app route for `url`, or null when it points outside the dashboard. */
+  path: string | null
+}
+
 export interface AuditLogFilters {
   start_time: string
   end_time: string
@@ -232,6 +241,8 @@ async function loadPrDetails(
 
 export interface SessionUser {
   login: string
+  auth_provider?: "github" | "langsmith"
+  github_login?: string | null
   /** How the server labels this user's messages; empty until they have a name. */
   display_name?: string
   email: string | null
@@ -313,6 +324,7 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
+  agent_workspace_tasks_supported?: boolean
   experimental_background_callbacks?: boolean | null
   login?: string
   email?: string
@@ -323,11 +335,10 @@ export interface Profile {
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
-  pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  experimental_monitor?: boolean | null
-  experimental_act_as_approval?: boolean
-  act_as_always_allowed?: boolean
+  goal_mode?: boolean
+  experimental_memory?: boolean
+  experimental_classify?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -343,10 +354,10 @@ export interface ProfileUpdate {
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
-  pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  experimental_monitor?: boolean | null
-  experimental_act_as_approval?: boolean
+  goal_mode?: boolean
+  experimental_memory?: boolean
+  experimental_classify?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -410,6 +421,10 @@ export interface WorkspaceSettings {
   default_reviewer_subagent_reasoning_effort?: string | null
   default_thread_title_model?: string | null
   default_thread_title_reasoning_effort?: string | null
+  /** Share (0–100) of newly reviewed pull requests that also get a shadow review. */
+  review_shadow_percent?: number | null
+  review_shadow_model?: string | null
+  review_shadow_reasoning_effort?: string | null
   updated_at?: string | null
 }
 
@@ -454,13 +469,6 @@ export interface MCPConnectionUpdate {
   allowed_tools: string[]
   headers?: Record<string, string> | null
   oauth?: MCPOAuthUpdate | null
-}
-
-export interface LangSmithConnectionStatus {
-  available: boolean
-  connected: boolean
-  email?: string | null
-  updated_at?: string | null
 }
 
 export interface ManagedToolsGateway {
@@ -838,6 +846,14 @@ export interface WorkspaceOption {
   refresh_steps?: Array<WorkspaceRefreshStep>
 }
 
+/** A person in the Slack workspace, offered when mentioning someone in a composer. */
+export interface SlackUserOption {
+  id: string
+  name: string
+  display_name: string
+  real_name: string
+}
+
 /** A channel the Slack bot can see, offered when binding channels to a workspace. */
 export interface SlackChannelOption {
   id: string
@@ -1054,6 +1070,7 @@ export interface OpenPullRequest {
   deletions: number | null
   mergeable: boolean | null
   mergeState: string
+  autoMerge?: boolean
   headSha: string | null
   headRef: string | null
   reviewDecision: "approved" | "changes_requested" | "none" | null
@@ -1073,6 +1090,9 @@ export interface OpenPullRequest {
   // null when the review threads could not be read, which is not the same
   // answer as none being unresolved.
   unresolvedThreads: number | null
+  // Why it is on the To Review list: Open SWE assigned it, may assign it once
+  // its review goes unclaimed, or it was linked in a Slack thread naming you.
+  assignment?: "assigned" | "tentative" | "mentioned" | null
 }
 
 export interface PullRequestReviewer {
@@ -1091,7 +1111,12 @@ export type PullRequestActionName =
   | "update-branch"
 
 export type PullRequestActionRequest =
-  | { action: "merge"; sha: string | null; merge_method: MergeMethod }
+  | {
+      action: "merge"
+      sha: string | null
+      merge_method: MergeMethod
+      auto_merge?: boolean
+    }
   | { action: "close"; reason?: string }
   | { action: "mark-ready" }
   | { action: "update-branch"; sha: string | null }
@@ -1167,6 +1192,7 @@ export interface ReviewPrDetails {
   state: string
   title: string
   body: string
+  description_pull_requests?: Array<number>
   additions: number
   deletions: number
   changed_files: number
@@ -1428,6 +1454,7 @@ export interface HumanReviewRequestResult {
   error: string
   request_id: string
   channel: string
+  channel_name: string
   permalink: string
   reused: boolean
 }
@@ -1459,11 +1486,6 @@ function pullRequestThread(
 }
 
 export const api = {
-  recordPageView: (page_name: string) =>
-    request<void>("/analytics/page", {
-      method: "POST",
-      body: JSON.stringify({ page_name }),
-    }),
   me: () => request<SessionUser>("/me"),
   /** Model list and defaults for one workspace; model defaults are per workspace. */
   options: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>
@@ -1670,6 +1692,13 @@ export const api = {
       `/workspaces/${encodeURIComponent(slug)}/settings`,
       { method: "PUT", body: JSON.stringify(overrides) }
     ),
+  pendingNotifications: () => request<AppNotification[]>("/notifications"),
+  acknowledgeNotification: (id: string) =>
+    request<{ ok: boolean }>(
+      `/notifications/${encodeURIComponent(id)}/delivered`,
+      { method: "POST" }
+    ),
+  listSlackUsers: () => request<{ users: SlackUserOption[] }>("/slack/users"),
   slackUserName: (userId: string) =>
     request<{ name: string }>(
       `/slack/users/${encodeURIComponent(userId)}/name`
@@ -1763,12 +1792,6 @@ export const api = {
       `/my-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
-  getMyLangSmithStatus: () =>
-    request<LangSmithConnectionStatus>("/my-credentials/langsmith"),
-  disconnectLangSmith: () =>
-    request<LangSmithConnectionStatus>("/my-credentials/langsmith", {
-      method: "DELETE",
-    }),
   listManagedToolsGateways: () =>
     request<ManagedToolsGateway[]>("/managed-tools/gateways"),
   getMyManagedTools: () => request<ManagedToolsView>("/my-managed-tools"),
@@ -1894,6 +1917,9 @@ export const api = {
       action: "merge",
       sha: pr.headSha,
       merge_method: method,
+      ...(pr.ci === "pending" && pr.mergeState === "blocked"
+        ? { auto_merge: true }
+        : {}),
     }),
   closePullRequest: (
     pr: OpenPullRequest,
@@ -1911,7 +1937,7 @@ export const api = {
     pr: OpenPullRequest
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
-  humanReviewAvailability: (pr: OpenPullRequest) =>
+  humanReviewAvailability: (pr: Pick<OpenPullRequest, "repo" | "number">) =>
     request<{
       available: boolean
       active: boolean
@@ -2117,7 +2143,7 @@ export function loginUrl(redirectTo?: string): string {
  * itself and resolves once the connection is stored.
  */
 export function connectService(
-  provider: "slack" | "langsmith",
+  provider: "slack" | "github",
   redirectTo?: string
 ) {
   const pending = window.openSweDesktop?.connectService(provider)

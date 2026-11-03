@@ -1,0 +1,411 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { execFileSync } = require("node:child_process");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+
+const {
+  addWorktree,
+  captureCheckpoint,
+  checkpointRef,
+  currentBranch,
+  localBranches,
+  parsePullRequest,
+  readBranchDiff,
+  readDiff,
+  removeWorktree,
+  repoRoot,
+  restoreWorktree,
+  watchProjectHead,
+} = require("../build/git-diff.cjs");
+
+function git(cwd, args) {
+  execFileSync("git", args, { cwd, stdio: "ignore" });
+}
+
+test("HEAD watcher follows atomic checkouts in repos and linked worktrees and cleans up", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-head-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const repo = path.join(dir, "repo");
+  const worktree = path.join(dir, "worktree");
+  fs.mkdirSync(repo);
+  git(repo, ["init", "-q", "-b", "main"]);
+  git(repo, [
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.com",
+    "commit",
+    "--allow-empty",
+    "-qm",
+    "init",
+  ]);
+  git(repo, ["worktree", "add", "-b", "worktree", worktree]);
+  for (const cwd of [repo, worktree]) {
+    let notifications = 0;
+    const close = await watchProjectHead(cwd, () => notifications++);
+    t.after(close);
+    for (const branch of ["alice", "bob"]) {
+      const expected = notifications + 1;
+      git(cwd, ["switch", "-c", `${branch}-${path.basename(cwd)}`]);
+      const deadline = Date.now() + 5_000;
+      while (notifications < expected && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(notifications, expected);
+      assert.equal(await currentBranch(cwd), `${branch}-${path.basename(cwd)}`);
+    }
+    git(cwd, ["switch", "--detach"]);
+    close();
+    const count = notifications;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(notifications, count);
+  }
+});
+
+test("normalizes validated pull request metadata", () => {
+  const pr = parsePullRequest(
+    JSON.stringify({
+      number: 12,
+      title: "Draft change",
+      state: "OPEN",
+      isDraft: true,
+      headRefName: "feature",
+      baseRefName: "main",
+      url: "https://github.com/example/repo/pull/12",
+      author: { login: "octocat" },
+      createdAt: "2026-08-20T00:00:00Z",
+      changedFiles: 3,
+      additions: 10,
+      deletions: 2,
+    }),
+  );
+  assert.deepEqual(pr, {
+    number: 12,
+    title: "Draft change",
+    state: "draft",
+    headRef: "feature",
+    baseRef: "main",
+    url: "https://github.com/example/repo/pull/12",
+    repoFullName: "example/repo",
+    author: "octocat",
+    authorAvatarUrl: null,
+    createdAt: "2026-08-20T00:00:00Z",
+    diffStats: { files: 3, additions: 10, deletions: 2 },
+  });
+  assert.equal(
+    parsePullRequest(
+      JSON.stringify({
+        number: 12,
+        title: "Closed draft",
+        state: "CLOSED",
+        isDraft: true,
+        headRefName: "feature",
+        baseRefName: "main",
+        url: "https://github.com/example/repo/pull/12",
+      }),
+    ).state,
+    "closed",
+  );
+  assert.equal(parsePullRequest('{"url":"javascript:alert(1)"}'), null);
+});
+
+test("diffs the worktree against a session checkpoint", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-git-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  git(dir, ["init", "-q", "-b", "main"]);
+  git(dir, ["config", "user.email", "test@example.com"]);
+  git(dir, ["config", "user.name", "Test"]);
+  fs.writeFileSync(path.join(dir, "kept.txt"), "one\ntwo\n");
+  fs.writeFileSync(path.join(dir, "gone.txt"), "bye\n");
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-qm", "init"]);
+
+  const repo = await repoRoot(dir);
+  assert.equal(await currentBranch(dir), "main");
+  git(dir, ["branch", "feature"]);
+  // The checked-out branch is annotated and sorts ahead of the rest.
+  assert.deepEqual(await localBranches(dir), [
+    { name: "main", current: true, isDefault: false, worktreePath: null },
+    { name: "feature", current: false, isDefault: false, worktreePath: null },
+  ]);
+  const ref = checkpointRef("session-id");
+  await captureCheckpoint(repo, ref);
+
+  fs.writeFileSync(path.join(dir, "kept.txt"), "one\ntwo\nthree\n");
+  fs.writeFileSync(path.join(dir, "added.txt"), "fresh\n");
+  fs.writeFileSync(path.join(dir, "binary.dat"), Buffer.from([0, 1, 2, 0]));
+  fs.writeFileSync(path.join(dir, "huge.txt"), "x".repeat(500_000));
+  fs.rmSync(path.join(dir, "gone.txt"));
+
+  const diff = await readDiff(repo, ref);
+  assert.equal(diff.status, "ready");
+  assert.equal(diff.truncated, false);
+  assert.deepEqual(
+    diff.files.map((file) => [
+      file.path,
+      file.status,
+      file.additions,
+      file.deletions,
+    ]),
+    [
+      ["added.txt", "added", 1, 0],
+      ["binary.dat", "added", 0, 0],
+      ["gone.txt", "removed", 0, 1],
+      ["huge.txt", "added", 1, 0],
+      ["kept.txt", "modified", 1, 0],
+    ],
+  );
+  const kept = diff.files.find((file) => file.path === "kept.txt");
+  assert.equal(kept.originalContent, "one\ntwo\n");
+  assert.equal(kept.modifiedContent, "one\ntwo\nthree\n");
+  assert.equal(kept.unrenderable, false);
+  assert.equal(
+    diff.files.find((file) => file.path === "binary.dat").unrenderable,
+    true,
+  );
+  assert.equal(
+    diff.files.find((file) => file.path === "gone.txt").modifiedContent,
+    null,
+  );
+
+  // Oversized blobs are never read into memory, only reported.
+  const huge = diff.files.find((file) => file.path === "huge.txt");
+  assert.equal(huge.unrenderable, true);
+  assert.equal(huge.modifiedContent, null);
+});
+
+test("branch diff reports only what the branch committed", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-git-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  git(dir, ["init", "-q", "-b", "main"]);
+  git(dir, ["config", "user.email", "test@example.com"]);
+  git(dir, ["config", "user.name", "Test"]);
+  fs.writeFileSync(path.join(dir, "models.ts"), "one\n");
+  fs.writeFileSync(path.join(dir, "search.ts"), "search\n");
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-qm", "init"]);
+
+  const repo = await repoRoot(dir);
+  git(dir, ["switch", "-q", "-c", "feature"]);
+  fs.writeFileSync(path.join(dir, "models.ts"), "one\ntwo\n");
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-qm", "feature work"]);
+
+  // Uncommitted noise in the checkout is not part of the branch's diff.
+  fs.writeFileSync(path.join(dir, "search.ts"), "search\nelsewhere\n");
+  fs.writeFileSync(path.join(dir, "stray.txt"), "stray\n");
+
+  const diff = await readBranchDiff(repo, "main");
+  assert.equal(diff.status, "ready");
+  assert.deepEqual(
+    diff.files.map((file) => [file.path, file.status, file.additions]),
+    [["models.ts", "modified", 1]],
+  );
+
+  assert.equal(
+    (await readBranchDiff(repo, "no-such-branch")).status,
+    "missing",
+  );
+  assert.equal(
+    (await readBranchDiff(repo, "--upload-pack=touch")).status,
+    "missing",
+  );
+
+  // The thread's branch is reported even while another one holds the checkout.
+  git(dir, ["switch", "-q", "main"]);
+  fs.writeFileSync(path.join(dir, "search.ts"), "search\nmain work\n");
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-qm", "main work"]);
+
+  const fromElsewhere = await readBranchDiff(repo, "main", "feature");
+  assert.deepEqual(
+    fromElsewhere.files.map((file) => file.path),
+    ["models.ts"],
+  );
+  assert.equal(
+    (await readBranchDiff(repo, "main", "no-such-branch")).status,
+    "missing",
+  );
+  assert.equal(
+    (await readBranchDiff(repo, "main", "--upload-pack=touch")).status,
+    "missing",
+  );
+});
+
+test("new worktrees fetch the selected branch's upstream without changing the local checkout", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-upstream-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const remote = path.join(dir, "remote");
+  const repo = path.join(dir, "repo");
+  git(dir, ["init", "-q", "-b", "main", remote]);
+  git(remote, ["config", "user.email", "test@example.com"]);
+  git(remote, ["config", "user.name", "Test"]);
+  fs.writeFileSync(path.join(remote, "kept.txt"), "one\n");
+  git(remote, ["add", "-A"]);
+  git(remote, ["commit", "-qm", "init"]);
+  git(dir, ["clone", "-q", remote, repo]);
+  fs.writeFileSync(path.join(remote, "kept.txt"), "upstream\n");
+  git(remote, ["commit", "-qam", "upstream work"]);
+  fs.writeFileSync(path.join(repo, "kept.txt"), "local changes\n");
+
+  const worktree = path.join(dir, "worktree");
+  await addWorktree(repo, worktree, "open-swe/local-fresh", "main", true);
+  assert.equal(
+    fs.readFileSync(path.join(worktree, "kept.txt"), "utf8"),
+    "upstream\n",
+  );
+  assert.equal(
+    fs.readFileSync(path.join(repo, "kept.txt"), "utf8"),
+    "local changes\n",
+  );
+  assert.equal(
+    execFileSync("git", ["show", "main:kept.txt"], {
+      cwd: repo,
+      encoding: "utf8",
+    }),
+    "one\n",
+  );
+
+  git(repo, ["remote", "rename", "origin", "upstream"]);
+  git(repo, ["branch", "-m", "local-main"]);
+  fs.writeFileSync(path.join(remote, "kept.txt"), "newer upstream\n");
+  git(remote, ["commit", "-qam", "more upstream work"]);
+  const trackedWorktree = path.join(dir, "tracked-worktree");
+  await addWorktree(
+    repo,
+    trackedWorktree,
+    "open-swe/local-tracked",
+    "local-main",
+    true,
+  );
+  assert.equal(
+    fs.readFileSync(path.join(trackedWorktree, "kept.txt"), "utf8"),
+    "newer upstream\n",
+  );
+
+  git(repo, ["remote", "set-url", "upstream", path.join(dir, "missing")]);
+  const failedWorktree = path.join(dir, "failed-worktree");
+  await addWorktree(
+    repo,
+    failedWorktree,
+    "open-swe/local-failed",
+    "local-main",
+    true,
+  );
+  assert.equal(
+    fs.readFileSync(path.join(failedWorktree, "kept.txt"), "utf8"),
+    "one\n",
+  );
+
+  git(repo, ["remote", "set-url", "upstream", remote]);
+  git(repo, ["config", "user.email", "test@example.com"]);
+  git(repo, ["config", "user.name", "Test"]);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "unpushed work"]);
+  const localTip = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: repo,
+    encoding: "utf8",
+  });
+  const aheadWorktree = path.join(dir, "ahead-worktree");
+  await addWorktree(
+    repo,
+    aheadWorktree,
+    "open-swe/local-ahead",
+    "local-main",
+    true,
+  );
+  assert.equal(
+    execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: aheadWorktree,
+      encoding: "utf8",
+    }),
+    localTip,
+  );
+
+  git(repo, ["switch", "--detach"]);
+  const detachedWorktree = path.join(dir, "detached-worktree");
+  await addWorktree(
+    repo,
+    detachedWorktree,
+    "open-swe/local-detached",
+    "HEAD",
+    true,
+  );
+  assert.equal(
+    execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: detachedWorktree,
+      encoding: "utf8",
+    }),
+    localTip,
+  );
+
+  git(repo, ["switch", "-c", "unpublished"]);
+  git(repo, ["remote", "add", "origin", remote]);
+  const unpublishedWorktree = path.join(dir, "unpublished-worktree");
+  await addWorktree(
+    repo,
+    unpublishedWorktree,
+    "open-swe/local-unpublished",
+    "unpublished",
+    true,
+  );
+  assert.equal(
+    execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: unpublishedWorktree,
+      encoding: "utf8",
+    }),
+    localTip,
+  );
+
+  git(repo, ["remote", "remove", "upstream"]);
+  git(repo, ["remote", "remove", "origin"]);
+  const noRemoteWorktree = path.join(dir, "no-remote-worktree");
+  await addWorktree(
+    repo,
+    noRemoteWorktree,
+    "open-swe/local-no-remote",
+    "unpublished",
+    true,
+  );
+  assert.equal(
+    execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: noRemoteWorktree,
+      encoding: "utf8",
+    }),
+    localTip,
+  );
+});
+
+test("a thread worktree survives its directory being deleted", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-git-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  git(dir, ["init", "-q", "-b", "main"]);
+  git(dir, ["config", "user.email", "test@example.com"]);
+  git(dir, ["config", "user.name", "Test"]);
+  fs.writeFileSync(path.join(dir, "kept.txt"), "one\n");
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-qm", "init"]);
+
+  const worktree = path.join(dir, "..", path.basename(dir) + "-wt");
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+  await addWorktree(dir, worktree, "open-swe/local-abc12345", "main");
+  assert.equal(await currentBranch(worktree), "open-swe/local-abc12345");
+  // The picker moves a thread by following where a ref is checked out.
+  assert.equal(
+    (await localBranches(dir)).find(
+      (ref) => ref.name === "open-swe/local-abc12345",
+    ).worktreePath,
+    fs.realpathSync(worktree),
+  );
+
+  fs.rmSync(worktree, { recursive: true, force: true });
+  await restoreWorktree(dir, worktree, "open-swe/local-abc12345");
+  assert.equal(fs.existsSync(path.join(worktree, "kept.txt")), true);
+
+  // Uncommitted work is discarded with the worktree, and removal is idempotent.
+  fs.writeFileSync(path.join(worktree, "kept.txt"), "dirty\n");
+  await removeWorktree(dir, worktree);
+  await removeWorktree(dir, worktree);
+  assert.equal(fs.existsSync(worktree), false);
+});

@@ -14,6 +14,7 @@ _TOOL_MODULES = {
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "delete_automation": ".automations",
     "delete_workspace": ".workspaces",
+    "discover_managed_tools": ".discover_managed_tools",
     "dismiss_human_review_request": ".request_human_review",
     "expedite_pr_approval": ".expedite_pr_approval",
     "expose_port": ".expose_port",
@@ -22,6 +23,7 @@ _TOOL_MODULES = {
     "get_human_review_status": ".request_human_review",
     "get_thread": ".threads",
     "http_request": ".http_request",
+    "classify": ".classify",
     "list_automations": ".automations",
     "list_event_types": ".listen_events",
     "listen_events": ".listen_events",
@@ -40,13 +42,14 @@ _TOOL_MODULES = {
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
+    "execute_database_sql": ".repair_data",
     "write_database_rows": ".repair_data",
     "read_only_sql": ".read_only_sql",
     "read_user_settings": ".read_user_settings",
     "record_human_input": ".record_human_input",
     "recreate_sandbox": ".recreate_sandbox",
-    "refresh_workspace_start": ".workspaces",
     "configure_repository": ".workspaces",
+    "configure_workspace": ".workspaces",
     "report_platform_issue": ".report_platform_issue",
     "request_human_review": ".request_human_review",
     "request_pr_review": "openswe.slack.tools.request_pr_review",
@@ -57,12 +60,19 @@ _TOOL_MODULES = {
     "publish_workspace": ".workspaces",
     "save_organization_skill": ".organization_skills",
     "publish_artifact": ".publish_artifact",
-    "save_user_instructions": ".save_user_instructions",
+    "remember": ".remember",
+    "forget": ".remember",
+    "list_memories": ".curator",
+    "read_workspace_prompt": ".curator",
+    "decide_memory": ".curator",
+    "publish_workspace_prompt": ".curator",
     "save_user_settings": ".save_user_settings",
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
+    "report_work_state": ".report_work_state",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_pull_requests": ".search_pull_requests",
+    "snapshotctl": ".workspaces",
     "send_announcement": ".send_announcement",
     "start_thread": ".threads",
     "slack_add_reaction": "openswe.slack.tools.add_reaction",
@@ -97,6 +107,7 @@ __all__ = [
     "create_sandbox_file_download_url",
     "delete_automation",
     "delete_workspace",
+    "discover_managed_tools",
     "dismiss_human_review_request",
     "expedite_pr_approval",
     "expose_port",
@@ -105,6 +116,7 @@ __all__ = [
     "get_human_review_status",
     "get_thread",
     "http_request",
+    "classify",
     "list_automations",
     "list_event_types",
     "listen_events",
@@ -123,13 +135,14 @@ __all__ = [
     "open_pull_request",
     "output_iframe",
     "publish_review",
+    "execute_database_sql",
     "write_database_rows",
     "read_only_sql",
     "read_user_settings",
     "record_human_input",
     "recreate_sandbox",
-    "refresh_workspace_start",
     "configure_repository",
+    "configure_workspace",
     "report_platform_issue",
     "request_human_review",
     "request_pr_review",
@@ -140,12 +153,19 @@ __all__ = [
     "save_organization_skill",
     "delete_organization_skill",
     "publish_artifact",
-    "save_user_instructions",
+    "remember",
+    "forget",
+    "list_memories",
+    "read_workspace_prompt",
+    "decide_memory",
+    "publish_workspace_prompt",
     "save_user_settings",
     "save_user_skill",
     "delete_user_skill",
+    "report_work_state",
     "schedule_thread_wakeup",
     "search_pull_requests",
+    "snapshotctl",
     "send_announcement",
     "start_thread",
     "slack_add_reaction",
@@ -196,9 +216,17 @@ if TYPE_CHECKING:
     )
     from openswe.tools.background_execute import background_execute
     from openswe.tools.background_task import background_task
+    from openswe.tools.classify import classify
     from openswe.tools.code_channel_set_view import code_channel_set_view
     from openswe.tools.connect_managed_tools import connect_managed_tools
     from openswe.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
+    from openswe.tools.curator import (
+        decide_memory,
+        list_memories,
+        publish_workspace_prompt,
+        read_workspace_prompt,
+    )
+    from openswe.tools.discover_managed_tools import discover_managed_tools
     from openswe.tools.expedite_pr_approval import expedite_pr_approval
     from openswe.tools.expose_port import expose_port
     from openswe.tools.fetch_review_diff import fetch_review_diff
@@ -219,9 +247,11 @@ if TYPE_CHECKING:
     from openswe.tools.read_user_settings import read_user_settings
     from openswe.tools.record_human_input import record_human_input
     from openswe.tools.recreate_sandbox import recreate_sandbox
-    from openswe.tools.repair_data import write_database_rows
+    from openswe.tools.remember import forget, remember
+    from openswe.tools.repair_data import execute_database_sql, write_database_rows
     from openswe.tools.reply_to_finding_thread import reply_to_finding_thread
     from openswe.tools.report_platform_issue import report_platform_issue
+    from openswe.tools.report_work_state import report_work_state
     from openswe.tools.request_human_review import (
         assign_human_reviewer,
         auto_assign_human_reviewer,
@@ -231,7 +261,6 @@ if TYPE_CHECKING:
     )
     from openswe.tools.request_rollout_check import request_rollout_check
     from openswe.tools.resolve_finding_thread import resolve_finding_thread
-    from openswe.tools.save_user_instructions import save_user_instructions
     from openswe.tools.save_user_settings import save_user_settings
     from openswe.tools.schedule_thread_wakeup import schedule_thread_wakeup
     from openswe.tools.search_pull_requests import search_pull_requests
@@ -245,10 +274,11 @@ if TYPE_CHECKING:
     from openswe.tools.web_search import web_search
     from openswe.tools.workspaces import (
         configure_repository,
+        configure_workspace,
         delete_workspace,
         list_workspaces,
         publish_workspace,
-        refresh_workspace_start,
+        snapshotctl,
     )
 
 

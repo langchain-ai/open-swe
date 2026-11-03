@@ -16,6 +16,13 @@ async def resolve_github_login(config: dict[str, Any]) -> str | None:
     """Best-effort resolution of the triggering user's GitHub login from config."""
     configurable = (config or {}).get("configurable") or {}
 
+    if configurable.get("auth_provider") == "langsmith":
+        user_id = configurable.get("user_id")
+        if isinstance(user_id, str):
+            canonical_id = User.key_id(f"user:{user_id}")
+            return f"user:{canonical_id}" if canonical_id is not None else None
+        return None
+
     login = configurable.get("github_login")
     if isinstance(login, str) and login.strip():
         return login.strip()

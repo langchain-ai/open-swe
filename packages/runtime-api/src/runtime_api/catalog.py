@@ -1,18 +1,17 @@
 """What the backend works out for a run as it starts it: its operations, subagents,
 models, sandbox and the rules of its middleware.
 
-The run's context carries it (``CATALOG`` answers a run started without it), and
-the MDA run builds its agent from it: a tool for each operation, the subagents it
-may delegate to, the models it calls, the box its file and shell tools run in, and
-what its middleware does around each model call.
+The run's context always carries it, and the MDA run builds its agent from it: a tool
+for each operation and for each tool of the MCP servers it connects to itself, the
+subagents it may delegate to, the models it calls, the sandbox its file and shell tools
+run in, and what its middleware does around each model call.
 """
 
 from typing import Literal
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, JsonValue, field_validator
 
-from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
-from runtime_api.operations import RunRequest
+from runtime_api.connections import ConnectionRef
 
 # The runtime's own tool that finds the run's operations by what they do.
 SEARCH_TOOLS = "search_tools"
@@ -41,7 +40,7 @@ class RunModels(BaseModel):
     vision: ModelSpec | None = None
 
 
-class OperationSpec(BaseModel):
+class ToolSpec(BaseModel):
     """One operation the run may call, as the model sees the tool that calls it."""
 
     name: str
@@ -57,6 +56,32 @@ class OperationSpec(BaseModel):
     code_name: str | None = None
     # The backend's grant of this operation to this run, sent with each call of it.
     grant: str | None = None
+    # How long a call of it may take, when shorter than a tool call's allowance.
+    seconds: float | None = None
+    # The connections its tool reads its credentials from, which the runtime reads as
+    # the run and sends with each call of it (``RunOperation.credentials``).
+    connections: list[ConnectionRef] = []
+
+
+class McpServerSpec(BaseModel):
+    """An MCP server whose credential is an MDA connection, which the run connects to itself.
+
+    The backend serves every other MCP server's tools as operations; it holds no
+    credential for this one.
+    """
+
+    # The Open SWE connection's name.
+    name: str
+    url: str
+    transport: Literal["streamable_http", "sse"]
+    # The tools the run may call, by their name on the server, each with the name the
+    # model calls it by.
+    tools: dict[str, str]
+    connection: ConnectionRef
+    # The header the credential goes in as it is; None sends ``Authorization: Bearer``.
+    header: str | None = None
+    # What each of its tools' descriptions ends with: where the model's tool comes from.
+    provenance: str = ""
 
 
 class SubagentSpec(BaseModel):
@@ -79,11 +104,24 @@ class SandboxCreate(BaseModel):
 
 
 class SandboxSpec(BaseModel):
-    """The thread's box, which MDA creates, owns and runs the file and shell tools in."""
+    """The thread's sandbox, which MDA creates, owns and runs the file and shell tools in."""
 
     create: SandboxCreate
-    # The thread whose box this one works in, a task worker's coordinator; None for its own.
+    sandbox_id: str | None = None
+    # The thread whose sandbox this one works in, a task worker's coordinator; None for its own.
     thread_id: str | None = None
+    # The connection the sandbox's GitHub rules carry, where MDA writes its proxy config
+    # (``runtime_api.sandbox_proxy``); None leaves the proxy config to the backend.
+    github_proxy: ConnectionRef | None = None
+
+    @field_validator("github_proxy")
+    @classmethod
+    def _deployments_own(cls, github: ConnectionRef | None) -> ConnectionRef | None:
+        # Everyone who runs on the thread, and its task workers, works in the sandbox, and
+        # its proxy config outlives the run: one person's token there reaches them all.
+        if github is not None and github.owner != "agent":
+            raise ValueError("A sandbox's GitHub proxy reads the deployment's own connection")
+        return github
 
 
 ShellGuard = Literal["shell_commands"]
@@ -94,7 +132,7 @@ class FilesSpec(BaseModel):
     """Where the run's file and shell tools act, and what is checked around them."""
 
     # Paths under these prefixes are the backend's (skills, offloaded images): the
-    # runtime's file tools reach them through the files API rather than the box.
+    # runtime's file tools reach them through the files API rather than the sandbox.
     backend_paths: list[str] = []
     # Where large results and binary reads are offloaded; the backend serves blobs under it.
     artifacts_root: str = "/"
@@ -125,6 +163,8 @@ class ReplyRules(BaseModel):
 
     tool: str
     no_reply_tool: str
+    # Where each turn starts answering: Slack for a run asked from there, else the web.
+    surface: Literal["slack", "web"] = "web"
     # Other tools whose successful call answers the person.
     replies: list[str] = []
     # The messages that ask again, in the run's input envelope, sent as ``nudge_sender``.
@@ -140,6 +180,19 @@ class CliResultRules(BaseModel):
     tool: str
     nudge: list[str] = []
     max_nudges: int = 2
+
+
+class WorkStateRules(BaseModel):
+    """The person wants the run to keep working until it calls ``tool`` to say it is blocked
+    or complete. An answer that neither calls it nor starts a wait in ``waits`` is sent
+    back, ``nudge`` up to ``max_nudges`` times."""
+
+    tool: str
+    # Tools whose successful call wakes the thread again later, so ending the run is fine.
+    waits: list[str] = []
+    nudge: list[str] = []
+    nudge_sender: str = ""
+    max_nudges: int = 5
 
 
 class RoutingRules(BaseModel):
@@ -166,14 +219,18 @@ class LoopRules(BaseModel):
     routing: RoutingRules | None = None
     reply: ReplyRules | None = None
     cli_result: CliResultRules | None = None
-    # Whether the thread's review walkthrough adds its rules to each call.
-    review_guide: bool = False
+    work_state: WorkStateRules | None = None
     # Whether the thread may belong to a task, as its coordinator or a worker.
     task_coordination: bool = False
     # Whether the run may wait on a call its client runs itself.
     client_tools: bool = False
-    # Whether the box's GitHub proxy token is kept fresh before each model call.
+    # Whether the backend gives the sandbox's GitHub proxy a fresh token before each model call.
     refresh_github_proxy: bool = False
+    # Whether the run investigates an incident: before each model call the backend checks the
+    # incident still wants it and gives the call its instructions (``incident_context``).
+    incident: bool = False
+    # Whether the run was asked only to offload the conversation: it summarizes it and ends.
+    offload_conversation: bool = False
     # What the run's end does besides recording it.
     at_end: list[Literal["settle_review_check", "finish_scout_plan"]] = []
 
@@ -181,7 +238,15 @@ class LoopRules(BaseModel):
 class Catalog(BaseModel):
     """The operations, subagents and models of the graph this run plays."""
 
-    operations: list[OperationSpec] = []
+    # The run's tools: all but its integrations, which stay on the backend, found with
+    # ``search_tools`` and called from code mode (``runtime_api.tool_search``).
+    operations: list[ToolSpec] = []
+    # The same tools by name alone, as the run's context carries them (``names_only``):
+    # the run reads their specs as it starts (``runtime_api.tool_search.TOOL_SPECS``).
+    tool_names: list[str] = []
+    # MCP servers the run connects to itself; ``search_tools`` finds only the backend's
+    # tools, so theirs are offered to each model call.
+    mcp_servers: list[McpServerSpec] = []
     subagents: list[SubagentSpec] = []
     models: RunModels | None = None
     trace_metadata: dict[str, JsonValue] = {}
@@ -193,7 +258,7 @@ class Catalog(BaseModel):
     also_from_code: list[str] = []
     # Tools the model labels each call of, with what the label argument tells it.
     described: dict[str, str] = {}
-    # The thread's box; None runs the file and shell tools through the files API alone.
+    # The thread's sandbox; None runs the file and shell tools through the files API alone.
     sandbox: SandboxSpec | None = None
     files: FilesSpec = FilesSpec()
     # Whether each tool result is recorded as incident evidence, which the result then cites.
@@ -207,16 +272,24 @@ class Catalog(BaseModel):
     skill_sources: list[str] = []
     # How the run reads what is sent to its thread while it works; None reads nothing.
     inbox: InboxSpec | None = None
-    # What the runtime's middleware does around each model call; None leaves it to the
-    # backend's phase calls, for the runs still answered from their plan.
-    loop: LoopRules | None = None
-    # Whether the run offers ``search_tools`` over its operations, and how the model reads it.
+    # What the runtime's middleware does around each model call.
+    loop: LoopRules = LoopRules()
+    # Whether the run offers ``search_tools`` over all its tools and calls those its
+    # catalog leaves out from code, and how the model reads the search.
     search_tools: bool = False
     search_tools_description: str | None = None
-    # The run's token, signed again with what the backend decided as it planned the
-    # run here; only for a run started without its catalog.
-    run_token: str | None = None
 
+    def names_only(self) -> Catalog:
+        """This catalog as a run's context carries it: its tools by name alone.
 
-# Only reads the plan, so it is safe to send again.
-CATALOG = Endpoint("catalog", RunRequest, Catalog, seconds=LOOP_CALL_SECONDS, delivery="idempotent")
+        The Agent Server copies the context into every checkpoint and every read of
+        the run, so the specs stay with the backend, which the run reads them from.
+        """
+        return self.model_copy(
+            update={"operations": [], "tool_names": [tool.name for tool in self.operations]}
+        )
+
+    @property
+    def needs_tool_specs(self) -> bool:
+        """Whether it names tools whose specs the run has yet to read."""
+        return bool(self.tool_names) and not self.operations

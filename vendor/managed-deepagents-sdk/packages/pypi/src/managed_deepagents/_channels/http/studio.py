@@ -62,17 +62,15 @@ def studio_url(run: HttpDelivery | None, env: Mapping[str, str] | None = None) -
     return f"{origin}/o/{workspace}/a/{quote(name, safe='')}/studio/thread?{query}"
 
 
-def pending_decision(finish: HttpFinish) -> Literal["interrupted", "waiting"] | None:
-    """What a finished delivery leaves the thread waiting on a decision as.
+def pending_decision(finish: HttpFinish) -> Literal["waiting"] | None:
+    """``waiting`` when a finished delivery's message found the thread waiting on a decision.
 
-    Its run stopped on interrupts (``interrupted``), or the message found the
-    thread already waiting (``waiting``). ``None`` when nothing waits, or the
-    delivery was a cancel or lost.
+    A run that stopped on interrupts posts its own ``interrupted`` notice as it
+    ends (``paused_notice``), so a ``run`` delivery has none here. ``None`` when
+    nothing waits, or the delivery was a cancel or lost.
     """
     if not finish["interrupts"]:
         return None
-    if finish["type"] == "run":
-        return "interrupted"
     return "waiting" if finish["type"] == "skipped" and finish["reason"] == "waiting" else None
 
 

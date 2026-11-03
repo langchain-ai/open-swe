@@ -4,7 +4,7 @@ from typing import cast
 
 from managed_deepagents._channels.binding import ChannelBinding
 from managed_deepagents._channels.trigger.types import (
-    TriggerChannelEvent,
+    TriggerChannelRunEvent,
     TriggerChannelSlackUserPromptResponseEvent,
 )
 from managed_deepagents.run_context import NormalizedChannelEvent
@@ -28,7 +28,7 @@ def normalized_user_prompt_response(
 
 
 def trigger_channel_binding(
-    *, provider: str, name: str, event: TriggerChannelEvent
+    *, provider: str, name: str, event: TriggerChannelRunEvent
 ) -> ChannelBinding:
     """Build current typed facts and a private route without identity tokens."""
     if event["type"] == "message":

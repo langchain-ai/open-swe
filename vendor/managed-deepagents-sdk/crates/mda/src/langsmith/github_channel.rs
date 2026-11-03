@@ -181,9 +181,10 @@ fn classify_sync_result(result: Result<serde_json::Value>) -> GitHubSyncOutcome 
 mod tests {
     use super::*;
     use crate::langsmith::test_support::serve_once;
+    use crate::langsmith::ApiKey;
 
     fn client(base: &str) -> Client {
-        Client::new_with_platform(base, Some(base), "lsv2_test_key", None).unwrap()
+        Client::new(base, base, ApiKey::new("lsv2_test_key"), None).unwrap()
     }
 
     const APP: &str = "11111111-2222-3333-4444-555555555555";

@@ -7,7 +7,8 @@ from html import escape
 from typing import Any, Final, Literal, NotRequired, TypedDict
 from xml.etree import ElementTree
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage, add_notification_metadata
+from runtime_api.loop import VISIBLE_FROM
 
 INJECTED_DYNAMIC_CONTEXT_HASHES_KEY = "injected_dynamic_context_hashes"
 # Written by the deepagents summarization middleware; the prompt it builds is the
@@ -39,6 +40,7 @@ class PersonIdentity(TypedDict):
     workspace_admin: NotRequired[Literal["yes", "no"]]
     new_prs: NotRequired[Literal["as drafts", "ready for review"]]
     standing_instructions: NotRequired[str]
+    personal_memories: NotRequired[str]
 
 
 class ChannelIdentity(TypedDict):
@@ -91,6 +93,7 @@ class RunMessage(TypedDict):
     role: Literal["user", "system"]
     content: str | list[dict[str, Any]]
     id: NotRequired[str]
+    additional_kwargs: NotRequired[dict[str, object]]
 
 
 class RunInput(TypedDict):
@@ -286,7 +289,7 @@ def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:
     if not isinstance(messages, (list, tuple)):
         return set()
     event = state.get(SUMMARIZATION_EVENT_KEY)
-    cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else None
+    cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else state.get(VISIBLE_FROM)
     if isinstance(cutoff, int) and cutoff >= 0:
         messages = messages[cutoff:]
     return dynamic_context_hashes_from_messages(messages)
@@ -344,6 +347,19 @@ def _entity_message(identity: Identity, kind: EntityKind) -> RunMessage:
         "role": "user",
         "content": fields.element("dynamic-context", {"kind": kind, "id": entity_id}),
     }
+
+
+def run_context(context_id: str, guidance: str) -> str:
+    """Guidance for the run that can change between turns, kept out of the system prompt.
+
+    The latest block with each ``context_id`` is the one in force, so it is added
+    again only when it changes or the model no longer sees it.
+    """
+    body = guidance.strip().replace("]]>", "]]]]><![CDATA[>")
+    return (
+        f'<dynamic-context kind="run" id="{_xml_attr(context_id)}">'
+        f"<![CDATA[\n{body}\n]]></dynamic-context>"
+    )
 
 
 def person_introduction(person: PersonIdentity) -> RunMessage:
@@ -412,7 +428,16 @@ def human_input(content: str | list[dict[str, Any]], context: InputMessageContex
 def system_input(content: str | list[dict[str, Any]], context: InputMessageContext) -> RunMessage:
     if context["kind"] != "system":
         raise ValueError("system_input requires kind='system'")
-    return {"role": "user", "content": _structured_content(content, context)}
+    structured = _structured_content(content, context)
+    message = add_notification_metadata(
+        HumanMessage(content=structured if isinstance(structured, str) else [*structured]),
+        source=context["sender_id"],
+    )
+    return {
+        "role": "user",
+        "content": structured,
+        "additional_kwargs": message.additional_kwargs,
+    }
 
 
 def build_input_messages(

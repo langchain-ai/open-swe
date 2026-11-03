@@ -6,6 +6,8 @@ import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from pydantic import BaseModel
+
 from openswe.incidents.models import Evidence
 from openswe.utils.time import now_iso
 
@@ -40,12 +42,13 @@ def source_url(value: str | None) -> str:
         return ""
 
 
-class EvidenceCollector:
-    def __init__(self) -> None:
-        self.evidence: list[Evidence] = []
-        self.gaps: list[str] = []
-        self.checked: list[str] = []
-        self._remaining_chars = 30_000
+class EvidenceCollector(BaseModel):
+    """What an incident run found, bounded: the evidence its report may cite, and its gaps."""
+
+    evidence: list[Evidence] = []
+    gaps: list[str] = []
+    checked: list[str] = []
+    remaining_chars: int = 30_000
 
     def record_observation(
         self, *, source: str, url: str, summary: str, query: str, content: Any
@@ -62,10 +65,10 @@ class EvidenceCollector:
         )
         if all(item.id != evidence.id for item in self.evidence):
             self.evidence.append(evidence)
-        serialized = redact(observation, min(4000, self._remaining_chars))
+        serialized = redact(observation, min(4000, self.remaining_chars))
         if len(observation) > len(serialized):
             gap = "Evidence content was bounded or redacted; source links retain the full context."
             if gap not in self.gaps:
                 self.gaps.append(gap)
-        self._remaining_chars -= len(serialized)
+        self.remaining_chars -= len(serialized)
         return {"evidence_id": evidence.id, "source_url": url, "observation": serialized}

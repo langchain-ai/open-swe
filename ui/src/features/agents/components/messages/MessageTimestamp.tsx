@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { toast } from "sonner"
 
 import { formatCost } from "@/features/agents/lib/contextUsage"
@@ -70,7 +71,10 @@ export function MessageTimestamp({
     <div
       className={`flex ${align === "right" ? "justify-end" : "justify-start"} ${className}`}
     >
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="xs"
         type="button"
         aria-label={`Copy timestamp: ${title}`}
         title={`${title} · Click to copy`}
@@ -84,11 +88,11 @@ export function MessageTimestamp({
             )
           }
         }}
-        className="cursor-pointer rounded-xs text-xxs leading-4 text-tertiary tabular-nums opacity-0 transition-opacity duration-normal select-none group-hover/turn:opacity-100 hover:text-primary focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+        className="h-auto cursor-pointer rounded-xs border-0 px-0 leading-4 text-tertiary tabular-nums opacity-0 transition-opacity select-none group-hover/turn:opacity-100 hover:text-primary focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
       >
         <time dateTime={date.toISOString()}>{shortTimestamp(date)}</time>
         {costUsd != null && ` · ${formatCost(costUsd)}`}
-      </button>
+      </Button>
     </div>
   )
 }

@@ -71,6 +71,9 @@ _SLACK_USERS: dict[str, dict[str, str]] = {
     },
 }
 
+_SLACK_USERS["W123BOB"] = _SLACK_USERS["U_BOB"]
+_SLACK_USERS["W123ALICE"] = _SLACK_USERS["U_ALICE"]
+
 from langgraph_sdk import get_client  # noqa: E402
 from langgraph_sdk.errors import NotFoundError  # noqa: E402
 
@@ -666,6 +669,10 @@ async def _seed_test_user_mappings() -> None:
         await signed_in.link(
             "slack", user["slack_id"], login=user["login"], email=user["email"], team_id="T_E2E"
         )
+    for login, slack_id in (("bob", "W123BOB"), ("alice", "W123ALICE")):
+        person = await User.for_login("github", login)
+        if person is not None:
+            await person.link("slack", slack_id, login=login, team_id="T_E2E")
     _MAPPINGS_SEEDED = True
 
 
@@ -860,6 +867,47 @@ async def _signed_in(login: str, email: str) -> User:
         return user
     github_id = str(int(hashlib.sha256(login.encode()).hexdigest()[:8], 16))
     return await User.sign_in("github", github_id, login=login, email=email)
+
+
+@app.post("/control/notifications")
+async def control_notification(request: Request) -> JSONResponse:
+    from openswe.notifications.service import AppNotification
+
+    body = await request.json()
+    await _seed_test_user_mappings()
+    user = await User.for_login("github", body.get("recipient", "bob"))
+    if user is None:
+        raise HTTPException(404)
+    await AppNotification.send(
+        user,
+        key=body["key"],
+        title=body["title"],
+        body="Open the conversation.",
+        url=body.get("url", "/agents"),
+        fallback_text=body["title"],
+    )
+    return JSONResponse({"ok": True})
+
+
+@app.post("/control/notifications/fallback")
+async def control_notification_fallback() -> JSONResponse:
+    from uuid import UUID
+
+    from sqlalchemy import text
+
+    from openswe.database import postgres
+    from openswe.notifications.service import JOB_KIND, AppNotification
+
+    async with postgres.transaction() as conn:
+        due = (
+            await conn.execute(
+                text("DELETE FROM job WHERE kind = :kind RETURNING payload"), {"kind": JOB_KIND}
+            )
+        ).scalars()
+        payloads = list(due)
+    for payload in payloads:
+        await AppNotification.deliver_fallback(UUID(payload["recipient_id"]), payload["key"])
+    return JSONResponse({"ok": True})
 
 
 @app.post("/control/login")
@@ -1309,8 +1357,29 @@ def gh_get_branch(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: 
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/rules/branches/{branch:path}")
-def gh_get_branch_rules(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: ARG001
-    return JSONResponse([])
+def gh_get_branch_rules(owner: str, repo: str, branch: str) -> JSONResponse:
+    required_checks: set[str] = {
+        check[context_key]
+        for pull in fakes.pulls()
+        if (pull["owner"], pull["repo"], pull["base"]) == (owner, repo, branch)
+        for checks, context_key in ((pull["check_runs"], "name"), (pull["statuses"], "context"))
+        for check in checks
+        if check.get("required")
+    }
+    return JSONResponse(
+        [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [
+                        {"context": name} for name in sorted(required_checks)
+                    ]
+                },
+            }
+        ]
+        if required_checks
+        else []
+    )
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls")
@@ -1829,6 +1898,23 @@ async def slack_reactions_add(request: Request) -> JSONResponse:
     return _ok()
 
 
+@app.get("/fake-slack/users.list")
+async def slack_users_list() -> JSONResponse:
+    return _ok(
+        {
+            "members": [
+                {
+                    "id": user_id,
+                    "name": info["name"],
+                    "profile": {"display_name": info["real_name"], "real_name": info["real_name"]},
+                }
+                for user_id, info in _SLACK_USERS.items()
+                if "_" not in user_id
+            ]
+        }
+    )
+
+
 @app.get("/fake-slack/users.info")
 async def slack_users_info(user: str = "") -> JSONResponse:
     info = _SLACK_USERS.get(
@@ -1861,7 +1947,6 @@ async def slack_conversations_info(channel: str = "") -> JSONResponse:
         "id": channel,
         "name": name,
         "name_normalized": name,
-        "num_members": 3,
         "is_channel": not channel.startswith("D"),
         "is_private": False,
         "is_im": channel.startswith("D"),

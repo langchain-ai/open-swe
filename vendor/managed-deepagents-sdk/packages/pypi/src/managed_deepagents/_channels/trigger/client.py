@@ -13,6 +13,11 @@ import uuid
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Literal, Protocol, TypedDict
 
+from pydantic import TypeAdapter, ValidationError
+
+from managed_deepagents._channels.trigger.types import TriggerStartedThread
+from managed_deepagents._langsmith_env import resolve_server_api_key
+
 if TYPE_CHECKING:
     from http.client import HTTPMessage
     from typing import IO
@@ -81,7 +86,7 @@ class TriggerClient(TriggerClientLike):
     ) -> None:
         resolved_env = os.environ if env is None else env
         self._api_base = _trigger_server_api_base(_configured_trigger_server_url(resolved_env))
-        api_key = _configured_api_key(resolved_env)
+        api_key = resolve_server_api_key(resolved_env)
         if not api_key:
             raise ValueError("Channel runtime is not configured.")
         self._api_key = api_key
@@ -166,11 +171,21 @@ class TriggerClient(TriggerClientLike):
             raise TriggerClientError(operation) from None
 
 
+_THREAD = TypeAdapter(TriggerStartedThread)
+
+
 def _parse_action_response(response: object) -> TriggerChannelActionResponse:
     response_id = response.get("id") if isinstance(response, dict) else None
     if not isinstance(response_id, str) or not response_id.strip():
         raise TriggerClientError("actions")
-    return {"id": response_id}
+    parsed: TriggerChannelActionResponse = {"id": response_id}
+    try:
+        thread = _THREAD.validate_python(response, strict=True)
+    except ValidationError:
+        return parsed
+    if thread["channel_id"].strip() and thread["source_thread_key"].strip():
+        parsed["thread"] = thread
+    return parsed
 
 
 def create_trigger_client(
@@ -182,7 +197,7 @@ def create_trigger_client(
 ) -> TriggerClient | None:
     """Build a client when both hosted Trigger settings are present."""
     resolved_env = os.environ if env is None else env
-    if _configured_trigger_server_url(resolved_env) is None or not _configured_api_key(
+    if _configured_trigger_server_url(resolved_env) is None or not resolve_server_api_key(
         resolved_env
     ):
         return None
@@ -198,13 +213,6 @@ def _uuid_string(value: str | None) -> str | None:
 
 def _configured_trigger_server_url(env: Mapping[str, str]) -> str | None:
     return (env.get(LANGSMITH_MDA_TRIGGER_SERVER_URL_ENV) or "").strip() or None
-
-
-def _configured_api_key(env: Mapping[str, str]) -> str:
-    # Self-hosted Host injects the deployment key under its legacy name.
-    return (env.get("LANGSMITH_API_KEY") or "").strip() or (
-        env.get("LANGCHAIN_API_KEY") or ""
-    ).strip()
 
 
 def _trigger_server_api_base(raw: str | None) -> str:

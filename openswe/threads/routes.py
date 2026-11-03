@@ -54,6 +54,7 @@ from openswe.threads.handlers import (
     share_thread_with_workspace,
 )
 from openswe.threads.listing import (
+    DashboardThreadExperience,
     DashboardThreadScope,
     list_dashboard_pinned_threads,
     list_dashboard_thread_repos,
@@ -79,6 +80,9 @@ from openswe.threads.runs import (
     create_dashboard_session,
 )
 from openswe.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
+from openswe.threads.status import WorkRunState, WorkRunView
+from openswe.threads.store import THREADS
+from openswe.threads.summary import assert_thread_readable
 from openswe.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
@@ -91,12 +95,17 @@ async def api_list_threads(
     principal: PrincipalDep,
     all: bool = False,
     limit: int = 25,
+    experience: DashboardThreadExperience | None = None,
 ) -> list[dict[str, Any]]:
     if principal.machine:
+        if experience is not None:
+            raise HTTPException(422, "experience filtering is only supported for people")
         return await machine_threads(principal, limit=limit)
     if all and not principal.admin:
         raise HTTPException(403, "admin only")
-    return await list_dashboard_threads(principal.person, email=principal.email, include_all=all)
+    return await list_dashboard_threads(
+        principal.person, email=principal.email, include_all=all, experience=experience
+    )
 
 
 @router.post("/threads", status_code=201)
@@ -169,6 +178,7 @@ async def api_list_thread_repos(
     owned: bool = False,
     all: bool = False,
     exclude_source: Annotated[list[str] | None, Query()] = None,
+    experience: DashboardThreadExperience | None = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> list[dict[str, Any]]:
     if all and not session_is_admin(session):
@@ -181,14 +191,18 @@ async def api_list_thread_repos(
         owned=owned,
         include_all=all,
         exclude_sources=frozenset(exclude_source or ()),
+        experience=experience,
     )
 
 
 @router.get("/threads/pinned")
 async def api_list_pinned_threads(
+    experience: DashboardThreadExperience | None = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> list[dict[str, Any]]:
-    return await list_dashboard_pinned_threads(session["sub"], email=session.get("email"))
+    return await list_dashboard_pinned_threads(
+        session["sub"], email=session.get("email"), experience=experience
+    )
 
 
 @router.post("/threads/{thread_id}/pin", status_code=204)
@@ -228,6 +242,7 @@ async def api_list_threads_page(
     ownerless: bool = False,
     owned: bool = False,
     exclude_source: Annotated[list[str] | None, Query()] = None,
+    experience: DashboardThreadExperience | None = None,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     hierarchy: bool = False,
     session: dict[str, Any] = SESSION_DEP,
@@ -259,6 +274,7 @@ async def api_list_threads_page(
         ownerless=ownerless,
         owned=owned,
         exclude_sources=frozenset(exclude_source or ()),
+        experience=experience,
         sort_by=sort_by,
         hierarchy=hierarchy,
     )
@@ -320,6 +336,33 @@ async def api_get_thread_pull_request_context(
         scope=scope,
         email=session.get("email"),
     )
+
+
+class ThreadViewedBody(BaseModel):
+    run_id: str = Field(min_length=1)
+
+
+@router.post("/threads/{thread_id}/viewed")
+async def api_mark_thread_viewed(
+    thread_id: str,
+    body: ThreadViewedBody,
+    session: dict[str, str] = SESSION_DEP,
+) -> WorkRunView:
+    thread = await THREADS.get(thread_id)
+    if thread is None:
+        raise HTTPException(404, "thread not found")
+    assert_thread_readable(thread.metadata, session["sub"], session.get("email"))
+    if thread.metadata.get("experience") != "agent_workspace":
+        raise HTTPException(409, "explicit read receipts are only supported for Work threads")
+    state = WorkRunState(thread)
+    try:
+        await state.refresh(viewed_run_id=body.run_id)
+    except Exception as exc:
+        logger.warning(
+            "Could not acknowledge Work run", extra={"thread_id": thread_id}, exc_info=True
+        )
+        raise HTTPException(503, "could not refresh the latest run") from exc
+    return await state.receipt()
 
 
 @router.get("/threads/{thread_id}")

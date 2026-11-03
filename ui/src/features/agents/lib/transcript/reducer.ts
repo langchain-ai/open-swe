@@ -30,6 +30,7 @@ import {
   type ContextUsage,
   contextUsageFromUsageMetadata,
 } from "@/features/agents/lib/contextUsage"
+import { CLAUDE_CODE_SOURCE } from "@/features/agents/lib/sidebarFilter"
 import { attachmentUrl, fetchToolOutput } from "./api"
 import type { StructuredEntity } from "@/features/agents/lib/structuredInputMessages"
 import type {
@@ -65,6 +66,8 @@ export interface TranscriptMessageState {
   attachments: ReadonlyArray<TranscriptAttachment>
   /** The GitHub login of a human message's sender, when the server knows it. */
   senderLogin: string | null
+  /** Where a human message's sender wrote it, such as `claude_code`. */
+  senderKind?: string
   /** What a system message's sender is called when its text introduces no name. */
   senderName?: string
   /** Invocation an AI message ran under, when the provider reported usage. */
@@ -84,6 +87,7 @@ export interface TranscriptToolCallState {
   outputComplete: boolean
   /** Whether the server holds output worth fetching on expand. */
   hasOutput: boolean
+  attachments: ReadonlyArray<TranscriptAttachment>
   namespace: Namespace
   startedAt: string
 }
@@ -185,6 +189,7 @@ function indexMessages(
       namespace: row.namespace,
       attachments: row.attachments ?? [],
       senderLogin: row.sender?.login ?? null,
+      senderKind: row.sender?.kind,
       senderName: row.sender?.display_name ?? undefined,
       invocationId: row.usage?.invocation_id ?? undefined,
       createdAt: row.created_at,
@@ -231,6 +236,7 @@ function indexToolCalls(
       // whether it is the whole output, so the endpoint stays available.
       outputComplete: false,
       hasOutput: row.has_output,
+      attachments: row.attachments ?? [],
       namespace: row.namespace,
       startedAt: row.started_at,
     }
@@ -448,6 +454,22 @@ function settledStatus(
 }
 
 /**
+ * A request no run ever took (its start died with the server) that a later
+ * turn has already overtaken. It never runs, so it is not waiting for anything.
+ */
+function isStrandedTurn(
+  state: TranscriptState,
+  turn: TranscriptTurnState
+): boolean {
+  if (turn.state !== "requested" || turn.runId !== null) return false
+  const requestedAt = Date.parse(turn.requestedAt)
+  return Object.values(state.turns).some(
+    (other) =>
+      other.startedAt !== null && Date.parse(other.requestedAt) > requestedAt
+  )
+}
+
+/**
  * Waiting behind the live run. A requested turn is queued once its run exists,
  * and already while another turn is running: the run id only follows the
  * request by a moment, and the row should not change shape in between.
@@ -458,6 +480,7 @@ function isQueuedTurn(
 ): boolean {
   if (turn.state !== "requested") return false
   if (turn.runId !== null) return true
+  if (isStrandedTurn(state, turn)) return false
   return Object.values(state.turns).some(
     (other) => other.turnId !== turn.turnId && other.state === "running"
   )
@@ -627,6 +650,7 @@ export function applyEvent(
         namespace: [],
         attachments: payload.attachments,
         senderLogin: payload.sender?.login ?? null,
+        senderKind: payload.sender?.kind,
         senderName: payload.sender?.display_name ?? undefined,
         createdAt: at,
       })
@@ -690,6 +714,7 @@ export function applyEvent(
         namespace: payload.namespace,
         attachments: existing?.attachments ?? [],
         senderLogin: existing?.senderLogin ?? null,
+        senderKind: existing?.senderKind,
         createdAt: existing?.createdAt ?? at,
       })
       break
@@ -708,6 +733,7 @@ export function applyEvent(
         namespace: payload.namespace,
         attachments: payload.attachments ?? existing?.attachments ?? [],
         senderLogin: payload.sender?.login ?? existing?.senderLogin ?? null,
+        senderKind: payload.sender?.kind ?? existing?.senderKind,
         senderName: payload.sender?.display_name ?? existing?.senderName,
         invocationId: payload.usage?.invocation_id ?? undefined,
         createdAt: payload.created_at || existing?.createdAt || at,
@@ -737,6 +763,7 @@ export function applyEvent(
         output: null,
         outputComplete: false,
         hasOutput: false,
+        attachments: [],
         namespace: payload.namespace,
         startedAt: at,
       })
@@ -757,6 +784,7 @@ export function applyEvent(
           payload.output_truncated
         ),
         hasOutput: payload.has_output,
+        attachments: payload.attachments ?? [],
       })
       break
     }
@@ -904,6 +932,8 @@ function toolChunk(
   if (output) chunk.output = output
   if (call.hasOutput && !call.outputComplete)
     chunk.loadOutput = outputLoader(threadId, call)
+  const images = imageChunks(threadId, call.attachments)
+  if (images.length) chunk.images = images
   const diffData = maybeDiffFromArgs(call.input)
   if (diffData) chunk.diffData = diffData
   // A `task` call owns the namespace of the subagent it spawned, which is what
@@ -936,10 +966,10 @@ function codeCalls(
 }
 
 /**
- * The attachments a message carries, as chunks a renderer can show: an
- * attachment is fetched from our own API with the session, a bare `url` is a
- * remote reference the browser loads itself, and one with neither has no bytes
- * to show.
+ * The attachments a message or tool result carries, as chunks a renderer can
+ * show: an attachment is fetched from our own API with the session, a bare
+ * `url` is a remote reference the browser loads itself, and one with neither
+ * has no bytes to show.
  */
 function imageChunks(
   threadId: string,
@@ -964,6 +994,17 @@ function imageChunks(
     })
   }
   return chunks
+}
+
+// Context Claude Code wraps around a prompt or sends as one. The transcript
+// keeps it; nobody typed it, so it is not shown.
+const CLAUDE_CODE_CONTEXT =
+  /<(system-reminder|local-command-caveat|local-command-stdout|local-command-stderr|task-notification|ci-monitor-event|side-sessions-event|agent-message|cross-session-message|artifact-view-context|ide_opened_file|ide_selection)\b[^>]*>[\s\S]*?<\/\1>\s*/g
+
+function shownText(row: TranscriptMessageState): string {
+  return row.senderKind === CLAUDE_CODE_SOURCE
+    ? row.text.replace(CLAUDE_CODE_CONTEXT, "")
+    : row.text
 }
 
 interface HumanCacheEntry {
@@ -993,7 +1034,7 @@ function buildHumanMessage(
   row: TranscriptMessageState,
   entities: ReadonlyMap<string, StructuredEntity>
 ): Message | null {
-  const parsed = parseStructuredInput(row.text, entities)
+  const parsed = parseStructuredInput(shownText(row), entities)
   if (parsed.type === "entity") return null
   if (parsed.type === "message" && isSilentSender(parsed.sender)) return null
   const entity =
@@ -1144,7 +1185,15 @@ function turnMessages(
         const message = humanMessage(state.threadId, row, state.entities)
         if (!message) continue
         turnKey = row.messageId
-        out.push(message)
+        out.push(
+          turn.state === "failed" && turn.startedAt === null
+            ? {
+                ...message,
+                deliveryStatus: "failed",
+                deliveryError: turn.error ?? undefined,
+              }
+            : message
+        )
         continue
       }
       const chunks: Array<Chunk> = []

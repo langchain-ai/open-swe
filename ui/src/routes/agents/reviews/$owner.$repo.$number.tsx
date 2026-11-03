@@ -4,11 +4,13 @@ import { useMemo } from "react"
 
 import { ReviewPage } from "@/features/reviews/page/ReviewPage"
 import { warmReviewPage } from "@/features/reviews/page/queries"
+import { validateReviewQueueSearch } from "@/features/reviews/search"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
+  validateSearch: validateReviewQueueSearch,
   component: ReviewDetailPage,
   // Runs on hover intent too: the shell's data and the highlighter warm up
   // before the click lands. Never awaited, so navigation is never held.

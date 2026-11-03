@@ -20,7 +20,8 @@ use serde::Serialize;
 
 // TODO: move LangSmith URL and key resolution out of `deploy` so telemetry
 // does not depend on a command module.
-use crate::deploy::{client_without_prompt, env_file, helpers};
+use crate::deploy::langsmith_context::LangSmithEndpoints;
+use crate::deploy::{client_without_prompt, env_file};
 use crate::langsmith::{AuthIdentity, Client};
 
 use super::command::CommandInvocation;
@@ -69,19 +70,21 @@ impl ReportableFacts {
 }
 
 /// The LangSmith platform URL the command targets, and a client for the key it
-/// would use there, from `--path`, `--host-url` and `--workspace-id` at any
-/// subcommand level and the project's env file.
+/// would use there, from `--path`, `--host-url`, `--workspace-id` and
+/// `--env-file` at any subcommand level and the project's env file.
 fn langsmith_target(matches: &ArgMatches) -> (String, Option<Client>) {
     fn arg<T: Clone + Send + Sync + 'static>(args: &ArgMatches, name: &str) -> Option<T> {
         args.try_get_one::<T>(name).ok().flatten().cloned()
     }
     let mut project_dir = PathBuf::from(".");
     let (mut host_url, mut workspace_id) = (None::<String>, None::<String>);
+    let mut env_file = None::<PathBuf>;
     let mut args = matches;
     loop {
         project_dir = arg(args, "path").unwrap_or(project_dir);
         host_url = arg(args, "host_url").or(host_url);
         workspace_id = arg(args, "workspace_id").or(workspace_id);
+        env_file = arg(args, "env_file").or(env_file);
         let Some((_, child)) = args.subcommand() else {
             break;
         };
@@ -89,17 +92,14 @@ fn langsmith_target(matches: &ArgMatches) -> (String, Option<Client>) {
     }
     // `dev` and `chat` fall back to `.env.local` when there is no `.env`.
     let env_path = if matches!(matches.subcommand_name(), Some("dev" | "chat")) {
-        env_file::project_env_persist_path(&project_dir)
+        env_file::project_env_persist_path(&project_dir, env_file.as_deref())
     } else {
-        project_dir.join(".env")
+        env_file::project_env_path(&project_dir, env_file.as_deref())
     };
     let env = env_file::parse_env_file(&env_path);
-    let (default_host, _) = helpers::resolve_langsmith_api_bases(&env);
-    let host = host_url
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or(default_host);
-    let platform = helpers::resolve_platform_api_url(&host, &env);
-    let client = client_without_prompt(&env, &host, &platform, workspace_id.as_deref());
+    let endpoints = LangSmithEndpoints::resolve(&env, host_url.as_deref());
+    let platform = endpoints.platform_api_url.clone();
+    let client = client_without_prompt(&env, endpoints, workspace_id.as_deref());
     (platform, client)
 }
 
@@ -237,13 +237,56 @@ mod tests {
         );
     }
 
+    /// The platform URL telemetry resolves for `argv`, against a CLI shaped
+    /// like `mda`'s: `path` and `env_file` on the subcommand.
+    fn target_platform(argv: &[&str]) -> String {
+        use clap::{value_parser, Arg};
+        let subcommand = |name: &'static str| {
+            Command::new(name)
+                .arg(Arg::new("path").value_parser(value_parser!(PathBuf)))
+                .arg(
+                    Arg::new("env_file")
+                        .long("env-file")
+                        .value_parser(value_parser!(PathBuf)),
+                )
+        };
+        let cli = Command::new("mda")
+            .subcommand(subcommand("deploy"))
+            .subcommand(subcommand("dev"));
+        langsmith_target(&cli.try_get_matches_from(argv).unwrap()).0
+    }
+
+    #[test]
+    fn env_file_flag_selects_the_langsmith_host() {
+        let root = tempfile::tempdir().unwrap();
+        let root_path = root.path().to_str().unwrap();
+        std::fs::write(
+            root.path().join(".env"),
+            "LANGSMITH_ENDPOINT=https://prod.example.com\n",
+        )
+        .unwrap();
+        let staging = root.path().join(".env.staging");
+        std::fs::write(&staging, "LANGSMITH_ENDPOINT=https://staging.example.com\n").unwrap();
+        let staging = staging.to_str().unwrap();
+
+        let platform = target_platform(&["mda", "deploy", root_path]);
+        assert!(platform.contains("prod.example.com"), "{platform}");
+        for command in ["deploy", "dev"] {
+            let platform = target_platform(&["mda", command, root_path, "--env-file", staging]);
+            assert!(
+                platform.contains("staging.example.com"),
+                "{command}: {platform}"
+            );
+        }
+    }
+
     // No test in this crate calls `init_facts`, so the store stays `None`.
     #[test]
     fn opted_out_runs_make_no_identity_request() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
-        let client = Client::new_with_platform(&base, Some(&base), "test-key", None).unwrap();
+        let client = Client::for_test(&base);
 
         refresh_identity(&client);
 

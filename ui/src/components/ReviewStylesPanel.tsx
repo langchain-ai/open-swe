@@ -10,7 +10,7 @@ import { useEffect, useState } from "react"
 
 import { AddRepositoryField } from "@/components/AddRepositoryField"
 import type { ReviewApprovalMode, ReviewStyle } from "@/lib/api"
-import { api, isGithubReauthError, loginUrl } from "@/lib/api"
+import { api, connectService, isGithubReauthError } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useRepos } from "@/lib/profile"
@@ -159,8 +159,15 @@ export function ReviewStylesPanel() {
         <Banner intent="error">
           <span className="text-xs text-error-secondary">
             Your GitHub connection expired.{" "}
-            <MacawLink href={loginUrl()} variant="sm">
-              Sign in with GitHub again
+            <MacawLink
+              href="#"
+              variant="sm"
+              onClick={(event) => {
+                event.preventDefault()
+                void connectService("github", window.location.href)
+              }}
+            >
+              Link GitHub again
             </MacawLink>{" "}
             to list installed repos.
           </span>
@@ -184,19 +191,24 @@ export function ReviewStylesPanel() {
             <ul className="flex flex-wrap gap-space-2">
               {(styles.data ?? []).map((s) => (
                 <li key={s.full_name}>
-                  <button
+                  <Button
+                    color="secondary"
+                    variant="plain"
+                    size="sm"
+                    aria-label={s.full_name}
                     type="button"
                     aria-pressed={selected === s.full_name}
                     className={cn(
-                      "inline-flex max-w-full items-center gap-space-2 rounded-md border px-space-2 py-space-1 text-left text-xs transition-colors hover:bg-surface-level-1-hover",
+                      "justify-start",
+                      "max-w-full gap-space-2 border px-space-2 py-space-1 text-left text-inherit hover:bg-surface-level-1-hover",
                       selected === s.full_name
-                        ? "border-brand bg-selected font-medium"
+                        ? "border-brand bg-selected font-medium hover:bg-selected dark:hover:bg-selected"
                         : "border-default"
                     )}
                     onClick={() => setSelected(s.full_name)}
                   >
                     <span className="truncate">{s.full_name}</span>
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>

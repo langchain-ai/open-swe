@@ -2,21 +2,22 @@
 #
 # The backend this dashboard fronts is read from DASHBOARD_API_URL at runtime, so
 # one image serves any deployment. Set it in the deployment's environment.
-FROM node:24-alpine AS build
+FROM node:26-alpine AS build
 
-RUN corepack enable
+RUN npm install --global pnpm@11.22.0
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY ui/package.json ui/package.json
-COPY ui/vendor ui/vendor
+COPY ui/patches ui/patches
+COPY desktop/patches desktop/patches
 RUN pnpm install --frozen-lockfile --filter open-swe-dashboard...
 
 COPY ui ui
 
 RUN pnpm --filter open-swe-dashboard run build
 
-FROM node:24-alpine
+FROM node:26-alpine
 
 WORKDIR /app
 COPY --from=build /app/ui/.output ./.output

@@ -18,16 +18,15 @@ use crate::cli_output::{continue_sequence, show_sequence, SequenceItem};
 use crate::command::CommandCompletion;
 use crate::compile;
 use crate::deploy::helpers::{
-    deployment_managed_deep_agent_marker, find_deployment_by_name, resolve_langsmith_api_bases,
-    resolve_platform_api_url, REMOVED_WORKSPACE_ID_ENVS, WORKSPACE_ID_ENV,
+    deployment_managed_deep_agent_marker, find_deployment_by_name, WORKSPACE_ID_ENV,
 };
+use crate::deploy::langsmith_context::{LangSmithContext, LangSmithEndpoints, WORKSPACE_FLAG_HINT};
 use crate::deploy::{env_file, resolve_api_key};
 use crate::error::{categorized, category_of, is_cancellation, ErrorCategory};
 use crate::install::Installation;
 use crate::interrupt::Interrupt;
 use crate::langsmith::{
-    self, resolve_preferred_env, ApiError, ConnectionOwnerPolicy, ConnectionSummary,
-    CreateOAuthConnection,
+    self, ApiError, ConnectionOwnerPolicy, ConnectionSummary, CreateOAuthConnection,
 };
 use crate::project;
 use crate::secret_input::{
@@ -40,6 +39,14 @@ pub struct ConnectionTarget {
     pub path: PathBuf,
     pub workspace_id: Option<String>,
     pub host_url: Option<String>,
+    /// Env file to read instead of the project `.env` (`--env-file`).
+    pub env_file: Option<PathBuf>,
+}
+
+impl ConnectionTarget {
+    fn env_path(&self) -> PathBuf {
+        env_file::project_env_path(&self.path, self.env_file.as_deref())
+    }
 }
 
 pub struct CreateOptions {
@@ -615,7 +622,7 @@ pub fn create(opts: CreateOptions) -> Result<CommandCompletion> {
                  per-caller values are collected at runtime.",
             ));
         }
-        let env_vars = env_file::parse_env_file(&opts.target.path.join(".env"));
+        let env_vars = env_file::parse_env_file(&opts.target.env_path());
         let session = Session::open(&opts.target, &env_vars)?;
         session
             .client
@@ -624,7 +631,7 @@ pub fn create(opts: CreateOptions) -> Result<CommandCompletion> {
         show_sequence(&user_slot_created_items(&opts.slug))?;
         return Ok(CommandCompletion::Succeeded);
     }
-    let env_vars = env_file::parse_env_file(&opts.target.path.join(".env"));
+    let env_vars = env_file::parse_env_file(&opts.target.env_path());
     let resolved = if let Some(value) = stdin_secret {
         ResolvedValue {
             value,
@@ -748,8 +755,9 @@ fn create_mcp_oauth(
     _owner: ConnectionOwnerPolicy,
     url: &str,
 ) -> Result<CommandCompletion> {
-    let env_vars = env_file::parse_env_file(&opts.target.path.join(".env"));
-    reject_mcp_address_langsmith_cannot_reach(url, &resolved_host_url(&opts.target, &env_vars))?;
+    let env_vars = env_file::parse_env_file(&opts.target.env_path());
+    let endpoints = LangSmithEndpoints::resolve(&env_vars, opts.target.host_url.as_deref());
+    reject_mcp_address_langsmith_cannot_reach(url, &endpoints.host_url)?;
     let session = Session::open(&opts.target, &env_vars)?;
     let deployment_id = opts
         .authorize
@@ -853,7 +861,7 @@ fn create_oauth(opts: CreateOptions, owner: ConnectionOwnerPolicy) -> Result<Com
     }
     let token_params = parse_token_params(&oauth.token_params)?;
     let token_request_headers = parse_token_request_headers(&oauth.token_request_headers)?;
-    let env_vars = env_file::parse_env_file(&opts.target.path.join(".env"));
+    let env_vars = env_file::parse_env_file(&opts.target.env_path());
     let session = Session::open(&opts.target, &env_vars)?;
     let deployment_id = (opts.authorize || grant_type == OAuthGrantType::ClientCredentials)
         .then(|| {
@@ -1026,7 +1034,7 @@ fn inferred_user_owned_mcp_connection_for_target(
     slug: &str,
 ) -> Result<Option<compile::McpConnectionEntry>> {
     let project = match project::load(&target.path) {
-        Ok(project) => project,
+        Ok(project) => project.without_env_file(target.env_file.as_deref()),
         Err(err) if category_of(&err) == ErrorCategory::Project => return Ok(None),
         Err(err) => return Err(err),
     };
@@ -1381,7 +1389,7 @@ fn manifest_owner_policy_for_slug(
     let explicit_target = opts.target.workspace_id.is_some() || opts.deployment_id.is_some();
     let requirements = (|| {
         let project = match project::load(&opts.target.path) {
-            Ok(project) => project,
+            Ok(project) => project.without_env_file(opts.target.env_file.as_deref()),
             Err(err) if category_of(&err) == ErrorCategory::Project => return Ok(None),
             Err(err) => return Err(err),
         };
@@ -1456,25 +1464,31 @@ pub fn delete(opts: DeleteOptions) -> Result<CommandCompletion> {
 
 impl Session {
     fn open_at(target: &ConnectionTarget) -> Result<Self> {
-        let env_vars = env_file::parse_env_file(&target.path.join(".env"));
+        let env_vars = env_file::parse_env_file(&target.env_path());
         Self::open(target, &env_vars)
     }
 
     fn open(target: &ConnectionTarget, env_vars: &BTreeMap<String, String>) -> Result<Self> {
-        let env_path = target.path.join(".env");
-        let host_url = resolved_host_url(target, env_vars);
-        let host_url = host_url.as_str();
-
-        let platform_api_url = resolve_platform_api_url(host_url, env_vars);
-        let credential = resolve_api_key(env_vars, &env_path, &platform_api_url)?;
-        let workspace_id = require_workspace_id(target, env_vars)?;
-        let client = langsmith::Client::with_credential_and_platform(
-            host_url,
-            Some(platform_api_url.as_str()),
-            credential,
-            Some(workspace_id),
+        let env_path = target.env_path();
+        let ctx = LangSmithContext::resolve_verified(
+            env_vars,
+            target.host_url.as_deref(),
+            target.workspace_id.as_deref(),
+            WORKSPACE_FLAG_HINT,
+            |platform_api_url| resolve_api_key(env_vars, &env_path, platform_api_url),
         )?;
-        Ok(Self { client })
+        if ctx.workspace_id.is_none() {
+            return Err(categorized(
+                ErrorCategory::UserInput,
+                format!(
+                    "A workspace ID is required for connection commands. Set {WORKSPACE_ID_ENV} \
+                     in the environment or project .env, or pass --workspace-id."
+                ),
+            ));
+        }
+        Ok(Self {
+            client: ctx.client()?,
+        })
     }
 
     fn find(&self, slug: &str) -> Result<ConnectionSummary> {
@@ -1493,29 +1507,6 @@ impl Session {
             )),
         }
     }
-}
-
-fn require_workspace_id(
-    target: &ConnectionTarget,
-    env_vars: &BTreeMap<String, String>,
-) -> Result<String> {
-    resolve_preferred_env(
-        WORKSPACE_ID_ENV,
-        REMOVED_WORKSPACE_ID_ENVS,
-        target.workspace_id.as_deref(),
-        env_vars,
-        |key| std::env::var(key).ok(),
-        " or pass --workspace-id instead",
-    )?
-    .ok_or_else(|| {
-        categorized(
-            ErrorCategory::UserInput,
-            format!(
-                "A workspace ID is required for connection commands. Set {WORKSPACE_ID_ENV} \
-                 in the environment or project .env, or pass --workspace-id."
-            ),
-        )
-    })
 }
 
 fn confirm_delete(found: &ConnectionSummary, yes: bool) -> Result<bool> {
@@ -1655,18 +1646,6 @@ fn normalize_mcp_server_url(raw: &str) -> Result<String> {
         ));
     }
     Ok(parsed.to_string())
-}
-
-/// The LangSmith host this invocation talks to, before any per-API mapping.
-fn resolved_host_url(target: &ConnectionTarget, env_vars: &BTreeMap<String, String>) -> String {
-    let (default_host, _) = resolve_langsmith_api_bases(env_vars);
-    target
-        .host_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .unwrap_or(default_host)
 }
 
 /// Refuse an MCP address that LangSmith has no route to.
@@ -1924,6 +1903,7 @@ mod tests {
                         path: dir.path().to_path_buf(),
                         workspace_id: (!deployment_target).then(|| "workspace".into()),
                         host_url: None,
+                        env_file: None,
                     },
                     slug: "service".into(),
                     value: ValueSource::Unspecified,
@@ -1970,6 +1950,7 @@ mod tests {
                 path: dir.path().to_path_buf(),
                 workspace_id: Some("workspace".into()),
                 host_url: None,
+                env_file: None,
             },
             slug: "doordash".into(),
             value: ValueSource::Unspecified,
@@ -2746,6 +2727,7 @@ mod tests {
                 path: PathBuf::from("."),
                 workspace_id: None,
                 host_url: None,
+                env_file: None,
             },
             slug: "foobar".into(),
             value: ValueSource::Unspecified,
@@ -3096,6 +3078,7 @@ mod tests {
                 path: PathBuf::from("."),
                 workspace_id: None,
                 host_url: None,
+                env_file: None,
             },
             slug: "openai".into(),
             value: ValueSource::Unspecified,
@@ -3118,6 +3101,7 @@ mod tests {
                     path: PathBuf::from("."),
                     workspace_id: None,
                     host_url: None,
+                    env_file: None,
                 },
                 slug: "gh".into(),
                 value: ValueSource::FromEnv("GH_SECRET".into()),

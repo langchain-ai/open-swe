@@ -138,13 +138,11 @@ pub(super) fn scaffold(
     if language == Language::TypeScript {
         files.push(("tsconfig.json", TSCONFIG_JSON.to_string()));
     }
-    if blueprint.identity {
-        let (file_name, template) = match language {
-            Language::TypeScript => ("identity.ts", IDENTITY_TS),
-            Language::Python => ("identity.py", IDENTITY_PY),
-        };
-        files.push((file_name, template.to_string()));
-    }
+    // Deployment requires an identity declaration, so every starter has one.
+    files.push(match language {
+        Language::TypeScript => ("identity.ts", IDENTITY_TS.to_string()),
+        Language::Python => ("identity.py", IDENTITY_PY.to_string()),
+    });
     // Memory is opt-in end to end: no `--memory` flag means no declaration, and
     // a project without one keeps nothing between runs.
     if let Some(choice) = blueprint.memory {
@@ -179,7 +177,6 @@ pub(super) fn scaffold(
     }
 
     Ok(InitSummary {
-        language,
         root: dir.to_path_buf(),
         files: created,
     })
