@@ -32,7 +32,7 @@ _PR_LINK = re.compile(
 _CODE = re.compile(r"```[\s\S]*?```|`[^`\n]*`")
 _GITHUB_MARK = "↗"
 _GITHUB_LABEL = "GitHub"
-_GITHUB_LABELS = (_GITHUB_MARK, _GITHUB_LABEL, ":arrow_upper_right:")
+_GITHUB_LABELS = (_GITHUB_MARK, _GITHUB_LABEL, f"({_GITHUB_LABEL})", ":arrow_upper_right:")
 
 
 @dataclass(frozen=True)
@@ -54,7 +54,7 @@ class _PrLinks:
     def link(self, match: re.Match[str]) -> str:
         github = match["md"] or match["slack"] or match["bare"]
         label = match["md_label"] or match["slack_label"]
-        if label in (_GITHUB_MARK, ":arrow_upper_right:") or (
+        if label in (_GITHUB_MARK, f"({_GITHUB_LABEL})", ":arrow_upper_right:") or (
             label == _GITHUB_LABEL and match.string[: match.start()].endswith("> (")
         ):
             return match.group()
@@ -65,11 +65,11 @@ class _PrLinks:
         if not self.github_mark:
             return match.group().replace(github, review)
         if match["md"]:
-            return f"[{match['md_label']}]({review})[{_GITHUB_MARK}]({github})"
+            return f"[{match['md_label']}]({review}) [({_GITHUB_LABEL})]({github})"
         label = match["slack_label"] or f"{repo}#{number}"
         if match["slack"] or self.mrkdwn:
-            return f"<{review}|{label}> (<{github}|{_GITHUB_LABEL}>)"
-        return f"[{label}]({review})[{_GITHUB_MARK}]({github})"
+            return f"<{review}|{label}> <{github}|({_GITHUB_LABEL})>"
+        return f"[{label}]({review}) [({_GITHUB_LABEL})]({github})"
 
     def block(self, value: object) -> object:
         if isinstance(value, list):
