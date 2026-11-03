@@ -74,7 +74,9 @@ test.describe("HTML artifacts", () => {
     await expect(loggedOut.getByText("Sign in to Open SWE")).toBeVisible({
       timeout: 30_000,
     });
-    await loggedOut.getByRole("link", { name: "Continue with GitHub" }).click();
+    await loggedOut
+      .getByRole("link", { name: "Continue with LangSmith" })
+      .click();
     await expect(loggedOut).toHaveURL(/\/fake-gh\/login\/oauth\/authorize/);
     await expect(loggedOut.getByTestId("fake-github-login")).toBeVisible();
     await loggedOut.getByLabel("GitHub user").selectOption(OWNER.login);

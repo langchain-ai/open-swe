@@ -254,6 +254,23 @@ async def api_get_pull_request_preview(
         return await get_pull_request_preview(repository.pull_request(pr_number))
 
 
+class PullRequestDescriptionUpdate(BaseModel):
+    body: str = Field(max_length=65_536)
+
+
+@router.patch("/reviews/{owner}/{repo}/{pr_number}/description", status_code=204)
+@audit_endpoint
+async def api_update_pull_request_description(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    update: PullRequestDescriptionUpdate,
+    session: dict[str, str] = SESSION_DEP,
+) -> None:
+    async with _as_viewer(session, owner, repo) as repository:
+        await repository.pull_request(pr_number).update_description(update.body)
+
+
 @router.get("/reviews/{owner}/{repo}/{pr_number}/labels")
 async def api_get_pull_request_labels(
     owner: str,

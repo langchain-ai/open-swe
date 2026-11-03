@@ -97,6 +97,16 @@ class GitHubCheckSuite(TypedDict):
 
 
 @with_config(ConfigDict(extra="allow", strict=True))
+class GitHubMergeGroup(TypedDict):
+    """The commit a merge queue tests: its pull requests merged onto the base branch."""
+
+    head_sha: Nonblank
+    head_ref: Nonblank
+    base_sha: Nonblank
+    base_ref: Nonblank
+
+
+@with_config(ConfigDict(extra="allow", strict=True))
 class _Owner(TypedDict):
     login: Nonblank
 
@@ -173,6 +183,15 @@ class _CheckSuitePayload(_DispatchPayload):
     check_suite: GitHubCheckSuite
 
 
+class _MergeGroupPayload(_DispatchPayload):
+    merge_group: GitHubMergeGroup
+
+
+class _MergeGroupDestroyedPayload(_MergeGroupPayload):
+    reason: Nonblank
+    """Why the group left the queue: ``merged``, ``dequeued`` or ``invalidated``."""
+
+
 # Events without an action are keyed by their name alone.
 class _PushPayload(_DispatchBase):
     ref: Nonblank
@@ -198,6 +217,8 @@ GitHubPayload = (
     | _WorkflowPayload
     | _CheckRunPayload
     | _CheckSuitePayload
+    | _MergeGroupPayload
+    | _MergeGroupDestroyedPayload
     | _PushPayload
     | _StatusPayload
 )
@@ -226,6 +247,8 @@ SupportedEventKey = Literal[
     "check_run.completed",
     "check_suite.completed",
     "workflow_run.completed",
+    "merge_group.checks_requested",
+    "merge_group.destroyed",
 ]
 
 # Several event actions share a payload shape; routing chooses the validator.
@@ -259,6 +282,8 @@ _PAYLOAD_ADAPTERS: dict[SupportedEventKey, TypeAdapter[GitHubPayload]] = {
     "check_run.completed": TypeAdapter(_CheckRunPayload),
     "check_suite.completed": TypeAdapter(_CheckSuitePayload),
     "workflow_run.completed": TypeAdapter(_WorkflowPayload),
+    "merge_group.checks_requested": TypeAdapter(_MergeGroupPayload),
+    "merge_group.destroyed": TypeAdapter(_MergeGroupDestroyedPayload),
 }
 github_identifier_adapter = TypeAdapter(_PositiveId)
 SUPPORTED_EVENT_KEYS = frozenset(_PAYLOAD_ADAPTERS)

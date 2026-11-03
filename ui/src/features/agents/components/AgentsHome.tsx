@@ -1,6 +1,13 @@
 import { AgentChatEmptyState } from "@/features/agents/components/AgentChatEmptyState"
 import { cn } from "@/lib/utils"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
@@ -12,6 +19,7 @@ import {
   pickComposerRepo,
   pickComposerWorkspace,
 } from "@/features/agents/lib/composerWorkspace"
+import { composerRepoSelection } from "@/features/agents/lib/composerRepoSelection"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
@@ -46,6 +54,7 @@ import {
 } from "@/features/agents/lib/gitPanelPreferences"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import { api } from "@/lib/api"
+import { hasLinkedGitHub } from "@/lib/linkedGitHub"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import {
@@ -176,6 +185,20 @@ export function AgentsHome({
   const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
     initialNoRepo ? null : initialRepo
   )
+  const userId = session.data?.user_id ?? ""
+  const rememberedRepo = useSyncExternalStore(
+    composerRepoSelection.subscribe,
+    () => composerRepoSelection.read(userId),
+    () => undefined
+  )
+  const restoredRepo =
+    rememberedRepo === null
+      ? null
+      : reposQuery.data?.repositories.find(
+          (candidate) =>
+            candidate.full_name.toLowerCase() === rememberedRepo?.toLowerCase()
+        )?.full_name
+  const repoSelection = repoOverride === undefined ? restoredRepo : repoOverride
   const userDefaultRepo = profileQuery.data?.default_repo ?? null
 
   // Workspace first: an explicit pick, else the workspace preferring a
@@ -192,11 +215,11 @@ export function AgentsHome({
     ? profileQuery.data?.workspace_default_repos?.[preferredWorkspace]
     : undefined
   const namedRepo = (
-    repoOverride === undefined
+    repoSelection === undefined
       ? personalWorkspaceRepo
         ? null
         : userDefaultRepo
-      : repoOverride
+      : repoSelection
   )?.toLowerCase()
   const selectedWorkspace = pickComposerWorkspace({
     override: workspaceOverride,
@@ -215,7 +238,7 @@ export function AgentsHome({
   // mutation to the React Compiler and costs the component its optimization.
   const workspaceRepos = useMemo(() => accessibleRepos ?? [], [accessibleRepos])
   const repo = pickComposerRepo({
-    override: repoOverride,
+    override: repoSelection,
     userDefault: userDefaultRepo,
     userWorkspaceDefault: selectedWorkspace
       ? profileQuery.data?.workspace_default_repos?.[selectedWorkspace]
@@ -230,6 +253,7 @@ export function AgentsHome({
   }
   const selectRepo = (value: string | null) => {
     setRepoOverride(value)
+    composerRepoSelection.write(userId, value)
     // Picking from the list pins the workspace it was offered under, so the
     // pick cannot drag the composer into whichever workspace owns it.
     if (!workspaceOverride) setWorkspaceOverride(selectedWorkspace)
@@ -540,7 +564,7 @@ export function AgentsHome({
           // Awaited so the thread route already knows it is This Mac's.
           await queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
           configurable.sandbox_bridge_id = local.bridgeId
-          if (local.repo && session.data?.auth_provider !== "langsmith")
+          if (local.repo && session.data && hasLinkedGitHub(session.data))
             configurable.repo = local.repo
           else configurable.repo_explicitly_none = true
         }

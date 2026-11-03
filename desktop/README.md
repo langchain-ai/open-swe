@@ -170,8 +170,8 @@ Local packaging remains available without those credentials; signing and notariz
 ## Deployment security
 
 The backend URL is public configuration, not a credential.
-Dashboard routes require an `osw_session` cookie issued after GitHub or LangSmith login.
-`ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` controls GitHub login; `LANGSMITH_LOGIN_ORG_ID` controls LangSmith organization authorization.
+Dashboard routes require an `osw_session` cookie issued after LangSmith login, the only sign-in.
+`LANGSMITH_LOGIN_ORG_ID` controls LangSmith organization authorization; `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` controls which GitHub accounts may be linked.
 CORS alone is not access control.
 
 Raw LangGraph routes are a separate boundary.
@@ -180,7 +180,7 @@ An external user does not need the deployment's server-side `LANGSMITH_API_KEY` 
 
 ## LangSmith deployment
 
-Register a confidential OAuth client (dynamic registration only permits MCP access) with callback `<DASHBOARD_API_BASE_URL>/dashboard/api/auth/langsmith/callback`.
+Register a confidential OAuth client (dynamic registration only permits MCP access) with callback `<DASHBOARD_API_BASE_URL>/dashboard/api/langsmith/callback`; existing clients already register it, so sign-in needs no new client or allowlist entry.
 Configure `LANGSMITH_CONNECTION_URL` (normally `https://api.smith.langchain.com`), `LANGSMITH_OAUTH_CLIENT_ID`, and `LANGSMITH_OAUTH_CLIENT_SECRET` on the backend, alongside its existing dashboard URLs, JWT/encryption secrets and PostgreSQL configuration.
 Set `LANGSMITH_LOGIN_ORG_ID=f5c798a2-2155-4999-ad27-6d466bd26e1c` for the production Agent Workspace organization.
 LangSmith login is disabled when this setting is unset, even if personal LangSmith connections are configured.
@@ -192,12 +192,17 @@ Users must select the organization configured by `LANGSMITH_LOGIN_ORG_ID`.
 Membership requires both `/userinfo`'s acting-org claim and current `/orgs?skip_create=true` membership; the claim alone does not prove membership.
 The organization list is unpaginated.
 
-The desktop starts `/dashboard/api/auth/langsmith/login` with a PKCE challenge and loopback port.
+The web dashboard starts `/dashboard/api/auth/langsmith/login` and receives its session cookie at the callback.
+The desktop starts it with a PKCE challenge and loopback port.
 The backend returns a short-lived handoff code to `127.0.0.1`; `/auth/desktop/exchange` requires the verifier.
 No browser session is created, and the handoff cannot itself authenticate as a cookie.
-LangSmith identities have independent internal UUID accounts, without GitHub identities or email-based linking.
+A LangSmith sign-in starts as its own internal UUID account, never linked by email.
+Coding features need a linked GitHub account: **Link GitHub** runs the GitHub App's OAuth through `/dashboard/api/github/login`.
+When that GitHub account already belongs to an Open SWE person, the LangSmith identity and login grant move to that person, so their threads and settings return; otherwise the GitHub account joins the LangSmith account.
+A GitHub account already linked to another LangSmith account is refused.
+Once linked, the session acts as the GitHub login while every request still checks the LangSmith grant.
 
-Encrypted `langsmith_login` grants refresh automatically and also serve managed tools.
+Encrypted `langsmith_login` grants refresh automatically and also serve managed tools; there is no separate LangSmith connection to connect or disconnect.
 Every authenticated request, run dispatch, runtime call and worker grant checks the stored grant.
 Successful organization authorization is cached in PostgreSQL for at most 60 seconds, bound to the current grant and configured organization; provider revocation or membership removal can take up to 60 seconds to take effect.
 Expired authorization must be revalidated; temporary provider failures deny access without extending the cache or discarding the grant.
@@ -208,6 +213,6 @@ Remote revocation failures do not prevent local sign out; a new login is require
 Sign out rather than disconnecting the login grant.
 
 Tasks and workers use private local bridges, with automatic task folders or an optional existing folder.
-Cloud moves, GitHub operations, and borrowed deployment bot/App credentials are unavailable.
+Without a linked GitHub account, cloud moves, GitHub operations, and borrowed deployment bot/App credentials are unavailable.
 Deploy the login routes and desktop UI with both sign-in providers before distributing installers.
 Real confidential-client OAuth, macOS signing/install and update installation still need production smoke tests; Linux packaging and mocked integration tests do not establish deployment readiness.

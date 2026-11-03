@@ -336,6 +336,7 @@ export interface Profile {
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
   goal_mode?: boolean
+  experimental_conditional_approval?: boolean
   experimental_memory?: boolean
   experimental_classify?: boolean
   draft_prs?: boolean
@@ -355,6 +356,7 @@ export interface ProfileUpdate {
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
   goal_mode?: boolean
+  experimental_conditional_approval?: boolean
   experimental_memory?: boolean
   experimental_classify?: boolean
   draft_prs?: boolean
@@ -468,13 +470,6 @@ export interface MCPConnectionUpdate {
   allowed_tools: string[]
   headers?: Record<string, string> | null
   oauth?: MCPOAuthUpdate | null
-}
-
-export interface LangSmithConnectionStatus {
-  available: boolean
-  connected: boolean
-  email?: string | null
-  updated_at?: string | null
 }
 
 export interface ManagedToolsGateway {
@@ -1088,6 +1083,7 @@ export interface OpenPullRequest {
   createdAt: string | null
   updatedAt: string | null
   ci: "passing" | "failing" | "pending" | "unknown" | "none"
+  requiredChecksPassing: boolean | null
   failingChecks: string[]
   pendingChecks: string[]
   // Required by the base branch but never reported on the head, so GitHub
@@ -1282,8 +1278,13 @@ export interface PublishedReviewAssessment {
   review_id: number
   head_sha: string
   risk_score: number
-  decision: "would_approve" | "needs_human_review"
+  decision:
+    | "would_approve"
+    | "would_approve_conditionally"
+    | "needs_human_review"
   explanation: string
+  approval_condition?: string | null
+  auto_approved?: string | null
 }
 
 export interface ReviewAssessmentFeedbackInput {
@@ -1798,12 +1799,6 @@ export const api = {
       `/my-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
-  getMyLangSmithStatus: () =>
-    request<LangSmithConnectionStatus>("/my-credentials/langsmith"),
-  disconnectLangSmith: () =>
-    request<LangSmithConnectionStatus>("/my-credentials/langsmith", {
-      method: "DELETE",
-    }),
   listManagedToolsGateways: () =>
     request<ManagedToolsGateway[]>("/managed-tools/gateways"),
   getMyManagedTools: () => request<ManagedToolsView>("/my-managed-tools"),
@@ -1976,6 +1971,16 @@ export const api = {
     request<ReviewDetail>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`
     ),
+  updatePullRequestDescription: (
+    owner: string,
+    repo: string,
+    number: number,
+    body: string
+  ) =>
+    request<void>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/description`,
+      { method: "PATCH", body: JSON.stringify({ body }) }
+    ),
   getAssessmentFeedback: (
     owner: string,
     repo: string,
@@ -2136,19 +2141,14 @@ export const api = {
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 }
 
-export function loginUrl(
-  redirectTo?: string,
-  provider: "github" | "langsmith" = "github"
-): string {
+export function loginUrl(redirectTo?: string): string {
   const target =
     redirectTo ??
     (typeof window !== "undefined"
       ? `${window.location.pathname}${window.location.search}${window.location.hash}`
       : "")
   const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : ""
-  const path =
-    provider === "langsmith" ? "/auth/langsmith/login" : "/auth/login"
-  return `${API_BASE}/dashboard/api${path}${qs}`
+  return `${API_BASE}/dashboard/api/auth/login${qs}`
 }
 
 /**
@@ -2160,7 +2160,7 @@ export function loginUrl(
  * itself and resolves once the connection is stored.
  */
 export function connectService(
-  provider: "slack" | "langsmith",
+  provider: "slack" | "github",
   redirectTo?: string
 ) {
   const pending = window.openSweDesktop?.connectService(provider)

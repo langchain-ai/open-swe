@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useParams } from "@tanstack/react-router"
 import { PlugsConnectedIcon } from "@phosphor-icons/react/dist/ssr/PlugsConnected"
 
-import { ConnectLangSmithButton } from "@/features/settings/components/ConnectionsSection"
+import { SignInWithLangSmithButton } from "@/features/settings/components/ConnectionsSection"
 import {
   MissingRow,
   managedToolsQuery,
@@ -31,11 +31,11 @@ export function ManagedToolsConnectionCard({
     return (
       <Card title="Managed Tools">
         <p className="text-secondary">
-          Managed tools run with your own LangSmith account. Connect LangSmith,
-          then ask again to connect the services they need.
+          Managed tools run with your LangSmith sign-in, which expired. Sign in
+          again, then ask again to connect the services they need.
         </p>
         <div className="mt-space-4 flex justify-end">
-          <ConnectLangSmithButton />
+          <SignInWithLangSmithButton />
         </div>
       </Card>
     )

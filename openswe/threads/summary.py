@@ -546,6 +546,10 @@ async def _thread_summary(
             else None
         ),
         "adminThread": metadata.get("admin_thread") is True,
+        "concierge": bool(
+            (slack_thread := SourceContext.from_metadata(metadata).slack_thread)
+            and slack_thread.is_concierge
+        ),
         "visibility": metadata.get("visibility", "public"),
         "transcript": (
             TRANSCRIPT_VERSION if metadata.get("transcript") == TRANSCRIPT_VERSION else None

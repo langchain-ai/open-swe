@@ -586,6 +586,7 @@ export interface AgentThread {
   modelSelection?: "auto" | "explicit" | null
   planStatus?: string | null
   adminThread?: boolean
+  concierge?: boolean
   source?: AgentSource
   origin?: AgentSource | string
   threadCategory?: AgentThreadCategory | string

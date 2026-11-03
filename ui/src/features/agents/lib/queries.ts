@@ -789,7 +789,7 @@ export function useSidebarActiveThread({
     enabled && !listed && !rootDetail
   )
   const row = listed ?? rootDetail ?? fetched ?? active
-  return row
+  return row && !row.concierge
     ? mergeTaskFamily(
         row,
         [rootDetail, fetched, active].flatMap((thread) =>

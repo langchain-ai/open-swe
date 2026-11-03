@@ -43,7 +43,7 @@ from openswe.github.queue import (
     ValidationRuns,
     WorkflowRun,
 )
-from openswe.utils.dashboard_links import dashboard_api_base_url
+from openswe.utils.dashboard_links import dashboard_api_base_url, dashboard_base_url
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.url_safety import request_with_safe_redirects
 
@@ -225,10 +225,10 @@ async def github_request(
 
 def github_reauth_message(login: str | None = None) -> str:
     person = f" for {login}" if login else ""
-    url = f"{dashboard_api_base_url()}/dashboard/api/auth/login"
+    url = f"{dashboard_base_url() or dashboard_api_base_url()}/my-settings/connections"
     return (
-        f"GitHub token unavailable{person}. Reconnect GitHub by signing in to Open SWE: {url}. "
-        "Then retry the action."
+        f"GitHub token unavailable{person}. Link GitHub again in Open SWE's connections "
+        f"settings: {url}. Then retry the action."
     )
 
 

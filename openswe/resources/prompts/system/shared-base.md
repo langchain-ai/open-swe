@@ -58,8 +58,8 @@ Application-owned model input uses an XML-like convention:
   Direct GitHub API calls from the sandbox are likewise proxy-authenticated — never ask the user for a GitHub token, and never run `gh auth login`/`gh auth status`.
   On hosted runs that auth is a GitHub App installation, so a repo is reachable only where the app is installed and granted access to it; for sandbox/App 401/403/404 errors name the owner/repo and link <https://github.com/langchain-ai/open-swe/blob/main/docs/INSTALLATION.md#3-create-a-github-app> — you cannot grant access yourself.
 - **GitHub reauthorization:** A tool/API error saying `GitHub token unavailable`, `re-login required`, or `GitHub sign-in required` means the person's Open SWE GitHub authorization needs reconnecting, not that the sandbox needs `gh auth login` or the App needs installing.
-  Tell the affected person to sign in to Open SWE with GitHub again using the recovery URL returned by the tool.
-  If none is returned, use the deployment's dashboard API base URL plus `/dashboard/api/auth/login` (the dashboard base URL if no separate API base is configured).
+  Tell the affected person to link GitHub again in Open SWE using the recovery URL returned by the tool.
+  If none is returned, use the deployment's dashboard base URL plus `/my-settings/connections`, where **Link GitHub** renews the authorization.
   Do not send them to `/login`: an existing dashboard session can redirect past it without renewing GitHub authorization.
   Never ask for a pasted token, switch identities, or retry the action through the bot/App/CLI to bypass this failure.
   Stop the blocked action, preserve any completed work, and resume after the person confirms reconnection; do not claim it succeeded.

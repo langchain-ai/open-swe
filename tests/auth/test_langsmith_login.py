@@ -12,7 +12,7 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
-from openswe.dashboard import auth_routes, langsmith_login, langsmith_oauth, langsmith_routes, oauth
+from openswe.dashboard import auth_routes, langsmith_login, langsmith_oauth, oauth
 from openswe.dashboard.langsmith_login import LangSmithAccount
 from openswe.dashboard.oauth_credentials import load_credential, save_credential
 from openswe.dashboard.profiles import PROFILES, get_profile
@@ -20,10 +20,12 @@ from openswe.dashboard.user_preferences import USER_PREFERENCES
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.github import dashboard_routes
 from openswe.review.routes import router as review_router
+from openswe.threads.principals import Principal
 from openswe.users import AccountConflict, UnauthorizedUser, User
 
 ISSUER = "https://api.smith.langchain.com"
 ALLOWED_ORG = "f5c798a2-2155-4999-ad27-6d466bd26e1c"
+CALLBACK = "https://dashboard.example/dashboard/api/langsmith/callback"
 
 
 @dataclass
@@ -73,6 +75,7 @@ class LangSmithServer:
                     return httpx2.Response(400, json={"error": "invalid_grant"})
             else:
                 assert body["code_verifier"][0]
+                assert body["redirect_uri"] == [CALLBACK]
             return httpx2.Response(
                 200, json={"access_token": "access", "refresh_token": "refresh", "expires_in": 3600}
             )
@@ -110,8 +113,9 @@ class LangSmithServer:
         query = parse_qs(urlparse(start.headers["location"]).query)
         assert query["scope"] == ["openid profile email offline_access"]
         assert query["resource"] == [ISSUER]
+        assert query["redirect_uri"] == [CALLBACK]
         callback = await client.get(
-            "/dashboard/api/auth/langsmith/callback",
+            "/dashboard/api/langsmith/callback",
             params={"state": query["state"][0], "code": "code"},
         )
         return callback
@@ -147,7 +151,6 @@ async def langsmith_client(registry_db, monkeypatch: pytest.MonkeyPatch):
         lambda _request, exc: JSONResponse({"detail": str(exc)}, status_code=409),
     )
     app.include_router(auth_routes.router, prefix="/dashboard/api")
-    app.include_router(langsmith_routes.router, prefix="/dashboard/api")
     app.include_router(dashboard_routes.router, prefix="/dashboard/api")
     app.include_router(review_router, prefix="/dashboard/api")
     async with httpx.AsyncClient(
@@ -195,9 +198,6 @@ async def test_desktop_login_is_independent_and_pkce_bound(langsmith_client) -> 
         header.startswith(oauth.COOKIE_NAME + "=") for header in me.headers.get_list("set-cookie")
     )
     assert await langsmith_oauth.langsmith_access_token(session["sub"]) == "access"
-    status = await client.get("/dashboard/api/my-credentials/langsmith")
-    assert status.json()["connected"] is True
-    assert (await client.delete("/dashboard/api/my-credentials/langsmith")).status_code == 400
     assert (await client.get("/dashboard/api/repos")).status_code == 403
     assert (await client.get("/dashboard/api/repos/example/repo/merge-methods")).status_code == 403
     assert (await client.get("/dashboard/api/reviews/example/repo/1/labels")).status_code == 403
@@ -219,36 +219,75 @@ async def test_slack_email_does_not_block_langsmith_login(langsmith_client) -> N
     assert user is not None and user.id != github_user.id
 
 
-async def test_one_email_cannot_hold_both_a_github_and_a_langsmith_account(
+async def test_linking_github_returns_a_langsmith_person_to_their_github_account(
     langsmith_client,
 ) -> None:
     server, client = langsmith_client
-    await User.sign_in("github", "1", login="alice", email="Same@Example.com")
-    callback = await server.desktop_login(client)
-    assert callback.status_code == 409
-    assert "GitHub" in callback.json()["detail"]
-    assert await User.for_identity("langsmith", server.subject) is None
+    github_user = await User.sign_in("github", "1", login="alice", email="Same@Example.com")
+    await save_credential(
+        "langsmith_login",
+        "alice",
+        encrypted_access_token=encrypt_token("stale"),
+        encrypted_refresh_token=None,
+        access_token_expires_at=None,
+        client_id="test-client",
+        token_endpoint=ISSUER + "/oauth/token",
+        account_email=None,
+    )
+    await USER_PREFERENCES.put("alice", {"follow_up_behavior": "queue"})
+    github_thread = {"owner_login": "alice", "visibility": "private"}
+    start = await client.get("/dashboard/api/auth/langsmith/login")
+    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    callback = await client.get(
+        "/dashboard/api/langsmith/callback", params={"state": state, "code": "code"}
+    )
+    assert callback.status_code == 302
+    person = await User.for_identity("langsmith", server.subject)
+    assert person is not None and person.id != github_user.id
+    fresh = oauth.decode_session(client.cookies[oauth.COOKIE_NAME])
+    assert fresh["sub"] == f"user:{person.id}"
+    with pytest.raises(HTTPException):
+        Principal.of_person(fresh).assert_can_read(github_thread)
 
-    await User.sign_in(
+    joined = await person.join_github("1", login="alice", email="Same@Example.com")
+    assert joined.id == github_user.id
+    assert {identity.provider for identity in joined.identities} == {"github", "langsmith"}
+    assert await User.for_identity("langsmith", server.subject) == joined
+    credential = await load_credential("langsmith_login", "alice")
+    assert credential is not None and decrypt_token(credential.encrypted_access_token) == "access"
+    assert await load_credential("langsmith_login", f"user:{person.id}") is None
+
+    me = await client.get("/dashboard/api/me")
+    assert me.status_code == 200
+    assert me.json()["github_login"] == "alice" and me.json()["login"] == "alice"
+    session = oauth.decode_session(me.cookies[oauth.COOKIE_NAME])
+    assert (session["sub"], session["provider"]) == ("alice", "langsmith")
+    assert me.json()["follow_up_behavior"] == "queue"
+    Principal.of_person(session).assert_can_read(github_thread)
+    assert (await client.get("/dashboard/api/review-styles")).status_code != 403
+
+    other = await User.sign_in(
         "langsmith",
         "ls-other",
-        email="langsmith@example.com",
+        email="other@example.com",
         authorization=LangSmithAccount(sub="ls-other", ls_org_id=server.organization),
     )
     with pytest.raises(AccountConflict):
-        await User.sign_in("github", "2", login="alice", email="LangSmith@example.com")
+        await other.join_github("1", login="alice", email="Same@Example.com")
 
 
 async def test_login_without_desktop_proof_and_cross_purpose_codes_are_rejected(
     langsmith_client,
 ) -> None:
     server, client = langsmith_client
-    assert (await client.get("/dashboard/api/auth/langsmith/login")).status_code == 400
+    assert (
+        await client.get("/dashboard/api/auth/langsmith/login", params={"desktop_port": 43210})
+    ).status_code == 400
     state = oauth.issue_state(
         redirect_to="https://dashboard.example", nonce_hash="nonce", provider="langsmith"
     )
     callback = await client.get(
-        "/dashboard/api/auth/langsmith/callback", params={"state": state, "code": "code"}
+        "/dashboard/api/langsmith/callback", params={"state": state, "code": "code"}
     )
     assert callback.status_code == 400
     code = oauth.issue_connect_handoff(
@@ -391,8 +430,7 @@ async def test_logout_revokes_replayed_sessions_and_runtime_grants(
     assert await load_credential("langsmith_login", session["sub"]) is None
     client.cookies.set(oauth.COOKIE_NAME, token)
     assert (await client.get("/dashboard/api/me")).status_code == 401
-    with pytest.raises(HTTPException, match="LangSmith login expired"):
-        await langsmith_oauth.langsmith_access_token(session["sub"])
+    assert await langsmith_oauth.langsmith_access_token(session["sub"]) is None
     assert (await client.post("/dashboard/api/auth/logout")).status_code == 204
 
 
