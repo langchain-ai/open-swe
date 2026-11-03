@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
-import { cleanup, render, screen, fireEvent } from "@testing-library/react"
+import { cleanup, render, screen } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
 
@@ -122,6 +122,15 @@ vi.mock("@/features/agents/lib/desktopProjects", () => ({
   useDesktopProjects: () => stub.projects,
 }))
 
+vi.mock("@/features/agents/lib/chatProjects", () => ({
+  useChatProjects: () => ({ data: { projects: [], memberships: {} } }),
+  useAssignChatProject: () => stub.rename,
+  useSaveChatProject: () => stub.rename,
+  useDeleteChatProject: () => stub.remove,
+  useReorderPinnedChats: () => stub.rename,
+  desktopDeviceId: () => "device",
+}))
+
 window.matchMedia = ((query: string) => ({
   matches: false,
   media: query,
@@ -168,7 +177,7 @@ it("registers the active thread's commands once and then stops", async () => {
   expect(probeRenders).toBeLessThanOrEqual(RENDER_BUDGET)
 })
 
-it("opens asynchronous workers as real conversations and expands the selected worker separately from synchronous subagents", () => {
+it("keeps sidebar rows flat without worker or subagent trees", () => {
   const worker = {
     id: "worker",
     title: "Implement change",
@@ -220,23 +229,12 @@ it("opens asynchronous workers as real conversations and expands the selected wo
       </TooltipProvider>
     </QueryClientProvider>
   )
-  const workerLink = screen.getByRole("link", { name: /Implement change/ })
-  expect(workerLink.getAttribute("href")).toBe("/agents/worker")
-  expect(workerLink.getAttribute("aria-current")).toBe("page")
-  fireEvent.click(screen.getByRole("button", { name: "Hide task workers" }))
+  expect(
+    screen.getByRole("link", { name: /Coordinate change/ }).getAttribute("href")
+  ).toBe("/agents/parent")
   expect(screen.queryByRole("link", { name: /Implement change/ })).toBeNull()
-  fireEvent.click(screen.getByRole("button", { name: "Show task workers" }))
-  expect(screen.getByRole("link", { name: /Implement change/ })).toBeTruthy()
-  const workerSyncToggle = screen.queryByRole("button", {
-    name: "Show worker subagents",
-  })
-  if (workerSyncToggle) fireEvent.click(workerSyncToggle)
+  expect(screen.queryByRole("link", { name: /Inspect code/ })).toBeNull()
   expect(
-    screen.getByRole("link", { name: /Worker inspection/ }).getAttribute("href")
-  ).toBe("/agents/worker?subagent=worker-sync")
-  const syncToggle = screen.queryByRole("button", { name: "Show subagents" })
-  if (syncToggle) fireEvent.click(syncToggle)
-  expect(
-    screen.getByRole("link", { name: /Inspect code/ }).getAttribute("href")
-  ).toBe("/agents/parent?subagent=sync-tool")
+    screen.queryByRole("button", { name: /task workers|subagents/ })
+  ).toBeNull()
 })

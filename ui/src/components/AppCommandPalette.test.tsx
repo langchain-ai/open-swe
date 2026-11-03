@@ -3,7 +3,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { experienceStore } from "@/lib/experience"
 import { AppCommandPalette } from "./AppCommandPalette"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "@/lib/appCommands"
@@ -11,10 +10,12 @@ import type { AppCommand } from "@/lib/appCommands"
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   fetchNextPage: vi.fn(),
+  search: vi.fn(),
   cloudThread: {
     id: "cloud-1",
     title: "Cloud result",
     experience: "agent_workspace",
+    resolved: true,
   } as AgentThread,
 }))
 
@@ -30,17 +31,25 @@ vi.mock("@tanstack/react-router", () => ({
   }),
 }))
 vi.mock("@/features/agents/lib/queries", () => ({
-  useInfiniteThreadsPages: () => ({
-    data: { pages: [{ items: [mocks.cloudThread] }] },
-    isFetching: false,
-    isError: false,
-    hasNextPage: true,
-    isFetchingNextPage: false,
-    fetchNextPage: mocks.fetchNextPage,
-  }),
+  useInfiniteThreadsPages: (...args: unknown[]) => {
+    mocks.search(...args)
+    return {
+      data: { pages: [{ items: [mocks.cloudThread] }] },
+      isFetching: false,
+      isError: false,
+      hasNextPage: true,
+      isFetchingNextPage: false,
+      fetchNextPage: mocks.fetchNextPage,
+    }
+  },
 }))
-vi.mock("@/features/reviews/lib/usePullRequestSearch", () => ({
-  usePullRequestSearch: () => ({ data: undefined }),
+vi.mock("@/features/agents/lib/chatProjects", () => ({
+  useChatProjects: () => ({
+    data: {
+      projects: [{ id: "project-1", name: "Launch" }],
+      memberships: { "cloud-1": "project-1" },
+    },
+  }),
 }))
 
 afterEach(() => {
@@ -65,6 +74,13 @@ describe("AppCommandPalette", () => {
       <AppCommandPalette commands={commands} open onOpenChange={vi.fn()} />
     )
 
+    expect(
+      screen.getByRole("option", { name: /Cloud result.*Launch.*Archived/ })
+    ).toBeTruthy()
+    expect(mocks.search).toHaveBeenCalledWith(
+      { limit: 20, q: undefined, scope: "all" },
+      { enabled: true, staleWhileRevalidate: true }
+    )
     const input = screen.getByRole("combobox")
     fireEvent.keyDown(input, { key: "ArrowDown" })
     fireEvent.keyDown(input, { key: "Enter" })
@@ -80,7 +96,7 @@ describe("AppCommandPalette", () => {
       <AppCommandPalette commands={commands} open onOpenChange={vi.fn()} />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Load more threads" }))
+    fireEvent.click(screen.getByRole("button", { name: "Load more chats" }))
 
     expect(mocks.fetchNextPage).toHaveBeenCalledOnce()
   })
@@ -96,10 +112,11 @@ describe("AppCommandPalette", () => {
       },
     })
     expect(
-      await screen.findByRole("option", { name: "Cloud result" })
+      await screen.findByRole("option", {
+        name: /Cloud result.*Launch.*Archived/,
+      })
     ).toBeTruthy()
 
-    experienceStore.write("alice", "coding")
     fireEvent.change(input, {
       target: {
         value:
@@ -113,6 +130,29 @@ describe("AppCommandPalette", () => {
       to: "/agents/reviews/$owner/$repo/$number",
       params: { owner: "langchain-ai", repo: "open-swe", number: "42" },
     })
+  })
+
+  it("runs commands without showing chats or a review result for general title searches", async () => {
+    render(
+      <AppCommandPalette commands={commands} open onOpenChange={vi.fn()} />
+    )
+    const input = screen.getByRole("combobox")
+    fireEvent.change(input, { target: { value: "fix search regression" } })
+    expect(
+      await screen.findByRole("option", { name: /Cloud result/ })
+    ).toBeTruthy()
+    expect(
+      screen.queryByRole("option", { name: /Open Review Page/ })
+    ).toBeNull()
+    expect(mocks.search).toHaveBeenLastCalledWith(
+      { limit: 20, q: "fix search regression", scope: "all" },
+      { enabled: true, staleWhileRevalidate: true }
+    )
+
+    fireEvent.change(input, { target: { value: ">settings" } })
+    expect(screen.queryByRole("option", { name: /Cloud result/ })).toBeNull()
+    fireEvent.click(screen.getByRole("option", { name: /Open settings/ }))
+    expect(commands[0]?.run).toHaveBeenCalledOnce()
   })
 
   it("closes on Escape", () => {

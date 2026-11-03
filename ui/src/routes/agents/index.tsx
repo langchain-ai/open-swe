@@ -6,6 +6,7 @@ interface AgentsIndexSearch {
   repo?: string
   localRepo?: string
   noRepo?: boolean
+  project?: string
 }
 
 export const Route = createFileRoute("/agents/")({
@@ -19,15 +20,19 @@ export const Route = createFileRoute("/agents/")({
     ...(search.noRepo === true || search.noRepo === "true"
       ? { noRepo: true }
       : {}),
+    ...(typeof search.project === "string" && search.project.trim()
+      ? { project: search.project.trim() }
+      : {}),
   }),
   component: AgentsIndexPage,
 })
 
 function AgentsIndexPage() {
-  const { repo, localRepo, noRepo } = Route.useSearch()
+  const { repo, localRepo, noRepo, project } = Route.useSearch()
   return (
     <AgentsHome
-      key={`${repo ?? ""}:${localRepo ?? ""}:${noRepo ?? ""}`}
+      key={`${project ?? ""}:${repo ?? ""}:${localRepo ?? ""}:${noRepo ?? ""}`}
+      projectId={project}
       initialRepo={repo}
       initialLocalRepo={localRepo}
       initialNoRepo={noRepo}

@@ -15,7 +15,6 @@ import {
   PopoverTrigger,
 } from "@langchain/macaw-components/Popover"
 import { SlidersHorizontalIcon } from "@phosphor-icons/react/dist/ssr/SlidersHorizontal"
-import { useAgentWorkspace } from "@/features/agents/lib/agentWorkspace"
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/ssr/ImageSquare"
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu"
@@ -169,6 +168,7 @@ const composerDrafts = new ComposerDrafts()
 
 export interface ChatComposerProps {
   draftKey?: string
+  contextProjectName?: string
   placeholder?: string
   autoFocus?: boolean
   compact?: boolean
@@ -345,7 +345,8 @@ export function buildCommandItems(
 /** Prompt editor with autocomplete, model selection, attachments, and send/stop controls. */
 export const ChatComposer = memo(function ChatComposer({
   draftKey,
-  placeholder = "Ask Open SWE to build, fix bugs, explore",
+  contextProjectName,
+  placeholder = "Ask a question or describe a task…",
   autoFocus = false,
   compact = false,
   disabled = false,
@@ -389,7 +390,6 @@ export const ChatComposer = memo(function ChatComposer({
   contextUsage,
   routed,
 }: ChatComposerProps) {
-  const agentWorkspace = useAgentWorkspace()
   const [contextOpen, setContextOpen] = useState(false)
   const [value, setValue] = useState(
     () => composerDrafts.read(draftKey)?.text ?? ""
@@ -856,6 +856,7 @@ export const ChatComposer = memo(function ChatComposer({
     />
   )
   const hasContextControls = Boolean(
+    runTarget ||
     onRepoChange ||
     onWorkspaceChange ||
     (runTarget === "local" && (onSelectLocalRepo || onSelectLocalRepoBranch))
@@ -864,10 +865,26 @@ export const ChatComposer = memo(function ChatComposer({
     runTarget === "local"
       ? (localRepos.find((repo) => repo.cwd === selectedLocalRepoPath)?.name ??
         selectedLocalRepoPath?.split("/").filter(Boolean).at(-1) ??
-        (agentWorkspace ? "Use a folder" : "Choose a folder"))
-      : (selectedRepo?.split("/").at(-1) ?? "Task context")
-  const targetControls = (onRepoChange || runTarget || onWorkspaceChange) && (
+        "Use a folder")
+      : (selectedRepo?.split("/").at(-1) ?? "Use a folder")
+  const folderControl = runTarget === "local" &&
+    onSelectLocalRepo &&
+    onAddLocalRepo &&
+    onRemoveLocalRepo && (
+      <LocalRepoSelector
+        onAddRepo={onAddLocalRepo}
+        onRemoveRepo={onRemoveLocalRepo}
+        onSelectRepo={onSelectLocalRepo}
+        repos={localRepos}
+        selectedRepoPath={selectedLocalRepoPath}
+        side="top"
+        placeholder="Use a folder"
+        onUseTaskFolder={onUseTaskFolder}
+      />
+    )
+  const advancedControls = (
     <>
+      {executionTarget}
       {runTarget !== "local" && onWorkspaceChange && (
         <WorkspaceSelector
           workspaces={workspaceOptions}
@@ -888,42 +905,30 @@ export const ChatComposer = memo(function ChatComposer({
           side="top"
         />
       )}
-      {runTarget === "local" &&
-        onSelectLocalRepo &&
-        onAddLocalRepo &&
-        onRemoveLocalRepo && (
-          <LocalRepoSelector
-            onAddRepo={onAddLocalRepo}
-            onRemoveRepo={onRemoveLocalRepo}
-            onSelectRepo={onSelectLocalRepo}
-            repos={localRepos}
-            selectedRepoPath={selectedLocalRepoPath}
-            side="top"
-            placeholder={agentWorkspace ? "Automatic task folder" : undefined}
-            onUseTaskFolder={onUseTaskFolder}
-          />
-        )}
-      {runTarget === "local" &&
-        (!agentWorkspace || localRepoBranches.length > 0) &&
-        onRefreshLocalRepoBranch &&
-        onSelectLocalRepoBranch && (
-          <LocalBranchSelector
-            refs={localRepoBranches}
-            disabled={!selectedLocalRepoPath}
-            onRefresh={onRefreshLocalRepoBranch}
-            onSelectBranch={onSelectLocalRepoBranch}
-            selectedBranch={selectedLocalRepoBranch}
-          />
-        )}
-      {runTarget === "local" &&
-        (!agentWorkspace || localRepoBranches.length > 0) &&
-        onSelectLocalRepoBranch && (
-          <LocalWorkspaceSelector
-            onChange={onLocalWorkspaceModeChange}
-            value={localWorkspaceMode}
-            worktreeLabel={localWorktreeLabel}
-          />
-        )}
+      {runTarget === "local" && localRepoBranches.length > 0 && (
+        <details className="w-full">
+          <summary className="cursor-pointer py-space-1 text-secondary">
+            Git
+          </summary>
+          <div className="flex flex-col items-start gap-space-3 pt-space-2">
+            {onRefreshLocalRepoBranch && onSelectLocalRepoBranch && (
+              <LocalBranchSelector
+                refs={localRepoBranches}
+                onRefresh={onRefreshLocalRepoBranch}
+                onSelectBranch={onSelectLocalRepoBranch}
+                selectedBranch={selectedLocalRepoBranch}
+              />
+            )}
+            {onSelectLocalRepoBranch && (
+              <LocalWorkspaceSelector
+                onChange={onLocalWorkspaceModeChange}
+                value={localWorkspaceMode}
+                worktreeLabel={localWorktreeLabel}
+              />
+            )}
+          </div>
+        </details>
+      )}
     </>
   )
 
@@ -954,15 +959,9 @@ export const ChatComposer = memo(function ChatComposer({
       <div
         data-chat-composer
         className={cn(
-          "relative z-floating-bar flex flex-col rounded-xl border bg-elevated px-space-3 py-space-2 shadow-md transition-[border-color,box-shadow] duration-slow hover:shadow-lg",
+          "relative z-floating-bar flex flex-col rounded-2xl border bg-elevated px-space-4 py-space-3 shadow-sm transition-[border-color,box-shadow] duration-slow focus-within:border-strong",
           compact ? "min-h-[88px]" : "min-h-[106px]",
-          agentWorkspace &&
-            "rounded-2xl px-space-4 py-space-3 shadow-sm focus-within:border-strong hover:shadow-sm",
-          dragKind
-            ? "border-brand"
-            : agentWorkspace
-              ? "border-subtle"
-              : "border-default"
+          dragKind ? "border-brand" : "border-subtle"
         )}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
@@ -1137,56 +1136,61 @@ export const ChatComposer = memo(function ChatComposer({
         </div>
       </div>
 
-      {targetControls && (
-        <div
-          className={cn(
-            "mt-space-2 flex min-w-0 flex-wrap items-center gap-x-space-5 gap-y-space-2 px-space-3 text-xs",
-            agentWorkspace && "gap-x-space-3 px-space-1"
-          )}
-        >
-          {executionTarget}
-          {agentWorkspace
-            ? hasContextControls && (
-                <Popover open={contextOpen} onOpenChange={setContextOpen}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      color="secondary"
-                      variant="plain"
-                      size="sm"
-                      aria-label={`Task context: ${contextLabel}`}
-                      className="max-w-full gap-space-2 rounded-full text-xs text-secondary"
-                    >
-                      <SlidersHorizontalIcon
-                        size={14}
-                        weight="regular"
-                        className="shrink-0"
-                      />
-                      <span className="truncate">{contextLabel}</span>
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    aria-label="Task context"
-                    side="top"
-                    align="start"
-                    className="w-80 max-w-[calc(100vw-2rem)] rounded-xl p-space-4"
-                  >
-                    <div className="flex flex-col gap-space-3">
-                      <div className="flex flex-col gap-space-1">
-                        <h2 className="text-sm font-medium">Task context</h2>
-                        <p className="text-xs leading-relaxed text-secondary">
-                          {runTarget === "local"
-                            ? "Each chat gets its own task folder. Use an existing folder when you need one."
-                            : "Add a repository or workspace when your task needs one."}
-                        </p>
-                      </div>
-                      <div className="flex flex-col items-start gap-space-3 text-xs">
-                        {targetControls}
-                      </div>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              )
-            : targetControls}
+      {hasContextControls && (
+        <div className="mt-space-2 flex min-w-0 flex-wrap items-center gap-space-3 px-space-1 text-xs">
+          <Popover open={contextOpen} onOpenChange={setContextOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label="Working context"
+                className="max-w-full gap-space-2 rounded-full text-xs text-secondary"
+              >
+                <SlidersHorizontalIcon
+                  size={14}
+                  weight="regular"
+                  className="shrink-0"
+                />
+                <span className="truncate">
+                  {contextProjectName
+                    ? `${contextProjectName} · ${contextLabel}`
+                    : contextLabel}
+                </span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              aria-label="Working context"
+              side="top"
+              align="start"
+              className="w-80 max-w-[calc(100vw-2rem)] rounded-xl p-space-4"
+            >
+              <div className="flex flex-col gap-space-3">
+                <div className="flex flex-col gap-space-1">
+                  <h2 className="text-sm font-medium">Working Context</h2>
+                  {contextProjectName && (
+                    <p className="truncate text-xs text-secondary">
+                      {contextProjectName}
+                    </p>
+                  )}
+                  <p className="text-xs leading-relaxed text-secondary">
+                    {runTarget === "local"
+                      ? "Each chat gets its own task folder. Use an existing folder when you need one."
+                      : "Choose a repository when your work needs one. Desktop chats can also use a folder on your Mac."}
+                  </p>
+                </div>
+                {folderControl}
+                <details>
+                  <summary className="cursor-pointer py-space-1 text-xs text-secondary">
+                    Advanced
+                  </summary>
+                  <div className="flex flex-col items-start gap-space-3 pt-space-3 text-xs">
+                    {advancedControls}
+                  </div>
+                </details>
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
       )}
     </div>

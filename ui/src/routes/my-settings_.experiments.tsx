@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 
 import { SettingsPage, SettingsSection } from "@/components/AppShell"
-import { StreamPreference } from "@/features/settings/components/StreamPreference"
 import { ProfileSwitchRow } from "@/features/settings/components/ProfileSwitchRow"
 import { pageTitle } from "@/lib/pageTitle"
 
@@ -16,9 +15,6 @@ function ExperimentsPage() {
       title="Experiments"
       description="Features under test. They may change or go away."
     >
-      <SettingsSection title="Interface">
-        <StreamPreference />
-      </SettingsSection>
       <SettingsSection title="Slack">
         <ProfileSwitchRow
           field="concierge_mode"

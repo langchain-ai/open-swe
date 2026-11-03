@@ -1,4 +1,3 @@
-import { experienceStore } from "@/lib/experience"
 /** @vitest-environment jsdom */
 
 import {
@@ -49,20 +48,6 @@ import type {
   WorkflowPushApproval,
   WorkflowPushApprovalsResponse,
 } from "./types"
-
-vi.mock("@/lib/experience", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/experience")>()
-  return {
-    ...actual,
-    useExperience: () => {
-      const state = actual.useExperience()
-      return {
-        ...state,
-        experience: window.openSweDesktop ? state.experience : undefined,
-      }
-    },
-  }
-})
 
 const params: ThreadsPageParams = {
   limit: 100,
@@ -922,6 +907,12 @@ describe("optimistic thread mutations", () => {
     status: "idle",
     resolved: false,
   } as AgentThread
+  const projectKey = [
+    "chat-projects",
+    "threads",
+    "user-1",
+    "project-1",
+  ] as const
   const pageKey = agentThreadKeys.page({ resolved: false })
   const pageOf = (items: Array<AgentThread>): ThreadsPage => ({
     items,
@@ -961,13 +952,17 @@ describe("optimistic thread mutations", () => {
     expect(result.current.pins.data).toEqual([existing, thread])
   })
 
-  it("renames across detail, pinned, and page caches and rolls back on failure", async () => {
+  it("renames across detail, pinned, page, and project caches and rolls back on failure", async () => {
     const request = deferred<AgentThread>()
     vi.spyOn(agentsApi, "renameThread").mockReturnValue(request.promise)
     const client = testClient()
     client.setQueryData(agentThreadKeys.detail(thread.id), thread)
     client.setQueryData(agentThreadKeys.pinned, [thread])
     client.setQueryData(pageKey, pageOf([thread]))
+    client.setQueryData<InfiniteData<ThreadsPage>>(projectKey, {
+      pages: [pageOf([thread])],
+      pageParams: [0],
+    })
     const { result } = renderHook(() => useRenameAgentThread(), {
       wrapper: wrapperFor(client),
     })
@@ -977,14 +972,18 @@ describe("optimistic thread mutations", () => {
       client.getQueryData<Array<AgentThread>>(agentThreadKeys.pinned)?.[0]
         ?.title,
       client.getQueryData<ThreadsPage>(pageKey)?.items[0]?.title,
+      client.getQueryData<InfiniteData<ThreadsPage>>(projectKey)?.pages[0]
+        ?.items[0]?.title,
     ]
 
     act(() => result.current.mutate({ threadId: thread.id, title: "After" }))
-    await waitFor(() => expect(titles()).toEqual(["After", "After", "After"]))
+    await waitFor(() =>
+      expect(titles()).toEqual(["After", "After", "After", "After"])
+    )
 
     act(() => request.reject(new Error("request failed")))
     await waitFor(() =>
-      expect(titles()).toEqual(["Before", "Before", "Before"])
+      expect(titles()).toEqual(["Before", "Before", "Before", "Before"])
     )
   })
 
@@ -995,6 +994,10 @@ describe("optimistic thread mutations", () => {
     )
     const client = testClient()
     client.setQueryData(agentThreadKeys.pinned, [thread])
+    client.setQueryData<InfiniteData<ThreadsPage>>(projectKey, {
+      pages: [pageOf([thread])],
+      pageParams: [0],
+    })
     void client.prefetchQuery({
       queryKey: agentThreadKeys.pinned,
       queryFn: () => stalePins.promise,
@@ -1009,6 +1012,10 @@ describe("optimistic thread mutations", () => {
         client.getQueryData<Array<AgentThread>>(agentThreadKeys.pinned)?.[0]
       ).toMatchObject({ resolved: true })
     )
+    expect(
+      client.getQueryData<InfiniteData<ThreadsPage>>(projectKey)?.pages[0]
+        ?.items[0]
+    ).toMatchObject({ id: thread.id, resolved: true })
     await act(async () => stalePins.resolve([thread]))
 
     expect(
@@ -1118,6 +1125,16 @@ describe("markAgentThreadViewed", () => {
   it("clears the unread flag across the caches, leaving the detail stale", () => {
     const client = testClient()
     const pagesKey = agentThreadKeys.infinitePages({ limit: 10 })
+    const projectKey = [
+      "chat-projects",
+      "threads",
+      "user-1",
+      "project-1",
+    ] as const
+    client.setQueryData<InfiniteData<ThreadsPage>>(projectKey, {
+      pages: [{ ...page, items: [unread] }],
+      pageParams: [0],
+    })
     client.setQueryData<Array<AgentThread>>(agentThreadKeys.pinned, [unread])
     client.setQueryData<InfiniteData<ThreadsPage>>(pagesKey, {
       pages: [{ items: [unread], limit: 10, offset: 0, hasMore: false }],
@@ -1128,6 +1145,10 @@ describe("markAgentThreadViewed", () => {
 
     markAgentThreadViewed(client, "thread-1")
 
+    expect(
+      client.getQueryData<InfiniteData<ThreadsPage>>(projectKey)?.pages[0]
+        ?.items[0]?.viewed
+    ).toBe(true)
     expect(
       client.getQueryData<Array<AgentThread>>(agentThreadKeys.pinned)?.[0]
         ?.viewed
@@ -1212,31 +1233,29 @@ describe("sidebar task families", () => {
   })
 })
 
-describe("desktop experience segregation", () => {
-  it("scopes list requests before paging and keeps pins, active injection and workers isolated across switches", async () => {
+describe("unified desktop history", () => {
+  it("keeps legacy and Home chats, pins, active injection and cross-origin workers together", async () => {
     Object.defineProperty(window, "openSweDesktop", {
       configurable: true,
       value: {},
     })
-    const coding = optimisticThread("legacy-coding", {
-      prompt: "Legacy coding",
-    })
+    const coding = {
+      ...optimisticThread("legacy-coding", { prompt: "Legacy coding" }),
+      experience: "coding" as const,
+    }
     const work = {
-      ...optimisticThread("work", { prompt: "Work" }),
+      ...optimisticThread("work", { prompt: "Home" }),
       experience: "agent_workspace" as const,
+      transcript: "v2" as const,
       taskWorkers: [coding],
     }
     const listPages = vi
       .spyOn(agentsApi, "listThreadsPage")
-      .mockImplementation(async (request) => ({
-        ...page,
-        items: request?.experience === "agent_workspace" ? [work] : [coding],
-      }))
+      .mockResolvedValue({ ...page, items: [work, coding] })
     const listPins = vi
       .spyOn(agentsApi, "listPinnedThreads")
       .mockResolvedValue([coding, work])
     const client = testClient()
-    client.setQueryData(["session"], { login: "mode-test" })
     client.setQueryData(agentThreadKeys.detail(coding.id), coding)
     const { result } = renderHook(
       () => ({
@@ -1249,35 +1268,23 @@ describe("desktop experience segregation", () => {
       }),
       { wrapper: wrapperFor(client) }
     )
-    await waitFor(() =>
+    await waitFor(() => {
       expect(result.current.recents.items.map((thread) => thread.id)).toEqual([
         work.id,
-      ])
-    )
-    expect(listPages).toHaveBeenCalledWith(
-      expect.objectContaining({ experience: "agent_workspace", offset: 0 })
-    )
-    expect(listPins).toHaveBeenCalledWith("agent_workspace")
-    expect(result.current.pins.data?.map((thread) => thread.id)).toEqual([
-      work.id,
-    ])
-    expect(result.current.pins.data?.[0]?.taskWorkers).toEqual([])
-    expect(result.current.active).toBeUndefined()
-    act(() => experienceStore.write("mode-test", "coding"))
-    expect(result.current.recents.items).toEqual([])
-    expect(result.current.pins.data).toBeUndefined()
-    await waitFor(() =>
-      expect(result.current.recents.items.map((thread) => thread.id)).toEqual([
         coding.id,
       ])
-    )
-    expect(listPages).toHaveBeenCalledWith(
-      expect.objectContaining({ experience: "coding", offset: 0 })
-    )
-    expect(result.current.pins.data?.map((thread) => thread.id)).toEqual([
-      coding.id,
-    ])
+      expect(result.current.pins.data).toEqual([coding, work])
+    })
+    expect(result.current.recents.items[0]?.taskWorkers).toEqual([coding])
+    expect(result.current.pins.data?.[1]?.taskWorkers).toEqual([coding])
     expect(result.current.active?.id).toBe(coding.id)
+    expect(listPages).toHaveBeenCalledWith(
+      expect.objectContaining({ offset: 0 })
+    )
+    expect(
+      listPages.mock.calls.every(([request]) => !request?.experience)
+    ).toBe(true)
+    expect(listPins).toHaveBeenCalledWith()
   })
 })
 
@@ -1292,6 +1299,7 @@ describe("Work freshness", () => {
     const work = {
       ...optimisticThread("work", { prompt: "Work" }),
       experience: "agent_workspace" as const,
+      transcript: "v2" as const,
     }
     vi.spyOn(agentsApi, "listPinnedThreads").mockImplementation(async () => [
       { ...work, status },
@@ -1316,13 +1324,10 @@ describe("Work freshness", () => {
       () => ({
         pins: useSidebarPinnedThreads(),
         pages: useInfiniteThreadsPages(
-          { experience: "agent_workspace", limit: 10 },
+          { limit: 10 },
           { pollWhileRunning: true }
         ),
-        page: useThreadsPage(
-          { experience: "agent_workspace", offset: 1 },
-          { pollWhileRunning: true }
-        ),
+        page: useThreadsPage({ offset: 1 }, { pollWhileRunning: true }),
       }),
       { wrapper: wrapperFor(client) }
     )
@@ -1371,6 +1376,7 @@ describe("Work freshness", () => {
     const work = {
       ...optimisticThread("work", { prompt: "Work" }),
       experience: "agent_workspace" as const,
+      transcript: "v2" as const,
       status: "finished" as const,
     }
     vi.spyOn(agentsApi, "listPinnedThreads").mockImplementation(async () => [
@@ -1393,7 +1399,7 @@ describe("Work freshness", () => {
         pins: useSidebarPinnedThreads(),
         detail: useAgentThread(work.id),
         pages: useInfiniteThreadsPages(
-          { experience: "agent_workspace", limit: 10 },
+          { limit: 10 },
           { pollWhileRunning: true }
         ),
       }),
@@ -1434,70 +1440,113 @@ describe("Work freshness", () => {
   })
 })
 
-it("keeps Work unread through optimistic row navigation", () => {
-  const client = testClient()
-  const work = {
-    ...optimisticThread("work", { prompt: "Work" }),
-    experience: "agent_workspace" as const,
-    viewed: false,
+it.each(["agent_workspace", "coding"] as const)(
+  "keeps %s v2 unread through optimistic row navigation",
+  (experience) => {
+    const client = testClient()
+    const work = {
+      ...optimisticThread("work", { prompt: "Work" }),
+      experience,
+      transcript: "v2" as const,
+      viewed: false,
+    }
+    const projectKey = [
+      "chat-projects",
+      "threads",
+      "user-1",
+      "project-1",
+    ] as const
+    client.setQueryData<InfiniteData<ThreadsPage>>(projectKey, {
+      pages: [{ ...page, items: [work] }],
+      pageParams: [0],
+    })
+    client.setQueryData(agentThreadKeys.detail(work.id), work)
+    client.setQueryData(agentThreadKeys.pinned, [work])
+    client.setQueryData(agentThreadKeys.page({ hierarchy: true }), {
+      ...page,
+      items: [{ ...work, id: "parent", taskWorkers: [work] }],
+    })
+    markAgentThreadViewed(client, work.id)
+    expect(
+      client.getQueryData<InfiniteData<ThreadsPage>>(projectKey)?.pages[0]
+        ?.items[0]?.viewed
+    ).toBe(false)
+    expect(
+      client.getQueryData<AgentThread>(agentThreadKeys.detail(work.id))?.viewed
+    ).toBe(false)
+    expect(
+      client.getQueryData<Array<AgentThread>>(agentThreadKeys.pinned)?.[0]
+        ?.viewed
+    ).toBe(false)
+    expect(
+      client.getQueryData<ThreadsPage>(
+        agentThreadKeys.page({ hierarchy: true })
+      )?.items[0]?.taskWorkers?.[0]?.viewed
+    ).toBe(false)
   }
-  client.setQueryData(agentThreadKeys.detail(work.id), work)
-  client.setQueryData(agentThreadKeys.pinned, [work])
-  client.setQueryData(agentThreadKeys.page({ hierarchy: true }), {
-    ...page,
-    items: [{ ...work, id: "parent", taskWorkers: [work] }],
-  })
-  markAgentThreadViewed(client, work.id)
-  expect(
-    client.getQueryData<AgentThread>(agentThreadKeys.detail(work.id))?.viewed
-  ).toBe(false)
-  expect(
-    client.getQueryData<Array<AgentThread>>(agentThreadKeys.pinned)?.[0]?.viewed
-  ).toBe(false)
-  expect(
-    client.getQueryData<ThreadsPage>(agentThreadKeys.page({ hierarchy: true }))
-      ?.items[0]?.taskWorkers?.[0]?.viewed
-  ).toBe(false)
-})
+)
 
-it("polls idle Work detail at ten seconds and running detail at two without changing Coding idle or focus defaults", async () => {
+it("refreshes Home-v2 and coding-v2 details at the same idle and running cadence and on focus and reconnect", async () => {
   vi.useFakeTimers()
   const client = testClient()
   client.setDefaultOptions({
-    queries: { retry: false, refetchOnWindowFocus: false },
+    queries: {
+      retry: false,
+      staleTime: Infinity,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+    },
   })
-  let workStatus: AgentThread["status"] = "finished"
-  let codingTitle = "before"
+  let status: AgentThread["status"] = "finished"
+  let title = "initial"
   vi.spyOn(agentsApi, "getThread").mockImplementation(async (id) => ({
     ...optimisticThread(id, { prompt: "Thread" }),
     experience: id === "work" ? "agent_workspace" : "coding",
-    title: id === "work" ? workStatus : codingTitle,
-    status: id === "work" ? workStatus : "finished",
+    transcript: "v2",
+    title,
+    status,
   }))
   const view = renderHook(
     () => ({ work: useAgentThread("work"), coding: useAgentThread("coding") }),
     { wrapper: wrapperFor(client) }
   )
-  await vi.waitFor(() =>
-    expect(view.result.current.work.data?.status).toBe("finished")
-  )
-  workStatus = "running"
-  codingTitle = "after"
-  await act(() => vi.advanceTimersByTimeAsync(10_000))
-  await vi.waitFor(() =>
-    expect(view.result.current.work.data?.status).toBe("running")
-  )
-  expect(view.result.current.coding.data?.title).toBe("before")
-  workStatus = "finished"
+  await vi.waitFor(() => {
+    expect(view.result.current.work.data?.title).toBe(title)
+    expect(view.result.current.coding.data?.title).toBe(title)
+  })
+  status = "running"
+  title = "external run"
   await act(() => vi.advanceTimersByTimeAsync(2000))
-  await vi.waitFor(() =>
-    expect(view.result.current.work.data?.status).toBe("finished")
-  )
+  expect(view.result.current.work.data?.status).toBe("finished")
+  expect(view.result.current.coding.data?.status).toBe("finished")
+  await act(() => vi.advanceTimersByTimeAsync(8000))
+  await vi.waitFor(() => {
+    expect(view.result.current.work.data?.status).toBe(status)
+    expect(view.result.current.coding.data?.status).toBe(status)
+  })
+  status = "finished"
+  await act(() => vi.advanceTimersByTimeAsync(2000))
+  await vi.waitFor(() => {
+    expect(view.result.current.work.data?.status).toBe(status)
+    expect(view.result.current.coding.data?.status).toBe(status)
+  })
+  title = "focused"
   act(() => {
     focusManager.setFocused(false)
     focusManager.setFocused(true)
   })
-  await act(() => vi.advanceTimersByTimeAsync(10))
-  expect(view.result.current.coding.data?.title).toBe("before")
+  await vi.waitFor(() => {
+    expect(view.result.current.work.data?.title).toBe(title)
+    expect(view.result.current.coding.data?.title).toBe(title)
+  })
+  title = "reconnected"
+  act(() => {
+    onlineManager.setOnline(false)
+    onlineManager.setOnline(true)
+  })
+  await vi.waitFor(() => {
+    expect(view.result.current.work.data?.title).toBe(title)
+    expect(view.result.current.coding.data?.title).toBe(title)
+  })
   focusManager.setFocused(undefined)
 })

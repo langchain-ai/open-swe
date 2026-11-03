@@ -14,10 +14,12 @@ from uuid import uuid7
 from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
 from sqlalchemy import RowMapping, text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from openswe.agent_api.client import MDA_RUNTIME, RUNTIME_METADATA_KEY
 from openswe.database.postgres import transaction
 from openswe.thread_ids import mda_successor_thread_id
+from openswe.ui_invalidations import Topic
 
 Runtime = Literal["local", "mda"]
 ThreadStatus = Literal["idle", "busy", "interrupted", "error"]
@@ -162,7 +164,31 @@ class IndexedThread(BaseModel):
                 .mappings()
                 .first()
             )
-        return None if row is None else self.from_row(row)
+        if row is None:
+            return None
+        updated = self.from_row(row)
+        await updated.invalidate_projects()
+        return updated
+
+    async def invalidate_projects(self, conn: AsyncConnection | None = None) -> None:
+        if conn is None:
+            async with transaction() as transaction_conn:
+                await self.invalidate_projects(transaction_conn)
+            return
+        owners = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT DISTINCT user_id FROM chat_project_membership WHERE thread_id = :thread_id"
+                    ),
+                    {"thread_id": self.thread_id},
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for owner in owners:
+            await Topic.CHAT_PROJECTS.invalidate(conn, key=str(owner))
 
     def stopped_since(self, moment_ms: int) -> bool:
         """Whether someone stopped the thread at or after ``moment_ms``."""
@@ -225,6 +251,13 @@ class ThreadSearch(BaseModel):
     async def run(self) -> list[IndexedThread]:
         where, params = self._where()
         order = "ASC" if self.sort_order == "asc" else "DESC"
+        sort_column = (
+            "CASE WHEN jsonb_typeof(metadata->'updated_at_ms') = 'number' "
+            "THEN to_timestamp((metadata->>'updated_at_ms')::double precision / 1000) "
+            "ELSE updated_at END"
+            if self.sort_by == "updated_at"
+            else self.sort_by
+        )
         columns, ranking = _COLUMNS, ""
         if self.text:
             columns, ranking = f"{_COLUMNS}, {_RANK} AS rank", "rank DESC, "
@@ -233,7 +266,7 @@ class ThreadSearch(BaseModel):
                 await conn.execute(
                     text(
                         f"SELECT {columns} FROM thread_index WHERE {where} "
-                        f"ORDER BY {ranking}{self.sort_by} {order}, thread_id {order} "
+                        f"ORDER BY {ranking}{sort_column} {order}, thread_id {order} "
                         "LIMIT :limit OFFSET :offset"
                     ),
                     {**params, "limit": self.limit, "offset": self.offset},
@@ -419,7 +452,11 @@ async def update(thread_id: str, metadata: Mapping[str, JsonValue]) -> IndexedTh
             .mappings()
             .first()
         )
-    return None if row is None else IndexedThread.from_row(row)
+    if row is None:
+        return None
+    updated = IndexedThread.from_row(row)
+    await updated.invalidate_projects()
+    return updated
 
 
 async def put_entry(
@@ -514,10 +551,16 @@ async def set_status(thread_id: str, status: ThreadStatus) -> None:
             ),
             {"thread_id": thread_id, "status": status},
         )
+        thread = await get(thread_id)
+        if thread is not None:
+            await thread.invalidate_projects(conn)
 
 
 async def delete(thread_id: str) -> bool:
+    thread = await get(thread_id)
     async with transaction() as conn:
+        if thread is not None:
+            await thread.invalidate_projects(conn)
         result = await conn.execute(
             text("DELETE FROM thread_index WHERE thread_id = :thread_id"),
             {"thread_id": thread_id},

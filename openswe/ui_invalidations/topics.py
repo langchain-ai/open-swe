@@ -111,6 +111,7 @@ class Topic(BaseTopic):
     """Admin announcements and their delivery progress; admins only."""
 
     NOTIFICATIONS: ClassVar[KeyedTopic[str]]
+    CHAT_PROJECTS: ClassVar[KeyedTopic[str]]
 
     SLACK_CHANNELS: ClassVar[Topic]
     """The Slack channel directory, after each walk over Slack."""
@@ -247,3 +248,4 @@ class RecipientTopic(KeyedTopic[str]):
 
 
 Topic.NOTIFICATIONS = RecipientTopic("notifications")
+Topic.CHAT_PROJECTS = RecipientTopic("chat-projects")

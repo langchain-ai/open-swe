@@ -58,6 +58,22 @@ def test_github_thread_identity_preserves_attribution(monkeypatch):
     principal.authorize("system")
 
 
+def test_unlinked_person_can_manage_personal_projects_but_not_workspace_settings() -> None:
+    principal = DashboardPrincipal.from_session(
+        {
+            "sub": "user:00000000-0000-0000-0000-000000000001",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "provider": "langsmith",
+            "langsmith_subject": "ls-sub",
+        }
+    )
+    principal.authorize_path("/dashboard/api/chat-projects", "POST")
+    principal.authorize_path("/dashboard/api/chat-projects/project-id", "DELETE")
+    with pytest.raises(HTTPException) as error:
+        principal.authorize_path("/dashboard/api/workspaces", "POST")
+    assert error.value.status_code == 403
+
+
 @pytest.mark.parametrize(
     ("login", "admin"),
     [("alice", True), ("mallory", False), ("user:00000000-0000-0000-0000-000000000001", False)],

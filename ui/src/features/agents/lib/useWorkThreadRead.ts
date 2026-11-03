@@ -91,7 +91,7 @@ export function useWorkThreadRead(thread: AgentThread, source: ThreadSource) {
   const runId = source.kind === "transcript" ? source.settledRunId : null
   const readable =
     active &&
-    thread.experience === "agent_workspace" &&
+    thread.transcript === "v2" &&
     !thread.viewed &&
     thread.status !== "running" &&
     !source.isRunning &&

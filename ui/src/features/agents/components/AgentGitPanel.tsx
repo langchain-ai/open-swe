@@ -219,7 +219,7 @@ export function AgentGitPanel({
       terminalTarget={terminalTarget}
       cwd={cwd}
       terminalAvailable={terminalAvailable}
-      diffAvailable
+      diffAvailable={Boolean(thread.repoFullName || localRepository?.branch)}
       browserAvailable={browserAvailable}
       renderBrowser={() => (
         <BrowserPanel threadId={thread.id} opened={browserOpened} />

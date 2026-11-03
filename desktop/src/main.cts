@@ -43,7 +43,6 @@ const {
   originRepo,
   readBranchDiff,
   readDiff,
-  removeWorktree,
   repoRoot,
   repositoryMetadata,
   restoreWorktree,
@@ -588,30 +587,6 @@ async function discardLocalThread(thread) {
   localThreadStore.delete(thread.id);
   if (thread.checkpoint.repo && thread.checkpoint.ref)
     deleteRefs(thread.checkpoint.repo, [thread.checkpoint.ref]);
-  await discardThreadWorktree(thread).catch((error) =>
-    console.warn("Could not remove a local thread's worktree", error),
-  );
-}
-
-/**
- * Every worktree this app made for the thread, including ones it has since
- * moved off, minus any another thread is in or owns.
- */
-async function discardThreadWorktree(thread) {
-  const others = localThreadStore.list().filter((it) => it.id !== thread.id);
-  const owned = thread.ownedWorktrees.filter(
-    (worktree) =>
-      managedWorktree(worktree) &&
-      !others.some(
-        (other) =>
-          other.worktreePath === worktree ||
-          other.ownedWorktrees.includes(worktree),
-      ),
-  );
-  if (!owned.length) return;
-  const repo = await repoRoot(thread.cwd);
-  if (!repo) return;
-  for (const worktree of owned) await removeWorktree(repo, worktree);
 }
 
 function configureDesktopIpc() {
@@ -893,11 +868,7 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     return localThreadStore.list();
   });
-  /**
-   * Forget a thread the backend no longer has: stop serving it and remove the
-   * worktrees and refs this app made for it. Its files in the user's own
-   * checkout are theirs and stay.
-   */
+  /** Forget a thread and its checkpoint ref without deleting its files or worktrees. */
   ipcMain.handle("desktop:discard-local-thread", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
     const thread = localThreadStore.get(threadId);

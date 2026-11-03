@@ -37,8 +37,8 @@ export interface AppCommand {
 export function createNewThreadCommand(run: () => void): AppCommand {
   return {
     id: "new-thread",
-    label: "New thread",
-    aliases: ["new chat", "start thread"],
+    label: "New chat",
+    aliases: ["new thread", "start thread"],
     shortcuts: ["mod+n", "mod+shift+o"],
     group: "General",
     run,
@@ -99,7 +99,7 @@ export function AppCommandProvider({
     () => [
       {
         id: "search-commands",
-        label: "Search commands and threads",
+        label: "Search chats and commands",
         aliases: ["command palette", "quick switcher"],
         shortcuts: ["mod+k"],
         group: "General",
@@ -111,7 +111,7 @@ export function AppCommandProvider({
       createNewThreadCommand(() => void navigate({ to: "/agents" })),
       {
         id: "open-threads",
-        label: "Open threads",
+        label: "Open chats",
         aliases: ["home", "chats", "agents"],
         group: "Navigation",
         run: () => void navigate({ to: "/agents" }),

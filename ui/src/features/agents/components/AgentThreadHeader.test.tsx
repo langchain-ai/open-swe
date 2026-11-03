@@ -10,10 +10,12 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AgentThreadHeader } from "./AgentThreadHeader"
+import { useLocalThread } from "@/features/agents/lib/desktopLocal"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 
 vi.mock("@/lib/session", () => ({ useSession: () => ({ data: null }) }))
 vi.mock("@/features/agents/lib/desktopLocal", () => ({
-  useLocalThread: () => null,
+  useLocalThread: vi.fn(() => null),
 }))
 vi.mock("@/features/agents/lib/sidebarPrefs", () => ({
   useSidebarPrefs: () => ({ prefs: { filters: {} } }),
@@ -30,19 +32,38 @@ vi.mock("@/features/agents/lib/queries", () => ({
 
 const title = "Show the thread title"
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  Object.defineProperty(window, "openSweDesktop", {
+    configurable: true,
+    value: undefined,
+  })
+})
 
 describe("AgentThreadHeader", () => {
-  it.each(["Cloud", "This Mac", "Local CLI"] as const)(
-    "only shows the run target indicator for local targets: %s",
-    (target) => {
-      render(<AgentThreadHeader target={target} panelCollapsed={false} />)
-      const indicator = screen.queryByRole("img", {
-        name: `Runs on ${target}`,
-      })
-      expect(Boolean(indicator)).toBe(target !== "Cloud")
-    }
-  )
+  it("opens an existing local thread's folder without requiring Home mode", async () => {
+    vi.mocked(useLocalThread).mockReturnValueOnce({
+      id: "local-thread",
+      cwd: "/work/demo",
+      worktreePath: null,
+      ownedWorktrees: [],
+      bridgeId: "bridge",
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    const openTaskFolder = vi.fn().mockResolvedValue(true)
+    Object.defineProperty(window, "openSweDesktop", {
+      configurable: true,
+      value: { openTaskFolder },
+    })
+    render(<AgentThreadHeader target="This Mac" panelCollapsed={false} />, {
+      wrapper: TooltipProvider,
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Open task folder" }))
+    await waitFor(() =>
+      expect(openTaskFolder).toHaveBeenCalledWith("local-thread")
+    )
+  })
 
   it("saves a trimmed title once on Enter then blur", async () => {
     const onRename = vi.fn().mockResolvedValue(undefined)

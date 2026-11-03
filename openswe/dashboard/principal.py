@@ -66,6 +66,7 @@ class DashboardPrincipal:
             "my-managed-tools",
             "my-credentials/langsmith",
             "threads",
+            "chat-projects",
             "bridges",
             "skills",
             "github/login",

@@ -1,8 +1,4 @@
-import {
-  experienceStore,
-  useExperience,
-  type Experience,
-} from "@/lib/experience"
+import type { Experience } from "@/lib/experience"
 import {
   mergeTaskFamily,
   sidebarRefreshInterval,
@@ -87,6 +83,7 @@ export const agentThreadKeys = {
 
 export function invalidateAgentThreadLists(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: agentThreadKeys.lists })
+  void queryClient.invalidateQueries({ queryKey: ["chat-projects", "threads"] })
 }
 
 function patchAgentThread(
@@ -98,9 +95,7 @@ function patchAgentThread(
   const update = (thread: AgentThread): AgentThread =>
     thread.id === threadId &&
     (runId === undefined ||
-      (thread.experience === "agent_workspace" &&
-        thread.latestRunId === runId &&
-        thread.status !== "running"))
+      (thread.latestRunId === runId && thread.status !== "running"))
       ? { ...thread, ...patch }
       : thread.taskWorkers
         ? { ...thread, taskWorkers: thread.taskWorkers.map(update) }
@@ -115,6 +110,17 @@ function patchAgentThread(
   )
   queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
     { queryKey: ["agent-threads", "lists", "infinite-pages"] },
+    (prev) =>
+      prev && {
+        ...prev,
+        pages: prev.pages.map((page) => ({
+          ...page,
+          items: page.items.map(update),
+        })),
+      }
+  )
+  queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
+    { queryKey: ["chat-projects", "threads"] },
     (prev) =>
       prev && {
         ...prev,
@@ -144,7 +150,7 @@ export class WorkThreadCache {
     const thread = this.queryClient.getQueryData<AgentThread>(
       agentThreadKeys.detail(this.threadId)
     )
-    if (thread?.experience !== "agent_workspace") return
+    if (!thread) return
     void this.queryClient.invalidateQueries({
       queryKey: agentThreadKeys.detail(this.threadId),
       exact: true,
@@ -211,6 +217,12 @@ function findCachedAgentThread(
       })
       .flatMap(([, data]) => data?.items ?? [])
       .flatMap(threadFamily)
+      .find(matches) ??
+    queryClient
+      .getQueriesData<InfiniteData<ThreadsPage>>({
+        queryKey: ["chat-projects", "threads"],
+      })
+      .flatMap(([, data]) => data?.pages.flatMap((page) => page.items) ?? [])
       .find(matches)
   )
 }
@@ -224,16 +236,10 @@ function setAgentThreadPinned(
   for (const [key] of queryClient.getQueriesData<Array<AgentThread>>({
     queryKey: agentThreadKeys.pinned,
   })) {
-    const experience = key[3] as Experience | undefined
     queryClient.setQueryData<Array<AgentThread>>(key, (prev) => {
       if (!prev) return prev
       const isPinned = prev.some((candidate) => candidate.id === threadId)
-      if (pinned)
-        return isPinned ||
-          !thread ||
-          !experienceStore.includes(thread, experience)
-          ? prev
-          : [...prev, thread]
+      if (pinned) return isPinned || !thread ? prev : [...prev, thread]
       return isPinned
         ? prev.filter((candidate) => candidate.id !== threadId)
         : prev
@@ -305,6 +311,7 @@ function snapshotAgentThreadQueries(
     ...queryClient.getQueriesData({
       queryKey: ["agent-threads", "lists", "page"],
     }),
+    ...queryClient.getQueriesData({ queryKey: ["chat-projects", "threads"] }),
   ].map(([key, data]): AgentThreadQuerySnapshot => [key, data, true])
   return [...direct, ...lists]
 }
@@ -338,6 +345,7 @@ export async function beginAgentThreadUpdate(
     queryClient.cancelQueries({
       queryKey: ["agent-threads", "lists", "page"],
     }),
+    queryClient.cancelQueries({ queryKey: ["chat-projects", "threads"] }),
   ])
   const previous = snapshotAgentThreadQueries(queryClient, threadId)
   apply()
@@ -373,14 +381,23 @@ export function markAgentThreadViewed(
   threadId: string
 ): void {
   const view = (thread: AgentThread): AgentThread =>
-    thread.id === threadId &&
-    thread.experience !== "agent_workspace" &&
-    !thread.viewed
+    thread.id === threadId && thread.transcript !== "v2" && !thread.viewed
       ? { ...thread, viewed: true, viewedAt: Date.now() }
       : thread.taskWorkers
         ? { ...thread, taskWorkers: thread.taskWorkers.map(view) }
         : thread
   const viewList = (threads: Array<AgentThread>) => threads.map(view)
+  queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
+    { queryKey: ["chat-projects", "threads"] },
+    (current) =>
+      current && {
+        ...current,
+        pages: current.pages.map((page) => ({
+          ...page,
+          items: viewList(page.items),
+        })),
+      }
+  )
 
   // Patched as already-stale: the detail GET is what marks the thread viewed
   // server-side, and a plain setQueryData would stamp this fresh under the
@@ -449,6 +466,17 @@ export function setAgentThreadResolved(
         ? { ...thread, taskWorkers: thread.taskWorkers.map(update) }
         : thread
   const cachedThread = findCachedAgentThread(queryClient, threadId)
+  queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
+    { queryKey: ["chat-projects", "threads"] },
+    (current) =>
+      current && {
+        ...current,
+        pages: current.pages.map((page) => ({
+          ...page,
+          items: page.items.map(update),
+        })),
+      }
+  )
 
   queryClient.setQueryData<AgentThread>(
     agentThreadKeys.detail(threadId),
@@ -723,23 +751,15 @@ function sidebarPageParams({
 }
 
 export function useSidebarPinnedThreads({ enabled = true } = {}) {
-  const { experience } = useExperience()
   return useQuery({
-    queryKey: experience
-      ? [...agentThreadKeys.pinned, experience]
-      : agentThreadKeys.pinned,
-    queryFn: () => agentsApi.listPinnedThreads(experience),
-    select: (threads) => experienceStore.filter(threads, experience),
+    queryKey: agentThreadKeys.pinned,
+    queryFn: () => agentsApi.listPinnedThreads(),
     enabled,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
-    ...(experience === "agent_workspace"
-      ? { refetchOnReconnect: "always" }
-      : {}),
+    refetchOnReconnect: "always",
     refetchInterval: (query) =>
-      experience === "agent_workspace"
-        ? Math.min(sidebarRefreshInterval(query.state.data) || 10_000, 10_000)
-        : sidebarRefreshInterval(query.state.data),
+      Math.min(sidebarRefreshInterval(query.state.data) || 10_000, 10_000),
   })
 }
 
@@ -756,12 +776,10 @@ export function useSidebarRepos({
   includeClaudeCode?: boolean
   enabled?: boolean
 }) {
-  const { experience } = useExperience()
   const params = {
     includeAutomations,
     includeResolved,
     owned,
-    ...(experience ? { experience } : {}),
   }
   const hydrated = useSidebarPrefsHydrated()
   return useQuery({
@@ -772,12 +790,6 @@ export function useSidebarRepos({
         ...excludedSources(includeClaudeCode),
       }),
     enabled: enabled && hydrated,
-    placeholderData: (previous, query) =>
-      query?.queryKey[3] &&
-      (query.queryKey[3] as { experience?: Experience }).experience ===
-        experience
-        ? previous
-        : undefined,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
   })
@@ -795,24 +807,15 @@ function useFetchedSidebarThread(
   threadId: string | undefined,
   enabled: boolean
 ): AgentThread | undefined {
-  const { experience } = useExperience()
   return useQuery({
     queryKey: agentThreadKeys.sidebarActive(threadId ?? ""),
     queryFn: () => agentsApi.getThread(threadId!, { markViewed: false }),
     enabled: enabled && Boolean(threadId),
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
-    ...(experience === "agent_workspace"
-      ? { refetchOnReconnect: "always" }
-      : {}),
+    refetchOnReconnect: "always",
     refetchInterval: (current) =>
-      experience === "agent_workspace"
-        ? current.state.data?.status === "running"
-          ? 2000
-          : 10_000
-        : sidebarRefreshInterval(
-            current.state.data ? [current.state.data] : []
-          ),
+      current.state.data?.status === "running" ? 2000 : 10_000,
     retry: false,
   }).data
 }
@@ -841,7 +844,6 @@ export function useSidebarActiveThread({
   loadedThreads: Array<AgentThread>
   enabled?: boolean
 }): AgentThread | undefined {
-  const { experience } = useExperience()
   const active = useCachedAgentThread(activeThreadId)
   const rootId =
     (active?.taskMembership?.role === "worker"
@@ -858,18 +860,13 @@ export function useSidebarActiveThread({
     enabled && !listed && !rootDetail
   )
   const row = listed ?? rootDetail ?? fetched ?? active
-  return row && experienceStore.includes(row, experience)
-    ? experienceStore.filter(
-        [
-          mergeTaskFamily(
-            row,
-            [rootDetail, fetched, active].flatMap((thread) =>
-              thread ? [thread] : []
-            )
-          ),
-        ],
-        experience
-      )[0]
+  return row
+    ? mergeTaskFamily(
+        row,
+        [rootDetail, fetched, active].filter((thread): thread is AgentThread =>
+          Boolean(thread)
+        )
+      )
     : undefined
 }
 
@@ -878,19 +875,12 @@ function useSidebarThreadPages(
   enabled: boolean
 ) {
   const hydrated = useSidebarPrefsHydrated()
-  const { experience } = useExperience()
-  const query = useInfiniteThreadsPages(
-    { ...params, ...(experience ? { experience } : {}) },
-    {
-      enabled: enabled && hydrated,
-      pollWhileRunning: true,
-    }
-  )
+  const query = useInfiniteThreadsPages(params, {
+    enabled: enabled && hydrated,
+    pollWhileRunning: true,
+  })
   return {
-    items: experienceStore.filter(
-      query.data?.pages.flatMap((page) => page.items) ?? [],
-      experience
-    ),
+    items: query.data?.pages.flatMap((page) => page.items) ?? [],
     hasMore: query.hasNextPage,
     isFetchingNextPage: query.isFetchingNextPage,
     isPending: query.isPending,
@@ -1020,7 +1010,7 @@ export function useAgentThread(threadId: string) {
     // session cookie), so a dropped event stream must not leave the view — and
     // its stop button — believing the run already ended.
     refetchInterval: (current) =>
-      current.state.data?.experience === "agent_workspace"
+      current.state.data?.transcript === "v2"
         ? current.state.data.status === "running" ||
           current.state.data.waitingForDelegatedWork
           ? 2000
@@ -1030,13 +1020,13 @@ export function useAgentThread(threadId: string) {
           ? 3000
           : false,
     refetchOnWindowFocus: (current) =>
-      current.state.data?.experience === "agent_workspace"
+      current.state.data?.transcript === "v2"
         ? "always"
         : typeof defaults.refetchOnWindowFocus === "function"
           ? defaults.refetchOnWindowFocus(current)
           : (defaults.refetchOnWindowFocus ?? true),
     refetchOnReconnect: (current) =>
-      current.state.data?.experience === "agent_workspace"
+      current.state.data?.transcript === "v2"
         ? "always"
         : typeof defaults.refetchOnReconnect === "function"
           ? defaults.refetchOnReconnect(current)
@@ -1503,10 +1493,20 @@ export function useDeleteAgentThread() {
     meta: { errorTitle: "Couldn't delete thread" },
     onSuccess: (_, threadId) => {
       queryClient.removeQueries({ queryKey: agentThreadKeys.detail(threadId) })
+      queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
+        { queryKey: ["chat-projects", "threads"] },
+        (current) =>
+          current && {
+            ...current,
+            pages: current.pages.map((page) => ({
+              ...page,
+              items: page.items.filter((thread) => thread.id !== threadId),
+            })),
+          }
+      )
       invalidateAgentThreadLists(queryClient)
-      // A "This Mac" thread also leaves a worktree and a bridge on this machine.
       const desktop = window.openSweDesktop
-      if (desktop)
+      if (desktop?.preservesThreadFiles)
         void desktop
           .discardLocalThread(threadId)
           .then((discarded) => {
@@ -1517,7 +1517,7 @@ export function useDeleteAgentThread() {
           })
           .catch((error: unknown) =>
             reportError({
-              title: "Couldn't clean up the thread's local worktree",
+              title: "Couldn't disconnect the chat's local session",
               error,
             })
           )
@@ -1598,6 +1598,7 @@ export function storeAgentThread(
 ): void {
   queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread)
   queryClient.setQueryData(agentThreadKeys.sidebarActive(thread.id), thread)
+  patchAgentThread(queryClient, thread.id, thread)
 }
 
 export function usePinAgentThread() {
@@ -1688,44 +1689,22 @@ export function useInfiniteThreadsPages(
           refetchOnWindowFocus: true,
         }
       : {}),
-    ...(params.experience === "agent_workspace"
-      ? { refetchOnWindowFocus: "always", refetchOnReconnect: "always" }
-      : {}),
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
   })
-  const work = params.experience === "agent_workspace"
-  const refreshPages =
-    pagesQuery.data?.pages.filter(
-      (page) => work || sidebarRefreshInterval(page.items)
-    ) ?? []
+  const refreshPages = pagesQuery.data?.pages ?? []
   const pollOffsets =
     refreshPages.length > 0
       ? [...new Set([0, ...refreshPages.map((page) => page.offset)])]
       : []
-  const idleRefreshedAt = useRef(0)
-  const discoverIdlePages = () => {
-    if (Date.now() - idleRefreshedAt.current < 30_000) return false
-    idleRefreshedAt.current = Date.now()
-    return true
-  }
   const refreshInterval = sidebarRefreshInterval(
     refreshPages.flatMap((page) => page.items)
   )
   useQuery({
     queryKey: ["agent-thread-page-poll", params, pollOffsets],
     queryFn: async () => {
-      const offsets =
-        params.experience === "agent_workspace" || discoverIdlePages()
-          ? pollOffsets
-          : [
-              ...new Set([
-                0,
-                ...refreshPages
-                  .filter((page) => sidebarRefreshInterval(page.items) === 2000)
-                  .map((page) => page.offset),
-              ]),
-            ]
       const refreshed = await Promise.all(
-        offsets.map((offset) =>
+        pollOffsets.map((offset) =>
           agentsApi.listThreadsPage({ ...params, offset })
         )
       )
@@ -1771,12 +1750,9 @@ export function useInfiniteThreadsPages(
       options.pollWhileRunning &&
       pollOffsets.length > 0
     ),
-    refetchInterval: work
-      ? Math.min(refreshInterval || 10_000, 10_000)
-      : refreshInterval,
-    ...(work
-      ? { refetchOnWindowFocus: "always", refetchOnReconnect: "always" }
-      : {}),
+    refetchInterval: Math.min(refreshInterval || 10_000, 10_000),
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
   })
   return pagesQuery
 }
@@ -1800,12 +1776,10 @@ export function useThreadsPage(
         : undefined,
     refetchInterval: (query) =>
       options.pollWhileRunning
-        ? params.experience === "agent_workspace"
-          ? Math.min(
-              sidebarRefreshInterval(query.state.data?.items) || 10_000,
-              10_000
-            )
-          : sidebarRefreshInterval(query.state.data?.items)
+        ? Math.min(
+            sidebarRefreshInterval(query.state.data?.items) || 10_000,
+            10_000
+          )
         : false,
     ...(options.staleWhileRevalidate
       ? {
@@ -1814,8 +1788,7 @@ export function useThreadsPage(
           refetchOnWindowFocus: true,
         }
       : {}),
-    ...(params.experience === "agent_workspace"
-      ? { refetchOnWindowFocus: "always", refetchOnReconnect: "always" }
-      : {}),
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
   })
 }

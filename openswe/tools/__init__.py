@@ -3,6 +3,11 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 _TOOL_MODULES = {
+    "assign_chat_project": ".chat_projects",
+    "create_chat_project": ".chat_projects",
+    "delete_chat_project": ".chat_projects",
+    "list_chat_projects": ".chat_projects",
+    "update_chat_project": ".chat_projects",
     "add_finding": ".add_finding",
     "assign_human_reviewer": ".request_human_review",
     "auto_assign_human_reviewer": ".request_human_review",
@@ -96,6 +101,11 @@ _TOOL_MODULES = {
 }
 
 __all__ = [
+    "assign_chat_project",
+    "create_chat_project",
+    "delete_chat_project",
+    "list_chat_projects",
+    "update_chat_project",
     "add_finding",
     "assign_human_reviewer",
     "auto_assign_human_reviewer",
@@ -216,6 +226,13 @@ if TYPE_CHECKING:
     )
     from openswe.tools.background_execute import background_execute
     from openswe.tools.background_task import background_task
+    from openswe.tools.chat_projects import (
+        assign_chat_project,
+        create_chat_project,
+        delete_chat_project,
+        list_chat_projects,
+        update_chat_project,
+    )
     from openswe.tools.classify import classify
     from openswe.tools.code_channel_set_view import code_channel_set_view
     from openswe.tools.connect_managed_tools import connect_managed_tools

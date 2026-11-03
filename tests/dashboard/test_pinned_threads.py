@@ -128,6 +128,19 @@ async def test_deleted_unreadable_and_private_pins_are_checked_for_each_viewer_a
     ]
 
 
+async def test_pin_order_is_personal_and_rejects_unknown_or_duplicate_ids(people: None) -> None:
+    for thread_id in ("first", "second", "hidden"):
+        await pins.pin_thread("alice", thread_id)
+    await pins.pin_thread("bob", "bob-only")
+    await pins.THREAD_PINS.reorder("alice", ["second", "first"])
+    assert await pins.list_thread_pin_ids("alice") == ["second", "first", "hidden"]
+    assert await pins.list_thread_pin_ids("bob") == ["bob-only"]
+    for invalid in (["first", "first"], ["bob-only"]):
+        with pytest.raises(ValueError):
+            await pins.THREAD_PINS.reorder("alice", invalid)
+    assert await pins.list_thread_pin_ids("alice") == ["second", "first", "hidden"]
+
+
 async def test_search_failure_propagates_instead_of_returning_an_empty_pin_list(
     thread_api: ThreadAPI, people: None
 ) -> None:

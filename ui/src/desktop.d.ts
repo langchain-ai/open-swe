@@ -29,7 +29,7 @@ export interface DesktopLocalThread {
   cwd: string
   worktreePath: string | null
   managedTaskFolder?: boolean
-  /** Worktrees this app created for the thread, removed when it is discarded. */
+  /** Worktrees this app created for the thread. */
   ownedWorktrees: Array<string>
   bridgeId: string | null
   createdAt: number
@@ -157,6 +157,7 @@ declare global {
     __OPEN_SWE_BUNDLE__?: { commit: string | null; built_at: string }
     openSweDesktop?: {
       isDesktop: true
+      preservesThreadFiles?: boolean
       taskWorkspaces?: boolean
       writeClipboard: (value: string) => Promise<void>
       copyPageLink: () => Promise<void>

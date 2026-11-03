@@ -7,7 +7,7 @@ export function DeleteThreadDialog({
   threadTitle,
   isDeleting,
   onConfirm,
-  detail = "This cannot be undone.",
+  detail = "This cannot be undone. Working files are kept.",
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -19,7 +19,7 @@ export function DeleteThreadDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        title="Delete thread"
+        title="Delete chat"
         description={`Delete "${threadTitle}"? ${detail}`}
         showClose={false}
         className="w-[min(28rem,calc(100vw-2rem))]"

@@ -13,7 +13,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ChatComposer, buildCommandItems } from "./ChatComposer"
 import { api } from "@/lib/api"
-import { AgentWorkspaceProvider } from "@/features/agents/lib/agentWorkspace"
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import { replaceTextRange } from "./composerTrigger"
 import type { ChatComposerProps } from "./ChatComposer"
@@ -73,7 +72,7 @@ beforeEach(() => {
 function renderComposer(
   running: boolean,
   props: Partial<ChatComposerProps> = {},
-  workspace = false
+  _legacyWorkspace = false
 ) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
@@ -82,12 +81,10 @@ function renderComposer(
     <QueryClientProvider client={client}>
       <AgentThreadStreamBoundary>
         <ThreadSourceProvider threadId="thread-1" transcript={false}>
-          <AgentWorkspaceProvider enabled={workspace}>
-            <ChatComposer
-              activeRun={{ threadId: "thread-1", running }}
-              {...props}
-            />
-          </AgentWorkspaceProvider>
+          <ChatComposer
+            activeRun={{ threadId: "thread-1", running }}
+            {...props}
+          />
         </ThreadSourceProvider>
       </AgentThreadStreamBoundary>
     </QueryClientProvider>,
@@ -258,46 +255,49 @@ describe("ChatComposer drafts", () => {
 })
 
 describe("ChatComposer options", () => {
-  it("keeps local setup reachable in workspace mode without taking Escape from the context popover", async () => {
-    const onTargetChange = vi.fn()
-    renderComposer(
-      true,
-      {
-        runTarget: "local",
-        onRunTargetChange: onTargetChange,
-        onSelectLocalRepo: vi.fn(),
-        onAddLocalRepo: vi.fn(),
-        onRemoveLocalRepo: vi.fn(),
-        onSelectLocalRepoBranch: vi.fn(),
-        onRefreshLocalRepoBranch: vi.fn(),
-        onLocalWorkspaceModeChange: vi.fn(),
-      },
-      true
-    )
+  it.each([true, false])(
+    "keeps local setup reachable without taking Escape from context (legacy mode %s)",
+    async (workspace) => {
+      const onTargetChange = vi.fn()
+      renderComposer(
+        true,
+        {
+          runTarget: "local",
+          onRunTargetChange: onTargetChange,
+          onSelectLocalRepo: vi.fn(),
+          onAddLocalRepo: vi.fn(),
+          onRemoveLocalRepo: vi.fn(),
+          onSelectLocalRepoBranch: vi.fn(),
+          onRefreshLocalRepoBranch: vi.fn(),
+          onLocalWorkspaceModeChange: vi.fn(),
+        },
+        workspace
+      )
 
-    expect(screen.getByRole("button", { name: "This Mac" })).toBeTruthy()
-    expect(
-      screen.queryByRole("button", { name: "Select repository" })
-    ).toBeNull()
-    fireEvent.click(
-      screen.getByRole("button", { name: "Task context: Use a folder" })
-    )
-    const dialog = await screen.findByRole("dialog", { name: "Task context" })
-    expect(
-      screen.getByRole("button", { name: "Automatic task folder" })
-    ).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "No branch" })).toBeNull()
-    expect(
-      screen.queryByRole("button", { name: "Current checkout" })
-    ).toBeNull()
-    fireEvent.keyDown(dialog, { key: "Escape" })
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "Task context" })).toBeNull()
-    )
-    expect(cancelThread).not.toHaveBeenCalled()
-  })
+      expect(screen.queryByRole("button", { name: "This Mac" })).toBeNull()
+      expect(
+        screen.queryByRole("button", { name: "Select repository" })
+      ).toBeNull()
+      fireEvent.click(screen.getByRole("button", { name: "Working context" }))
+      const dialog = await screen.findByRole("dialog", {
+        name: "Working context",
+      })
+      expect(screen.getByRole("button", { name: "Use a folder" })).toBeTruthy()
+      expect(screen.queryByRole("button", { name: "No branch" })).toBeNull()
+      expect(
+        screen.queryByRole("button", { name: "Current checkout" })
+      ).toBeNull()
+      fireEvent.keyDown(dialog, { key: "Escape" })
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("dialog", { name: "Working context" })
+        ).toBeNull()
+      )
+      expect(cancelThread).not.toHaveBeenCalled()
+    }
+  )
 
-  it("keeps an existing local thread's branch controls in task context", async () => {
+  it("keeps an existing local thread's branch controls in Advanced/Git", async () => {
     renderComposer(
       false,
       {
@@ -312,8 +312,11 @@ describe("ChatComposer options", () => {
       },
       true
     )
-    fireEvent.click(screen.getByRole("button", { name: "Task context: demo" }))
-    expect(await screen.findByRole("button", { name: "main" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Working context" }))
+    await screen.findByRole("dialog", { name: "Working context" })
+    fireEvent.click(screen.getByText("Advanced", { selector: "summary" }))
+    fireEvent.click(screen.getByText("Git", { selector: "summary" }))
+    expect(screen.getByRole("button", { name: "main" })).toBeTruthy()
   })
 
   it("offers attachments without a plan-mode toggle", async () => {

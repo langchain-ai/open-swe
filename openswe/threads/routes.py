@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from openswe.audit_logs.middleware import audit_endpoint
+from openswe.chat_projects import routes as chat_project_routes
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.oauth import bind_audit_session, decode_upload_ticket
 from openswe.github.pull_request_checks import PullRequestState
@@ -64,6 +65,7 @@ from openswe.threads.listing import (
     unpin_dashboard_thread,
 )
 from openswe.threads.machine_reads import machine_thread, machine_threads
+from openswe.threads.pins import THREAD_PINS
 from openswe.threads.principals import PrincipalDep
 from openswe.threads.proxy import (
     proxy_dashboard_thread_commands,
@@ -203,6 +205,22 @@ async def api_list_pinned_threads(
     return await list_dashboard_pinned_threads(
         session["sub"], email=session.get("email"), experience=experience
     )
+
+
+class ThreadPinOrder(BaseModel):
+    threadIds: list[str] = Field(max_length=1000)
+
+
+@router.post("/threads/pins/order", status_code=204)
+@audit_endpoint
+async def reorder_thread_pins(
+    body: ThreadPinOrder, session: dict[str, str] = SESSION_DEP
+) -> Response:
+    try:
+        await THREAD_PINS.reorder(session["sub"], body.threadIds)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return Response(status_code=204)
 
 
 @router.post("/threads/{thread_id}/pin", status_code=204)
@@ -352,15 +370,16 @@ async def api_mark_thread_viewed(
     if thread is None:
         raise HTTPException(404, "thread not found")
     assert_thread_readable(thread.metadata, session["sub"], session.get("email"))
-    if thread.metadata.get("experience") != "agent_workspace":
-        raise HTTPException(409, "explicit read receipts are only supported for Work threads")
+    if (
+        thread.metadata.get("transcript") != "v2"
+        and thread.metadata.get("experience") != "agent_workspace"
+    ):
+        raise HTTPException(409, "explicit read receipts require a run-aware transcript")
     state = WorkRunState(thread)
     try:
         await state.refresh(viewed_run_id=body.run_id)
     except Exception as exc:
-        logger.warning(
-            "Could not acknowledge Work run", extra={"thread_id": thread_id}, exc_info=True
-        )
+        logger.warning("Could not acknowledge run", extra={"thread_id": thread_id}, exc_info=True)
         raise HTTPException(503, "could not refresh the latest run") from exc
     return await state.receipt()
 
@@ -388,6 +407,7 @@ async def api_get_thread(
 
 router.include_router(terminal.router)
 router.include_router(browser.router)
+router.include_router(chat_project_routes.router)
 
 
 @router.get("/threads/{thread_id}/recovery.patch")

@@ -1,7 +1,5 @@
 import { createContext, useContext } from "react"
 
-import { useStreamPreference } from "@/lib/streamPreference"
-
 import { useAgentStreamSource } from "./useAgentStreamSource"
 import { useTranscriptSource } from "./useTranscriptSource"
 import type { ReactNode } from "react"
@@ -66,7 +64,6 @@ function TranscriptSource({
 export function ThreadSourceProvider({
   threadId,
   transcript,
-  experience,
   children,
 }: {
   threadId: string
@@ -75,8 +72,7 @@ export function ThreadSourceProvider({
   experience?: AgentThread["experience"]
   children: ReactNode
 }) {
-  const preferStream = useStreamPreference()
-  return transcript && (experience === "agent_workspace" || !preferStream) ? (
+  return transcript ? (
     <TranscriptSource threadId={threadId}>{children}</TranscriptSource>
   ) : (
     <StreamSource threadId={threadId}>{children}</StreamSource>

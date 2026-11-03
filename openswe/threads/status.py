@@ -29,7 +29,7 @@ class WorkRunView(TypedDict):
 
 
 class WorkRunState:
-    """The latest runtime run and its explicit Work read receipt."""
+    """The latest runtime run and its explicit read receipt."""
 
     def __init__(self, thread: IndexedThread) -> None:
         self.thread = thread
@@ -38,7 +38,10 @@ class WorkRunState:
         self, *, viewed_run_id: str | None = None, unstarted_is_idle: bool = False
     ) -> IndexedThread:
         for _ in range(2):
-            if self.thread.metadata.get("experience") != "agent_workspace":
+            if (
+                self.thread.metadata.get("transcript") != "v2"
+                and self.thread.metadata.get("experience") != "agent_workspace"
+            ):
                 return self.thread
             runtime = RUNTIMES.runs_on(self.thread.runtime)
             run = await runtime.latest_run(self.thread.thread_id)
@@ -56,6 +59,8 @@ class WorkRunState:
                 patch["latest_run_status"] = None
             if run is not None:
                 patch.update(latest_run_id=run.run_id, latest_run_status=run.status)
+                if self.thread.metadata.get("latest_run_id") != run.run_id:
+                    patch["updated_at_ms"] = now_ms()
                 if run.active:
                     status = "busy"
                 if (
@@ -126,24 +131,26 @@ async def refresh_thread_status(
     thread = await index.get(thread_id)
     if thread is None:
         return None
-    if thread.metadata.get("experience") == "agent_workspace":
-        return (await WorkRunState(thread).refresh(unstarted_is_idle=unstarted_is_idle)).status
-    runtime = RUNTIMES.runs_on(thread.runtime)
-    if channel_of(thread.metadata) is not None:
-        # Read as Studio, as every MDA read is. A channel's thread MDA doesn't show
-        # the backend says nothing about its run, which must not read as idle.
-        found = await runtime.indexed(thread_id)
-        status = found.status if found else ("idle" if unstarted_is_idle else None)
+    if (
+        thread.metadata.get("transcript") == "v2"
+        or thread.metadata.get("experience") == "agent_workspace"
+    ):
+        status = (await WorkRunState(thread).refresh(unstarted_is_idle=unstarted_is_idle)).status
     else:
-        status = await runtime.status(thread_id)
-    if status is not None:
-        await index.set_status(thread_id, status)
-        if status != thread.status and thread.metadata.get("kind") == "reviewer":
-            pr = thread.metadata.get("pr")
-            if isinstance(pr, dict):
-                owner, repo, number = pr.get("owner"), pr.get("name"), pr.get("number")
-                if isinstance(owner, str) and isinstance(repo, str) and isinstance(number, int):
-                    await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, number))
+        runtime = RUNTIMES.runs_on(thread.runtime)
+        if channel_of(thread.metadata) is not None:
+            found = await runtime.indexed(thread_id)
+            status = found.status if found else ("idle" if unstarted_is_idle else None)
+        else:
+            status = await runtime.status(thread_id)
+        if status is not None:
+            await index.set_status(thread_id, status)
+    if status is not None and status != thread.status and thread.metadata.get("kind") == "reviewer":
+        pr = thread.metadata.get("pr")
+        if isinstance(pr, dict):
+            owner, repo, number = pr.get("owner"), pr.get("name"), pr.get("number")
+            if isinstance(owner, str) and isinstance(repo, str) and isinstance(number, int):
+                await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, number))
     return status
 
 

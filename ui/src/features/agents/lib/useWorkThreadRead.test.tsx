@@ -19,6 +19,7 @@ class ReadHarness {
   readonly thread: AgentThread = {
     ...optimisticThread("work-read", { prompt: "Answer" }),
     experience: "agent_workspace",
+    transcript: "v2",
     status: "finished",
     viewed: false,
     latestRunId: "run-1",
@@ -83,54 +84,59 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-it("acknowledges only a hydrated matching answer in a visible focused document", async () => {
-  vi.useFakeTimers()
-  const harness = new ReadHarness()
-  const focus = vi.spyOn(document, "hasFocus").mockReturnValue(false)
-  const visibility = vi
-    .spyOn(document, "visibilityState", "get")
-    .mockReturnValue("hidden")
-  const acknowledge = vi
-    .spyOn(agentsApi, "markThreadViewed")
-    .mockResolvedValue({ runId: "run-1", viewed: true, viewedAt: 123 })
-  const view = harness.mount()
-  await act(() => vi.advanceTimersByTimeAsync(20))
-  expect(acknowledge).not.toHaveBeenCalled()
-  visibility.mockReturnValue("visible")
-  act(() => document.dispatchEvent(new Event("visibilitychange")))
-  await act(() => vi.advanceTimersByTimeAsync(20))
-  expect(acknowledge).not.toHaveBeenCalled()
-  focus.mockReturnValue(true)
-  act(() => window.dispatchEvent(new Event("focus")))
-  view.rerender({
-    thread: harness.thread,
-    source: { ...harness.source, isHydrating: true },
-  })
-  await act(() => vi.advanceTimersByTimeAsync(20))
-  expect(acknowledge).not.toHaveBeenCalled()
-  view.rerender({
-    thread: { ...harness.thread, latestRunId: "run-2" },
-    source: harness.source,
-  })
-  await act(() => vi.advanceTimersByTimeAsync(20))
-  expect(acknowledge).not.toHaveBeenCalled()
-  view.rerender({ thread: harness.thread, source: harness.source })
-  await act(() => vi.advanceTimersByTimeAsync(20))
-  expect(acknowledge).toHaveBeenCalledExactlyOnceWith(
-    harness.thread.id,
-    "run-1"
-  )
-  expect(
-    harness.client.getQueryData<Array<AgentThread>>(agentThreadKeys.pinned)?.[0]
-      ?.viewed
-  ).toBe(true)
-  expect(
-    harness.client.getQueryData<ThreadsPage>(agentThreadKeys.page({}))?.items[0]
-      ?.viewed
-  ).toBe(true)
-})
+it.each(["agent_workspace", "coding"] as const)(
+  "acknowledges only a hydrated matching %s answer in a visible focused document",
+  async (experience) => {
+    vi.useFakeTimers()
+    const harness = new ReadHarness()
+    harness.thread.experience = experience
+    const focus = vi.spyOn(document, "hasFocus").mockReturnValue(false)
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("hidden")
+    const acknowledge = vi
+      .spyOn(agentsApi, "markThreadViewed")
+      .mockResolvedValue({ runId: "run-1", viewed: true, viewedAt: 123 })
+    const view = harness.mount()
+    await act(() => vi.advanceTimersByTimeAsync(20))
+    expect(acknowledge).not.toHaveBeenCalled()
+    visibility.mockReturnValue("visible")
+    act(() => document.dispatchEvent(new Event("visibilitychange")))
+    await act(() => vi.advanceTimersByTimeAsync(20))
+    expect(acknowledge).not.toHaveBeenCalled()
+    focus.mockReturnValue(true)
+    act(() => window.dispatchEvent(new Event("focus")))
+    view.rerender({
+      thread: harness.thread,
+      source: { ...harness.source, isHydrating: true },
+    })
+    await act(() => vi.advanceTimersByTimeAsync(20))
+    expect(acknowledge).not.toHaveBeenCalled()
+    view.rerender({
+      thread: { ...harness.thread, latestRunId: "run-2" },
+      source: harness.source,
+    })
+    await act(() => vi.advanceTimersByTimeAsync(20))
+    expect(acknowledge).not.toHaveBeenCalled()
+    view.rerender({ thread: harness.thread, source: harness.source })
+    await act(() => vi.advanceTimersByTimeAsync(20))
+    expect(acknowledge).toHaveBeenCalledExactlyOnceWith(
+      harness.thread.id,
+      "run-1"
+    )
+    expect(
+      harness.client.getQueryData<Array<AgentThread>>(
+        agentThreadKeys.pinned
+      )?.[0]?.viewed
+    ).toBe(true)
+    expect(
+      harness.client.getQueryData<ThreadsPage>(agentThreadKeys.page({}))
+        ?.items[0]?.viewed
+    ).toBe(true)
+  }
+)
 
-it("does not acknowledge Coding or an answer blurred before its display frame", async () => {
+it("does not acknowledge legacy threads or an answer blurred before its display frame", async () => {
   vi.useFakeTimers()
   const harness = new ReadHarness()
   const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true)
@@ -143,7 +149,7 @@ it("does not acknowledge Coding or an answer blurred before its display frame", 
   focus.mockReturnValue(true)
   act(() => window.dispatchEvent(new Event("focus")))
   view.rerender({
-    thread: { ...harness.thread, experience: "coding" },
+    thread: { ...harness.thread, transcript: undefined },
     source: harness.source,
   })
   await act(() => vi.advanceTimersByTimeAsync(20))

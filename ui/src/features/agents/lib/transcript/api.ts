@@ -15,7 +15,6 @@ import {
   newRequestId,
 } from "@/lib/dashboard-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
-import { readPreference as prefersSdkStream } from "@/lib/streamPreference"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type {
   StoredEvent,
@@ -231,9 +230,7 @@ export function runStartCommand({
         : null,
       config: { configurable: { ...configurable, thread_id: threadId } },
       assistant_id: AGENT_ASSISTANT_ID,
-      // Unless this browser streams threads through the SDK, it reads the
-      // transcript, so the server need keep no replay of the run.
-      ...(prefersSdkStream() ? {} : { stream_resumable: false as const }),
+      stream_resumable: false,
     },
   }
 }

@@ -275,7 +275,7 @@ def _is_thread_viewed(metadata: Mapping[str, Any], latest_run_id: str | None) ->
     run_id = _thread_run_id(metadata, latest_run_id)
     if run_id:
         return viewed_run_id == run_id
-    return isinstance(viewed_at, (int, float))
+    return metadata.get("transcript") != "v2" and isinstance(viewed_at, (int, float))
 
 
 def _is_thread_resolved(metadata: Mapping[str, Any]) -> bool:
@@ -608,7 +608,7 @@ async def _thread_summary(
         # What the thread's Browser panel offers: its browser to watch, or to open.
         "browser": None if browser is None else browser.state,
     }
-    if metadata.get("experience") == "agent_workspace":
+    if metadata.get("transcript") == "v2" or metadata.get("experience") == "agent_workspace":
         summary["latestRunId"] = _thread_run_id(metadata, latest_run_id)
     raw_pull_requests = metadata.get("pull_requests")
     pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []
@@ -666,6 +666,10 @@ async def _thread_summary(
     return summary
 
 
+thread_summary = _thread_summary
+thread_is_resolved = _is_thread_resolved
+
+
 def _status_of(run: Any) -> str | None:
     raw = run.get("status") if isinstance(run, dict) else getattr(run, "status", None)
     return raw.lower() if isinstance(raw, str) else None
@@ -706,7 +710,8 @@ async def _refresh_latest_run_metadata(
     thread_id = thread.get("thread_id") or thread.get("id")
     if not isinstance(thread_id, str) or not thread_id:
         return thread, None, None
-    if thread_metadata(thread).get("experience") == "agent_workspace":
+    metadata = thread_metadata(thread)
+    if metadata.get("transcript") == "v2" or metadata.get("experience") == "agent_workspace":
         try:
             indexed = await THREADS.get(thread_id)
             if indexed is None:
@@ -722,7 +727,7 @@ async def _refresh_latest_run_metadata(
             )
         except Exception:
             logger.warning(
-                "Could not refresh Work run metadata", extra={"thread_id": thread_id}, exc_info=True
+                "Could not refresh run metadata", extra={"thread_id": thread_id}, exc_info=True
             )
             return thread, None, None
     with phase(record, "runs_list"):

@@ -1217,6 +1217,50 @@
         "title": "ChallengeResponse",
         "type": "object"
       },
+      "ChatProject": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "localFolder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocalFolder"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo"
+          }
+        },
+        "required": [
+          "name",
+          "id"
+        ],
+        "title": "ChatProject",
+        "type": "object"
+      },
       "CheckpointFile": {
         "additionalProperties": false,
         "description": "One file a turn changed, as ``git diff --numstat`` counted it.",
@@ -3107,6 +3151,29 @@
           "events"
         ],
         "title": "LinearTrigger",
+        "type": "object"
+      },
+      "LocalFolder": {
+        "additionalProperties": false,
+        "properties": {
+          "deviceId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Deviceid",
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "deviceId"
+        ],
+        "title": "LocalFolder",
         "type": "object"
       },
       "MCPConnectionPublic": {
@@ -5110,6 +5177,124 @@
           }
         },
         "title": "ProfileUpdate",
+        "type": "object"
+      },
+      "ProjectBody": {
+        "additionalProperties": false,
+        "properties": {
+          "localFolder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocalFolder"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ProjectBody",
+        "type": "object"
+      },
+      "ProjectCollection": {
+        "properties": {
+          "memberships": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Memberships",
+            "type": "object"
+          },
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/ChatProject"
+            },
+            "title": "Projects",
+            "type": "array"
+          }
+        },
+        "required": [
+          "projects",
+          "memberships"
+        ],
+        "title": "ProjectCollection",
+        "type": "object"
+      },
+      "ProjectMembershipBody": {
+        "additionalProperties": false,
+        "properties": {
+          "projectId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectid"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "title": "ProjectMembershipBody",
+        "type": "object"
+      },
+      "ProjectThreadsPage": {
+        "properties": {
+          "hasMore": {
+            "title": "Hasmore",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "additionalProperties": {
+                "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              },
+              "type": "object"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "hasMore"
+        ],
+        "title": "ProjectThreadsPage",
         "type": "object"
       },
       "PullRequestActionResult": {
@@ -8119,6 +8304,23 @@
           }
         },
         "title": "ThreadMoveRequest",
+        "type": "object"
+      },
+      "ThreadPinOrder": {
+        "properties": {
+          "threadIds": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Threadids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "threadIds"
+        ],
+        "title": "ThreadPinOrder",
         "type": "object"
       },
       "ThreadRenameBody": {
@@ -11582,6 +11784,316 @@
         "tags": [
           "dashboard",
           "sandbox-bridge"
+        ]
+      }
+    },
+    "/dashboard/api/chat-projects": {
+      "get": {
+        "operationId": "list_projects_dashboard_api_chat_projects_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectCollection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "List Projects",
+        "tags": [
+          "dashboard",
+          "threads",
+          "chat-projects"
+        ]
+      },
+      "post": {
+        "operationId": "create_project_dashboard_api_chat_projects_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatProject"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Create Project",
+        "tags": [
+          "dashboard",
+          "threads",
+          "chat-projects"
+        ]
+      }
+    },
+    "/dashboard/api/chat-projects/threads/{thread_id}": {
+      "put": {
+        "operationId": "assign_project_dashboard_api_chat_projects_threads__thread_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectMembershipBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Assign Project",
+        "tags": [
+          "dashboard",
+          "threads",
+          "chat-projects"
+        ]
+      }
+    },
+    "/dashboard/api/chat-projects/{project_id}": {
+      "delete": {
+        "operationId": "delete_project_dashboard_api_chat_projects__project_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Delete Project",
+        "tags": [
+          "dashboard",
+          "threads",
+          "chat-projects"
+        ]
+      },
+      "patch": {
+        "operationId": "update_project_dashboard_api_chat_projects__project_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatProject"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Update Project",
+        "tags": [
+          "dashboard",
+          "threads",
+          "chat-projects"
+        ]
+      }
+    },
+    "/dashboard/api/chat-projects/{project_id}/threads": {
+      "get": {
+        "operationId": "project_threads_dashboard_api_chat_projects__project_id__threads_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resolved",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Resolved",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectThreadsPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Project Threads",
+        "tags": [
+          "dashboard",
+          "threads",
+          "chat-projects"
         ]
       }
     },
@@ -20096,6 +20608,46 @@
           }
         ],
         "summary": "Api List Pinned Threads",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/pins/order": {
+      "post": {
+        "operationId": "reorder_thread_pins_dashboard_api_threads_pins_order_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThreadPinOrder"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Reorder Thread Pins",
         "tags": [
           "dashboard",
           "threads"

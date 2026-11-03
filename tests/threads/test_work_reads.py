@@ -35,8 +35,8 @@ class WorkRuntime:
         return "busy" if self.run is not None and self.run.active else "idle"
 
 
-@pytest.fixture
-async def work(monkeypatch: pytest.MonkeyPatch) -> WorkRuntime:
+@pytest.fixture(params=[("agent_workspace", None), ("coding", "v2")])
+async def work(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> WorkRuntime:
     runtime = WorkRuntime()
     monkeypatch.setattr(status.RUNTIMES, "runs_on", Mock(return_value=runtime))
     monkeypatch.setattr(THREADS.copies, "start", Mock())
@@ -45,7 +45,8 @@ async def work(monkeypatch: pytest.MonkeyPatch) -> WorkRuntime:
         "work",
         runtime="mda",
         metadata={
-            "experience": "agent_workspace",
+            "experience": request.param[0],
+            "transcript": request.param[1],
             "source": "dashboard",
             "visibility": "private",
             "owner_login": "test-user",
@@ -69,6 +70,11 @@ async def test_fast_external_run_becomes_unread_without_an_intervening_list(
     result = await summary._thread_summary(thread.as_langgraph(), bridge_status=False)
     assert (result["latestRunId"], result["status"], result["viewed"]) == ("R2", "finished", False)
     assert listing._should_refresh_latest_run(thread.as_langgraph()) is False
+    activity = thread.metadata["updated_at_ms"]
+    await status.WorkRunState(thread).refresh(viewed_run_id="R2")
+    read = await THREADS.get("work")
+    assert read is not None
+    assert read.metadata["updated_at_ms"] == activity
 
 
 async def test_settled_work_recovers_once_and_failed_recovery_is_retryable(
@@ -165,14 +171,19 @@ async def test_receipts_require_a_person_session_read_access_and_work(
         assert response.json()["runId"] == "R1"
         assert response.json()["viewed"] is True
         assert isinstance(response.json()["viewedAt"], int)
-        await THREADS.update("work", {"experience": "coding"})
+        await THREADS.update("work", {"experience": "coding", "transcript": None})
         response = await client.post("/dashboard/api/threads/work/viewed", json={"run_id": "R1"})
         assert response.status_code == 409
 
 
 @pytest.mark.parametrize(
     ("experience", "transcript", "expected_viewed"),
-    [("agent_workspace", "v2", False), ("agent_workspace", None, True), ("coding", "v2", True)],
+    [
+        ("agent_workspace", "v2", False),
+        ("agent_workspace", None, True),
+        ("coding", "v2", False),
+        ("coding", None, True),
+    ],
 )
 async def test_detail_keeps_explicit_work_receipts_and_legacy_read_fallback(
     work: WorkRuntime,
@@ -199,7 +210,10 @@ async def test_detail_keeps_explicit_work_receipts_and_legacy_read_fallback(
     current = await THREADS.get("work")
     assert current is not None
     assert current.metadata["last_viewed_run_id"] == ("R1" if expected_viewed else "older")
-    assert ("latestRunId" in result) is (experience == "agent_workspace")
+    assert ("latestRunId" in result) is (transcript == "v2" or experience == "agent_workspace")
+    assert current.metadata["experience"] == experience
+    assert current.metadata["transcript"] == transcript
+    assert current.runtime == "mda"
 
 
 @pytest.mark.parametrize("channel", [None, "linear"])
@@ -230,3 +244,8 @@ async def test_no_run_keeps_terminal_identity_without_acknowledging(work: WorkRu
     result = await summary._thread_summary(thread.as_langgraph(), bridge_status=False)
     assert result["status"] == "finished"
     assert thread.metadata["latest_run_id"] == "R1"
+    await THREADS.update("work", {"latest_run_id": None})
+    thread = await THREADS.get("work")
+    assert thread is not None
+    result = await summary._thread_summary(thread.as_langgraph(), bridge_status=False)
+    assert result["viewed"] is (thread.metadata.get("transcript") != "v2")

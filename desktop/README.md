@@ -19,7 +19,7 @@ A thread runs only while the app that started it is open: quitting closes its br
 Opening the thread again, or sending a follow-up, reopens it.
 The thread is visible from the web and other computers, but only this Mac can continue it.
 
-In **Work mode**, new chats need no repository or folder selection.
+New chats need no repository or folder selection and default to **This Mac** with an automatic task folder.
 This Mac creates a private task folder per conversation under the app profile’s `tasks/<thread-id>` directory.
 **Use a folder** optionally selects existing material; several chats can select the same folder, without sharing their conversation histories.
 **Open task folder** opens the working location in Finder.
@@ -27,18 +27,16 @@ Closing, archiving, or deleting a chat does not delete its automatic task files.
 These folders are starting locations, not filesystem security sandboxes.
 Git branch and worktree controls appear only for Git folders.
 
-The desktop header switches between **Home** (Work mode) and **Code** (Coding mode).
-Home is selected by default; the app remembers each account’s last selection on this device.
-Each experience has its own thread lists, pins and search results; switching never converts an existing thread.
+Home and Code share one chat UI and history. The sidebar shows **Pinned**, optional personal **Projects**, **Recents**, and **Archived**.
+Recents includes project chats, excluding pinned and archived chats. Projects group conversations without sharing their histories or changing access.
+A project's optional folder or repository is a default for future chats; moving an existing chat changes only organization.
+Projects are saved on the backend, with local folder defaults bound to the device that selected them. There is no repository-group import.
 
-The general-purpose experience is saved on new threads before their first run and inherited by later runs and task workers.
-Existing conversations retain their coding experience.
-Testing requires this branch’s desktop shell and backend; a local UI against an older backend cannot enable the new prompting.
-
-The composer's workspace selector chooses where a local thread runs.
-**Current checkout** (the default) runs the agent in the project directory itself, on whichever branch the branch picker selects.
+**Working context** holds folder selection and advanced execution, environment, repository and Git controls.
+Git folders default to **New worktree**; ordinary folders are used directly.
+**Current checkout** runs the agent in the project directory itself, on whichever branch the branch picker selects.
 **New worktree** gives the thread its own git worktree, checked out from the selected base branch on a placeholder `open-swe/local-<id>` branch that the agent renames after it reads the request — so your own checkout is never touched and several local threads can run at once without contending for a working tree.
-Deleting a thread removes its worktree along with anything uncommitted in it.
+Deleting a chat keeps its folders, worktrees, branches and uncommitted files. Updated shells disconnect its local session; downloaded UI skips cleanup on older shells that do not advertise file-preserving cleanup.
 Only one agent may work in a given tree at a time, so starting a thread in a checkout another agent is running in, or switching that checkout's branch under it, is refused.
 
 The side panel's **Changes** tab diffs the project against a git snapshot taken when the session started, so it shows what the agent changed and not the working tree's prior state.

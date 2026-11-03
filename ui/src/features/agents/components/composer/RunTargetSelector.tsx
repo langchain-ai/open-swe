@@ -139,10 +139,14 @@ export function LocalRepoSelector({
           "max-w-[260px]",
           triggerClassName
         )}
-        title={selectedRepo?.cwd}
+        title={selectedRepoPath ?? undefined}
       >
         <ComposerTriggerIcon icon={FolderOpenIcon} />
-        <span className="truncate">{selectedRepo?.name ?? placeholder}</span>
+        <span className="truncate">
+          {selectedRepo?.name ??
+            selectedRepoPath?.split("/").filter(Boolean).at(-1) ??
+            placeholder}
+        </span>
         <ComposerControlChevron />
       </DropdownMenuTrigger>
       <DropdownMenuContent

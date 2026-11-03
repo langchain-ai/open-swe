@@ -171,6 +171,7 @@ from openswe.threads.blobs import ThreadBlobs, blob_namespace
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.tools import (
+    assign_chat_project,
     assign_human_reviewer,
     auto_assign_human_reviewer,
     background_execute,
@@ -181,9 +182,11 @@ from openswe.tools import (
     configure_workspace,
     connect_managed_tools,
     create_automation,
+    create_chat_project,
     create_sandbox_file_download_url,
     decide_memory,
     delete_automation,
+    delete_chat_project,
     delete_organization_skill,
     delete_user_skill,
     delete_workspace,
@@ -199,6 +202,7 @@ from openswe.tools import (
     http_request,
     link_pull_request,
     list_automations,
+    list_chat_projects,
     list_event_types,
     list_memories,
     list_threads,
@@ -251,6 +255,7 @@ from openswe.tools import (
     switch_to_performance_model,
     trigger_automation,
     update_automation,
+    update_chat_project,
     web_search,
     write_database_rows,
 )
@@ -656,6 +661,11 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "read_only_sql",
         "execute_database_sql",
         "read_user_settings",
+        "assign_chat_project",
+        "create_chat_project",
+        "delete_chat_project",
+        "list_chat_projects",
+        "update_chat_project",
         "connect_managed_tools",
         "discover_managed_tools",
         "save_user_settings",
@@ -714,6 +724,11 @@ ADMIN_TOOLS = (
 # Every tool the agent may offer; each run's plan offers those it keeps (``agent_catalog``),
 # and a call answered without the plan finds its tool here by name.
 AGENT_TOOLS: Final = (
+    assign_chat_project,
+    create_chat_project,
+    delete_chat_project,
+    list_chat_projects,
+    update_chat_project,
     http_request,
     fetch_url,
     web_search,

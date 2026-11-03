@@ -1,4 +1,3 @@
-import { experienceStore, useExperience } from "@/lib/experience"
 import { MagnifyingGlassRegularIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import {
@@ -24,7 +23,7 @@ import { useEffect, useState } from "react"
 
 import type { AppCommand } from "@/lib/appCommands"
 import type { PullRequestSearchResult } from "@/lib/api"
-import { usePullRequestSearch } from "@/features/reviews/lib/usePullRequestSearch"
+import { useChatProjects } from "@/features/agents/lib/chatProjects"
 import type { AgentThread } from "@/features/agents/lib/types"
 import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
@@ -130,32 +129,24 @@ export function AppCommandPalette({
     const timer = window.setTimeout(() => setDebouncedQuery(threadQuery), 180)
     return () => window.clearTimeout(timer)
   }, [open, threadQuery])
-  const { experience } = useExperience()
+  const projects = useChatProjects()
   const cloudThreads = useInfiniteThreadsPages(
     {
-      experience,
       limit: 20,
       q: debouncedQuery || undefined,
-      scope: prReference ? "all" : "interactive",
+      scope: "all",
     },
     { enabled: open && !actionsOnly, staleWhileRevalidate: true }
-  )
-  const pullRequests = usePullRequestSearch(
-    query,
-    open && !actionsOnly && !prReference && experience !== "agent_workspace"
   )
   const results: Array<PaletteResult> = [
     ...buildPaletteResults(
       commands,
       debouncedQuery === threadQuery
-        ? experienceStore.filter(
-            cloudThreads.data?.pages.flatMap((page) => page.items) ?? [],
-            experience
-          )
+        ? (cloudThreads.data?.pages.flatMap((page) => page.items) ?? [])
         : [],
       query
     ),
-    ...(prReference && experience !== "agent_workspace"
+    ...(prReference
       ? [
           {
             id: `pr:${prReference.owner}/${prReference.repo}#${prReference.number}`,
@@ -168,16 +159,6 @@ export function AppCommandPalette({
           },
         ]
       : []),
-    ...(open && !actionsOnly && !prReference && experience !== "agent_workspace"
-      ? (pullRequests.data?.pages.flatMap((page) =>
-          page.pull_requests.map((pr): PullRequestResult => ({
-            id: `pr:${pr.repo}#${pr.number}`,
-            kind: "pull-request",
-            label: pr.title || `${pr.repo} #${pr.number}`,
-            pr,
-          }))
-        ) ?? [])
-      : []),
   ]
   const resultGroups = new Map<string, Array<PaletteResult>>()
   for (const result of results) {
@@ -185,7 +166,7 @@ export function AppCommandPalette({
       result.kind === "command"
         ? result.command.group
         : result.kind === "cloud-thread"
-          ? "Threads"
+          ? "Chats"
           : "Pull requests"
     resultGroups.set(group, [...(resultGroups.get(group) ?? []), result])
   }
@@ -212,9 +193,8 @@ export function AppCommandPalette({
   }
 
   const showLoading =
-    ((!actionsOnly &&
-      (debouncedQuery !== threadQuery || cloudThreads.isFetching)) ||
-      pullRequests.isSearching) &&
+    !actionsOnly &&
+    (debouncedQuery !== threadQuery || cloudThreads.isFetching) &&
     results.length === 0
   const showError = cloudThreads.isError && results.length === 0
 
@@ -225,16 +205,14 @@ export function AppCommandPalette({
         childrenClassName="gap-0 p-0"
         showClose={false}
       >
-        <DialogTitle className="sr-only">
-          Search commands, threads, and pull requests
-        </DialogTitle>
+        <DialogTitle className="sr-only">Search chats and commands</DialogTitle>
         <DialogDescription className="sr-only">
-          Search commands, threads, and pull request titles and descriptions.
+          Find chats, including project and archived chats, or search commands.
         </DialogDescription>
         <Command
           className="min-h-0 flex-1 bg-transparent"
           data-hotkeys="ignore"
-          label="Search commands, threads, and pull requests"
+          label="Search chats and commands"
           loop
           shouldFilter={false}
         >
@@ -248,7 +226,7 @@ export function AppCommandPalette({
               />
             }
             onValueChange={setQuery}
-            placeholder="Search commands, threads, and pull requests…"
+            placeholder="Search chats and commands…"
             rightDecorator={<Kbd>Esc</Kbd>}
             size="md"
             value={query}
@@ -258,15 +236,15 @@ export function AppCommandPalette({
             {showLoading ? (
               <div className="flex items-center justify-center gap-space-2 py-space-7 text-xs text-secondary">
                 <Spinner size="xs" />
-                Searching threads and pull requests…
+                Searching chats…
               </div>
             ) : showError ? (
               <p className="py-space-7 text-center text-xs text-error-secondary">
-                Thread search is unavailable.
+                Chat search is unavailable.
               </p>
             ) : results.length === 0 ? (
               <p className="py-space-7 text-center text-xs text-secondary">
-                No commands, threads, or pull requests found.
+                No chats or commands found.
               </p>
             ) : (
               <>
@@ -295,6 +273,20 @@ export function AppCommandPalette({
                           />
                           <span className="min-w-0 flex-1 truncate">
                             {result.label}
+                            {result.kind === "cloud-thread" && (
+                              <span className="ml-space-2 text-xs text-secondary">
+                                {
+                                  projects.data?.projects.find(
+                                    (project) =>
+                                      project.id ===
+                                      projects.data?.memberships[
+                                        result.thread.id
+                                      ]
+                                  )?.name
+                                }
+                                {result.thread.resolved ? " · Archived" : ""}
+                              </span>
+                            )}
                             {result.kind === "pull-request" && (
                               <span className="ml-space-2 text-xs text-secondary">
                                 {result.pr.repo} #{result.pr.number}
@@ -310,19 +302,6 @@ export function AppCommandPalette({
                     })}
                   </CommandGroup>
                 ))}
-                {pullRequests.hasNextPage && !query.trim().startsWith(">") && (
-                  <Button
-                    className="w-full"
-                    color="secondary"
-                    disabled={pullRequests.isFetchingNextPage}
-                    loading={pullRequests.isFetchingNextPage}
-                    onClick={() => void pullRequests.fetchNextPage()}
-                    size="xs"
-                    variant="plain"
-                  >
-                    Load more pull requests
-                  </Button>
-                )}
                 {cloudThreads.hasNextPage && (
                   <Button
                     className="w-full"
@@ -333,21 +312,11 @@ export function AppCommandPalette({
                     size="xs"
                     variant="plain"
                   >
-                    Load more threads
+                    Load more chats
                   </Button>
                 )}
               </>
             )}
-            {query.trim() &&
-              !query.trim().startsWith(">") &&
-              pullRequests.isError && (
-                <p
-                  role="alert"
-                  className="px-space-3 py-space-2 text-xs text-error-secondary"
-                >
-                  Pull request search is unavailable.
-                </p>
-              )}
           </CommandList>
         </Command>
       </DialogContent>

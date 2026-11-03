@@ -13,7 +13,6 @@ import { LockIcon } from "@phosphor-icons/react/dist/ssr/Lock"
 
 import { MenuCheckItem } from "@/features/agents/components/MenuCheckItem"
 import type { ThreadVisibility } from "@/lib/api"
-import { useAgentWorkspace } from "@/features/agents/lib/agentWorkspace"
 
 const OPTIONS: Record<
   ThreadVisibility,
@@ -35,15 +34,14 @@ export function ThreadVisibilityMenu({
   disabledValues?: ThreadVisibility[]
   busy?: boolean
 }) {
-  const agentWorkspace = useAgentWorkspace()
   const current = OPTIONS[value]
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
           color="secondary"
-          variant={agentWorkspace ? "plain" : "outlined"}
-          size={agentWorkspace ? "sm" : undefined}
+          variant="plain"
+          size="sm"
           aria-label="Thread visibility"
           aria-busy={busy}
           disabled={busy}

@@ -3,6 +3,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { execFileSync } = require("node:child_process");
+const { runInNewContext } = require("node:vm");
+const { deleteRefs, removeWorktree } = require("../build/git-diff.cjs");
 
 const { LocalThreadStore } = require("../build/local-thread-store.cjs");
 
@@ -78,4 +81,62 @@ test("remembers a created worktree after the thread moves off it", (t) => {
   const reloaded = fixture.create().get(thread.id);
   assert.equal(reloaded.worktreePath, null);
   assert.deepEqual(reloaded.ownedWorktrees, [worktree]);
+});
+
+test("discard closes the local session and forgets history without deleting dirty owned worktrees", async (t) => {
+  const fixture = temporaryStore(t);
+  const store = fixture.create();
+  const repo = path.join(path.dirname(fixture.path), "repo");
+  const worktree = path.join(path.dirname(fixture.path), "worktree");
+  fs.mkdirSync(repo);
+  const git = (...args) =>
+    execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+  git("init", "--quiet");
+  git("config", "user.name", "Test");
+  git("config", "user.email", "test@example.com");
+  fs.writeFileSync(path.join(repo, "tracked.txt"), "original");
+  git("add", ".");
+  git("commit", "--quiet", "-m", "initial");
+  git("worktree", "add", "--quiet", "-b", "thread-work", worktree);
+  fs.writeFileSync(path.join(worktree, "tracked.txt"), "uncommitted change");
+  fs.writeFileSync(path.join(worktree, "new.txt"), "untracked work");
+  const ref = "refs/open-swe/local/thread-1";
+  git("update-ref", ref, "HEAD");
+  store.create({ id: "thread-1", cwd: repo });
+  store.setWorktree("thread-1", worktree, true);
+  store.setCheckpoint("thread-1", { repo, ref, branch: "thread-work" });
+  const closed = new Set();
+  const source = fs.readFileSync(require.resolve("../build/main.cjs"), "utf8");
+  const context = {
+    localThreadStore: store,
+    localBridges: { close: async (id) => closed.add(`bridge:${id}`) },
+    closeThreadTerminals: async (id) => closed.add(`terminal:${id}`),
+    deleteRefs,
+    removeWorktree,
+    repoRoot: async () => repo,
+    managedWorktree: () => true,
+    console,
+  };
+  await runInNewContext(
+    source.slice(
+      source.indexOf("async function discardLocalThread"),
+      source.indexOf("function configureDesktopIpc"),
+    ) + '\ndiscardLocalThread(localThreadStore.get("thread-1"));',
+    context,
+  );
+  assert.equal(store.get("thread-1"), null);
+  assert.deepEqual(closed, new Set(["bridge:thread-1", "terminal:thread-1"]));
+  assert.equal(git("for-each-ref", "--format=%(refname)", ref).trim(), "");
+  assert.equal(
+    fs.readFileSync(path.join(worktree, "tracked.txt"), "utf8"),
+    "uncommitted change",
+  );
+  assert.equal(
+    fs.readFileSync(path.join(worktree, "new.txt"), "utf8"),
+    "untracked work",
+  );
+  assert.match(
+    git("worktree", "list", "--porcelain"),
+    /branch refs\/heads\/thread-work/,
+  );
 });

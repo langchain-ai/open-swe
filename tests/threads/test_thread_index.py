@@ -79,6 +79,14 @@ async def test_search_filters_sorts_and_pages_like_the_agent_server() -> None:
     assert await ThreadSearch(metadata={"owner_login": "ada"}, limit=1).count() == 2
 
 
+async def test_recent_activity_order_does_not_change_when_a_chat_is_read() -> None:
+    await index.create("older", runtime="mda", metadata={"updated_at_ms": 1000})
+    await index.create("newer", runtime="mda", metadata={"updated_at_ms": 2000})
+    await index.update("older", {"last_viewed_at_ms": 3000})
+    found = await ThreadSearch(sort_by="updated_at", limit=1).run()
+    assert [thread.thread_id for thread in found] == ["newer"]
+
+
 async def test_a_text_search_ranks_title_matches_and_recent_activity_first() -> None:
     now = datetime.now(UTC)
     for thread_id, metadata, age in [

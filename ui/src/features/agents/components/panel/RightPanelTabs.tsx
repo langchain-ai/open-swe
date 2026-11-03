@@ -117,34 +117,28 @@ interface SurfaceLauncher {
 function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
   return [
     {
-      label: "Terminal",
-      description: "Start a shell in this workspace.",
-      icon: TerminalWindowIcon,
-      available: props.terminalAvailable,
-      disabledReason: "Terminals are only available from a running workspace.",
-      unavailableHint: "Available once the workspace is running.",
-      onClick: props.onAddTerminal,
-    },
-    {
-      label: "Changes",
-      description: "Review changes in this thread.",
-      icon: GitDiffIcon,
-      available: props.diffAvailable,
-      disabledReason:
-        "Changes are only available for threads with a repository.",
-      unavailableHint: "Available for Git repositories.",
-      onClick: props.onAddDiff,
-    },
-    {
       label: "Files",
-      description: "Browse files in this workspace.",
+      description: "Browse this chat's working files.",
       icon: FilesIcon,
       shortcut: "F",
       available: props.terminalAvailable,
-      disabledReason: "Files are only available from a running workspace.",
-      unavailableHint: "Available once the workspace is running.",
+      disabledReason: "Files are available once the working folder is ready.",
+      unavailableHint: "Available once work starts.",
       onClick: props.onAddFiles,
     },
+    ...(props.diffAvailable
+      ? [
+          {
+            label: "Changes",
+            description: "Review file changes in this chat.",
+            icon: GitDiffIcon,
+            available: true,
+            disabledReason: "Changes need a Git repository.",
+            unavailableHint: "Available for Git repositories.",
+            onClick: props.onAddDiff,
+          },
+        ]
+      : []),
     ...(props.onAddBrowser
       ? [
           {
@@ -175,6 +169,16 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
           },
         ]
       : []),
+    {
+      label: "Terminal",
+      description: "Advanced: open a command-line shell.",
+      icon: TerminalWindowIcon,
+      available: props.terminalAvailable,
+      disabledReason:
+        "A terminal is available once the working folder is ready.",
+      unavailableHint: "Advanced · available once work starts.",
+      onClick: props.onAddTerminal,
+    },
   ]
 }
 
@@ -241,8 +245,12 @@ function RightPanelEmptyState({
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1)
-
-  const availableActions = actions.filter((action) => action.available)
+  const [advanced, setAdvanced] = useState(false)
+  const primaryActions = actions.filter((action) => action.label !== "Terminal")
+  const terminal = actions.find((action) => action.label === "Terminal")
+  const visibleActions =
+    advanced && terminal ? [...primaryActions, terminal] : primaryActions
+  const availableActions = visibleActions.filter((action) => action.available)
   const highlightIndex =
     availableActions.length === 0
       ? -1
@@ -341,7 +349,7 @@ function RightPanelEmptyState({
       ref={focusOnMount}
       tabIndex={0}
       onKeyDown={handleKeyDown}
-      aria-label="Open a surface"
+      aria-label="Work panel"
       data-surface-launcher-keys={availableActions
         .map((action) => action.shortcut)
         .join("")}
@@ -355,14 +363,14 @@ function RightPanelEmptyState({
       <div className="relative w-full max-w-lg">
         <div className="absolute inset-x-0 bottom-full mb-space-4 text-center">
           <Text as="h3" variant="h5" weight="medium" color="primary">
-            Open a surface
+            Work panel
           </Text>
           <p className="mt-space-1 text-xs text-secondary">
-            Choose what to show in the right panel.
+            Open files, review changes, or browse alongside the agent.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-space-2">
-          {actions.map((action) =>
+          {visibleActions.map((action) =>
             action.available ? (
               <Button
                 color="secondary"
@@ -424,6 +432,18 @@ function RightPanelEmptyState({
             )
           )}
         </div>
+        {terminal && (
+          <Button
+            size="sm"
+            color="secondary"
+            variant="plain"
+            className="mt-space-3"
+            aria-expanded={advanced}
+            onClick={() => setAdvanced(!advanced)}
+          >
+            Advanced tools
+          </Button>
+        )}
       </div>
     </div>
   )
@@ -649,7 +669,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 color="secondary"
                 icon={PlusIcon}
                 iconClassName="size-3.5"
-                label="Add panel surface"
+                label="Open a tool"
                 size="sm"
                 variant="plain"
               />

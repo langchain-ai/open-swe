@@ -7,6 +7,7 @@ from sqlalchemy import text
 from openswe.database.postgres import transaction
 from openswe.threads import index, status
 from openswe.threads.index import Runtime, ThreadStatus
+from openswe.threads.runtimes import MdaRun
 from openswe.ui_invalidations import Topic, outbox
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -18,6 +19,9 @@ class _Runtime:
 
     async def status(self, thread_id: str) -> ThreadStatus | None:
         return self.statuses.get(thread_id)
+
+    async def latest_run(self, thread_id: str) -> MdaRun | None:
+        return None
 
     async def indexed(self, thread_id: str) -> index.IndexedThread | None:
         known = self.statuses.get(thread_id)
@@ -109,13 +113,18 @@ async def test_a_channel_thread_mda_says_nothing_about_stays_busy_until_its_run_
 
 
 @pytest.mark.parametrize("finished", ["idle", "error", "interrupted"])
+@pytest.mark.parametrize("transcript", [None, "v2"])
 async def test_reviewer_status_reconciliation_refreshes_its_open_review_page(
-    monkeypatch: pytest.MonkeyPatch, finished: ThreadStatus
+    monkeypatch: pytest.MonkeyPatch, finished: ThreadStatus, transcript: str | None
 ) -> None:
     await _busy_since("reviewer", datetime.now(UTC) - timedelta(hours=1))
     await index.update(
         "reviewer",
-        {"kind": "reviewer", "pr": {"owner": "Acme", "name": "Widgets", "number": 42}},
+        {
+            "kind": "reviewer",
+            "transcript": transcript,
+            "pr": {"owner": "Acme", "name": "Widgets", "number": 42},
+        },
     )
     runtime = _Runtimes({"reviewer": "busy"})
     monkeypatch.setattr(status, "RUNTIMES", runtime)

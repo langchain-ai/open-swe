@@ -13,6 +13,7 @@ function isDesktopCommandId(value) {
 
 contextBridge.exposeInMainWorld("openSweDesktop", {
   isDesktop: true,
+  preservesThreadFiles: true,
   onCommand: (callback) => {
     const listener = (_event, commandId) => {
       if (isDesktopCommandId(commandId)) callback(commandId);

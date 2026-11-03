@@ -38,6 +38,10 @@ it("shows running before unread and retains unread until acknowledgement even on
   expect(screen.getByRole("img", { name: "Chat running" })).toBeTruthy()
   expect(screen.queryByRole("img", { name: "Unread chat" })).toBeNull()
 
+  rerender(<SidebarConversationRow {...props} status="error" />)
+  expect(screen.getByRole("img", { name: "Chat error" })).toBeTruthy()
+  expect(screen.queryByRole("img", { name: "Unread chat" })).toBeNull()
+
   rerender(<SidebarConversationRow {...props} status="finished" />)
   expect(screen.queryByRole("img", { name: "Chat running" })).toBeNull()
   expect(screen.getByRole("img", { name: "Unread chat" })).toBeTruthy()

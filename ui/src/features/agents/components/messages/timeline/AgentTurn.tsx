@@ -494,8 +494,8 @@ export function AgentTurn({
         <TurnFoldRow
           label={
             actionCount > 0
-              ? `${label} · ${actionCount} action${actionCount === 1 ? "" : "s"}`
-              : label
+              ? `Activity · ${label} · ${actionCount} action${actionCount === 1 ? "" : "s"}`
+              : `Activity · ${label}`
           }
           active={live}
           expanded={expanded}

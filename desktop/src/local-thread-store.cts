@@ -240,11 +240,7 @@ export class LocalThreadStore {
     return this.get(id);
   }
 
-  /**
-   * `null` moves the thread back into the project's own checkout. `owned` marks
-   * a worktree this app created: it stays recorded even after the thread moves
-   * off it, so nothing the app made is left behind when the thread is deleted.
-   */
+  /** Track the current worktree and any this app created, without owning their lifetime. */
   setWorktree(id: string, worktreePath: string | null, owned = false) {
     const current = this.threads.get(id);
     if (!current) return null;
