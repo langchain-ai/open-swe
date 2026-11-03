@@ -18,7 +18,8 @@ Preserve the specialized integrations documented in DESIGN.md.
 
 The dashboard aims for quiet, deliberate minimalism: structure comes from surface tone, not lines.
 
-- Colors come from Macaw tokens only. The dark theme is Macaw's own `neutral` ramp; app-level adjustments live in `src/styles.css` as token references, never hand-picked hex values.
+- Colors come from Macaw tokens only.
+  The dark theme is Macaw's own `neutral` ramp; app-level adjustments live in `src/styles.css` as token references, never hand-picked hex values.
 - Separate regions by stepping surfaces: page `bg-surface-level-1`, sidebar `bg-surface-level-2`, raised surfaces (composer, menus, user messages) `bg-elevated`.
   Do not add a border where a tone step already separates two regions.
 - Borders have three weights:
@@ -34,7 +35,8 @@ The dashboard aims for quiet, deliberate minimalism: structure comes from surfac
   A control that moves between states, like the panel toggle, keeps the same spot in both.
 - Disabled icon buttons only dim (`disabled:bg-transparent`); Macaw's disabled fill reads as a pressed button.
 - Section view menus use the three-line filter icon (`FunnelSimpleIcon`) and show on hover; overflow menus such as the sidebar's More use three dots (`DotsThreeIcon`).
-- A menu item that navigates away must not hand focus back to its trigger (`onCloseAutoFocus` → `preventDefault()`), or Chromium draws a focus ring on it. Escape and outside clicks still return focus.
+- A menu item that navigates away must not hand focus back to its trigger (`onCloseAutoFocus` → `preventDefault()`), or Chromium draws a focus ring on it.
+  Escape and outside clicks still return focus.
 - Decorative display headings, such as the empty-state "What should we work on?", are not selectable (`select-none cursor-default`).
 
 ## Desktop title bar
