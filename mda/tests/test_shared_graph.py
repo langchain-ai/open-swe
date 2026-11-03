@@ -982,6 +982,53 @@ async def test_finished_runs_release_their_tools_and_interpreters(
     assert not interpreter._ptc_tools_by_slot
 
 
+class TestEvalOutput:
+    @pytest.mark.parametrize("length", [8_000, 20_000])
+    @pytest.mark.parametrize("logged", [False, True])
+    async def test_transcript_output_budget(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        backend_calls: BackendCalls,
+        length: int,
+        logged: bool,
+    ) -> None:
+        expression = f"'x'.repeat({length})"
+        code = f"console.log({expression})" if logged else expression
+        monkeypatch.setattr(
+            agent,
+            "_DEFAULT_MODEL",
+            _calling(ToolCall(name="eval", args={"code": code}, id="transcript")),
+        )
+        catalog = _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]})
+        context = _context("agent", "token", catalog)
+        graph = await compile_managed_agent_async(
+            agent.agent,
+            _thread("transcript"),
+            runtime=_ExecutionRuntime(
+                access_context="threads.create_run", store=InMemoryStore(), context=context
+            ),
+            report_telemetry=False,
+            async_subagent_graphs=_WORKERS,
+        )
+        state = await graph.ainvoke(
+            {"messages": [("user", "Read the transcript")]},
+            _thread("transcript"),
+            context=context,  # ty: ignore[invalid-argument-type]
+        )
+        [result] = [
+            message
+            for message in state["messages"]
+            if isinstance(message, ToolMessage) and message.tool_call_id == "transcript"
+        ]
+        if length < 16_000:
+            assert "x" * length in result.text
+            assert "truncated" not in result.text
+        else:
+            assert "x" * length not in result.text
+            assert "truncated" in result.text
+            assert len(result.text) < 16_200
+
+
 async def test_code_mode_calls_tools_its_catalog_leaves_out(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
 ) -> None:
