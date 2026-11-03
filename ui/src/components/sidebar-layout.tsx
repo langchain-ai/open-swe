@@ -132,34 +132,33 @@ export function SidebarFrame({
 }: SidebarFrameProps) {
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
-
-  // Electron resolves window drag regions in DOM order, ignoring z-index, so a
-  // page header marked draggable would swallow clicks on these floating
-  // controls if it came earlier. Portal them after all content to keep them last.
-  const windowNavigation =
-    isDesktop && createPortal(<WindowNavigation />, document.body)
+  // Rendered by the root layout in the same commit, so it exists once mounted.
+  const [controlsHost, setControlsHost] = useState<Element | null>(null)
+  useEffect(() => {
+    if (!isDesktop) return
+    // oxlint-disable-next-line react/set-state-in-effect
+    setControlsHost(document.querySelector("[data-desktop-window-controls]"))
+  }, [isDesktop])
+  const windowControls =
+    controlsHost &&
+    createPortal(
+      <WindowControls collapsed={collapsed} toggle={toggle} />,
+      controlsHost
+    )
 
   if (collapsed) {
-    return (
-      <>
-        {createPortal(
-          <IconButton
-            icon={SidebarSimpleIcon}
-            label="Expand sidebar"
-            color="secondary"
-            variant="plain"
-            size="sm"
-            data-sidebar-expand=""
-            onClick={toggle}
-            className={cn(
-              "fixed top-2 left-2 z-sidebar size-7",
-              isDesktop && "left-[90px]"
-            )}
-          />,
-          document.body
-        )}
-        {windowNavigation}
-      </>
+    if (isDesktop) return windowControls
+    return createPortal(
+      <IconButton
+        icon={SidebarSimpleIcon}
+        label="Expand sidebar"
+        color="secondary"
+        variant="plain"
+        size="sm"
+        onClick={toggle}
+        className="fixed top-2 left-2 z-sidebar size-7"
+      />,
+      document.body
     )
   }
 
@@ -178,16 +177,25 @@ export function SidebarFrame({
       <div className="max-md:hidden">
         <ResizeHandle width={width} onResize={setWidth} />
       </div>
-      {windowNavigation}
+      {windowControls}
     </aside>
   )
 }
 
 /**
- * Back and forward beside the sidebar toggle, which the desktop app needs
- * because it has no browser chrome. ⌘[ and ⌘] stay the browser's on the web.
+ * The desktop title bar's buttons beside the traffic lights: the sidebar
+ * toggle, then back and forward, which the app needs without browser chrome.
+ * One no-drag cluster in the root layout's controls host, so no draggable
+ * header can come after it and swallow its clicks. ⌘[ and ⌘] stay the
+ * browser's on the web.
  */
-function WindowNavigation() {
+function WindowControls({
+  collapsed,
+  toggle,
+}: {
+  collapsed: boolean
+  toggle: () => void
+}) {
   const subscribe = (onChange: () => void) => {
     window.navigation?.addEventListener("currententrychange", onChange)
     return () =>
@@ -220,7 +228,19 @@ function WindowNavigation() {
   }, [])
 
   return (
-    <div className="fixed top-2 left-[122px] z-sidebar flex items-center gap-0.5 [.desktop-fullscreen_&]:left-[44px]">
+    <div
+      data-no-drag=""
+      className="fixed top-2 left-[90px] z-sidebar flex items-center gap-0.5 [.desktop-fullscreen_&]:left-[12px]"
+    >
+      <IconButton
+        icon={SidebarSimpleIcon}
+        label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        color="secondary"
+        variant="plain"
+        size="sm"
+        onClick={toggle}
+        className="size-7"
+      />
       <IconButton
         icon={ArrowLeftIcon}
         label="Back"
@@ -236,7 +256,7 @@ function WindowNavigation() {
         size="sm"
         disabled={!canGoBack}
         onClick={() => window.history.back()}
-        className="size-7"
+        className="size-7 disabled:bg-transparent"
       />
       <IconButton
         icon={ArrowRightIcon}
@@ -253,7 +273,7 @@ function WindowNavigation() {
         size="sm"
         disabled={!canGoForward}
         onClick={() => window.history.forward()}
-        className="size-7"
+        className="size-7 disabled:bg-transparent"
       />
     </div>
   )
@@ -326,9 +346,8 @@ export function SidebarCollapseButton({
   onToggle,
   className,
 }: SidebarCollapseButtonProps) {
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
-
+  // On desktop the title bar's WindowControls own the toggle.
+  if (typeof window !== "undefined" && window.openSweDesktop) return null
   return (
     <IconButton
       icon={SidebarSimpleIcon}
@@ -336,13 +355,8 @@ export function SidebarCollapseButton({
       color="secondary"
       variant="plain"
       size="sm"
-      data-sidebar-collapse=""
       onClick={onToggle}
-      className={cn(
-        "shrink-0",
-        isDesktop && "fixed top-2 left-[90px] z-sidebar size-7",
-        className
-      )}
+      className={cn("shrink-0", className)}
     />
   )
 }
