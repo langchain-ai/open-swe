@@ -228,7 +228,7 @@ def label_slack_channel_mentions(text: str, channel_names_by_id: Mapping[str, st
 
 def convert_mentions_to_slack_format(text: str) -> str:
     """Convert @Name(USER_ID) patterns to Slack's <@USER_ID> mention format."""
-    return re.sub(r"@[^()]+\(([A-Z0-9]+)\)", r"<@\1>", text)
+    return re.sub(r"(?<![\w<@])@[^()<>@\r\n]+\(([UW][A-Z0-9]{8,})\)", r"<@\1>", text)
 
 
 def verify_slack_signature(

@@ -4,6 +4,7 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException
 
+from openswe.dashboard.deps import session_is_admin
 from openswe.dashboard.principal import DashboardPrincipal
 from openswe.threads.principals import Principal
 from openswe.users import User
@@ -55,3 +56,22 @@ def test_github_thread_identity_preserves_attribution(monkeypatch):
     assert principal.sender_id == "github:Alice"
     assert principal.admin
     principal.authorize("system")
+
+
+@pytest.mark.parametrize(
+    ("login", "admin"),
+    [("alice", True), ("mallory", False), ("user:00000000-0000-0000-0000-000000000001", False)],
+)
+def test_langsmith_session_is_admin_only_through_its_linked_github_login(
+    monkeypatch, login: str, admin: bool
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice,admin@example.com")
+    session = {
+        "sub": login,
+        "provider": "langsmith",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "langsmith_subject": "ls-sub",
+        "email": "admin@example.com",
+    }
+
+    assert session_is_admin(session) is admin

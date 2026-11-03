@@ -15,6 +15,8 @@ class UserPreferences(BaseModel):
     # workspace memories they saved in their private threads reach their own runs there
     # until the curator processes them.
     experimental_memory: bool = False
+    # Code mode can classify with TypeSafe's System One model (the ``classify`` tool).
+    experimental_classify: bool = False
 
 
 class UserPreferencesPatch(BaseModel):
@@ -24,5 +26,8 @@ class UserPreferencesPatch(BaseModel):
     )
     goal_mode: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
     experimental_memory: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    experimental_classify: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )

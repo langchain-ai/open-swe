@@ -338,6 +338,7 @@ export interface Profile {
   pr_failure_reactions?: boolean
   goal_mode?: boolean
   experimental_memory?: boolean
+  experimental_classify?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -356,6 +357,7 @@ export interface ProfileUpdate {
   pr_failure_reactions?: boolean
   goal_mode?: boolean
   experimental_memory?: boolean
+  experimental_classify?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -467,13 +469,6 @@ export interface MCPConnectionUpdate {
   allowed_tools: string[]
   headers?: Record<string, string> | null
   oauth?: MCPOAuthUpdate | null
-}
-
-export interface LangSmithConnectionStatus {
-  available: boolean
-  connected: boolean
-  email?: string | null
-  updated_at?: string | null
 }
 
 export interface ManagedToolsGateway {
@@ -1797,12 +1792,6 @@ export const api = {
       `/my-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
-  getMyLangSmithStatus: () =>
-    request<LangSmithConnectionStatus>("/my-credentials/langsmith"),
-  disconnectLangSmith: () =>
-    request<LangSmithConnectionStatus>("/my-credentials/langsmith", {
-      method: "DELETE",
-    }),
   listManagedToolsGateways: () =>
     request<ManagedToolsGateway[]>("/managed-tools/gateways"),
   getMyManagedTools: () => request<ManagedToolsView>("/my-managed-tools"),
@@ -2145,19 +2134,14 @@ export const api = {
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 }
 
-export function loginUrl(
-  redirectTo?: string,
-  provider: "github" | "langsmith" = "github"
-): string {
+export function loginUrl(redirectTo?: string): string {
   const target =
     redirectTo ??
     (typeof window !== "undefined"
       ? `${window.location.pathname}${window.location.search}${window.location.hash}`
       : "")
   const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : ""
-  const path =
-    provider === "langsmith" ? "/auth/langsmith/login" : "/auth/login"
-  return `${API_BASE}/dashboard/api${path}${qs}`
+  return `${API_BASE}/dashboard/api/auth/login${qs}`
 }
 
 /**
@@ -2169,7 +2153,7 @@ export function loginUrl(
  * itself and resolves once the connection is stored.
  */
 export function connectService(
-  provider: "slack" | "langsmith",
+  provider: "slack" | "github",
   redirectTo?: string
 ) {
   const pending = window.openSweDesktop?.connectService(provider)

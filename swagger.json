@@ -5041,6 +5041,17 @@
             ],
             "title": "Experimental Background Callbacks"
           },
+          "experimental_classify": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Classify"
+          },
           "experimental_memory": {
             "anyOf": [
               {
@@ -11190,63 +11201,6 @@
         ]
       }
     },
-    "/dashboard/api/auth/langsmith/callback": {
-      "get": {
-        "operationId": "auth_langsmith_callback_dashboard_api_auth_langsmith_callback_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "state",
-            "required": true,
-            "schema": {
-              "title": "State",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "code",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Code"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Auth Langsmith Callback",
-        "tags": [
-          "dashboard",
-          "auth"
-        ]
-      }
-    },
     "/dashboard/api/auth/langsmith/login": {
       "get": {
         "operationId": "auth_langsmith_login_dashboard_api_auth_langsmith_login_get",
@@ -11341,6 +11295,7 @@
     },
     "/dashboard/api/auth/login": {
       "get": {
+        "description": "Everyone signs in with LangSmith; locally without it, as the `gh` CLI's user.",
         "operationId": "auth_login_dashboard_api_auth_login_get",
         "parameters": [
           {
@@ -11357,50 +11312,6 @@
                 }
               ],
               "title": "Redirect To"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Desktop",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_handoff",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Handoff"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_port",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 65535,
-                  "minimum": 1024,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Port"
             }
           }
         ],
@@ -12001,6 +11912,144 @@
         ]
       }
     },
+    "/dashboard/api/github/desktop/exchange": {
+      "post": {
+        "description": "Finish a desktop GitHub link with the app's own session.",
+        "operationId": "github_link_desktop_exchange_dashboard_api_github_desktop_exchange_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopConnectExchange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Github Link Desktop Exchange Dashboard Api Github Desktop Exchange Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Github Link Desktop Exchange",
+        "tags": [
+          "dashboard",
+          "auth"
+        ]
+      }
+    },
+    "/dashboard/api/github/login": {
+      "get": {
+        "description": "Start linking a GitHub account to the signed-in LangSmith person.",
+        "operationId": "github_link_login_dashboard_api_github_login_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "redirect_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Redirect To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop_handoff",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desktop Handoff"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop_port",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 1024,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desktop Port"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Github Link Login",
+        "tags": [
+          "dashboard",
+          "auth"
+        ]
+      }
+    },
     "/dashboard/api/incidents/documents/history": {
       "get": {
         "operationId": "search_history_dashboard_api_incidents_documents_history_get",
@@ -12465,7 +12514,8 @@
     },
     "/dashboard/api/langsmith/callback": {
       "get": {
-        "operationId": "langsmith_callback_dashboard_api_langsmith_callback_get",
+        "description": "Finish LangSmith sign-in on the callback the LangSmith OAuth client registers.",
+        "operationId": "auth_langsmith_callback_dashboard_api_langsmith_callback_get",
         "parameters": [
           {
             "in": "query",
@@ -12491,38 +12541,6 @@
               ],
               "title": "Code"
             }
-          },
-          {
-            "in": "query",
-            "name": "error",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Error"
-            }
-          },
-          {
-            "in": "query",
-            "name": "error_description",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Error Description"
-            }
           }
         ],
         "responses": {
@@ -12545,149 +12563,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Langsmith Callback",
+        "summary": "Auth Langsmith Callback",
         "tags": [
           "dashboard",
-          "langsmith"
-        ]
-      }
-    },
-    "/dashboard/api/langsmith/desktop/exchange": {
-      "post": {
-        "description": "Finish a desktop LangSmith connection with the app's own session.",
-        "operationId": "langsmith_desktop_exchange_dashboard_api_langsmith_desktop_exchange_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DesktopConnectExchange"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Langsmith Desktop Exchange Dashboard Api Langsmith Desktop Exchange Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Langsmith Desktop Exchange",
-        "tags": [
-          "dashboard",
-          "langsmith"
-        ]
-      }
-    },
-    "/dashboard/api/langsmith/login": {
-      "get": {
-        "operationId": "langsmith_login_dashboard_api_langsmith_login_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "redirect_to",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Redirect To"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_handoff",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Handoff"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_port",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 65535,
-                  "minimum": 1024,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Port"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Langsmith Login",
-        "tags": [
-          "dashboard",
-          "langsmith"
+          "auth"
         ]
       }
     },
@@ -13523,62 +13402,6 @@
         "tags": [
           "dashboard",
           "merge-queue"
-        ]
-      }
-    },
-    "/dashboard/api/my-credentials/langsmith": {
-      "delete": {
-        "operationId": "disconnect_my_langsmith_dashboard_api_my_credentials_langsmith_delete",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Disconnect My Langsmith Dashboard Api My Credentials Langsmith Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Disconnect My Langsmith",
-        "tags": [
-          "dashboard",
-          "langsmith"
-        ]
-      },
-      "get": {
-        "operationId": "get_my_langsmith_status_dashboard_api_my_credentials_langsmith_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get My Langsmith Status Dashboard Api My Credentials Langsmith Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Get My Langsmith Status",
-        "tags": [
-          "dashboard",
-          "langsmith"
         ]
       }
     },
