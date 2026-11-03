@@ -392,8 +392,9 @@ the conversation it posts to, in every run of the thread, typed by `provider`:
 - `LinearChannelTarget`: `organization_id`, `issue_id`, and `identifier`,
   `comment_id` or `session_id` when the conversation has one.
 
-`target` is `None` for a channel without a typed target, such as
-`channels.http()`.
+In a scheduled run that starts a new thread, `post` posts at top level, so
+`target` has no `thread_ts`, `comment_id` or `session_id`. `target` is `None` for
+a channel without a typed target, such as `channels.http()`.
 
 ```python
 origin = runtime.thread.origin
@@ -423,6 +424,23 @@ posted = await origin.channel.post(
     {"type": "content", "content": "Haiku about mango"},
     new_thread=True,
     run={"messages": [*history, HumanMessage("Go on.")]},
+)
+```
+
+To move the conversation instead, pass `hand_off=True`. The new Slack thread
+takes the current run's thread, with its history: replies, Stop and decision
+buttons there reach it, and `thread_id` is the current thread's. The rest of
+the run answers, and waits on decisions, in the new Slack thread too. The old Slack
+thread no longer has a thread, so a run its later messages would start is
+refused; a handler that knows about the move can `reply()` instead. Only a
+channel conversation's run can hand off its thread, and not together with
+`run=`:
+
+```python
+await origin.channel.post(
+    {"type": "content", "content": "Moved here from the old thread."},
+    new_thread=True,
+    hand_off=True,
 )
 ```
 
@@ -1965,6 +1983,9 @@ Python also has async methods such as `aread`, `awrite`, and `adelete`.
 All paths refer to the current sandbox. Context Hub routes for skills and
 memory are not part of this backend.
 
+The sandbox opens on its first use. `open_sandbox(runtime.backend)` opens it
+now and returns its name.
+
 Private published images can declare registry credentials by environment
 variable name; MDA creates or updates the deployment-owned Host registry:
 
@@ -2031,6 +2052,15 @@ When a LangSmith-managed OAuth MCP server needs authorization, the runtime
 reports its connection URL; complete OAuth there, then retry the run. API-key
 MCP servers require the caller to connect the key in LangSmith Tools before
 invoking one of their tools.
+
+A LangSmith tool kit asks for every unconnected provider before the run starts.
+Pass `jit_auth=True` to `define_mcp` to ask on use instead: the kit's tools for
+unconnected providers are still offered to the model. When the model calls
+them, the run interrupts once per model step with the connect links for the
+providers those calls need, then runs the calls after it resumes. If the run
+resumes without a connection, or nobody can connect in this run (no signed-in
+caller, or a scheduled run), those calls return a tool error and the run
+continues.
 
 Deploy the project first, then provision its connections with
 `mda connections create`. Agent-owned opaque secrets are scoped to that
