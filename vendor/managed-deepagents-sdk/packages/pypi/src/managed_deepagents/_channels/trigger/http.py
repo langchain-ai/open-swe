@@ -15,7 +15,6 @@ from http import HTTPStatus
 from importlib import import_module
 from typing import (
     TYPE_CHECKING,
-    Any,
     Literal,
     NamedTuple,
     Never,
@@ -72,12 +71,12 @@ from managed_deepagents._channels.trigger.ingress import (
     cancel_ingress_thread_runs,
     conversation_thread_id,
     delete_ingress_thread,
+    get_ingress_thread_state,
     handler_thread_resume_target,
     handler_threads_key,
     ingress_resume_target,
     ingress_thread_exists,
     ingress_thread_interrupts,
-    ingress_thread_values,
     newer_ingress_run,
     observe_ingress_agent,
     other_active_ingress_run,
@@ -112,7 +111,7 @@ from managed_deepagents._telemetry.otel import set_log_attributes
 from managed_deepagents.run_context import INTERRUPT_CORRELATION_KEY
 
 if TYPE_CHECKING:
-    from langgraph_sdk.schema import Interrupt
+    from langgraph_sdk.schema import Interrupt, ThreadState
 
     from managed_deepagents._agent_auth import ResolvePrincipalIdentity
     from managed_deepagents._channels.actor import ChannelActor
@@ -149,9 +148,9 @@ class TriggerChannelThread(TypedDict):
 
     id: str
     source_thread_key: str
-    read_state: NotRequired[Callable[[], Awaitable[dict[str, Any] | None]]]
-    """Reads the thread's state values as its conversation's runs do; set only
-    while a handler decides an event."""
+    get_state: NotRequired[Callable[[], Awaitable[ThreadState | None]]]
+    """Reads the thread's state as its conversation's runs do; set only while a
+    handler decides an event."""
 
 
 @dataclass(frozen=True)
@@ -270,7 +269,7 @@ class ThreadExistsFn(Protocol):
     ) -> bool: ...
 
 
-class ThreadValuesFn(Protocol):
+class GetThreadStateFn(Protocol):
     async def __call__(
         self,
         *,
@@ -278,7 +277,7 @@ class ThreadValuesFn(Protocol):
         source_provider: str,
         source_thread_key: str,
         user_id: str,
-    ) -> dict[str, Any] | None: ...
+    ) -> ThreadState | None: ...
 
 
 class NewerRunFn(Protocol):
@@ -683,7 +682,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     resume_agent: ResumeAgentFn | None = None,
     thread_interrupts: ThreadInterruptsFn | None = None,
     thread_exists: ThreadExistsFn | None = None,
-    thread_values: ThreadValuesFn | None = None,
+    get_thread_state: GetThreadStateFn | None = None,
     newer_run: NewerRunFn | None = None,
     other_active_run: OtherActiveRunFn | None = None,
     resume_target: ResumeTargetFn | None = None,
@@ -878,8 +877,8 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         "source_thread_key": event["source_thread_key"],
         # As the conversation's runs read it: under its owner key, which is a
         # code channel's own.
-        "read_state": functools.partial(
-            thread_values or ingress_thread_values,
+        "get_state": functools.partial(
+            get_thread_state or get_ingress_thread_state,
             thread_id=thread_id,
             source_provider=source_provider,
             source_thread_key=owner_key,
@@ -1924,10 +1923,10 @@ __all__ = [
     "ASSISTANT_ID_ENV",
     "TRIGGER_SERVICE_KEY_HEADER",
     "DecideMessageFn",
+    "GetThreadStateFn",
     "NewerRunFn",
     "OnlyContinuesThreadFn",
     "ThreadExistsFn",
-    "ThreadValuesFn",
     "TriggerChannelThread",
     "TriggerFinishedEvent",
     "TriggerMessageBackground",
