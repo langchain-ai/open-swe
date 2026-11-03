@@ -1,28 +1,55 @@
 """Requests the run sends to a host someone else named, only at a public address.
 
-A URL from a catalog or a message may name any host. These requests stay on the
-URL's own HTTPS origin and go to an address checked as public, so neither a
-redirect nor a second DNS answer can point them, or the credential they carry, at
-a private host.
+A URL from a catalog or a message may name any host. These requests go to an address
+checked as public, so neither a redirect nor a second DNS answer can point them, or
+the credential they carry, at a private host. ``PublicOrigin`` stays on the URL's own
+HTTPS origin; ``request_public``, which the model's own requests take, follows
+redirects to any public host, checking each and dropping the credentials a redirect
+to another origin would carry, as the backend's ``openswe.utils.url_safety`` does.
 """
 
 import asyncio
 import ipaddress
 import logging
-from urllib.parse import urlsplit, urlunsplit
+import socket
+from typing import Any, Final
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx2
 
 logger = logging.getLogger(__name__)
+
+_MAX_REDIRECTS: Final = 5
+_REDIRECT_CODES: Final = frozenset({301, 302, 303, 307, 308})
+_ENTITY_HEADERS: Final = frozenset(
+    {"content-encoding", "content-language", "content-length", "content-type"}
+)
+_SENSITIVE_HEADERS: Final = frozenset({"authorization", "cookie", "proxy-authorization"})
 
 
 class NotPublicError(ValueError):
     """A request the run refused to send; its message is ours."""
 
 
+class BlockedUrlError(NotPublicError):
+    """A URL ``request_public`` would not send to; ``url`` is the one it stopped at."""
+
+    def __init__(self, url: str, reason: str) -> None:
+        super().__init__(f"Request blocked: {reason}")
+        self.url = url
+
+
 def _origin(url: str) -> tuple[str, str | None, int]:
     parsed = urlsplit(url)
     return parsed.scheme, parsed.hostname, parsed.port or 443
+
+
+def _address(address: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    """``address``, an IPv4-mapped one as the IPv4 address it maps; ValueError if not one."""
+    ip = ipaddress.ip_address(address)
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return ip.ipv4_mapped
+    return ip
 
 
 async def public_addresses(
@@ -35,14 +62,128 @@ async def public_addresses(
         raise error(f"{name} has no addresses")
     for address in addresses:
         try:
-            ip = ipaddress.ip_address(address)
+            ip = _address(address)
         except ValueError:
             raise error(f"{name} must resolve only to public addresses") from None
-        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-            ip = ip.ipv4_mapped
         if not ip.is_global:
             raise error(f"{name} must resolve only to public addresses")
     return addresses
+
+
+async def _checked(url: str) -> tuple[str, list[str]]:
+    """``url``'s host and its addresses, once every one is public; ``BlockedUrlError`` otherwise."""
+    try:
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"}:
+            raise BlockedUrlError(url, f"Unsupported URL scheme: {parsed.scheme or '<missing>'}")
+        hostname = parsed.hostname
+        if not hostname:
+            raise BlockedUrlError(url, "Could not parse hostname from URL")
+        try:
+            infos = await asyncio.get_running_loop().getaddrinfo(hostname, None)
+        except socket.gaierror as exc:
+            raise BlockedUrlError(url, f"Could not resolve hostname: {hostname}") from exc
+        if not infos:
+            raise BlockedUrlError(url, f"Could not resolve hostname: {hostname}")
+        for info in infos:
+            address = str(info[4][0])
+            try:
+                ip = _address(address)
+            except ValueError as exc:
+                raise BlockedUrlError(url, f"Could not parse resolved address: {address}") from exc
+            if not ip.is_global:
+                raise BlockedUrlError(url, f"URL resolves to blocked address: {address}")
+        return hostname, list(dict.fromkeys(str(info[4][0]) for info in infos))
+    except BlockedUrlError:
+        raise
+    except Exception as exc:
+        raise BlockedUrlError(url, f"URL validation error: {exc}") from exc
+
+
+def _pinned(url: str, address: str) -> str:
+    parsed = urlsplit(url)
+    host = f"[{address}]" if ":" in address else address
+    return urlunsplit(parsed._replace(netloc=f"{host}:{parsed.port}" if parsed.port else host))
+
+
+def _any_origin(url: str) -> tuple[str, str, int]:
+    parsed = urlsplit(url)
+    try:
+        port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+    except ValueError:
+        port = -1
+    return parsed.scheme.lower(), (parsed.hostname or "").lower(), port
+
+
+def _sensitive(name: str) -> bool:
+    normalized = name.lower()
+    return (
+        normalized in _SENSITIVE_HEADERS or "api-key" in normalized or normalized.endswith("-token")
+    )
+
+
+def _redirect_method(method: str, status_code: int) -> str:
+    if status_code in {302, 303} and method != "HEAD":
+        return "GET"
+    if status_code == 301 and method == "POST":
+        return "GET"
+    return method
+
+
+async def request_public(
+    client: httpx2.AsyncClient, method: str, url: str, **kwargs: Any
+) -> httpx2.Response:
+    """``client``'s request, at a public address checked for each host it is redirected to.
+
+    A redirect to another origin drops the credentials the request carried, and one that
+    changes its method to ``GET`` drops its body. Raises ``BlockedUrlError``.
+    """
+    current_method = method.upper()
+    current_url = url
+    request_kwargs: dict[str, Any] = dict(kwargs)
+    raw_headers = request_kwargs.pop("headers", None)
+    headers_sent = dict(raw_headers) if isinstance(raw_headers, dict) else {}
+    for redirect_count in range(_MAX_REDIRECTS + 1):
+        hostname, addresses = await _checked(current_url)
+        headers = {**headers_sent, "Host": urlsplit(current_url).netloc}
+        response: httpx2.Response | None = None
+        for index, address in enumerate(addresses):
+            try:
+                response = await client.request(
+                    current_method,
+                    _pinned(current_url, address),
+                    follow_redirects=False,
+                    headers=headers,
+                    extensions={"sni_hostname": hostname},
+                    **request_kwargs,
+                )
+                break
+            except httpx2.ConnectError, httpx2.ConnectTimeout:
+                if index == len(addresses) - 1:
+                    raise
+        if response is None:
+            raise httpx2.ConnectError("No response received from pinned address")
+        location = response.headers.get("Location")
+        if response.status_code not in _REDIRECT_CODES or not location:
+            return response
+        if redirect_count == _MAX_REDIRECTS:
+            raise BlockedUrlError(current_url, "Too many redirects")
+        next_url = urljoin(current_url, location)
+        request_kwargs.pop("params", None)
+        if _any_origin(current_url) != _any_origin(next_url):
+            headers_sent = {k: v for k, v in headers_sent.items() if not _sensitive(k)}
+            request_kwargs.pop("auth", None)
+            request_kwargs.pop("cookies", None)
+        next_method = _redirect_method(current_method, response.status_code)
+        if next_method != current_method:
+            headers_sent = {
+                k: v for k, v in headers_sent.items() if k.lower() not in _ENTITY_HEADERS
+            }
+            for body in ("data", "content", "json"):
+                request_kwargs.pop(body, None)
+        current_method = next_method
+        current_url = next_url
+    raise BlockedUrlError(current_url, "Too many redirects")
 
 
 class PublicOrigin(httpx2.AsyncBaseTransport):

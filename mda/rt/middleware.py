@@ -68,7 +68,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from runtime_api.catalog import InboxSpec
+from runtime_api.catalog import JOINED_TASK_CONTEXT, InboxSpec
 from runtime_api.endpoint import Endpoint, call
 from runtime_api.loop import (
     AFTER_AGENT,
@@ -952,7 +952,7 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
         launch: Launch,
-    ) -> ToolMessage:
+    ) -> ToolMessage | Command:
         tool_call = request.tool_call
         tool_call_id = tool_call.get("id") or ""
         waits = iter(_LAUNCH_RETRY_SECONDS)
@@ -997,7 +997,7 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
 
     async def _register(
         self, launch: Launch, launched: _Launched, tool_call_id: str
-    ) -> ToolMessage:
+    ) -> ToolMessage | Command:
         try:
             registered = await call(
                 self._backend,
@@ -1013,9 +1013,17 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
             # reporting a failed launch would only start a second worker.
             logger.warning("The backend did not register a launched worker", exc_info=True)
             return _worker_message({"worker_thread_id": launched.thread_id}, tool_call_id)
-        if registered.task_context is not None:
-            self._backend.run.joined_task(registered.task_context)
-        return _worker_message(registered.worker, tool_call_id)
+        message = _worker_message(registered.worker, tool_call_id)
+        if registered.task_context is None:
+            return message
+        # The first worker made the thread its task's coordinator: the run's later calls
+        # tell the model the task, as the next run's catalog will.
+        return Command(
+            update={
+                "messages": [message],
+                STATE_KEY: {JOINED_TASK_CONTEXT: registered.task_context},
+            }
+        )
 
 
 def _launch_runtime(runtime: ToolRuntime, grant: str, catalog: dict[str, JsonValue]) -> ToolRuntime:

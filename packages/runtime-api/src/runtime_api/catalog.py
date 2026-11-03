@@ -7,7 +7,7 @@ subagents it may delegate to, the models it calls, the sandbox its file and shel
 run in, and what its middleware does around each model call.
 """
 
-from typing import Literal
+from typing import Final, Literal
 
 from pydantic import BaseModel, JsonValue, field_validator
 
@@ -61,6 +61,9 @@ class ToolSpec(BaseModel):
     # The connections its tool reads its credentials from, which the runtime reads as
     # the run and sends with each call of it (``RunOperation.credentials``).
     connections: list[ConnectionRef] = []
+    # Whether the runtime runs the tool itself, as this spec describes it, rather than
+    # calling the operation; a runtime that cannot run it calls the operation.
+    runtime_runs: bool = False
 
 
 class McpServerSpec(BaseModel):
@@ -182,6 +185,29 @@ class CliResultRules(BaseModel):
     max_nudges: int = 2
 
 
+# A route a run's model calls take: the classifier picks one of ``ROUTES``; ``default``
+# is the run's own model.
+RouteName = Literal["fast", "balanced", "performance", "default"]
+ROUTES: Final[tuple[RouteName, ...]] = ("fast", "balanced", "performance")
+
+
+def kept_route(value: object) -> RouteName | None:
+    """The route a thread's kept ``model_route`` stands for; None when it names none.
+
+    Threads from before kept ``fast_alt`` for ``fast``.
+    """
+    match value:
+        case "fast" | "fast_alt":
+            return "fast"
+        case "balanced":
+            return "balanced"
+        case "performance":
+            return "performance"
+        case "default":
+            return "default"
+    return None
+
+
 class RoutingRules(BaseModel):
     """How the run picks the route of each model call."""
 
@@ -190,6 +216,12 @@ class RoutingRules(BaseModel):
     # The model each route stands for, which the dashboard shows, and the effort it runs at.
     route_model_ids: dict[str, str] = {}
     route_efforts: dict[str, str | None] = {}
+
+
+# Held state: the context of a task the thread joined during the run, after its catalog
+# was planned without it (a coordinator's first worker, a baby-sit watch). The next
+# run's catalog carries it in ``LoopRules.task_context``.
+JOINED_TASK_CONTEXT: Final = "joined_task_context"
 
 
 class TaskContext(BaseModel):
@@ -221,6 +253,10 @@ class LoopRules(BaseModel):
     # started; None where it may not. A coordinator's first worker hands back the context
     # of the task it then joined (``runtime_api.workers.Worker``).
     task_context: TaskContext | None = None
+    # Deprecated: what an MDA deployment from before ``task_context`` reads to ask the
+    # backend's ``task_context`` before each call. Remove once every deployment reads
+    # ``task_context``.
+    task_coordination: bool = False
     # Whether the run may wait on a call its client runs itself.
     client_tools: bool = False
     # Whether the backend gives the sandbox's GitHub proxy a fresh token before each model
@@ -274,6 +310,10 @@ class Catalog(BaseModel):
     # catalog leaves out from code, and how the model reads the search.
     search_tools: bool = False
     search_tools_description: str | None = None
+    # The digest the backend keeps every tool the run may call by, which the run reads
+    # once per process to search and resolve them itself (``runtime_api.tool_search``);
+    # None searches on the backend.
+    tool_set: str | None = None
 
     def names_only(self) -> Catalog:
         """This catalog as a run's context carries it: its tools by name alone.

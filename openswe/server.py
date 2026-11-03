@@ -36,6 +36,7 @@ from runtime_api.catalog import (
     ReplyRules,
     RoutingRules,
 )
+from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import QUICK_CALL_SECONDS
 from runtime_api.loop import RunSender, RunStarted
 
@@ -114,7 +115,7 @@ from openswe.middleware import (
 )
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
-from openswe.middleware.model_selection import RoutingMode
+from openswe.middleware.model_selection import ModelSelectionState, RoutingMode, SelectedRoute
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.require_cli_result import RequireCliResultMiddleware, cli_result_nudge
 from openswe.middleware.require_user_reply import (
@@ -1043,6 +1044,35 @@ def code_only(name: str) -> bool:
     return callable_from_code(name) and name not in _DIRECT_IN_CODE_MODE
 
 
+# Tools that read nothing of the backend's, which MDA runs itself from their spec
+# (``mda/rt/local_tools.py``). The backend keeps their implementations, for runtimes
+# that call them as operations and for its own MCP server.
+_RUNTIME_TOOLS = frozenset(
+    {
+        "fetch_url",
+        "http_request",
+        "slack_no_reply_needed",
+        "suggest_task",
+        "cli_result",
+        "record_human_input",
+        "note_on_diff",
+        "propose_review_comment",
+        "propose_pr_review",
+    }
+)
+
+
+def runtime_runs(name: str, connections: Sequence[ConnectionRef]) -> bool:
+    """Whether the run's runtime runs a tool itself rather than calling its operation.
+
+    ``web_search`` only where its key is the deployment's connection, which the runtime
+    reads; the backend's own key stays here.
+    """
+    if name == "web_search":
+        return any(ref.owner == "agent" for ref in connections)
+    return name in _RUNTIME_TOOLS
+
+
 def _integration_middleware(
     mcp_tools: Sequence[BaseTool], reserved_names: set[str]
 ) -> DynamicToolMiddleware | None:
@@ -1130,7 +1160,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     """Ready an agent run's turn: its prompt and model, and who it speaks with.
 
     Built from what starting the run decided (``AgentTurnSettings``), so preparing a turn
-    plans nothing; the run classifies the thread's route itself, alongside it. A thread
+    plans nothing. MDA's loop classifies the route of a run it loops itself, alongside this;
+    a run its plan answers is routed here. A thread
     whose sandbox MDA keeps (``sandbox``, its name) is not reached here: its work dir is
     the sandbox's own, and MDA readied the sandbox as it opened it.
     """
@@ -1142,11 +1173,15 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         *,
         repo_instructions: str | None,
         sandbox_id: str | None = None,
+        model_selection: ModelSelectionMiddleware | None = None,
     ) -> None:
         cfg = RunConfig.from_config(config)
         if cfg.thread_id is None:
             raise ValueError("An agent run needs a thread")
         self._config = config
+        # A run its plan answers routes its turn here, as before MDA routed: its loop runs no
+        # classifier of its own. None for the runs MDA's loop routes.
+        self._model_selection = model_selection
         self._turn = turn
         self._thread_id = cfg.thread_id
         self._sandbox_id = sandbox_id
@@ -1424,6 +1459,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 option = self._requested_models[requested_model]
                 requested_effort = settings.get("effort") or option["default_effort"]
                 decision.requested_effort = requested_effort
+                if self._model_selection is not None:
+                    self._model_selection.use_requested_model(requested_model)
                 if decision.outcome != "reused_saved_choice":
                     decision.outcome = "accepted_request"
                     decision.reason = "validated_and_persisted"
@@ -1471,8 +1508,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
         # Reads only who the run is for, so it runs alongside participants.
         recent_threads = asyncio.create_task(self._recent_threads(cfg))
-        # The run classifies the thread's route itself as it prepares; a dashboard switched
-        # back to Auto has it classify again.
+        # A dashboard switched back to Auto drops the route the thread kept.
         reroute = (
             not requested_model
             and cfg.source == "dashboard"
@@ -1480,8 +1516,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             and cfg.model_selection_changed
         )
         async with aphase(self._thread_id, "prepare.participants"):
-            configurable["resolved_agent_model_id"] = self._model_id
-            configurable["resolved_agent_effort"] = self._effort
+            route, persist_route = await self._route(state, requested_model, reroute=reroute)
+            attribution_model_id, attribution_effort = self._routing_defaults.get(
+                route or "default", (self._model_id, self._effort)
+            )
+            configurable["resolved_agent_model_id"] = attribution_model_id
+            configurable["resolved_agent_effort"] = attribution_effort
             bot_id = (
                 cfg.slack_thread.triggering_bot_id
                 if self._source == "slack" and cfg.slack_thread
@@ -1533,10 +1573,16 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "work_dir": work_dir,
             "requested_model": requested_model,
             "requested_effort": requested_effort,
-            "selected_model_id": self._model_id,
-            "selected_effort": self._effort,
+            "selected_model_id": attribution_model_id,
+            "selected_effort": attribution_effort,
             **({"messages": added} if added else {}),
-            **({"model_route": None} if reroute else {}),
+            **(
+                {"model_route": route}
+                if persist_route
+                else {"model_route": None}
+                if reroute
+                else {}
+            ),
             **system_prompt,
         }
 
@@ -1553,6 +1599,25 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 slack_team_id=(cfg.slack_thread.team_id if cfg.slack_thread else None),
                 slack_channel_id=(cfg.slack_thread.channel_id if cfg.slack_thread else None),
             )
+
+    async def _route(
+        self, state: PrepareRunState, requested_model: str | None, *, reroute: bool
+    ) -> tuple[SelectedRoute | None, bool]:
+        """The turn's route, and whether the thread keeps it; None for none chosen here.
+
+        MDA's loop classifies a run it routes itself, alongside this, so only a run its
+        plan answers is classified here.
+        """
+        if requested_model:
+            return "default", True
+        if self._model_selection is None:
+            return None, False
+        routing_state = cast(ModelSelectionState, state).copy()
+        if reroute:
+            routing_state.pop("model_route", None)
+            routing_state.pop("requested_model", None)
+        selection = await self._model_selection.select_route(routing_state)
+        return selection.route, selection.persist
 
     async def _render_system_prompt(self, cfg: RunConfig) -> SystemPrompt:
         """The thread's system prompt, from what holds for it as its first run starts."""
@@ -2072,7 +2137,10 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         tool_discovery_failures=list(mcp_tools.failures) if isinstance(mcp_tools, MCPTools) else [],
     )
     configurable[AGENT_TURN_KEY] = turn.model_dump(mode="json")
-    run_preparation = PrepareAgentRunMiddleware(config, turn, repo_instructions=repo_instructions)
+    # Prepares only a run its plan answers: MDA prepares the others from the token.
+    run_preparation = PrepareAgentRunMiddleware(
+        config, turn, repo_instructions=repo_instructions, model_selection=model_selection
+    )
     subagent_tools = [
         tool
         for tool in static_tools
@@ -2155,6 +2223,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             if cli_result_required
             else None,
             task_context=task_coordination.task_context() if task_coordination else None,
+            task_coordination=task_coordination is not None,
             client_tools=client_tools is not None,
             refresh_github_proxy=True,
         )

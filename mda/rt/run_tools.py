@@ -26,15 +26,13 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from managed_deepagents.run_resources import on_run_exit
 from runtime_api.catalog import Catalog, SubagentSpec, ToolSpec
-from runtime_api.endpoint import call
 from runtime_api.loop import ModelCall
-from runtime_api.tool_search import RESOLVE, ToolLookup
 
 from rt.backend import BackendCallError, OpenSweBackend, Run, RunLocal, current_run
 from rt.file_tools import FileToolsMiddleware
 from rt.mcp import McpTools
 from rt.models import build_model
-from rt.search_tools import search_tools_tool
+from rt.search_tools import resolve_tool, search_tools_tool
 from rt.tools import backend_tool, operation_tool, run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
@@ -193,8 +191,7 @@ class BackendTools:
         if not run.catalog.search_tools:
             return None
         if name not in run.backend_tools:
-            lookup = ToolLookup(run_id=run_id(), name=name)
-            run.backend_tools[name] = (await call(self._backend, RESOLVE, lookup)).tool
+            run.backend_tools[name] = await resolve_tool(self._backend, name)
         return run.backend_tools[name]
 
 

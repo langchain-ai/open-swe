@@ -16,8 +16,6 @@ dependencies = [
     "langchain-quickjs>=0.3.10,<0.4.0",
     "langsmith>=0.14.16",
     "httpx2>=2.12.0",
-    # Classifies each new thread's route, as the backend's classifier did.
-    "langchain-typesafe==0.0.1a3",
     # Renders the prompts in prompts/, as the backend renders its own.
     "jinja2>=3.1.6",
     # The vendored SDK's browser installs its extension from this package, so this
@@ -26,6 +24,10 @@ dependencies = [
     # The browser's tools; matches the pin `mda` injects into browser builds.
     "stagehand-middleware==0.1.0",
     "mcp>=2.2.0",
+    # web_search and fetch_url, which MDA runs itself; their results match the
+    # backend's only at the versions it runs.
+    "exa-py==2.22.2",
+    "markdownify==1.2.3",
     "pydantic>=2.11",
     "open-swe-runtime-api",
 ]

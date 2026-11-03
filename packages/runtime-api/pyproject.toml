@@ -8,6 +8,9 @@ dependencies = [
     # Both sides build the run's chat models from the one table and builder (models.py).
     "langchain>=1.4.7",
     "langchain-openai>=1.7.3,<2.0.0",
+    # Jev, the gateway's classifier, which both sides ask (classifier.py).
+    "langchain-typesafe==0.0.1a3",
+    "httpx2>=2.12.0",
 ]
 
 [build-system]
