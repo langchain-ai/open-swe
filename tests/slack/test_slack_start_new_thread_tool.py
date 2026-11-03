@@ -57,29 +57,27 @@ async def test_slack_breakout_thread_refuses_private_channel(
     monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
 
     result = await slack_breakout_tool.slack_breakout_thread(
-        "Title", "Do the thing.", channel_id="C2"
+        "Title", "Do the thing.", destination="C2"
     )
 
     assert result["success"] is False
     post.assert_not_awaited()
 
 
-@pytest.mark.parametrize("channel_id", [None, "null", "", "#general"])
+@pytest.mark.parametrize("destination", ["null", "", "#general"])
 async def test_breakout_rejects_invalid_channel_before_slack_lookup(
-    monkeypatch: pytest.MonkeyPatch, channel_id: str | None
+    monkeypatch: pytest.MonkeyPatch, destination: str
 ) -> None:
     monkeypatch.setattr("openswe.run_config.get_config", _config)
     load = AsyncMock()
     monkeypatch.setattr(SlackChannel, "load", load)
 
     result = await slack_breakout_tool.slack_breakout_thread(
-        "Title", "Do the thing.", channel_id=channel_id
+        "Title", "Do the thing.", destination=destination
     )
 
     assert result["success"] is False
-    assert (
-        "channel_id is required" if channel_id is None else "channel_id must be a Slack channel ID"
-    ) in str(result["error"])
+    assert "destination must be a Slack channel ID" in str(result["error"])
     load.assert_not_awaited()
 
 
@@ -217,7 +215,7 @@ async def test_breakout_queues_source_thread_files_best_effort(
     monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", dispatch)
 
     result = await slack_breakout_tool.slack_breakout_thread(
-        "Investigate recording", "Investigate the attached recording.", channel_id="C2"
+        "Investigate recording", "Investigate the attached recording.", destination="C2"
     )
 
     assert result["success"] is True
@@ -257,7 +255,7 @@ async def test_breakout_rejects_invalid_model_settings_without_creating_thread(
     monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
 
     result = await slack_breakout_tool.slack_breakout_thread(
-        "Title", "Do the thing.", channel_id="C1", model=model, effort=effort
+        "Title", "Do the thing.", destination="C1", model=model, effort=effort
     )
 
     assert result["success"] is False
@@ -284,7 +282,7 @@ async def test_web_breakout_does_not_post_or_bind_slack(
     monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
     monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", bind)
     result = await slack_breakout_tool.slack_breakout_thread(
-        "Side question", "Explain this", channel_id=None, web_only=True, model=model
+        "Side question", "Explain this", destination="web", model=model
     )
     assert result["success"] is True
     assert "slack_url" not in result
@@ -449,7 +447,7 @@ async def test_slack_breakout_thread_success(
     result = await slack_breakout_tool.slack_breakout_thread(
         "Investigate follow-up",
         "Use the same repo and investigate the follow-up aspect in detail.",
-        channel_id=explicit,
+        destination=explicit,
         model=model,
         effort=effort,
     )
@@ -628,7 +626,7 @@ async def test_breakout_preserves_requester_and_credential_scope(
     monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", dispatch)
 
     result = await slack_breakout_tool.slack_breakout_thread(
-        "Title", "Instructions", channel_id="C1"
+        "Title", "Instructions", destination="C1"
     )
 
     assert result["success"] is allowed
@@ -682,7 +680,7 @@ async def test_breakout_rejects_unreadable_parent_scope(monkeypatch: pytest.Monk
     monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
 
     with pytest.raises(RuntimeError, match="store unavailable"):
-        await slack_breakout_tool.slack_breakout_thread("Title", "Instructions", channel_id="C1")
+        await slack_breakout_tool.slack_breakout_thread("Title", "Instructions", destination="C1")
     post.assert_not_awaited()
 
 
@@ -716,7 +714,7 @@ async def test_slack_breakout_thread_returns_detail_failure_without_dispatch(
     monkeypatch.setattr(slack_breakout_tool.asyncio, "sleep", fake_sleep)
 
     result = await slack_breakout_tool.slack_breakout_thread(
-        "Title", "Instructions", channel_id="C1"
+        "Title", "Instructions", destination="C1"
     )
 
     assert result["success"] is False

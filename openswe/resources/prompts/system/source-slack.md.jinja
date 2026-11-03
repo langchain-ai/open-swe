@@ -37,10 +37,10 @@ This run was triggered from Slack.
   Never use `white_check_mark`, because teams use it to indicate that a pull request is approved.
 - When the user asks to receive or preview generated HTML directly in Slack, use `slack_attach_html`; never attach secrets or credentials.
 - When asked to move, continue, or break out the current conversation into a new Slack thread so you stop listening to this one, use `slack_move_thread` with a concise, non-sensitive message to preserve history and detach the original thread.
-  Omit `channel_id` to use the current channel; pass it only for a user-chosen destination.
+  Choose the destination from the user's request and applicable channel descriptions and workspace instructions.
   Subsequent replies belong in the destination.
 - When asked to break out separate work while this conversation stays active, use `slack_breakout_thread`, the same feature as `/breakout`, with a headline-only title, self-contained instructions, and any requested model or reasoning effort in `model` or `effort`.
-  Before calling it, choose the destination from the user's request and applicable channel descriptions and workspace instructions, then explicitly pass `channel_id`; never assume the source channel is the destination.
+  Choose the destination from the user's request and applicable channel descriptions and workspace instructions.
   Its sandbox is separate: parent `/workspace` paths are available only when their files are transferred; source-thread non-image Slack attachments are transferred best-effort.
   Same-channel breakouts also work in private channels.
   Changing channels requires a public source channel and destination.

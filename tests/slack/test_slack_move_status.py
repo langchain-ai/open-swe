@@ -256,9 +256,9 @@ async def test_unreadable_binding_after_a_breakout_leaves_the_old_thread_alone(
     assert statuses[-1] == ("C2", "2.0", "")
 
 
-@pytest.mark.parametrize("explicit, target", [(None, "C1"), ("C3", "C3")])
+@pytest.mark.parametrize("explicit, target", [("C1", "C1"), ("C3", "C3")])
 async def test_move_tool_uses_current_or_explicit_channel_without_moving_twice(
-    monkeypatch: pytest.MonkeyPatch, statuses: list[StatusCall], explicit: str | None, target: str
+    monkeypatch: pytest.MonkeyPatch, statuses: list[StatusCall], explicit: str, target: str
 ) -> None:
     client = cast(LangGraphClient, _LangGraph({"channel_id": "C1", "thread_ts": "1.0"}))
     config = {

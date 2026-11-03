@@ -177,22 +177,16 @@ def _new_slack_thread_context(
 async def slack_breakout_thread(
     title: str,
     instructions: str,
-    channel_id: Annotated[str, Field(pattern=_CHANNEL_ID_PATTERN)] | None,
+    destination: Annotated[str, Field(pattern=r"^(?:[CG][A-Z0-9]+|web)$")],
     default_repo: str | None = None,
-    web_only: bool = False,
     model: str | None = None,
     effort: str | None = None,
 ) -> dict[str, object]:
     """Implement the `slack_breakout_thread` tool."""
-    if channel_id is None and not web_only:
+    if destination != "web" and not re.fullmatch(_CHANNEL_ID_PATTERN, destination):
         return {
             "success": False,
-            "error": "channel_id is required for Slack breakouts. Choose the destination from the user's request and channel/workspace instructions, then pass its Slack channel ID explicitly.",
-        }
-    if channel_id is not None and not re.fullmatch(_CHANNEL_ID_PATTERN, channel_id):
-        return {
-            "success": False,
-            "error": "channel_id must be a Slack channel ID (for example, C0123456789); pass JSON null only for web_only=true.",
+            "error": 'destination must be a Slack channel ID (for example, C0123456789) or "web".',
         }
     cfg = RunConfig.from_runtime()
     if cfg.slack_thread is None:
@@ -238,11 +232,6 @@ async def slack_breakout_thread(
     if not isinstance(source_channel, str) or not source_channel.strip():
         return {"success": False, "error": "Missing slack_thread.channel_id in config"}
     source_channel = source_channel.strip()
-    destination = await resolve_breakout_destination(
-        source_channel, channel_id, workspace=cfg.workspace_slug
-    )
-    if error := await destination.channel_error(source_channel):
-        return {"success": False, "error": error}
 
     clean_title = _validate_text(title, field="title", max_chars=_TITLE_MAX_CHARS)
     if isinstance(clean_title, dict):
@@ -338,9 +327,7 @@ async def slack_breakout_thread(
             ),
         )
 
-    if web_only:
-        if channel_id:
-            return {"success": False, "error": "Web breakouts do not have a Slack destination"}
+    if destination == "web":
         if cfg.background_task_completion or not owner_login:
             return {"success": False, "error": "Web breakouts require an authenticated user run"}
         if not isinstance(current_thread_ts, str) or not current_thread_ts:
@@ -373,7 +360,12 @@ async def slack_breakout_thread(
             "next_step": "Share the dashboard_url with the requester; the thread is web-only.",
         }
 
-    clean_channel_id = destination.channel_id
+    resolved = await resolve_breakout_destination(
+        source_channel, destination, workspace=cfg.workspace_slug
+    )
+    if error := await resolved.channel_error(source_channel):
+        return {"success": False, "error": error}
+    clean_channel_id = resolved.channel_id
     if clean_channel_id != source_channel and visibility == "private":
         return {
             "success": False,
@@ -456,7 +448,7 @@ async def slack_breakout_thread(
     thread_title = clean_title[:80]
     metadata: dict[str, Any] = {
         "source": "slack",
-        "workspace": destination.workspace,
+        "workspace": resolved.workspace,
         "title": thread_title,
         "visibility": visibility,
         "owner_type": owner_type,
@@ -485,8 +477,8 @@ async def slack_breakout_thread(
         "source": "slack",
         "slack_kickoff_eligible": False,
         "slack_breakout": True,
-        "workspace": destination.workspace,
-        "environment": destination.workspace,
+        "workspace": resolved.workspace,
+        "environment": resolved.workspace,
     }
     if repo:
         new_configurable["repo"] = repo

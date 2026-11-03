@@ -1570,7 +1570,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "slack_breakout_thread",
             {
                 "title": "Add greet() helper",
-                "channel_id": DEMO_CHANNEL,
+                "destination": DEMO_CHANNEL,
                 "instructions": "Please add a greet() helper and open a draft PR in the default repository. Use the current Slack request as context, and report progress in this new thread.",
             },
             "call-breakout",
@@ -1591,7 +1591,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "slack_move_thread",
             {
                 "message": "Continue the existing Open SWE task in this channel.",
-                "channel_id": "C_TARGET",
+                "destination": "CTARGET01",
             },
             "call-move",
         ),
