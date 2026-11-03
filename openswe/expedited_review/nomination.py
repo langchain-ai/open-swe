@@ -31,6 +31,7 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.client import GitHubPrRef
 from openswe.slack.dm import send_dm
 from openswe.slack.http import SlackRequestError
+from openswe.slack.review_links import PrReviewLinks
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
 
@@ -357,7 +358,7 @@ class ExpeditedReviewNomination:
             and requester.slack_user_id
             and await send_dm(
                 requester.slack_user_id,
-                f"Expedited review requested for <{pr_ref.url}|{pr_ref.repo}#{pr_ref.number}> "
+                f"Expedited review requested for {PrReviewLinks.slack(pr_ref.url, f'{pr_ref.repo}#{pr_ref.number}')} "
                 f"in <#{channel_id}>. Open SWE merges it once someone approves.",
             )
         ):

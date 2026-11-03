@@ -36,11 +36,17 @@ _GITHUB_LABELS = (_GITHUB_MARK, _GITHUB_LABEL, ":arrow_upper_right:")
 
 
 @dataclass(frozen=True)
-class _PrLinks:
+class PrReviewLinks:
     """Show the review page followed by a format-appropriate GitHub link."""
 
     mrkdwn: bool
     github_mark: bool = True
+
+    @classmethod
+    def slack(cls, url: str, label: str) -> str:
+        """Render a Slack PR link with both the review page and direct GitHub destination."""
+        link = f"<{url}|{label}>"
+        return link if _PRESERVE_GITHUB_LINKS.get() else cls(mrkdwn=True).text(link)
 
     def text(self, text: str) -> str:
         parts: list[str] = []
@@ -73,7 +79,29 @@ class _PrLinks:
 
     def block(self, value: object) -> object:
         if isinstance(value, list):
-            return [self.block(item) for item in value]
+            items: list[object] = []
+            for index, item in enumerate(value):
+                items.append(self.block(item))
+                if not isinstance(item, dict) or item.get("type") != "link":
+                    continue
+                url = item.get("url")
+                if (
+                    not isinstance(url, str)
+                    or not _PR_LINK.fullmatch(url)
+                    or item.get("text") in _GITHUB_LABELS
+                    or _PLAIN.text(url) == url
+                ):
+                    continue
+                following = value[index + 1] if index + 1 < len(value) else None
+                if (
+                    isinstance(following, dict)
+                    and following.get("type") == "link"
+                    and following.get("url") == url
+                    and following.get("text") in _GITHUB_LABELS
+                ):
+                    continue
+                items.append({"type": "link", "url": url, "text": _GITHUB_MARK})
+            return items
         if (
             not isinstance(value, dict)
             or value.get("type") in {"plain_text", "rich_text_preformatted"}
@@ -81,7 +109,9 @@ class _PrLinks:
         ):
             return value
         nested = _PLAIN if value.get("type") == "rich_text" or not self.github_mark else self
-        field = nested if nested is _PLAIN else _PrLinks(mrkdwn=value.get("type") != "markdown")
+        field = (
+            nested if nested is _PLAIN else PrReviewLinks(mrkdwn=value.get("type") != "markdown")
+        )
         return {
             key: (field if key == "text" else _PLAIN).text(item)
             if key in {"text", "url"} and isinstance(item, str)
@@ -90,7 +120,7 @@ class _PrLinks:
         }
 
 
-_PLAIN = _PrLinks(mrkdwn=True, github_mark=False)
+_PLAIN = PrReviewLinks(mrkdwn=True, github_mark=False)
 
 
 async def pr_review_links(
@@ -104,5 +134,5 @@ async def pr_review_links(
         or "github.com/" not in (text + str(blocks)).lower()
     ):
         return text, blocks
-    links = _PrLinks(mrkdwn=True)
+    links = PrReviewLinks(mrkdwn=True)
     return links.text(text), cast(list[dict[str, object]] | None, links.block(blocks))

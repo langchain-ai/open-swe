@@ -28,6 +28,7 @@ from openswe.slack.client import (
 from openswe.slack.dm import DmOrigin, note_for_concierge, send_dm_with_location
 from openswe.slack.payloads import SlackButtonValue, SlackInteraction, SlackMessage
 from openswe.slack.responses import WebhookResponse, accepted, ignored
+from openswe.slack.review_links import PrReviewLinks
 from openswe.slack.thread_owner import wake_thread_owner
 from openswe.threads.store import THREADS
 from openswe.users import User
@@ -149,7 +150,9 @@ async def offer_readiness(pr: GitHubPrRef, pull: PullRequestClient, origin: Orig
     text = f"Review {pr.url} carefully yourself before clicking Mark ready."
     blocks = block_payload(
         [
-            section(f"*Draft pull request*\n<{pr.url}|{pr.repo}#{pr.number}>"),
+            section(
+                f"*Draft pull request*\n{PrReviewLinks.slack(pr.url, f'{pr.repo}#{pr.number}')}"
+            ),
             section(text),
             actions(
                 button(

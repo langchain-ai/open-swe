@@ -36,6 +36,7 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.client import post_slack_thread_reply_with_ts
 from openswe.slack.dm import send_dm
 from openswe.slack.http import SlackRequestError
+from openswe.slack.review_links import PrReviewLinks
 from openswe.threads.runs import start_dashboard_thread
 from openswe.users import User
 from openswe.utils.preview import skip_on_preview
@@ -348,7 +349,7 @@ class SupplementaryReview:
             )
             note = (
                 f"*{escape(label, quote=False)} requested* · {slack_mention(user, state.github_login)} · "
-                f"<{pr.url}|{pr.repo}#{pr.number}>\n"
+                f"{PrReviewLinks.slack(pr.url, pr.label)}\n"
                 f"{escape(' '.join(pr.title.split())[:160], quote=False)}\n"
                 f"*Impact:* {escape(' '.join(state.reason.split())[:320], quote=False)}\n"
                 f"*Scope:* {pr.changed_files} files · +{pr.additions}/−{pr.deletions}\n"

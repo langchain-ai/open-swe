@@ -21,6 +21,7 @@ from openswe.slack.code_channels import set_summary_message
 from openswe.slack.diff_image import SlackDiffImage
 from openswe.slack.http import SlackRequestError
 from openswe.slack.markdown import markdown_blocks
+from openswe.slack.review_links import PrReviewLinks
 from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,7 @@ async def refresh_progress(
 ) -> None:
     """Edit the progress message, posting it and making it the channel's summary the first time."""
     pr = session.pull_request
-    lines = [f"*{_HEADINGS[stage]}* · <{pr.url}|{pr.repo}#{pr.number}>"]
+    lines = [f"*{_HEADINGS[stage]}* · {PrReviewLinks.slack(pr.url, pr.label)}"]
     if reader is not None:
         lines.append(reader.walk.coverage())
         if (left := reader.progress_line()) and stage in ("walking", "paused"):

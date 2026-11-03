@@ -9,6 +9,7 @@ import json
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, slack_mention
 from openswe.slack.blocks import Block, ButtonElement, actions, button, context, escape, section
+from openswe.slack.review_links import PrReviewLinks
 from openswe.users import User
 
 BUTTON_TYPE = "human_review"
@@ -26,11 +27,6 @@ def mention(user: User) -> str:
 
 def _button_value(action: str, request: HumanReviewRequest) -> str:
     return json.dumps({"type": BUTTON_TYPE, "action": action, "fingerprint": str(request.id)})
-
-
-def _label(request: HumanReviewRequest) -> str:
-    pr = request.pull_request
-    return pr.label
 
 
 def _reviewer_line(reviewer: HumanReviewParticipant, states: dict[str, str]) -> str:
@@ -55,7 +51,7 @@ def _reviewers(request: HumanReviewRequest, states: dict[str, str]) -> list[Bloc
 
 
 async def _heading(request: HumanReviewRequest, states: dict[str, str]) -> str:
-    link = f"<{request.pull_request.url}|{_label(request)}>"
+    link = PrReviewLinks.slack(request.pull_request.url, request.pull_request.label)
     if "CHANGES_REQUESTED" in states.values() or "APPROVED" not in states.values():
         return f":mag: *Review requested*  {link}"
     return f":white_check_mark: *Approved by {await _approvers(request, states)}*  {link}"
@@ -173,7 +169,7 @@ async def open_card(
     if request.detail:
         blocks.append(context(f"Waiting on: {escape(request.detail)}."))
     blocks.append(actions(*_buttons(request)))
-    link = f"<{request.pull_request.url}|{_label(request)}>"
+    link = PrReviewLinks.slack(request.pull_request.url, request.pull_request.label)
     return f"Review requested for {link}: {title}", blocks
 
 
@@ -186,7 +182,7 @@ async def closed_card(
     review_states: dict[str, str],
 ) -> tuple[str, list[Block]]:
     """A finished or approved request collapses to one line; ``outcome`` is our own mrkdwn."""
-    pull = f"<{request.pull_request.url}|{_label(request)}> {escape(title)} — authored by {author}"
+    pull = f"{PrReviewLinks.slack(request.pull_request.url, request.pull_request.label)} {escape(title)} — authored by {author}"
     approvers = await _approvers(request, review_states)
     if outcome in ("approved", "merged"):
         line = f":{'merged' if outcome == 'merged' else 'white_check_mark'}: {pull}"

@@ -366,7 +366,9 @@ async def test_a_notice_is_not_repeated_while_the_thread_still_ends_with_it(
     ]
 
 
-@pytest.mark.parametrize("delivery", ["post", "update", "ephemeral", "command"])
+@pytest.mark.parametrize(
+    "delivery", ["post", "update", "ephemeral", "command", "interaction", "acknowledge"]
+)
 @pytest.mark.parametrize("angled", [False, True])
 async def test_review_links_default_to_open_swe_without_changing_code_or_button_values(
     slack_api: SlackAPI,
@@ -383,7 +385,7 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
     blocks = block_payload(
         [
             markdown(text),
-            section(f"<{url}|PR>"),
+            section(review_links.PrReviewLinks.slack(url, "PR")),
             actions(button("I'll review", action_id="review", value=url, url=url)),
             *code_blocks(url),
         ]
@@ -406,14 +408,25 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
         with patch.object(
             slack_utils.httpx2, "AsyncHTTPTransport", return_value=httpx2.MockTransport(handle)
         ):
-            assert await slack_utils.replace_slack_command_message(
-                "https://hooks.slack.com/commands/test", text, blocks=blocks
-            )
+            if delivery == "interaction":
+                assert await slack_utils.respond_to_slack_interaction(
+                    "https://hooks.slack.com/actions/test", {"text": text, "blocks": blocks}
+                )
+            elif delivery == "acknowledge":
+                assert await slack_utils.acknowledge_slack_command(
+                    "https://hooks.slack.com/commands/test", text
+                )
+            else:
+                assert await slack_utils.replace_slack_command_message(
+                    "https://hooks.slack.com/commands/test", text, blocks=blocks
+                )
     payload = slack_api.calls[0][1]
     code = f"`{url}`\n```bash\n{url}\n```\n{unchanged}"
     assert payload["text"] == (
         f"[PR]({target})[↗]({url}), <{target}|PR> (<{url}|GitHub>) and <{target}|app#7> (<{url}|GitHub>).\n{code}"
     )
+    if delivery == "acknowledge":
+        return
     sent_blocks = payload["blocks"]
     assert sent_blocks[0]["text"] == (
         f"[PR]({target})[↗]({url}), <{target}|PR> (<{url}|GitHub>) and [app#7]({target})[↗]({url}).\n{code}"
@@ -425,6 +438,14 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
     assert blocks[0]["text"] == text
     resent = await review_links.pr_review_links(payload["text"], sent_blocks)
     assert resent == (payload["text"], sent_blocks)
+    if delivery == "interaction":
+        with patch.object(
+            slack_utils.httpx2, "AsyncHTTPTransport", return_value=httpx2.MockTransport(handle)
+        ):
+            assert await slack_utils.respond_to_slack_interaction(
+                "https://hooks.slack.com/actions/test", {"blocks": blocks}
+            )
+        assert slack_api.calls[-1][1] == {"blocks": sent_blocks}
 
     fetched: list[dict[str, object]] = [
         {
@@ -435,13 +456,16 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
                     "elements": [
                         {"type": "link", "url": url, "text": "PR"},
                         {"type": "link", "url": url, "text": "↗"},
+                        {"type": "link", "url": url, "text": "Another PR"},
                         {"type": "text", "text": f"see {url}"},
                     ],
                 }
             ],
         }
     ]
-    assert await review_links.pr_review_links("", fetched) == (
+    rewritten = await review_links.pr_review_links("", fetched)
+    assert await review_links.pr_review_links(*rewritten) == rewritten
+    assert rewritten == (
         "",
         [
             {
@@ -451,6 +475,8 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
                         "type": "rich_text_section",
                         "elements": [
                             {"type": "link", "url": target, "text": "PR"},
+                            {"type": "link", "url": url, "text": "↗"},
+                            {"type": "link", "url": target, "text": "Another PR"},
                             {"type": "link", "url": url, "text": "↗"},
                             {"type": "text", "text": f"see {target}"},
                         ],
