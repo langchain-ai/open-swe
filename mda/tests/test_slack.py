@@ -326,6 +326,85 @@ def test_commands_come_back_built_by_the_backend(
     assert slack_reads["history"] == []
 
 
+@pytest.mark.usefixtures("slack_reads")
+def test_a_branch_starts_with_what_the_conversations_thread_holds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    branch = uuid.uuid4()
+    built = _RUN.model_copy(
+        update={"input": {"messages": [{"role": "human", "content": "why is it red?"}]}}
+    )
+    _backend(
+        monkeypatch,
+        SlackTurnStarted(run=built, thread_id=branch, branches_conversation=True),
+    )
+    held = [
+        {"type": "human", "content": "the build is red", "id": "m1"},
+        {"type": "ai", "content": "Looking.", "id": "m2"},
+    ]
+
+    [run] = cast(
+        list[ChannelRun],
+        asyncio.run(
+            slack.start_turn(
+                _event("<@UBOT> /btw why is it red?"),
+                _thread({"messages": held, "todos": ["fix CI"]}),
+            )
+        ),
+    )
+
+    # The new thread starts with the conversation's history and state, then the question.
+    assert run.get("thread") == {"mode": "persistent", "id": str(branch)}
+    run_input = cast(dict[str, Any], run["input"])
+    assert run_input["messages"] == [*held, *cast(list[Any], built.input["messages"])]
+    assert run_input["todos"] == ["fix CI"]
+
+
+@pytest.mark.parametrize("values", [None, {}], ids=["no-run-yet", "empty"])
+@pytest.mark.usefixtures("slack_reads")
+def test_a_branch_of_a_thread_that_holds_nothing_starts_with_the_question(
+    monkeypatch: pytest.MonkeyPatch, values: dict[str, Any] | None
+) -> None:
+    built = _RUN.model_copy(update={"input": {"messages": [{"role": "human", "content": "x"}]}})
+    _backend(
+        monkeypatch,
+        SlackTurnStarted(run=built, thread_id=uuid.uuid4(), branches_conversation=True),
+    )
+
+    [run] = cast(
+        list[ChannelRun],
+        asyncio.run(slack.start_turn(_event("<@UBOT> /btw why?"), _thread(values))),
+    )
+
+    assert run["input"] == built.input
+
+
+@pytest.mark.usefixtures("slack_reads")
+def test_a_branch_whose_conversation_cant_be_read_is_still_answered(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    built = _RUN.model_copy(update={"input": {"messages": [{"role": "human", "content": "x"}]}})
+    _backend(
+        monkeypatch,
+        SlackTurnStarted(run=built, thread_id=uuid.uuid4(), branches_conversation=True),
+    )
+
+    async def unreadable() -> ThreadState | None:
+        raise RuntimeError("agent server is down")
+
+    thread = _thread()
+    object.__setattr__(thread, "_get_state", unreadable)
+
+    with caplog.at_level("WARNING"):
+        [run] = cast(
+            list[ChannelRun],
+            asyncio.run(slack.start_turn(_event("<@UBOT> /btw why?"), thread)),
+        )
+
+    assert run["input"] == built.input
+    assert "Could not read the conversation a Slack branch starts with" in caplog.text
+
+
 @pytest.mark.parametrize(
     ("event", "facts"),
     [
