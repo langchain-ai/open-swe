@@ -19,7 +19,9 @@ from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from langchain.mcp import as_langchain_tool
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
+from langsmith import tracing_context
 from runtime_api.catalog import McpServerSpec
+from runtime_api.mcp_secrets import McpResult
 
 from mcp.shared.exceptions import MCPError
 from mcp.types import Tool
@@ -28,6 +30,8 @@ from openswe.mcp.models import CONNECTION_OWNERS, MCPConnection, MCPScope, MCPTo
 from openswe.mcp.oauth import MCPOAuthError, connection_auth
 from openswe.mcp.transport import MCPDiscoveryError, mcp_http_client
 from openswe.prompts import prompt
+from openswe.run_config import RunConfig
+from openswe.sandboxes.state import get_sandbox_backend
 from openswe.utils.startup_trace import asubphase
 
 if TYPE_CHECKING:
@@ -278,9 +282,19 @@ def _wrap_tool(
             if not isinstance(fresh, StructuredTool) or fresh.coroutine is None:
                 raise ToolException("MCP tool has no async implementation")
             # Call the coroutine directly so remote arguments LangChain reserves pass through.
-            result = await asyncio.wait_for(fresh.coroutine(**arguments), timeout=_TIMEOUT_SECONDS)
+            with tracing_context(enabled=False):
+                try:
+                    content, artifact = await asyncio.wait_for(
+                        fresh.coroutine(**arguments), timeout=_TIMEOUT_SECONDS
+                    )
+                except ToolException:
+                    raise ToolException("MCP server reported a tool error") from None
+                result = McpResult(content, artifact)
+                thread_id = RunConfig.from_runtime().thread_id if result.secrets else None
+                sandbox = await get_sandbox_backend(thread_id) if thread_id else None
+                protected = await result.protect(sandbox)
             is_error = False
-            return result
+            return protected
         except ToolException:
             is_error = True
             raise

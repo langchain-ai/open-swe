@@ -18,26 +18,29 @@ from typing import Final
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx2
+from deepagents.backends.protocol import SandboxBackendProtocol
 from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from langchain.mcp import as_langchain_tool
-from langchain.tools import ToolRuntime
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command
+from langsmith import tracing_context
 from managed_deepagents import (
     ConnectionNotFoundError,
     CredentialAuthorizationRequiredError,
     CredentialStoreError,
+    ManagedToolRuntime,
     connections,
 )
 from mcp.types import Tool
 from pydantic import JsonValue
 from runtime_api.catalog import McpServerSpec
+from runtime_api.mcp_secrets import McpResult
 
 from rt.backend import OpenSweBackend
-from rt.tools import called
+from rt.tools import _content, called
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +239,12 @@ class McpServer:
         return f"MCP server {self.spec.name} cannot read {slug} ({type(error).__name__})"
 
     async def call(
-        self, definition: Tool, arguments: Mapping[str, JsonValue], tool_call_id: str
+        self,
+        definition: Tool,
+        arguments: Mapping[str, JsonValue],
+        tool_call_id: str,
+        *,
+        sandbox: object = None,
     ) -> ToolMessage:
         name = self.spec.tools[definition.name]
 
@@ -256,12 +264,16 @@ class McpServer:
             if not isinstance(tool, StructuredTool) or tool.coroutine is None:
                 raise ToolException("MCP tool has no async implementation")
             # Called directly so arguments LangChain reserves for itself reach the server.
-            content, artifact = await asyncio.wait_for(
-                tool.coroutine(**arguments), timeout=_TIMEOUT_SECONDS
-            )
-        except ToolException as exc:
-            # The server ran the tool and says it failed.
-            return failed(str(exc))
+            with tracing_context(enabled=False):
+                content, artifact = await asyncio.wait_for(
+                    tool.coroutine(**arguments), timeout=_TIMEOUT_SECONDS
+                )
+                result = McpResult(content, artifact)
+                content, artifact = await result.protect(
+                    sandbox if isinstance(sandbox, SandboxBackendProtocol) else None
+                )
+        except ToolException:
+            return failed("MCP server reported a tool error; no response details were returned")
         except Exception as exc:
             # What the request raised can quote what it carried, the credential included.
             logger.warning(
@@ -269,7 +281,11 @@ class McpServer:
                 extra={"mcp_name": self.spec.name, "error_type": type(exc).__name__},
             )
             return failed("MCP call failed; check its connection and credentials")
-        return ToolMessage(content=content, artifact=artifact, tool_call_id=tool_call_id, name=name)
+        if not isinstance(content, str | list):
+            return failed("Invalid MCP content")
+        return ToolMessage(
+            content=_content(content), artifact=artifact, tool_call_id=tool_call_id, name=name
+        )
 
     def tool(
         self, definition: Tool, backend: OpenSweBackend, *, cites_evidence: bool
@@ -277,13 +293,17 @@ class McpServer:
         """``definition`` as the model sees it: the backend's name and description for it."""
         name = self.spec.tools[definition.name]
 
-        async def call(runtime: ToolRuntime, **arguments: JsonValue) -> ToolMessage | Command:
+        async def call(
+            runtime: ManagedToolRuntime, **arguments: JsonValue
+        ) -> ToolMessage | Command:
             return await called(
                 backend,
                 name,
                 arguments,
                 runtime,
-                partial(self.call, definition, arguments),
+                partial(
+                    self.call, definition, arguments, sandbox=getattr(runtime, "backend", None)
+                ),
                 cites_evidence=cites_evidence,
             )
 

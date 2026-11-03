@@ -117,7 +117,11 @@ async def test_a_server_tool_gets_the_arguments_langchain_names_for_itself(
     sent: list[Mapping[str, object]] = []
 
     async def call(
-        _definition: Tool, arguments: Mapping[str, object], tool_call_id: str
+        _definition: Tool,
+        arguments: Mapping[str, object],
+        tool_call_id: str,
+        *,
+        sandbox: object = None,
     ) -> ToolMessage:
         sent.append(arguments)
         return ToolMessage(content="ok", tool_call_id=tool_call_id)
