@@ -23,6 +23,7 @@ CODE_TEXT_MAX_CHARS = 4000
 # Cumulative across every markdown block in one message.
 MARKDOWN_TEXT_MAX_CHARS = 12000
 MESSAGE_MAX_BLOCKS = 50
+CONTAINER_TITLE_MAX_CHARS = 150
 BUTTON_TEXT_MAX_CHARS = 75
 OPTION_TEXT_MAX_CHARS = 75
 ButtonStyle = Literal["primary", "danger"]
@@ -45,6 +46,7 @@ type TextObject = PlainText | Mrkdwn
 class SectionBlock(TypedDict):
     type: Literal["section"]
     text: TextObject
+    block_id: NotRequired[str]
 
 
 class MarkdownBlock(TypedDict):
@@ -55,6 +57,7 @@ class MarkdownBlock(TypedDict):
 class ContextBlock(TypedDict):
     type: Literal["context"]
     elements: list[TextObject]
+    block_id: NotRequired[str]
 
 
 class DividerBlock(TypedDict):
@@ -82,9 +85,25 @@ class RichTextPreformatted(TypedDict):
     language: NotRequired[str]
 
 
+class RichTextStyle(TypedDict, total=False):
+    bold: bool
+
+
+class RichTextLink(TypedDict):
+    type: Literal["link"]
+    url: str
+    text: str
+    style: NotRequired[RichTextStyle]
+
+
+class RichTextSection(TypedDict):
+    type: Literal["rich_text_section"]
+    elements: list[RichTextText | RichTextLink]
+
+
 class RichTextBlock(TypedDict):
     type: Literal["rich_text"]
-    elements: list[RichTextPreformatted]
+    elements: list[RichTextPreformatted | RichTextSection]
 
 
 class ButtonElement(TypedDict):
@@ -150,8 +169,31 @@ class InputBlock(TypedDict):
     optional: NotRequired[bool]
 
 
+class ImageElement(TypedDict):
+    type: Literal["image"]
+    image_url: str
+    alt_text: str
+
+
+type ContainerChild = SectionBlock | ContextBlock | ActionsBlock
+
+
+class ContainerBlock(TypedDict):
+    """A titled group of blocks; ``width`` ``full`` spans the whole message."""
+
+    type: Literal["container"]
+    child_blocks: list[ContainerChild]
+    block_id: NotRequired[str]
+    rich_text_title: NotRequired[RichTextBlock]
+    subtitle: NotRequired[Mrkdwn]
+    icon: NotRequired[ImageElement]
+    width: NotRequired[Literal["narrow", "standard", "wide", "full"]]
+    has_header_divider: NotRequired[bool]
+
+
 type Block = (
     SectionBlock
+    | ContainerBlock
     | MarkdownBlock
     | ContextBlock
     | DividerBlock

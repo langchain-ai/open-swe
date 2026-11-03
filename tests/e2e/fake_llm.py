@@ -699,6 +699,29 @@ def _pr_mentions_reply_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+PR_CARD_MARKER = "E2E_PR_CARD"
+_PR_CARD_NUMBER = re.compile(rf"{PR_CARD_MARKER}:(\d+)")
+
+
+def _pr_card_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    asked = "\n".join(_text(message.content) for message in _script_humans(messages))
+    match = _PR_CARD_NUMBER.search(asked)
+    url = f"https://github.com/{OWNER}/{REPO}/pull/{match.group(1) if match else 1}"
+    return AIMessage(
+        content="Showing the pull request as a live card.",
+        tool_calls=[
+            {
+                "name": "slack_reply",
+                "args": {
+                    "message": f"Here's where it stands:\n\n{{{{pr-card {url}}}}}",
+                    "response_type": "final",
+                },
+                "id": "call-pr-card-reply",
+            }
+        ],
+    )
+
+
 def _multi_pr_reply_step(messages: list[BaseMessage]) -> AIMessage:
     url = _pr_url_from_messages(messages) or "(PR url unavailable)"
     return AIMessage(
@@ -1385,6 +1408,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     ),
     "implement": (*_IMPLEMENT_STEPS, _dynamic_step(_reply_step)),
     "pr_mentions": (*_IMPLEMENT_STEPS, _dynamic_step(_pr_mentions_reply_step)),
+    "pr_card": (_dynamic_step(_pr_card_reply_step),),
     # Expedited review, turn 1: implement a one-line change, open the PR, start
     # the durable CI watch, and post the approval card before checks report.
     "expedite": (
@@ -1764,6 +1788,7 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "pr_mentions", lambda ctx: ctx.human_count <= 1 and PR_MENTIONS_MARKER in ctx.first_text
     ),
+    ScriptRule("pr_card", lambda ctx: ctx.human_count <= 1 and PR_CARD_MARKER in ctx.first_text),
     ScriptRule(
         "many_files", lambda ctx: ctx.human_count <= 1 and "E2E_MANY_FILES" in ctx.first_text
     ),

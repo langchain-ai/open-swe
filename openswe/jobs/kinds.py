@@ -59,13 +59,20 @@ from openswe.slack.channel_options import ensure_directory_sync, sync_directory
 from openswe.slack.mda_forwarding import SWEEP_JOB as SLACK_LOST_REQUESTS
 from openswe.slack.mda_forwarding import schedule_sweep as schedule_slack_lost_requests
 from openswe.slack.mda_forwarding import sweep_lost_requests
+from openswe.slack.pr_cards import SlackPullRequestCards
 from openswe.threads.index_import import import_agent_server_threads
 from openswe.threads.stalls import fail_stalled_runs
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
 from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads
 from openswe.tools.schedule_thread_wakeup import WAKE_THREAD_JOB, run_thread_wakeup
+from openswe.webhooks.event_listeners import EXPIRE_JOB as EVENT_LISTENER_EXPIRE
+from openswe.webhooks.event_listeners import HEAR_JOB as EVENT_LISTENER_HEAR
+from openswe.webhooks.event_listeners import EventListener
 from openswe.workspaces.refresh import REFRESH_TASK as WORKSPACE_REFRESH
 from openswe.workspaces.refresh import run_workspace_refresh_tick
+
+# Each registers its EventHandler, which hearings and expiries look up by name.
+_EVENT_HANDLERS = (SlackPullRequestCards,)
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +222,20 @@ async def _slack_lost_requests(_job: Job) -> None:
     reported = await sweep_lost_requests()
     if reported:
         logger.info("Reported lost Slack messages", extra={"reported": reported})
+
+
+@WORKER.register(EVENT_LISTENER_HEAR)
+async def _event_listener_hear(job: Job) -> None:
+    name, pull_request_id = _text(job, "handler"), _text(job, "pull_request_id")
+    if name is not None and pull_request_id is not None:
+        await EventListener.hear(name, UUID(pull_request_id))
+
+
+@WORKER.register(EVENT_LISTENER_EXPIRE)
+async def _event_listener_expire(job: Job) -> None:
+    listener_id = _text(job, "listener_id")
+    if listener_id is not None:
+        await EventListener.expire(UUID(listener_id))
 
 
 @WORKER.register(REPORT_RECEIPT_PURGE)

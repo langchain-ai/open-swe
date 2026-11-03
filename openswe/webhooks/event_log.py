@@ -338,6 +338,7 @@ class EventLog:
 
         Never raises. False means the row was not stored.
         """
+        from openswe.webhooks.event_listeners import EventListener  # noqa: PLC0415
         from openswe.webhooks.event_subscriptions import EventSubscription  # noqa: PLC0415
 
         if not configured():
@@ -376,6 +377,7 @@ class EventLog:
         _POSTHOG_TASKS.add(task)
         task.add_done_callback(_POSTHOG_TASKS.discard)
         await EventSubscription.deliver(event)
+        await EventListener.deliver(event)
         return True
 
     @classmethod

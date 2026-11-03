@@ -3,7 +3,7 @@ import logging
 import re
 from collections.abc import Mapping
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal
 
 import httpx2
@@ -34,12 +34,13 @@ from openswe.slack.client import (
 )
 from openswe.slack.events import claim_slack_event
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
-from openswe.slack.markdown import markdown_blocks, markdown_to_mrkdwn
+from openswe.slack.markdown import markdown_to_mrkdwn
 from openswe.slack.orphan import (
     dashboard_handoff_message,
     move_thread_to_dashboard,
     slack_thread_detached,
 )
+from openswe.slack.pr_cards import CardedMessage
 from openswe.slack.records import SlackRun, SlackThread, store_slack_message_run_mapping
 from openswe.slack.review_links import preserve_github_links as github_link_delivery
 from openswe.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
@@ -162,6 +163,8 @@ async def send_slack_reply(
 
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
+    carded = await CardedMessage.parse(message) if blocks is None else CardedMessage([message])
+    message = carded.text
 
     from openswe.slack.code_channels import is_code_channel_session
 
@@ -192,7 +195,11 @@ async def send_slack_reply(
         slack_blocks = blocks
         if blocks is None:
             slack_blocks = _reply_blocks(
-                message, options, reserve=_WEB_LINK_BLOCKS, option_user_id=option_user_id
+                carded,
+                options,
+                reserve=_WEB_LINK_BLOCKS,
+                live_until=carded.live_until,
+                option_user_id=option_user_id,
             )
             if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
                 message = markdown_to_mrkdwn(message)
@@ -226,6 +233,10 @@ async def send_slack_reply(
                 "message_chars": len(message),
                 "hint": _slack_reply_failure_hint(exc.code),
             }
+        if message_ts and blocks is None and slack_blocks is not None:
+            await carded.track(
+                str(channel_id), post_thread_ts, message_ts, requester=_triggering_user_id(cfg)
+            )
         if message_ts and cfg.source == "slack" and not is_code_channel_session(str(thread_ts)):
             try:
                 await _handle_kickoff(
@@ -243,7 +254,7 @@ async def send_slack_reply(
     if run_id and not is_code_channel_session(str(thread_ts)):
         # Slack drops the status when the app posts.
         await restore_slack_thinking_status(str(channel_id), str(thread_ts))
-    return {"success": True, "message_ts": message_ts}
+    return {"success": True, "message_ts": message_ts, **carded.report}
 
 
 async def _stale_reply_guard(
@@ -353,8 +364,11 @@ async def _by_the_way_reply(
         return {"success": False, "error": "Missing the Slack channel to answer in"}
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
+    carded = CardedMessage([message])
     if blocks is None:
-        blocks = _reply_blocks(message, None, reserve=0)
+        carded = await CardedMessage.parse(message)
+        message = carded.text
+        blocks = _reply_blocks(carded, None, reserve=0, live_until=carded.live_until)
         if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             message = markdown_to_mrkdwn(message)
     reservation = cfg.thread_id or ""
@@ -374,7 +388,9 @@ async def _by_the_way_reply(
             "hint": "Do not post again; end the run.",
         }
     try:
-        await post_slack_thread_reply_with_ts(channel_id, thread_ts, message, blocks=blocks)
+        message_ts = await post_slack_thread_reply_with_ts(
+            channel_id, thread_ts, message, blocks=blocks
+        )
     except SlackRequestError as exc:
         try:
             await event_claims.release(_BY_THE_WAY_ANSWER_SCOPE, reservation)
@@ -389,13 +405,15 @@ async def _by_the_way_reply(
             "slack_error": exc.code,
             "hint": _slack_reply_failure_hint(exc.code),
         }
+    if message_ts and blocks is not None:
+        await carded.track(channel_id, thread_ts, message_ts, requester=_triggering_user_id(cfg))
     if cfg.slack_by_the_way_message_ts:
         await remove_slack_reaction(
             channel_id, cfg.slack_by_the_way_message_ts, "hourglass_flowing_sand"
         )
     # Slack drops a thread's status on any bot post, including a conversation's already there.
     await settle_slack_thread_status(channel_id, thread_ts)
-    return {"success": True}
+    return {"success": True, **carded.report}
 
 
 async def _ephemeral_reply(
@@ -424,7 +442,10 @@ async def _ephemeral_reply(
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
     if blocks is None:
-        blocks = _reply_blocks(message, None, reserve=_WEB_LINK_BLOCKS)
+        # Nothing can redraw an ephemeral message, so its cards say when they were read.
+        carded = await CardedMessage.parse(message)
+        message = carded.text
+        blocks = _reply_blocks(carded, None, reserve=_WEB_LINK_BLOCKS, live_until=None)
         if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             message = markdown_to_mrkdwn(message)
     usage = _usage_with_effort(summarize_run_usage(state), state, cfg)
@@ -516,11 +537,16 @@ def _oversized_options_error(message: str) -> dict[str, str | int | bool]:
 
 
 def _reply_blocks(
-    message: str, options: list[str] | None, *, reserve: int, option_user_id: str | None = None
+    carded: CardedMessage,
+    options: list[str] | None,
+    *,
+    reserve: int,
+    live_until: datetime | None,
+    option_user_id: str | None = None,
 ) -> list[dict[str, Any]] | None:
-    """``message`` then option buttons; ``None`` when they cannot fit in one message."""
+    """The message and its cards, then option buttons; ``None`` when they cannot fit in one."""
     actions = option_actions(options, user_id=option_user_id)
-    body = markdown_blocks(message)
+    body = carded.blocks(live_until=live_until)
     if body is None or len(body) + len(actions) + reserve > MESSAGE_MAX_BLOCKS:
         return None
     return [*block_payload(body), *actions]
