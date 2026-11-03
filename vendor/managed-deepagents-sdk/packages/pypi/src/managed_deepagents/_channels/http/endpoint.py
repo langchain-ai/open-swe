@@ -29,7 +29,7 @@ from typing_extensions import TypedDict, TypeIs, TypeVar
 from managed_deepagents._channels.types import JsonValue
 
 if TYPE_CHECKING:
-    from managed_deepagents._channels.run_input import ChannelRunOptions, ChannelRunResult
+    from managed_deepagents._channels.run_input import ChannelRun, ChannelRunResult
 
 _TIMEOUT_SECONDS = 60.0
 """How long an event endpoint may take to answer one attempt."""
@@ -164,15 +164,14 @@ class EndpointAnswer(TypedDict):
     """
 
     input: str | dict[str, JsonValue]
-    """The run's input, as a handler returns it: text, or state such as
-    ``{"messages": ...}``. Never a list, which a handler's ``(input, options)``
-    tuple would be confused with."""
+    """The run's input, as a handler's run takes it: text, or state such as
+    ``{"messages": ...}``. Never a list."""
     context: NotRequired[dict[str, JsonValue]]
     """Run context, as ``agent.invoke(input, context=...)`` takes it."""
     metadata: NotRequired[dict[str, JsonValue]]
-    """Metadata for the run; see ``ChannelRunOptions``."""
+    """Metadata for the run; see ``ChannelRun``."""
     webhook: NotRequired[str]
-    """A URL the Agent Server POSTs the finished run to; see ``ChannelRunOptions``."""
+    """A URL the Agent Server POSTs the finished run to; see ``ChannelRun``."""
 
 
 @with_config(ConfigDict(extra="forbid"))
@@ -480,11 +479,12 @@ def _run_result(body: JsonValue) -> ChannelRunResult | EndpointDeclined | None:
         if not text.strip() or len(text) > _DECLINE_MAX_LENGTH:
             raise RuntimeError(_ANSWER_SHAPE)
         return EndpointDeclined(text)
-    options: ChannelRunOptions = {}
+    run: ChannelRun = {"input": answer["input"]}
     if "context" in answer:
-        options["context"] = answer["context"]
+        run["context"] = answer["context"]
     if "metadata" in answer:
-        options["metadata"] = answer["metadata"]
+        run["metadata"] = answer["metadata"]
     if "webhook" in answer:
-        options["webhook"] = answer["webhook"]
-    return (answer["input"], options)
+        run["webhook"] = answer["webhook"]
+    # A list holds a run with options; a dict alone would be state.
+    return [run]

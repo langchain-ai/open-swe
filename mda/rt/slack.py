@@ -10,7 +10,7 @@ threads. A concierge DM's runs go on the DM's one thread, which the backend name
 """
 
 from managed_deepagents import (
-    ChannelRunOptions,
+    ChannelRun,
     ChannelRunResult,
     SlackChannelThread,
     SlackMessageEvent,
@@ -42,14 +42,16 @@ def run_result(start: SlackTurnStart) -> ChannelRunResult | None:
     run = start.run
     if run is None:
         return None
-    options: ChannelRunOptions = {
+    started: ChannelRun = {
+        "input": run.input,
         "context": run.context,
         "metadata": run.metadata,
         "multitask_strategy": "interrupt" if start.interrupts else "enqueue",
     }
     if run.webhook:
-        options["webhook"] = run.webhook
+        started["webhook"] = run.webhook
     if start.thread_id is not None:
-        # The agent answers with its own Slack tools, so no ``deliver_to``.
-        options["thread"] = {"mode": "persistent", "id": str(start.thread_id)}
-    return (run.input, options)
+        # The agent answers with its own Slack tools, so the run posts nothing (no ``auto_post``).
+        started["thread"] = {"mode": "persistent", "id": str(start.thread_id)}
+    # A list carries the run's options; a dict alone would be the run's state.
+    return [started]

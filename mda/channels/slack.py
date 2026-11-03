@@ -18,7 +18,7 @@ from rt.slack_clicks import start_click, start_shortcut
 channel = channels.slack(
     # The backend decides what reaches the channel, so every forwarded message counts.
     trigger_mode="all",
-    reply="none",
+    auto_post=False,
     # No 👀 on the message that starts a run.
     reactions=False,
     # Trigger Server forwards a bot's mention; the backend hands over only the bots on

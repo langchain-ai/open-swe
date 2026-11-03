@@ -19,7 +19,7 @@ from typing import Final, cast
 
 from langchain_core.messages.content import create_text_block
 from managed_deepagents import (
-    ChannelRunOptions,
+    ChannelRun,
     LinearChannelThread,
     LinearEvent,
     LinearEventResult,
@@ -338,7 +338,12 @@ async def start_session(
     ).answer
     if isinstance(started, LinearSessionDeclined):
         return _declined(decline_text(started))
-    options: ChannelRunOptions = {"context": started.context, "metadata": started.metadata}
+    run: ChannelRun = {
+        "input": await turn.run_input(started),
+        "context": started.context,
+        "metadata": started.metadata,
+    }
     if started.webhook:
-        options["webhook"] = started.webhook
-    return (await turn.run_input(started), options)
+        run["webhook"] = started.webhook
+    # A list carries the run's options; a dict alone would be the run's state.
+    return [run]

@@ -298,7 +298,7 @@ The handler starts each of the DM's runs on that thread (`thread: {"mode": "pers
 Trigger Server verifies the request as if Slack had sent it and hands the message to the channel, whose handler (`rt/slack.py`) asks the backend's `plan_slack_turn` what it starts; the backend builds the run from the request it remembered, as for its own Slack runs.
 A mention, a direct message or an explicit request redirects the thread's run in progress (`interrupt`); any other follow-up waits its turn behind it (`enqueue`), as on the backend's own Slack threads.
 The backend still answers `/slack/channel/events` for a deployment whose channel names it as an endpoint, until every deployment runs the handler.
-The agent replies with Open SWE's Slack tools (`reply="none"`), and the channel shows the run's status and Stop.
+The agent replies with Open SWE's Slack tools (`auto_post=False`), and the channel shows the run's status and Stop.
 
 Every Slack click goes to the channel too: `/webhooks/slack/interactivity` forwards it unchanged to Trigger Server's interactivity URL (`TRIGGER_INTERACTIVITY_URL`), after answering Slack, so the Slack app's Interactivity URL can move to Trigger Server with no code change.
 Only "Explain this" (a message shortcut), code channel views and the options they load (`block_suggestion`), and modals the backend opened itself stay on the backend.

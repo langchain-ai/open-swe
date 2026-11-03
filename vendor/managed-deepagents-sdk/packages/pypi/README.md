@@ -329,6 +329,7 @@ runtime
     .provider       // Provider label, such as slack
     .event          // Typed MDA delivery; no internal routing
     .raw_event      // Optional original provider payload
+    .target         // The provider conversation, typed per provider
     .post(...)      // Present when sending is supported
   .backend          // Present when a sandbox is configured
   .schedules        // Create and manage schedules for this run's caller
@@ -380,8 +381,19 @@ when a message arrives. They hold routing and principal IDs only, never message
 content. Only managed ingress can write them.
 
 The channel facts are available even when the channel cannot send. `post` uses
-a private, verified reply target. The channel helper does not expose the target
-or let callers replace it.
+a private, verified reply target, which callers can't replace. `target` names
+the conversation it posts to, in every run of the thread, typed by `provider`:
+
+- `SlackChannelTarget`: `conversation_id` (Slack's `channel`), `thread_ts`
+  (Slack's `thread_ts`) and `code_channel`, whether the conversation is a code
+  channel.
+- `GitHubChannelTarget`: `repository` (`owner/name`) and the issue or pull
+  request `number`.
+- `LinearChannelTarget`: `organization_id`, `issue_id`, and `identifier`,
+  `comment_id` or `session_id` when the conversation has one.
+
+`target` is `None` for a channel without a typed target, such as
+`channels.http()`.
 
 ```python
 origin = runtime.thread.origin
@@ -518,13 +530,13 @@ from managed_deepagents import SlackChannelThread, SlackMessageEvent, channels
 
 
 def on_mention(event: SlackMessageEvent, thread: SlackChannelThread):
-    return (
-        event.text,
+    return [
         {
+            "input": event.text,
             "context": {"ticket": thread.id},
             "metadata": {"slack_channel": event.channel_id},
-        },
-    )
+        }
+    ]
 
 
 channel = channels.slack(
@@ -559,15 +571,16 @@ A handler gets the `SlackMessageEvent` (`text`, `user_id`, `channel_id`,
 `message_ts`, `thread_ts`, `files`, Slack's own event as `payload`, and
 `actor`) and its `SlackChannelThread` (`id`, `source_thread_key`,
 `channel.name`). It
-returns the run's input, as `agent.invoke` takes it, optionally with
-`context`, `metadata` and `webhook` as `(input, options)`, as the GitHub and
-Linear handlers do. `None` starts no run, and the app neither reacts nor
-replies. Trigger Server gets its answer before MDA asks the handler, so a slow
-handler never times out the delivery. A handler that raises, or returns input
-the channel can't start, starts no run either; the error is logged without its
-message. To try a failing call again, retry it inside the handler with the
-backoff you choose; a delivery whose handler is still running or waiting when
-the deployment restarts is lost. The message's
+returns the run's input, as `agent.invoke` takes it, or, to also set run
+options such as `context`, `metadata` or `webhook`, a list of runs, as
+`[{"input": ..., "context": ...}]`, as the GitHub and Linear handlers do.
+`None` starts no run, and the app neither reacts nor replies. Trigger Server
+gets its answer before MDA asks the handler, so a slow handler never times out
+the delivery. A handler that raises, or returns input the channel can't start,
+starts no run either; the error is logged without its message. To try a failing
+call again, retry it inside the handler with the backoff you choose; a delivery
+whose handler is still running or waiting when the deployment restarts is lost.
+The message's
 blocks and attachments are added to the handler's messages, and its files
 still reach `/workspace/attachments/`. Interrupt resumes don't go through
 `on_event`; a click on a button the agent posted does, as `"interaction"`: see
@@ -592,9 +605,9 @@ after it, `interrupt` cancels the run, keeping its progress, and starts at
 once, `rollback` cancels it and discards its progress, and `reject` starts
 nothing.
 
-A handler may also choose each run's thread and strategy, as on GitHub, Linear
-and HTTP channels: it returns `(input, options)`, or a list of them, at most
-one on the Slack thread's own conversation:
+A handler may also choose each run's thread, strategy and `auto_post`, as on
+GitHub, Linear and HTTP channels: its list may hold several runs, at most one
+on the Slack thread's own conversation:
 
 ```python
 def on_message(event: SlackMessageEvent, thread: SlackChannelThread):
@@ -602,14 +615,24 @@ def on_message(event: SlackMessageEvent, thread: SlackChannelThread):
         return event.text  # a mention interrupts, as the channel says
     if channel_session_id is not None:
         # One session for the whole channel: every Slack thread's message waits its turn.
-        return (event.text, {"thread": {"mode": "persistent", "id": channel_session_id},
-                             "multitask_strategy": "enqueue"})
-    return (event.text, {"multitask_strategy": "enqueue"})  # waits behind the running run
+        return [
+            {
+                "input": event.text,
+                "thread": {"mode": "persistent", "id": channel_session_id},
+                "multitask_strategy": "enqueue",
+                "auto_post": True,
+            }
+        ]
+    return [{"input": event.text, "multitask_strategy": "enqueue"}]  # waits behind the running run
 ```
 
 A run on a thread of the handler's choosing shows its status, reaction and
 decisions in the Slack thread its message came from, and posts its answer
-there only with `deliver_to`. Stop in that Slack thread cancels the runs its
+there only with `"auto_post": True`, or a `SlackChannelTarget` naming that
+Slack thread, such as a run's `channel.target` passed back. A run on the Slack
+thread's own conversation (without `thread`, or on a persistent thread with
+`thread.id`) posts as the channel's `auto_post` says, unless its own
+`auto_post` says otherwise. Stop in that Slack thread cancels the runs its
 messages started, on the conversation and on the handler's threads; another
 Slack thread's run on a shared thread goes on. A decision a run there waits on
 is answered from the Slack thread that started the run. Every thread a
@@ -757,16 +780,17 @@ step not yet done, as the thread's status. Without `status`, nothing changes.
 ### Replying from the agent
 
 The channel posts the agent's last reply in the thread once a run succeeds.
-`reply="none"` leaves replying to the agent instead, for an agent that posts
+`auto_post=False` leaves replying to the agent instead, for an agent that posts
 its own messages, with `runtime.channel.post` or its own Slack client, or
 that answers somewhere else:
 
 ```python
-channels.slack(reply="none")
+channels.slack(auto_post=False)
 ```
 
 Reactions, the status, Stop and `onFinish` work as before. `channels.linear`
-and `channels.http` take the same option. Deploying `reply="none"` needs an
+and `channels.http` take the same option. `reply="none"` still works, with a
+deprecation warning; setting both raises. Deploying `auto_post=False` needs an
 `mda` CLI from this release; an older one refuses it.
 
 ### Buttons your agent posts
@@ -775,9 +799,7 @@ and `channels.http` take the same option. Deploying `reply="none"` needs an
 Slack-specific, such as buttons, feedback buttons or a message the agent
 updates later, the agent posts with its own Slack client. The app's bot token
 is the agent connection `mda/slack-bot-token` (reading it as a user connection
-raises), and `runtime.channel.raw_event`, the Slack event the run came from,
-names the thread: a message's own event, or a click's interaction payload,
-whose `container` says where the button was.
+raises), and the channel's `target` names the conversation and its thread.
 
 ```python
 from langchain.tools import tool
@@ -788,16 +810,14 @@ from slack_sdk.web.async_client import AsyncWebClient
 @tool
 async def offer_choices(question: str, choices: list[str], runtime: ManagedToolRuntime) -> str:
     """Ask the user to pick one of a few answers in Slack."""
-    if runtime.channel is None or runtime.channel.provider != "slack":
+    origin = runtime.thread.origin
+    target = origin.channel.target if origin else None
+    if target is None or target.provider != "slack":
         return "Not in Slack."
-    raw = runtime.channel.raw_event or {}
-    where = raw.get("container") or raw
-    channel = where.get("channel_id") or where.get("channel")
-    thread_ts = where.get("thread_ts") or where.get("message_ts") or where.get("ts")
     token = await connections.get("mda/slack-bot-token", {"type": "agent"})
     await AsyncWebClient(token=token).chat_postMessage(
-        channel=channel,
-        thread_ts=thread_ts,
+        channel=target.conversation_id,
+        thread_ts=target.thread_ts,
         text=question,
         blocks=[
             {"type": "section", "text": {"type": "mrkdwn", "text": question}},
@@ -1119,9 +1139,12 @@ configured handler, a callback or an endpoint (see "Asking your service what to
 start"), and starts the run, so a slow handler never times out the delivery.
 Synchronous and async callbacks are supported. A handler returns
 what `agent.invoke` takes: a nonblank string (one user message), a message such
-as `HumanMessage(...)` with text or content blocks, state such as
-`{"messages": [...], "todos": []}`, or `(input, {"context": {...}, "metadata": {...}})`
-to also set the run's context (`context["channel"]` is reserved) or metadata,
+as `HumanMessage(...)` with text or content blocks, or state such as
+`{"messages": [...], "todos": []}`. To set run options, it returns a list of
+runs instead, such as `[{"input": ..., "context": {...}, "metadata": {...}}]`:
+each run's `input` is what a handler returns alone, and a run without `input`,
+or a tuple, is refused. A run may set the run's context (`context["channel"]`
+is reserved) or metadata,
 such as `{"issue": "ENG-123"}` to find the run by in LangSmith. Metadata keys are
 letters, digits, `_`, `.` or `-`. Keys the Agent Server and LangSmith set
 are reserved: `mda_`, `langgraph_` and `ls_` keys, and ids such as
@@ -1150,29 +1173,34 @@ because each thread runs a delivery once. A comment that arrives while the agent
 is still working waits for that run to finish, so it never skips a decision the
 run stops for. GitHub never redelivers on its own.
 
-A handler may instead return a list of `(input, options)` to start several
-runs for one event, on threads it chooses (GitHub, Linear, HTTP and Slack channels):
+The list may hold several runs for one event, on threads the handler chooses
+(GitHub, Linear, HTTP and Slack channels):
 
 ```python
 def on_comment(event, thread):
     return [
         # The issue's conversation; this run's answer isn't posted.
-        (prompt, {"reply": "none"}),
+        {"input": prompt, "auto_post": False},
         # A fresh thread, deleted once the run ends; its answer posts on the issue.
-        (triage, {
-            "thread": {"mode": "ephemeral"},
-            "deliver_to": {"channel": "github", "to": {"type": "current_thread"}},
-        }),
+        {"input": triage, "thread": {"mode": "ephemeral"}, "auto_post": True},
         # A thread your service keeps across events, by its UUID.
-        (plan, {"thread": {"mode": "persistent", "id": plan_thread_id},
-                "multitask_strategy": "interrupt"}),
+        {
+            "input": plan,
+            "thread": {"mode": "persistent", "id": plan_thread_id},
+            "multitask_strategy": "interrupt",
+        },
     ]
 ```
 
-`thread` takes what `define_schedule` does. At most one run may omit it and
-start on the event's conversation; only that run may set `reply`, and only a
-run with `thread` may set `deliver_to`, for now to the event's own conversation
-(`current_thread`). `multitask_strategy` overrides the channel's for one run.
+`thread` is a `ThreadConfig`, as `define_schedule` takes it. A run without it
+starts on the event's conversation, as does a run on a persistent thread with
+the conversation's id (`thread.id`); at most one run may. `auto_post` is where
+a run posts its final answer: `True` on the event's conversation, `False`
+nowhere, or a channel target, for now only the conversation's own (such as
+`GitHubChannelTarget(repository="owner/repo", number=42)`, or a run's
+`channel.target` passed back), which is `True`. Omitted, the conversation's run
+posts as the channel's `auto_post` says, and a run on any other thread posts
+nothing. `multitask_strategy` overrides the channel's for one run.
 A persistent id must be a UUID; which ids an event may reach is yours to
 check. A delivery starts at most one run on each thread, so a resent one
 starts nothing there again, even if the handler now starts a different set of
@@ -1396,7 +1424,7 @@ Agent Auth app, whose OAuth connection is `mda/linear-app/<deployment-id>`,
 installed with `actor=app`; read its token with
 `await connections.get("mda/linear-token", {"type": "agent"})` to call Linear's API from tools.
 
-`reply="none"` leaves the run's answer to the agent: the channel doesn't post
+`auto_post=False` leaves the run's answer to the agent: the channel doesn't post
 it as a comment or in the session. Session acknowledgements, Stop and error
 notices still post.
 
@@ -1596,8 +1624,8 @@ adapter without conversion. If `post` is omitted, the channel can receive events
 and exposes facts, but has no runtime `post` method. The webhook path is
 `/channels/<name>/events`, where `<name>` is the channel file name. An existing
 Photon webhook needs no URL change when the deployment host and channel name
-stay the same. `reply="none"` turns automatic replies off, so the agent replies
-itself; `post` still serves `runtime.channel.post` and error notices.
+stay the same. `auto_post=False` turns automatic replies off, so the agent
+replies itself; `post` still serves `runtime.channel.post` and error notices.
 
 If a run fails, MDA uses `post` to send “Something went wrong
 while processing your request.” A failed send is logged without another attempt.
@@ -1785,6 +1813,22 @@ schedule = define_schedule(
     cron="0 8 * * 1-5",
     timezone="America/Los_Angeles",
     prompt="Write the daily digest.",
+)
+```
+
+To post the run's answer in Slack, give `auto_post` a `SlackChannelTarget`: a
+conversation, or a thread in it with `thread_ts`. `channel` names the Slack
+channel file when it isn't `channels/slack.py`. `deliver_to` is its deprecated
+form.
+
+```python
+from managed_deepagents import define_schedule
+
+schedule = define_schedule(
+    cron="0 9 * * 1",
+    prompt="Post the weekly summary.",
+    # A literal, since deploy reads schedules statically.
+    auto_post={"provider": "slack", "conversation_id": "C0123456789"},
 )
 ```
 

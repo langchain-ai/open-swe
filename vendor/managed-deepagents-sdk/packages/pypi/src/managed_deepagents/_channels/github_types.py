@@ -176,10 +176,11 @@ class GitHubAppOptions(TypedDict, total=False):
 
 
 GitHubEventResult = ChannelRunResult | None
-"""What an event handler returns: a run's input, as ``agent.invoke`` takes it — a
-string, a message such as ``HumanMessage(...)``, state such as
-``{"messages": [...]}``, or ``(input, {"context": ..., "metadata": ...})``. ``None``
-starts nothing."""
+"""What an event handler returns: a run's input, as ``agent.invoke`` takes it (a
+string, a message such as ``HumanMessage(...)``, or state such as
+``{"messages": [...]}``), one run on the event's conversation; or a list of runs
+with options, such as ``[{"input": ..., "context": ..., "metadata": ...}]``.
+``None`` starts nothing."""
 
 _Key = TypeVar("_Key", bound=str, default=str)
 _EventPayload = TypeVar("_EventPayload", default=GitHubPayload)

@@ -56,9 +56,10 @@ _MESSAGE = {
 
 
 def _options(result: object) -> dict[str, Any]:
-    """The run options a handler started its run with."""
-    assert isinstance(result, tuple)
-    return cast(dict[str, Any], result[1])
+    """The one run a handler started, with its options: a list, as a dict alone would be state."""
+    assert isinstance(result, list)
+    [run] = cast(list[dict[str, Any]], result)
+    return run
 
 
 def _click(
@@ -134,8 +135,7 @@ def test_an_option_answers_for_the_person_it_was_for(monkeypatch: pytest.MonkeyP
 
     result = asyncio.run(clicks.start_click(_click(_option()), _THREAD))
 
-    assert isinstance(result, tuple)
-    assert result[0] == _RUN.input
+    assert _options(result)["input"] == _RUN.input
     # A click waits behind the work in progress, as the person's message would.
     assert _options(result)["multitask_strategy"] == "enqueue"
     [asked] = slack.asked
