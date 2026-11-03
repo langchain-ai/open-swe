@@ -177,17 +177,22 @@ def _new_slack_thread_context(
 async def slack_breakout_thread(
     title: str,
     instructions: str,
+    channel_id: Annotated[str, Field(pattern=_CHANNEL_ID_PATTERN)] | None,
     default_repo: str | None = None,
-    channel_id: Annotated[str, Field(pattern=_CHANNEL_ID_PATTERN)] | None = None,
     web_only: bool = False,
     model: str | None = None,
     effort: str | None = None,
 ) -> dict[str, object]:
     """Implement the `slack_breakout_thread` tool."""
+    if channel_id is None and not web_only:
+        return {
+            "success": False,
+            "error": "channel_id is required for Slack breakouts. Choose the destination from the user's request and channel/workspace instructions, then pass its Slack channel ID explicitly.",
+        }
     if channel_id is not None and not re.fullmatch(_CHANNEL_ID_PATTERN, channel_id):
         return {
             "success": False,
-            "error": "channel_id must be a Slack channel ID (for example, C0123456789); omit it or pass JSON null to use the current channel.",
+            "error": "channel_id must be a Slack channel ID (for example, C0123456789); pass JSON null only for web_only=true.",
         }
     cfg = RunConfig.from_runtime()
     if cfg.slack_thread is None:

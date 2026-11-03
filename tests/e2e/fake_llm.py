@@ -1570,6 +1570,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "slack_breakout_thread",
             {
                 "title": "Add greet() helper",
+                "channel_id": DEMO_CHANNEL,
                 "instructions": "Please add a greet() helper and open a draft PR in the default repository. Use the current Slack request as context, and report progress in this new thread.",
             },
             "call-breakout",
