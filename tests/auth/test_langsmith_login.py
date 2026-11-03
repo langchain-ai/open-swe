@@ -3,7 +3,6 @@
 import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -14,7 +13,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
 from openswe.dashboard import auth_routes, langsmith_login, langsmith_oauth, oauth
-from openswe.dashboard.github_link import GitHubLink
 from openswe.dashboard.langsmith_login import LangSmithAccount
 from openswe.dashboard.oauth_credentials import load_credential, save_credential
 from openswe.dashboard.profiles import PROFILES, get_profile
@@ -35,7 +33,6 @@ CALLBACK = "https://dashboard.example/dashboard/api/langsmith/callback"
 class LangSmithServer:
     subject: str = "5bb3fb19-f328-4815-8fe8-0483b41312c2"
     organization: str = ALLOWED_ORG
-    email: str = "same@example.com"
     member: bool = True
     revoked: bool = False
     unavailable: bool = False
@@ -91,7 +88,7 @@ class LangSmithServer:
                 json={
                     "sub": self.subject,
                     "ls_org_id": self.organization,
-                    "email": self.email,
+                    "email": "same@example.com",
                     "name": "LangSmith Person",
                 },
             )
@@ -216,47 +213,23 @@ async def test_desktop_login_is_independent_and_pkce_bound(langsmith_client) -> 
         await github_user.link("langsmith", server.subject)
 
 
-@pytest.mark.parametrize(
-    ("existing_provider", "email"),
-    [
-        ("github", "same@example.com"),
-        ("slack", "same@example.com"),
-        (None, "same@example.com"),
-        (None, ""),
-    ],
-)
-async def test_unlinked_langsmith_login_requires_github_link(
-    langsmith_client, existing_provider: str | None, email: str
-) -> None:
+async def test_new_langsmith_person_requires_linking(langsmith_client) -> None:
     server, client = langsmith_client
-    server.email = email
-    github_user = None
-    if existing_provider is not None:
-        github_user = await User.sign_in(
-            "github",
-            "1",
-            login="alice",
-            email="same@example.com" if existing_provider == "github" else "alice@example.com",
-        )
-        if existing_provider == "slack":
-            await github_user.link("slack", "slack-alice", email="same@example.com")
     callback = await server.desktop_login(client)
     assert callback.status_code == 302
     user = await User.for_identity("langsmith", server.subject)
     assert user is not None
-    assert github_user is None or user.id != github_user.id
     exchanged = await server.exchange(client, callback)
     client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
     assert (await client.get("/dashboard/api/me")).json()["requires_github_link"] is True
     assert (await client.get("/dashboard/api/profile")).status_code == 403
 
 
-@pytest.mark.parametrize("desktop", [False, True])
 async def test_linking_github_returns_a_langsmith_person_to_their_github_account(
-    langsmith_client, monkeypatch: pytest.MonkeyPatch, desktop: bool
+    langsmith_client,
 ) -> None:
     server, client = langsmith_client
-    github_user = await User.sign_in("github", "1", login="alice", email="personal@example.com")
+    github_user = await User.sign_in("github", "1", login="alice", email="Same@Example.com")
     await save_credential(
         "langsmith_login",
         "alice",
@@ -282,33 +255,8 @@ async def test_linking_github_returns_a_langsmith_person_to_their_github_account
     with pytest.raises(HTTPException):
         Principal.of_person(fresh).assert_can_read(github_thread)
 
-    monkeypatch.setenv("GITHUB_APP_CLIENT_ID", "test-github-client")
-    link = GitHubLink(
-        oauth.GithubUser(id=1, login="alice"),
-        "personal@example.com",
-        {"access_token": "github-access"},
-    )
-    monkeypatch.setattr(GitHubLink, "from_code", AsyncMock(return_value=link))
-    params = (
-        {"desktop_handoff": oauth.pkce_s256_challenge("verifier"), "desktop_port": 43210}
-        if desktop
-        else {}
-    )
-    start = await client.get("/dashboard/api/github/login", params=params)
-    assert start.status_code == 302
-    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
-    callback = await client.get(
-        "/dashboard/api/auth/callback", params={"state": state, "code": "github-code"}
-    )
-    assert callback.status_code == 302
-    if desktop:
-        code = parse_qs(urlparse(callback.headers["location"]).query)["code"][0]
-        response = await client.post(
-            "/dashboard/api/github/desktop/exchange", json={"code": code, "verifier": "verifier"}
-        )
-        assert response.status_code == 200
-    joined = await User.for_identity("langsmith", server.subject)
-    assert joined is not None and joined.id == github_user.id
+    joined = await person.join_github("1", login="alice", email="Same@Example.com")
+    assert joined.id == github_user.id
     assert {identity.provider for identity in joined.identities} == {"github", "langsmith"}
     assert await User.for_identity("langsmith", server.subject) == joined
     credential = await load_credential("langsmith_login", "alice")

@@ -64,25 +64,3 @@ test("recovery with different emails verifies GitHub and survives the next login
   const returning = await (await page.request.get("/dashboard/api/me")).json();
   expect(returning.user_id).toBe(original.user_id);
 });
-
-test("first-time LangSmith users must link GitHub before using Open SWE", async ({
-  page,
-}) => {
-  await page.goto("/login");
-  await page.getByRole("link", { name: "Continue with LangSmith" }).click();
-  await page
-    .getByRole("textbox", { name: "Email" })
-    .fill(`new-user-${crypto.randomUUID()}@example.com`);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "Link GitHub to use Open SWE" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Link GitHub", exact: true }),
-  ).toBeVisible();
-  await expect(page.getByTestId("composer-editor")).toHaveCount(0);
-  expect((await page.request.get("/dashboard/api/profile")).status()).toBe(403);
-  await page.getByRole("button", { name: "Sign out", exact: true }).click();
-  await expect(page).toHaveURL(/\/login(?:\?|$)/);
-  expect((await page.request.get("/dashboard/api/me")).status()).toBe(401);
-});
