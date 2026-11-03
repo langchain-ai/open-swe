@@ -337,6 +337,7 @@ export interface Profile {
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
   goal_mode?: boolean
+  experimental_conditional_approval?: boolean
   experimental_memory?: boolean
   experimental_classify?: boolean
   draft_prs?: boolean
@@ -356,6 +357,7 @@ export interface ProfileUpdate {
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
   goal_mode?: boolean
+  experimental_conditional_approval?: boolean
   experimental_memory?: boolean
   experimental_classify?: boolean
   draft_prs?: boolean
@@ -1276,8 +1278,13 @@ export interface PublishedReviewAssessment {
   review_id: number
   head_sha: string
   risk_score: number
-  decision: "would_approve" | "needs_human_review"
+  decision:
+    | "would_approve"
+    | "would_approve_conditionally"
+    | "needs_human_review"
   explanation: string
+  approval_condition?: string | null
+  auto_approved?: string | null
 }
 
 export interface ReviewAssessmentFeedbackInput {

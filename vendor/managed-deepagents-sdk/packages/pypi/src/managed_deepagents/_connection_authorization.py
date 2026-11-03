@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Literal, TypedDict, cast
 
@@ -41,6 +42,21 @@ class _UserConnectionGrant:
 
 InterruptFn = Callable[[CredentialAuthorizationRequiredInterrupt], None]
 
+_defer_interrupts: ContextVar[bool] = ContextVar("mda_defer_credential_interrupts", default=False)
+
+
+class CredentialAuthorizationDeferredError(Exception):
+    """Missing credentials raised instead of interrupting, for the caller to merge."""
+
+    def __init__(self, credentials: Sequence[PendingCredential]) -> None:
+        super().__init__([credential.get("slug") for credential in credentials])
+        self.credentials = list(credentials)
+
+
+def defer_credential_interrupts() -> None:
+    """Raise ``CredentialAuthorizationDeferredError`` instead of interrupting in this context."""
+    _defer_interrupts.set(True)
+
 
 def raise_credential_authorization_required(
     credentials: Sequence[PendingCredential],
@@ -55,6 +71,8 @@ def raise_credential_authorization_required(
     """
     if not credentials:
         raise ValueError("credentials must be non-empty")
+    if _defer_interrupts.get():
+        raise CredentialAuthorizationDeferredError(credentials)
     payload: CredentialAuthorizationRequiredInterrupt = {
         "type": "credential_authorization_required",
         "message": message,
@@ -127,9 +145,11 @@ def _interrupt(payload: CredentialAuthorizationRequiredInterrupt) -> None:
 
 
 __all__ = [
+    "CredentialAuthorizationDeferredError",
     "CredentialAuthorizationRequiredInterrupt",
     "PendingCredential",
     "collect_pending_user_connection_credentials",
+    "defer_credential_interrupts",
     "raise_credential_authorization_required",
     "resolve_user_connection_grants",
 ]

@@ -2195,11 +2195,15 @@
       },
       "ExcludedHunk": {
         "additionalProperties": false,
-        "description": "A hunk left off the card.",
+        "description": "A hunk left off the card; an empty ``header`` stands for a whole file without a text diff.",
         "properties": {
           "additions": {
             "title": "Additions",
             "type": "integer"
+          },
+          "approval_condition": {
+            "title": "Approval Condition",
+            "type": "boolean"
           },
           "deletions": {
             "title": "Deletions",
@@ -5051,6 +5055,17 @@
               }
             ],
             "title": "Experimental Classify"
+          },
+          "experimental_conditional_approval": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Conditional Approval"
           },
           "experimental_memory": {
             "anyOf": [
