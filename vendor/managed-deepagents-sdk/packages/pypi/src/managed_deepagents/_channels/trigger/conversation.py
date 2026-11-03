@@ -64,18 +64,19 @@ async def start_trigger_conversation(
     thread_id = source_thread_id(key)
     if source is not None:
         thread, execution = source
-        await hand_off_thread(
-            thread,
-            execution,
-            {
-                "name": origin["name"],
-                "provider": origin["provider"],
-                "source_thread_key": key,
-                "delivery_id": action_id,
-                "transport": "trigger_server",
-                "target": cast("JsonValue", started),
-            },
-        )
+        moved: ChannelBinding = {
+            "name": origin["name"],
+            "provider": origin["provider"],
+            "source_thread_key": key,
+            "delivery_id": action_id,
+            "transport": "trigger_server",
+            "target": cast("JsonValue", started),
+        }
+        await hand_off_thread(thread, execution, moved)
+        # The rest of this run answers, and waits on decisions, in the new thread.
+        if "reply" in origin:
+            moved["reply"] = origin["reply"]
+        current_run_thread(None, get_config().get("configurable", {})).handed_off.append(moved)
         thread_id = thread.id
     elif run_input is not None and caller is not None:
         user_id, assistant_id = caller

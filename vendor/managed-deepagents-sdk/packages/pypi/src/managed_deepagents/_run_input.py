@@ -292,6 +292,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         output: RunOutput | None,
     ) -> None:
         """Send the finished stream's result to the run's thread origin or ``deliver_to``."""
+        thread = thread.moved()
         if not delivers_result(thread, merged, routing):
             return
         if output is not None:
@@ -319,6 +320,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         routing: Mapping[str, object] | None,
         output: RunOutput | None,
     ) -> None:
+        thread = thread.moved()
         if not delivers_result(thread, merged, routing):
             return
         if output is not None:
@@ -380,6 +382,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         error: Exception,
     ) -> None:
         """Report the raised run's failure where its result would have gone."""
+        thread = thread.moved()
         if not delivers_result(thread, merged, routing):
             return
         await deliver_run_failure(
