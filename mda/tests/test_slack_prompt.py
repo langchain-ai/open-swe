@@ -106,7 +106,8 @@ def test_the_thread_state_says_what_the_model_already_has() -> None:
     built = slack_prompt.build_input(**_case("mention_with_history"))
     values = {"messages": [{"type": "human", "content": m["content"]} for m in built["messages"]]}
 
-    hashes, timestamps = slack_prompt.dispatched_context(values)
+    # As Agent Server's ``threads.get_state`` reads it.
+    hashes, timestamps = slack_prompt.dispatched_context({"values": values, "next": []})
 
     assert timestamps == {"1.0", "1.2", "1.3", "9.0"}
     case: dict[str, Any] = {
@@ -124,7 +125,9 @@ def test_the_thread_state_says_what_the_model_already_has() -> None:
     assert slack_prompt.dispatched_context(None) == (set(), set())
     # Messages behind a summary are gone from the prompt, so their context is shown again.
     assert (
-        slack_prompt.dispatched_context({**values, "visible_from": len(built["messages"])})[0]
+        slack_prompt.dispatched_context(
+            {"values": {**values, "visible_from": len(built["messages"])}}
+        )[0]
         == set()
     )
 

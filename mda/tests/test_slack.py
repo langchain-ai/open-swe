@@ -7,6 +7,7 @@ from typing import Any, cast
 
 import pytest
 import rt.slack as slack
+from langgraph_sdk.schema import ThreadState
 from managed_deepagents import ChannelReplyResult, ChannelRun, SlackChannelThread, SlackMessageEvent
 from managed_deepagents._channels.http.types import ChannelName
 from managed_deepagents._channels.run_input import RunChannel, normalize_run_inputs
@@ -44,15 +45,19 @@ _HISTORY = [
 ]
 
 
-def _thread(state: Mapping[str, Any] | None = None) -> SlackChannelThread:
-    async def read_state() -> dict[str, Any] | None:
-        return dict(state) if state is not None else None
+def _thread(values: Mapping[str, Any] | None = None) -> SlackChannelThread:
+    """A conversation's thread whose state holds ``values``; ``None`` before any run."""
+
+    async def get_state() -> ThreadState | None:
+        if values is None:
+            return None
+        return cast(ThreadState, {"values": dict(values), "next": [], "tasks": []})
 
     return SlackChannelThread(
         id=_THREAD_ID,
         source_thread_key="slack:v1:A1:T1:C1:171.1",
         channel=ChannelName(name="slack"),
-        _read_state=read_state,
+        _get_state=get_state,
     )
 
 

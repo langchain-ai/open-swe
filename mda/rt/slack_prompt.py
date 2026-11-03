@@ -591,12 +591,14 @@ def visible_dynamic_context_hashes(values: Mapping[str, Any]) -> set[str]:
     return dynamic_context_hashes_from_messages(messages)
 
 
-def dispatched_context(values: Mapping[str, Any] | None) -> tuple[set[str], set[str]]:
+def dispatched_context(state: Mapping[str, Any] | None) -> tuple[set[str], set[str]]:
     """What the thread already holds: visible context hashes and replayed Slack ts.
 
-    Read from the state ``await thread.state()`` gives the handler; a thread no run
-    started on yet (``None``) holds nothing.
+    Read from the state ``await thread.get_state()`` gives the handler, as Agent
+    Server's ``threads.get_state`` does; a thread no run started on yet (``None``)
+    holds nothing.
     """
+    values = state.get("values") if isinstance(state, Mapping) else None
     if not isinstance(values, Mapping):
         return set(), set()
     messages = values.get("messages")

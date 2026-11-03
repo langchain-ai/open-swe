@@ -354,8 +354,8 @@ async def _start_turn(
     images = await slack_prompt.image_blocks(image_urls)
     # The model has what earlier runs on this thread handed it; a concierge DM's runs go
     # on another thread, whose state the handler can't read, so its context may repeat.
-    values = await thread.state() if start.thread_id in {None, thread.id} else None
-    visible, dispatched = slack_prompt.dispatched_context(values)
+    state = await thread.get_state() if start.thread_id in {None, thread.id} else None
+    visible, dispatched = slack_prompt.dispatched_context(state)
     described = {message.user_id} if prompt.first_turn else set(prompt.logins)
     run_input = slack_prompt.build_input(
         context,
