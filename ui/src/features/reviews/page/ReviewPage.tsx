@@ -5,6 +5,8 @@ import { useEffect, useLayoutEffect, useRef } from "react"
 
 import { useIsHydrated } from "@/lib/hydration"
 import { useMediaQuery } from "@/lib/useIsMobile"
+import { useResizableWidth } from "@/lib/useResizableWidth"
+import { RightPanelResizeHandle } from "@/features/agents/components/panel/RightPanelResizeHandle"
 import { pageTitle } from "@/lib/pageTitle"
 import { SideSheet } from "@/components/SideSheet"
 import { useSidebarControls } from "@/components/sidebar-layout"
@@ -91,6 +93,13 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
     : "pl-space-3"
 
   const navigatorInline = navigatorOpen && roomForNavigator
+  const navigatorSize = useResizableWidth({
+    storageKey: "open-swe.review-navigator.width",
+    defaultWidth: 248,
+    minWidth: 200,
+    maxWidth: 480,
+    edge: "right",
+  })
 
   return (
     <ChatDraftsProvider>
@@ -106,8 +115,15 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
         ) : (
           <div className="flex min-h-0 flex-1">
             {navigatorInline && (
-              <div className="w-[248px] shrink-0 border-r border-default bg-surface-level-1">
+              <div
+                className="relative shrink-0 border-r border-default bg-surface-level-1"
+                style={{ width: navigatorSize.width }}
+              >
                 <Navigator pr={pr} />
+                <RightPanelResizeHandle
+                  handlers={navigatorSize.handlers}
+                  className="right-0 left-auto translate-x-1/2 touch-none"
+                />
               </div>
             )}
             <section aria-label="Changes" className="min-w-0 flex-1">

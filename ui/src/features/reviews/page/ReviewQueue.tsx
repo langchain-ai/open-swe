@@ -11,8 +11,9 @@ import { toast } from "sonner"
 
 import { useSession } from "@/lib/session"
 import { useOpenPullRequests } from "@/features/reviews/lib/useOpenPullRequests"
-import { usePullRequestDetails } from "@/features/reviews/lib/usePullRequestDetails"
-import { standingReview } from "@/features/reviews/lib/reviewers"
+import { pullRequestStatusQuery } from "@/features/reviews/lib/cache"
+import type { OpenPullRequest } from "@/lib/api"
+import { awaitsViewer } from "@/features/reviews/lib/reviewers"
 import { pullRequestKey } from "@/features/reviews/lib/status"
 import { parsePullRequestSelection } from "@/features/reviews/search"
 import { warmReviewPage, type PullRequestRef } from "./queries"
@@ -52,53 +53,58 @@ export function useReviewQueue(pr: PullRequestRef): ReviewQueue | null {
     if (hasNextPage && !isFetching) void fetchNextPage()
   }, [hasNextPage, isFetching, fetchNextPage])
   const rows = pending.data?.pages.flatMap((page) => page.pullRequests) ?? []
-  const { all } = usePullRequestDetails(login, rows, rows)
-  const remaining = all
-    .filter((row) => {
-      if (row.state !== "open") return false
-      if (row.author?.toLowerCase() === login.toLowerCase()) return row.draft
-      const review = standingReview(row, login)
-      return (
-        row.draft === false &&
-        review !== "approved" &&
-        review !== "changes_requested"
-      )
-    })
-    .map(pullRequestKey)
   const current = pullRequestKey({
     repo: `${pr.owner}/${pr.repo}`,
     number: pr.number,
   }).toLowerCase()
-  const liveKeys = new Set(remaining.map((key) => key.toLowerCase()))
-  const ordered = explicit
-    ? [
-        ...explicit.filter(
-          (key) =>
-            liveKeys.has(key.toLowerCase()) || key.toLowerCase() === current
-        ),
-        ...remaining.filter(
-          (key) =>
-            !explicit.some((entry) => entry.toLowerCase() === key.toLowerCase())
-        ),
-      ]
-    : [current, ...remaining.filter((key) => key.toLowerCase() !== current)]
-  const queue = ordered.some((key) => key.toLowerCase() === current)
-    ? ordered
-    : [current, ...ordered]
-  const index = queue.findIndex((key) => key.toLowerCase() === current)
-  const nextKey = index < 0 ? undefined : queue?.[index + 1]
-  const previous = parsePullRequestSelection(queue?.[index - 1])
+  const same = (key: string) => key.toLowerCase() === current
+  const loaded =
+    pending.isSuccess &&
+    !pending.hasNextPage &&
+    !pending.data.pages.some((page) => page.incomplete)
+  const remaining = loaded
+    ? rows
+        .filter((row) => {
+          const live = queryClient.getQueryData<OpenPullRequest | null>(
+            pullRequestStatusQuery(login, row).queryKey
+          )
+          return awaitsViewer(
+            { ...row, ...live, assignment: row.assignment },
+            login
+          )
+        })
+        .map(pullRequestKey)
+    : undefined
+  const ordered = !remaining
+    ? (explicit ?? [])
+    : explicit
+      ? [
+          ...explicit.filter(
+            (key) =>
+              same(key) ||
+              remaining.some((left) => left.toLowerCase() === key.toLowerCase())
+          ),
+          ...remaining.filter(
+            (key) =>
+              !explicit.some(
+                (entry) => entry.toLowerCase() === key.toLowerCase()
+              )
+          ),
+        ]
+      : remaining.some((key) => !same(key))
+        ? [current, ...remaining.filter((key) => !same(key))]
+        : []
+  const queue =
+    ordered.length && !ordered.some(same) ? [current, ...ordered] : ordered
+  const index = queue.findIndex(same)
+  const nextKey = queue[index + 1]
+  const previous = parsePullRequestSelection(queue[index - 1])
   const next = parsePullRequestSelection(nextKey)
   useEffect(() => {
     const upcoming = parsePullRequestSelection(nextKey)
     if (upcoming) warmReviewPage(queryClient, upcoming)
   }, [queryClient, nextKey])
-  if (
-    pending.isPending ||
-    pending.isError ||
-    pending.data?.pages.some((page) => page.incomplete)
-  )
-    return null
+  if (index < 0) return null
   const open = (target: PullRequestRef) =>
     void navigate({
       to: REVIEW_ROUTE,

@@ -141,28 +141,31 @@ test.describe("review page", () => {
     const target = new RegExp(`/agents/reviews/${OWNER}/${REPO}/${pr.number}$`);
     const link = `https://github.com/${OWNER}/${REPO}/pull/${pr.number}/files?w=1`;
 
-    await page.goto("/agents/reviews");
     const input = page.getByLabel("Open a pull request review");
-    await expect(input).toBeVisible();
-    await input.fill(`see ${link} thx`);
-    await input.press("Enter");
-    await expect(page).toHaveURL(target);
+    // The server-rendered input shows before the client handles it; retry until it does.
+    await page.goto("/agents/reviews");
+    await expect(async () => {
+      await input.fill(`see ${link} thx`);
+      await input.press("Enter");
+      await expect(page).toHaveURL(target, { timeout: 5_000 });
+    }).toPass();
 
     await page.goto("/agents/reviews");
-    await expect(input).toBeVisible();
-    await input.focus();
-    await input.evaluate((element, text) => {
-      const data = new DataTransfer();
-      data.setData("text/plain", text);
-      element.dispatchEvent(
-        new ClipboardEvent("paste", {
-          clipboardData: data,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-    }, `see ${link} thx`);
-    await expect(page).toHaveURL(target);
+    await expect(async () => {
+      await input.focus();
+      await input.evaluate((element, text) => {
+        const data = new DataTransfer();
+        data.setData("text/plain", text);
+        element.dispatchEvent(
+          new ClipboardEvent("paste", {
+            clipboardData: data,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }, `see ${link} thx`);
+      await expect(page).toHaveURL(target, { timeout: 5_000 });
+    }).toPass();
   });
 
   test("keeps the state pill beside the title menu and a separate GitHub link", async ({
@@ -192,6 +195,142 @@ test.describe("review page", () => {
     expect(pillMiddle).toBeGreaterThan(titleBox!.y);
     expect(pillMiddle).toBeLessThan(titleBox!.y + titleBox!.height);
     expect(pillBox!.x + pillBox!.width).toBeLessThanOrEqual(titleBox!.x);
+  });
+
+  test("edits descriptions, cancels drafts, and keeps failed saves retryable", async ({
+    page,
+  }) => {
+    await openReview(page, pr);
+    const description = page.getByRole("article", {
+      name: "Description",
+      exact: true,
+    });
+    const edit = description.getByRole("button", { name: "Edit description" });
+    const input = description.getByRole("textbox", { name: "PR description" });
+    const save = description.getByRole("button", { name: "Save description" });
+    await edit.click();
+    await expect(input).toBeFocused();
+    await expect(description.locator(".view-lines")).toContainText(DESCRIPTION);
+    await expect(save).toBeDisabled();
+    await input.press("ControlOrMeta+f");
+    const find = description.locator(".find-widget");
+    await expect(find).toHaveAttribute("aria-hidden", "false");
+    await page.keyboard.press("Escape");
+    await expect(find).toHaveAttribute("aria-hidden", "true");
+    await expect(input).toBeFocused();
+    await input.focus();
+    await input.press("ControlOrMeta+A");
+    await page.keyboard.insertText("Discard this draft");
+    await description
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
+    await expect(description).toContainText(DESCRIPTION);
+    await edit.click();
+    await expect(description.locator(".view-lines")).toContainText(DESCRIPTION);
+    const updated = "## Updated description\n\nSaved **from the review page**.";
+    await input.focus();
+    await input.press("ControlOrMeta+A");
+    await page.keyboard.insertText(updated);
+    await input.press("Control+Enter");
+    await expect(input).toBeHidden();
+    await expect(
+      description.getByRole("heading", { name: "Updated description" }),
+    ).toBeVisible();
+    await page.reload();
+    await edit.click();
+    await expect(description.locator(".view-lines")).toContainText(
+      "Updated description",
+    );
+    const endpoint = `**${reviewApi(pr, "/description")}`;
+    await page.route(endpoint, (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({
+          detail: "You do not have permission to edit this PR",
+        }),
+      }),
+    );
+    await input.focus();
+    await input.press("ControlOrMeta+A");
+    await page.keyboard.insertText("Retry this draft");
+    await save.click();
+    await expect(description.locator(".view-lines")).toContainText(
+      "Retry this draft",
+    );
+    await expect(
+      page.getByText("Couldn't update description", { exact: true }),
+    ).toBeVisible();
+    await page.unroute(endpoint);
+    await description
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
+    await expect(
+      description.getByRole("heading", { name: "Updated description" }),
+    ).toBeVisible();
+    await edit.click();
+    await input.focus();
+    await input.press("ControlOrMeta+A");
+    await input.press("Backspace");
+    await save.click();
+    await expect(
+      description.getByText("No description.", { exact: true }),
+    ).toBeVisible();
+    await page.reload();
+    await expect(
+      description.getByText("No description.", { exact: true }),
+    ).toBeVisible();
+  });
+
+  test("links description references to GitHub without assuming they are pull requests", async ({
+    page,
+  }) => {
+    const linkedPr = await seedOpenPullRequest(page, {
+      repo: `${OWNER}/${REPO}`,
+      title: "Fix issue backlinks",
+      body: `Fixes #4879. See #${pr.number} and ${OWNER}/${REPO}#${pr.number}, plus langchain-ai/langgraph#9252. Leave \`#42\` alone.`,
+      author: "bob",
+      head: "issue-backlinks",
+      files: { "backlinks.py": "FIXED = True\n" },
+    });
+    await page.route(`**${reviewApi(linkedPr)}`, async (route) => {
+      const response = await route.fetch();
+      const detail = await response.json();
+      detail.pr.description_pull_requests = [pr.number];
+      await route.fulfill({ response, json: detail });
+    });
+    await openReview(page, linkedPr);
+    const description = page.getByRole("article", {
+      name: "Description",
+      exact: true,
+    });
+    await expect(
+      description.getByRole("link", { name: "#4879", exact: true }),
+    ).toHaveAttribute(
+      "href",
+      `https://github.com/${OWNER}/${REPO}/issues/4879`,
+    );
+    await expect(
+      description.getByRole("link", {
+        name: "langchain-ai/langgraph#9252",
+        exact: true,
+      }),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/langchain-ai/langgraph/issues/9252",
+    );
+    for (const name of [`#${pr.number}`, `${OWNER}/${REPO}#${pr.number}`]) {
+      await expect(
+        description.getByRole("link", { name, exact: true }),
+      ).toHaveAttribute(
+        "href",
+        `/agents/reviews/${OWNER}/${REPO}/${pr.number}`,
+      );
+    }
+    await expect(
+      description.getByRole("link", { name: "#42", exact: true }),
+    ).toHaveCount(0);
+    await expect(description.locator("code")).toHaveText("#42");
   });
 
   test("keeps description spacing stable when expanding and collapsing", async ({
@@ -249,7 +388,7 @@ test.describe("review page", () => {
 
     await openReview(page, pr);
     const guidance = page.getByRole("group", {
-      name: "Requested behavior",
+      name: "Requested changes",
     });
     const request = guidance.getByText(
       "Asked to keep the constants in flat modules",

@@ -201,6 +201,14 @@ class PullRequest(Base):
             return await cls(owner=owner, repo=repo, number=number).fetch(session)
 
     @classmethod
+    async def author_user_id_of(cls, pull_request_id: UUID) -> UUID | None:
+        """The Open SWE person who opened that stored PR, or ``None``."""
+        if not postgres.configured():
+            return None
+        async with postgres.session() as session:
+            return await session.scalar(select(cls.author_user_id).where(cls.id == pull_request_id))
+
+    @classmethod
     async def load(cls, owner: str, repo: str, number: int) -> Self:
         """The stored row, or an unsaved one, so callers always hold a record."""
         return await cls.get(owner, repo, number) or cls(owner=owner, repo=repo, number=number)
@@ -217,19 +225,24 @@ class PullRequest(Base):
             return list(rows)
 
     @classmethod
-    async def review_candidates(cls, repositories: Collection[str], login: str) -> list[Self]:
-        """Open, reviewed PRs in repositories the viewer can access."""
+    async def review_candidates(
+        cls, repositories: Collection[str], user_id: UUID, *, limit: int
+    ) -> list[Self]:
+        """Recently updated open PRs by others that Open SWE reviewed, in ``repositories``."""
+        if not repositories:
+            return []
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(cls)
                 .join(cls.repository)
                 .where(
-                    Repository.key.in_(repositories),
+                    Repository.key.in_([name.lower() for name in repositories]),
                     cls.state == "open",
-                    func.lower(cls.author) != login.lower(),
+                    cls.author_user_id.is_distinct_from(user_id),
                     cls.reviews.any(),
                 )
                 .order_by(cls.updated_at.desc(), cls.id.desc())
+                .limit(limit)
             )
             return list(rows)
 

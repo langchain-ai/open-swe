@@ -8,6 +8,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from openswe import event_claims
 from openswe.slack import move as slack_move
+from openswe.slack import routed_work
 from openswe.slack import thinking as slack_thinking
 from openswe.slack.channels import SlackChannel
 from openswe.slack.records import lookup_slack_thread_id
@@ -87,6 +88,7 @@ def statuses(monkeypatch: pytest.MonkeyPatch) -> list[StatusCall]:
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 0.001)
     monkeypatch.setattr(slack_thinking, "_STATUS_RETRY_DELAYS", (0.0, 0.0))
+    monkeypatch.setattr(routed_work.THREADS, "get", AsyncMock(return_value=None))
     return calls
 
 

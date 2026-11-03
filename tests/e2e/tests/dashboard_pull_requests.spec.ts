@@ -74,6 +74,58 @@ test.describe("thread pull requests", () => {
     ).toBeVisible();
   });
 
+  test("shows pull request links as review cards and chips with GitHub links", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.goto("/mock/slack");
+    await page.locator("#reset").click();
+    await page
+      .locator("#text")
+      .fill(
+        "<@U0BOT> E2E_PR_MENTIONS please add a greet() helper and open a PR",
+      );
+    await page.locator("#send").click();
+    await expect(
+      page.locator(".msg.bot").filter({ hasText: "Opened the pull request" }),
+    ).toBeVisible({ timeout: 60_000 });
+    await page.locator('.msg.bot a[href*="/agents/"]').first().click();
+    await expect(page).toHaveURL(/\/agents\//);
+
+    const card = page.getByTestId("pr-card-fakeorg/demo-1");
+    await expect(async () => {
+      await page.reload();
+      await expect(card).toBeVisible({ timeout: 8000 });
+    }).toPass({ timeout: 60_000 });
+    await expect(card).toContainText("Add greet() helper");
+    await expect(card).toContainText("draft");
+    const github = "Open fakeorg/demo#1 on GitHub";
+    await expect(card.getByRole("link", { name: github })).toHaveAttribute(
+      "href",
+      /\/fakeorg\/demo\/pull\/1$/,
+    );
+
+    const chip = page.locator(".pr-link-chip");
+    await expect(chip).toHaveCount(1);
+    await expect(
+      chip.getByRole("link", { name: "the greet() PR" }),
+    ).toHaveAttribute("href", "/agents/reviews/fakeorg/demo/1");
+    await expect(chip.getByRole("link", { name: github })).toHaveAttribute(
+      "href",
+      /\/fakeorg\/demo\/pull\/1$/,
+    );
+    await page.emulateMedia({ colorScheme: "dark" });
+    await card.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: test.info().outputPath("pr-link-card.png") });
+
+    await card
+      .getByRole("link", {
+        name: "Review fakeorg/demo pull request #1 in Open SWE",
+      })
+      .click();
+    await expect(page).toHaveURL(/\/agents\/reviews\/fakeorg\/demo\/1$/);
+  });
+
   test("shows live pull request health and submits actionable fixes", async ({
     page,
   }) => {

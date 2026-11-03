@@ -156,7 +156,7 @@ describe("apiWarmupScript", () => {
     },
     {
       name: "list mode",
-      expected: { repoMode: false },
+      expected: { repoMode: false, sort: "updated" as ChatSort },
       prefs: { organize: "list" },
     },
     {

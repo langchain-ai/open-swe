@@ -17,10 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7.0.0
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: "24"
-      - run: corepack enable
+          node-version: "26"
+      - run: npm install --global pnpm@11.22.0
       - run: pnpm install --frozen-lockfile --filter open-swe-dashboard...
       - run: pnpm --filter open-swe-dashboard run build
         env:

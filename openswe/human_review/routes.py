@@ -1,6 +1,7 @@
 """Dashboard API for asking a repository's Slack review channel to review a pull request."""
 
 import logging
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
@@ -11,16 +12,17 @@ from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, or_none
 from openswe.github.pull_request_status import (
+    OpenPullRequest,
     OpenPullRequests,
     pull_request_identity,
 )
 from openswe.github.repo_files import RepoSettings
-from openswe.github.repos import accessible_repo_full_names
 from openswe.human_review.card import mention
+from openswe.human_review.dashboard import DashboardReviewRequest
 from openswe.human_review.lifecycle import ReviewCard
-from openswe.human_review.queue import ReviewQueue
 from openswe.human_review.requests import HumanReviewRequest
-from openswe.human_review.standard import Origin, RequestResult, request_review, review_blockers
+from openswe.human_review.review_queue import ReviewQueue
+from openswe.human_review.standard import Origin, RequestResult, review_blockers
 from openswe.slack.client import GitHubPrRef, get_slack_permalink
 from openswe.users import User
 
@@ -43,10 +45,18 @@ async def api_review_assignments(
         for name in repositories
     ):
         raise HTTPException(422, "repository must be owner/repo")
-    accessible = await accessible_repo_full_names(login)
-    repositories = accessible & repositories if repositories else accessible
-    async with GitHubClient.as_user(login) as github:
-        return await ReviewQueue(github, login, repositories).load(sort, direction, page)
+    user = await User.for_login("github", login)
+    rows: list[OpenPullRequest] = []
+    if user is not None:
+        async with GitHubClient.as_user(login) as github:
+            rows = await ReviewQueue(github, login, user, repositories).rows(sort, direction)
+    start = (page - 1) * 100
+    return OpenPullRequests(
+        pull_requests=rows[start : start + 100],
+        next_page=page + 1 if start + 100 < len(rows) else None,
+        incomplete=False,
+        updated_at=datetime.now(UTC).isoformat(),
+    )
 
 
 class HumanReviewRequestBody(BaseModel):
@@ -122,14 +132,12 @@ async def api_request_human_review(
     requester = await User.for_login("github", login)
     if requester is None:
         raise HTTPException(403, "No Open SWE user record for this login")
-    await require_repo_access_for_user(login, f"{owner}/{repo}")
+    token = await require_repo_access_for_user(login, f"{owner}/{repo}")
     options = body or HumanReviewRequestBody()
     inline_summary = options.inline_summary
     if inline_summary is not None and not inline_summary.strip():
         raise HTTPException(422, "inline_summary must not be blank")
-    result = await request_review(
-        pr_ref,
-        Origin(requester=requester),
+    result = await DashboardReviewRequest(pr_ref, Origin(requester=requester), token).request(
         channel=options.channel,
         inline_summary=inline_summary,
     )

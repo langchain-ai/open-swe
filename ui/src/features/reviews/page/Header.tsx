@@ -373,11 +373,11 @@ export function Header({
                   : "Approve & finish"
                 : undefined
             }
-            undraftLabel={
+            readyLabel={
               queue
                 ? queue.next
-                  ? "Undraft & next"
-                  : "Undraft & finish"
+                  ? "Mark ready & next"
+                  : "Mark ready & finish"
                 : undefined
             }
             onApproved={queue?.advance}

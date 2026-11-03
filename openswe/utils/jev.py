@@ -3,7 +3,7 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from math import isfinite
-from typing import Literal
+from typing import Literal, Self
 
 import httpx2
 from langchain_typesafe import Choice, TypeSafeClassifier
@@ -16,6 +16,29 @@ from openswe.utils.http_pool import pooled_transport
 logger = logging.getLogger(__name__)
 
 JEV_TIMEOUT_SECONDS = 3.0
+# Pinned so confidence thresholds tuned against it keep holding.
+SYSTEM_ONE_MODEL = "typesafe/jev-1.13.0"
+
+
+@dataclass(frozen=True)
+class SystemOneGateway:
+    """TypeSafe's System One model, reached through the LangSmith LLM Gateway."""
+
+    api_key: str
+
+    @classmethod
+    def configured(cls) -> Self | None:
+        """The gateway this deployment's LangSmith key reaches, or None without one."""
+        api_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
+        return cls(api_key) if api_key else None
+
+    def classifier(self, client: httpx2.AsyncClient) -> TypeSafeClassifier:
+        return TypeSafeClassifier(
+            model=SYSTEM_ONE_MODEL,
+            api_key=self.api_key,
+            base_url=gateway_base_url(),
+            async_client=client,
+        )
 
 
 @dataclass
@@ -53,8 +76,8 @@ async def select_jev_choices(
     for decision in tracked.values():
         decision.outcome = "classifier_failure"
         decision.reason = "missing_credentials"
-    gateway_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
-    if not gateway_key:
+    gateway = SystemOneGateway.configured()
+    if gateway is None:
         logger.warning("Jev classification has no API key", extra={"questions": list(questions)})
         return results
     for decision in tracked.values():
@@ -64,13 +87,7 @@ async def select_jev_choices(
             asyncio.timeout(JEV_TIMEOUT_SECONDS),
             httpx2.AsyncClient(transport=pooled_transport(), timeout=JEV_TIMEOUT_SECONDS) as client,
         ):
-            classifier = TypeSafeClassifier(
-                model="typesafe/jev-1.13.0",
-                api_key=gateway_key,
-                base_url=gateway_base_url(),
-                async_client=client,
-            )
-            response = await classifier.ainvoke(
+            response = await gateway.classifier(client).ainvoke(
                 {"state": task, "questions": dict(questions)},
                 config={"tags": ["nostream"]},
             )

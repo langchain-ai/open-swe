@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import httpx2
@@ -11,7 +12,7 @@ import pytest
 
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.expedited_review.readiness import PullRequestSnapshot
-from openswe.github.http import GitHubClient, RepoClient
+from openswe.github.http import GitHubClient, GitHubError, RepoClient
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, ThreadLink
 from openswe.github.repo_files import RepoSettings
@@ -796,6 +797,9 @@ async def test_missing_or_invalid_settings_have_no_review_channel(status: int, t
 async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_reviews(
     monkeypatch,
 ):
+    from sqlalchemy import func, update
+
+    from openswe.database import postgres
     from openswe.github.pull_requests import PullRequest
     from openswe.human_review.requests import (
         HumanReviewParticipant,
@@ -804,22 +808,35 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         RequestState,
     )
     from openswe.human_review.routes import api_review_assignments
+    from openswe.human_review.tentative import TentativeReviewers
+    from openswe.slack.payloads import SlackEventEnvelope
+    from openswe.slack.pr_links import SlackPullRequestLink
+    from openswe.slack.thread_mentions import SlackThreadMention
     from openswe.users import User
 
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "ada,grace")
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
     ada = await User.sign_in("github", "1", login="ada")
+    await ada.link("slack", "UADA")
     grace = await User.sign_in("github", "2", login="grace")
-    cases: list[tuple[int, User, bool, RequestState, RequestKind]] = [
+    cases: list[tuple[int, User | None, bool, RequestState, RequestKind]] = [
         (1, ada, True, "open", "standard"),
         (2, ada, False, "open", "standard"),
         (3, grace, True, "open", "standard"),
         (4, ada, True, "cancelled", "standard"),
         (5, ada, True, "open", "posted"),
         (6, ada, True, "open", "standard"),
+        (7, None, False, "open", "standard"),
+        (8, None, False, "open", "standard"),
+        (14, None, False, "open", "standard"),
     ]
     for number, user, assigned, state, kind in cases:
         pr = await PullRequest(
-            owner="o", repo="hidden" if number == 6 else "r", number=number, title=f"PR {number}"
+            owner="o",
+            repo={6: "hidden", 14: "unreadable"}.get(number, "r"),
+            number=number,
+            title=f"PR {number}",
+            author="grace",
         ).save()
         await HumanReviewRequest(
             pull_request_id=pr.id,
@@ -830,22 +847,54 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
                 HumanReviewParticipant(
                     user_id=user.id, decision="review", assigned_by_agent=assigned
                 )
-            ],
+            ]
+            if user is not None
+            else [],
         ).save()
+    for ts, text in [
+        ("1.0", "<@UADA> https://openswe.example.com/agents/reviews/o/r/9"),
+        ("2.0", "<@UADA> https://github.com/o/r/pull/10"),
+        ("3.0", "https://github.com/o/r/pull/11"),
+        ("4.0", "<@UADA> https://github.com/o/r/pull/1"),
+        ("5.0", "<@UADA> https://github.com/o/r/pull/12"),
+        ("7.0", "<@UADA> https://github.com/o/r/pull/13"),
+        ("6.0", "<@UADA> still need you here"),
+    ]:
+        if ts == "6.0":
+            async with postgres.session() as session:
+                await session.execute(
+                    update(SlackThreadMention).values(updated_at=func.now() - timedelta(days=40))
+                )
+        envelope = SlackEventEnvelope.model_validate(
+            {
+                "type": "event_callback",
+                "team_id": "T1",
+                "event": {
+                    "type": "message",
+                    "channel": "C1",
+                    "ts": ts,
+                    "thread_ts": "5.0" if ts == "6.0" else "",
+                    "user": "UG",
+                    "text": text,
+                },
+            }
+        )
+        await SlackPullRequestLink.record(envelope)
+        await SlackThreadMention.record(envelope)
 
     @asynccontextmanager
     async def as_user(login: str) -> AsyncIterator[GitHubClient]:
         yield GitHubClient(MagicMock())
 
-    from openswe.github.pull_request_status import (
-        OpenPullRequest,
-        OpenPullRequests,
-        PullRequestReviewer,
-    )
+    async def info(repo: RepoClient) -> dict[str, object]:
+        if repo.name == "hidden":
+            raise GitHubError(_response(404))
+        return {}
+
+    from openswe.github.pull_request_status import OpenPullRequest, OpenPullRequests
     from openswe.github.pull_requests import ReviewLink
 
-    await PullRequest(owner="o", repo="r", number=7, author="ada").save()
-    for number in [8, 9]:
+    for number in [30, 31]:
         await PullRequest(
             owner="o",
             repo="r",
@@ -855,41 +904,54 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         ).save()
 
     async def search(github, login, repo, *, scope, **kwargs):
-        numbers = [7] if scope == "drafts" else [1, 5]
+        listed = {"review-requested": [(20, "grace", False), (21, "grace", True)]}
+        rows = listed.get(scope, [(22, "ada", True)])
         return OpenPullRequests(
-            pull_requests=[OpenPullRequest(repo="o/r", number=n, title=str(n)) for n in numbers],
+            pull_requests=[
+                OpenPullRequest(repo="o/r", number=n, title=str(n), author=a, draft=d)
+                for n, a, d in rows
+            ],
             next_page=None,
             incomplete=False,
             updated_at="",
         )
 
-    async def load(pull, **kwargs):
-        if pull.repo.name == "hidden":
-            return None
-        return OpenPullRequest(
-            repo=pull.repo.full_name,
-            number=pull.number,
-            title=str(pull.number),
-            author="ada" if pull.number == 7 else "grace",
-            draft=pull.number in {7, 9},
-            reviewers=[PullRequestReviewer(login="ada", user_id=1, state="approved")]
-            if pull.number == 5
-            else [],
-        )
+    async def pull(self) -> dict[str, object]:
+        author = "ada" if self.number == 10 else "grace"
+        return {
+            "state": "open",
+            "user": {"login": author},
+            "title": f"PR {self.number}",
+            "draft": self.number == 31,
+        }
+
+    async def states(pull, author):
+        return {5: {"ada": "APPROVED"}, 20: {"ada": "CHANGES_REQUESTED"}}.get(pull.number, {})
+
+    async def tentative(self) -> frozenset[UUID]:
+        return frozenset({ada.id} if self.request.pull_request.number in {7, 14} else {grace.id})
 
     with (
         patch("openswe.human_review.routes.GitHubClient.as_user", as_user),
+        patch.object(RepoClient, "info", info),
+        patch.object(PullRequestClient, "pull", pull),
+        patch.object(TentativeReviewers, "user_ids", tentative),
         patch(
-            "openswe.human_review.routes.accessible_repo_full_names",
-            AsyncMock(return_value={"o/r"}),
+            "openswe.human_review.review_queue.accessible_repo_full_names",
+            AsyncMock(return_value=frozenset({"o/r"})),
         ),
-        patch("openswe.human_review.queue.list_open_pull_requests", search),
-        patch.object(PullRequestClient, "load", load),
+        patch("openswe.human_review.review_queue.latest_review_states", states),
+        patch("openswe.human_review.review_queue.list_open_pull_requests", search),
     ):
         result = await api_review_assignments(page=1, session={"sub": "ada"})
-        assert [row.number for row in result.pull_requests] == [1, 7, 8]
-        filtered = await api_review_assignments(repo="o/hidden", page=1, session={"sub": "ada"})
-        assert filtered.pull_requests == []
+    assert [(row.number, row.assignment) for row in result.pull_requests] == [
+        (1, "assigned"),
+        (20, "requested"),
+        (7, "tentative"),
+        (12, "mentioned"),
+        (22, "draft"),
+        (30, "speculative"),
+    ]
 
 
 @asynccontextmanager
@@ -1010,7 +1072,7 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
     ref = GitHubPrRef(owner="lc", repo="repo", number=7, url=pr.url)
     with (
         patch.object(standard, "review_blockers", AsyncMock(return_value=[])),
-        patch.object(standard, "_target_channel", AsyncMock(return_value=SlackChannel(id="C1"))),
+        patch.object(standard, "target_channel", AsyncMock(return_value=SlackChannel(id="C1"))),
         patch.object(standard, "record_pull_request", AsyncMock(return_value=(pr, details))),
         patch.object(
             standard,

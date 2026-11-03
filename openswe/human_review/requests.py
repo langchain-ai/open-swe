@@ -59,6 +59,7 @@ RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
 # ``expired`` is a pick that was not accepted in time, kept so it is not picked again.
 ParticipantDecision = Literal["approve", "reject", "review", "picked", "expired"]
 SUPPLEMENTARY_REVIEWS_KEY = "supplementary_reviews"
+AUTO_ASSIGN_ASKED = "auto_assign_asked"
 
 
 class ChannelChoice(TypedDict):
@@ -196,6 +197,11 @@ class HumanReviewRequest(Base):
         return [p for p in self.participants if p.decision == "picked"]
 
     @property
+    def auto_assign_asked(self) -> bool:
+        """Someone asked Open SWE to find this request a reviewer."""
+        return AUTO_ASSIGN_ASKED in self.run_config
+
+    @property
     def requester_login(self) -> str:
         if self.requested_by is not None:
             return self.requested_by.github_login
@@ -216,6 +222,18 @@ class HumanReviewRequest(Base):
     def approvers(self) -> list[str]:
         """GitHub handles of the approvers, for display."""
         return [participant.github_login for participant in self.approvals]
+
+    @property
+    def approval_condition(self) -> str:
+        """What an expedited card asks voters to okay in place of the hunks it hides."""
+        return next(
+            (e["guideline"] for e in self.excluded_hunks if e.get("approval_condition")), ""
+        )
+
+    @property
+    def auto_approved(self) -> str:
+        """What Open SWE's review judged the approval criteria already cover besides the condition."""
+        return next((e["reason"] for e in self.excluded_hunks if e.get("approval_condition")), "")
 
     def participant(self, user_id: UUID) -> HumanReviewParticipant | None:
         return next((p for p in self.participants if p.user_id == user_id), None)
@@ -292,6 +310,28 @@ class HumanReviewRequest(Base):
                     HumanReviewParticipant.user_id == user_id,
                     HumanReviewParticipant.decision == "review",
                     HumanReviewParticipant.assigned_by_agent.is_(True),
+                )
+            )
+            return list(rows)
+
+    @classmethod
+    async def unclaimed(cls, repositories: Collection[str]) -> list[Self]:
+        """Open requests in these lowercase ``owner/repo``s nobody has signed up for or been picked for."""
+        if not repositories:
+            return []
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._loaded(select(cls))
+                .join(cls.pull_request)
+                .join(PullRequest.repository)
+                .where(
+                    Repository.key.in_(repositories),
+                    cls.state == "open",
+                    cls.kind.in_(("standard", "posted")),
+                    PullRequest.state == "open",
+                    ~cls.participants.any(
+                        HumanReviewParticipant.decision.in_(("review", "picked"))
+                    ),
                 )
             )
             return list(rows)

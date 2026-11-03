@@ -345,6 +345,11 @@ _bot_user: CachedRead[str | None] = CachedRead(
 )
 
 
+async def slack_bot_user_id() -> str | None:
+    """The app's bot user, or ``None`` when Slack can't say."""
+    return await _bot_user.get()
+
+
 def reset_slack_bot_user() -> None:
     """Forget the bot user's ID; for tests."""
     _bot_user.reset()

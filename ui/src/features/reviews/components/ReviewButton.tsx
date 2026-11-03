@@ -75,7 +75,7 @@ export function ReviewButton({
   onOpenReview,
   approveLabel = "Approve",
   onApproved,
-  undraftLabel = "Undraft",
+  readyLabel = "Mark ready",
   nextLabel,
   onNext,
 }: {
@@ -90,7 +90,7 @@ export function ReviewButton({
   onOpenReview: (verdict: PullRequestReviewEvent) => void
   /** Names what an approval also does, e.g. "Approve & next" while working through a queue. */
   approveLabel?: string
-  undraftLabel?: string
+  readyLabel?: string
   /** Names the queue step shown when this PR has no action left, e.g. "Next". */
   nextLabel?: string
   onNext?: () => void
@@ -201,7 +201,7 @@ export function ReviewButton({
           <ButtonGroup size="sm" color="primary" variant="normal">
             <MarkReadyButton
               pr={status.data}
-              label={undraftLabel}
+              label={readyLabel}
               onReady={() => {
                 refresh.status()
                 onApproved?.()
@@ -440,9 +440,9 @@ function MarkReadyButton({
       {actionLabel(
         {
           idle: label,
-          pending: "Undrafting…",
-          done: "Undrafted",
-          retry: "Retry undraft",
+          pending: "Marking ready…",
+          done: "Marked ready",
+          retry: "Retry mark ready",
         },
         ready
       )}

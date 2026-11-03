@@ -195,11 +195,11 @@ test.describe("my pull requests", () => {
       .click();
     await expect(page).toHaveURL(new RegExp(`/demo/${mine.number}`));
     await page
-      .getByRole("button", { name: "Undraft & finish", exact: true })
+      .getByRole("button", { name: "Mark ready & finish", exact: true })
       .click();
     await expect(page).toHaveURL(/tab=to-review/);
     await expect(
-      page.getByText("No pending reviews or drafts. You’re all caught up."),
+      page.getByText("Nothing to review. You’re all caught up."),
     ).toBeVisible();
     expect(
       (await readPullRequest(page, "fakeorg", "demo", mine.number)).draft,

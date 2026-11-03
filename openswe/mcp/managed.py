@@ -23,6 +23,7 @@ from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 from pydantic import BaseModel, Field
 
+from mcp.types import ListToolsResult
 from openswe.config import ENV
 from openswe.credential_scope import private_credential_login
 from openswe.dashboard.langsmith_oauth import (
@@ -61,7 +62,7 @@ class ManagedToolsError(ValueError):
 
 class LangSmithNotConnected(ManagedToolsError):
     def __init__(self) -> None:
-        super().__init__("Connect LangSmith in Settings first")
+        super().__init__("Sign in with LangSmith again first")
 
 
 class MissingCredential(BaseModel):
@@ -108,6 +109,18 @@ class Gateway(BaseModel):
     tool_count: int
 
 
+class ManagedTool(BaseModel):
+    name: str
+    description: str | None = None
+
+
+class GatewayInventory(BaseModel):
+    gateway: Gateway
+    tools: list[ManagedTool]
+    missing: list[MissingCredential]
+    all_required: bool
+
+
 class GatewayStatus(BaseModel):
     """What one person sees for a gateway: every service connected, or what is left."""
 
@@ -148,7 +161,11 @@ class _Listing:
     missing: list[MissingCredential]
     links: dict[str, ConsentLink]
     all_required: bool
-    tool_names: frozenset[str] = frozenset()
+    tools: tuple[ManagedTool, ...] = ()
+
+    @property
+    def tool_names(self) -> frozenset[str]:
+        return frozenset(tool.name for tool in self.tools)
 
 
 def managed_tools_configured() -> bool:
@@ -188,7 +205,7 @@ def _client() -> httpx2.AsyncClient:
 
 
 def _credentials(entries: object) -> tuple[list[MissingCredential], dict[str, ConsentLink]]:
-    missing: list[MissingCredential] = []
+    missing: dict[str, MissingCredential] = {}
     links: dict[str, ConsentLink] = {}
     for entry in entries if isinstance(entries, list) else []:
         if not isinstance(entry, dict) or not isinstance(entry.get("slug"), str):
@@ -196,14 +213,14 @@ def _credentials(entries: object) -> tuple[list[MissingCredential], dict[str, Co
         kind: CredentialKind = "secret" if entry.get("kind") == "secret" else "oauth"
         display_name = str(entry.get("display_name") or entry["slug"])
         slug = _service_slug(entry["slug"], display_name)
-        missing.append(MissingCredential(slug=slug, display_name=display_name, kind=kind))
+        missing[slug] = MissingCredential(slug=slug, display_name=display_name, kind=kind)
         url = entry.get("verification_url")
         if kind == "oauth" and isinstance(url, str) and url.startswith("https://"):
             auth_id = entry.get("auth_id")
             links[slug] = ConsentLink(
                 url=url, auth_id=auth_id if isinstance(auth_id, str) else None
             )
-    return missing, links
+    return list(missing.values()), links
 
 
 def _service_slug(slug: str, display_name: str) -> str:
@@ -482,6 +499,28 @@ async def _with_session[T](
         raise ManagedToolsError("Could not reach the tool kit; retry later") from None
 
 
+async def _list_tools(client: Client[StreamableHttpTransport]) -> ListToolsResult:
+    result = await client.list_tools_mcp()
+    for _ in range(_MAX_PAGES - 1):
+        if not result.next_cursor:
+            return result
+        page = await client.list_tools_mcp(cursor=result.next_cursor)
+        result.tools.extend(page.tools)
+        missing = [
+            entry
+            for listing in (result, page)
+            if isinstance(entries := (listing.meta or {}).get(_MISSING_CREDENTIALS_META), list)
+            for entry in entries
+        ]
+        result.meta = {_MISSING_CREDENTIALS_META: missing}
+        result.next_cursor = page.next_cursor
+    if result.next_cursor:
+        raise ManagedToolsError(
+            "Managed tools listing exceeded the page limit; narrow the tool kit"
+        )
+    return result
+
+
 async def _listing(login: str, gateway: str) -> _Listing:
     """Read the gateway's tools as ``login``, under either of LMT's connection policies.
 
@@ -489,7 +528,7 @@ async def _listing(login: str, gateway: str) -> _Listing:
     allows partial use lists the connected services' tools and names the rest in _meta.
     """
     try:
-        result = await _with_session(login, gateway, lambda client: client.list_tools_mcp())
+        result = await _with_session(login, gateway, _list_tools)
     except GatewayCredentialsRequired as required:
         return _Listing(None, required.missing, required.links, all_required=True)
     missing, links = _credentials((result.meta or {}).get(_MISSING_CREDENTIALS_META))
@@ -498,7 +537,22 @@ async def _listing(login: str, gateway: str) -> _Listing:
         missing,
         links,
         all_required=False,
-        tool_names=frozenset(tool.name for tool in result.tools),
+        tools=tuple(
+            ManagedTool(name=tool.name, description=tool.description) for tool in result.tools
+        ),
+    )
+
+
+async def gateway_inventory(login: str, gateway: str) -> GatewayInventory:
+    """The configured kit's callable tools and missing services, without consent secrets."""
+    detail, listing = await asyncio.gather(
+        _gateway_detail(login, gateway), _listing(login, gateway)
+    )
+    return GatewayInventory(
+        gateway=_gateway(detail),
+        tools=list(listing.tools),
+        missing=listing.missing,
+        all_required=listing.all_required,
     )
 
 

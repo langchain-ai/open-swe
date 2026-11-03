@@ -31,7 +31,7 @@ import {
   pullRequestStatusQuery,
   refreshPullRequest,
 } from "./lib/cache"
-import { standingReview } from "./lib/reviewers"
+import { awaitsViewer } from "./lib/reviewers"
 import { dateLabel } from "./lib/dateLabel"
 import { readPreference, writePreference } from "./lib/preferences"
 import { pullRequestKey, statusLabels } from "./lib/status"
@@ -151,17 +151,10 @@ export function OpenPullRequests({
   const matchingRows = rows
     .filter((pr) => {
       if (scope !== "review-assigned") return true
-      const live =
-        queryClient.getQueryData<OpenPullRequest | null>(
-          pullRequestStatusQuery(login, pr).queryKey
-        ) ?? pr
-      if (live.author?.toLowerCase() === login.toLowerCase()) return live.draft
-      const review = standingReview(live, login)
-      return (
-        live.draft === false &&
-        review !== "approved" &&
-        review !== "changes_requested"
+      const live = queryClient.getQueryData<OpenPullRequest | null>(
+        pullRequestStatusQuery(login, pr).queryKey
       )
+      return awaitsViewer({ ...pr, ...live, assignment: pr.assignment }, login)
     })
     .filter(
       (pr) =>
@@ -308,7 +301,7 @@ export function OpenPullRequests({
             <div className="flex items-center gap-space-2 text-xs text-secondary">
               <span>
                 {scope === "review-assigned"
-                  ? "Requested reviews · Your drafts · Speculative reviews"
+                  ? "Requested reviews, your drafts, then speculative reviews"
                   : "GitHub review requests"}
               </span>
               {scope === "review-requested" && (
@@ -513,7 +506,7 @@ export function OpenPullRequests({
                           : scope === "mine"
                             ? "No open PRs found"
                             : scope === "review-assigned"
-                              ? "No pending reviews or drafts. You’re all caught up."
+                              ? "Nothing to review. You’re all caught up."
                               : "No pending GitHub review requests"
                       }
                     />

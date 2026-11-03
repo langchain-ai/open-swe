@@ -176,7 +176,6 @@ class _Harness:
             return {"graph": assistant_id, "__run_token": sign_runtime_token(run)}
 
         monkeypatch.setattr(runtimes, "remote_run_context", context)
-        monkeypatch.setattr(runtimes, "get_tracer_project", lambda: "open-swe-test")
 
         async def app(scope: Scope, receive: Receive, send: Send) -> None:
             self.reached_here.append(scope["path"])
@@ -402,7 +401,8 @@ async def test_a_new_thread_runs_on_mda(
     assert sent["assistant_id"] == graph
     # Nothing the remote graph is handed carries the configurable but the signed token.
     assert "config" not in sent
-    assert sent["langsmith_tracer"] == {"project_name": "open-swe-test"}
+    # Traced once, into the MDA deployment's own project.
+    assert "langsmith_tracer" not in sent
     context = sent["context"]
     assert isinstance(context, dict) and context["__event_streaming_v2"] is True
     assert isinstance(token := context["__run_token"], str)
