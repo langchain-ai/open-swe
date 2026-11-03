@@ -188,12 +188,29 @@ test("queued and steered mentions notify once per accepted message and skip self
   const recipient = await browser.newPage();
   await loginAs(recipient, OTHER_USER);
   await page.goto("/agents", { waitUntil: "domcontentloaded" });
-  const editor = page.getByTestId("composer-editor");
-  await editor.click();
-  await editor.pressSequentially("E2E_BUSY_HOLD:20 inspect the code");
-  await editor.press("Enter");
-  await expect(page).toHaveURL(/\/agents\/[a-f0-9-]+$/);
-  const threadId = new URL(page.url()).pathname.split("/").pop()!;
+  const threadId = crypto.randomUUID();
+  const started = await page.request.post(
+    `/dashboard/api/threads/${threadId}/commands`,
+    {
+      headers: { origin: new URL(page.url()).origin },
+      data: {
+        id: crypto.randomUUID(),
+        method: "run.start",
+        params: {
+          input: {
+            messages: [
+              {
+                id: crypto.randomUUID(),
+                type: "human",
+                content: "E2E_BUSY_HOLD:20 inspect the code",
+              },
+            ],
+          },
+        },
+      },
+    },
+  );
+  expect(started.ok(), await started.text()).toBeTruthy();
   for (const strategy of ["interrupt", "enqueue"]) {
     const response = await page.request.post(
       `/dashboard/api/threads/${threadId}/commands`,
