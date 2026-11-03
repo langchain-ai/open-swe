@@ -10,6 +10,7 @@ import pytest
 import rt.slack_clicks as clicks
 from managed_deepagents import SlackActor, SlackChannelThread, SlackInteractionEvent
 from managed_deepagents._channels.http.types import ChannelName
+from managed_deepagents._channels.slack.api import SlackApiError  # noqa: PLC2701
 from pydantic import BaseModel
 from runtime_api.endpoint import Endpoint
 from runtime_api.slack import (
@@ -99,8 +100,20 @@ class _Slack:
         async def respond(_click: object, body: dict[str, object]) -> None:
             self.calls.append(("slack", body))
 
+        async def bot_token() -> str:
+            return "xoxb-test"
+
+        async def api(_token: str, method: str, body: dict[str, object]) -> dict[str, object]:
+            self.calls.append((method, body))
+            if self.refuse:
+                raise SlackApiError(method, "channel_not_found")
+            return {"ok": True}
+
+        self.refuse = False
         monkeypatch.setattr(clicks, "ask_backend", backend)
         monkeypatch.setattr(clicks._Click, "_respond", respond)
+        monkeypatch.setattr(clicks, "slack_bot_token", bot_token)
+        monkeypatch.setattr(clicks, "slack_api", api)
 
     @property
     def asked(self) -> list[PlanSlackClick]:
@@ -109,6 +122,10 @@ class _Slack:
     @property
     def posted(self) -> list[dict[str, Any]]:
         return [body for kind, body in self.calls if kind == "slack"]
+
+    @property
+    def told(self) -> list[dict[str, Any]]:
+        return [body for kind, body in self.calls if kind == "chat.postEphemeral"]
 
 
 def _option(user_id: str | None = "U1") -> dict[str, Any]:
@@ -148,10 +165,28 @@ def test_an_option_for_someone_else_starts_nothing_and_tells_only_the_clicker(
 
     assert result is None
     assert slack.asked == []
+    assert slack.posted == []
+    assert slack.told == [
+        {
+            "channel": "C1",
+            "user": "U2",
+            "thread_ts": "171.1",
+            "text": "This choice is for someone else. No action was taken.",
+        }
+    ]
+
+
+def test_a_note_slack_refuses_in_the_thread_goes_through_the_response_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slack = _Slack(monkeypatch, SlackClickStart(run=_RUN))
+    slack.refuse = True
+
+    asyncio.run(clicks.start_click(_click(_option("U1"), clicker="U2"), _THREAD))
+
     [told] = slack.posted
     assert told["response_type"] == "ephemeral"
     assert told["replace_original"] is False
-    assert told["thread_ts"] == "171.1"
 
 
 def test_a_second_click_on_a_message_starts_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -218,8 +253,8 @@ def test_a_workflow_push_the_backend_no_longer_has_tells_the_clicker(
     }
 
     assert asyncio.run(clicks.start_click(_click(value), _THREAD)) is None
-    [told] = slack.posted
-    assert told["response_type"] == "ephemeral"
+    [told] = slack.told
+    assert told["thread_ts"] == "171.1"
 
 
 def _retry(user_id: str = "U1", **fields: object) -> dict[str, Any]:
@@ -277,8 +312,8 @@ def test_a_retry_only_its_requester_may_click_starts_nothing_otherwise(
 
     assert asyncio.run(clicks.start_click(_click(value), _THREAD)) is None
     assert slack.asked == []
-    [told] = slack.posted
-    assert told["response_type"] == "ephemeral"
+    [told] = slack.told
+    assert told["thread_ts"] == "171.1"
 
 
 def test_a_click_without_a_verified_clicker_starts_nothing(
