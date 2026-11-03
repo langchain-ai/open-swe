@@ -170,8 +170,8 @@ ENV.var(
 ENV.var(
     "LANGSMITH_AGENT_ID",
     "LangSmith agent the runs trace into, with LANGSMITH_AGENT_ENVIRONMENT; set it to the "
-    "deployment's own values so trace links, costs and feedback read runs there. It takes "
-    "precedence over LANGSMITH_PROJECT, and MDA_LANGSMITH_PROJECT over both.",
+    "deployment's own values so trace links, costs and feedback read runs there. Use it "
+    "instead of LANGSMITH_PROJECT, not alongside; MDA_LANGSMITH_PROJECT overrides both.",
 )
 ENV.var(
     "LANGSMITH_AGENT_ENVIRONMENT",
