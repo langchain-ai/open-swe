@@ -16,6 +16,7 @@ _TOOL_MODULES = {
     "delete_workspace": ".workspaces",
     "discover_managed_tools": ".discover_managed_tools",
     "dismiss_human_review_request": ".request_human_review",
+    "dismiss_review_finding": ".dismiss_review_finding",
     "expedite_pr_approval": ".expedite_pr_approval",
     "expose_port": ".expose_port",
     "fetch_review_diff": ".fetch_review_diff",
@@ -109,6 +110,7 @@ __all__ = [
     "delete_workspace",
     "discover_managed_tools",
     "dismiss_human_review_request",
+    "dismiss_review_finding",
     "expedite_pr_approval",
     "expose_port",
     "fetch_review_diff",
@@ -227,6 +229,7 @@ if TYPE_CHECKING:
         read_workspace_prompt,
     )
     from openswe.tools.discover_managed_tools import discover_managed_tools
+    from openswe.tools.dismiss_review_finding import dismiss_review_finding
     from openswe.tools.expedite_pr_approval import expedite_pr_approval
     from openswe.tools.expose_port import expose_port
     from openswe.tools.fetch_review_diff import fetch_review_diff
