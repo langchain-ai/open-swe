@@ -70,7 +70,9 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
   const hint = active
     ? permalink
       ? null
-      : "Open SWE could not find this review request in Slack."
+      : availability.data?.awaiting_ready
+        ? "Only the author can open this review request until its Slack card is posted."
+        : "Open SWE could not find this review request in Slack."
     : channel
       ? null
       : availability.isPending

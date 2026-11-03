@@ -2645,6 +2645,11 @@
             "title": "Available",
             "type": "boolean"
           },
+          "awaiting_ready": {
+            "default": false,
+            "title": "Awaiting Ready",
+            "type": "boolean"
+          },
           "blockers": {
             "default": [],
             "items": {

@@ -88,6 +88,8 @@ class HumanReviewAvailability(BaseModel):
     available: bool
     active: bool
     permalink: str = ""
+    # The open request is a draft's expedited card only its author can see until they mark it ready.
+    awaiting_ready: bool = False
     blockers: list[str] = []
 
 
@@ -96,7 +98,8 @@ async def api_human_review_availability(
     owner: str, repo: str, number: int, session: dict[str, Any] = SESSION_DEP
 ) -> HumanReviewAvailability:
     _pr_ref(owner, repo, number)
-    await require_repo_access_for_user(str(session["sub"]), f"{owner}/{repo}")
+    login = str(session["sub"])
+    await require_repo_access_for_user(login, f"{owner}/{repo}")
     async with GitHubClient.as_app(owner, repo) as github:
         pull = github.repo(owner, repo).pull_request(number)
         sha = await or_none(pull.head_sha())
@@ -109,7 +112,12 @@ async def api_human_review_availability(
     return HumanReviewAvailability(
         available=bool(channel),
         active=active is not None,
-        permalink=await active.permalink() if active is not None else "",
+        permalink=(
+            await active.permalink(await User.for_login("github", login))
+            if active is not None
+            else ""
+        ),
+        awaiting_ready=active is not None and active.awaiting_ready,
         blockers=blockers or [],
     )
 

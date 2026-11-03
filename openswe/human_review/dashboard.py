@@ -68,7 +68,11 @@ class DashboardReviewRequest:
                                 request_id=str(result["approval_id"]),
                                 channel=target.id,
                                 channel_name=target.name,
-                                permalink=await approval.permalink() if approval else "",
+                                permalink=(
+                                    await approval.permalink(self.origin.requester)
+                                    if approval
+                                    else ""
+                                ),
                             )
             except GitHubAppUnavailable:
                 return RequestResult(

@@ -261,11 +261,16 @@ class HumanReviewRequest(Base):
         owner = await lookup_slack_thread_id(self.slack_channel_id, root)
         return owner == thread_id
 
-    async def permalink(self) -> str:
-        """Where the request lives in Slack: its card, else the author's Mark ready DM."""
+    async def permalink(self, viewer: User | None = None) -> str:
+        """Where ``viewer`` can open the request in Slack: its card, else the author's own Mark ready DM."""
         if self.slack_channel_id and self.slack_message_ts:
             location = (self.slack_channel_id, self.slack_message_ts)
-        elif self.slack_dm_channel_id and self.slack_dm_message_ts:
+        elif (
+            viewer is not None
+            and self.slack_dm_channel_id
+            and self.slack_dm_message_ts
+            and self.is_author(viewer.id, viewer.github_login)
+        ):
             location = (self.slack_dm_channel_id, self.slack_dm_message_ts)
         else:
             return ""

@@ -1950,6 +1950,7 @@ export const api = {
       available: boolean
       active: boolean
       permalink: string
+      awaiting_ready?: boolean
       blockers: string[]
     }>(
       `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`

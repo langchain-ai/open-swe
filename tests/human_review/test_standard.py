@@ -66,6 +66,26 @@ async def test_review_backlink_survives_card_reposts_without_duplicate_comments(
     )
 
 
+async def test_only_the_author_gets_a_permalink_to_their_mark_ready_dm() -> None:
+    author, other = User(), User()
+    pr = PullRequest(owner="lc", repo="repo", number=7, author_user_id=author.id)
+    request = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="expedited",
+        slack_channel_id="C1",
+        slack_dm_channel_id="D1",
+        slack_dm_message_ts="4.0",
+        awaiting_ready=True,
+    )
+    request.pull_request = pr
+    lookup = AsyncMock(return_value="https://slack.example.com/dm")
+    with patch("openswe.human_review.requests.get_slack_permalink", lookup):
+        links = [await request.permalink(viewer) for viewer in (author, other, None)]
+    assert links == ["https://slack.example.com/dm", "", ""]
+    lookup.assert_awaited_once_with("D1", "4.0")
+
+
 @pytest.mark.parametrize("decision", [None, "picked", "review"])
 async def test_concurrent_picks_add_at_most_one_reviewer(decision: str | None) -> None:
     from openswe.human_review.people import Outcome, Participant
