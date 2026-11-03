@@ -406,8 +406,6 @@ async def start_edit(
     agent never got starts nothing; a concierge DM's runs go on another thread, whose
     state the handler can't read, so its edits start nothing.
     """
-    if event.code_channel:
-        return None
     raw = event.payload
     edited, previous = raw.get("message"), raw.get("previous_message")
     if not (isinstance(edited, Mapping) and isinstance(previous, Mapping)):
