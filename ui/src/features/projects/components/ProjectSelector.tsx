@@ -50,8 +50,8 @@ function Selected() {
 
 /**
  * Picks what a new cloud thread works in: one of the person's projects, or a
- * repository, which is a project with git. Typing a name no project has
- * offers to create it. Without `repos`, as while GitHub is unlinked, it lists
+ * repository, which is a project with git. `onCreate` opens project creation,
+ * with the typed name when no project has it. Without `repos`, as while GitHub is unlinked, it lists
  * projects only.
  */
 export function ProjectSelector({
@@ -173,8 +173,19 @@ export function ProjectSelector({
               >
                 <FolderPlusIcon className={ROW_ICON_CLASS_NAME} />
                 <span className="min-w-0 flex-1 truncate">
-                  Create project “{query.trim()}”
+                  Create project “{query.trim()}”…
                 </span>
+              </CommandItem>
+            )}
+            {!needle && (
+              <CommandItem
+                className={ROW_CLASS_NAME}
+                onSelect={() => choose(() => onCreate(""))}
+                size="sm"
+                value="new-project"
+              >
+                <FolderPlusIcon className={ROW_ICON_CLASS_NAME} />
+                <span className="min-w-0 flex-1 truncate">New project…</span>
               </CommandItem>
             )}
             {!needle && (

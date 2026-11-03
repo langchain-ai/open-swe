@@ -12,6 +12,25 @@ import { projectKeys, projectsApi } from "@/features/projects/lib/projects"
  */
 const links = new Map<string, Promise<string | null>>()
 
+/**
+ * Holds a folder for a project the person is creating, so it is not given one
+ * of its own meanwhile. Settle it with the new project's id, or `null` to let
+ * the folder have its own after all.
+ */
+export function claimFolder(cwd: string): (projectId: string | null) => void {
+  let settle: (projectId: string | null) => void = () => {}
+  links.set(
+    cwd,
+    new Promise((resolve) => {
+      settle = resolve
+    })
+  )
+  return (projectId) => {
+    if (projectId === null) links.delete(cwd)
+    settle(projectId)
+  }
+}
+
 /** Whether the folder should have a project of its own and has none yet. */
 function needsProject(folder: DesktopProject) {
   // `undefined` is a desktop build that doesn't know; only `null` is "none".

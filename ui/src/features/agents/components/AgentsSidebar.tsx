@@ -36,6 +36,7 @@ import type {
   PullRequestSnapshot,
   SidebarRepo,
 } from "@/features/agents/lib/api"
+import { CreateProjectDialog } from "@/features/projects/components/CreateProjectDialog"
 import { ProjectFolderMenu } from "@/features/projects/components/ProjectFolderMenu"
 import { useLinkDesktopFolders } from "@/features/projects/lib/desktopFolders"
 import { type Project, useProjects } from "@/features/projects/lib/projects"
@@ -315,6 +316,7 @@ export function AgentsSidebar({
   useRegisterAppCommands(repoCommands)
 
   const { projects } = useProjects({ enabled: true })
+  const [creatingProject, setCreatingProject] = useState(false)
   useLinkDesktopFolders(localRepos, localThreadsQuery.data, isDesktop)
   const pinnedThreads = pinnedQuery.data ?? []
   const cloudPinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
@@ -734,6 +736,9 @@ export function AgentsSidebar({
       {...layout}
       className="border-r border-muted bg-surface-level-2"
     >
+      {creatingProject && (
+        <CreateProjectDialog open onOpenChange={setCreatingProject} />
+      )}
       <div
         className={cn(
           "flex items-center justify-between px-space-4 pb-space-4",
@@ -885,59 +890,56 @@ export function AgentsSidebar({
             </section>
           )}
 
-          {repoMode &&
-            (unpinnedGroups.length > 0 || noRepoAvailable || isDesktop) && (
-              <section className="mb-space-3">
-                <SidebarSectionHeader
-                  label={workspaceMode ? "Workspaces" : "Projects"}
-                  collapsed={!workspaceMode && sectionCollapsed("repos")}
-                  onToggleCollapsed={
-                    workspaceMode
-                      ? undefined
-                      : () => toggleSectionCollapsed("repos")
-                  }
-                  menu={
-                    <SidebarSectionMenu label="Repositories options">
-                      {viewMenuItems}
-                      {removeProjectItems}
-                    </SidebarSectionMenu>
-                  }
-                  action={
-                    isDesktop ? (
-                      <SidebarSectionAction
-                        label="Add repository"
-                        icon={PlusIcon}
-                        onClick={() => void addLocalRepo()}
-                      />
-                    ) : undefined
-                  }
-                />
-                {(workspaceMode || !sectionCollapsed("repos")) && (
-                  <>
-                    {workspaceMode
-                      ? workspaceGroups.map((workspace) => (
-                          <WorkspaceGroupSection
-                            key={workspace.slug}
-                            workspace={workspace}
-                            collapsed={sectionCollapsed(
+          {repoMode && (
+            <section className="mb-space-3">
+              <SidebarSectionHeader
+                label={workspaceMode ? "Workspaces" : "Projects"}
+                collapsed={!workspaceMode && sectionCollapsed("repos")}
+                onToggleCollapsed={
+                  workspaceMode
+                    ? undefined
+                    : () => toggleSectionCollapsed("repos")
+                }
+                menu={
+                  <SidebarSectionMenu label="Repositories options">
+                    {viewMenuItems}
+                    {removeProjectItems}
+                  </SidebarSectionMenu>
+                }
+                action={
+                  <SidebarSectionAction
+                    label="New project"
+                    icon={PlusIcon}
+                    onClick={() => setCreatingProject(true)}
+                  />
+                }
+              />
+              {(workspaceMode || !sectionCollapsed("repos")) && (
+                <>
+                  {workspaceMode
+                    ? workspaceGroups.map((workspace) => (
+                        <WorkspaceGroupSection
+                          key={workspace.slug}
+                          workspace={workspace}
+                          collapsed={sectionCollapsed(
+                            `workspace:${workspace.slug}`
+                          )}
+                          onToggleCollapsed={() =>
+                            toggleSectionCollapsed(
                               `workspace:${workspace.slug}`
-                            )}
-                            onToggleCollapsed={() =>
-                              toggleSectionCollapsed(
-                                `workspace:${workspace.slug}`
-                              )
-                            }
-                            renderRepoGroup={renderRepoGroup}
-                          />
-                        ))
-                      : unpinnedGroups.map(renderRepoGroup)}
-                    {!noRepoPinned &&
-                      noRepoAvailable &&
-                      renderRepoGroup(noRepoGroup)}
-                  </>
-                )}
-              </section>
-            )}
+                            )
+                          }
+                          renderRepoGroup={renderRepoGroup}
+                        />
+                      ))
+                    : unpinnedGroups.map(renderRepoGroup)}
+                  {!noRepoPinned &&
+                    noRepoAvailable &&
+                    renderRepoGroup(noRepoGroup)}
+                </>
+              )}
+            </section>
+          )}
 
           {!repoMode &&
             recentGroups.map((group, index) => (

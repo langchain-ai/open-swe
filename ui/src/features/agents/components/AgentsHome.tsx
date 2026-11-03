@@ -56,7 +56,8 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
-import { useCreateProject, useProjects } from "@/features/projects/lib/projects"
+import { useProjects } from "@/features/projects/lib/projects"
+import { CreateProjectDialog } from "@/features/projects/components/CreateProjectDialog"
 import { useFolderProject } from "@/features/projects/lib/desktopFolders"
 import { api } from "@/lib/api"
 import { hasLinkedGitHub } from "@/lib/linkedGitHub"
@@ -135,7 +136,6 @@ export function AgentsHome({
   const { projects } = useProjects({ enabled: cloudEnabled })
   const folderProject = useFolderProject()
   const localThreads = useLocalThreads()
-  const createProject = useCreateProject()
   const [projectId, setProjectId] = useState<string | null>(
     initialProject ?? null
   )
@@ -289,11 +289,8 @@ export function AgentsHome({
     setWorkspaceOverride(null)
     setRepoOverride(undefined)
   }
-  const handleCreateProject = (name: string) =>
-    createProject.mutate(
-      { name, workspace: selectedWorkspace },
-      { onSuccess: (project) => selectProject(project.id) }
-    )
+  // The name typed in the picker, while the create dialog is open.
+  const [creatingProject, setCreatingProject] = useState<string | null>(null)
   const selectRepo = (value: string | null) => {
     setRepoOverride(value)
     composerRepoSelection.write(userId, value)
@@ -794,7 +791,7 @@ export function AgentsHome({
                   ? selectProject
                   : undefined
               }
-              onCreateProject={handleCreateProject}
+              onCreateProject={setCreatingProject}
               workspaceOptions={workspaces}
               selectedWorkspace={selectedWorkspace}
               onWorkspaceChange={
@@ -807,6 +804,17 @@ export function AgentsHome({
           </AgentComposerDock>
         </div>
       </div>
+      {creatingProject !== null && (
+        <CreateProjectDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setCreatingProject(null)
+          }}
+          initialName={creatingProject}
+          workspace={selectedWorkspace}
+          onCreated={(project) => selectProject(project.id)}
+        />
+      )}
       {localRepo ? (
         <LocalRepoRightPanel
           scopeId={localRepo.scopeId}
