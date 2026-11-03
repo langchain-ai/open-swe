@@ -22,6 +22,7 @@ from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
     JOINED_TASK_CONTEXT,
     Catalog,
+    CliResultRules,
     LoopRules,
     ModelSpec,
     ReplyRules,
@@ -36,6 +37,8 @@ from runtime_api.loop import (
     PhaseResult,
     Prepared,
 )
+from runtime_api.model_errors import MODEL_FAILURE_REPLY_KEY
+from runtime_api.models import chosen_model
 from runtime_api.reports import REPORTS, Reports, ReportsTaken
 
 _MAIN = ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})
@@ -300,13 +303,13 @@ async def test_a_run_context_summarized_away_is_sent_again(
     ]
 
 
-async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the_rest(
+async def test_a_requested_model_is_chosen_here_as_the_backend_would(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    requested = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={"reasoning_effort": "high"})
+    requested = chosen_model("openai:gpt-6.1-sol", "high")
     backend, calls = _backend(
         monkeypatch,
-        {"model_choice": requested},
+        {},
         LoopRules(routing=RoutingRules(mode="fast")),
     )
     events: list[object] = []
@@ -330,12 +333,9 @@ async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the
         "route": "default",
         "model_id": requested.model_id,
     }
-    assert calls == [
-        (
-            "model_choice",
-            {"run_id": "run-1", "model_id": requested.model_id, "effort": "high"},
-        )
-    ]
+    # Its settings and fallback come from the shared table: the backend is not asked.
+    assert requested.fallback is not None
+    assert calls == []
 
 
 async def test_a_route_the_classifier_fell_back_to_is_not_kept(
@@ -504,6 +504,28 @@ async def test_an_answer_that_owes_a_slack_reply_is_asked_again_then_posted_for_
         ("reply_on_behalf", "Fixed the login.")
     ]
     assert on_the_web == PhaseResult()
+
+
+@pytest.mark.parametrize("surface", ["slack", "web"])
+async def test_an_answer_written_for_an_unreachable_model_is_final(
+    monkeypatch: pytest.MonkeyPatch, surface: str
+) -> None:
+    """Asking again would wait out the same outage: it is posted as it is, no nudges."""
+    rules = LoopRules(reply=_REPLY, cli_result=CliResultRules(tool="cli_result", nudge=["Send it"]))
+    backend, calls = _backend(monkeypatch, {"reply_on_behalf": Done()}, rules)
+    loop = RunLoop(backend)
+    asked = HumanMessage(content="Fix it", id="human-1")
+    outage = AIMessage(
+        content="The providers are down.",
+        id="ai-1",
+        response_metadata={MODEL_FAILURE_REPLY_KEY: "outage"},
+    )
+
+    result = await loop.after_model(_state(asked, outage, reply_surface=surface))
+
+    assert result.jump_to is None and not result.messages
+    expected = [("reply_on_behalf", "The providers are down.")] if surface == "slack" else []
+    assert [(name, body["text"]) for name, body in calls] == expected
 
 
 @pytest.mark.parametrize(

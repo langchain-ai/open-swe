@@ -15,6 +15,7 @@ from typing import Annotated, Any, Literal, NotRequired
 from langchain.agents.middleware.types import AgentState, OmitFromOutput, hook_config
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.runtime import Runtime
+from runtime_api.model_errors import is_model_failure_reply
 
 from openswe.input_messages import (
     SystemIdentity,
@@ -218,6 +219,11 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         last = messages[-1] if messages else None
         if not isinstance(last, AIMessage) or current_reply_surface(state) != SLACK_REPLY_SURFACE:
             return None
+        if is_model_failure_reply(last):
+            # The model could not be reached: asking it again for a reply would wait out
+            # the same outage, so what the runtime wrote for it goes out as it is.
+            await self._post_on_behalf(state)
+            return {"reply_nudges": 0}
         suppressed: list[AIMessage] = []
         update: dict[str, object] = {}
         if last.tool_calls:
