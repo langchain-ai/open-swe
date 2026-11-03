@@ -106,6 +106,7 @@ if TYPE_CHECKING:
         LinearSessionPromptedEvent,
         LinearTeam,
     )
+    from managed_deepagents._channels.reply import ChannelReplyResult, reply
     from managed_deepagents._channels.resolve_user import (
         ResolveUser,
         ResolveUserEndpointRequest,
@@ -251,6 +252,7 @@ _EXPORTS: dict[str, str] = {
     "ChannelName": "managed_deepagents._channels.http",
     "ChannelNativeMessage": "managed_deepagents._channels.types",
     "ChannelReply": "managed_deepagents._channels.types",
+    "ChannelReplyResult": "managed_deepagents._channels.reply",
     "ChannelRun": "managed_deepagents._channels.run_input",
     "ChannelRunInput": "managed_deepagents._channels.run_input",
     "ChannelRunResult": "managed_deepagents._channels.run_input",
@@ -418,6 +420,7 @@ _EXPORTS: dict[str, str] = {
     "define_schedule": "managed_deepagents.schedules",
     "open_sandbox": "managed_deepagents.sandbox",
     "replace_sandbox": "managed_deepagents.sandbox",
+    "reply": "managed_deepagents._channels.reply",
     "schedules": "managed_deepagents._runtime_schedules",
     "shared_factory": "managed_deepagents.agent_entry",
 }
@@ -479,6 +482,7 @@ __all__ = [
     "ChannelName",
     "ChannelNativeMessage",
     "ChannelReply",
+    "ChannelReplyResult",
     "ChannelRun",
     "ChannelRunInput",
     "ChannelRunResult",
@@ -645,6 +649,7 @@ __all__ = [
     "define_schedule",
     "open_sandbox",
     "replace_sandbox",
+    "reply",
     "schedules",
     "shared_factory",
 ]

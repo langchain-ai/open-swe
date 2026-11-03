@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from starlette.responses import Response
 
     from managed_deepagents._channels.actor import ChannelActor
-    from managed_deepagents._channels.run_input import ChannelRunResult
+    from managed_deepagents._channels.reply import HandlerResult
     from managed_deepagents._channels.types import JsonValue, MessageContent
 
 
@@ -178,11 +178,12 @@ HttpFinishedDelivery = _RunFinishedDelivery | _SkippedFinishedDelivery | _Failed
 
 HttpInput = Callable[
     [HttpChannelInboundMessage, "JsonValue | None"],
-    "ChannelRunResult | Awaitable[ChannelRunResult | None] | None",
+    "HandlerResult | Awaitable[HandlerResult | None] | None",
 ]
 """What a message without ``content`` starts a run with, asked only once the
 thread takes a new turn, never while it waits on an interrupt. ``None`` starts
-nothing."""
+nothing; ``reply(message)`` starts nothing and posts ``message`` to the message's
+target."""
 
 
 HttpOnReceived = Callable[["JsonValue", HttpDelivery], Awaitable[None]]

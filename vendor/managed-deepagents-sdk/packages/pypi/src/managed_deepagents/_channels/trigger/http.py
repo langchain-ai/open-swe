@@ -130,7 +130,7 @@ if TYPE_CHECKING:
         PendingInterrupt,
         ResumeTarget,
     )
-    from managed_deepagents._channels.types import JsonValue
+    from managed_deepagents._channels.types import ChannelMessage, JsonValue
     from managed_deepagents._ingress_runs import MultitaskStrategy, StartedIngressRun
 
 ASSISTANT_ID_ENV = "MDA_ASSISTANT_ID"
@@ -153,15 +153,18 @@ class TriggerChannelThread(TypedDict):
 class TriggerMessageDecision:
     """What a message event starts.
 
-    The run input a provider's handler returned (``input``), no run
+    The run input a provider's handler returned (``input``), no run but a
+    message posted where the event came from (``reply``), no run
     (``skipped``), or nothing because the handler failed (``failed``).
     """
 
-    type: Literal["input", "skipped", "failed"]
+    type: Literal["input", "reply", "skipped", "failed"]
     input: NormalizedRunInput | None = None
     """The run on the message's own conversation; with ``runs`` alone, none starts there."""
     runs: tuple[NormalizedRunInput, ...] = ()
     """Runs on threads the handler chose, each with its ``thread``."""
+    message: ChannelMessage | None = None
+    """Set for ``reply``: what MDA posts instead of a run."""
 
 
 @dataclass(frozen=True)
@@ -818,16 +821,29 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     # resolve_user's answer when it holds back the run the delivery would start.
     withheld = None if user is None or user["type"] == "principal" else user
 
+    async def reply_to(message: ChannelMessage) -> None:
+        """Post a reply instead of the run, where the delivery came from."""
+        await post_reply(
+            message,
+            name=channel_name,
+            provider=source_provider,
+            target=_trigger_target(event),
+            transport=TriggerTransport(client, action_id=event["delivery_id"]),
+        )
+
     async def withhold() -> None:
         """Post resolve_user's reply, if any, instead of that run."""
         if withheld is not None and withheld["type"] == "reply":
-            await post_reply(
-                withheld["message"],
-                name=channel_name,
-                provider=source_provider,
-                target=_trigger_target(event),
-                transport=TriggerTransport(client, action_id=event["delivery_id"]),
-            )
+            await reply_to(withheld["message"])
+        _log_no_run(event, TriggerMessageDecision("skipped"))
+
+    async def reply_instead(message: ChannelMessage) -> None:
+        """Post a handler's reply instead of the run. When resolve_user held the
+        delivery back, its answer stands instead, as for a run."""
+        if withheld is not None:
+            await withhold()
+            return
+        await reply_to(message)
         _log_no_run(event, TriggerMessageDecision("skipped"))
 
     owner_key = conversation_key
@@ -1090,7 +1106,10 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         async def decide_then_start() -> None:
             decided = await decide()
             if decided.type != "input":
-                _log_no_run(event, decided)
+                if decided.message is not None:
+                    await reply_instead(decided.message)
+                else:
+                    _log_no_run(event, decided)
                 await finish(_skipped("ignored"))
                 return
             if withheld is not None:
@@ -1117,8 +1136,11 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         # here on is logged, and nothing redelivers the message.
         schedule_ingress_work(decide_then_start, label="Channel event decision", schedule=schedule)
         return _accepted_response(event)
-    if decision is not None and decision.type == "skipped":
-        _log_no_run(event, decision)
+    if decision is not None and decision.type in ("skipped", "reply"):
+        if decision.message is not None:
+            await reply_instead(decision.message)
+        else:
+            _log_no_run(event, decision)
         finish_later(_skipped("ignored"))
         return _accepted_response(event)
     # Trigger Server may deliver it again, which finishes on its own.

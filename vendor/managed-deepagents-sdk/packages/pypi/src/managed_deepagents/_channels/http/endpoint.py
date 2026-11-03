@@ -26,10 +26,12 @@ import httpx
 from pydantic import ConfigDict, TypeAdapter, ValidationError, with_config
 from typing_extensions import TypedDict, TypeIs, TypeVar
 
+from managed_deepagents._channels.reply import ChannelReplyResult, reply
 from managed_deepagents._channels.types import JsonValue
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.run_input import ChannelRun, ChannelRunResult
+    from managed_deepagents._channels.types import ChannelMessage
 
 _TIMEOUT_SECONDS = 60.0
 """How long an event endpoint may take to answer one attempt."""
@@ -38,10 +40,9 @@ _RETRY_DELAYS_SECONDS = (1.0, 5.0)
 _MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 """The largest answer read; run input may carry images."""
 _ANSWER_SHAPE = (
-    "event endpoint answer must be null, { decline } or { input, context?, metadata?, webhook? }"
+    'event endpoint answer must be null, { type: "reply", message } or '
+    "{ input, context?, metadata?, webhook? }"
 )
-_DECLINE_MAX_LENGTH = 2000
-"""The longest ``decline`` text, in characters: a few sentences, as a reply holds them."""
 SERVICE_SECRET_ENV = "MDA_SERVICE_SECRET"  # noqa: S105 - an env var's name
 """The deployment's env var holding the secret it shares with your services:
 every endpoint request is signed with it, as Standard Webhooks does.
@@ -175,21 +176,15 @@ class EndpointAnswer(TypedDict):
 
 
 @with_config(ConfigDict(extra="forbid"))
-class _EndpointDecline(TypedDict):
-    decline: str
+class _EndpointReply(TypedDict):
+    """An endpoint's ``{"type": "reply", "message"}`` answer, as ``resolve_user``'s."""
+
+    type: Literal["reply"]
+    message: dict[str, object]
 
 
-_ANSWER: TypeAdapter[EndpointAnswer | _EndpointDecline | None] = TypeAdapter(
-    EndpointAnswer | _EndpointDecline | None
-)
-
-
-@dataclass(frozen=True)
-class EndpointDeclined:
-    """An endpoint's ``{"decline": message}`` answer: start nothing, and tell the
-    person why where the channel can, such as the Linear agent session."""
-
-    message: str
+_ANSWER: TypeAdapter[EndpointAnswer | None] = TypeAdapter(EndpointAnswer | None)
+_REPLY: TypeAdapter[_EndpointReply] = TypeAdapter(_EndpointReply)
 
 
 def signature_headers(
@@ -240,7 +235,7 @@ class _ChannelThread(Protocol):
 _Event = TypeVar("_Event", bound=_ChannelEvent)
 
 EndpointHandler = Callable[
-    [_Event, _ChannelThread], Awaitable["ChannelRunResult | EndpointDeclined | None"]
+    [_Event, _ChannelThread], Awaitable["ChannelRunResult | ChannelReplyResult | None"]
 ]
 """The handler an endpoint stands for; see :func:`endpoint_handler`."""
 
@@ -275,11 +270,11 @@ def endpoint_handler(
     headers, signed when the deployment has ``MDA_SERVICE_SECRET``, and
     starts the run the service answers with: ``{"input",
     "context"?, "metadata"?, "webhook"?}``. ``null`` or HTTP 204 starts nothing;
-    ``{"decline": "<text>"}`` starts nothing too, and the Linear channel tells the
-    session that text instead of its own line. A
-    network error before the answer, HTTP 429 or a 5xx is tried again, up to three
-    attempts. Any other answer, one cut off, a redirect, or no answer within 60
-    seconds fails the handler, as a handler that raises does. The URL is https,
+    ``{"type": "reply", "message"}`` starts nothing too, and posts ``message`` where
+    the event came from, as a handler's ``reply()`` does. A network error before
+    the answer, HTTP 429 or a 5xx is tried again, up to three attempts. Any other
+    answer, one cut off, a redirect, or no answer within 60 seconds fails the
+    handler, as a handler that raises does. The URL is https,
     or http to a loopback host for local development, without credentials in it.
 
     The webhook ID is ``msg_<deliveryId>`` for the call that starts the run, and
@@ -290,7 +285,7 @@ def endpoint_handler(
 
     async def handler(
         event: _Event, thread: _ChannelThread
-    ) -> ChannelRunResult | EndpointDeclined | None:
+    ) -> ChannelRunResult | ChannelReplyResult | None:
         interrupted = bool(getattr(thread, "interrupted", False))
         # The channel's own fields can't stand in for the ones every event has.
         sent_event: dict[str, object] = {
@@ -464,21 +459,17 @@ async def _bounded_json(response: httpx.Response, name: str) -> JsonValue:
         raise RuntimeError(f"{name} answer is not JSON") from None
 
 
-def _run_result(body: JsonValue) -> ChannelRunResult | EndpointDeclined | None:
-    """The run the answer names, or its decline; the channel checks the input
-    and options as a handler's."""
+def _run_result(body: JsonValue) -> ChannelRunResult | ChannelReplyResult | None:
+    """The run the answer names, or its reply; the channel checks the input and
+    options as a handler's."""
     try:
+        if isinstance(body, dict) and "input" not in body:
+            return reply(cast("ChannelMessage", _REPLY.validate_python(body)["message"]))
         answer = _ANSWER.validate_python(body)
-    except ValidationError:
+    except (ValidationError, TypeError):
         raise RuntimeError(_ANSWER_SHAPE) from None
     if answer is None:
         return None
-    if "decline" in answer:
-        text = cast("_EndpointDecline", answer)["decline"]
-        # Non-blank and short, as Linear shows it; never logged.
-        if not text.strip() or len(text) > _DECLINE_MAX_LENGTH:
-            raise RuntimeError(_ANSWER_SHAPE)
-        return EndpointDeclined(text)
     run: ChannelRun = {"input": answer["input"]}
     if "context" in answer:
         run["context"] = answer["context"]
