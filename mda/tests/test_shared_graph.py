@@ -53,6 +53,7 @@ from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_a
 from managed_deepagents.sandbox import SandboxDefinition, SandboxReplacement
 from pydantic import BaseModel, JsonValue
 from rt import backend as rt_backend
+from rt import search_tools
 from rt.backend import Run, current_run
 from rt.managed_sandbox import PROXY_WRITE_BACKOFF_SECONDS, definition, opened_sandbox
 from rt.outbox import Outbox
@@ -73,7 +74,7 @@ from runtime_api.endpoint import Endpoint
 from runtime_api.loop import SANDBOX_UNREACHABLE
 from runtime_api.operations import RunRequest
 from runtime_api.reports import Reports
-from runtime_api.tool_search import ResolvedTool, ToolSpecs
+from runtime_api.tool_search import KeptTools, ResolvedTool, ToolSpecs
 
 _WORKERS = {"general-purpose": "open-swe--general-purpose"}
 # The backend's own rule on a sandbox whose proxy config MDA writes.
@@ -216,6 +217,22 @@ def backend_calls(
                 else None
             )
             return httpx2.Response(200, request=request, json=resolved.model_dump(mode="json"))
+        if hook == "tool_set":
+            digest = _CATALOGS[headers["Authorization"].removeprefix("Bearer ")].tool_set
+            kept = KeptTools(
+                digest=str(digest),
+                tools=[
+                    ToolSpec(
+                        name="withheld_lookup",
+                        description="Look up what the catalog leaves out.",
+                        parameters={},
+                        code_name="withheldLookup",
+                    ),
+                    ToolSpec(name="load_integration_tools", description="Load.", parameters={}),
+                ],
+                excluded=["load_integration_tools"],
+            )
+            return httpx2.Response(200, request=request, json=kept.model_dump(mode="json"))
         if hook == "sandbox_proxy":
             return httpx2.Response(200, request=request, json={"config": {"rules": [_TOOLS_RULE]}})
         if hook == "reports":
@@ -1029,6 +1046,63 @@ async def test_code_mode_calls_tools_its_catalog_leaves_out(
         ("resolve_tool", "notOne"),
         ("operation", "withheld_lookup:found-grant"),
         ("resolve_tool", "noTool"),
+    ]
+
+
+async def test_runs_search_and_resolve_the_set_their_catalog_names_read_once(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    """Runs whose catalogs name one set read it once, search it here, and know here
+    which names it has none for; only the grant of a tool they call is the backend's."""
+    monkeypatch.setattr(search_tools, "_read", OrderedDict())
+    seen: list[ToolMessage] = []
+    generate = GenericFakeChatModel._agenerate
+
+    async def answering(
+        model: GenericFakeChatModel,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        seen.extend(m for m in messages if isinstance(m, ToolMessage) and m not in seen)
+        return await generate(model, messages, stop, run_manager)
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", answering)
+    code = "await tools.withheldLookup({}); await tools.notOne({})"
+    turn = [
+        AIMessage(
+            content="",
+            tool_calls=[ToolCall(name="search_tools", args={"query": "look up"}, id="search")],
+        ),
+        AIMessage(content="", tool_calls=[ToolCall(name="eval", args={"code": code}, id="eval")]),
+        AIMessage(
+            content="", tool_calls=[ToolCall(name="load_integration_tools", args={}, id="no")]
+        ),
+        AIMessage(content="done"),
+    ]
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=iter(turn * 2)))
+    catalog = _catalog("lookup", "grant").model_copy(
+        update={"search_tools": True, "tool_set": "set-1"}
+    )
+
+    await _run(InMemoryStore(), "searching-1", _context("agent", "token-1", catalog))
+    await _run(InMemoryStore(), "searching-2", _context("agent", "token-2", catalog))
+
+    found = [m for m in seen if m.tool_call_id == "search"]
+    assert len(found) == 2
+    assert all(json.loads(m.text)[0]["name"] == "withheld_lookup" for m in found)
+    hooks = [hook for hook, _, _ in backend_calls]
+    # Read once for both runs, and never searched on the backend.
+    assert hooks.count("tool_set") == 1
+    assert "search_tools" not in hooks
+    # The backend gave each run its grant of the tool it called, and heard of no other.
+    called = [(hook, detail) for hook, _, detail in backend_calls if detail]
+    assert called == [
+        ("resolve_tool", "withheldLookup"),
+        ("operation", "withheld_lookup:found-grant"),
+        ("resolve_tool", "withheldLookup"),
+        ("operation", "withheld_lookup:found-grant"),
     ]
 
 

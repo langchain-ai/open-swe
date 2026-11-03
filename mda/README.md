@@ -41,8 +41,9 @@ Every call is authenticated with the run token.
   An operation whose sandbox stopped answering ends the run; the backend has told the person.
   Tools the graph hides from the model are dropped from each request.
 - **`search_tools`, `resolve_tool`:** the catalog leaves the run's integrations (MCP tools) out: hundreds of them would put about a megabyte in each run's context, which the Agent Server copies into every checkpoint.
-  The backend keeps every tool the run started with in PostgreSQL by digest (`run_tool_sets`), which the run token signs.
-  `search_tools` searches them there, and the run calls one by the name a search gave it: `tools.<name>` in code mode for a tool it has none for, or a direct call by a name its tools don't have, asks `resolve_tool` which tool that is, with the run's grant of it (`BackendTools` in `rt/run_tools.py`, through the vendored code mode's `resolve_tool`).
+  The backend keeps every tool the run started with in PostgreSQL by digest (`run_tool_sets`), which the run token signs and the catalog names (`tool_set`).
+  The deployment reads each set once per process (`tool_set`) and `search_tools` searches it here, with the backend's own BM25 index (`runtime_api.tool_search.ToolIndex`); a run whose catalog names no set searches on the backend.
+  The run calls a tool by the name a search gave it: `tools.<name>` in code mode for a tool it has none for, or a direct call by a name its tools don't have, is looked up in the set here, and only a name it has asks `resolve_tool` for the run's grant of it (`BackendTools` in `rt/run_tools.py`, through the vendored code mode's `resolve_tool`).
   A name that is none throws `TypeError` in code mode.
 - **MCP servers:** the backend serves its MCP servers' tools as operations, with credentials it keeps, except a server whose credential is an MDA connection (`connection` on its Open SWE record).
   The catalog names those (`mcp_servers`), and `rt/mcp.py` connects to them before the run's first model call, in a node of its own: it reads each credential with `managed_deepagents.connections`, the deployment's for an instance or workspace server and the person's own for a personal one, lists the server's tools, and offers those the catalog allows under the backend's names to each model call, since `search_tools` finds only the backend's tools.

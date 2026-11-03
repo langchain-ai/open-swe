@@ -274,6 +274,10 @@ class Catalog(BaseModel):
     # catalog leaves out from code, and how the model reads the search.
     search_tools: bool = False
     search_tools_description: str | None = None
+    # The digest the backend keeps every tool the run may call by, which the run reads
+    # once per process to search and resolve them itself (``runtime_api.tool_search``);
+    # None searches on the backend.
+    tool_set: str | None = None
 
     def names_only(self) -> Catalog:
         """This catalog as a run's context carries it: its tools by name alone.

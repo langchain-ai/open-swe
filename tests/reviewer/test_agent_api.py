@@ -92,6 +92,112 @@ async def test_backend_operation_traces_keep_runtime_events_and_errors(fails: bo
     assert bool(node.error) is fails
 
 
+async def test_each_backend_operation_compiles_its_graph_once_and_runs_its_own_work() -> None:
+    """Calls of one name share its compiled graph, each running its own work and
+    answering with its own result and events, however they interleave or nest."""
+    from langgraph.config import get_stream_writer
+    from langgraph.runtime import Runtime
+
+    from openswe.agent_api import runs
+    from openswe.agent_api.runs import in_graph_context
+
+    runs._graph.cache_clear()
+
+    async def call(n: int) -> tuple[int, list[object]]:
+        events: list[object] = []
+
+        async def work(_runtime: Runtime) -> int:
+            await asyncio.sleep(0)
+            get_stream_writer()({"call": n})
+            if n == 0:
+                # The same name, nested inside one of its own calls.
+                await in_graph_context({"run_name": "files.read"}, lambda _r: asyncio.sleep(0))
+            return n
+
+        answered = await in_graph_context({"run_name": "files.read"}, work, events=events)
+        return answered, events
+
+    answers = await asyncio.gather(*(call(n) for n in range(5)))
+
+    assert answers == [(n, [{"call": n}]) for n in range(5)]
+    assert runs._graph.cache_info().currsize == 1
+
+
+async def test_a_runs_thread_files_are_built_once_until_its_sandbox_changes() -> None:
+    """Reaching the thread's files reads the thread and the run's skill stores; the run's
+    later files calls reach the same files, and a fresh sandbox builds them again."""
+    from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
+    from langchain_core.runnables import RunnableConfig
+
+    from openswe.agent_api import graph as graph_module
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.agent_api.run_parts import RunParts
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    class Machine(SandboxBackendProtocol):
+        @property
+        def id(self) -> str:
+            return "machine"
+
+        async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+            return ExecuteResponse(output=f"ran {command}", exit_code=0)
+
+    built: list[str | None] = []
+
+    class Parts(RunParts):
+        async def files(self, config: RunnableConfig) -> Machine:
+            built.append(config["configurable"].get("run_id"))
+            return Machine()
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("A files call never plans the run")
+
+    async def reconnected(config: object, assistant_id: object) -> None:
+        return None
+
+    graph = RemoteGraph("agent", never_planned, Parts())
+    run = RUN.granting()
+    other = RUN.granting()
+
+    for run_id in ("run-1", "run-1", "run-2"):
+        reply = await graph.api(run, "files.execute", {"command": "ls", "run_id": run_id})
+        assert reply == {"output": "ran ls", "exit_code": 0, "truncated": False}
+    assert built == ["run-1"]
+    # Another run on the thread reaches its files as itself.
+    await graph.api(other, "files.execute", {"command": "ls", "run_id": "run-3"})
+    assert built == ["run-1", "run-3"]
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(graph_module, "reconnect_sandbox", reconnected)
+        await graph.api(run, "sandbox_replaced", {"run_id": "run-1"})
+    await graph.api(run, "files.execute", {"command": "ls", "run_id": "run-1"})
+    assert built == ["run-1", "run-3", "run-1"]
+
+
+def test_a_tools_parameters_are_worked_out_once_while_it_lives() -> None:
+    import gc
+
+    from langchain_core.tools import tool
+
+    from openswe.sandboxes import tool_runtime
+    from openswe.sandboxes.tool_runtime import tool_parameters
+
+    @tool
+    def lookup(query: str, limit: int = 5) -> str:
+        """Look it up."""
+        return query
+
+    parameters = tool_parameters(lookup)
+
+    assert parameters["required"] == ["query"]
+    assert tool_parameters(lookup) is parameters
+    assert id(lookup) in tool_runtime._parameters_of
+    key = id(lookup)
+    del lookup
+    gc.collect()
+    assert key not in tool_runtime._parameters_of
+
+
 @pytest.mark.parametrize("requested", ["anthropic:claude-opus-5-5", "openai:gpt-6.1-sol"])
 def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -> None:
     from runtime_api.catalog import ModelSpec, RunModels
@@ -511,6 +617,83 @@ async def test_a_report_whose_reply_was_not_kept_holds_up_nothing_behind_it(
 
     # Done again only by the delivery after the reply was lost, then never again.
     assert settled.await_count == 2
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_batch_of_reports_claims_keeps_and_writes_its_reports_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each report is recorded in order, but the batch's keys are claimed and kept, and
+    what its reports queued written, once for the batch rather than once per report."""
+    from langchain.agents.middleware.types import AgentMiddleware
+    from runtime_api.loop import TOOL_STARTED, ToolCallReport
+    from runtime_api.reports import Reports, ReportsTaken, item
+
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.agent_api.run_parts import RunParts
+    from openswe.database import postgres
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    heard: list[str] = []
+
+    class Recorder(AgentMiddleware):
+        async def aresume_run(self, state: object, runtime: object) -> None:
+            heard.append("resumed")
+
+        async def aflush_run(self, runtime: object) -> None:
+            heard.append("written")
+
+        async def atool_started(self, tool_call: dict, message_id: str | None) -> None:
+            heard.append(f"started {tool_call['id']}")
+
+        async def atool_finished(self, result: object) -> None:
+            raise AssertionError("No result was reported")
+
+    class Parts(RunParts):
+        reporters = (Recorder(),)
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("A report never plans the run")
+
+    transactions = 0
+    transaction = postgres.transaction
+
+    def counted() -> object:
+        nonlocal transactions
+        transactions += 1
+        return transaction()
+
+    monkeypatch.setattr(postgres, "transaction", counted)
+    graph = RemoteGraph("agent", never_planned, Parts())
+    batch = Reports(
+        items=[
+            item(
+                TOOL_STARTED,
+                ToolCallReport(run_id="run-1", name="ls", tool_call_id=f"call-{n}"),
+                key=f"run-1:call-{n}",
+                trace={},
+            )
+            for n in range(3)
+        ]
+    ).model_dump(mode="json")
+
+    first = ReportsTaken.model_validate(await graph.api(RUN, "reports", batch))
+    # Its keys claimed in one transaction and its replies kept in another.
+    assert transactions == 2
+    again = ReportsTaken.model_validate(await graph.api(RUN, "reports", batch))
+    # Delivered again, it answers from what was kept, read as its keys are claimed.
+    assert transactions == 3
+
+    assert first == again == ReportsTaken(replies=[{}, {}, {}])
+    assert heard == [
+        "resumed",
+        "started call-0",
+        "resumed",
+        "started call-1",
+        "resumed",
+        "started call-2",
+        "written",
+    ]
 
 
 async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
@@ -1135,6 +1318,58 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     # What the graph excludes is never found, so the run cannot call it either.
     assert ResolvedTool.model_validate(unknown).tool is None
 
+    # The catalog names the set its token does, which the run reads to search it itself,
+    # finding what the backend finds, without grants, which stay the backend's to give.
+    from runtime_api.tool_search import KeptTools, ToolIndex
+
+    assert catalog["tool_set"] == started.settings.tools
+    kept = KeptTools.model_validate(await graph.api(started_run, "tool_set", {}))
+    assert kept.digest == started.settings.tools
+    assert all(tool.grant is None for tool in kept.tools)
+    index = ToolIndex(kept.tools, kept.excluded)
+    assert [ToolIndex.match(tool) for tool in index.search("mcp search", 1)] == found.matches
+    resolved = index.resolve("mcpSearch")
+    assert resolved is not None and resolved.name == "mcp_search"
+    assert index.resolve("load_integration_tools") is None
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_kept_tool_set_is_read_from_postgres_once_per_digest() -> None:
+    from runtime_api.catalog import ToolSpec
+
+    from openswe.agent_api import tool_sets
+    from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError, purge_tool_sets
+    from openswe.database import postgres
+
+    tool_sets._read.clear()
+    digest = await ToolSet(
+        [ToolSpec(name="lookup", description="Look it up.", parameters={})]
+    ).keep()
+
+    reads = 0
+    session = postgres.session
+
+    def counted() -> object:
+        nonlocal reads
+        reads += 1
+        return session()
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(postgres, "session", counted)
+        first = await ToolSet.kept(digest)
+        again = await ToolSet.kept(digest)
+        assert first is again
+        assert reads == 1
+        # One no run reads any more is gone, and so never found again.
+        with pytest.raises(ToolSetNotKeptError):
+            await ToolSet.kept("0" * 64)
+        with pytest.raises(ToolSetNotKeptError):
+            await ToolSet.kept("0" * 64)
+        assert reads == 3
+    assert [tool.name for tool in first.search("look it up", 5)] == ["lookup"]
+    assert await purge_tool_sets() == 0
+    tool_sets._read.clear()
+
 
 def test_search_tools_ranks_by_bm25_and_names_code_calls() -> None:
     from runtime_api.catalog import ToolSpec
@@ -1162,6 +1397,13 @@ def test_search_tools_ranks_by_bm25_and_names_code_calls() -> None:
 
     assert [spec.name for spec in matches] == ["searchDatadogLogs", "get_datadog_metric"]
     assert tools.search("kubernetes", 5) == []
+    # Scored as the per-query BM25 scores them, whose documents it counts only once.
+    from runtime_api.tool_search import _document, _tokens, bm25
+
+    scores = bm25(_tokens("datadog logs"), [_document(tool) for tool in tools.tools])
+    ranked = sorted(zip(scores, tools.tools, strict=True), key=lambda pair: -pair[0])
+    assert [tool.name for score, tool in ranked if score > 0][:2] == [spec.name for spec in matches]
+    assert tools.resolve("saveIssue") == tools.resolve("save_issue") is not None
 
 
 async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_changed() -> None:

@@ -39,7 +39,8 @@ import asyncio
 import base64
 import logging
 import time
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from functools import partial
@@ -175,10 +176,12 @@ from runtime_api.slack import (
 from runtime_api.tool_search import (
     RESOLVE,
     SEARCH,
+    TOOL_SET,
     TOOL_SPECS,
+    KeptTools,
     ResolvedTool,
+    ToolIndex,
     ToolLookup,
-    ToolMatch,
     ToolMatches,
     ToolNames,
     ToolSearch,
@@ -204,7 +207,13 @@ from openswe.agent_api.loop import (
     run_hooks,
 )
 from openswe.agent_api.operations import Injections, invoke
-from openswe.agent_api.report_receipts import Recorded, Recording, ReportReceipts
+from openswe.agent_api.report_receipts import (
+    Claim,
+    Claimed,
+    Recorded,
+    Recording,
+    ReportReceipts,
+)
 from openswe.agent_api.run_parts import RunParts
 from openswe.agent_api.runs import in_graph_context, run_config
 from openswe.agent_api.server import RefusedCallError
@@ -309,6 +318,11 @@ async def _tell_sandbox_gone(
 
 _json = TypeAdapter(JsonValue)
 _json_object = TypeAdapter(dict[str, JsonValue])
+# The runs a batch of reports writes what its reporters queued for, once it recorded
+# them all, by run; None writes it as each report is recorded.
+_batch_flushes: ContextVar[dict[str | None, RunnableConfig] | None] = ContextVar(
+    "batch_flushes", default=None
+)
 _json_list = TypeAdapter(list[JsonValue])
 _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 
@@ -936,7 +950,6 @@ class TokenRun:
         self.run_id = run_id
         self.parts = graph.parts
         self.config = graph.config_for(run, run_id)
-        self._files: BackendProtocol | None = None
 
     @property
     def legacy(self) -> bool:
@@ -956,12 +969,10 @@ class TokenRun:
         return await in_graph_context({**self.config, "run_name": name}, run)
 
     async def thread_files(self) -> BackendProtocol:
-        if self._files is None:
-            files = await self.parts.files(self.config)
-            if files is None:
-                raise RuntimeError("This run has no files on the backend")
-            self._files = files
-        return self._files
+        files = await self.graph.files(self.run, self.config)
+        if files is None:
+            raise RuntimeError("This run has no files on the backend")
+        return files
 
     async def _session(self) -> RunSession:
         return await self.graph.session(self.run, self.run_id)
@@ -1006,7 +1017,8 @@ class TokenRun:
 
         A report carries only what it is about: the ``messages`` it adds and the run
         state (``held``) its recorders read. What a recorder queued is written before the
-        call answers, so the next call may reach another process.
+        call answers, so the next call may reach another process: a batch of reports
+        writes it once, after the last (``reports``).
         """
         state: dict[str, object] = {**held, "messages": list(messages)}
         carried = [m for m in self.parts.reporters if isinstance(m, CarriedAcrossProcesses)]
@@ -1016,6 +1028,11 @@ class TokenRun:
                 await middleware.aresume_run(cast(AgentState, dict(state)), runtime)
             with within_namespace(report.namespace):
                 result = await record(state, runtime)
+            batch = _batch_flushes.get()
+            if batch is not None:
+                # The batch writes it with the rest of its reports, once they are recorded.
+                batch.setdefault(self.run_id, self.config)
+                return result
             for middleware in carried:
                 await middleware.aflush_run(runtime)
             return result
@@ -1188,20 +1205,18 @@ class TokenRun:
             tools=[tool.model_copy(update={"grant": self.run.grant(tool.name)}) for tool in specs]
         )
 
+    async def tool_set(self, _request: RunRequest) -> KeptTools:
+        """Every tool the run may call, as its token names the set, for the run to search
+        and resolve itself; the grant of each it calls it still reads from here."""
+        kept = await self._tool_set()
+        # What the token names it by: digesting a set again would cost what it saves.
+        digest = cast(str, self.run.settings.tools)
+        return KeptTools(digest=digest, tools=kept.tools, excluded=kept.excluded)
+
     async def search_tools(self, request: ToolSearch) -> ToolMatches:
         """The run's tools that best match what the model looks for."""
         matches = (await self._tool_set()).search(request.query, request.limit)
-        return ToolMatches(
-            matches=[
-                ToolMatch(
-                    name=tool.name,
-                    description=tool.description,
-                    parameters=tool.parameters,
-                    code_name=tool.code_name,
-                )
-                for tool in matches
-            ]
-        )
+        return ToolMatches(matches=[ToolIndex.match(tool) for tool in matches])
 
     async def resolve_tool(self, request: ToolLookup) -> ResolvedTool:
         """The tool the run calls as ``request.name``, with the run's grant of it."""
@@ -1216,11 +1231,13 @@ class TokenRun:
         return await self.in_run("check_shell", lambda: check_shell(guards, request))
 
     async def sandbox_replaced(self, _request: RunRequest) -> Done:
+        self.graph.forget_files(self.run)
         await reconnect_sandbox(self.config, self.graph.assistant_id)
         return Done()
 
     async def sandbox_unreachable(self, request: SandboxGone) -> Done:
         """A tool MDA ran in the sandbox found it gone; the run ends once the person knows."""
+        self.graph.forget_files(self.run)
         await _tell_sandbox_gone(
             self.config,
             self.graph.assistant_id,
@@ -1348,39 +1365,84 @@ class TokenRun:
         """Record the run's reports and notices in order, each key once.
 
         Stops at the first it cannot take now, so none is recorded before one made
-        before it: one that failed, or one another delivery is still recording.
+        before it: one that failed, or one another delivery is still recording. The
+        batch's keys are claimed together, what its reports queued for the transcript
+        is written once they are all recorded, and their replies are kept together.
         """
         receipts = ReportReceipts(self.run.thread_id)
+        claims = await receipts.claim(
+            item.key for item in request.items if REPORTED[item.endpoint] != "idempotent"
+        )
         replies: list[dict[str, JsonValue]] = []
-        for item in request.items:
-            claim = (
-                await receipts.claim(item.key) if REPORTED[item.endpoint] != "idempotent" else None
-            )
-            if isinstance(claim, Recording):
-                break
-            if isinstance(claim, Recorded):
-                replies.append(claim.reply)
-                continue
-            try:
-                with traced_under(item.trace):
-                    answered = await self.graph.api(
-                        self.run, item.endpoint, item.request.model_dump(mode="json")
+        taken: dict[str, tuple[Claimed, dict[str, JsonValue]]] = {}
+        refused: str | None = None
+        flushes: dict[str | None, RunnableConfig] = {}
+        batch = _batch_flushes.set(flushes)
+        try:
+            for item in request.items:
+                claim = claims.get(item.key) if REPORTED[item.endpoint] != "idempotent" else None
+                if isinstance(claim, Recording):
+                    break
+                if isinstance(claim, Recorded):
+                    replies.append(claim.reply)
+                    continue
+                if item.key in taken:
+                    replies.append(taken[item.key][1])
+                    continue
+                try:
+                    with traced_under(item.trace):
+                        answered = await self.graph.api(
+                            self.run, item.endpoint, item.request.model_dump(mode="json")
+                        )
+                except Exception as exc:
+                    logger.exception(
+                        "An MDA report was not recorded",
+                        extra={"endpoint": item.endpoint, "report_key": item.key},
                     )
-            except BaseException as exc:
+                    refused = f"{type(exc).__name__}: {exc}"
+                    break
+                reply = _json_object.validate_python(answered)
                 if claim is not None:
-                    await asyncio.shield(receipts.release(claim))
-                if not isinstance(exc, Exception):
-                    raise
-                logger.exception(
-                    "An MDA report was not recorded",
-                    extra={"endpoint": item.endpoint, "report_key": item.key},
-                )
-                return ReportsTaken(replies=replies, refused=f"{type(exc).__name__}: {exc}")
-            reply = _json_object.validate_python(answered)
-            if claim is not None:
-                await receipts.keep(claim, item.key, reply)
-            replies.append(reply)
-        return ReportsTaken(replies=replies)
+                    taken[item.key] = (claim, reply)
+                replies.append(reply)
+            await self._flush_reporters(flushes.values())
+        except BaseException:
+            # Cancelled: what was recorded keeps its reply, and the rest is given up.
+            await asyncio.shield(self._settle(receipts, claims, taken))
+            raise
+        finally:
+            _batch_flushes.reset(batch)
+        await self._settle(receipts, claims, taken)
+        return ReportsTaken(replies=replies, refused=refused)
+
+    async def _flush_reporters(self, configs: Iterable[RunnableConfig]) -> None:
+        """Write what a batch's reports queued, once for each run they were about."""
+        carried = [m for m in self.parts.reporters if isinstance(m, CarriedAcrossProcesses)]
+
+        async def flushed(runtime: Runtime) -> None:
+            for middleware in carried:
+                await middleware.aflush_run(runtime)
+
+        for config in configs if carried else ():
+            try:
+                await in_graph_context({**config, "run_name": "reports_flushed"}, flushed)
+            except Exception:
+                # The reports are recorded; their run's writer goes on writing them.
+                logger.exception("Writing what MDA reports queued failed")
+
+    @staticmethod
+    async def _settle(
+        receipts: ReportReceipts,
+        claims: Mapping[str, Claim],
+        taken: Mapping[str, tuple[Claimed, dict[str, JsonValue]]],
+    ) -> None:
+        """Keep the replies of the reports recorded, and give up the keys of the rest."""
+        await receipts.keep([(claim, key, reply) for key, (claim, reply) in taken.items()])
+        await receipts.release(
+            claim
+            for key, claim in claims.items()
+            if isinstance(claim, Claimed) and key not in taken
+        )
 
 
 class RemoteGraph:
@@ -1391,6 +1453,8 @@ class RemoteGraph:
         self._plan = plan
         self.parts = parts or RunParts()
         self._sessions: dict[tuple[str, str | None], RunSession] = {}
+        # Each run's thread files, by its thread and grant, until they expire.
+        self._files: dict[tuple[str, str], tuple[float, BackendProtocol]] = {}
 
     def config_for(
         self,
@@ -1434,7 +1498,7 @@ class RemoteGraph:
         session = await self._planned(run, None, fresh=False)
         tools, catalog = await asyncio.gather(session.tool_set().keep(), session.plan())
         settings = session.settings().model_copy(update={"tools": tools})
-        return RunStart(catalog=catalog, settings=settings)
+        return RunStart(catalog=catalog.model_copy(update={"tool_set": tools}), settings=settings)
 
     async def session(
         self, run: RemoteRun, run_id: str | None, *, fresh: bool = False
@@ -1452,6 +1516,31 @@ class RemoteGraph:
 
     def end(self, run: RemoteRun, run_id: str | None) -> None:
         self._sessions.pop((run.thread_id, run_id), None)
+
+    async def files(self, run: RemoteRun, config: RunnableConfig) -> BackendProtocol | None:
+        """The thread's files as ``run``'s tools reach them, built once per run: building
+        them reads the thread and the run's skill stores, which every files call did."""
+        if run.grant_id is None:
+            return await self.parts.files(config)
+        key = (run.thread_id, run.grant_id)
+        now = time.monotonic()
+        kept = self._files.get(key)
+        if kept is not None and now < kept[0]:
+            return kept[1]
+        files = await self.parts.files(config)
+        if files is None:
+            return None
+        if len(self._files) >= _SESSION_LIMIT:
+            self._files = {k: kept for k, kept in self._files.items() if kept[0] > now}
+            while len(self._files) >= _SESSION_LIMIT:
+                del self._files[next(iter(self._files))]
+        self._files[key] = (now + _SESSION_TTL_SECONDS, files)
+        return files
+
+    def forget_files(self, run: RemoteRun) -> None:
+        """Build ``run``'s files again on its next call: its sandbox changed."""
+        if run.grant_id is not None:
+            self._files.pop((run.thread_id, run.grant_id), None)
 
     async def api(self, run: RemoteRun, endpoint: str, raw: JsonValue) -> JsonValue:
         """Answer one call the MDA run makes (``runtime_api``), without its plan when it can."""
@@ -1658,6 +1747,7 @@ RUN_CALLS.serve(SKILLS, TokenRun.skills)
 RUN_CALLS.serve(TOOL_SPECS, TokenRun.tool_specs)
 RUN_CALLS.serve(SEARCH, TokenRun.search_tools)
 RUN_CALLS.serve(RESOLVE, TokenRun.resolve_tool)
+RUN_CALLS.serve(TOOL_SET, TokenRun.tool_set)
 RUN_CALLS.serve(INBOX, TokenRun.inbox)
 RUN_CALLS.serve(INBOX_RECEIVED, TokenRun.inbox_received)
 RUN_CALLS.serve(MODEL_RESULT, TokenRun.model_result)
