@@ -411,9 +411,9 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
     assert payload["text"] == f"[PR]({target}), <{target}|PR> and {target}.\n{code}"
     sent_blocks = payload["blocks"]
     assert sent_blocks[0]["text"] == (
-        f"[PR]({target})[↗]({url}), <{target}|PR><{url}|↗> and [app#7]({target})[↗]({url}).\n{code}"
+        f"[PR]({target})[↗]({url}), <{target}|PR> (<{url}|GitHub>) and [app#7]({target})[↗]({url}).\n{code}"
     )
-    assert sent_blocks[1]["text"]["text"] == f"<{target}|PR><{url}|↗>"
+    assert sent_blocks[1]["text"]["text"] == f"<{target}|PR> (<{url}|GitHub>)"
     assert sent_blocks[2]["elements"][0]["url"] == target
     assert sent_blocks[2]["elements"][0]["value"] == url
     assert sent_blocks[3] == blocks[3]
@@ -482,9 +482,13 @@ async def test_direct_github_reply_override_is_scoped_to_one_delivery(
     assert slack_api.calls[-1][1]["text"] == url
     assert slack_api.calls[-1][1]["blocks"] == blocks
     await slack_utils.post_slack_top_level_message_with_ts("C1", url)
-    assert slack_api.calls[-1][1]["text"] == (
-        f"<https://openswe.example/agents/reviews/acme/app/7|app#7><{url}|↗>"
+    sent = slack_api.calls[-1][1]["text"]
+    assert sent == f"<https://openswe.example/agents/reviews/acme/app/7|app#7> (<{url}|GitHub>)"
+    assert await review_links.pr_review_links(sent, None) == (sent, None)
+    fetched = (
+        f"<https://openswe.example/agents/reviews/acme/app/7|app#7><{url}|:arrow_upper_right:>"
     )
+    assert await review_links.pr_review_links(fetched, None) == (fetched, None)
 
 
 async def test_review_links_fall_back_to_github_without_a_dashboard(
