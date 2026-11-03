@@ -13,10 +13,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Final, Literal, Self
-from urllib.parse import quote
 from uuid import UUID, uuid7
 
-from pydantic import BaseModel
+from pydantic import AliasPath, BaseModel, Field
 
 from openswe.github.pull_request_status import OpenPullRequest, PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
@@ -85,6 +84,7 @@ class CardPull(PullRequestPayload):
     labels: list[_Named] = []
     requested_reviewers: list[_Login] = []
     requested_teams: list[_Named] = []
+    author_avatar_url: str | None = Field(None, validation_alias=AliasPath("user", "avatar_url"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,11 +158,10 @@ class PullRequestCard:
             "subtitle": mrkdwn(self._state_line()),
             "child_blocks": children,
         }
-        if pull.author:
-            path = f"u/{pull.author_id}" if pull.author_id is not None else quote(pull.author)
+        if pull.author and pull.author_avatar_url:
             drawn["icon"] = {
                 "type": "image",
-                "image_url": f"https://avatars.githubusercontent.com/{path}?size=72",
+                "image_url": pull.author_avatar_url,
                 "alt_text": pull.author,
             }
         return drawn
@@ -267,9 +266,20 @@ class PullRequestCard:
             return lines
         if status.auto_merge:
             lines.append(":hourglass: Auto-merges once it passes")
-        elif status.merge_state in {"clean", "has_hooks"}:
+        elif status.merge_state in {"clean", "has_hooks"} and self._unblocked(status):
             lines.append(":rocket: Ready to merge")
         return lines
+
+    @staticmethod
+    def _unblocked(status: OpenPullRequest) -> bool:
+        """Nothing the card shows stands in the way, whatever GitHub's merge state says."""
+        return (
+            status.ci in {"passing", "none"}
+            and not status.missing_checks
+            and not status.review_required
+            and status.review_decision != "changes_requested"
+            and not status.unresolved_threads
+        )
 
     @staticmethod
     def _when(moment: datetime, *, time: bool = True) -> str:

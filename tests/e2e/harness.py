@@ -416,6 +416,29 @@ async def control_github_event(request: Request) -> JSONResponse:
     )
 
 
+@app.post("/control/expire-event-listeners")
+async def control_expire_event_listeners() -> JSONResponse:
+    """Run every event listener's expiry now, as if its time had come."""
+    from sqlalchemy import text
+
+    from openswe.database import postgres
+    from openswe.webhooks.event_listeners import EventListener
+
+    async with postgres.transaction() as conn:
+        ids = (
+            (
+                await conn.execute(
+                    text("UPDATE event_listener SET expires_at = clock_timestamp() RETURNING id")
+                )
+            )
+            .scalars()
+            .all()
+        )
+    for listener_id in ids:
+        await EventListener.expire(listener_id)
+    return JSONResponse({"ok": True, "expired": len(ids)})
+
+
 @app.get("/control/thread-idle")
 async def control_thread_idle(thread_id: str) -> JSONResponse:
     """How many runs an agent thread has had and whether none is queued or running."""
@@ -1973,6 +1996,7 @@ async def slack_conversations_replies(channel: str = "", ts: str = "") -> JSONRe
                     "text": m["text"],
                     "ts": m["ts"],
                     "thread_ts": m["thread_ts"],
+                    **({"blocks": m["blocks"]} if m.get("blocks") else {}),
                     **({"bot_id": m["bot_id"], "subtype": "bot_message"} if m["is_bot"] else {}),
                 }
                 for m in msgs

@@ -37,6 +37,16 @@
       .block-image { display: block; max-width: 100%; margin-top: 8px; border: 1px solid #e0e0e0; border-radius: 6px; }
       .actions button { margin: 8px 6px 0 0; border: 1px solid #bbb; border-radius: 5px; padding: 6px 10px; background: #fff; font-weight: 700; cursor: pointer; }
       .actions button.primary { background: #007a5a; color: #fff; border-color: #007a5a; }
+      .pr-container { margin-top: 8px; border: 1px solid #dddddd; border-radius: 8px; background: #fff; }
+      .pr-container-head { display: flex; gap: 10px; align-items: center; padding: 10px 12px; }
+      .pr-container-head.divided { border-bottom: 1px solid #e8e8e8; }
+      .pr-container-icon { width: 32px; height: 32px; border-radius: 6px; flex: none; }
+      .pr-container-title { font-size: 15px; font-weight: 800; }
+      .pr-container-title a { color: #1264a3; text-decoration: none; }
+      .pr-container-subtitle { color: #616061; font-size: 13px; margin-top: 2px; }
+      .pr-container-body { padding: 4px 12px 10px; }
+      .pr-container-body .section { white-space: pre-wrap; line-height: 1.6; font-size: 14px; margin-top: 6px; }
+      .pr-container code { background: #f6f6f6; border: 1px solid #e3e3e3; border-radius: 3px; padding: 0 3px; color: #c01343; font-size: 12px; }
       .composer-wrap { padding: 10px 22px 20px; }
       .compose { display: flex; gap: 8px; border: 1px solid #8d8d8d; border-radius: 9px; padding: 8px; box-shadow: 0 1px 1px rgba(0,0,0,.04); }
       .compose select { border: 0; background: #f4f4f4; border-radius: 5px; padding: 7px; }
@@ -102,6 +112,112 @@
         await poll();
       }
 
+      const EMOJI = {
+        large_green_circle: "🟢", white_circle: "⚪", large_purple_circle: "🟣", red_circle: "🔴",
+        x: "❌", hourglass_flowing_sand: "⏳", hourglass: "⌛", white_check_mark: "✅", eyes: "👀",
+        warning: "⚠️", speech_balloon: "💬", arrow_down: "⬇️", rocket: "🚀", grey_question: "❔",
+        label: "🏷️",
+      };
+
+      // Just enough mrkdwn for Open SWE's PR cards: links, dates, bold, code and emoji.
+      function mrkdwn(source) {
+        const fragment = document.createDocumentFragment();
+        const token = /<!date\^\d+\^[^|>]*\|([^>]*)>|<(https?:\/\/[^|>]+)\|([^>]+)>|\*([^*\n]+)\*|`([^`\n]+)`|:([a-z0-9_+-]+):/g;
+        let cursor = 0;
+        for (const match of source.matchAll(token)) {
+          fragment.append(document.createTextNode(source.slice(cursor, match.index)));
+          if (match[1] !== undefined) fragment.append(document.createTextNode(match[1]));
+          else if (match[2]) {
+            const link = document.createElement("a");
+            link.href = match[2];
+            link.textContent = match[3];
+            fragment.append(link);
+          } else if (match[4]) {
+            const bold = document.createElement("b");
+            bold.textContent = match[4];
+            fragment.append(bold);
+          } else if (match[5]) {
+            const code = document.createElement("code");
+            code.textContent = match[5];
+            fragment.append(code);
+          } else fragment.append(document.createTextNode(EMOJI[match[6]] || match[0]));
+          cursor = match.index + match[0].length;
+        }
+        fragment.append(document.createTextNode(source.slice(cursor)));
+        return fragment;
+      }
+
+      function renderContainer(message, block) {
+        const container = document.createElement("section");
+        container.className = "pr-container";
+        container.dataset.blockId = block.block_id || "";
+        const head = document.createElement("div");
+        head.className = `pr-container-head ${block.has_header_divider ? "divided" : ""}`;
+        if (block.icon?.image_url) {
+          const icon = document.createElement("img");
+          icon.className = "pr-container-icon";
+          icon.src = block.icon.image_url;
+          icon.alt = block.icon.alt_text || "";
+          head.appendChild(icon);
+        }
+        const heading = document.createElement("div");
+        const title = document.createElement("div");
+        title.className = "pr-container-title";
+        for (const element of block.rich_text_title?.elements?.[0]?.elements || []) {
+          if (element.type === "link") {
+            const link = document.createElement("a");
+            link.href = element.url;
+            link.textContent = element.text || element.url;
+            title.appendChild(link);
+          } else title.append(document.createTextNode(element.text || ""));
+        }
+        if (!title.textContent && block.title?.text) title.textContent = block.title.text;
+        heading.appendChild(title);
+        if (block.subtitle?.text) {
+          const subtitle = document.createElement("div");
+          subtitle.className = "pr-container-subtitle";
+          subtitle.appendChild(mrkdwn(block.subtitle.text));
+          heading.appendChild(subtitle);
+        }
+        head.appendChild(heading);
+        const content = document.createElement("div");
+        content.className = "pr-container-body";
+        for (const child of block.child_blocks || []) {
+          if (child.type === "section" && child.text?.text) {
+            const element = document.createElement("div");
+            element.className = "section";
+            element.appendChild(mrkdwn(child.text.text));
+            content.appendChild(element);
+          }
+          if (child.type === "context") {
+            for (const item of child.elements || []) {
+              if (!item.text) continue;
+              const element = document.createElement("div");
+              element.className = "context";
+              element.appendChild(mrkdwn(item.text));
+              content.appendChild(element);
+            }
+          }
+          if (child.type === "actions") {
+            const actions = document.createElement("div");
+            actions.className = "actions";
+            for (const action of child.elements || []) {
+              const button = document.createElement(action.url ? "a" : "button");
+              button.textContent = action.text?.text || "Choose";
+              if (action.url) {
+                button.href = action.url;
+                button.setAttribute("role", "button");
+                button.style.cssText = "display:inline-block;margin:8px 6px 0 0;border:1px solid #bbb;border-radius:5px;padding:6px 10px;background:#fff;font-weight:700;color:#1d1c1d;text-decoration:none;font-size:13px";
+              } else button.addEventListener("click", () => sendAction(message, action, button));
+              actions.appendChild(button);
+            }
+            content.appendChild(actions);
+          }
+        }
+        container.append(head, content);
+        return container;
+      }
+
       function renderMessages(messages) {
         const thread = $("thread");
         thread.replaceChildren();
@@ -139,6 +255,10 @@
           text.append(document.createTextNode(message.text.slice(cursor)));
           body.append(who, text);
           for (const block of message.blocks || []) {
+            if (block.type === "container") {
+              body.appendChild(renderContainer(message, block));
+              continue;
+            }
             // Slack renders an uploaded file inline. Without this the
             // expedited-review card's diff PNG is invisible to the suite and a
             // silent fall back to its text diff would go unnoticed.
