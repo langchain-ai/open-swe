@@ -24,7 +24,7 @@ from openswe.slack import ask as slack_ask
 from openswe.slack import channel as slack_channel
 from openswe.slack import events as slack_events
 from openswe.slack import failures as slack_failures
-from openswe.slack import mda_forwarding
+from openswe.slack import forks, mda_forwarding
 from openswe.slack import routes as slack_routes
 from openswe.slack import webhook as slack_service
 from openswe.slack.allowed_bots import AllowedSlackBot
@@ -1666,6 +1666,27 @@ async def test_a_by_the_way_question_goes_to_mda_on_a_thread_of_its_own(
     assert (task, url) == (mda_forwarding.forward_to_trigger_server, _EVENTS_URL)
     assert tasks.kwargs[0]["thread_id"] == side
     assert tasks.kwargs[0]["message_ts"] == _COMMAND_TS
+
+
+async def test_a_by_the_way_question_in_an_mda_conversation_runs_on_a_fork(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = AsyncMock()
+    monkeypatch.setattr(mda_forwarding, "claim_side", claim)
+    monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
+    fork = AsyncMock(return_value="forked-thread")
+    monkeypatch.setattr(forks, "fork_thread", fork)
+    request = _FakeRequest(_mention(text="<@BOT> /btw how does routing work?"), _SLACK_HEADERS)
+    tasks = _FakeBackgroundTasks()
+
+    await slack_routes.slack_webhook(cast(Request, request), cast(BackgroundTasks, tasks))
+
+    # The side question knows what the agent did in the conversation it was asked in.
+    fork.assert_awaited_once_with(_MDA_THREAD, key=forks.branch_key("C1", _COMMAND_TS), login="ada")
+    claim.assert_awaited_once_with("forked-thread", owner_login="ada")
+    [remembered, _repo, _ts] = cast(AsyncMock, mda_forwarding.remember).await_args.args
+    assert remembered.thread_id == "forked-thread"
+    assert tasks.kwargs[0]["thread_id"] == "forked-thread"
 
 
 @pytest.mark.parametrize("owner", [None, _MDA_THREAD], ids=["backend", "mda"])
