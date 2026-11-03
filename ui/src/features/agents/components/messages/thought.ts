@@ -26,6 +26,11 @@ export class Thought {
     return heading ? Thought.plain(Thought.headingText(heading)) : null
   }
 
+  /** The live header: the latest heading, else the first line while no heading has streamed. */
+  get liveLabel(): string {
+    return this.heading || this.preview
+  }
+
   /** The thought without its leading heading when the row above already shows that heading. */
   bodyUnder(shown: string | null): string {
     const [firstLine = "", ...rest] = this.text.split("\n")
@@ -35,6 +40,13 @@ export class Thought {
     return leading !== null && leading === shown
       ? rest.join("\n").trim()
       : this.text
+  }
+
+  /** The live body, without the first line when the header is already showing it. */
+  get liveBody(): string {
+    if (this.heading) return this.bodyUnder(this.heading)
+    const [, ...rest] = this.text.split("\n")
+    return rest.join("\n").trim()
   }
 
   private static headingText(line: string): string {
