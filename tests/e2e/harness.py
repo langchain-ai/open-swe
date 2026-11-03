@@ -1380,6 +1380,7 @@ def gh_search_issues(
             or reviewer.lower() in {login.lower() for login in pull["requested_reviewers"]}
         )
         and (not repositories or f"{pull['owner']}/{pull['repo']}".lower() in repositories)
+        and ("draft:true" not in terms or pull["draft"])
         and (not open_only or (pull["state"] == "open" and not pull["merged"]))
     ]
     field = "created_at" if sort == "created" else "updated_at"

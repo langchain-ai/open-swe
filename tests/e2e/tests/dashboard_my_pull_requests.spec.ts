@@ -149,12 +149,13 @@ test.describe("my pull requests", () => {
     await expect(page.getByText("Someone else's change")).toHaveCount(0);
   });
 
-  test("keeps pending review requests separate from authored PRs", async ({
+  test("queues requested reviews before own drafts and advances after success", async ({
     page,
   }) => {
     const mine = await seedOpenPullRequest(page, {
       repo: DEMO,
       title: "My authored change",
+      draft: true,
       ...approved,
     });
     const assigned = await seedOpenPullRequest(page, {
@@ -178,40 +179,31 @@ test.describe("my pull requests", () => {
     await openMine(page);
     await expect(card(page, mine)).toBeVisible();
     await page.getByRole("button", { name: "To Review", exact: true }).click();
+    await expect(card(page, assigned)).toBeVisible();
+    await expect(card(page, mine)).toBeVisible();
+    await expect(card(page, unassigned)).toHaveCount(0);
+    const titles = await page.getByRole("listitem").allTextContents();
+    expect(
+      titles.findIndex((text) => text.includes("Assigned to Alice")),
+    ).toBeLessThan(
+      titles.findIndex((text) => text.includes("My authored change")),
+    );
+    await page.getByText("Review one by one (2)").click();
+    await expect(page).toHaveURL(new RegExp(`/demo/${assigned.number}`));
+    await page
+      .getByRole("button", { name: "Approve & next", exact: true })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`/demo/${mine.number}`));
+    await page
+      .getByRole("button", { name: "Mark ready & finish", exact: true })
+      .click();
+    await expect(page).toHaveURL(/tab=to-review/);
     await expect(
       page.getByText("Nothing to review. You’re all caught up."),
     ).toBeVisible();
-    await expect(card(page, assigned)).toHaveCount(0);
-    await page
-      .getByRole("button", { name: "Show my GitHub review requests" })
-      .click();
-    await expect(card(page, assigned)).toBeVisible();
-    await expect(card(page, mine)).toHaveCount(0);
-    await expect(card(page, unassigned)).toHaveCount(0);
-    await page.reload();
-    await expect(card(page, assigned)).toBeVisible();
-    await card(page, assigned)
-      .getByRole("button", { name: "Assigned to Alice", exact: true })
-      .click();
-    await expect(
-      page.getByRole("button", { name: "Close pull request preview" }),
-    ).toBeVisible();
-    await page.getByRole("button", { name: "Mine", exact: true }).click();
-    await expect(card(page, mine)).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Close pull request preview" }),
-    ).toHaveCount(0);
-    await page.getByRole("button", { name: "To Review", exact: true }).click();
-    await expect(card(page, assigned)).toBeVisible();
-    const closed = await page.request.patch(
-      `/fake-gh/repos/fakeorg/demo/pulls/${assigned.number}`,
-      { data: { state: "closed" } },
-    );
-    expect(closed.ok()).toBeTruthy();
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
-    await expect(
-      page.getByText("No pending GitHub review requests"),
-    ).toBeVisible();
+    expect(
+      (await readPullRequest(page, "fakeorg", "demo", mine.number)).draft,
+    ).toBe(false);
   });
 
   test("closes a pull request from its own card after confirmation", async ({

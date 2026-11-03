@@ -4161,8 +4161,11 @@
               {
                 "enum": [
                   "assigned",
+                  "requested",
                   "tentative",
-                  "mentioned"
+                  "mentioned",
+                  "draft",
+                  "speculative"
                 ],
                 "type": "string"
               },
@@ -4171,6 +4174,17 @@
               }
             ],
             "title": "Assignment"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
           },
           "autoMerge": {
             "default": false,
