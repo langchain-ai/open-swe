@@ -685,7 +685,9 @@ class User(Base):
         if provider == "langsmith":
             if authorization is None or authorization.sub != external_id:
                 raise UnauthorizedUser("LangSmith sign in requires an authorized account")
-            authorization.require_allowed_org()
+            from openswe.dashboard.langsmith_login import LangSmithLogin
+
+            authorization.require_allowed_org(await LangSmithLogin().allowed_org())
         owner = await session.scalar(
             select(UserIdentity.user_id).where(
                 UserIdentity.provider == provider,

@@ -388,8 +388,8 @@ ENV.var(
 )
 ENV.var(
     "LANGSMITH_LOGIN_ORG_ID",
-    "Organization allowed to sign in to Agent Workspace with LangSmith. Unset disables "
-    "LangSmith login without affecting personal LangSmith connections.",
+    "Optional organization allowed to sign in to Agent Workspace with LangSmith. "
+    "Defaults to the organization of the backend's LANGSMITH_API_KEY; lookup failures deny login.",
 )
 ENV.var(
     "LMT_TENANT_ID",

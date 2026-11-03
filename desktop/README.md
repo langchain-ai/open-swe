@@ -182,13 +182,15 @@ An external user does not need the deployment's server-side `LANGSMITH_API_KEY` 
 
 Register a confidential OAuth client (dynamic registration only permits MCP access) with callback `<DASHBOARD_API_BASE_URL>/dashboard/api/langsmith/callback`; existing clients already register it, so sign-in needs no new client or allowlist entry.
 Configure `LANGSMITH_CONNECTION_URL` (normally `https://api.smith.langchain.com`), `LANGSMITH_OAUTH_CLIENT_ID`, and `LANGSMITH_OAUTH_CLIENT_SECRET` on the backend, alongside its existing dashboard URLs, JWT/encryption secrets and PostgreSQL configuration.
-Set `LANGSMITH_LOGIN_ORG_ID=f5c798a2-2155-4999-ad27-6d466bd26e1c` for the production Agent Workspace organization.
-LangSmith login is disabled when this setting is unset, even if personal LangSmith connections are configured.
+The backend derives the allowed login organization from its server-side `LANGSMITH_API_KEY` using `GET <LANGSMITH_ENDPOINT>/auth/public`.
+The key must belong to the intended login organization and cannot be a tracing-only key; missing keys or failed lookups deny login.
+Set `LANGSMITH_LOGIN_ORG_ID` to explicitly pin an organization instead of discovering it from the key.
+Before removing an existing production pin, deploy discovery support and verify the deployment key resolves to the same organization.
 Apply migrations through `0089_1850da6129ee`.
 Never ship the client secret in the app.
 
 Login discovers OIDC endpoints on the issuer origin and requests `openid profile email offline_access` for the API resource.
-Users must select the organization configured by `LANGSMITH_LOGIN_ORG_ID`.
+Users must select the discovered organization, or the explicit `LANGSMITH_LOGIN_ORG_ID` when configured.
 Membership requires both `/userinfo`'s acting-org claim and current `/orgs?skip_create=true` membership; the claim alone does not prove membership.
 The organization list is unpaginated.
 

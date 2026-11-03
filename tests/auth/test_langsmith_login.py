@@ -33,6 +33,7 @@ CALLBACK = "https://dashboard.example/dashboard/api/langsmith/callback"
 class LangSmithServer:
     subject: str = "5bb3fb19-f328-4815-8fe8-0483b41312c2"
     organization: str = ALLOWED_ORG
+    deployment_org: str = ALLOWED_ORG
     member: bool = True
     revoked: bool = False
     unavailable: bool = False
@@ -50,6 +51,10 @@ class LangSmithServer:
         )
 
     async def respond(self, request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/auth/public":
+            assert request.headers["x-api-key"] == "deployment-key"
+            assert "authorization" not in request.headers
+            return httpx2.Response(200, json={"organization_id": self.deployment_org})
         if request.url.path == "/.well-known/openid-configuration":
             return httpx2.Response(
                 200,
@@ -140,6 +145,8 @@ async def langsmith_client(registry_db, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("LANGSMITH_OAUTH_CLIENT_ID", "test-client")
     monkeypatch.setenv("LANGSMITH_OAUTH_CLIENT_SECRET", "test-client-secret")
     monkeypatch.setenv("LANGSMITH_LOGIN_ORG_ID", ALLOWED_ORG)
+    monkeypatch.setenv("LANGSMITH_API_KEY", "deployment-key")
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", ISSUER)
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
     server = LangSmithServer()
@@ -161,8 +168,13 @@ async def langsmith_client(registry_db, monkeypatch: pytest.MonkeyPatch):
         yield server, client
 
 
-async def test_desktop_login_is_independent_and_pkce_bound(langsmith_client) -> None:
+@pytest.mark.parametrize("discover_org", [False, True])
+async def test_desktop_login_is_independent_and_pkce_bound(
+    langsmith_client, monkeypatch: pytest.MonkeyPatch, discover_org: bool
+) -> None:
     server, client = langsmith_client
+    if discover_org:
+        monkeypatch.delenv("LANGSMITH_LOGIN_ORG_ID")
     github_user = await User.sign_in("github", "1", login="alice", email="alice@example.com")
     callback = await server.desktop_login(client)
     assert callback.status_code == 302
@@ -311,8 +323,13 @@ async def test_login_without_desktop_proof_and_cross_purpose_codes_are_rejected(
 
 
 @pytest.mark.parametrize("wrong_org", [False, True])
-async def test_nonmembers_get_no_login_user_or_grant(langsmith_client, wrong_org: bool) -> None:
+@pytest.mark.parametrize("discover_org", [False, True])
+async def test_nonmembers_get_no_login_user_or_grant(
+    langsmith_client, monkeypatch: pytest.MonkeyPatch, wrong_org: bool, discover_org: bool
+) -> None:
     server, client = langsmith_client
+    if discover_org:
+        monkeypatch.delenv("LANGSMITH_LOGIN_ORG_ID")
     if wrong_org:
         server.organization = "other-org"
     else:
@@ -384,13 +401,14 @@ async def test_changed_provider_subject_cannot_rebind_a_session(langsmith_client
     assert await load_credential("langsmith_login", session["sub"]) is None
 
 
-async def test_login_is_opt_in_and_org_changes_invalidate_cached_access(
+async def test_login_requires_an_org_source_and_org_changes_invalidate_cached_access(
     langsmith_client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     server, client = langsmith_client
     exchanged = await server.exchange(client, await server.desktop_login(client))
     client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
     monkeypatch.delenv("LANGSMITH_LOGIN_ORG_ID")
+    monkeypatch.delenv("LANGSMITH_API_KEY")
     assert (await client.get("/dashboard/api/me")).status_code == 503
     start = await client.get(
         "/dashboard/api/auth/langsmith/login",
@@ -398,8 +416,42 @@ async def test_login_is_opt_in_and_org_changes_invalidate_cached_access(
     )
     assert start.status_code == 503
     assert langsmith_oauth.langsmith_oauth_configured()
-    monkeypatch.setenv("LANGSMITH_LOGIN_ORG_ID", "different-org")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "deployment-key")
+    assert (await client.get("/dashboard/api/me")).status_code == 200
+    server.deployment_org = "different-org"
     assert (await client.get("/dashboard/api/me")).status_code == 403
+
+
+@pytest.mark.parametrize(
+    "status,body",
+    [
+        (403, {}),
+        (503, {}),
+        (302, {}),
+        (200, {}),
+        (200, {"organization_id": " "}),
+        (200, {"organization_id": 123}),
+        (200, []),
+    ],
+)
+async def test_deployment_org_discovery_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, status: int, body: object
+) -> None:
+    monkeypatch.delenv("LANGSMITH_LOGIN_ORG_ID", raising=False)
+    monkeypatch.setenv("LANGSMITH_API_KEY", "deployment-key")
+    transport = httpx2.MockTransport(lambda request: httpx2.Response(status, json=body))
+    monkeypatch.setattr(langsmith_login, "pooled_transport", lambda: transport)
+    with pytest.raises(HTTPException) as exc:
+        await langsmith_login.LangSmithLogin().allowed_org()
+    assert exc.value.status_code == 503
+
+
+async def test_explicit_login_org_does_not_require_a_deployment_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LANGSMITH_LOGIN_ORG_ID", ALLOWED_ORG)
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    assert await langsmith_login.LangSmithLogin().allowed_org() == ALLOWED_ORG
 
 
 async def test_cached_authorization_uses_no_provider_calls_or_refresh_lock(
