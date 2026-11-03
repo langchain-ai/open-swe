@@ -41,15 +41,23 @@ class TriggerTransport:
 
 
 async def start_trigger_thread(
-    client: TriggerClientLike, *, target: object, text: str, action_id: str
+    client: TriggerClientLike,
+    *,
+    target: object,
+    text: str,
+    action_id: str,
+    conversation_id: str | None = None,
 ) -> TriggerStartedThread | None:
     """Post the first message of a new thread in the target's conversation.
 
-    Trigger follows the thread. Returns it, unless Trigger cannot name it.
+    ``conversation_id`` names another conversation of the target's channel to
+    post in. Trigger follows the thread. Returns it, unless Trigger cannot name it.
     """
     route = _trigger_route(target)
     address = dict(route["address"])
     address.pop("thread_id", None)
+    if conversation_id:
+        address["conversation_id"] = conversation_id
     result = await client.post_action(
         route["channel_id"],
         {
