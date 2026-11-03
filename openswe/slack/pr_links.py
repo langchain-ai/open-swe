@@ -2,8 +2,10 @@
 
 import logging
 import re
+from collections.abc import Collection
 from datetime import datetime
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -111,3 +113,17 @@ class SlackPullRequestLink(Base):
             )
             return []
         return [ref for ref in refs if ref.url in new_urls]
+
+    @classmethod
+    async def channels_for(cls, pr_urls: Collection[str]) -> dict[str, set[str]]:
+        """The Slack channels each of these canonical PR URLs was linked in."""
+        if not pr_urls or not postgres.configured():
+            return {}
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(cls.pr_url, cls.channel_id).where(cls.pr_url.in_(list(pr_urls))).distinct()
+            )
+            channels: dict[str, set[str]] = {}
+            for pr_url, channel_id in rows:
+                channels.setdefault(pr_url, set()).add(channel_id)
+            return channels

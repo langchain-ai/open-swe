@@ -239,6 +239,10 @@ class OpenPullRequest(BaseModel):
         """Lowercased ``(repo, number)``, as stored pull requests are looked up."""
         return self.repo.lower(), self.number
 
+    @property
+    def url(self) -> str:
+        return f"https://github.com/{self.repo}/pull/{self.number}"
+
 
 class OpenPullRequests(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)

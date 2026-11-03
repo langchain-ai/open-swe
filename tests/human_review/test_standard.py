@@ -926,11 +926,16 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
     ):
         await CodeOwnerCache.refresh("o/r", 30)
     async with postgres.session() as session:
-        await SlackChannel.ensure(session, "CKITCHEN", "CREVIEW", "COTHER")
+        await SlackChannel.ensure(session, "CKITCHEN", "CREVIEW", "COTHER", "C1")
         await session.execute(update(SlackChannel).values(members_synced_at=func.now()))
         session.add_all(
             SlackChannelMember(channel_id=channel_id, user_id=user.id)
-            for channel_id, user in [("CKITCHEN", ada), ("CREVIEW", ada), ("COTHER", grace)]
+            for channel_id, user in [
+                ("CKITCHEN", ada),
+                ("CREVIEW", ada),
+                ("C1", ada),
+                ("COTHER", grace),
+            ]
         )
 
     async def search(github, login, repo, *, scope, **kwargs):
@@ -978,8 +983,8 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         (1, "assigned"),
         (20, "requested"),
         (30, "speculative"),
-        (7, "tentative"),
         (12, "mentioned"),
+        (7, "tentative"),
         (22, "draft"),
     ]
 

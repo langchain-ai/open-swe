@@ -5,7 +5,8 @@ A row scores three things, from what PostgreSQL has cached:
 - Obligation: why it is on the list, Open SWE's own assignment above everything.
 - Necessity: the changed files they own, divided by one more than the other people who
   could approve them instead, so a sole owner counts fully and one of many barely.
-- Context: whether they are in the Slack channel its review was posted to or it was built in.
+- Context: whether they are in the Slack channel its review was posted to, it was built in,
+  or any other channel it was linked in.
 
 A cache miss scores nothing and queues a refresh for the next read.
 """
@@ -22,6 +23,7 @@ from openswe.github.pull_requests import PullRequest
 from openswe.human_review.code_owners import CodeOwnerCache
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.channel_members import SlackChannelMember
+from openswe.slack.pr_links import SlackPullRequestLink
 
 OBLIGATION: Final[Mapping[ReviewAssignment, float]] = {
     "assigned": 120,
@@ -34,6 +36,7 @@ OBLIGATION: Final[Mapping[ReviewAssignment, float]] = {
 NECESSITY: Final = 60
 REVIEW_CHANNEL: Final = 8
 KITCHEN_CHANNEL: Final = 4
+LINKED_CHANNEL: Final = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +47,7 @@ class Signals:
     alternatives: int | None = None
     in_review_channel: bool = False
     in_kitchen_channel: bool = False
+    in_linked_channel: bool = False
 
     @property
     def score(self) -> float:
@@ -52,6 +56,7 @@ class Signals:
             necessity
             + REVIEW_CHANNEL * self.in_review_channel
             + KITCHEN_CHANNEL * self.in_kitchen_channel
+            + LINKED_CHANNEL * self.in_linked_channel
         )
 
 
@@ -71,13 +76,20 @@ class Relevance:
             row.key: datetime.fromisoformat(row.updated_at) if row.updated_at else None
             for row in rows
         }
-        owned, built, posted = await asyncio.gather(
+        owned, built, posted, linked = await asyncio.gather(
             CodeOwnerCache.alternatives_for(user_id, changed),
             PullRequest.built_in(list(changed)),
             HumanReviewRequest.posted_in(list(changed)),
+            SlackPullRequestLink.channels_for([row.url for row in rows]),
         )
+        linked_in = {row.key: linked.get(row.url, set()) for row in rows}
         joined = await SlackChannelMember.joined(
-            user_id, {*built.values(), *(c for channels in posted.values() for c in channels)}
+            user_id,
+            {
+                *built.values(),
+                *(c for channels in posted.values() for c in channels),
+                *(c for channels in linked_in.values() for c in channels),
+            },
         )
         return cls(
             {
@@ -85,6 +97,10 @@ class Relevance:
                     alternatives=owned.get(key),
                     in_review_channel=bool(posted.get(key, set()) & joined),
                     in_kitchen_channel=built.get(key) in joined,
+                    in_linked_channel=bool(
+                        (linked_in.get(key, set()) - posted.get(key, set()) - {built.get(key)})
+                        & joined
+                    ),
                 )
                 for key in changed
             }
