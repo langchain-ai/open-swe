@@ -28,6 +28,8 @@ dependencies = [
 
 # Not `dev`, which uv installs by default: deploys stay without test tooling.
 [dependency-groups]
+# PROTOTYPE: transcript benchmark server deps.
+bench = ["langgraph-api", "langgraph-cli[inmem]", "langgraph-runtime-inmem", "langgraph-grpc-common"]
 test = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
@@ -41,6 +43,13 @@ managed-deepagents = { path = "../vendor/managed-deepagents-sdk/packages/pypi", 
 langchain-quickjs = { path = "../vendor/langchain-quickjs", editable = true }
 # Shared with the backend; `mda build` bundles it as a local package.
 open-swe-runtime-api = { path = "../packages/runtime-api", editable = true }
+# PROTOTYPE: transcript benchmark.
+deepagents = { path = "/Users/cwlbraa/src/deepagents-transcript/libs/deepagents", editable = true }
+langgraph = { path = "/Users/cwlbraa/src/langgraph-transcript/libs/langgraph", editable = true }
+langgraph-api = { path = "/Users/cwlbraa/src/langchainplus/.claude/worktrees/suspicious-mendeleev-1b1147/langgraph-api/api", editable = true }
+langgraph-grpc-common = { path = "/Users/cwlbraa/src/langchainplus/.claude/worktrees/suspicious-mendeleev-1b1147/langgraph-api/grpc_common_py", editable = true }
+langgraph-core-bin = { path = "/Users/cwlbraa/src/langchainplus/.claude/worktrees/suspicious-mendeleev-1b1147/langgraph-api/core_python", editable = true }
+langgraph-runtime-inmem = { path = "/Users/cwlbraa/src/langchainplus/.claude/worktrees/suspicious-mendeleev-1b1147/langgraph-api/runtime_inmem", editable = true }
 
 # Its own type-check root: checked against this project's environment alone, an
 # import of the backend (`openswe`) or a database driver fails to resolve.
