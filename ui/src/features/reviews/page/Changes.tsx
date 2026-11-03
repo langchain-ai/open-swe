@@ -522,7 +522,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
                 // Each file is a card on the page's gutter, as on GitHub; a step
                 // opens with a bare heading over its cards. The outline is a
                 // shadow, so it adds nothing CodeView must measure.
-                className="review-code-view h-full overflow-y-auto [&_diffs-container]:overflow-clip sm:[&_diffs-container]:mx-space-4 [&_diffs-container:has([data-step-header])]:bg-transparent [&_diffs-container:not(:has([data-step-header]))]:shadow-[0_0_0_1px_var(--border-default)] [&_diffs-container:not(:has([data-step-header]))]:[--panel-diff-bg:var(--bg-code-panel)] sm:[&_diffs-container:not(:has([data-step-header]))]:rounded-lg [&>*]:mx-auto [&>*]:max-w-6xl"
+                className="review-code-view h-full overflow-y-auto [&_diffs-container]:overflow-clip sm:[&_diffs-container]:mx-space-4 [&_diffs-container:has([data-step-header])]:bg-transparent [&_diffs-container:not(:has([data-step-header]))]:shadow-[0_0_0_1px_var(--border-default)] [&_diffs-container:not(:has([data-step-header]))]:[--panel-diff-bg:var(--bg-code-panel)] sm:[&_diffs-container:not(:has([data-step-header]))]:rounded-lg"
                 renderCodeViewHeader={renderHeader}
                 renderCodeViewFooter={renderFooter}
                 renderCustomHeader={renderCustomHeader}

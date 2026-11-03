@@ -204,7 +204,7 @@ function Description({
       <div
         ref={ref}
         className={cn(
-          "relative flow-root max-w-[100ch] text-xs leading-[1.65]",
+          "relative flow-root max-w-[650px] text-xs leading-[1.65]",
           clamped && "overflow-hidden"
         )}
         style={clamped ? { maxHeight: CLAMP_PX } : undefined}
