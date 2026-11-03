@@ -264,15 +264,26 @@ export function AgentsSidebar({
     prefs.filters.includeAutomations ||
     prefs.filters.sources.includes("schedule")
   const pinnedQuery = useSidebarPinnedThreads({ enabled: true })
-  const recentsQuery = useSidebarRecents({
-    repoMode,
+  const recentsFilters = {
     includeAutomations,
     includeResolved: agentWorkspaceEnabled || prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
     includeClaudeCode: prefs.filters.includeClaudeCode,
     includeSlack: prefs.filters.includeSlack,
+  }
+  const recentsQuery = useSidebarRecents({
+    ...recentsFilters,
+    repoMode,
     sort: repoMode ? prefs.sortChats : "updated",
     enabled: true,
+  })
+  // Repo folders load their threads only while expanded, so completions are
+  // watched across every repo instead of only the folders that are open.
+  const allRecentsQuery = useSidebarRecents({
+    ...recentsFilters,
+    repoMode: false,
+    sort: "updated",
+    enabled: repoMode,
   })
   const sidebarReposQuery = useSidebarRepos({
     includeAutomations,
@@ -340,7 +351,11 @@ export function AgentsSidebar({
   ]
   const visibleThreads = [...pinnedThreads, ...recentThreads]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
-  useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
+  useRunCompletionNotifier(
+    repoMode ? [...pinnedThreads, ...allRecentsQuery.items] : visibleThreads,
+    activeThreadId,
+    openThread
+  )
 
   const serverRepos = sidebarReposQuery.data ?? []
   const activeRepo: SidebarRepo | undefined = activeThread?.repoFullName.trim()
@@ -620,7 +635,6 @@ export function AgentsSidebar({
       includeSlack={prefs.filters.includeSlack}
       sort={prefs.sortChats}
       activeThreadId={activeThreadId}
-      openThread={openThread}
       hydrate={hydrateRepoThreads}
       onToggleCollapsed={() => toggleRepoCollapsed(group.key)}
       onExpand={() => expandRepo(group.key)}
@@ -1067,7 +1081,6 @@ function RepoGroup({
   includeSlack,
   sort,
   activeThreadId,
-  openThread,
   hydrate,
   onToggleCollapsed,
   onExpand,
@@ -1091,7 +1104,6 @@ function RepoGroup({
   includeSlack: boolean
   sort: ChatSort
   activeThreadId?: string
-  openThread: (threadId: string) => void
   hydrate: (threads: Array<AgentThread>) => Array<SidebarThreadItem>
   onToggleCollapsed: () => void
   onExpand: () => void
@@ -1122,7 +1134,6 @@ function RepoGroup({
     ...repo.items.filter((thread) => thread.id !== group.activeThread?.id),
   ])
   useSeedAgentThreadDetails(cloudThreads, activeThreadId)
-  useRunCompletionNotifier(cloudThreads, activeThreadId, openThread)
   const threads = sortSidebarThreads(
     [...hydrate(cloudThreads), ...group.threads],
     sort

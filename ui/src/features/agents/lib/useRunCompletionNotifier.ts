@@ -15,8 +15,7 @@ export function useRunCompletionNotifier(
 
   useEffect(() => {
     if (!threads) return
-    const isViewingThread =
-      !!activeThreadId && document.visibilityState === "visible"
+    const isViewingThread = !!activeThreadId && document.hasFocus()
     const prev = prevStatusRef.current
     for (const thread of threads) {
       const prevStatus = prev.get(thread.id)
