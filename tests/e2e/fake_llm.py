@@ -903,6 +903,28 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(content=f"{FOLLOW_UP_REPLY}{suffix}")
 
 
+CONCIERGE_THREADS_MARKER = "E2E_CONCIERGE_THREADS"
+
+
+def _concierge_thread_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    """Answer the latest top-level DM message in its own thread, as asked."""
+    stamps = re.findall(r'timestamp="([0-9.]+)"', "\n".join(_text(m.content) for m in messages))
+    return AIMessage(
+        content="Replying in a thread, as asked.",
+        tool_calls=[
+            {
+                "name": "slack_reply",
+                "args": {
+                    "message": "Threaded, as you asked.",
+                    "response_type": "final",
+                    "thread_ts": stamps[-1] if stamps else "",
+                },
+                "id": "call-concierge-thread-reply",
+            }
+        ],
+    )
+
+
 def _called(messages: list[BaseMessage], call_id: str) -> int | None:
     """The index of the model reply that made ``call_id``, when one did."""
     for index, message in enumerate(messages):
@@ -1467,6 +1489,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
     ),
     "hello": (_tool_step("Saying hi.", "slack_reply", {"message": "Hi!"}, "call-hello"),),
+    "concierge_threads": (_dynamic_step(_concierge_thread_reply_step),),
     # Woken because nobody signed up within 30 minutes.
     "human_review_assign": (
         _dynamic_step(_human_review_assign_step),
@@ -1741,6 +1764,7 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: _UNCLAIMED_MARKER in ctx.last_text or _DECLINED_MARKER in ctx.pending_text,
     ),
     ScriptRule("hello", lambda ctx: "E2E_HELLO" in ctx.last_text),
+    ScriptRule("concierge_threads", lambda ctx: CONCIERGE_THREADS_MARKER in ctx.last_text),
     ScriptRule("followup", lambda ctx: "E2E_FOLLOWUP" in ctx.last_text),
     ScriptRule("human_review_dismiss", lambda ctx: HUMAN_REVIEW_DISMISS_MARKER in ctx.last_text),
     ScriptRule(
