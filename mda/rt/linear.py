@@ -25,8 +25,8 @@ from managed_deepagents import (
     LinearEventResult,
     LinearSessionCreatedEvent,
     LinearSessionPromptedEvent,
+    reply,
 )
-from managed_deepagents._channels.http.endpoint import EndpointDeclined  # noqa: PLC2701
 from pydantic import JsonValue
 from runtime_api.linear import (
     LINEAR_SESSION_FACTS,
@@ -89,9 +89,8 @@ def decline_text(declined: LinearSessionDeclined) -> str:
 
 
 def _declined(text: str) -> LinearEventResult:
-    # MDA's Linear channel tells the session a handler's ``EndpointDeclined`` as it
-    # does an endpoint's; its handler type doesn't name it.
-    return cast(LinearEventResult, EndpointDeclined(text))
+    # MDA posts the reply to the session as its response, and starts nothing.
+    return reply(text)
 
 
 def _person(person: object) -> LinearPerson | None:

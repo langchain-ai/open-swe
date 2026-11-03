@@ -23,6 +23,7 @@ from managed_deepagents._channels.http.types import (
     HttpChannelParseResult,
     HttpChannelRequest,
 )
+from managed_deepagents._channels.reply import ChannelReplyResult
 from managed_deepagents._channels.resolve_user import (
     post_reply,
     resolve_channel_user,
@@ -69,6 +70,7 @@ if TYPE_CHECKING:
     )
     from managed_deepagents._channels.types import (
         ChannelEvent,
+        ChannelMessage,
         ChannelReply,
         JsonValue,
         MessageContent,
@@ -220,10 +222,16 @@ async def handle_http_request(ctx: ChannelEventsContext, channel: HttpChannel) -
     # Joined before the first start, so a cancel during it reaches the message.
     waiter = _join_thread_waiters(thread_id)
     prepare = functools.partial(
-        _prepare, channel, message, result.get("raw_event"), waiter, name=ctx["name"]
+        _prepare,
+        ctx["name"],
+        channel,
+        message,
+        result.get("raw_event"),
+        waiter,
+        withheld=user is not None and user["type"] != "principal",
     )
     plan = _ConversationRun(
-        run_input=_run_input(user, ctx["name"], channel, message, prepare),
+        run_input=_run_input(user, ctx["name"], channel, message, prepare, waiter),
         multitask_strategy=channel.multitask_strategy,
     )
     start = functools.partial(
@@ -637,8 +645,10 @@ async def _prepare_runs(
     run_channel: RunChannel,
     *,
     interrupted: bool = False,
+    withheld: bool = False,
 ) -> list[NormalizedRunInput]:
-    """What the channel's ``input`` starts; failures start nothing.
+    """What the channel's ``input`` starts; failures start nothing, and a reply is
+    posted instead, unless resolve_user held the sender back.
 
     While the conversation waits on a decision, the channel's
     ``interrupted_input`` is asked instead, when it has one.
@@ -653,6 +663,16 @@ async def _prepare_runs(
     except Exception as error:  # noqa: BLE001
         logger.error("channel input failed (%s)", logger.safe_error_label(error), error=error)
         return []
+    if isinstance(result, ChannelReplyResult):
+        waiter.replied = True
+        # For a sender resolve_user held back, its answer stands instead.
+        if not withheld:
+            await _post_reply(result.message, run_channel["name"], channel, message)
+            logger.info(
+                "channel input replied, no run started %s",
+                json.dumps({"threadId": message["thread_id"].lower()}),
+            )
+        result = None
     try:
         runs = normalize_run_inputs(result, run_channel)
     except InvalidRunInput as error:
@@ -880,12 +900,14 @@ def _skipped(outcome: StartedIngressRun | SkippedIngressRun) -> str | None:
 class _ThreadWaiter:
     """A message in this process that may still wait for its thread."""
 
-    __slots__ = ("cancelled", "dropped")
+    __slots__ = ("cancelled", "dropped", "replied")
 
     def __init__(self) -> None:
         self.cancelled = False
         self.dropped = False
         """Set when a cancel dropped the message while its input was decided."""
+        self.replied = False
+        """Set when the input replied instead of starting a run."""
 
 
 _thread_waiters: dict[str, set[_ThreadWaiter]] = {}
@@ -999,20 +1021,26 @@ def _delivery(
 
 
 async def _prepare(
+    name: str,
     channel: HttpChannel,
     message: HttpChannelInboundMessage,
     raw_event: JsonValue | None,
     waiter: _ThreadWaiter,
     *,
-    name: str,
+    withheld: bool,
 ) -> NormalizedRunInput | None:
     """What the channel's ``input`` starts on the event's conversation; failures start nothing.
 
-    Asked here only when its runs weren't planned before the start, as when
-    reading the conversation failed.
+    Asked here only when its runs weren't planned before the start: when reading the
+    conversation failed, or resolve_user held the sender back.
     """
     runs = await _prepare_runs(
-        channel, message, raw_event, waiter, _run_channel(name, channel, message)
+        channel,
+        message,
+        raw_event,
+        waiter,
+        _run_channel(name, channel, message),
+        withheld=withheld,
     )
     return next((run for run in runs if "thread" not in run), None)
 
@@ -1180,6 +1208,7 @@ def _run_input(
     channel: HttpChannel,
     message: HttpChannelInboundMessage,
     prepare: PrepareInput,
+    waiter: _ThreadWaiter,
 ) -> dict[str, object]:
     """What the message's run starts with: its content or the channel's input,
     unless resolve_user holds the run back."""
@@ -1187,7 +1216,13 @@ def _run_input(
     if user is not None and user["type"] != "principal":
         return {
             "prepare": functools.partial(
-                _withhold, user, name, channel, message, prepare if content is None else None
+                _withhold,
+                user,
+                name,
+                channel,
+                message,
+                prepare if content is None else None,
+                waiter,
             )
         }
     if content is not None:
@@ -1201,25 +1236,33 @@ async def _withhold(
     channel: HttpChannel,
     message: HttpChannelInboundMessage,
     prepare: PrepareInput | None,
+    waiter: _ThreadWaiter,
 ) -> None:
     """Instead of the run the message would start, post resolve_user's reply, if
     any, once per delivery. The message then finishes as skipped."""
-    if prepare is not None and await prepare() is None:
+    if prepare is not None and await prepare() is None and not waiter.replied:
         return
     if withheld["type"] == "reply":
-        await post_reply(
-            withheld["message"],
-            name=name,
-            provider=channel.kind,
-            target=message["target"],
-            transport=channel.messaging(os.environ) if channel.messaging else None,
-            delivery_key=message.get("delivery_key"),
-        )
+        await _post_reply(withheld["message"], name, channel, message)
     logger.info(
         "channel run withheld by resolve_user %s",
         json.dumps({"threadId": message["thread_id"].lower()}),
     )
     return
+
+
+async def _post_reply(
+    reply: ChannelMessage, name: str, channel: HttpChannel, message: HttpChannelInboundMessage
+) -> None:
+    """Post a reply instead of the run: to the message's target, once per delivery."""
+    await post_reply(
+        reply,
+        name=name,
+        provider=channel.kind,
+        target=message["target"],
+        transport=channel.messaging(os.environ) if channel.messaging else None,
+        delivery_key=message.get("delivery_key"),
+    )
 
 
 def _error(status: int, message: str) -> Response:

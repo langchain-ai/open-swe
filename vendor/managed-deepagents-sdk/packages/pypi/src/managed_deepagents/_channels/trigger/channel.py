@@ -27,8 +27,9 @@ if TYPE_CHECKING:
     from managed_deepagents._channels.http.provider import EventFinished
     from managed_deepagents._channels.http.types import HttpFinishedDelivery
     from managed_deepagents._channels.manifest import ChannelManifest, JsonObject
+    from managed_deepagents._channels.reply import HandlerResult
     from managed_deepagents._channels.resolve_user import ChannelResolveUser, ResolveUser
-    from managed_deepagents._channels.run_input import ChannelRunResult, RunChannel
+    from managed_deepagents._channels.run_input import RunChannel
     from managed_deepagents._channels.slack.events import (
         DecidedSlackEvents,
         SlackChannelThread,
@@ -378,7 +379,7 @@ def _run_channel(
 
 async def _run_handler(
     event: SlackEvent,
-    call: Callable[[], ChannelRunResult | Awaitable[ChannelRunResult | None] | None],
+    call: Callable[[], HandlerResult | Awaitable[HandlerResult | None] | None],
     channel: RunChannel,
 ) -> TriggerMessageDecision:
     """Run a handler and normalize what it returned into run input.
@@ -399,6 +400,8 @@ async def _run_handler(
     from managed_deepagents._log import logger  # noqa: PLC0415
 
     outcome = await run_event_handler("Slack", event.key, event.delivery_id, call)
+    if outcome.reply is not None:
+        return TriggerMessageDecision("reply", message=outcome.reply.message)
     if outcome.type != "input":
         return TriggerMessageDecision(outcome.type)
     try:
