@@ -1159,7 +1159,8 @@ http(s), without credentials in the URL.
 The handler's second argument is the conversation's `thread`: `thread.id` is
 the thread the run starts on, for context that names it, such as a token your
 backend signs for the thread.
-`None` skips without a thread or run.
+`None` skips without a thread or run. `reply(message)` skips too, with a reply
+as `resolve_user`'s, which GitHub can't post.
 Other results are safely logged and start nothing. So does a handler that
 raises: GitHub already has its answer, so the delivery isn't failed; MDA logs
 the error's type only. Nor is a delivery whose run can't start, for example
@@ -1521,8 +1522,8 @@ Linear event that names no one. It returns:
 - `{"type": "identity", "provider": ..., "issuer": ..., "subject": ...}`: run
   as an exact Agent Auth identity, such as the IdP `sub` your web users sign in
   with.
-- `{"type": "reply", "message": ...}`: start nothing, and post `message` where
-  the event came from, as `runtime.channel.post` does, but only when the event
+- `{"type": "reply", "message": ...}`, or `reply(message)`: start nothing, and
+  post `message` where the event came from, as `runtime.channel.post` does, but only when the event
   would start or resume a run. `message` is a `ChannelMessage`. Slack and Linear send text only. A GitHub channel can't
   post, so it only starts nothing.
 - `{"type": "ignore"}`: start nothing. This also stops a stranger from
@@ -1699,9 +1700,12 @@ service checks. When the event's thread takes a turn, MDA POSTs
 "interrupted"?}}` as JSON to it, with the request's headers (never logged), and
 starts the run the service answers with: `{"input", "context"?, "metadata"?,
 "webhook"?}`, checked as a handler's result. `null` or HTTP 204 starts nothing.
-`{"decline": "<text>"}` starts nothing too, and the Linear channel tells the
-agent session that text, non-blank and up to 2000 characters, instead of its own
-"I'm not set up to work on this request."
+`{"type": "reply", "message": ...}` starts nothing too, and posts `message`, a
+`ChannelMessage`, where the event came from, as `resolve_user`'s reply does: a
+Linear agent session hears it as its response, instead of "I'm not set up to
+work on this request." A function handler returns `reply(message)` for the
+same, with text or a `ChannelMessage`. For a sender `resolve_user` holds back,
+its own answer stands instead.
 A GitHub event also carries what a handler gets beside the payload: its
 `"action"`, `"repository"` (`"account"` for an installation event), `"sender"`
 and `"mentions"`, so a service checks them as a handler does. These are optional in `GitHubEndpointRequest`, so a receiver
