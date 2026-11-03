@@ -207,15 +207,15 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
     parsed = ParsedSlackMessage.parse(
         turn.text, common.SLACK_BOT_USER_ID, common.SLACK_BOT_USERNAME
     )
+    branch_of = ""
     if turn.kind in {"by_the_way", "web"}:
-        # On a thread of its own, whoever holds the Slack thread it was asked in: a fork of
-        # its conversation's thread, which knows what the agent did there, or one seeded
-        # from the Slack thread.
-        conversation = await forks.fork_thread(
-            await mda_forwarding.owned_thread(turn.channel_id, key_ts),
-            key=forks.branch_key(turn.channel_id, turn.message_ts),
-            login=owner_login,
-        ) or mda_forwarding.side_thread_id(turn.channel_id, turn.message_ts)
+        # On a thread of its own, whoever holds the Slack thread it was asked in. It starts
+        # with what the conversation's thread holds when this channel may read it, or is
+        # seeded from the Slack thread.
+        source = await mda_forwarding.owned_thread(turn.channel_id, key_ts)
+        if await _branches(source, turn, owner_login):
+            branch_of = str(source)
+        conversation = mda_forwarding.side_thread_id(turn.channel_id, turn.message_ts)
         await mda_forwarding.claim_side(conversation, owner_login=owner_login)
     elif (owned := await mda_forwarding.owned_thread(turn.channel_id, key_ts)) is not None:
         conversation = owned
@@ -255,6 +255,7 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
         attachments=cast(list[dict[str, Any]], turn.attachments),
         bot_user_id=common.SLACK_BOT_USER_ID,
         thread_id=conversation,
+        held_thread_id=branch_of,
         treat_all_messages_as_mentions=turn.treat_all_messages_as_mentions,
         kitchen_channel=turn.kitchen_channel,
         explicit_mention=turn.explicit_mention,
@@ -282,7 +283,10 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
         case "web":
             request = await web_opening(request, BreakoutCommand.from_message(parsed), conversation)
         case "breakout":
-            opened = await _open_breakout(request, BreakoutCommand.from_message(parsed), repo)
+            branches = await _branches(conversation, turn, owner_login)
+            opened = await _open_breakout(
+                request, BreakoutCommand.from_message(parsed), repo, branches=branches
+            )
             if opened is None:
                 _no_run("breakout opened nothing", **fields)
                 return SlackTurnStarted()
@@ -325,6 +329,8 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
         _no_run("no run prepared", **fields)
     elif run_thread != str(turn.thread_id):
         start.thread_id = UUID(run_thread)
+        # The channel starts the new thread with what its conversation's thread holds.
+        start.branches_conversation = bool(request.held_thread_id)
     if start.run is not None and request.web_only:
         await _notify_web_breakout(request, webhook_id)
     return start
@@ -374,8 +380,22 @@ async def _claim(turn: StartSlackTurn, owner_login: str | None) -> str:
         ) from exc
 
 
+async def _branches(source: object, turn: StartSlackTurn, owner_login: str | None) -> bool:
+    """Whether a branch's new thread starts with what ``source`` holds: the thread this
+    turn's channel handler can read (its event's conversation), which the person may read."""
+    return (
+        source is not None
+        and str(source) == str(turn.thread_id)
+        and await forks.branches_from(str(source), login=owner_login)
+    )
+
+
 async def _open_breakout(
-    request: SlackRequest, command: BreakoutCommand, repo: common.SlackRepoResolution | None
+    request: SlackRequest,
+    command: BreakoutCommand,
+    repo: common.SlackRepoResolution | None,
+    *,
+    branches: bool,
 ) -> tuple[SlackRequest, common.SlackRepoResolution | None] | None:
     """Open a breakout's new Slack thread: its first turn, which runs on the command's own
     thread; ``None`` when the breakout told the sender why it opened nothing."""
@@ -386,7 +406,7 @@ async def _open_breakout(
     ) -> None:
         opened.append((opening, opening_repo))
 
-    await process_slack_breakout(request, command, repo, hand_to_mda=hand_to_mda)
+    await process_slack_breakout(request, command, repo, hand_to_mda=hand_to_mda, branches=branches)
     return opened[0] if opened else None
 
 
