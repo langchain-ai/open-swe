@@ -7,8 +7,9 @@ Invalid selections return `available_models` with valid IDs and efforts without 
 This is only for requested breakouts, not a general mechanism for creating Slack threads.
 Same-channel breakouts also work in private channels.
 Changing channels requires a public source channel and destination.
-Omit `channel_id` to use the current channel.
-Pass `channel_id` only when the user explicitly chooses a destination.
+Always pass `channel_id` explicitly for Slack breakouts, including when staying in the current channel.
+Choose the destination from the user's request and applicable channel descriptions and workspace instructions before calling this tool; those instructions can designate a channel other than the source.
+Resolve its Slack channel ID with the channel directory if it is not already known.
 The current conversation remains active; to move the current conversation and stop listening to the original thread, use `slack_move_thread` instead.
 
 Choose the breakout's model deliberately rather than automatically inheriting the parent's.
@@ -19,7 +20,7 @@ This selects the new thread's model; it does not switch the current conversation
 
 Set `web_only=true` only when the user explicitly asks for a web breakout (the equivalent of `/breakout:web`).
 Never choose a web breakout proactively or merely because a question seems quick.
-It creates a private, web-only conversation seeded with the full Slack transcript, with no Slack thread binding or destination; omit `channel_id`.
+It creates a private, web-only conversation seeded with the full Slack transcript, with no Slack thread binding or destination; pass `channel_id=null`.
 Share the returned `dashboard_url` with the requester.
 The Slack completion instructions below apply only when `web_only=false`.
 
