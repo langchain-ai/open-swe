@@ -152,16 +152,24 @@ test.describe("my pull requests", () => {
   test("queues requested reviews before own drafts and advances after success", async ({
     page,
   }) => {
+    const files = {
+      "constants.py": Array.from(
+        { length: 150 },
+        (_, index) => `VALUE_${index} = ${index}`,
+      ).join("\n"),
+    };
     const mine = await seedOpenPullRequest(page, {
       repo: DEMO,
       title: "My authored change",
       draft: true,
+      files,
       ...approved,
     });
     const assigned = await seedOpenPullRequest(page, {
       repo: DEMO,
       title: "Assigned to Alice",
       author: "bob",
+      files,
       ...approved,
     });
     const unassigned = await seedOpenPullRequest(page, {
@@ -190,10 +198,21 @@ test.describe("my pull requests", () => {
     );
     await page.getByText("Review one by one (2)").click();
     await expect(page).toHaveURL(new RegExp(`/demo/${assigned.number}`));
+    const changes = page.locator(".review-code-view");
+    await expect
+      .poll(() => changes.evaluate((node) => node.scrollHeight))
+      .toBeGreaterThan(1500);
+    await changes.evaluate((node) => {
+      node.scrollTop = 1500;
+    });
+    await expect
+      .poll(() => changes.evaluate((node) => node.scrollTop))
+      .toBeGreaterThan(1000);
     await page
       .getByRole("button", { name: "Approve & next", exact: true })
       .click();
     await expect(page).toHaveURL(new RegExp(`/demo/${mine.number}`));
+    await expect.poll(() => changes.evaluate((node) => node.scrollTop)).toBe(0);
     await page
       .getByRole("button", { name: "Mark ready & finish", exact: true })
       .click();
