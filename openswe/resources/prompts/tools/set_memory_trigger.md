@@ -5,4 +5,5 @@ Use one for memories that matter only in a narrow situation, so they stop costin
 
 Args:
 - slug: 1-100 lowercase letters, digits and `:/._-`, naming the situation, such as `repo:org/name` or `task:release`.
-- summary: One short sentence saying only when its memories apply, such as "Working in `org/name`." Never restate the memories themselves.
+- summary: One short sentence saying only when its memories apply, such as "Working in `org/name`."
+  Never restate the memories themselves.
