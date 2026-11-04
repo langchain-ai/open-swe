@@ -688,7 +688,7 @@ function SidebarSubagentRow({
       className={sidebarRowClassName({
         compact,
         active: isActive,
-        paddingLeft: nested ? "pl-16" : "pl-10",
+        paddingLeft: nested ? "pl-space-9" : "pl-space-7",
         archived: false,
       })}
     >
@@ -891,7 +891,7 @@ function SidebarTaskWorkerRow({
         className={sidebarRowClassName({
           compact,
           active: rowIsActive,
-          paddingLeft: "pl-10",
+          paddingLeft: "pl-space-7",
           archived: worker.resolved === true,
         })}
       >
