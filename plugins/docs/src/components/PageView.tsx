@@ -92,7 +92,7 @@ export function PageView({
   const draft = useDrafts(repository).data?.get(path) ?? null
   const ref = draft?.branch ?? space.defaultBranch
   const head = useHead(repository, ref)
-  const file = useFile(repository, path, head.data ?? undefined)
+  const file = useFile(repository, path, draft?.head ?? head.data ?? undefined)
   const editing = draft !== null
   const { live, synced } = useLiveDoc(
     repository,
@@ -115,6 +115,7 @@ export function PageView({
   const [activeId, setActiveId] = useState<string | null>(null)
   const [pendingAccept, setPendingAccept] = useState<string | null>(null)
   const [discarding, setDiscarding] = useState(false)
+  const [replacingEdits, setReplacingEdits] = useState(false)
 
   // Opening the draft swaps the read-only editor for the live one, and the page
   // briefly loses its height; put the reader back where they were.
@@ -152,7 +153,7 @@ export function PageView({
     saved !== null &&
     current.trimEnd() !== saved.trimEnd()
   const outsideCommits =
-    editing && Boolean(head.data) && draft.head !== head.data && !dirty
+    editing && Boolean(head.data) && draft.head !== head.data
 
   const people = usePeople(
     useMemo(
@@ -260,6 +261,10 @@ export function PageView({
   const save = async (message?: string) => {
     const ready = mounted()
     if (!draft || !head.data || !ready) return
+    if (outsideCommits)
+      throw new Error(
+        "Load the commits made outside Docs before saving this draft."
+      )
     const body = preserveFormatting(
       split.body.trimEnd(),
       (saved ?? normalize(ready, split.body)).trimEnd(),
@@ -268,7 +273,7 @@ export function PageView({
     const text = split.frontMatter + withTrailingNewline(body)
     const sha = await github.commit({
       branch: draft.branch,
-      expectedHead: head.data,
+      expectedHead: draft.head,
       message: message?.trim() || `Update ${path}`,
       files: { [path]: text },
     })
@@ -286,6 +291,7 @@ export function PageView({
       contentType: "markdown",
     })
     await putDraft({ ...draft, head: head.data })
+    setReplacingEdits(false)
     await refreshDraft()
   }
 
@@ -363,11 +369,17 @@ export function PageView({
     const view = mounted()
     const range = view && resolveAnchor(view.state.doc, thread.comment)
     if (!view || !range || thread.comment.suggestion === null) return
-    view
+    const applied = view
       .chain()
       .focus()
-      .insertContentAt(range, { type: "text", text: thread.comment.suggestion })
+      .insertContentAt(
+        range,
+        thread.comment.suggestion
+          ? { type: "text", text: thread.comment.suggestion }
+          : []
+      )
       .run()
+    if (!applied) throw new Error("The suggestion couldn't be applied.")
     await setStatus(thread.id, "accepted")
   }
 
@@ -693,14 +705,44 @@ export function PageView({
         <article className="pb-space-12 mx-auto w-full max-w-3xl px-space-6 pt-space-8">
           {outsideCommits && (
             <Banner intent="neutral" className="mb-space-4">
-              <span className="flex items-center gap-space-3">
-                This draft has commits made outside Docs, such as by the agent.
+              <span className="flex flex-wrap items-center gap-space-3">
+                This draft has commits made outside Docs. Load them before
+                saving.
                 <Button
                   size="xs"
                   variant="outlined"
-                  onClick={() => act("Load commits")(loadOutsideCommits)}
+                  disabled={busy !== null}
+                  onClick={() =>
+                    dirty
+                      ? setReplacingEdits(true)
+                      : act("Load commits")(loadOutsideCommits)
+                  }
                 >
                   Load them
+                </Button>
+              </span>
+            </Banner>
+          )}
+          {outsideCommits && replacingEdits && (
+            <Banner intent="warning" className="mb-space-4">
+              <span className="flex flex-wrap items-center gap-space-3">
+                Loading these commits replaces the unsaved edits in this shared
+                draft. Copy any edits you want to keep first.
+                <Button
+                  size="xs"
+                  color="error"
+                  disabled={busy !== null}
+                  loading={busy === "Load commits"}
+                  onClick={() => act("Load commits")(loadOutsideCommits)}
+                >
+                  Replace unsaved edits
+                </Button>
+                <Button
+                  size="xs"
+                  variant="outlined"
+                  onClick={() => setReplacingEdits(false)}
+                >
+                  Keep editing
                 </Button>
               </span>
             </Banner>
