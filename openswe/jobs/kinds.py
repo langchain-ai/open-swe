@@ -8,6 +8,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Final
+from uuid import UUID
 
 from pydantic import JsonValue
 
@@ -25,6 +26,8 @@ from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
 from openswe.github.forwarding import FORWARD_JOB as GITHUB_CHANNEL_FORWARD
 from openswe.github.forwarding import ForwardJob
+from openswe.github.required_check_cache import REFRESH_JOB as REQUIRED_CHECK_REFRESH
+from openswe.github.required_check_cache import refresh_required_checks
 from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.standard import run_deadline
 from openswe.jobs import queue
@@ -39,6 +42,8 @@ from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
 from openswe.merge_queue.runtime import reconcile_queue
 from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
 from openswe.monitors.delivery import poll_monitors
+from openswe.notifications.service import JOB_KIND as NOTIFICATION_FALLBACK
+from openswe.notifications.service import AppNotification
 
 __all__ = ["WORKER"]
 from openswe.reconcile import reconcile_stale_runs
@@ -72,6 +77,7 @@ RECONCILE: Final = "reconcile"
 _FIRE_CLAIM_TTL: Final = timedelta(days=2)
 
 WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
+WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
 
 
 def _text(job: Job, key: str) -> str | None:
@@ -248,6 +254,13 @@ async def _wake_thread(job: Job) -> None:
         logger.exception("Thread wakeup failed", extra={"job_id": str(job.id)})
         return
     logger.info("Thread woken", extra={"job_id": str(job.id), "run_id": run_id})
+
+
+@WORKER.register(NOTIFICATION_FALLBACK)
+async def notification_fallback(job: Job) -> None:
+    await AppNotification.deliver_fallback(
+        UUID(str(job.payload["recipient_id"])), str(job.payload["key"])
+    )
 
 
 async def start_jobs() -> None:

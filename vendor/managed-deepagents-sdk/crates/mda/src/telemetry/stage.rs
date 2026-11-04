@@ -25,6 +25,8 @@ pub enum Stage {
     Bake,
     Deploy,
     WaitReady,
+    ScheduleSync,
+    ChannelSetup,
     EnvSetup,
     DepsInstall,
     ServerStart,
@@ -43,6 +45,8 @@ impl Stage {
             Self::Bake => "bake",
             Self::Deploy => "deploy",
             Self::WaitReady => "wait_ready",
+            Self::ScheduleSync => "schedule_sync",
+            Self::ChannelSetup => "channel_setup",
             Self::EnvSetup => "env_setup",
             Self::DepsInstall => "deps_install",
             Self::ServerStart => "server_start",
@@ -188,6 +192,13 @@ mod tests {
             text("channel_requires_user_key")
         );
         assert_eq!(attribute(&logs[3], "outcome"), text("cancelled"));
+    }
+
+    #[test]
+    fn deploy_reports_what_follows_the_rollout_as_stages_of_their_own() {
+        assert_eq!(Stage::WaitReady.as_str(), "wait_ready");
+        assert_eq!(Stage::ScheduleSync.as_str(), "schedule_sync");
+        assert_eq!(Stage::ChannelSetup.as_str(), "channel_setup");
     }
 
     // No test in this crate calls `init_facts`, so telemetry is off here.

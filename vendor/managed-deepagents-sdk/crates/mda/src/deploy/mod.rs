@@ -533,8 +533,13 @@ fn run_session(
     // -- 4c. Set up the channels the running revision already serves ------
     // Its Agent Server URL stays the same across revisions, so a channel
     // that can no longer be set up stops the deploy before anything is
-    // uploaded.
-    if let Some((deployment_id, agent_server_url)) = &live_existing_deployment {
+    // uploaded. Recorded as a stage of its own, between two parts of the
+    // deploy stage.
+    if let Some((deployment_id, agent_server_url)) = live_existing_deployment
+        .as_ref()
+        .filter(|_| early_channels.needs_live_url())
+    {
+        telemetry::stage::enter(Stage::ChannelSetup);
         early_channels.set_up(&SetupTarget {
             client,
             agent_server_url,
@@ -543,6 +548,7 @@ fn run_session(
             project_root: &project.root,
             env_vars: &env_vars,
         })?;
+        telemetry::stage::enter(Stage::Deploy);
     }
 
     let external_image = match image_source {
@@ -677,10 +683,13 @@ fn run_session(
         &deployment_id,
         &name,
         status_url.as_deref(),
-        &summary.schedule_crons,
         opts.wait_timeout,
         interrupt,
     )?;
+    if let Some(agent_server_url) = &agent_server_url {
+        telemetry::stage::enter(Stage::ScheduleSync);
+        reconcile_schedules(client, agent_server_url, &summary.schedule_crons)?;
+    }
     let agent_server_url =
         require_trigger_registration_url(agent_server_url, channel_setup.needs_live_url())?;
     let Some(agent_server_url) = agent_server_url else {
@@ -697,6 +706,9 @@ fn run_session(
         "HTTP channels",
         &http_link_refs,
     )?;
+    if channel_setup.needs_live_url() {
+        telemetry::stage::enter(Stage::ChannelSetup);
+    }
     channel_setup.set_up(&SetupTarget {
         client,
         agent_server_url: &agent_server_url,
@@ -2573,7 +2585,6 @@ fn poll_and_report(
     deployment_id: &str,
     name: &str,
     status_url: Option<&str>,
-    schedule_crons: &compile::schedules::ScheduleCrons,
     wait_timeout: Duration,
     interrupt: &Interrupt,
 ) -> Result<Option<String>> {
@@ -2654,9 +2665,7 @@ fn poll_and_report(
     match final_status.as_str() {
         "DEPLOYED" => {
             sp.stop("Deployment live");
-            let agent_server_url = fetch_agent_server_url(client, deployment_id)?;
-            reconcile_schedules(client, &agent_server_url, schedule_crons)?;
-            Ok(Some(agent_server_url))
+            fetch_agent_server_url(client, deployment_id).map(Some)
         }
         status if is_interrupted_status(status) => {
             sp.error("Deployment interrupted from another interface");

@@ -58,6 +58,7 @@ const {
 } = require("./terminal-manager.cjs");
 const {
   addProject,
+  linkProject,
   readProjects,
   removeProject,
 } = require("./project-store.cjs");
@@ -305,9 +306,20 @@ function projectScopeSession(scopeId) {
   return project ? { id: scopeId, cwd: project.cwd } : null;
 }
 
-function sendProjectsChanged() {
+/** The folders with the GitHub repository each is a clone of, for the dashboard to file them. */
+async function describedProjects() {
+  return Promise.all(
+    listProjects().map(async (project) => ({
+      ...project,
+      repo: await originRepo(project.cwd),
+    })),
+  );
+}
+
+async function sendProjectsChanged() {
+  const projects = await describedProjects();
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send("desktop:projects-changed", listProjects());
+    mainWindow.webContents.send("desktop:projects-changed", projects);
   }
 }
 
@@ -665,7 +677,21 @@ function configureDesktopIpc() {
 
   ipcMain.handle("desktop:projects", (event) => {
     requireTrustedDesktopIpc(event);
-    return listProjects();
+    return describedProjects();
+  });
+
+  ipcMain.handle("desktop:link-project", async (event, input) => {
+    requireTrustedDesktopIpc(event);
+    const cwd = input && typeof input.cwd === "string" ? input.cwd : null;
+    const project = cwd ? registeredProject(cwd) : null;
+    if (!project) throw new Error("Project is not registered");
+    const linked = linkProject(
+      projectsPath(),
+      project,
+      input.projectId ?? null,
+    );
+    await sendProjectsChanged();
+    return linked ? withScopeId(linked) : null;
   });
 
   const projectHeadWatches = new Map<number, () => void>();
@@ -730,8 +756,11 @@ function configureDesktopIpc() {
       : await dialog.showOpenDialog(options);
     if (result.canceled || !result.filePaths[0]) return null;
     const project = addProject(projectsPath(), result.filePaths[0]);
-    sendProjectsChanged();
-    return withScopeId(project);
+    void sendProjectsChanged();
+    return {
+      ...withScopeId(project),
+      repo: await originRepo(project.cwd),
+    };
   });
 
   ipcMain.handle("desktop:remove-project", async (event, cwd) => {
@@ -752,7 +781,7 @@ function configureDesktopIpc() {
       : await dialog.showMessageBox(options);
     if (result.response !== 1) return false;
     const removed = removeProject(projectsPath(), project.cwd);
-    if (removed) sendProjectsChanged();
+    if (removed) void sendProjectsChanged();
     return removed;
   });
 
@@ -812,13 +841,13 @@ function configureDesktopIpc() {
         thread = await startThreadWorktree(thread, input?.baseBranch);
       if (!thread.managedTaskFolder)
         thread = await recordLocalCheckpoint(thread);
-      const bridgeId = await localBridges.ensure(thread.id);
-      return {
-        bridgeId,
-        repo: thread.managedTaskFolder
-          ? null
-          : await originRepo(threadRoot(thread)),
-      };
+      const [bridgeId, repo] = await Promise.all([
+        localBridges.ensure(thread.id),
+        thread.managedTaskFolder
+          ? Promise.resolve(null)
+          : originRepo(threadRoot(thread)),
+      ]);
+      return { bridgeId, repo };
     } catch (error) {
       await discardLocalThread(thread);
       throw error;
@@ -1832,9 +1861,14 @@ function configureFraming() {
   session.defaultSession.webRequest.onHeadersReceived(
     { urls: ["https://*/*"] },
     (details, callback) => {
-      const page = webContents.fromId(details.webContentsId)?.getURL();
+      // Requests no page made, like the main process's own, carry no webContentsId.
+      const page =
+        details.resourceType === "subFrame" &&
+        details.webContentsId !== undefined
+          ? webContents.fromId(details.webContentsId)?.getURL()
+          : undefined;
       callback(
-        details.resourceType === "subFrame" && isAppUrl(page ?? "")
+        isAppUrl(page ?? "")
           ? { responseHeaders: headersFramedByApp(details.responseHeaders) }
           : {},
       );
@@ -1844,11 +1878,11 @@ function configureFraming() {
 
 function configurePermissions() {
   session.defaultSession.setPermissionRequestHandler(
-    (webContents, permission, callback, details) => {
+    (requester, permission, callback, details) => {
       callback(
         isTrustedPermissionRequest(
           permission,
-          details.requestingUrl || webContents.getURL(),
+          details.requestingUrl || requester.getURL(),
         ),
       );
     },

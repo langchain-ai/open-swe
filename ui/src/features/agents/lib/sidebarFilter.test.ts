@@ -93,6 +93,18 @@ describe("filterThreads", () => {
     ).toEqual([automation])
   })
 
+  it("hides Slack threads but keeps threads moved to the dashboard", () => {
+    const slack = makeThread({ source: "slack" })
+    const movedToWeb = makeThread({ source: "dashboard" })
+    const github = makeThread({ source: "github" })
+    expect(
+      filterThreads(
+        [slack, movedToWeb, github],
+        filters({ includeSlack: false })
+      )
+    ).toEqual([movedToWeb, github])
+  })
+
   it("filters by source, defaulting missing source to dashboard", () => {
     const gh = makeThread({ source: "github" })
     const noSource = makeThread({ source: undefined })
@@ -120,6 +132,7 @@ describe("hasActiveFilters", () => {
   })
 
   it("is true when any dimension changes", () => {
+    expect(hasActiveFilters(filters({ includeSlack: false }))).toBe(true)
     expect(hasActiveFilters(filters({ sources: ["github"] }))).toBe(true)
     expect(hasActiveFilters(filters({ includeAutomations: true }))).toBe(true)
     expect(hasActiveFilters(filters({ includeResolved: true }))).toBe(true)

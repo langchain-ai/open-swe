@@ -25,7 +25,7 @@ async def _runs_on_the_client(**_: object) -> str:
 
 class ClientToolsMiddleware(OpenSWEMiddleware):
     def __init__(self, specs: Sequence[ClientToolSpec]) -> None:
-        self.tools: list[BaseTool] = [
+        self.tools: Sequence[BaseTool] = [
             StructuredTool(
                 name=spec.name,
                 description=spec.description,

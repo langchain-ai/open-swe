@@ -10,8 +10,24 @@ from slack_sdk.errors import SlackApiError
 from openswe.slack import http
 from openswe.slack.breakout_destination import BreakoutDestination
 from openswe.slack.channels import PAYLOAD_TTL, SlackChannel
-from openswe.slack.client import remove_slack_reaction
+from openswe.slack.client import convert_mentions_to_slack_format, remove_slack_reaction
 from tests.support.slack_api import SlackAPI, slack_api_server
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("@Alice Smith(U012ABCDE) hello @Bob(W034DEFGH)", "<@U012ABCDE> hello <@W034DEFGH>"),
+        ("<@U012ABCDE> **MDA digest (UTC)**", "<@U012ABCDE> **MDA digest (UTC)**"),
+        ("@team **MDA digest (UTC)**", "@team **MDA digest (UTC)**"),
+        ("@team\nUpdates (U012ABCDE)", "@team\nUpdates (U012ABCDE)"),
+        ("<@U012ABCDE> @Bob(W034DEFGH)", "<@U012ABCDE> <@W034DEFGH>"),
+    ],
+)
+def test_convert_mentions_preserves_slack_mentions_and_unrelated_parentheses(
+    text: str, expected: str
+) -> None:
+    assert convert_mentions_to_slack_format(text) == expected
 
 
 @pytest.mark.parametrize(

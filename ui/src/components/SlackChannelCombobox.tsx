@@ -1,6 +1,7 @@
 import { CheckIcon, GlobeRegularIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { SpinnerIcon } from "@langchain/macaw-components/Spinner"
+import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { Typeahead } from "@langchain/macaw-components/Typeahead"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ClockCounterClockwise"
@@ -48,11 +49,15 @@ export function SlackChannelRow({
       <SlackChannelIcon channel={channel} />
       <span className="min-w-0 flex-1 truncate">{channel?.name ?? id}</span>
       {recent && (
-        <ClockCounterClockwiseIcon
-          aria-label="Recently used"
-          className="shrink-0 text-icon-secondary"
-          size={12}
-        />
+        <Tooltip title="Recently used in this browser">
+          <span className="inline-flex shrink-0">
+            <ClockCounterClockwiseIcon
+              aria-label="Recently used"
+              className="text-icon-secondary"
+              size={12}
+            />
+          </span>
+        </Tooltip>
       )}
       {channel && !channel.is_member ? (
         <span className="shrink-0 text-secondary">bot not in channel</span>

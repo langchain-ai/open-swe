@@ -35,7 +35,11 @@ from openswe.input_messages import (
     system_introduction,
 )
 from openswe.prompts import prompt
-from openswe.review.approvals import approval_mode_for, approval_policy_for_review
+from openswe.review.approvals import (
+    ApprovalPolicy,
+    approval_mode_for,
+    approval_policy_for_review,
+)
 from openswe.review.findings import (
     FindingInteraction,
     ReviewerPRMeta,
@@ -43,7 +47,8 @@ from openswe.review.findings import (
     reviewer_thread_title,
 )
 from openswe.review.reconcile import reconcile_linked_findings
-from openswe.run_config import Repo
+from openswe.review.shadow import ReviewShadow
+from openswe.run_config import Repo, RunConfig
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
 from openswe.thread_ids import (
@@ -343,7 +348,7 @@ async def trigger_pr_review_from_ref(
         "base_ref": base_ref,
         "author": (pr_metadata.get("user") or {}).get("login", ""),
     }
-    slack_thread_meta: ReviewerSlackThread | None = None
+    slack_thread_meta: ReviewerSlackThread = {}
     if slack_channel_id and slack_thread_ts:
         slack_thread_meta = {
             "channel_id": slack_channel_id,
@@ -405,6 +410,9 @@ async def trigger_pr_review_from_ref(
         client=langgraph_client,
     )
     await common.store_current_reviewer_run_id(thread_id, run)
+    await ReviewShadow.follow(
+        RunConfig.parse(configurable), kickoff=review_prompt, pr_title=pr_title
+    )
     return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}
 
 
@@ -541,6 +549,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     )
     await common.store_current_reviewer_run_id(thread_id, run)
     common.logger.info("Reviewer run dispatched for thread %s (source=%s)", thread_id, source)
+    await ReviewShadow.follow(RunConfig.parse(configurable), kickoff=prompt, pr_title=pr_title)
 
 
 async def process_github_pr_walkthrough(payload: dict[str, object]) -> None:
@@ -906,7 +915,12 @@ async def _process_github_head_update(
         )
         and not (
             await approval_mode_for(context.owner, context.name) == "approve"
-            and await approval_policy_for_review(context.owner, context.name, token=app_token)
+            and (
+                await approval_policy_for_review(
+                    context.owner, context.name, pr_number, token=app_token
+                )
+                or ApprovalPolicy()
+            ).configured
         )
     ):
         await PullRequest(
@@ -1052,6 +1066,9 @@ async def _process_github_head_update(
         client=langgraph_client,
     )
     await common.store_current_reviewer_run_id(thread_id, run)
+    await ReviewShadow.follow(
+        RunConfig.parse(configurable), kickoff=re_review_prompt, pr_title=pr_title
+    )
 
 
 async def process_github_ci_event(
