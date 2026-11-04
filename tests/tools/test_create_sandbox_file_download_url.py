@@ -15,6 +15,7 @@ class _AsyncClient:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
         self.closed = False
+        self.download_url = "https://downloads.example/file?token=secret"
 
     async def __aenter__(self) -> _AsyncClient:
         return self
@@ -25,7 +26,7 @@ class _AsyncClient:
     async def generate_download_url(self, name: str, path: str, **kwargs: Any) -> Any:
         self.calls.append((name, path, kwargs))
         return SimpleNamespace(
-            download_url="https://downloads.example/file?token=secret",
+            download_url=self.download_url,
             token="secret",
             expires_at="2026-08-20T12:00:00Z",
         )
@@ -115,6 +116,18 @@ async def test_local_development_falls_back_to_the_signed_url(
         "file_path": "/workspace/project/result.zip",
         "expires_at": "2026-08-20T12:00:00Z",
     }
+
+
+async def test_a_non_https_signed_url_is_returned_without_a_short_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://openswe.example")
+    client = _configure(monkeypatch, _Backend())
+    client.download_url = "http://langsmith.internal/file?token=secret"
+
+    result = await download_tool.create_sandbox_file_download_url("result.zip")
+
+    assert result["url"] == "http://langsmith.internal/file?token=secret"
 
 
 async def test_create_download_url_defaults_to_a_non_expiring_link(
