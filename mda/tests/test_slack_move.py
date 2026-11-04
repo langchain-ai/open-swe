@@ -261,7 +261,10 @@ def test_a_move_from_code_mode_goes_through_mda_as_the_models_own_call(
     assert isinstance(result, ToolMessage)
     assert json.loads(cast(str, result.content)) == _MOVED
     assert channel.posts == [
-        ({"type": "content", "content": "Moved here"}, {"new_thread": True, "hand_off": True})
+        (
+            {"type": "content", "content": "Moved here"},
+            {"new_thread": True, "hand_off": True, "to": None},
+        )
     ]
     assert [name for name, _ in backend.calls] == ["slack_move", "slack_moved"]
     assert cast(SlackMoved, backend.calls[1][1]).mark_source is True
