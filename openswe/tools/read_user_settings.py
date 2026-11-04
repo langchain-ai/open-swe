@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 _PROFILE_SETTING_KEYS = (
     "auto_fix_ci",
     "auto_human_review_enabled",
+    "auto_human_review_excluded_repos",
     "draft_prs",
     "review_draft_prs",
 )
