@@ -71,7 +71,7 @@ from runtime_api.catalog import (
 from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import Endpoint
 from runtime_api.loop import SANDBOX_UNREACHABLE
-from runtime_api.operations import RunRequest
+from runtime_api.operations import OperationResult, RunRequest
 from runtime_api.reports import Reports
 from runtime_api.tool_search import ResolvedTool, ToolSpecs
 
@@ -161,7 +161,7 @@ def browsers() -> Browsers:
 
 
 @pytest.fixture
-def operation_contents() -> dict[str, str]:
+def operation_contents() -> dict[str, str | OperationResult]:
     """What each operation answers the model, by its name; any other answers "found"."""
     return {}
 
@@ -171,7 +171,7 @@ def backend_calls(
     monkeypatch: pytest.MonkeyPatch,
     prepared: Prepared,
     browsers: Browsers,
-    operation_contents: dict[str, str],
+    operation_contents: dict[str, str | OperationResult],
 ) -> BackendCalls:
     """Every call the runs make on the backend: its endpoint, its bearer and, for an
     operation, the name and grant it was called with."""
@@ -195,7 +195,12 @@ def backend_calls(
             browsers.append((json["browser"], json["opened"]))
         if hook == "operation":
             content = operation_contents.get(str(json["name"]), "found")
-            return httpx2.Response(200, request=request, json={"content": content})
+            answer = (
+                content
+                if isinstance(content, OperationResult)
+                else OperationResult(content=content)
+            )
+            return httpx2.Response(200, request=request, json=answer.model_dump(mode="json"))
         if hook == "tool_specs":
             catalog = _CATALOGS[headers["Authorization"].removeprefix("Bearer ")]
             names = json["names"]
@@ -818,7 +823,7 @@ _CLOUD_RULE: dict[str, JsonValue] = {
 def replacements(
     monkeypatch: pytest.MonkeyPatch,
     proxy_writes: list[tuple[str, object]],
-    operation_contents: dict[str, str],
+    operation_contents: dict[str, str | OperationResult],
 ) -> list[SandboxDefinition]:
     """Each sandbox a run's recreate_sandbox replaced the thread's with, under its name; the
     backend answers it with a sandbox from another snapshot that carries a cloud identity rule."""
@@ -980,6 +985,82 @@ async def test_finished_runs_release_their_tools_and_interpreters(
     )
     assert not interpreter._registry._slots
     assert not interpreter._ptc_tools_by_slot
+
+
+@pytest.mark.parametrize("code_mode", [False, True])
+@pytest.mark.parametrize(
+    ("answer", "expression", "expected"),
+    [
+        (
+            OperationResult(content='{"formatted":"first\\nsecond"}'),
+            "result.formatted.split('\\n')[1]",
+            "second",
+        ),
+        (OperationResult(content='[{"formatted":"found"}]'), "result[0].formatted", "found"),
+        (OperationResult(content="plain text"), "result", "plain text"),
+        (OperationResult(content="{invalid JSON}"), "result", "{invalid JSON}"),
+        (OperationResult(content="42"), "typeof result", "string"),
+        (
+            OperationResult(content='{"formatted":"failed"}', status="error"),
+            "result",
+            '{"formatted":"failed"}',
+        ),
+        (
+            OperationResult(content='{"formatted":"found"}', state={"kept": True}),
+            "result.formatted",
+            "found",
+        ),
+        (
+            OperationResult(content='{"formatted":"failed"}', status="error", state={"kept": True}),
+            "result",
+            '{"formatted":"failed"}',
+        ),
+    ],
+)
+async def test_backend_results_are_typed_only_in_code_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    backend_calls: BackendCalls,
+    operation_contents: dict[str, str | OperationResult],
+    code_mode: bool,
+    answer: OperationResult,
+    expression: str,
+    expected: str,
+) -> None:
+    operation_contents["lookup"] = answer
+    seen: list[BaseMessage] = []
+    generate = GenericFakeChatModel._agenerate
+
+    async def answering(
+        model: GenericFakeChatModel,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        seen[:] = messages
+        return await generate(model, messages, stop, run_manager)
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", answering)
+    call = ToolCall(
+        name="eval" if code_mode else "lookup",
+        args={"code": f"var result = await tools.lookup({{}}); {expression}"} if code_mode else {},
+        id="result",
+    )
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling(call))
+    catalog = _catalog("lookup", "grant").model_copy(
+        update={"code_only": ["lookup"] if code_mode else []}
+    )
+    await _run(InMemoryStore(), "typed", _context("agent", "token", catalog))
+
+    [result] = [m for m in seen if isinstance(m, ToolMessage) and m.tool_call_id == "result"]
+    if code_mode:
+        assert result.status == "success"
+        assert f"<result>{expected}</result>" in result.text
+        assert "<error" not in result.text
+    else:
+        assert result.content == answer.content
+        assert result.status == answer.status
+    assert len([operation for _, _, operation in backend_calls if operation]) == 1
 
 
 async def test_code_mode_calls_tools_its_catalog_leaves_out(
