@@ -6,10 +6,12 @@ import { PlugsConnectedIcon } from "@phosphor-icons/react/dist/ssr/PlugsConnecte
 
 import { SignInWithLangSmithButton } from "@/features/settings/components/ConnectionsSection"
 import {
-  MissingRow,
+  ConnectButton,
+  MANAGED_TOOLS_KEY,
   managedToolsQuery,
   useConnectPopup,
 } from "@/features/settings/components/ManagedToolsSection"
+import { api } from "@/lib/api"
 import type { ManagedToolsCardOffer } from "@/features/agents/lib/managedToolsCard"
 
 /** The connect card `connect_managed_tools` offered; the thread continues once its services connect. */
@@ -25,7 +27,12 @@ export function ManagedToolsConnectionCard({
     ...managedToolsQuery,
     refetchOnWindowFocus: "always",
   })
-  const popup = useConnectPopup(threadId ? { threadId, cardId } : undefined)
+  const popup = useConnectPopup(MANAGED_TOOLS_KEY, (serverId) =>
+    api.connectManagedTool(
+      serverId,
+      threadId ? { threadId, cardId } : undefined
+    )
+  )
 
   if (offer.status === "langsmith_required") {
     return (
@@ -41,23 +48,17 @@ export function ManagedToolsConnectionCard({
     )
   }
 
-  const live = view.data?.gateways.find(
-    (status) => status.gateway.id === offer.gateway.id
-  )
-  // The card offers the services the person asked for, or every one when the
-  // gateway withholds its tools until all are connected.
-  const offered = new Set(offer.missing.map((credential) => credential.slug))
+  const live = view.data?.servers
   const missing = live
-    ? live.missing.filter(
-        (credential) => live.all_required || offered.has(credential.slug)
+    ? offer.missing.filter(
+        (server) => !live.some((own) => own.id === server.id && own.connected)
       )
     : offer.missing
-  // Only consent links can be waited on; API keys are set in LangSmith.
-  const then = offer.missing.every((credential) => credential.kind === "oauth")
+  const then = offer.continuesAutomatically
     ? "This thread then continues on its own."
     : "Then ask the agent to continue."
   return (
-    <Card title={`${offer.gateway.name} managed tools`}>
+    <Card title="Managed Tools">
       {live && missing.length === 0 ? (
         <p className="flex items-center gap-space-1 text-success-secondary">
           <CheckIcon aria-hidden size={14} weight="bold" /> Connected. {then}
@@ -66,29 +67,28 @@ export function ManagedToolsConnectionCard({
         <>
           <p className="text-secondary">
             Connect {missing.length === 1 ? "this" : "these"} to your account.{" "}
-            {live?.all_required
-              ? "LangSmith offers this tool kit's tools once all of them are connected. "
-              : ""}
             {then}
           </p>
           <ul className="mt-space-3 divide-y divide-default rounded-md border border-default">
-            {missing.map((credential) => (
-              <MissingRow
-                key={credential.slug}
-                gatewayId={offer.gateway.id}
-                credential={credential}
-                connecting={
-                  popup.connecting === `${offer.gateway.id}:${credential.slug}`
-                }
-                onConnect={popup.start}
-              />
+            {missing.map((server) => (
+              <li
+                key={server.id}
+                className="flex flex-wrap items-center justify-between gap-space-3 px-space-3 py-space-2"
+              >
+                <span className="text-sm text-primary">{server.name}</span>
+                <ConnectButton
+                  server={server}
+                  connecting={popup.connecting === server.id}
+                  onConnect={popup.start}
+                />
+              </li>
             ))}
           </ul>
         </>
       )}
       <p className="mt-space-3 text-xxs leading-relaxed text-tertiary">
-        For your account only. Consent opens in a new tab; provider tokens stay
-        in LangSmith.
+        For your account only. Each page opens in a new tab; provider tokens
+        stay in LangSmith.
       </p>
     </Card>
   )

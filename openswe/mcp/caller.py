@@ -29,6 +29,7 @@ _TOOL_MODULES: Final = (
     "openswe.tools.manage_feature_flags",
     "openswe.tools.manage_review_approval_mode",
     "openswe.tools.manage_review_shadow",
+    "openswe.tools.manage_workspace_bot",
     "openswe.tools.manage_review_repos",
     "openswe.tools.read_only_sql",
     "openswe.tools.fetch_url",
@@ -105,7 +106,6 @@ class ToolCaller:
         }
 
     async def tools(self) -> dict[str, tuple[BaseTool, Access]]:
-        from openswe.mcp.instance import instance_mcp_source
         from openswe.mcp.runtime import load_mcp_tools
         from openswe.mcp.user import user_mcp_source
         from openswe.mcp.workspace import workspace_mcp_source
@@ -118,7 +118,6 @@ class ToolCaller:
             if access == "session" or admin
         }
         sources = (
-            instance_mcp_source(),
             workspace_mcp_source(DEFAULT_WORKSPACE_SLUG),
             user_mcp_source(self.login),
         )

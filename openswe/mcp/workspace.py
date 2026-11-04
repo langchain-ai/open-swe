@@ -1,4 +1,4 @@
-"""Admin-managed MCP connections of one workspace, sharded by slug; see ``openswe.mcp.instance`` for the tier above."""
+"""Admin-managed MCP connections of one workspace, sharded by slug."""
 
 import logging
 from collections.abc import Callable, Coroutine

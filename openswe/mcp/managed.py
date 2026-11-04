@@ -1,20 +1,31 @@
-"""LangSmith Managed Tools (LMT) gateways, used by each person with their own grants.
+"""LangSmith Managed Tools (LMT): each workspace's bot, and each person's own connections.
 
-An instance admin picks one LMT gateway (a curated set of tools across MCP servers,
-served from one MCP URL). Private threads in every workspace load the gateway with the
-owner's own LangSmith token, so every tool call runs with the provider connections
-that person made in LangSmith. LMT owns those provider grants and proxies the calls;
-provider tokens, consent links and the LangSmith token never reach the agent, a tool
+Every LMT server a run uses is one MCP connection to that server's own route
+(``/v1/managed-tools/servers/{id}/mcp``), named after the server. A person's own
+connection to a server therefore replaces the workspace bot's in their private threads,
+by the runtime's usual precedence.
+
+- The workspace bot is two LMT objects Open SWE makes for the workspace: a tool kit,
+  which tools its runs may call, and a profile (``X-LangSmith-Profile``), whose
+  credentials they call them with, through Open SWE's own LangSmith API key. Only admins
+  connect a profile's services or change the kit, in LangSmith or from the workspace's
+  MCP servers, where they can also register new servers.
+- A person's own connections are every LMT server they connected in LangSmith, called
+  with their own LangSmith sign-in; they load only in that person's private threads.
+
+Provider tokens, consent links and LangSmith credentials never reach the agent, a tool
 argument or the sandbox.
 """
 
 import asyncio
+import hashlib
+import json
 import logging
 import re
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
-from functools import partial
-from typing import Literal
+from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable, Iterable, Mapping
+from datetime import timedelta
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import quote
 from uuid import UUID
 
@@ -22,8 +33,8 @@ import httpx2
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
-from mcp.types import ListToolsResult
 from openswe.config import ENV
 from openswe.credential_scope import private_credential_login
 from openswe.dashboard.langsmith_oauth import (
@@ -32,27 +43,32 @@ from openswe.dashboard.langsmith_oauth import (
     langsmith_issuer,
     langsmith_oauth_configured,
 )
-from openswe.mcp.models import MCPConnection
+from openswe.database.postgres import transaction
+from openswe.mcp.models import MCPConnection, MCPScope
 from openswe.mcp.runtime import MCPSource, refresh_mcp_catalog
 from openswe.mcp.transport import mcp_http_client
+
+if TYPE_CHECKING:
+    from langgraph_api.cache import SWRResult
 
 logger = logging.getLogger(__name__)
 
 KITS_PATH = "/v1/managed-tools/kits"
 SERVERS_PATH = "/v1/managed-tools/servers"
+PROFILES_PATH = "/v1/managed-tools/profiles"
 CONSENT_SESSIONS_PATH = "/v1/agent-auth/oauth-authorization-sessions"
-CONNECTION_NAME = "lmt"
 _MISSING_CREDENTIALS_META = "com.langchain.langsmith/missingCredentials"
-_LANGSMITH_APP_SLUG_PREFIX = "langsmith-"
 _TIMEOUT_SECONDS = 30
 _MAX_PAGES = 5
+_LISTING_FRESH_FOR = timedelta(minutes=1)
+_LISTING_MAX_AGE = timedelta(minutes=10)
 # LangSmith holds each status request open this long while consent is pending.
 _CONSENT_WAIT_SECONDS = 25
 # Consent links expire after ten minutes; stop waiting shortly after.
 _CONSENT_DEADLINE_SECONDS = 11 * 60
 _CONSENT_POLL_FLOOR_SECONDS = 1
 
-type CredentialKind = Literal["oauth", "secret"]
+type CredentialKind = Literal["none", "oauth", "secret"]
 type ConsentOutcome = Literal["completed", "failed", "expired"]
 
 
@@ -65,413 +81,179 @@ class LangSmithNotConnected(ManagedToolsError):
         super().__init__("Sign in with LangSmith again first")
 
 
-class MissingCredential(BaseModel):
-    """A service in the gateway this person has not connected yet."""
-
-    slug: str
-    """Which service, for connect links and cards: LMT's credential slug, made per service
-    where several share it (see ``_service_slug``)."""
-    display_name: str
-    kind: CredentialKind
-
-
 class ConsentLink(BaseModel):
-    """LMT's single-use consent link for one service; whoever completes it connects the
-    service to the token owner's account, so it goes only to that person."""
+    """LMT's single-use link for connecting one service; whoever completes it connects the
+    service for the link's owner (a person, or a workspace bot), so it goes only to them."""
 
     url: str
     auth_id: str | None = None
 
 
-class GatewayCredentialsRequired(ManagedToolsError):
-    """LMT's 428: a gateway that offers no tools until every listed service is connected."""
-
-    def __init__(self, missing: list[MissingCredential], links: dict[str, ConsentLink]) -> None:
-        super().__init__("Connect every service in this tool kit before using its tools")
-        self.missing = missing
-        self.links = links
-
-
-class ConnectedService(BaseModel):
-    """A service in the gateway this person has connected."""
+class ManagedServer(BaseModel):
+    """One LMT server, as one caller sees it."""
 
     id: str
-    """LMT's server ID or built-in key, which disconnecting names."""
+    """LMT's server ID, or the key of a LangSmith built-in."""
     name: str
-    tool_count: int
-    disconnectable: bool = False
-    """This person has a stored credential for it; public services have none to remove."""
+    kind: CredentialKind = "none"
+    enabled: bool = True
+    connected: bool = False
+    has_credential: bool = False
+    """The caller has stored a credential for it, which disconnecting removes."""
 
+    @classmethod
+    def from_lmt(cls, item: object) -> ManagedServer | None:
+        if not isinstance(item, dict):
+            return None
+        server_id, name = item.get("id"), item.get("name")
+        if not isinstance(server_id, str) or not isinstance(name, str) or not server_id:
+            return None
+        connection = item.get("connection")
+        kind = connection.get("type") if isinstance(connection, dict) else None
+        return cls(
+            id=server_id,
+            name=name,
+            kind=kind if kind in ("oauth", "secret") else "none",
+            enabled=item.get("enabled") is not False,
+            connected=item.get("connected") is True,
+            has_credential=item.get("has_credential") is True,
+        )
 
-class Gateway(BaseModel):
-    id: str
-    name: str
-    tool_count: int
+    @property
+    def connection_name(self) -> str:
+        """The MCP connection name, the same whoever's credential the server runs with."""
+        return re.sub(r"[^a-z0-9]+", "-", self.name.lower()).strip("-") or "lmt"
 
+    @property
+    def usable(self) -> bool:
+        return self.enabled and self.connected
 
-class ManagedTool(BaseModel):
-    name: str
-    description: str | None = None
+    @property
+    def needs_connect(self) -> bool:
+        return self.enabled and not self.connected and self.kind != "none"
 
-
-class GatewayInventory(BaseModel):
-    gateway: Gateway
-    tools: list[ManagedTool]
-    missing: list[MissingCredential]
-    all_required: bool
-
-
-class GatewayStatus(BaseModel):
-    """What one person sees for a gateway: every service connected, or what is left."""
-
-    gateway: Gateway
-    ready: bool
-    tool_count: int | None = None
-    missing: list[MissingCredential] = Field(default_factory=list)
-    connected: list[ConnectedService] = Field(default_factory=list)
-    """Filled only when asked for, since naming them costs another LangSmith read."""
-    all_required: bool = False
-    """LangSmith withholds every tool until all of ``missing`` are connected. Otherwise
-    the connected services' tools load and each missing one can be connected alone."""
-
-    def missing_for(self, services: Sequence[str]) -> list[MissingCredential]:
-        """The unconnected services among ``services`` (slugs or names, as people say them).
-
-        Every unconnected service when none is named, or when the gateway needs them all.
-        """
-        if self.all_required or not services:
-            return self.missing
-        keys = {key for service in services if (key := _match_key(service))}
-        return [
-            item
-            for item in self.missing
-            if item.slug in services or any(key in _match_key(item.display_name) for key in keys)
-        ]
+    def matches(self, service: str) -> bool:
+        """Whether ``service`` names this server: its ID, or its name as people say it."""
+        if service == self.id:
+            return True
+        key = _match_key(service)
+        return bool(key) and key in _match_key(self.name)
 
 
 def _match_key(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
-@dataclass(frozen=True)
-class _Listing:
-    """One tools/list read: how many tools it offered, and what is still unconnected."""
+class Kit(BaseModel):
+    id: str
+    name: str
+    tool_count: int = 0
 
-    tool_count: int | None
-    missing: list[MissingCredential]
-    links: dict[str, ConsentLink]
-    all_required: bool
-    tools: tuple[ManagedTool, ...] = ()
+    @classmethod
+    def from_lmt(cls, item: dict[str, object]) -> Kit:
+        count, tools = item.get("tool_count"), item.get("tools")
+        return cls(
+            id=str(item["id"]),
+            name=str(item.get("name") or item["id"]),
+            tool_count=count
+            if isinstance(count, int)
+            else len(tools)
+            if isinstance(tools, list)
+            else 0,
+        )
+
+
+class BotServer(ManagedServer):
+    """One server as a workspace's bot has it: ``connected`` when the bot can call it, and
+    the kit's ``tools`` from it (none when it is not in the kit)."""
+
+    tools: list[str] = Field(default_factory=list)
 
     @property
-    def tool_names(self) -> frozenset[str]:
-        return frozenset(tool.name for tool in self.tools)
+    def in_kit(self) -> bool:
+        return bool(self.tools)
+
+
+class BotStatus(BaseModel):
+    """The workspace bot's kit and profile, and every server its admins could give it."""
+
+    kit: Kit | None
+    profile_id: str | None
+    servers: list[BotServer]
+
+    @property
+    def missing(self) -> list[BotServer]:
+        """Servers in the kit the bot cannot call yet."""
+        return [server for server in self.servers if server.in_kit and not server.connected]
+
+
+class NewServer(BaseModel):
+    """An MCP server an admin registers in LMT for the whole LangSmith workspace."""
+
+    name: str = Field(min_length=1, max_length=100)
+    url: str = Field(min_length=1, max_length=2048)
+    kind: Literal["none", "oauth", "secret"]
+    header: str | None = Field(default=None, max_length=128)
+    """For ``secret``: the header its API key goes in."""
+
+    def lmt_body(self) -> dict[str, object]:
+        if not self.url.startswith("https://"):
+            raise ManagedToolsError("Use an HTTPS URL for the server")
+        connection: dict[str, object] = {"type": self.kind}
+        if self.kind == "secret":
+            header = (self.header or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9-]{1,128}", header):
+                raise ManagedToolsError("Name the header the API key goes in")
+            connection["fields"] = [
+                {"name": header.lower(), "injection": {"type": "header", "name": header}}
+            ]
+        return {
+            "name": self.name.strip(),
+            "upstream_url": self.url,
+            "connection": connection,
+            "scope": "workspace",
+        }
+
+
+def lmt_id(value: str, what: str) -> str:
+    try:
+        return str(UUID(value))
+    except ValueError:
+        raise ManagedToolsError(f"Unknown {what}") from None
 
 
 def managed_tools_configured() -> bool:
     return langsmith_oauth_configured()
 
 
-async def instance_gateway() -> str | None:
-    """The gateway an instance admin picked; workspaces cannot override it."""
-    from openswe.dashboard.workspace_settings_cache import cached_instance_settings
-
-    return (await cached_instance_settings()).managed_tools_gateway_id
-
-
-def gateway_id(value: str) -> str:
-    try:
-        return str(UUID(value))
-    except ValueError:
-        raise ManagedToolsError("Unknown tool kit") from None
-
-
-async def _headers(login: str) -> dict[str, str]:
-    if not managed_tools_configured():
-        raise ManagedToolsError("Managed tools are not configured on this Open SWE instance")
-    token = await langsmith_access_token(login)
-    if token is None:
-        raise LangSmithNotConnected
-    headers = {"Authorization": f"Bearer {token}"}
-    # Without a pin, LangSmith uses the workspace the person chose when signing in,
-    # which their token carries.
-    if tenant := ENV.LMT_TENANT_ID.optional():
-        headers["X-Tenant-Id"] = tenant
-    return headers
-
-
-def _client() -> httpx2.AsyncClient:
-    return mcp_http_client(langsmith_issuer(), timeout=httpx2.Timeout(_TIMEOUT_SECONDS))
-
-
-def _credentials(entries: object) -> tuple[list[MissingCredential], dict[str, ConsentLink]]:
-    missing: dict[str, MissingCredential] = {}
-    links: dict[str, ConsentLink] = {}
-    for entry in entries if isinstance(entries, list) else []:
-        if not isinstance(entry, dict) or not isinstance(entry.get("slug"), str):
-            continue
-        kind: CredentialKind = "secret" if entry.get("kind") == "secret" else "oauth"
-        display_name = str(entry.get("display_name") or entry["slug"])
-        slug = _service_slug(entry["slug"], display_name)
-        missing[slug] = MissingCredential(slug=slug, display_name=display_name, kind=kind)
-        url = entry.get("verification_url")
-        if kind == "oauth" and isinstance(url, str) and url.startswith("https://"):
-            auth_id = entry.get("auth_id")
-            links[slug] = ConsentLink(
-                url=url, auth_id=auth_id if isinstance(auth_id, str) else None
-            )
-    return list(missing.values()), links
-
-
-def _service_slug(slug: str, display_name: str) -> str:
-    """One key per service, even where services share an LMT connection.
-
-    LMT keeps one connection per LangSmith OAuth app (slug prefix ``langsmith-``, e.g.
-    ``langsmith-google``) for every built-in on it, but lists each built-in apart with its
-    own consent link asking only that built-in's scopes. Keyed by slug alone, all but one
-    link would be dropped and every button would grant the same built-in.
-    """
-    if slug.startswith(_LANGSMITH_APP_SLUG_PREFIX):
-        return f"{slug}:{_match_key(display_name)}"
-    return slug
-
-
-def _credentials_required(body: object) -> GatewayCredentialsRequired:
-    return GatewayCredentialsRequired(
-        *_credentials(body.get("credentials") if isinstance(body, dict) else None)
-    )
-
-
 def _failure(response: httpx2.Response) -> ManagedToolsError:
-    if response.status_code == 428:
-        try:
-            body = response.json()
-        except ValueError:
-            logger.warning("Unreadable LMT credentials challenge")
-            body = None
-        return _credentials_required(body)
     if response.status_code in {401, 403}:
-        return ManagedToolsError("LangSmith refused access to this tool kit")
+        return ManagedToolsError("LangSmith refused access to managed tools")
     if response.status_code == 404:
-        if not ENV.LMT_TENANT_ID.optional():
-            return ManagedToolsError(
-                "The tool kit was not found or is inaccessible in the current LangSmith workspace. "
-                "A workspace mismatch is one possible cause. Sign in to the workspace containing "
-                "the kit, or ask an administrator to verify the instance gateway and pin "
-                "LMT_TENANT_ID to its workspace."
-            )
-        return ManagedToolsError("The tool kit no longer exists")
+        return ManagedToolsError("LangSmith has no such managed tools resource")
+    if response.status_code == 409:
+        return ManagedToolsError("LangSmith cannot connect this service that way")
     return ManagedToolsError(f"Managed tools failed (HTTP {response.status_code}); retry later")
 
 
-def _gateway(item: dict[str, object]) -> Gateway:
-    tools = item.get("tools")
-    count = item.get("tool_count")
-    return Gateway(
-        id=str(item["id"]),
-        name=str(item.get("name") or item["id"]),
-        tool_count=count
-        if isinstance(count, int)
-        else len(tools)
-        if isinstance(tools, list)
-        else 0,
-    )
+def _link(body: object) -> ConsentLink | None:
+    """The consent link in a credential session, or in LMT's 428 for one missing credential."""
+    if not isinstance(body, dict):
+        return None
+    if isinstance(entries := body.get("credentials"), list) and entries:
+        body = entries[0]
+        if not isinstance(body, dict):
+            return None
+    url, auth_id = body.get("verification_url"), body.get("auth_id")
+    if not isinstance(url, str) or not url.startswith("https://"):
+        return None
+    return ConsentLink(url=url, auth_id=auth_id if isinstance(auth_id, str) else None)
 
 
-async def list_gateways(login: str) -> list[Gateway]:
-    """The gateways in the LangSmith workspace, read as ``login`` (for the admin picker)."""
-    headers = await _headers(login)
-    gateways: list[Gateway] = []
-    async with _client() as client:
-        cursor: str | None = None
-        for _ in range(_MAX_PAGES):
-            params = {"page_size": "100", **({"cursor": cursor} if cursor else {})}
-            response = await client.get(
-                langsmith_issuer() + KITS_PATH, headers=headers, params=params
-            )
-            if not response.is_success:
-                raise _failure(response)
-            payload = response.json()
-            gateways.extend(
-                _gateway(item)
-                for item in payload.get("items", [])
-                if isinstance(item, dict) and item.get("id")
-            )
-            cursor = payload.get("next_cursor")
-            if not cursor:
-                break
-    return sorted(gateways, key=lambda gateway: gateway.name.lower())
-
-
-async def _gateway_detail(login: str, gateway: str) -> dict[str, object]:
-    headers = await _headers(login)
-    async with _client() as client:
-        response = await client.get(
-            f"{langsmith_issuer()}{KITS_PATH}/{gateway_id(gateway)}", headers=headers
-        )
-    if not response.is_success:
-        raise _failure(response)
-    return response.json()
-
-
-@dataclass(frozen=True)
-class _Server:
-    """What LMT's server list says about one server: its name, credential slugs, and
-    whether the caller has stored a credential for it."""
-
-    name: str
-    slugs: frozenset[str]
-    has_credential: bool = False
-
-
-def _server(item: dict[str, object]) -> _Server:
-    # A missing credential names its server by one of these (smith-go connectionSlug).
-    slugs = {f"mt-{item['id']}"}
-    if isinstance(key := item.get("key"), str) and key:
-        slugs |= {key, f"mt-builtin-{key}"}
-    connection = item.get("connection")
-    if isinstance(connection, dict) and isinstance(
-        slug := connection.get("agent_auth_connection_slug"), str
-    ):
-        slugs.add(slug)
-    return _Server(
-        name=str(item["name"]),
-        slugs=frozenset(slugs),
-        has_credential=item.get("has_credential") is True,
-    )
-
-
-async def _servers(login: str) -> dict[str, _Server]:
-    """Servers by id and key: every server a tool kit can hold.
-
-    LMT lists only the built-ins it supports (public and API-key ones) and admits only
-    those into tool kits, so OAuth built-ins are neither listed nor in a kit. Callers
-    fall back to a name from the kit when this read fails.
-    """
-    headers = await _headers(login)
-    servers: dict[str, _Server] = {}
-    async with _client() as client:
-        cursor: str | None = None
-        for _ in range(_MAX_PAGES):
-            params = {"page_size": "100", **({"cursor": cursor} if cursor else {})}
-            response = await client.get(
-                langsmith_issuer() + SERVERS_PATH, headers=headers, params=params
-            )
-            if not response.is_success:
-                raise _failure(response)
-            payload = response.json()
-            for item in payload.get("items", []):
-                if not isinstance(item, dict):
-                    continue
-                if not isinstance(item.get("name"), str) or not isinstance(item.get("id"), str):
-                    continue
-                server = _server(item)
-                for key in ("id", "key"):
-                    if isinstance(item.get(key), str):
-                        servers[item[key]] = server
-            cursor = payload.get("next_cursor")
-            if not cursor:
-                break
-    return servers
-
-
-@dataclass(frozen=True)
-class _Source:
-    """One server's tools in a gateway, by the names the gateway lists them under."""
-
-    id: str
-    fallback_name: str
-    tool_names: list[str]
-
-
-def _sources(detail: dict[str, object]) -> list[_Source]:
-    """Group the gateway's tools by server, in the order servers first appear."""
-    grouped: dict[str, _Source] = {}
-    tools = detail.get("tools")
-    for tool in tools if isinstance(tools, list) else []:
-        if not isinstance(tool, dict) or not isinstance(tool.get("mcp_name"), str):
-            continue
-        source = tool.get("server_id") or tool.get("builtin_server_key")
-        if not isinstance(source, str):
-            continue
-        if source not in grouped:
-            grouped[source] = _Source(source, _fallback_name(tool), [])
-        grouped[source].tool_names.append(tool["mcp_name"])
-    return list(grouped.values())
-
-
-def _fallback_name(tool: dict[str, object]) -> str:
-    """The server part of a gateway tool name (``<server>_<tool>``), made readable."""
-    if isinstance(key := tool.get("builtin_server_key"), str) and key:
-        name = key
-    else:
-        name = str(tool["mcp_name"])
-        upstream = tool.get("tool_name")
-        if isinstance(upstream, str) and name.endswith("_" + upstream):
-            name = name.removesuffix("_" + upstream)
-    name = re.sub(r"[_-]+", " ", name).strip()
-    return name[:1].upper() + name[1:]
-
-
-def _connected_services(
-    sources: list[_Source], servers: dict[str, _Server], listing: _Listing
-) -> list[ConnectedService]:
-    missing_slugs = {item.slug for item in listing.missing}
-    missing_names = {_match_key(item.display_name) for item in listing.missing}
-    connected: list[ConnectedService] = []
-    for source in sources:
-        server = servers.get(source.id)
-        name = server.name if server else source.fallback_name
-        slugs = (
-            server.slugs
-            if server
-            else frozenset({source.id, f"mt-{source.id}", f"mt-builtin-{source.id}"})
-        )
-        if listing.all_required:
-            # LangSmith listed nothing, so a service counts as connected when it is not missing:
-            # matched by credential slug first, then by name.
-            if slugs & missing_slugs or _match_key(name) in missing_names:
-                continue
-            count = len(source.tool_names)
-        else:
-            count = sum(tool in listing.tool_names for tool in source.tool_names)
-            if not count:
-                continue
-        connected.append(
-            ConnectedService(
-                id=source.id,
-                name=name,
-                tool_count=count,
-                disconnectable=server.has_credential if server else False,
-            )
-        )
-    return connected
-
-
-def _mcp_url(gateway: str) -> str:
-    return f"{langsmith_issuer()}{KITS_PATH}/{gateway_id(gateway)}/mcp"
-
-
-def _gateway_client(headers: dict[str, str], gateway: str) -> Client[StreamableHttpTransport]:
-    async def check(response: httpx2.Response) -> None:
-        if response.status_code >= 300:
-            await response.aread()
-            raise _failure(response)
-
-    def factory(
-        headers: dict[str, str] | None = None,
-        timeout: httpx2.Timeout | None = None,
-        auth: httpx2.Auth | None = None,
-        follow_redirects: bool = False,
-    ) -> httpx2.AsyncClient:
-        client = mcp_http_client(_mcp_url(gateway), headers, timeout, auth, follow_redirects)
-        client.event_hooks["response"].append(check)
-        return client
-
-    transport = StreamableHttpTransport(
-        _mcp_url(gateway), headers=headers, httpx_client_factory=factory
-    )
-    return Client(transport, timeout=_TIMEOUT_SECONDS)
+class _CredentialRequired(ManagedToolsError):
+    def __init__(self, link: ConsentLink | None) -> None:
+        super().__init__("Connect this service first")
+        self.link = link
 
 
 def _wrapped[E: BaseException](error: BaseException, kind: type[E]) -> E | None:
@@ -485,250 +267,611 @@ def _wrapped[E: BaseException](error: BaseException, kind: type[E]) -> E | None:
     return None
 
 
-async def _with_session[T](
-    login: str, gateway: str, use: Callable[[Client[StreamableHttpTransport]], Awaitable[T]]
-) -> T:
-    headers = await _headers(login)
-    try:
-        async with asyncio.timeout(_TIMEOUT_SECONDS):
-            async with _gateway_client(headers, gateway) as client:
-                return await use(client)
-    except Exception as exc:
-        if (found := _wrapped(exc, ManagedToolsError)) is not None:
-            raise found from None
-        raise ManagedToolsError("Could not reach the tool kit; retry later") from None
-
-
-async def _list_tools(client: Client[StreamableHttpTransport]) -> ListToolsResult:
-    result = await client.list_tools_mcp()
-    for _ in range(_MAX_PAGES - 1):
-        if not result.next_cursor:
-            return result
-        page = await client.list_tools_mcp(cursor=result.next_cursor)
-        result.tools.extend(page.tools)
-        missing = [
-            entry
-            for listing in (result, page)
-            if isinstance(entries := (listing.meta or {}).get(_MISSING_CREDENTIALS_META), list)
-            for entry in entries
-        ]
-        result.meta = {_MISSING_CREDENTIALS_META: missing}
-        result.next_cursor = page.next_cursor
-    if result.next_cursor:
-        raise ManagedToolsError(
-            "Managed tools listing exceeded the page limit; narrow the tool kit"
-        )
-    return result
-
-
-async def _listing(login: str, gateway: str) -> _Listing:
-    """Read the gateway's tools as ``login``, under either of LMT's connection policies.
-
-    A gateway that requires every connection answers 428 until all are made. One that
-    allows partial use lists the connected services' tools and names the rest in _meta.
-    """
-    try:
-        result = await _with_session(login, gateway, _list_tools)
-    except GatewayCredentialsRequired as required:
-        return _Listing(None, required.missing, required.links, all_required=True)
-    missing, links = _credentials((result.meta or {}).get(_MISSING_CREDENTIALS_META))
-    return _Listing(
-        len(result.tools),
-        missing,
-        links,
-        all_required=False,
-        tools=tuple(
-            ManagedTool(name=tool.name, description=tool.description) for tool in result.tools
-        ),
-    )
-
-
-async def gateway_inventory(login: str, gateway: str) -> GatewayInventory:
-    """The configured kit's callable tools and missing services, without consent secrets."""
-    detail, listing = await asyncio.gather(
-        _gateway_detail(login, gateway), _listing(login, gateway)
-    )
-    return GatewayInventory(
-        gateway=_gateway(detail),
-        tools=list(listing.tools),
-        missing=listing.missing,
-        all_required=listing.all_required,
-    )
-
-
-async def gateway_status(
-    login: str, gateway: str, *, with_connected: bool = False
-) -> GatewayStatus:
-    """Whether ``login`` has connected every service in the gateway, or which are left.
-
-    ``with_connected`` also names the services already connected, for settings pages.
-    """
-
-    async def servers() -> dict[str, _Server]:
-        try:
-            return await _servers(login)
-        except ManagedToolsError:
-            logger.warning("Managed tools server names unavailable", exc_info=True)
-            return {}
-
-    # Independent LangSmith reads; the tools/list fan-out dominates, so run them together.
-    if with_connected:
-        detail, listing, names = await asyncio.gather(
-            _gateway_detail(login, gateway), _listing(login, gateway), servers()
-        )
-        connected = _connected_services(_sources(detail), names, listing)
-    else:
-        detail, listing = await asyncio.gather(
-            _gateway_detail(login, gateway), _listing(login, gateway)
-        )
-        connected = []
-    return GatewayStatus(
-        gateway=_gateway(detail),
-        ready=not listing.missing,
-        tool_count=listing.tool_count,
-        missing=listing.missing,
-        connected=connected,
-        all_required=listing.all_required,
-    )
-
-
-async def connect_link(login: str, gateway: str, slug: str) -> ConsentLink | None:
-    """A fresh consent link for one service in the gateway; None when it is connected."""
-    listing = await _listing(login, gateway)
-    if any(item.slug == slug and item.kind == "secret" for item in listing.missing):
-        raise ManagedToolsError("Set this service's API key in LangSmith, then refresh")
-    if slug in listing.links:
-        return listing.links[slug]
-    if any(item.slug == slug for item in listing.missing):
-        raise ManagedToolsError("LangSmith did not return a consent link; retry")
-    return None
-
-
-async def disconnect_service(login: str, gateway: str, service: str) -> None:
-    """Delete ``login``'s own LangSmith credential for one service in the gateway.
-
-    LangSmith keeps the server and everyone else's credentials; the person can connect again.
-    """
-    if service not in {source.id for source in _sources(await _gateway_detail(login, gateway))}:
-        raise ManagedToolsError("This tool kit has no such service")
-    headers = await _headers(login)
-    async with _client() as client:
-        response = await client.delete(
-            f"{langsmith_issuer()}{SERVERS_PATH}/{quote(service, safe='')}/credential",
-            headers=headers,
-        )
-    if response.status_code == 404:
-        raise ManagedToolsError("This service no longer exists in LangSmith")
-    if response.status_code == 409:
-        raise ManagedToolsError("This service has no connection to remove")
-    if not response.is_success:
-        raise _failure(response)
-    try:
-        await refresh_tools(login, gateway)
-    except Exception:
-        # A gateway that now misses a service may refuse to list; its stale list expires.
-        logger.warning(
-            "Managed tools refresh after disconnect failed",
-            extra={"gateway": gateway},
-            exc_info=True,
-        )
-
-
-async def refresh_tools(login: str, gateway: str) -> None:
-    """Re-read the gateway's cached tool list, so a newly connected service's tools load."""
-    await refresh_mcp_catalog(managed_mcp_source(login, gateway), CONNECTION_NAME)
-
-
-async def consent_outcome(login: str, auth_id: str) -> ConsentOutcome:
-    """Wait for the person to finish (or abandon) one consent link."""
-    headers = await _headers(login)
-    url = f"{langsmith_issuer()}{CONSENT_SESSIONS_PATH}/{quote(auth_id, safe='')}"
-    timeout = httpx2.Timeout(_TIMEOUT_SECONDS + _CONSENT_WAIT_SECONDS)
-    async with asyncio.timeout(_CONSENT_DEADLINE_SECONDS):
-        async with mcp_http_client(langsmith_issuer(), timeout=timeout) as client:
-            while True:
-                response = await client.get(
-                    url, headers=headers, params={"wait_seconds": str(_CONSENT_WAIT_SECONDS)}
-                )
-                if not response.is_success:
-                    raise ManagedToolsError(
-                        f"Consent status unavailable (HTTP {response.status_code})"
-                    )
-                status = response.json().get("status")
-                if status in ("completed", "failed", "expired"):
-                    return status
-                if status != "pending":
-                    raise ManagedToolsError("LangSmith returned an unknown consent status")
-                # Long polls return early sometimes; never hammer LangSmith with the owner's token.
-                await asyncio.sleep(_CONSENT_POLL_FLOOR_SECONDS)
-
-
-class _GatewayConnection(MCPConnection):
-    """The gateway route, carrying the caller's current token in memory, never stored.
-
-    Every tool the gateway lists is offered: the admin curates the gateway in LangSmith.
-    """
+class _ServerConnection(MCPConnection):
+    """One LMT server's route, carrying the caller's current credential in memory, never
+    stored. ``tools`` limits it to a tool kit's tools; ``None`` offers every tool."""
 
     headers: dict[str, str] = Field(default_factory=dict, repr=False, exclude=True)
+    tools: frozenset[str] | None = Field(default=None, exclude=True)
 
     def connection_headers(self) -> dict[str, str]:
         return self.headers
 
     def allows_tool(self, name: str) -> bool:
-        return True
+        return self.tools is None or name in self.tools
 
     @property
     def offers_tools(self) -> bool:
         return True
 
 
-async def _connections(login: str, gateway: str) -> list[MCPConnection]:
-    """Resolved on every lookup, so each tool call carries a freshly refreshed token."""
-    if not managed_tools_configured():
-        return []
-    try:
-        headers = await _headers(login)
-    except LangSmithNotConnected:
-        logger.info("Managed tools skipped; LangSmith not connected", extra={"login": login})
-        return []
-    except LangSmithOAuthError as exc:
-        # Raising would make the runtime drop every tier's MCPs; only these depend on LangSmith.
-        logger.warning(
-            "Managed tools skipped; LangSmith token unavailable",
-            extra={"login": login, "status_code": exc.status_code},
+class ManagedTools(ABC):
+    """What one LangSmith caller reaches in LMT, offered to runs as MCP connections."""
+
+    scope: MCPScope
+    namespace: tuple[str, ...]
+
+    @abstractmethod
+    async def headers(self) -> dict[str, str]:
+        """How LMT identifies the caller; raises :class:`LangSmithNotConnected`."""
+
+    @abstractmethod
+    async def _authorize(self) -> None:
+        """Refuse a tool call the run may not make with this caller's credentials."""
+
+    def _tenant(self) -> dict[str, str]:
+        # Without a pin, LangSmith uses the workspace the credential carries.
+        return {"X-Tenant-Id": tenant} if (tenant := ENV.LMT_TENANT_ID.optional()) else {}
+
+    def _client(self) -> httpx2.AsyncClient:
+        return mcp_http_client(langsmith_issuer(), timeout=httpx2.Timeout(_TIMEOUT_SECONDS))
+
+    async def _request(
+        self, method: str, path: str, *, body: object = None, ok: Iterable[int] = ()
+    ) -> httpx2.Response:
+        headers = await self.headers()
+        async with self._client() as client:
+            response = await client.request(
+                method, langsmith_issuer() + path, headers=headers, json=body
+            )
+        if not response.is_success and response.status_code not in set(ok):
+            raise _failure(response)
+        return response
+
+    async def _pages(self, path: str) -> list[object]:
+        items: list[object] = []
+        headers = await self.headers()
+        async with self._client() as client:
+            cursor: str | None = None
+            for _ in range(_MAX_PAGES):
+                params = {"page_size": "100", **({"cursor": cursor} if cursor else {})}
+                response = await client.get(
+                    langsmith_issuer() + path, headers=headers, params=params
+                )
+                if not response.is_success:
+                    raise _failure(response)
+                payload = response.json()
+                items.extend(payload.get("items", []))
+                cursor = payload.get("next_cursor")
+                if not cursor:
+                    break
+        return items
+
+    def _loaders(self) -> dict[str, Callable[[], Awaitable[object]]]:
+        """Each cached LangSmith listing, by name, as the JSON its loader stores."""
+        return {"servers": self._load_servers}
+
+    async def _swr(self, listing: str) -> SWRResult[object]:
+        from langgraph_api.cache import swr
+
+        digest = hashlib.sha256(json.dumps(self.namespace).encode()).hexdigest()
+        return await swr(
+            f"lmt:{listing}:{digest}",
+            self._loaders()[listing],
+            fresh_for=_LISTING_FRESH_FOR,
+            max_age=_LISTING_MAX_AGE,
         )
-        return []
-    return [
-        _GatewayConnection(
-            name=CONNECTION_NAME,
-            url=_mcp_url(gateway),
-            revision=gateway_id(gateway),
-            updated_at="",
-            headers=headers,
+
+    async def _cached(self, listing: str) -> object:
+        """A listing shared by every replica for a minute, so runs and tool calls do not
+        each ask LangSmith; :meth:`refresh` re-reads it after a connection changes."""
+        return (await self._swr(listing)).value
+
+    async def _load_servers(self) -> list[dict[str, object]]:
+        servers = [ManagedServer.from_lmt(item) for item in await self._pages(SERVERS_PATH)]
+        return [server.model_dump(mode="json") for server in servers if server is not None]
+
+    async def servers(self) -> list[ManagedServer]:
+        """Every server the caller can see in the LangSmith workspace, with its state."""
+        cached = await self._cached("servers")
+        items = cached if isinstance(cached, list) else []
+        return [ManagedServer.model_validate(item) for item in items]
+
+    async def server(self, server_id: str) -> ManagedServer:
+        found = next((item for item in await self.servers() if item.id == server_id), None)
+        if found is None:
+            raise ManagedToolsError("LangSmith has no such service")
+        return found
+
+    async def offered(self) -> list[tuple[ManagedServer, frozenset[str] | None]]:
+        """The servers whose tools runs load, each with the tools they may call (``None``:
+        all): every one the caller connected an account to. Public servers count as
+        connected for everyone, so they are no one's own."""
+        return [
+            (server, None)
+            for server in await self.servers()
+            if server.usable and server.has_credential
+        ]
+
+    async def refresh(self) -> None:
+        """Re-read the listings now, then each offered server's tools, so a service that
+        was just connected or disconnected shows in the next run."""
+        for listing in self._loaders():
+            result = await self._swr(listing)
+            if result.status != "miss":
+                await result.mutate()
+        source = self.source()
+        for connection in await self.connections():
+            await refresh_mcp_catalog(source, connection.name)
+
+    async def connections(self) -> list[MCPConnection]:
+        """Resolved on every lookup, so each tool call carries a fresh credential.
+
+        Failures leave out only these servers: raising would make the runtime drop
+        every tier's MCPs, and only these depend on LangSmith.
+        """
+        if not managed_tools_configured():
+            return []
+        try:
+            headers = await self.headers()
+            offered = await self.offered()
+        except LangSmithNotConnected:
+            logger.info("Managed tools skipped; LangSmith not connected")
+            return []
+        except LangSmithOAuthError as exc:
+            logger.warning(
+                "Managed tools skipped; LangSmith token unavailable",
+                extra={"status_code": exc.status_code},
+            )
+            return []
+        except ManagedToolsError:
+            logger.warning("Managed tools skipped; LangSmith listing failed", exc_info=True)
+            return []
+        connections: dict[str, MCPConnection] = {}
+        for server, tools in offered:
+            name = server.connection_name
+            if name in connections:
+                # LangSmith lets a registered server share a built-in's name (Linear, Pylon).
+                name = f"{name}-{server.id[:8].lower()}"
+            connections[name] = _ServerConnection(
+                name=name,
+                url=f"{langsmith_issuer()}{SERVERS_PATH}/{quote(server.id, safe='')}/mcp",
+                revision=hashlib.sha256(
+                    json.dumps([server.id, sorted(tools or [])]).encode()
+                ).hexdigest()[:16],
+                updated_at="",
+                headers=headers,
+                tools=tools,
+            )
+        return list(connections.values())
+
+    async def connection(self, name: str) -> MCPConnection | None:
+        return next((item for item in await self.connections() if item.name == name), None)
+
+    def source(self) -> MCPSource:
+        return MCPSource(
+            scope=self.scope,
+            namespace=self.namespace,
+            list_connections=self.connections,
+            get_connection=self.connection,
+            authorize=self._authorize,
         )
-    ]
+
+    def _mcp_failure(self, response: httpx2.Response) -> ManagedToolsError:
+        if response.status_code == 428:
+            try:
+                body: object = response.json()
+            except ValueError:
+                body = None
+            return _CredentialRequired(_link(body))
+        return _failure(response)
+
+    async def _mcp[T](
+        self, path: str, use: Callable[[Client[StreamableHttpTransport]], Awaitable[T]]
+    ) -> T:
+        """One MCP session with an LMT route, its HTTP failures raised as ours."""
+        url = langsmith_issuer() + path
+
+        async def check(response: httpx2.Response) -> None:
+            if response.status_code >= 300:
+                await response.aread()
+                raise self._mcp_failure(response)
+
+        def factory(
+            headers: dict[str, str] | None = None,
+            timeout: httpx2.Timeout | None = None,
+            auth: httpx2.Auth | None = None,
+            follow_redirects: bool = False,
+        ) -> httpx2.AsyncClient:
+            client = mcp_http_client(url, headers, timeout, auth, follow_redirects)
+            client.event_hooks["response"].append(check)
+            return client
+
+        transport = StreamableHttpTransport(
+            url, headers=await self.headers(), httpx_client_factory=factory
+        )
+        try:
+            async with asyncio.timeout(_TIMEOUT_SECONDS):
+                async with Client(transport, timeout=_TIMEOUT_SECONDS) as client:
+                    return await use(client)
+        except Exception as exc:
+            if (found := _wrapped(exc, ManagedToolsError)) is not None:
+                raise found from None
+            raise ManagedToolsError("Could not reach managed tools; retry later") from None
+
+    async def consent_outcome(self, auth_id: str) -> ConsentOutcome:
+        """Wait for whoever was sent one consent link to finish (or abandon) it."""
+        headers = await self.headers()
+        url = f"{langsmith_issuer()}{CONSENT_SESSIONS_PATH}/{quote(auth_id, safe='')}"
+        timeout = httpx2.Timeout(_TIMEOUT_SECONDS + _CONSENT_WAIT_SECONDS)
+        async with asyncio.timeout(_CONSENT_DEADLINE_SECONDS):
+            async with mcp_http_client(langsmith_issuer(), timeout=timeout) as client:
+                while True:
+                    response = await client.get(
+                        url, headers=headers, params={"wait_seconds": str(_CONSENT_WAIT_SECONDS)}
+                    )
+                    if not response.is_success:
+                        raise ManagedToolsError(
+                            f"Consent status unavailable (HTTP {response.status_code})"
+                        )
+                    status = response.json().get("status")
+                    if status in ("completed", "failed", "expired"):
+                        return status
+                    if status != "pending":
+                        raise ManagedToolsError("LangSmith returned an unknown consent status")
+                    # Long polls return early sometimes; never hammer LangSmith.
+                    await asyncio.sleep(_CONSENT_POLL_FLOOR_SECONDS)
 
 
-async def _connection(login: str, gateway: str, name: str) -> MCPConnection | None:
-    # Every MCP tool call looks its connection up here first; only ours needs a token.
-    if name != CONNECTION_NAME:
-        return None
-    return next(iter(await _connections(login, gateway)), None)
+class PersonalTools(ManagedTools):
+    """LMT as one person, with their own LangSmith sign-in.
 
+    Their runs load every server they have connected; the rest are theirs to connect.
+    The same sign-in reads and sets up workspace bots, which LangSmith permits only to
+    workspace admins.
+    """
 
-def managed_mcp_source(login: str, gateway: str) -> MCPSource:
-    """The workspace gateway, used as the private-thread owner, after their own MCPs."""
-    login = login.strip().lower()
+    scope: MCPScope = "managed"
 
-    async def authorize() -> None:
+    def __init__(self, login: str) -> None:
+        self.login = login.strip().lower()
+        self.namespace = ("managed_tools", self.login)
+
+    async def headers(self) -> dict[str, str]:
+        if not managed_tools_configured():
+            raise ManagedToolsError("Managed tools are not configured on this Open SWE instance")
+        token = await langsmith_access_token(self.login)
+        if token is None:
+            raise LangSmithNotConnected
+        return {"Authorization": f"Bearer {token}", **self._tenant()}
+
+    async def _authorize(self) -> None:
         owner = await private_credential_login()
-        if owner is None or owner.strip().lower() != login:
-            raise RuntimeError("Managed tools require the private thread owner")
+        if owner is None or owner.strip().lower() != self.login:
+            raise RuntimeError("Personal managed tools require the private thread owner")
 
-    return MCPSource(
-        scope="managed",
-        namespace=("managed_tools", login, gateway_id(gateway)),
-        list_connections=partial(_connections, login, gateway),
-        get_connection=partial(_connection, login, gateway),
-        authorize=authorize,
-    )
+    async def unconnected(self, services: Iterable[str] = ()) -> list[ManagedServer]:
+        """The services this person could connect, narrowed to ``services`` when named."""
+        wanted = list(services)
+        return [
+            server
+            for server in await self.servers()
+            if server.needs_connect and (not wanted or any(server.matches(s) for s in wanted))
+        ]
+
+    async def connect_link(self, server_id: str) -> ConsentLink | None:
+        """A fresh link connecting one service for this person; None when it already works."""
+        server = await self.server(server_id)
+        if server.usable:
+            return None
+        if server.kind == "secret":
+            response = await self._request(
+                "POST", f"{SERVERS_PATH}/{quote(server.id, safe='')}/credential-sessions"
+            )
+            if (link := _link(response.json())) is None:
+                raise ManagedToolsError("LangSmith did not return a setup link; retry")
+            # Its status lives elsewhere in Agent Auth, so nothing waits on it; the next
+            # listing (within a minute) shows the service connected.
+            return ConsentLink(url=link.url)
+
+        async def ping(client: Client[StreamableHttpTransport]) -> None:
+            await client.list_tools_mcp()
+
+        # LMT answers an OAuth server's first request with 428 and the consent link.
+        try:
+            await self._mcp(f"{SERVERS_PATH}/{quote(server.id, safe='')}/mcp", ping)
+        except _CredentialRequired as required:
+            if required.link is None:
+                raise ManagedToolsError("LangSmith did not return a consent link; retry") from None
+            return required.link
+        await self.refresh()
+        return None
+
+    async def disconnect(self, server_id: str) -> None:
+        """Delete this person's own credential for one service; LangSmith keeps the server."""
+        server = await self.server(server_id)
+        response = await self._request(
+            "DELETE", f"{SERVERS_PATH}/{quote(server.id, safe='')}/credential", ok=(404, 409)
+        )
+        if response.status_code == 404:
+            raise ManagedToolsError("This service no longer exists in LangSmith")
+        if response.status_code == 409:
+            raise ManagedToolsError("This service has no connection to remove")
+        await self.refresh()
+
+    async def kits(self) -> list[Kit]:
+        return sorted(
+            (
+                Kit.from_lmt(item)
+                for item in await self._pages(KITS_PATH)
+                if isinstance(item, dict) and item.get("id")
+            ),
+            key=lambda kit: kit.name.lower(),
+        )
+
+    async def bot_profile(self, bot: BotTools) -> BotTools:
+        """``bot`` with an LMT profile, making and saving the workspace's first one.
+
+        Under a lock per workspace, and reusing a profile LangSmith already has under the
+        workspace's name, so admins connecting at once or a lost setting make no second one.
+        """
+        if bot.profile is not None:
+            return bot
+        async with transaction() as conn:
+            await conn.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:lock))"),
+                {"lock": f"lmt-bot-profile:{bot.workspace}"},
+            )
+            if (current := await BotTools.of(bot.workspace)).profile:
+                return current
+            name = BotTools.lmt_name(bot.workspace)
+            existing = next(
+                (
+                    str(item["id"])
+                    for item in await self._pages(PROFILES_PATH)
+                    if isinstance(item, dict) and item.get("id") and item.get("name") == name
+                ),
+                None,
+            )
+            if existing is None:
+                response = await self._request("POST", PROFILES_PATH, body={"name": name})
+                existing = str(response.json()["id"])
+            return await current.adopt(profile=existing)
+
+    async def set_bot_tools(self, bot: BotTools, server_id: str, tools: Iterable[str]) -> BotTools:
+        """Make ``tools`` the bot's kit's tools from one server, as this admin.
+
+        None takes the server out of the kit; the workspace's first tools make its kit.
+        Open SWE's writes to one workspace's kit wait on each other, so none drops another.
+        """
+        wanted = sorted(set(tools))
+        async with transaction() as conn:
+            await conn.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:lock))"),
+                {"lock": f"lmt-bot-kit:{bot.workspace}"},
+            )
+            bot = await BotTools.of(bot.workspace)
+            links = [
+                link
+                for link in BotTools.kit_links(await bot.load_kit())
+                if BotTools.link_source(link) != server_id
+            ]
+            links += [BotTools.tool_link(server_id, name) for name in wanted]
+            if bot.kit is None:
+                if not wanted:
+                    return bot
+                response = await self._request(
+                    "POST",
+                    KITS_PATH,
+                    body={
+                        "name": BotTools.lmt_name(bot.workspace),
+                        "scope": "workspace",
+                        "connection_policy": "ALLOW_PARTIAL",
+                        "tools": links,
+                    },
+                )
+                bot = await bot.adopt(kit=str(response.json()["id"]))
+            else:
+                await self._request(
+                    "PATCH", f"{KITS_PATH}/{quote(bot.kit, safe='')}", body={"tools": links}
+                )
+        await bot.refresh()
+        return bot
+
+    async def enable_for_bot(self, bot: BotTools, server_id: str) -> BotTools:
+        """Put every tool the bot can list from one server in its kit."""
+        return await self.set_bot_tools(bot, server_id, await bot.server_tools(server_id))
+
+    async def remove_from_bot(self, bot: BotTools, server_id: str) -> None:
+        """Take one server out of the bot's kit and delete the bot's credential for it;
+        LangSmith keeps the server for everyone else."""
+        bot = await self.set_bot_tools(bot, server_id, ())
+        if bot.profile is not None and (await bot.server(server_id)).kind != "none":
+            await self._request(
+                "DELETE", f"{bot.profile_server_path(server_id)}/credential", ok=(404,)
+            )
+            await bot.refresh()
+
+    async def create_server(self, new: NewServer) -> ManagedServer:
+        """Register a server in LMT for the LangSmith workspace, as this admin."""
+        response = await self._request("POST", SERVERS_PATH, body=new.lmt_body())
+        if (server := ManagedServer.from_lmt(response.json())) is None:
+            raise ManagedToolsError("LangSmith returned an unreadable server")
+        await self.refresh()
+        return server
+
+    async def connect_for_bot(self, bot: BotTools, server_id: str) -> ConsentLink:
+        """A link where this admin connects one service for the workspace bot."""
+        path = f"{bot.profile_server_path(server_id)}/credential-sessions"
+        if (link := _link((await self._request("POST", path)).json())) is None:
+            raise ManagedToolsError("LangSmith did not return a consent link; retry")
+        return link
+
+
+class BotTools(ManagedTools):
+    """A workspace's bot: its tool kit's tools, called with its LMT profile's credentials.
+
+    Every run in the workspace loads them, public threads and automations included, so
+    they run with credentials an admin connected for the whole workspace. Each kit server
+    is called on its own route, so a person's own connection to it replaces the bot's in
+    their private threads.
+    """
+
+    scope: MCPScope = "bot"
+
+    def __init__(self, workspace: str, kit: str | None = None, profile: str | None = None) -> None:
+        self.workspace = workspace.strip().lower()
+        # Each is None until an admin first gives the bot a server.
+        self.kit = None if kit is None else lmt_id(kit, "tool kit")
+        self.profile = None if profile is None else lmt_id(profile, "bot profile")
+        self.namespace = (
+            "managed_tools",
+            "bot",
+            self.workspace,
+            self.kit or "",
+            self.profile or "",
+        )
+
+    @staticmethod
+    def lmt_name(workspace: str) -> str:
+        """The name of the kit and the profile Open SWE makes for a workspace's bot."""
+        return f"Open SWE bot ({workspace})"
+
+    @classmethod
+    async def of(cls, workspace: str) -> BotTools:
+        """The workspace's bot, with the kit and profile it has so far."""
+        from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+
+        settings = await cached_workspace_settings(workspace)
+        return cls(workspace, settings.managed_tools_gateway_id, settings.managed_tools_profile_id)
+
+    @classmethod
+    async def for_workspace(cls, workspace: str) -> BotTools | None:
+        """The bot a run loads, once it has a kit and Open SWE has a LangSmith key."""
+        bot = await cls.of(workspace)
+        return bot if bot.kit is not None and ENV.LANGSMITH_API_KEY.is_set() else None
+
+    async def adopt(self, *, kit: str | None = None, profile: str | None = None) -> BotTools:
+        """Save a kit or profile Open SWE made as the workspace bot's, returning that bot."""
+        from openswe.dashboard.workspace_settings import (
+            WorkspaceSettingsUpdate,
+            upsert_workspace_overrides,
+            workspace_record,
+        )
+
+        record = await workspace_record(self.workspace)
+        if kit is not None:
+            record["managed_tools_gateway_id"] = kit
+        if profile is not None:
+            record["managed_tools_profile_id"] = profile
+        await upsert_workspace_overrides(
+            self.workspace, WorkspaceSettingsUpdate.model_validate(record)
+        )
+        return BotTools(self.workspace, kit or self.kit, profile or self.profile)
+
+    def profile_server_path(self, server_id: str) -> str:
+        if self.profile is None:
+            raise ManagedToolsError("This workspace bot has no LMT profile yet")
+        profile, server = quote(self.profile, safe=""), quote(server_id, safe="")
+        return f"{PROFILES_PATH}/{profile}/servers/{server}"
+
+    async def _authorize(self) -> None:
+        """Every run in the workspace may call its bot's tools."""
+        return
+
+    async def headers(self) -> dict[str, str]:
+        if not ENV.LANGSMITH_API_KEY.is_set():
+            raise ManagedToolsError("Open SWE has no LangSmith API key for the workspace bot")
+        return {
+            "X-Api-Key": ENV.LANGSMITH_API_KEY.get(),
+            **({"X-LangSmith-Profile": self.profile} if self.profile else {}),
+            **self._tenant(),
+        }
+
+    def _loaders(self) -> dict[str, Callable[[], Awaitable[object]]]:
+        return {**super()._loaders(), "kit": self.load_kit}
+
+    async def load_kit(self) -> dict[str, object]:
+        """The kit as LangSmith has it now, uncached."""
+        if self.kit is None:
+            return {}
+        return (await self._request("GET", f"{KITS_PATH}/{quote(self.kit, safe='')}")).json()
+
+    @staticmethod
+    def link_source(link: Mapping[str, object]) -> object:
+        return link.get("server_id") or link.get("builtin_server_key")
+
+    @staticmethod
+    def tool_link(server_id: str, tool_name: str) -> dict[str, object]:
+        """A kit link to one tool; built-ins are named by key, registered servers by ID."""
+        try:
+            source: dict[str, object] = {"server_id": str(UUID(server_id))}
+        except ValueError:
+            source = {"builtin_server_key": server_id}
+        return {**source, "tool_name": tool_name}
+
+    @staticmethod
+    def kit_links(detail: Mapping[str, object]) -> list[dict[str, object]]:
+        """The kit's links as LangSmith takes them back, so a write keeps every other one."""
+        tools = detail.get("tools")
+        links: list[dict[str, object]] = []
+        for tool in tools if isinstance(tools, list) else []:
+            if not isinstance(tool, dict) or not isinstance(tool.get("tool_name"), str):
+                continue
+            link = {
+                key: tool[key]
+                for key in ("server_id", "builtin_server_key", "tool_name", "exposed_name")
+                if tool.get(key)
+            }
+            if BotTools.link_source(link):
+                links.append(link)
+        return links
+
+    async def kit_tools(self) -> dict[str, frozenset[str]]:
+        """The kit's upstream tool names, by server."""
+        detail = await self._cached("kit")
+        grouped: dict[str, set[str]] = {}
+        for link in self.kit_links(detail if isinstance(detail, dict) else {}):
+            source, name = self.link_source(link), link["tool_name"]
+            if isinstance(source, str) and isinstance(name, str):
+                grouped.setdefault(source, set()).add(name)
+        return {source: frozenset(names) for source, names in grouped.items()}
+
+    def _can_call(self, server: ManagedServer) -> bool:
+        if not server.enabled:
+            return False
+        if server.kind == "none":
+            # Public servers need no credential, so they work without a profile.
+            return server.connected
+        return self.profile is not None and server.usable and server.has_credential
+
+    async def bot_servers(self) -> list[BotServer]:
+        """Every server the workspace's admins could give the bot, as the bot has it."""
+        servers, kit_tools = await asyncio.gather(self.servers(), self.kit_tools())
+        return [
+            BotServer(
+                **server.model_dump(),
+                tools=sorted(kit_tools.get(server.id, ())),
+            ).model_copy(update={"connected": self._can_call(server)})
+            for server in servers
+        ]
+
+    async def offered(self) -> list[tuple[ManagedServer, frozenset[str] | None]]:
+        if self.kit is None:
+            return []
+        return [
+            (server, frozenset(server.tools))
+            for server in await self.bot_servers()
+            if server.in_kit and server.connected
+        ]
+
+    async def server_tools(self, server_id: str) -> list[str]:
+        """The tools the bot can list from one server, live."""
+
+        async def listed(client: Client[StreamableHttpTransport]) -> list[str]:
+            return [tool.name for tool in await client.list_tools()]
+
+        try:
+            return await self._mcp(f"{SERVERS_PATH}/{quote(server_id, safe='')}/mcp", listed)
+        except _CredentialRequired:
+            raise ManagedToolsError("Connect this service for the bot first") from None
+
+    async def status(self) -> BotStatus:
+        """The bot's kit and profile, and every server with whether the bot can call it."""
+        detail, servers = await asyncio.gather(self._cached("kit"), self.bot_servers())
+        kit = (
+            Kit.from_lmt({**detail, "id": self.kit})
+            if self.kit is not None and isinstance(detail, dict) and detail
+            else None
+        )
+        return BotStatus(kit=kit, profile_id=self.profile, servers=servers)

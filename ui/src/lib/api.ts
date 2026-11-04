@@ -403,8 +403,10 @@ export interface WorkspaceSettings {
   fable_enabled?: boolean
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
-  /** LangSmith Managed Tools gateway private threads load with the owner's LangSmith login. */
+  /** The workspace bot's LangSmith Managed Tools kit; every run in the workspace loads it. */
+  /** The LangSmith Managed Tools profile the workspace bot runs its kit's tools as. */
   managed_tools_gateway_id?: string | null
+  managed_tools_profile_id?: string | null
   org_guidelines?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
@@ -473,36 +475,20 @@ export interface MCPConnectionUpdate {
   oauth?: MCPOAuthUpdate | null
 }
 
-export interface ManagedToolsGateway {
-  id: string
-  name: string
-  tool_count: number
-}
-
-export interface ManagedToolsMissingCredential {
-  slug: string
-  display_name: string
-  kind: "oauth" | "secret"
-}
-
-export interface ManagedToolsConnectedService {
+/** One of the caller's LangSmith Managed Tools servers. */
+export interface ManagedServer {
   /** LangSmith's server ID or built-in key. */
   id: string
   name: string
-  tool_count: number
-  /** The caller has a stored credential for it; public services have none. */
-  disconnectable: boolean
+  kind: "none" | "oauth" | "secret"
+  enabled: boolean
+  connected: boolean
+  /** The caller has a stored credential for it, so it can be disconnected. */
+  has_credential: boolean
 }
 
-export interface ManagedToolsGatewayStatus {
-  gateway: ManagedToolsGateway
-  ready: boolean
-  tool_count?: number | null
-  missing: ManagedToolsMissingCredential[]
-  connected?: ManagedToolsConnectedService[]
-  /** LangSmith offers no tools until every missing service is connected. */
-  all_required: boolean
-}
+/** A service someone can connect: an OAuth consent page or an API key page. */
+export type ConnectableServer = Pick<ManagedServer, "id" | "name" | "kind">
 
 /** The card the agent offered in a thread, identified by its tool call. */
 export interface ManagedToolsConnectCard {
@@ -513,7 +499,42 @@ export interface ManagedToolsConnectCard {
 export interface ManagedToolsView {
   configured: boolean
   langsmith_connected: boolean
-  gateways: ManagedToolsGatewayStatus[]
+  servers: ManagedServer[]
+}
+
+export interface ManagedConnectResult {
+  connected: boolean
+  url?: string | null
+}
+
+/** A LangSmith Managed Tools tool kit: the tools a workspace bot loads. */
+export interface ManagedToolsKit {
+  id: string
+  name: string
+  tool_count: number
+}
+
+/** One server as a workspace bot has it: `tools` are those its kit allows (none: not in the kit). */
+export interface BotServer extends ManagedServer {
+  tools: string[]
+}
+
+/** A workspace bot: its tool kit, its LMT profile, and every server it could have. */
+export interface WorkspaceBotTools {
+  status: {
+    kit: ManagedToolsKit | null
+    profile_id: string | null
+    servers: BotServer[]
+  } | null
+  error: string | null
+}
+
+/** An MCP server an admin registers in LangSmith for the workspace bot. */
+export interface NewBotServer {
+  name: string
+  url: string
+  kind: "none" | "oauth" | "secret"
+  header?: string | null
 }
 
 export interface AdminUser {
@@ -1743,24 +1764,6 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  getInstanceMCPs: () => request<MCPConnection[]>("/mcps"),
-  revealInstanceMCPHeaders: (name: string) =>
-    request<Record<string, string>>(
-      `/mcps/${encodeURIComponent(name)}/headers/reveal`,
-      { method: "POST", cache: "no-store" }
-    ),
-  saveInstanceMCP: (body: MCPConnectionUpdate) =>
-    request<MCPConnection>(`/mcps/${encodeURIComponent(body.name)}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  deleteInstanceMCP: (name: string) =>
-    request<void>(`/mcps/${encodeURIComponent(name)}`, { method: "DELETE" }),
-  discoverInstanceMCP: (body: MCPConnectionUpdate) =>
-    request<{ name: string; description: string }[]>(
-      `/mcps/${encodeURIComponent(body.name)}/discover`,
-      { method: "POST", body: JSON.stringify(body) }
-    ),
   getWorkspaceMCPs: (workspace: string) =>
     request<MCPConnection[]>(
       `/workspaces/${encodeURIComponent(workspace)}/mcps`
@@ -1808,27 +1811,56 @@ export const api = {
       `/my-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
-  listManagedToolsGateways: () =>
-    request<ManagedToolsGateway[]>("/managed-tools/gateways"),
   getMyManagedTools: () => request<ManagedToolsView>("/my-managed-tools"),
   /** With a thread's connect card, the thread continues once every service is connected. */
-  connectManagedTool: (
-    gatewayId: string,
-    slug: string,
-    card?: ManagedToolsConnectCard
-  ) =>
-    request<{ connected: boolean; url?: string | null }>(
-      `/my-managed-tools/${encodeURIComponent(gatewayId)}/connect/${encodeURIComponent(slug)}${
+  connectManagedTool: (serverId: string, card?: ManagedToolsConnectCard) =>
+    request<ManagedConnectResult>(
+      `/my-managed-tools/connect/${encodeURIComponent(serverId)}${
         card
           ? `?${new URLSearchParams({ thread_id: card.threadId, card: card.cardId })}`
           : ""
       }`,
       { method: "POST" }
     ),
-  disconnectManagedTool: (gatewayId: string, serviceId: string) =>
+  disconnectManagedTool: (serverId: string) =>
     request<void>(
-      `/my-managed-tools/${encodeURIComponent(gatewayId)}/services/${encodeURIComponent(serviceId)}`,
+      `/my-managed-tools/services/${encodeURIComponent(serverId)}`,
       { method: "DELETE" }
+    ),
+  getWorkspaceBotTools: (workspace: string) =>
+    request<WorkspaceBotTools>(
+      `/workspaces/${encodeURIComponent(workspace)}/bot-tools`
+    ),
+  listManagedToolsKits: () => request<ManagedToolsKit[]>("/managed-tools/kits"),
+  /** A link where the admin connects one server for the workspace bot; its tools then join the kit. */
+  connectWorkspaceBotTool: (workspace: string, serverId: string) =>
+    request<ManagedConnectResult>(
+      `/workspaces/${encodeURIComponent(workspace)}/bot-tools/connect/${encodeURIComponent(serverId)}`,
+      { method: "POST" }
+    ),
+  /** Registers a server in LangSmith, returning a link connecting it for the workspace bot. */
+  addWorkspaceBotServer: (workspace: string, server: NewBotServer) =>
+    request<{ server: ManagedServer; url: string | null }>(
+      `/workspaces/${encodeURIComponent(workspace)}/bot-tools/servers`,
+      { method: "POST", body: JSON.stringify(server) }
+    ),
+  removeWorkspaceBotTool: (workspace: string, serverId: string) =>
+    request<void>(
+      `/workspaces/${encodeURIComponent(workspace)}/bot-tools/services/${encodeURIComponent(serverId)}`,
+      { method: "DELETE" }
+    ),
+  getWorkspaceBotServerTools: (workspace: string, serverId: string) =>
+    request<{ available: string[]; allowed: string[] }>(
+      `/workspaces/${encodeURIComponent(workspace)}/bot-tools/services/${encodeURIComponent(serverId)}/tools`
+    ),
+  setWorkspaceBotServerTools: (
+    workspace: string,
+    serverId: string,
+    tools: string[]
+  ) =>
+    request<{ available: string[]; allowed: string[] }>(
+      `/workspaces/${encodeURIComponent(workspace)}/bot-tools/services/${encodeURIComponent(serverId)}/tools`,
+      { method: "PUT", body: JSON.stringify({ tools }) }
     ),
   listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),

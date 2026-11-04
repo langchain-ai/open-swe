@@ -1,5 +1,6 @@
-"""Dashboard API for instance-wide, workspace, and per-user MCP connections."""
+"""Dashboard API for workspace and per-user MCP connections, and managed tools."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -10,24 +11,16 @@ from pydantic import BaseModel
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from openswe.dashboard.oauth import frontend_base_url
-from openswe.mcp.cards import ConnectCard, connect_service
-from openswe.mcp.instance import (
-    delete_instance_mcp,
-    discover_instance_mcp,
-    get_instance_mcp,
-    list_instance_mcps,
-    save_instance_mcp,
-)
+from openswe.mcp.cards import ConnectCard, connect_bot_service, connect_service
 from openswe.mcp.managed import (
-    Gateway,
-    GatewayStatus,
+    BotStatus,
+    BotTools,
+    Kit,
     LangSmithNotConnected,
+    ManagedServer,
     ManagedToolsError,
-    disconnect_service,
-    gateway_id,
-    gateway_status,
-    instance_gateway,
-    list_gateways,
+    NewServer,
+    PersonalTools,
     managed_tools_configured,
 )
 from openswe.mcp.models import (
@@ -72,51 +65,6 @@ def _normalized_workspace(raw: str) -> str:
         return slugify(raw)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-
-
-instance_mcp_router = APIRouter(route_class=MCPRoute)
-
-
-@instance_mcp_router.get("/mcps", response_model=list[MCPConnectionPublic])
-async def api_list_instance_mcps(_admin: dict[str, Any] = ADMIN_DEP) -> list[dict[str, Any]]:
-    return await list_instance_mcps()
-
-
-@instance_mcp_router.put("/mcps/{name}", response_model=MCPConnectionPublic)
-@audit_endpoint
-async def api_save_instance_mcp(
-    name: str, update: MCPConnectionUpdate, _admin: dict[str, Any] = ADMIN_DEP
-) -> dict[str, Any]:
-    try:
-        return await save_instance_mcp(name, update)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from None
-
-
-@instance_mcp_router.delete("/mcps/{name}", status_code=204)
-@audit_endpoint
-async def api_delete_instance_mcp(name: str, _admin: dict[str, Any] = ADMIN_DEP) -> None:
-    await delete_instance_mcp(name)
-
-
-@instance_mcp_router.post("/mcps/{name}/headers/reveal")
-@audit_endpoint
-async def api_reveal_instance_mcp_headers(
-    name: str, _admin: dict[str, Any] = ADMIN_DEP
-) -> JSONResponse:
-    return _reveal_mcp_headers(await get_instance_mcp(name))
-
-
-@instance_mcp_router.post("/mcps/{name}/discover", response_model=list[MCPToolDescription])
-async def api_discover_instance_mcp(
-    name: str,
-    update: MCPConnectionUpdate | None = None,
-    _admin: dict[str, Any] = ADMIN_DEP,
-) -> list[dict[str, str]]:
-    try:
-        return await discover_instance_mcp(name, update)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from None
 
 
 workspace_mcp_router = APIRouter(route_class=MCPRoute)
@@ -225,11 +173,11 @@ async def api_discover_my_mcp(
 
 
 class ManagedToolsView(BaseModel):
-    """The instance's managed tools gateway (none or one), and what the caller still needs."""
+    """The caller's own LMT services: those they connected, and those they could."""
 
     configured: bool
     langsmith_connected: bool = False
-    gateways: list[GatewayStatus]
+    servers: list[ManagedServer] = []
 
 
 class ManagedConnectResponse(BaseModel):
@@ -237,62 +185,173 @@ class ManagedConnectResponse(BaseModel):
     url: str | None = None
 
 
+class BotToolsView(BaseModel):
+    """A workspace bot's kit and profile, and every server with whether the bot has it."""
+
+    status: BotStatus | None = None
+    error: str | None = None
+
+
+class NewBotServer(BaseModel):
+    server: ManagedServer
+    url: str | None = None
+    """Where the admin connects it for the bot; None when it needed no connection."""
+
+
+class BotServerTools(BaseModel):
+    """One server's tools the bot can list, and those its kit allows."""
+
+    available: list[str]
+    allowed: list[str]
+
+
+class BotToolsUpdate(BaseModel):
+    tools: list[str]
+
+
 managed_mcp_router = APIRouter(route_class=MCPRoute)
 
 
-@managed_mcp_router.get("/managed-tools/gateways", response_model=list[Gateway])
-async def api_list_managed_tools_gateways(admin: dict[str, Any] = ADMIN_DEP) -> list[Gateway]:
-    """Gateways an admin can pick for the instance, read with the admin's own LangSmith login."""
+def _managed_error(exc: ManagedToolsError) -> HTTPException:
+    return HTTPException(409 if isinstance(exc, LangSmithNotConnected) else 502, str(exc))
+
+
+@managed_mcp_router.get("/managed-tools/kits", response_model=list[Kit])
+async def api_list_managed_tools_kits(admin: dict[str, Any] = ADMIN_DEP) -> list[Kit]:
+    """Tool kits an admin can point a workspace bot at, read with their own LangSmith login."""
     try:
-        return await list_gateways(admin["sub"])
-    except LangSmithNotConnected as exc:
-        raise HTTPException(409, str(exc)) from None
+        return await PersonalTools(admin["sub"]).kits()
     except ManagedToolsError as exc:
-        raise HTTPException(502, str(exc)) from None
+        raise _managed_error(exc) from None
+
+
+@managed_mcp_router.get("/workspaces/{workspace}/bot-tools", response_model=BotToolsView)
+async def api_workspace_bot_tools(
+    workspace: str, _admin: dict[str, Any] = ADMIN_DEP
+) -> BotToolsView:
+    slug = _normalized_workspace(workspace)
+    if not managed_tools_configured():
+        return BotToolsView()
+    try:
+        return BotToolsView(status=await (await BotTools.of(slug)).status())
+    except ManagedToolsError as exc:
+        logger.warning("Workspace bot status unavailable", extra={"workspace": slug}, exc_info=True)
+        return BotToolsView(error=str(exc))
+
+
+@managed_mcp_router.post(
+    "/workspaces/{workspace}/bot-tools/connect/{server}", response_model=ManagedConnectResponse
+)
+@audit_endpoint
+async def api_connect_workspace_bot_tool(
+    workspace: str, server: str, admin: dict[str, Any] = ADMIN_DEP
+) -> ManagedConnectResponse:
+    """Give the workspace bot one existing server: a consent link where the admin connects
+    it, after which its tools join the bot's kit."""
+    bot = await BotTools.of(_normalized_workspace(workspace))
+    try:
+        link = await connect_bot_service(admin["sub"], bot, server)
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return ManagedConnectResponse(connected=link is None, url=link.url if link else None)
+
+
+@managed_mcp_router.post(
+    "/workspaces/{workspace}/bot-tools/servers", response_model=NewBotServer, status_code=201
+)
+@audit_endpoint
+async def api_add_workspace_bot_server(
+    workspace: str, body: NewServer, admin: dict[str, Any] = ADMIN_DEP
+) -> NewBotServer:
+    """Register a server in LMT, then give it to the workspace bot."""
+    bot = await BotTools.of(_normalized_workspace(workspace))
+    try:
+        server = await PersonalTools(admin["sub"]).create_server(body)
+        link = await connect_bot_service(admin["sub"], bot, server.id)
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return NewBotServer(server=server, url=link.url if link else None)
+
+
+@managed_mcp_router.get(
+    "/workspaces/{workspace}/bot-tools/services/{server}/tools", response_model=BotServerTools
+)
+async def api_workspace_bot_server_tools(
+    workspace: str, server: str, _admin: dict[str, Any] = ADMIN_DEP
+) -> BotServerTools:
+    bot = await BotTools.of(_normalized_workspace(workspace))
+    try:
+        available, kit_tools = await asyncio.gather(bot.server_tools(server), bot.kit_tools())
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return BotServerTools(available=available, allowed=sorted(kit_tools.get(server, ())))
+
+
+@managed_mcp_router.put(
+    "/workspaces/{workspace}/bot-tools/services/{server}/tools", response_model=BotServerTools
+)
+@audit_endpoint
+async def api_set_workspace_bot_server_tools(
+    workspace: str, server: str, body: BotToolsUpdate, admin: dict[str, Any] = ADMIN_DEP
+) -> BotServerTools:
+    """Set which of one server's tools the bot's kit allows; none takes it out of the kit."""
+    bot = await BotTools.of(_normalized_workspace(workspace))
+    tools = PersonalTools(admin["sub"])
+    try:
+        available = await bot.server_tools(server)
+        if unknown := set(body.tools) - set(available):
+            raise ManagedToolsError(f"The server has no tool named {sorted(unknown)[0]}")
+        bot = await tools.set_bot_tools(bot, server, body.tools)
+        allowed = sorted((await bot.kit_tools()).get(server, ()))
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return BotServerTools(available=available, allowed=allowed)
+
+
+@managed_mcp_router.delete("/workspaces/{workspace}/bot-tools/services/{server}", status_code=204)
+@audit_endpoint
+async def api_remove_workspace_bot_tool(
+    workspace: str, server: str, admin: dict[str, Any] = ADMIN_DEP
+) -> None:
+    """Take a server out of the bot's kit and delete the bot's credential for it."""
+    bot = await BotTools.of(_normalized_workspace(workspace))
+    try:
+        await PersonalTools(admin["sub"]).remove_from_bot(bot, server)
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
 
 
 @managed_mcp_router.get("/my-managed-tools", response_model=ManagedToolsView)
 async def api_my_managed_tools(session: dict[str, Any] = SESSION_DEP) -> ManagedToolsView:
     if not managed_tools_configured():
-        return ManagedToolsView(configured=False, gateways=[])
-    statuses: list[GatewayStatus] = []
-    if gateway := await instance_gateway():
-        try:
-            statuses.append(await gateway_status(session["sub"], gateway, with_connected=True))
-        except LangSmithNotConnected:
-            return ManagedToolsView(configured=True, gateways=[])
-        except ManagedToolsError:
-            logger.warning(
-                "Managed tools gateway status unavailable",
-                extra={"gateway": gateway},
-                exc_info=True,
-            )
-    return ManagedToolsView(configured=True, langsmith_connected=True, gateways=statuses)
+        return ManagedToolsView(configured=False)
+    try:
+        servers = await PersonalTools(session["sub"]).servers()
+    except LangSmithNotConnected:
+        return ManagedToolsView(configured=True)
+    except ManagedToolsError as exc:
+        raise _managed_error(exc) from None
+    return ManagedToolsView(
+        configured=True,
+        langsmith_connected=True,
+        servers=[server for server in servers if server.enabled],
+    )
 
 
-async def _instance_gateway(gateway: str) -> str:
-    """``gateway``, refused unless it is the tool kit this instance uses."""
-    configured = await instance_gateway()
-    if configured is None or gateway_id(gateway) != gateway_id(configured):
-        raise HTTPException(404, "This Open SWE does not use this tool kit")
-    return gateway
-
-
-async def _card(thread_id: str, card_id: str, login: str, gateway: str) -> ConnectCard:
+async def _card(thread_id: str, card_id: str, login: str) -> ConnectCard:
     """The connect card the agent offered this person in their thread."""
-    card = await ConnectCard.load(thread_id, card_id, login, gateway)
+    card = await ConnectCard.load(thread_id, card_id, login)
     if card is None:
         raise HTTPException(404, "Unknown connect card")
     return card
 
 
 @managed_mcp_router.post(
-    "/my-managed-tools/{gateway}/connect/{slug}", response_model=ManagedConnectResponse
+    "/my-managed-tools/connect/{server}", response_model=ManagedConnectResponse
 )
 @audit_endpoint
 async def api_connect_managed_tool(
-    gateway: str,
-    slug: str,
+    server: str,
     thread_id: str | None = None,
     card: str | None = None,
     session: dict[str, Any] = SESSION_DEP,
@@ -300,38 +359,32 @@ async def api_connect_managed_tool(
     """A consent link for one service; from a thread's card, the thread resumes once connected."""
     try:
         if thread_id and card:
-            link = await (await _card(thread_id, card, session["sub"], gateway)).connect(slug)
+            link = await (await _card(thread_id, card, session["sub"])).connect(server)
         else:
-            link = await connect_service(session["sub"], await _instance_gateway(gateway), slug)
+            link = await connect_service(session["sub"], server)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
     return ManagedConnectResponse(connected=link is None, url=link.url if link else None)
 
 
-@managed_mcp_router.delete("/my-managed-tools/{gateway}/services/{service}", status_code=204)
+@managed_mcp_router.delete("/my-managed-tools/services/{server}", status_code=204)
 @audit_endpoint
-async def api_disconnect_managed_tool(
-    gateway: str, service: str, session: dict[str, Any] = SESSION_DEP
-) -> None:
-    """Remove the caller's own LangSmith connection to one service in the tool kit."""
+async def api_disconnect_managed_tool(server: str, session: dict[str, Any] = SESSION_DEP) -> None:
+    """Remove the caller's own LangSmith connection to one service."""
     try:
-        await disconnect_service(session["sub"], await _instance_gateway(gateway), service)
+        await PersonalTools(session["sub"]).disconnect(server)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
 
 
-@managed_mcp_router.get("/my-managed-tools/{gateway}/connect/{slug}")
+@managed_mcp_router.get("/my-managed-tools/connect/{server}")
 async def connect_managed_tool_from_card(
-    gateway: str,
-    slug: str,
-    thread_id: str,
-    card: str,
-    session: dict[str, Any] = SESSION_DEP,
+    server: str, thread_id: str, card: str, session: dict[str, Any] = SESSION_DEP
 ) -> RedirectResponse:
     """A Slack card button: mint the consent link here, for the signed-in owner only."""
     try:
-        offered = await _card(thread_id, card, session["sub"], gateway)
-        link = await offered.connect(slug)
+        offered = await _card(thread_id, card, session["sub"])
+        link = await offered.connect(server)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
     # Built from the stored card, so no request value chooses where this redirects.
@@ -340,7 +393,6 @@ async def connect_managed_tool_from_card(
 
 
 router = APIRouter()
-router.include_router(instance_mcp_router)
 router.include_router(workspace_mcp_router)
 router.include_router(user_mcp_router)
 router.include_router(managed_mcp_router)
