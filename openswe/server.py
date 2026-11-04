@@ -117,7 +117,7 @@ from openswe.middleware.require_user_reply import (
     work_state_nudge,
 )
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from openswe.middleware.stale_workspace import queue_stale_workspace_notice
+from openswe.middleware.stale_workspace import StaleWorkspaceReporter
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.model_request import (
     ModelSelectionDecision,
@@ -1505,7 +1505,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 )
         del github_token
         if stale_workspace := take_stale_boot(self._thread_id):
-            queue_stale_workspace_notice(self._thread_id, stale_workspace)
+            await StaleWorkspaceReporter(self._thread_id, stale_workspace).report()
         rendered_prompt = (
             asyncio.create_task(self._render_system_prompt(cfg)) if render_prompt else None
         )
