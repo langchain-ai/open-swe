@@ -464,6 +464,49 @@
         "title": "ApiKeyView",
         "type": "object"
       },
+      "AppNotification": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The in-app route for ``url``; ``None`` when it points outside the dashboard.",
+            "readOnly": true,
+            "title": "Path"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "body",
+          "url",
+          "path"
+        ],
+        "title": "AppNotification",
+        "type": "object"
+      },
       "AppUser": {
         "description": "MDA's ``ResolvedAppUser``: run as this Open SWE user. The only answer besides ``None``.",
         "properties": {
@@ -2099,11 +2142,15 @@
       },
       "ExcludedHunk": {
         "additionalProperties": false,
-        "description": "A hunk left off the card.",
+        "description": "A hunk left off the card; an empty ``header`` stands for a whole file without a text diff.",
         "properties": {
           "additions": {
             "title": "Additions",
             "type": "integer"
+          },
+          "approval_condition": {
+            "title": "Approval Condition",
+            "type": "boolean"
           },
           "deletions": {
             "title": "Deletions",
@@ -2143,7 +2190,7 @@
         "type": "object"
       },
       "Exclusion": {
-        "description": "Changes the agent judged to qualify under the target repository's APPROVALS.md.",
+        "description": "Changes the agent judged to qualify under the target repository's auto-approve rules.",
         "properties": {
           "guideline": {
             "title": "Guideline",
@@ -2176,7 +2223,7 @@
       },
       "ExpeditedExclusions": {
         "additionalProperties": false,
-        "description": "What an expedited card left off as qualifying under the target repo's APPROVALS.md.",
+        "description": "What an expedited card left off as qualifying under the target repo's auto-approve rules.",
         "properties": {
           "approvals_md_sha256": {
             "title": "Approvals Md Sha256",
@@ -3390,12 +3437,40 @@
         ],
         "type": "string"
       },
+      "MemberSet": {
+        "properties": {
+          "person": {
+            "minLength": 1,
+            "title": "Person",
+            "type": "string"
+          },
+          "role": {
+            "default": "member",
+            "enum": [
+              "owner",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "person"
+        ],
+        "title": "MemberSet",
+        "type": "object"
+      },
       "MergeAction": {
         "properties": {
           "action": {
             "const": "merge",
             "title": "Action",
             "type": "string"
+          },
+          "auto_merge": {
+            "default": false,
+            "title": "Auto Merge",
+            "type": "boolean"
           },
           "merge_method": {
             "enum": [
@@ -4003,6 +4078,41 @@
             ],
             "title": "Additions"
           },
+          "assignment": {
+            "anyOf": [
+              {
+                "enum": [
+                  "assigned",
+                  "requested",
+                  "tentative",
+                  "mentioned",
+                  "draft",
+                  "speculative"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignment"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "autoMerge": {
+            "default": false,
+            "title": "Automerge",
+            "type": "boolean"
+          },
           "ci": {
             "default": "unknown",
             "enum": [
@@ -4119,6 +4229,17 @@
           "repo": {
             "title": "Repo",
             "type": "string"
+          },
+          "requiredChecksPassing": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requiredcheckspassing"
           },
           "reviewDecision": {
             "anyOf": [
@@ -4326,33 +4447,6 @@
           }
         },
         "title": "OutputTokensDetails",
-        "type": "object"
-      },
-      "PageView": {
-        "properties": {
-          "page_name": {
-            "enum": [
-              "agents",
-              "review",
-              "usage",
-              "settings",
-              "workspaces",
-              "integrations",
-              "admin",
-              "assistant",
-              "incidents",
-              "cloud-agents",
-              "feature-flags",
-              "other"
-            ],
-            "title": "Page Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "page_name"
-        ],
-        "title": "PageView",
         "type": "object"
       },
       "PauseChange": {
@@ -4592,6 +4686,24 @@
           }
         },
         "title": "PlanUpdate",
+        "type": "object"
+      },
+      "PostHogProject": {
+        "properties": {
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "host"
+        ],
+        "title": "PostHogProject",
         "type": "object"
       },
       "PostedReviewComment": {
@@ -4868,17 +4980,6 @@
             ],
             "title": "Draft Prs"
           },
-          "experimental_act_as_approval": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Act As Approval"
-          },
           "experimental_background_callbacks": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -4891,7 +4992,7 @@
             ],
             "title": "Experimental Background Callbacks"
           },
-          "experimental_fleet": {
+          "experimental_classify": {
             "anyOf": [
               {
                 "type": "boolean"
@@ -4900,7 +5001,18 @@
                 "type": "null"
               }
             ],
-            "title": "Experimental Fleet"
+            "title": "Experimental Classify"
+          },
+          "experimental_conditional_approval": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Conditional Approval"
           },
           "experimental_memory": {
             "anyOf": [
@@ -4912,6 +5024,17 @@
               }
             ],
             "title": "Experimental Memory"
+          },
+          "goal_mode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Mode"
           },
           "pr_failure_reactions": {
             "anyOf": [
@@ -4949,6 +5072,189 @@
           }
         },
         "title": "ProfileUpdate",
+        "type": "object"
+      },
+      "Project": {
+        "description": "A project as one of its members sees it.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectMember"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "repo_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Full Name"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "workspace": {
+            "title": "Workspace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "workspace",
+          "repo_full_name",
+          "role",
+          "members",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "Project",
+        "type": "object"
+      },
+      "ProjectChanges": {
+        "description": "What an owner may change; an omitted field stays as it is.",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "repo_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Full Name"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace"
+          }
+        },
+        "title": "ProjectChanges",
+        "type": "object"
+      },
+      "ProjectCreate": {
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "repo_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Full Name"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ProjectCreate",
+        "type": "object"
+      },
+      "ProjectMember": {
+        "properties": {
+          "avatar_url": {
+            "title": "Avatar Url",
+            "type": "string"
+          },
+          "login": {
+            "title": "Login",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "name",
+          "login",
+          "avatar_url",
+          "role"
+        ],
+        "title": "ProjectMember",
         "type": "object"
       },
       "PullRequestActionResult": {
@@ -5007,6 +5313,20 @@
           }
         },
         "title": "PullRequestChecksRequest",
+        "type": "object"
+      },
+      "PullRequestDescriptionUpdate": {
+        "properties": {
+          "body": {
+            "maxLength": 65536,
+            "title": "Body",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "title": "PullRequestDescriptionUpdate",
         "type": "object"
       },
       "PullRequestFixContext": {
@@ -7675,6 +7995,50 @@
         "title": "SlackTrigger",
         "type": "object"
       },
+      "SlackUserDirectory": {
+        "properties": {
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/SlackUserOption"
+            },
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "required": [
+          "users"
+        ],
+        "title": "SlackUserDirectory",
+        "type": "object"
+      },
+      "SlackUserOption": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "real_name": {
+            "title": "Real Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "display_name",
+          "real_name"
+        ],
+        "title": "SlackUserOption",
+        "type": "object"
+      },
       "SlashCommandResponse": {
         "properties": {
           "response_type": {
@@ -7784,10 +8148,21 @@
           "environment": {
             "title": "Environment",
             "type": "string"
+          },
+          "posthog": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PostHogProject"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
-          "environment"
+          "environment",
+          "posthog"
         ],
         "title": "TelemetryConfig",
         "type": "object"
@@ -9355,6 +9730,18 @@
             ],
             "title": "Human Review Auto Merge Enabled"
           },
+          "implementation_walkthrough_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Implementation Walkthrough Enabled"
+          },
           "managed_tools_gateway_id": {
             "anyOf": [
               {
@@ -9412,6 +9799,41 @@
               }
             ],
             "title": "Review Draft Prs"
+          },
+          "review_shadow_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Shadow Model"
+          },
+          "review_shadow_percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Shadow Percent"
+          },
+          "review_shadow_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Shadow Reasoning Effort"
           },
           "review_trace_links": {
             "agent_feature_flag": true,
@@ -10540,46 +10962,6 @@
         ]
       }
     },
-    "/dashboard/api/analytics/page": {
-      "post": {
-        "operationId": "api_page_view_dashboard_api_analytics_page_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PageView"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Page View",
-        "tags": [
-          "dashboard",
-          "analytics"
-        ]
-      }
-    },
     "/dashboard/api/analytics/pr-merge-rate-by-model": {
       "get": {
         "operationId": "api_pr_merge_rate_by_model_dashboard_api_analytics_pr_merge_rate_by_model_get",
@@ -10990,9 +11372,9 @@
         ]
       }
     },
-    "/dashboard/api/auth/login": {
+    "/dashboard/api/auth/langsmith/login": {
       "get": {
-        "operationId": "auth_login_dashboard_api_auth_login_get",
+        "operationId": "auth_langsmith_login_dashboard_api_auth_langsmith_login_get",
         "parameters": [
           {
             "in": "query",
@@ -11052,6 +11434,55 @@
                 }
               ],
               "title": "Desktop Port"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Langsmith Login",
+        "tags": [
+          "dashboard",
+          "auth"
+        ]
+      }
+    },
+    "/dashboard/api/auth/login": {
+      "get": {
+        "description": "Everyone signs in with LangSmith; locally without it, as the `gh` CLI's user.",
+        "operationId": "auth_login_dashboard_api_auth_login_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "redirect_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Redirect To"
             }
           }
         ],
@@ -11336,6 +11767,29 @@
         "tags": [
           "dashboard",
           "sandbox-bridge"
+        ]
+      }
+    },
+    "/dashboard/api/claude-code/connections": {
+      "post": {
+        "description": "Mint the token a ``connect_claude_code`` claim stands for, once, for the script installing it.",
+        "operationId": "api_redeem_claude_code_claim_dashboard_api_claude_code_connections_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MintedSyncToken"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Redeem Claude Code Claim",
+        "tags": [
+          "dashboard",
+          "claude-code"
         ]
       }
     },
@@ -11626,6 +12080,144 @@
         "tags": [
           "dashboard",
           "review"
+        ]
+      }
+    },
+    "/dashboard/api/github/desktop/exchange": {
+      "post": {
+        "description": "Finish a desktop GitHub link with the app's own session.",
+        "operationId": "github_link_desktop_exchange_dashboard_api_github_desktop_exchange_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopConnectExchange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Github Link Desktop Exchange Dashboard Api Github Desktop Exchange Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Github Link Desktop Exchange",
+        "tags": [
+          "dashboard",
+          "auth"
+        ]
+      }
+    },
+    "/dashboard/api/github/login": {
+      "get": {
+        "description": "Start linking a GitHub account to the signed-in LangSmith person.",
+        "operationId": "github_link_login_dashboard_api_github_login_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "redirect_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Redirect To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop_handoff",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desktop Handoff"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop_port",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 1024,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desktop Port"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Github Link Login",
+        "tags": [
+          "dashboard",
+          "auth"
         ]
       }
     },
@@ -12093,7 +12685,8 @@
     },
     "/dashboard/api/langsmith/callback": {
       "get": {
-        "operationId": "langsmith_callback_dashboard_api_langsmith_callback_get",
+        "description": "Finish LangSmith sign-in on the callback the LangSmith OAuth client registers.",
+        "operationId": "auth_langsmith_callback_dashboard_api_langsmith_callback_get",
         "parameters": [
           {
             "in": "query",
@@ -12119,38 +12712,6 @@
               ],
               "title": "Code"
             }
-          },
-          {
-            "in": "query",
-            "name": "error",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Error"
-            }
-          },
-          {
-            "in": "query",
-            "name": "error_description",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Error Description"
-            }
           }
         ],
         "responses": {
@@ -12173,149 +12734,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Langsmith Callback",
+        "summary": "Auth Langsmith Callback",
         "tags": [
           "dashboard",
-          "langsmith"
-        ]
-      }
-    },
-    "/dashboard/api/langsmith/desktop/exchange": {
-      "post": {
-        "description": "Finish a desktop LangSmith connection with the app's own session.",
-        "operationId": "langsmith_desktop_exchange_dashboard_api_langsmith_desktop_exchange_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DesktopConnectExchange"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Langsmith Desktop Exchange Dashboard Api Langsmith Desktop Exchange Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Langsmith Desktop Exchange",
-        "tags": [
-          "dashboard",
-          "langsmith"
-        ]
-      }
-    },
-    "/dashboard/api/langsmith/login": {
-      "get": {
-        "operationId": "langsmith_login_dashboard_api_langsmith_login_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "redirect_to",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Redirect To"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_handoff",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Handoff"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_port",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 65535,
-                  "minimum": 1024,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Port"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Langsmith Login",
-        "tags": [
-          "dashboard",
-          "langsmith"
+          "auth"
         ]
       }
     },
@@ -13154,62 +13576,6 @@
         ]
       }
     },
-    "/dashboard/api/my-credentials/langsmith": {
-      "delete": {
-        "operationId": "disconnect_my_langsmith_dashboard_api_my_credentials_langsmith_delete",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Disconnect My Langsmith Dashboard Api My Credentials Langsmith Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Disconnect My Langsmith",
-        "tags": [
-          "dashboard",
-          "langsmith"
-        ]
-      },
-      "get": {
-        "operationId": "get_my_langsmith_status_dashboard_api_my_credentials_langsmith_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get My Langsmith Status Dashboard Api My Credentials Langsmith Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Get My Langsmith Status",
-        "tags": [
-          "dashboard",
-          "langsmith"
-        ]
-      }
-    },
     "/dashboard/api/my-managed-tools": {
       "get": {
         "operationId": "api_my_managed_tools_dashboard_api_my_managed_tools_get",
@@ -13681,6 +14047,90 @@
         "summary": "Api Reveal My Mcp Headers",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/notifications": {
+      "get": {
+        "operationId": "api_notifications_dashboard_api_notifications_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AppNotification"
+                  },
+                  "title": "Response Api Notifications Dashboard Api Notifications Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Notifications",
+        "tags": [
+          "dashboard",
+          "notifications"
+        ]
+      }
+    },
+    "/dashboard/api/notifications/{notification_id}/delivered": {
+      "post": {
+        "operationId": "api_notification_delivered_dashboard_api_notifications__notification_id__delivered_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Notification Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Api Notification Delivered Dashboard Api Notifications  Notification Id  Delivered Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Notification Delivered",
+        "tags": [
+          "dashboard",
+          "notifications"
         ]
       }
     },
@@ -14372,6 +14822,407 @@
         "tags": [
           "dashboard",
           "profiles"
+        ]
+      }
+    },
+    "/dashboard/api/projects": {
+      "get": {
+        "operationId": "api_list_projects_dashboard_api_projects_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "items": {
+                      "$ref": "#/components/schemas/Project"
+                    },
+                    "type": "array"
+                  },
+                  "title": "Response Api List Projects Dashboard Api Projects Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Projects",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      },
+      "post": {
+        "operationId": "api_create_project_dashboard_api_projects_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Create Project",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      }
+    },
+    "/dashboard/api/projects/threads/{thread_id}": {
+      "delete": {
+        "operationId": "api_unfile_thread_dashboard_api_projects_threads__thread_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Unfile Thread",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      }
+    },
+    "/dashboard/api/projects/{project_id}": {
+      "delete": {
+        "operationId": "api_delete_project_dashboard_api_projects__project_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete Project",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      },
+      "patch": {
+        "operationId": "api_update_project_dashboard_api_projects__project_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectChanges"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Update Project",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      }
+    },
+    "/dashboard/api/projects/{project_id}/members": {
+      "put": {
+        "operationId": "api_set_project_member_dashboard_api_projects__project_id__members_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Set Project Member",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      }
+    },
+    "/dashboard/api/projects/{project_id}/members/{user_id}": {
+      "delete": {
+        "operationId": "api_remove_project_member_dashboard_api_projects__project_id__members__user_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Remove Project Member",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      }
+    },
+    "/dashboard/api/projects/{project_id}/threads/{thread_id}": {
+      "put": {
+        "operationId": "api_file_thread_dashboard_api_projects__project_id__threads__thread_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api File Thread",
+        "tags": [
+          "dashboard",
+          "projects"
         ]
       }
     },
@@ -16483,6 +17334,75 @@
           }
         ],
         "summary": "Api Post Review Conversation Comment",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/description": {
+      "patch": {
+        "operationId": "api_update_pull_request_description_dashboard_api_reviews__owner___repo___pr_number__description_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PullRequestDescriptionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Update Pull Request Description",
         "tags": [
           "dashboard",
           "review"
@@ -19265,6 +20185,33 @@
         ]
       }
     },
+    "/dashboard/api/slack/users": {
+      "get": {
+        "operationId": "api_slack_users_dashboard_api_slack_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackUserDirectory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Slack Users",
+        "tags": [
+          "dashboard",
+          "slack"
+        ]
+      }
+    },
     "/dashboard/api/slack/users/{user_id}/name": {
       "get": {
         "operationId": "api_slack_user_name_dashboard_api_slack_users__user_id__name_get",
@@ -19667,6 +20614,23 @@
               "default": false,
               "title": "Hierarchy",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project"
             }
           }
         ],

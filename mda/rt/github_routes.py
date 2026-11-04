@@ -29,6 +29,9 @@ COMMENT_ACTIONS: Final = {
 }
 PR_WATCH_TOGGLE_ACTIONS: Final = frozenset({"closed", "reopened", "converted_to_draft"})
 PR_FIRST_REVIEW_ACTIONS: Final = frozenset({"opened", "ready_for_review"})
+# Pull request actions after which the walkthrough plans the pull request, drafts included.
+PR_WALKTHROUGH_ACTIONS: Final = frozenset({"opened", "reopened", "ready_for_review", "synchronize"})
+REVIEW_THREAD_ACTIONS: Final = frozenset({"resolved", "unresolved"})
 # The pull request actions that change the state the agent thread tracks.
 PR_AGENT_STATE_ACTIONS: Final = frozenset(
     {"closed", "reopened", "converted_to_draft", "ready_for_review", "synchronize"}
@@ -69,6 +72,11 @@ def _fields(value: object) -> Mapping[str, object]:
 
 
 def _pull_request(action: str, facts: GitHubDeliveryFacts, work: list[GitHubWorkName]) -> Route:
+    if facts.gated:
+        # The public-repo gate turned the sender away.
+        return Route(tuple(work))
+    if action in PR_WALKTHROUGH_ACTIONS:
+        work.append("walkthrough_pull_request")
     if action in {"opened", "edited"} or action in PR_AGENT_STATE_ACTIONS:
         work.append("track_pull_request_state")
     if action == "synchronize":
@@ -84,13 +92,16 @@ def _pull_request(action: str, facts: GitHubDeliveryFacts, work: list[GitHubWork
         work.append("update_reviewer_watch")
     elif action in PR_FIRST_REVIEW_ACTIONS and facts.auto_review:
         work.append("review_pull_request")
-    return Route(tuple(work), automations=action in {"opened", "closed"} and facts.allowed)
+    return Route(tuple(work), automations=action in {"opened", "closed"})
 
 
 def route(
     event: str, payload: Mapping[str, object], facts: GitHubDeliveryFacts, *, from_app: bool
 ) -> Route:
     """What a delivery of ``event`` starts. ``from_app``: Open SWE's own App caused it."""
+    if not facts.allowed:
+        # The repository allowlist doesn't take it.
+        return Route()
     if event in INSTALLATION_EVENTS:
         # About the installation, not a repository, so no workspace owns it.
         return Route(("forget_cached_repos",))
@@ -108,10 +119,12 @@ def route(
         if facts.auto_review:
             work.append("review_push")
         return Route(tuple(work))
-    if not facts.allowed:
-        return Route(tuple(work))
     if event in CI_EVENTS:
         return Route((*work, "ci_event"))
+    if event == "pull_request_review_thread":
+        if action in REVIEW_THREAD_ACTIONS:
+            work.append("sync_review_thread")
+        return Route(tuple(work))
     if event == "pull_request_review" and action in {"submitted", "dismissed"}:
         # Any reviewer's verdict can complete a review request, Open SWE's own included.
         work.append("settle_human_reviews")

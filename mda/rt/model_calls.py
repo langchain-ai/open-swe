@@ -19,17 +19,15 @@ progress is checkpointed, so the person can start it again.
 import asyncio
 import logging
 import random
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Any, Final
 
 import anthropic
 import httpx2
 import openai
-from langchain.agents.middleware import (
-    AgentMiddleware,
-    ModelRetryMiddleware,
-)
+from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
@@ -41,12 +39,12 @@ from langchain_openai import ChatOpenAI
 from runtime_api.model_errors import MODEL_FAILURE_REPLY_KEY, classify_exception, exception_fields
 from runtime_api.models import MODEL_CALL_BUDGET
 
+from rt.model_retries import ModelOutput, ModelRetriesMiddleware
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
 
-# Above the provider client's own request timeout (rt/models.py), so a stalled
-# request fails and retries inside the client first.
+# One attempt on one model, its own retries and reasoning included.
 MODEL_CALL_TIMEOUT_SECONDS: Final = 900.0
 # As the in-process graphs': a tool call can outlast the 5m default between model calls.
 PROMPT_CACHE_TTL: Final = "1h"
@@ -57,7 +55,7 @@ _SUBAGENT_TIMED_OUT: Final = "This subagent could not finish: its model call tim
 # Seconds waited before each attempt after the first; one more attempt than delays.
 # The first failover is immediate: one provider's outage should not delay the other.
 # Later waits grow past the ~30s the gateway's 502 page asks for. Each attempt also
-# gets the provider client's own retries (``runtime_api.models``), and all of them
+# gets the model's own retries (``rt.model_retries``), and all of them
 # together end within ``MODEL_CALL_BUDGET``, well before the backend takes the run
 # for stalled.
 BACKOFF_SCHEDULE: Sequence[float] = (0.0, 5.0, 15.0, 30.0, 45.0)
@@ -259,6 +257,7 @@ async def call_with_fallback(
     last: BaseException | None = None
     made = 0
     for attempt in range(len(schedule) + 1):
+        output = ModelOutput()
         delay = 0.0
         if last is not None:
             delay = schedule[attempt - 1]
@@ -279,8 +278,9 @@ async def call_with_fallback(
                 if delay > 0:
                     await asyncio.sleep(delay)
             made += 1
-            async with asyncio.timeout_at(deadline):
-                return await handler(attempt_request)
+            with output.tracking():
+                async with asyncio.timeout_at(deadline):
+                    return await handler(attempt_request)
         except Exception as exc:
             if (message := model_access_message(exc)) is not None:
                 logger.warning(
@@ -291,6 +291,8 @@ async def call_with_fallback(
             if not is_transient(exc):
                 raise
             last = exc
+            # The next attempt answers instead: what this one streamed is taken back.
+            output.supersede()
             logger.warning(
                 "Model call failed transiently",
                 extra={"model_call_retry": {"attempt": made, **exception_fields(exc)}},
@@ -343,9 +345,19 @@ class ModelCallTimeoutMiddleware(_ModelCallGuard):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
+        async with self.deadline():
+            return await handler(request)
+
+    @asynccontextmanager
+    async def deadline(self) -> AsyncIterator[asyncio.Timeout]:
+        """Bound model attempts together without reclassifying provider timeouts."""
+        timeout = asyncio.timeout(self._timeout_seconds)
         try:
-            return await asyncio.wait_for(handler(request), timeout=self._timeout_seconds)
+            async with timeout:
+                yield timeout
         except TimeoutError as exc:
+            if not timeout.expired():
+                raise
             logger.warning(
                 "Model call exceeded its deadline", extra={"timeout_seconds": self._timeout_seconds}
             )
@@ -404,21 +416,17 @@ def model_call_guards(
 ) -> list[AgentMiddleware]:
     """Innermost around every model call, inside the middleware that picks its model.
 
-    They see the model the call really goes to, the fallback included. One deadline
-    covers the call and its retries. An agent's call that still fails raises, so
-    ``call_with_fallback`` tries again and the run-complete webhook sees why; a subagent's that
-    times out becomes its answer. The prompt cache replaces deepagents' own 5m
-    one by name, in place.
+    They see the model the call really goes to, the fallback included. Middleware
+    owns retries for providers whose SDK retries are disabled. An agent's call that
+    still fails raises, so ``call_with_fallback`` tries again and the run-complete
+    webhook sees why; a subagent's timeout becomes its answer. The prompt cache
+    replaces deepagents' own 5m one by name, in place.
     """
     return [
         *([SubagentTimeoutReplyMiddleware()] if subagent else []),
         ReplayableHistoryMiddleware(),
         ModelCallTimeoutMiddleware(timeout_seconds),
-        # Its default answers with the error as the model's reply instead of raising.
-        ModelRetryMiddleware(retry_on=(TimeoutError,), on_failure="error"),
-        # An agent's two breakpoints from RunPromptMiddleware and this one's last system
-        # block and automatic one fill all four a request may have; Anthropic rejects a
-        # fifth, so anything adding one must give one up. A subagent's take the last tool.
+        ModelRetriesMiddleware(),
         (AnthropicPromptCachingMiddleware if subagent else _RunPromptCaching)(
             ttl=PROMPT_CACHE_TTL, unsupported_model_behavior="ignore"
         ),

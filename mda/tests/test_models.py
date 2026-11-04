@@ -5,7 +5,7 @@ import pytest
 import runtime_api.models as shared
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
-from rt.models import _build, build_model
+from rt.models import _SDK_RETRY_DISABLE, _build, build_model
 from runtime_api.catalog import ModelSpec
 from runtime_api.models import SUPPORTED_MODELS, model_init_kwargs, provider_model_kwargs
 
@@ -45,7 +45,8 @@ def _spec(model_id: str, effort: str) -> ModelSpec:
 def test_the_runtime_builds_each_model_with_the_backends_settings(
     monkeypatch: pytest.MonkeyPatch, option: Any, use_gateway: bool
 ) -> None:
-    """What reaches ``init_chat_model`` is what the backend's ``make_model`` sends it."""
+    """What reaches ``init_chat_model`` is what the backend's ``make_model`` sends it, but
+    for the SDK retries of a provider whose retries MDA's model middleware owns."""
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
     built: list[tuple[str, dict[str, object]]] = []
 
@@ -59,11 +60,11 @@ def test_the_runtime_builds_each_model_with_the_backends_settings(
     build_model(spec, use_gateway=use_gateway)
 
     # The spec's kwargs crossed the wire as JSON, as the backend's never do.
-    expected = model_init_kwargs(
-        option["id"],
-        provider_model_kwargs(option["id"], option["default_effort"], max_tokens=64_000),
-        use_gateway=use_gateway,
-    )
+    kwargs = provider_model_kwargs(option["id"], option["default_effort"], max_tokens=64_000)
+    provider = option["id"].split(":", 1)[0]
+    if provider in _SDK_RETRY_DISABLE:
+        kwargs = {**kwargs, "max_retries": _SDK_RETRY_DISABLE[provider]}
+    expected = model_init_kwargs(option["id"], kwargs, use_gateway=use_gateway)
     assert built == [expected]
 
 
@@ -97,7 +98,8 @@ def test_an_anthropic_model_streams() -> None:
     # Runs aren't streamed: without it LangSmith has no time to first token, and a long
     # answer is cut off by the non-streaming request timeout.
     assert model.streaming is True
-    assert model.max_retries == 6
+    # Its retries are the model middleware's (``rt.model_retries``), not the SDK's.
+    assert model.max_retries == 0
 
 
 def test_a_baseten_model_goes_to_baseten_with_its_key(monkeypatch: pytest.MonkeyPatch) -> None:

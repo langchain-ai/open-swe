@@ -18,6 +18,7 @@ import { useReconnectNotice } from "@/features/agents/lib/stream/useReconnectNot
 import {
   agentThreadKeys,
   invalidateAgentThreadLists,
+  ThreadSummaryCache,
 } from "@/features/agents/lib/queries"
 import {
   threadHydrated,
@@ -129,6 +130,10 @@ export function useThreadTranscript(
 ): ThreadTranscript {
   const runTracker = options.runTracker
   const queryClient = useQueryClient()
+  const summaries = useMemo(
+    () => new ThreadSummaryCache(queryClient, threadId),
+    [queryClient, threadId]
+  )
   const [state, setState] = useState<TranscriptState | null>(() =>
     cached(threadId)
   )
@@ -198,6 +203,7 @@ export function useThreadTranscript(
           if (disposed) return
           flush()
           onConnected()
+          summaries.reconcile()
         },
         onDeleted: () => {
           cancelPublication()
@@ -237,6 +243,14 @@ export function useThreadTranscript(
               flush()
             }
           }
+          if (
+            next !== current &&
+            (event.event_type === "turn.started" ||
+              event.event_type === "turn.completed" ||
+              event.event_type === "turn.failed" ||
+              event.event_type === "turn.interrupted")
+          )
+            summaries.reconcile()
           if (!runTracker) return
           const payload = event.payload
           runTracker.transcriptEvent({
@@ -312,6 +326,7 @@ export function useThreadTranscript(
     publish,
     queryClient,
     runTracker,
+    summaries,
     threadId,
   ])
 

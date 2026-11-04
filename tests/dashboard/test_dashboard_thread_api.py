@@ -32,7 +32,7 @@ from openswe.threads import runs as thread_runs
 from openswe.threads.summary import TRANSCRIPT_VERSION
 from openswe.transcript.engine import AppendResult
 from openswe.transcript.turns import OpenTurn
-from openswe.users import User, UserPreferences
+from openswe.users import User
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import ThreadStoreOverClient, patch_thread_module
 
@@ -78,6 +78,34 @@ async def test_create_session_starts_only_when_requested(monkeypatch, start: boo
         assert command["params"]["input"]["messages"] == [{"type": "human", "content": "Fix login"}]
     else:
         dispatch.assert_not_awaited()
+
+
+async def test_langsmith_cloud_session_is_private_and_has_no_repository(monkeypatch) -> None:
+    from openswe.threads.identity import ThreadIdentity
+
+    subject = f"user:{uuid7()}"
+    monkeypatch.setattr(
+        thread_runs, "get_profile", AsyncMock(return_value={"default_repo": "acme/private"})
+    )
+    monkeypatch.setattr(
+        thread_runs, "_resolve_requested_workspace", AsyncMock(return_value="default")
+    )
+    monkeypatch.setattr(thread_runs, "_ensure_dashboard_github_token", AsyncMock())
+    create = AsyncMock(return_value={"thread_id": "cloud-thread"})
+    monkeypatch.setattr(thread_runs, "create_dashboard_thread_record", create)
+    result = await thread_runs.create_dashboard_session(
+        thread_runs.SessionCreateBody(prompt="Research", visibility="public"), subject
+    )
+    assert result == "cloud-thread"
+    assert create.call_args.kwargs["visibility"] == "private"
+    assert create.call_args.kwargs["repo_config"] == {}
+    assert create.call_args.kwargs["repo_explicitly_none"] is True
+    assert ThreadIdentity(subject).github_login is None
+    with pytest.raises(HTTPException) as rejected:
+        await thread_runs.create_dashboard_session(
+            thread_runs.SessionCreateBody(prompt="Clone", repo="acme/private"), subject
+        )
+    assert rejected.value.status_code == 403
 
 
 async def test_create_session_uses_saved_defaults(monkeypatch, registry_db) -> None:
@@ -226,59 +254,88 @@ async def test_failed_run_start_drains_prefetches(monkeypatch: pytest.MonkeyPatc
         await history_finished.wait()
 
 
-@pytest.mark.parametrize("enabled", [False, True])
-async def test_agent_workspace_experience_is_bound_before_first_dispatch(
-    monkeypatch, enabled: bool
+@pytest.mark.parametrize("langsmith", [False, True])
+@pytest.mark.parametrize("local", [False, True])
+async def test_desktop_thread_keeps_authenticated_identity_on_resume(
+    monkeypatch: pytest.MonkeyPatch,
+    registry_db: None,
+    langsmith: bool,
+    local: bool,
 ) -> None:
     monkeypatch.setattr(
         thread_runs, "_resolve_requested_workspace", AsyncMock(return_value="default")
     )
-    monkeypatch.setattr(thread_runs, "_requested_visibility", AsyncMock(return_value="private"))
-    monkeypatch.setattr(thread_runs.postgres, "configured", lambda: False)
-    monkeypatch.setattr(
-        User,
-        "preferences_for_login",
-        AsyncMock(return_value=UserPreferences(experimental_fleet=enabled)),
-    )
+    monkeypatch.setattr(thread_runs, "_requested_visibility", AsyncMock(return_value="public"))
+    monkeypatch.setattr(thread_runs, "postgres", SimpleNamespace(configured=lambda: False))
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={"default_repo": "acme/default"})
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    subject = f"user:{uuid7()}" if langsmith else "octocat"
+    bridge = await BridgeStore.register(
+        owner_id=subject if langsmith else "github:octocat",
+        hostname="laptop.local",
+        root_path="/Users/test/tasks",
+        label=None,
+        bridge_id=None,
+    )
+    assert bridge is not None
     command = {
         "method": "run.start",
         "params": {
             "input": {"messages": [{"type": "human", "content": "Research this topic"}]},
-            "config": {"configurable": {"experience": "agent_workspace"}},
+            "config": {
+                "configurable": {
+                    **({"sandbox_bridge_id": bridge.bridge_id} if local else {}),
+                }
+            },
         },
     }
-    if not enabled:
-        with pytest.raises(HTTPException) as rejected:
-            await thread_runs._enrich_run_start_command(
-                "new-tid", "octocat", command, metadata={}, creating=True
-            )
-        assert rejected.value.status_code == 403
-        assert "metadata" not in created
-        return
     first = await thread_runs._enrich_run_start_command(
-        "new-tid", "octocat", command, metadata={}, creating=True
+        "new-tid", subject, command, metadata={}, creating=True
     )
-    assert first["params"]["config"]["configurable"]["experience"] == "agent_workspace"
-    assert first["params"]["config"]["configurable"]["repo_explicitly_none"] is True
+    config = first["params"]["config"]["configurable"]
+    if langsmith:
+        assert config["auth_provider"] == "langsmith"
+        assert config["user_id"] == subject.removeprefix("user:")
+        assert "github_login" not in config
+        assert "repo" not in config
+    else:
+        assert config["github_login"] == subject
+        assert "auth_provider" not in config
     metadata = created["metadata"]
     assert isinstance(metadata, dict)
-    assert metadata["experience"] == "agent_workspace"
+    assert metadata["owner_login"] == subject
+    if langsmith:
+        assert metadata["owner_user_id"] == subject.removeprefix("user:")
+    assert metadata["visibility"] == ("private" if local or langsmith else "public")
+    if local:
+        assert metadata["sandbox_id"] == bridge.sandbox_id
+    else:
+        assert metadata.get("sandbox_id") is None
     followup = {
         "method": "run.start",
         "params": {
             "input": {"messages": [{"type": "human", "content": "Continue"}]},
-            "config": {"configurable": {"experience": "coding"}},
+            "config": {
+                "configurable": {
+                    "github_login": "admin",
+                    "auth_provider": "github",
+                }
+            },
         },
     }
-    monkeypatch.setattr(User, "preferences_for_login", AsyncMock(return_value=UserPreferences()))
     _patch_new_thread_deps(monkeypatch, profile={})
     next_run = await thread_runs._enrich_run_start_command(
-        "new-tid", "octocat", followup, metadata=metadata
+        "new-tid", subject, followup, metadata=metadata
     )
-    assert next_run["params"]["config"]["configurable"]["experience"] == "agent_workspace"
+    resumed = next_run["params"]["config"]["configurable"]
+    if langsmith:
+        assert resumed["auth_provider"] == "langsmith"
+        assert resumed["user_id"] == subject.removeprefix("user:")
+        assert "github_login" not in resumed
+    else:
+        assert resumed["github_login"] == subject
+        assert "auth_provider" not in resumed
 
 
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
@@ -531,6 +588,40 @@ async def test_only_a_person_on_web_moves_a_slack_thread_to_web(
     assert cast(dict[str, object], created["metadata"])["source"] == source
 
 
+@pytest.mark.parametrize("relayed", [False, True])
+async def test_queued_web_follow_up_notifies_slack_only_for_a_person(
+    monkeypatch: pytest.MonkeyPatch, relayed: bool
+) -> None:
+    metadata = {
+        "source": "slack",
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+    }
+    created: dict[str, object] = {"metadata": dict(metadata)}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    posted = AsyncMock(return_value=True)
+    monkeypatch.setattr(thread_runs, "post_slack_thread_reply", posted)
+    monkeypatch.setattr(
+        thread_runs, "create_durable_run", AsyncMock(return_value={"run_id": "queued-run"})
+    )
+    params: dict[str, object] = {
+        "input": {"messages": [{"type": "human", "content": "Also fix this"}]}
+    }
+    if relayed:
+        params[thread_runs.RELAYED_FROM_KEY] = "coordinator-tid"
+
+    result = await thread_runs.queue_follow_up_run(
+        "tid", "octocat", {"method": "run.start", "params": params}, metadata=metadata
+    )
+
+    assert result["result"]["queued"] is True
+    assert posted.await_count == (0 if relayed else 1)
+    if not relayed:
+        assert posted.call_args.args[:2] == ("C1", "1.0")
+        assert "https://dashboard.example/agents/tid" in posted.call_args.args[2]
+
+
 @pytest.mark.parametrize("selection_changed", [False, True])
 async def test_enrich_run_start_command_preserves_explicit_auto_intent(
     monkeypatch: pytest.MonkeyPatch, selection_changed: bool
@@ -697,7 +788,6 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
                     "invocation_id": "stolen",
                     "prepare_run_id": "stolen",
                     "repo": {"owner": "evil", "name": "repo"},
-                    "experience": "agent_workspace",
                     "agent_model_id": _VISION_MODEL,
                     "agent_effort": "medium",
                 }
@@ -726,7 +816,6 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
         {"owner_login", "owner_type", "visibility", "system_authorization"}
         & enriched["params"]["metadata"].keys()
     )
-    assert "experience" not in configurable
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
@@ -892,6 +981,8 @@ async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
         }
 
     failed = AsyncMock()
+    notify = AsyncMock()
+    monkeypatch.setattr(thread_proxy.ThreadMentions, "notify", notify)
     patch_thread_module(
         monkeypatch, "langgraph_client", lambda: SimpleNamespace(threads=IdleThreads())
     )
@@ -905,6 +996,7 @@ async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
 
     assert status == status_code
     failed.assert_awaited_once_with("tid", turn_id, error="the message could not be started")
+    notify.assert_not_awaited()
 
 
 async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> None:

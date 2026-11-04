@@ -44,7 +44,7 @@ The fake GitHub/Slack stores are the single source of truth the mock UIs render,
 - `sandbox_service.py` — the stand-in for LangSmith's sandbox service, which both the MDA server and the backend open sandboxes through.
 - `patches.py` — monkeypatches the boundaries (LLM, GitHub/Slack URLs, token mint).
 - `agent_entrypoint.py` — langgraph `agent` graph: applies patches in the backend worker, re-exports the read-only `traced_agent`.
-  Every Open SWE thread runs on Managed Deep Agents, whose hooks the backend answers from `plan_agent`.
+  Every Open SWE thread runs on Managed Deep Agents, whose hooks the backend answers from `agent_catalog`.
 - `mda-dev.sh` + `mda_entrypoint.py` — the Managed Deep Agents server: `mda build` output served by `langgraph dev` as `mda dev` serves it, with the fake model and loopback completion webhooks.
 - `harness.py` — langgraph `http.app`: the real `openswe.webapp` plus the fake GitHub/Slack APIs, the mock UIs, and the control/compose endpoints.
 - `fakes.py` — in-memory PR/Slack stores + git seeding of the bare remote.
@@ -74,6 +74,7 @@ Requires `pnpm`.
 pnpm install --frozen-lockfile
 pnpm run test:e2e:install
 pnpm run test:e2e            # browser suite
+pnpm --filter open-swe-e2e run test:auth # account recovery; no MDA runtime needed
 pnpm run test:e2e:desktop    # Electron + pinned uv dcode ACP
 ```
 

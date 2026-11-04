@@ -16,6 +16,7 @@ from openswe.database import postgres
 from openswe.dispatch import channel_of
 from openswe.expedited_review.reviews import REVIEW_BODY_PREFIX
 from openswe.github.comments import GitHubAuthError
+from openswe.github.http import GitHubClient
 from openswe.github.notifications import notify_slack_review
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestEvent, PullRequestPayload
@@ -33,14 +34,20 @@ from openswe.input_messages import (
     system_introduction,
 )
 from openswe.prompts import prompt
-from openswe.review.approvals import approval_mode_for, approval_policy_for_review
+from openswe.review.approvals import (
+    ApprovalPolicy,
+    approval_mode_for,
+    approval_policy_for_review,
+)
 from openswe.review.findings import (
     FindingInteraction,
     ReviewerPRMeta,
     ReviewerSlackThread,
     reviewer_thread_title,
 )
-from openswe.run_config import Repo
+from openswe.review.reconcile import reconcile_linked_findings
+from openswe.review.shadow import ReviewShadow
+from openswe.run_config import Repo, RunConfig
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
 from openswe.thread_ids import (
@@ -153,6 +160,11 @@ async def trigger_pr_review_from_ref(
     allow_draft: bool = False,
 ) -> dict[str, Any]:
     repo_config = {"owner": pr_ref.owner, "name": pr_ref.repo}
+    if not common.is_repo_allowed(repo_config):
+        return {
+            "success": False,
+            "error": f"{pr_ref.owner}/{pr_ref.repo} is not in the repository allowlist",
+        }
 
     # Full token to read PR metadata (privacy/id aren't in the trigger ref);
     # re-scoped below once we know whether the repo is public.
@@ -214,7 +226,7 @@ async def trigger_pr_review_from_ref(
         "base_ref": base_ref,
         "author": (pr_metadata.get("user") or {}).get("login", ""),
     }
-    slack_thread_meta: ReviewerSlackThread | None = None
+    slack_thread_meta: ReviewerSlackThread = {}
     if slack_channel_id and slack_thread_ts:
         slack_thread_meta = {
             "channel_id": slack_channel_id,
@@ -276,6 +288,9 @@ async def trigger_pr_review_from_ref(
         client=langgraph_client,
     )
     await common.store_current_reviewer_run_id(thread_id, run)
+    await ReviewShadow.follow(
+        RunConfig.parse(configurable), kickoff=review_prompt, pr_title=pr_title
+    )
     return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}
 
 
@@ -412,6 +427,59 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     )
     await common.store_current_reviewer_run_id(thread_id, run)
     common.logger.info("Reviewer run dispatched for thread %s (source=%s)", thread_id, source)
+    await ReviewShadow.follow(RunConfig.parse(configurable), kickoff=prompt, pr_title=pr_title)
+
+
+async def process_github_pr_walkthrough(payload: dict[str, object]) -> None:
+    """Plan open PRs, including drafts, independently of automatic assessment."""
+    from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+    from openswe.review_scout.launch import ReviewScoutTarget
+    from openswe.workspaces.store import WORKSPACES
+
+    event = PullRequestEvent.parse(payload)
+    if event is None or event.identity is None or not postgres.configured():
+        return
+    owner, repo, number = event.identity
+    pull = event.pull_request
+    if pull.state == "closed" or not pull.head_sha or not pull.base_sha:
+        return
+    workspace = await WORKSPACES.owner_of_repo(f"{owner}/{repo}")
+    settings = await cached_workspace_settings(workspace)
+    if settings.get("implementation_walkthrough_enabled") is True:
+        stored = await PullRequest.get(owner, repo, number)
+        if stored is not None:
+            for thread_id in stored.thread_ids:
+                thread = await THREADS.get(thread_id)
+                if thread is not None and thread.status == "busy":
+                    return
+        if (
+            pull.head_ref
+            and await index.ThreadSearch(
+                metadata={
+                    "implementation_pr_target": {
+                        "repository": f"{owner}/{repo}",
+                        "head": pull.head_ref,
+                    }
+                },
+                status="busy",
+                limit=1,
+            ).run()
+        ):
+            return
+    target = ReviewScoutTarget(
+        owner=owner,
+        repo=repo,
+        pr_number=number,
+        pr_title=pull.title,
+        base_sha=pull.base_sha,
+        head_sha=pull.head_sha,
+        workspace_slug=workspace,
+    )
+    try:
+        if await target.walkthrough() is None:
+            await target.start()
+    except Exception:
+        common.logger.exception("Could not start the PR walkthrough", extra=target.log_extra)
 
 
 async def process_github_pr_ready(payload: dict[str, Any]) -> None:
@@ -725,7 +793,12 @@ async def _process_github_head_update(
         )
         and not (
             await approval_mode_for(context.owner, context.name) == "approve"
-            and await approval_policy_for_review(context.owner, context.name, token=app_token)
+            and (
+                await approval_policy_for_review(
+                    context.owner, context.name, pr_number, token=app_token
+                )
+                or ApprovalPolicy()
+            ).configured
         )
     ):
         await PullRequest(
@@ -871,6 +944,9 @@ async def _process_github_head_update(
         client=langgraph_client,
     )
     await common.store_current_reviewer_run_id(thread_id, run)
+    await ReviewShadow.follow(
+        RunConfig.parse(configurable), kickoff=re_review_prompt, pr_title=pr_title
+    )
 
 
 async def process_github_ci_event(
@@ -1385,6 +1461,26 @@ async def process_github_pr_comment(
             edited_body=event_body if payload.get("action") == "edited" else None,
             edited_at=event_comment["event_at"],
         )
+
+
+async def process_github_review_thread(payload: dict[str, object]) -> None:
+    """Re-read thread states so delayed resolution events cannot overwrite newer ones."""
+    repository = payload.get("repository")
+    pull_request = payload.get("pull_request")
+    if not isinstance(repository, dict) or not isinstance(pull_request, dict):
+        return
+    owner_data = repository.get("owner")
+    owner = owner_data.get("login") if isinstance(owner_data, dict) else None
+    repo = repository.get("name")
+    number = pull_request.get("number")
+    if not isinstance(owner, str) or not isinstance(repo, str) or not isinstance(number, int):
+        return
+    thread_id = reviewer_thread_id(owner, repo, number)
+    metadata = await common.get_thread_metadata_safe(thread_id)
+    if metadata is None or metadata.get("kind") != common.REVIEWER_THREAD_KIND:
+        return
+    async with GitHubClient.as_app(owner, repo) as github:
+        await reconcile_linked_findings(thread_id, github.repo(owner, repo).pull_request(number))
 
 
 async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:

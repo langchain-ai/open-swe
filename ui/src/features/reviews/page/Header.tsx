@@ -38,6 +38,7 @@ import { reviewQueries, type PullRequestRef } from "./queries"
 import { isLive } from "./pullRequestStanding"
 import { RecentReviewPagesMenu } from "./RecentReviewPagesMenu"
 import { RelativeTimestamp } from "./RelativeTimestamp"
+import { ReviewQueueControls, useReviewQueue } from "./ReviewQueue"
 import { NextStepAction, StandingDot, usePullRequestStanding } from "./Standing"
 import { useReviewPage } from "./store"
 
@@ -90,6 +91,7 @@ export function Header({
   const { openShortcutReference } = useAppCommandControls()
   const githubUrl = githubUrls.pullRequest(pr)
   const current = usePullRequestStanding(pr)
+  const queue = useReviewQueue(pr)
   const status = current?.status
   const state = detail ? pillState(detail, status?.draft) : null
   const live = detail !== undefined && isLive(detail)
@@ -117,7 +119,7 @@ export function Header({
         variant="plain"
         className="max-sm:hidden"
       >
-        <Link to="/agents/reviews" />
+        <Link to="/agents/reviews" search={queue ? { tab: "to-review" } : {}} />
       </IconButton>
       <IconButton
         icon={TreeViewIcon}
@@ -337,6 +339,7 @@ export function Header({
             {viewedCount}/{files.length} viewed
           </Button>
         )}
+        {queue && <ReviewQueueControls queue={queue} />}
         {compactRail && (
           <Button
             size="sm"
@@ -349,6 +352,11 @@ export function Header({
             <span className="max-sm:hidden">Chat</span>
           </Button>
         )}
+        {detail && !isLive(detail) && queue && (
+          <Button size="sm" onClick={queue.advance}>
+            {queue.next ? "Next" : "Finish"}
+          </Button>
+        )}
         {detail && isLive(detail) && (
           <ReviewButton
             owner={pr.owner}
@@ -358,6 +366,23 @@ export function Header({
             onOpenChange={setReviewOpen}
             defaultVerdict={reviewVerdict}
             onOpenReview={openReview}
+            approveLabel={
+              queue
+                ? queue.next
+                  ? "Approve & next"
+                  : "Approve & finish"
+                : undefined
+            }
+            readyLabel={
+              queue
+                ? queue.next
+                  ? "Mark ready & next"
+                  : "Mark ready & finish"
+                : undefined
+            }
+            onApproved={queue?.advance}
+            nextLabel={queue ? (queue.next ? "Next" : "Finish") : undefined}
+            onNext={queue?.advance}
           />
         )}
         <DropdownMenu>

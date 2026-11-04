@@ -10,7 +10,14 @@ import type { AppCommand } from "@/lib/appCommands"
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   fetchNextPage: vi.fn(),
-  cloudThread: { id: "cloud-1", title: "Cloud result" } as AgentThread,
+  cloudThread: {
+    id: "cloud-1",
+    title: "Cloud result",
+  } as AgentThread,
+}))
+
+vi.mock("@/lib/session", () => ({
+  useSession: () => ({ data: { login: "alice" } }),
 }))
 
 vi.mock("@tanstack/react-router", () => ({
@@ -37,6 +44,7 @@ vi.mock("@/features/reviews/lib/usePullRequestSearch", () => ({
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  localStorage.clear()
 })
 
 const commands: Array<AppCommand> = [

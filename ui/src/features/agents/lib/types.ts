@@ -401,7 +401,8 @@ export interface PendingThreadMessage extends Omit<
 > {
   images?: Array<ImageChunk>
   replies?: Array<PassageReply>
-  status: "sending" | "failed"
+  /** `sent`: the server took it; the transcript just doesn't have it yet. */
+  status: "sending" | "sent" | "failed"
   /** Sent to queue behind the live run, so it renders as a queued row. */
   queued?: boolean
   /** Why delivery failed, e.g. `503 Service Unavailable`. */
@@ -560,6 +561,7 @@ export type TaskMembership =
   | { role: "worker"; taskId: string; coordinatorThreadId: string | null }
 
 export interface AgentThread {
+  waitingForDelegatedWork?: boolean
   taskMembership?: TaskMembership
   taskWorkers?: Array<AgentThread>
   ownerLogin?: string | null
@@ -578,12 +580,15 @@ export interface AgentThread {
   title: string
   repo: string
   repoFullName: string
+  /** The Open SWE project the thread was started in or moved to. */
+  projectId?: string | null
   branch: string
   model: string
   effort?: string | null
   modelSelection?: "auto" | "explicit" | null
   planStatus?: string | null
   adminThread?: boolean
+  concierge?: boolean
   source?: AgentSource
   origin?: AgentSource | string
   threadCategory?: AgentThreadCategory | string

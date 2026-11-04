@@ -51,12 +51,17 @@ Every variable Open SWE reads is declared in `openswe/config.py` with its descri
 Set `POSTHOG_API_KEY` to your PostHog project API key.
 `POSTHOG_HOST` defaults to `https://us.i.posthog.com`; use `https://eu.i.posthog.com` for EU projects or your self-hosted ingestion host.
 Without a key, capture is disabled.
-No frontend key or additional dependency is needed.
+The dashboard reads the same key from `/dashboard/api/analytics/config` and captures in the browser with posthog-js, so no frontend build setting is needed.
 
-Authenticated dashboard navigation sends `$pageview` events with normalized `page_name`; MCP executions send `MCP Tool Called` with tool name, `is_error`, and the run repository name; persisted webhook deliveries send `Webhook Received` with source, event type, action, resolved workspace/repository/PR IDs, and the repository name on GitHub events.
+The dashboard sends `$pageview` and `$pageleave` events grouped into PostHog sessions, with the page title, a normalized `page_name` and URLs whose ids and query strings are replaced by placeholders (`/agents/:threadId`); autocapture, heatmaps, session recording, exception capture and web vitals are off.
+`platform` is `web` or `desktop` (with `desktop_version`), so desktop app usage can be told apart.
+MCP executions send `MCP Tool Called` with tool name, `is_error`, and the run repository name; persisted webhook deliveries send `Webhook Received` with source, event type, action, resolved workspace/repository/PR IDs, and the repository name on GitHub events.
 `DD_ENV` identifies the deployment.
 Resolved users share the internal user UUID, with email and GitHub login traits on usage events.
-Unresolved usage is skipped; unresolved webhooks use a source-specific ID without creating person profiles.
+Signed-out dashboard visits create no person profiles; unresolved MCP usage is skipped.
+A webhook whose sender is no Open SWE user counts as that account (`github:<id>`, `slack:<id>`); bots get a person profile marked `is_bot`, people without an account get none, and events with no sender use `open-swe:webhook:<source>`.
+Webhooks on a pull request also carry `pull_request_author_id`, the author's user UUID, so bot activity on a PR can be credited to its author.
+Private events, such as a person's own threads, record only who acted, the source, event type and workspace, marked `visibility: private`; PRs they open are public and tracked in full.
 
 Delivery is best effort, not a durable export or historical backfill.
 Tool arguments/results, page URLs/query strings/thread identifiers, and raw webhook payloads are excluded; only allowlisted metadata properties are exported; IP geolocation is disabled.
@@ -165,8 +170,9 @@ Go to **GitHub Settings → Developer settings → [GitHub Apps](https://github.
   - Checks: Read & write — reports an "Open SWE Review" check run on PRs while an auto-review runs and lets `/baby-sit` read third-party CI conclusions.
     Without it, check-run creation fails (logged, best-effort), reviews still work, and `/baby-sit` fails closed when it cannot read the complete check set.
   - Commit statuses: Read-only — required for `/baby-sit` to evaluate the complete PR status set, including integrations that report via legacy commit statuses.
-  - Code scanning alerts: Read-only — optional; lets Open SWE inspect code-scanning alerts directly so it can identify and patch reported vulnerabilities.
-    Source-code changes still use the Contents permission above.
+  - Code scanning alerts: Read & write — lets Open SWE inspect, dismiss, and reopen code-scanning alerts.
+    Existing installations must approve the expanded permission before the MDA GitHub token can receive it.
+    Source-code changes still use the Contents permission above; Dependabot and secret-scanning alerts require separate permissions.
   - Actions: Read-only — optional for CI diagnostics and log access.
     Grant **Read & write** only to enable `/baby-sit` to rerun evidence-backed flaky GitHub Actions jobs; existing installations must approve the elevation, and the token could then also cancel or delete runs.
   - Workflows: Read & write — lets Open SWE push branches containing explicitly requested GitHub Actions workflow changes.
@@ -366,6 +372,7 @@ CONFIGURED_ADMINS=""                  # GitHub logins or emails, comma-separated
 MDA_RUNTIME_URL=""                    # the Managed Deep Agents deployment of mda/; required
 MDA_RUNTIME_API_KEY=""                # LangSmith key to call it with; defaults to LANGSMITH_API_KEY
 MDA_WORKSPACE_ID=""                   # its LangSmith workspace; defaults to this backend's
+MDA_LANGSMITH_PROJECT=""              # its LangSmith project (the deployment name); defaults to LANGSMITH_PROJECT
 REMOTE_RUNTIME_TOKEN_SECRET=""        # openssl rand -hex 32     (signs the run tokens it calls back with); required
 ```
 

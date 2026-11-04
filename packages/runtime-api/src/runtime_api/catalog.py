@@ -211,6 +211,19 @@ def kept_route(value: object) -> RouteName | None:
     return None
 
 
+class WorkStateRules(BaseModel):
+    """The person wants the run to keep working until it calls ``tool`` to say it is blocked
+    or complete. An answer that neither calls it nor starts a wait in ``waits`` is sent
+    back, ``nudge`` up to ``max_nudges`` times."""
+
+    tool: str
+    # Tools whose successful call wakes the thread again later, so ending the run is fine.
+    waits: list[str] = []
+    nudge: list[str] = []
+    nudge_sender: str = ""
+    max_nudges: int = 5
+
+
 class RoutingRules(BaseModel):
     """How the run picks the route of each model call."""
 
@@ -252,6 +265,7 @@ class LoopRules(BaseModel):
     routing: RoutingRules | None = None
     reply: ReplyRules | None = None
     cli_result: CliResultRules | None = None
+    work_state: WorkStateRules | None = None
     # The task the thread may belong to, as its coordinator or a worker, as the run
     # started; None where it may not. A coordinator's first worker hands back the context
     # of the task it then joined (``runtime_api.workers.Worker``).
@@ -265,6 +279,11 @@ class LoopRules(BaseModel):
     # Whether the backend gives the sandbox's GitHub proxy a fresh token before each model
     # call: a task worker's, the token of its coordinator's sandbox.
     refresh_github_proxy: bool = False
+    # Whether the run investigates an incident: before each model call the backend checks the
+    # incident still wants it and gives the call its instructions (``incident_context``).
+    incident: bool = False
+    # Whether the run was asked only to offload the conversation: it summarizes it and ends.
+    offload_conversation: bool = False
     # What the run's end does besides recording it.
     at_end: list[Literal["settle_review_check", "finish_scout_plan"]] = []
 
@@ -306,9 +325,8 @@ class Catalog(BaseModel):
     skill_sources: list[str] = []
     # How the run reads what is sent to its thread while it works; None reads nothing.
     inbox: InboxSpec | None = None
-    # What the runtime's middleware does around each model call; None leaves it to the
-    # backend's phase calls, for the runs still answered from their plan.
-    loop: LoopRules | None = None
+    # What the runtime's middleware does around each model call.
+    loop: LoopRules = LoopRules()
     # Whether the run offers ``search_tools`` over all its tools and calls those its
     # catalog leaves out from code, and how the model reads the search.
     search_tools: bool = False

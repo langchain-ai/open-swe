@@ -35,7 +35,7 @@ from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata, channel_of
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
-from openswe.review.findings import REVIEWER_THREAD_KIND
+from openswe.review.findings import REVIEWER_SHADOW_THREAD_KIND, REVIEWER_THREAD_KIND
 from openswe.review.run_failure import ReviewRunFailure
 from openswe.session_cost import schedule_session_cost_refresh
 from openswe.slack.client import (
@@ -44,6 +44,7 @@ from openswe.slack.client import (
     post_slack_thread_reply,
 )
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
+from openswe.slack.routed_work import RoutedWork
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
@@ -377,7 +378,7 @@ async def _handle_successful_run(
         from openswe.incidents import turns
 
         return await turns.handle_run_completion(thread_id, run_id, "success")
-    if metadata.get("kind") == REVIEWER_THREAD_KIND:
+    if metadata.get("kind") in {REVIEWER_THREAD_KIND, REVIEWER_SHADOW_THREAD_KIND}:
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
     await sync_slack_background_status(client, thread_id)
@@ -527,6 +528,9 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         )
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     await _settle_transcript_turn(thread_id, run_id, status)
+    from openswe.review.events import ReviewEvents
+
+    await ReviewEvents.completed(thread_id, run_id, status)
     is_worker = False
     if run_id and isinstance(status, str) and status in _TERMINAL_RUN_STATUSES:
         from openswe.tasks.events import worker_finished
@@ -557,6 +561,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             pickup_allowed = delegation is not None and not delegation.cancelled
         if pickup_allowed:
             await _start_run_for_pending_follow_ups(thread_id)
+    if status in _TERMINAL_RUN_STATUSES:
+        await RoutedWork(thread_id).settle_origins()
     if is_worker:
         await sync_slack_background_status(langgraph_client(), thread_id)
         if status in _TERMINAL_FAILURE_STATUSES:

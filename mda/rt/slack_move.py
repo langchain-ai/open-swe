@@ -14,6 +14,7 @@ Two things move a thread: the agent's ``slack_move_thread`` tool, and a person's
 
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from functools import partial
 from typing import Final
@@ -46,6 +47,8 @@ from rt.tracing import MIDDLEWARE_TRACE_POLICY
 logger = logging.getLogger(__name__)
 
 MOVE_TOOL: Final = "slack_move_thread"
+# Where the agent moves a thread, always named: a Slack channel ID.
+_DESTINATION: Final = re.compile(r"^[CGD][A-Z0-9]+$")
 
 
 class SlackMoveMiddleware(AgentMiddleware):
@@ -70,11 +73,17 @@ class SlackMoveMiddleware(AgentMiddleware):
             return await handler(request)
         args = call_["args"]
         message = args.get("message")
-        channel_id = args.get("channel_id")
+        # ``channel_id`` is what a backend from before a destination was required offers.
+        destination = args.get("destination", args.get("channel_id"))
+        if not isinstance(destination, str) or not _DESTINATION.fullmatch(destination):
+            refused = {"success": False, "error": "destination must be a Slack channel ID"}
+            return ToolMessage(
+                content=json.dumps(refused), tool_call_id=call_["id"] or "", name=MOVE_TOOL
+            )
         result = await self._move(
             request.runtime,
             message=message if isinstance(message, str) else "",
-            channel_id=channel_id if isinstance(channel_id, str) and channel_id else None,
+            channel_id=destination,
         )
         if result is None:
             # A thread the backend holds: the backend's tool moves it, as before.

@@ -28,6 +28,7 @@ export interface SidebarThreadItem {
   /** Subagents the thread spawned, listed as sub-threads under its row. */
   subagents?: Array<AgentSubagentSummary>
   taskWorkers?: Array<AgentThread>
+  waitingForDelegatedWork?: boolean
   thread: AgentThread
 }
 
@@ -106,6 +107,7 @@ export function cloudSidebarThread(thread: AgentThread): SidebarThreadItem {
     reviewPage: thread.reviewPage,
     subagents: thread.subagents,
     taskWorkers: thread.taskWorkers,
+    waitingForDelegatedWork: thread.waitingForDelegatedWork,
     thread,
   }
 }
@@ -178,6 +180,45 @@ export function sortSidebarThreads(
   // pin order, which is the only manual ordering the user can actually set.
   if (mode === "manual") return [...threads]
   return [...threads].sort(mode === "created" ? byCreation : byRecency)
+}
+
+export interface SidebarAgeGroup {
+  key: "today" | "yesterday" | "older"
+  label: string
+  threads: Array<SidebarThreadItem>
+}
+
+/** Buckets threads into Today, Yesterday and Older by when they were last updated, each ordered by creation. */
+export function groupSidebarThreadsByAge(
+  threads: ReadonlyArray<SidebarThreadItem>,
+  now: Date = new Date()
+): Array<SidebarAgeGroup> {
+  const today = new Date(now).setHours(0, 0, 0, 0)
+  const yesterday = new Date(today).setDate(new Date(today).getDate() - 1)
+  const buckets: Record<SidebarAgeGroup["key"], Array<SidebarThreadItem>> = {
+    today: [],
+    yesterday: [],
+    older: [],
+  }
+  for (const thread of threads) {
+    const day = new Date(thread.updatedAt).setHours(0, 0, 0, 0)
+    buckets[
+      day >= today ? "today" : day >= yesterday ? "yesterday" : "older"
+    ].push(thread)
+  }
+  return (
+    [
+      ["today", "Today"],
+      ["yesterday", "Yesterday"],
+      ["older", "Older"],
+    ] as const
+  )
+    .filter(([key]) => buckets[key].length > 0)
+    .map(([key, label]) => ({
+      key,
+      label,
+      threads: buckets[key].sort(byCreation),
+    }))
 }
 
 export function threadFamily(thread: AgentThread): Array<AgentThread> {

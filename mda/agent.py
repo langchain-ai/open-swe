@@ -42,10 +42,11 @@ from managed_deepagents import (
 )
 from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import BaseModel, ConfigDict
-from rt.backend import Graph, OpenSweBackend, RunContext
+from rt.backend import OpenSweBackend, RunContext
 from rt.browser import ReportedBrowserMiddleware
 from rt.factory_timing import FactoryTiming
 from rt.file_tools import FileToolsMiddleware
+from rt.kinds import Graph
 from rt.managed_sandbox import (
     EXECUTE_TIMEOUT_SECONDS,
     ManagedSandboxMiddleware,
@@ -322,7 +323,6 @@ def agent(inputs: GraphInputs) -> DeepAgentDefinition:
     }
     return define_deep_agent(
         name="open-swe",
-        replicate_traces=False,
         model=inputs.agent_model(),
         context_schema=RunContext,
         # The thread's sandbox, for the file and shell tools run in it and for MDA's own use

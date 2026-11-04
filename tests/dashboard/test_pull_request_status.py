@@ -394,3 +394,56 @@ async def test_thread_status_read_denial_does_not_resolve_oauth_token(
 
     assert exc_info.value.status_code == 403
     token.assert_not_awaited()
+
+
+async def test_finding_thread_states_read_every_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def graphql(self, query: str, variables: dict[str, object]) -> dict[str, object]:
+        cursor = variables["cursor"]
+        return {
+            "repository": {
+                "pullRequest": {
+                    "reviewThreads": {
+                        "nodes": [
+                            {"id": "A" if cursor is None else "B", "isResolved": cursor is None}
+                        ],
+                        "pageInfo": {"hasNextPage": cursor is None, "endCursor": "next"},
+                    }
+                }
+            }
+        }
+
+    monkeypatch.setattr(github_http.RepoClient, "graphql", graphql)
+    pull = _github().repo("acme", "app").pull_request(7)
+    assert await pull.review_thread_states() == {"A": True, "B": False}
+
+
+@pytest.mark.parametrize(
+    "last_page",
+    [
+        {"nodes": [], "pageInfo": {"hasNextPage": True, "endCursor": "next"}},
+        {"nodes": []},
+        {"nodes": [], "pageInfo": {"hasNextPage": "false"}},
+        {"nodes": [{"id": "B"}], "pageInfo": {"hasNextPage": False}},
+        ValueError("GitHub GraphQL error on page two"),
+        httpx2.ConnectError("GitHub unavailable on page two"),
+    ],
+)
+async def test_finding_thread_states_never_return_a_partial_snapshot(
+    monkeypatch: pytest.MonkeyPatch, last_page: object
+) -> None:
+    async def graphql(self, query: str, variables: dict[str, object]) -> dict[str, object]:
+        if variables["cursor"] is None:
+            connection = {
+                "nodes": [{"id": "A", "isResolved": True}],
+                "pageInfo": {"hasNextPage": True, "endCursor": "next"},
+            }
+        elif isinstance(last_page, Exception):
+            raise last_page
+        else:
+            connection = last_page
+        return {"repository": {"pullRequest": {"reviewThreads": connection}}}
+
+    monkeypatch.setattr(github_http.RepoClient, "graphql", graphql)
+    pull = _github().repo("acme", "app").pull_request(7)
+    with pytest.raises((ValueError, httpx2.HTTPError)):
+        await pull.review_thread_states()

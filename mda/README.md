@@ -1,10 +1,10 @@
 # Open SWE on Managed Deep Agents
 
 Open SWE's coding agent, pull request reviewer and review scout, packaged as one [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) project with a single graph, `open-swe`.
-Each run's context names the Open SWE graph it plays (`agent`, `reviewer` or `review-scout`); the factory in `agent.py` builds that graph's deep agent from it.
+Each run's context names the kind of run it is (`agent`, `reviewer` or `review-scout`); the factory in `agent.py` builds the deep agent for that kind from it.
 
 The model loop, its checkpoints, every tool call and the middleware around them run here.
-The backend works out each run's catalog as it starts the run (`openswe/agent_api/graph.py`): its operations, its models and the rules of its middleware.
+The backend resolves each run's catalog as it starts the run, from the thread's settings, the workspace's defaults, the sender's access and the integrations their credentials reach (`openswe/agent_api/run_catalog.py`): its operations, its models and the rules of its middleware.
 Every call MDA makes on the backend, the loop's and the tools', is a named endpoint of the typed API in `packages/runtime-api` (`runtime_api`), under `POST /agent-api/{endpoint}`, which both sides import, answered from the run token and the request on whichever backend replica it lands.
 Each endpoint declares how long it may take and when it is sent again after a failed delivery.
 Every call is authenticated with the run token.
@@ -38,7 +38,7 @@ Every call is authenticated with the run token.
   The backend names a person's connection only in the catalog of a run that acts as one (the run token's `acting_user_id`, never `user_id`, whom the run is only attributed to), so a run it starts for no one asks no one to connect it: on a channel's thread MDA reads it as its channel service principal (`mda:channel`), which reads no user connections, and on any other thread as the backend's own key, one principal all such runs share.
   A person's connection the run cannot read otherwise (no grant given, Agent Auth not reached) is left out, and the tool works as it did without; a call whose deployment connection is missing or unreadable fails and names it.
   The backend runs no tools node and no tool-call middleware.
-  A tool that reads nothing of the backend's, which the backend marks (`runtime_runs`), MDA runs itself and answers as its operation would, byte for byte, reported to the transcript alike (`rt/local_tools.py`, `rt/local_results.py`): `web_search` (where `MDA_EXA_CONNECTION` names the Exa key, which MDA reads), `fetch_url` and `http_request`, whose requests go only to public addresses, each redirect checked (`rt/public_http.py`), and `slack_no_reply_needed`, `suggest_task`, `cli_result`, `record_human_input`, `note_on_diff`, `propose_review_comment` and `propose_pr_review`.
+  A tool that reads nothing of the backend's, which the backend marks (`runtime_runs`), MDA runs itself and answers as its operation would, byte for byte, reported to the transcript alike (`rt/local_tools.py`, `rt/local_results.py`): `web_search` (where `MDA_EXA_CONNECTION` names the Exa key, which MDA reads), `fetch_url` and `http_request`, whose requests go only to public addresses, each redirect checked (`rt/public_http.py`), and `slack_no_reply_needed`, `cli_result`, `record_human_input`, `note_on_diff`, `propose_review_comment` and `propose_pr_review`.
   A large search result or response goes to the sandbox MDA owns; a run without one calls those two as operations, and MDA calls any marked tool it does not have as one.
   An operation whose sandbox stopped answering ends the run; the backend has told the person.
   Tools the graph hides from the model are dropped from each request.
@@ -62,7 +62,7 @@ Every call is authenticated with the run token.
   Tool errors become results.
   Where the catalog lists the checks, a file posing as an image is not attached and reading a file loads the `AGENTS.md` files above it (`rt/validate_image_reads.py`, `rt/subdir_agents.py`).
   Commands get the backend's five-minute default timeout and a client-side deadline past it.
-  The transcript hears of every call alongside it (`tool_started`, `tool_result`); each phase and reply waits for the reports made before it.
+  The transcript hears of every call alongside it (`tool_started`, `tool_result`); each reply waits for the reports made before it.
   Code mode's calls skip the checks.
 - **Skills:** the backend lists the skills a run may see (`runtime_api.skills`): a person's own only on a run that acts for them.
   `rt/skills.py` keeps them as read-only files, lists them in the system prompt of the agent's and its subagents' model calls with deepagents' skills middleware, listing them again every run, started before `prepare`, so a public thread never keeps a person's skills from a run that acted for them, and answers `read_file` and the other file tools on their paths.
@@ -73,22 +73,23 @@ Every call is authenticated with the run token.
   - `prepare`: before the run, on the backend: the turn's prompt, model and route, from what the run token says starting the run decided, never planning the run again.
     It writes the graph state the loop reads.
     The run then reports its start (`run_started`), behind which the backend opens the transcript turn and records the thread's model and usage, none of which the first model call waits for.
-    The reviewer and the scout still prepare from their plan;
+    The reviewer and the scout prepare from it too;
   - **Git evidence** (`rt/git_evidence.py`): the sandbox's checkouts are fingerprinted (`rt/sandbox_scripts/git_trace.py`) as the turn starts and before a model call that follows a file or shell tool, each in the background; a tool that may change a checkout waits only for the turn's first fingerprint.
     With the pull requests the run's operations open, they name the turn's `ls_git_repo` and `ls_git_branch` in its trace, reconciled after the run ends, so neither the run's end nor the thread's next message waits for the last fingerprint or the trace's update.
     A turn whose tools changed nothing waits for no fingerprint;
   - `inbox`, before each model call: only what was sent to the thread while the run worked (queued follow-ups and notes, event matches, task messages), read as the catalog's `InboxSpec` says.
     Once the model call goes ahead, the run hands the items back through `inbox_received`, alongside the call as the transcript's reports go, and the next read names what that receipt holds until the backend took it, so the backend receives it before reading; a run that ends first leaves them owed.
     A run started to carry events receives them at `prepare`;
-  - `RunLoop` (`rt/loop.py`), around each model call, as the catalog's `LoopRules` say: it ends the run where a rule says to (a scout with nothing to plan, a client's call still pending), adds the task context its catalog carries (a coordinator's first worker hands back the task it joined) and keeps the GitHub proxy the backend writes fresh (`refresh_github_proxy`, asked while the inbox is read; a worker's is its coordinator's), picks the route (`rt/routing.py` classifies a new thread's request alongside preparing it) and the model (`model_choice` for one a person asked for), and assembles the system prompt and tool list.
+  - `RunLoop` (`rt/loop.py`), around each model call, as the run's `LoopRules` say: the catalog's for the coding agent, whose rules depend on the run, and those of its kind (`rt/kinds.py`) for the reviewer and the scout, which every run of theirs follows: it ends the run where a rule says to (a scout with nothing to plan, a client's call still pending), adds the task context its catalog carries (a coordinator's first worker hands back the task it joined) and an incident run's instructions (`incident_context`, which also checks the incident still wants the run and records the evidence people's messages carry), keeps the GitHub proxy the backend writes fresh (`refresh_github_proxy`, asked while the inbox is read; a worker's is its coordinator's), picks the route (`rt/routing.py` classifies a new thread's request alongside preparing it) and the model, and assembles the system prompt and tool list.
     After an answer that calls no tool it asks again for the CLI result and the Slack reply the run owes, then posts the answer itself (`reply_on_behalf`).
     At the end it asks for the graph's own end-of-run work (`step_limit_reached`, `settle_review_check`, `finish_scout_plan`) and reports the run ended (`run_ended`: transcript, usage), and the run ends without waiting for either;
   - `model_result` (`ReportRepliesMiddleware`): the transcript and usage see each response;
   - **Reports:** the reports (`run_started`, `tool_started`, `tool_result`, `model_result`, `inbox_received`, `run_ended`) and the notices whose answer the run never reads (`sandbox_unreachable` and the end-of-run work) go through the run's outbox (`rt/outbox.py`): in the order they were made, batched into one `reports` call (`runtime_api.reports`) with whatever else waits, and sent again until the backend says it took them.
     Each carries a key unique in the thread, and the backend records a key once (`agent_report_receipt`), so a resend after a lost answer records nothing twice.
     What the backend has not taken rides in the run's graph state (`open_swe_outbox`), written with the reply, tool result or hook that made it, so a restarted process, or the thread's next run, sends it first.
-    A phase waits for the reports before it for up to five minutes, except `prepare`, which nothing an earlier run left unsent changes; `run_ended` goes out after them;
-  - a run whose catalog names no loop rules (a requested conversation offload, an incident run) hands `before_model`, `after_model` and `after_agent` to the graph's own middleware on the backend instead.
+    `run_ended` goes out after them;
+  - a run started only to offload the conversation (`LoopRules.offload_conversation`) summarizes it before its first model call, as MDA's summarization would but whatever its length, and ends (`rt/offload.py`);
+  - an incident run's tool results are recorded as evidence its report may cite (`record_evidence`), kept per run in PostgreSQL so any backend replica answers the run's calls.
 - **Subagents:** MDA runs `task` and its subagents.
   `RuntimeToolsMiddleware` reports each call to a tool MDA runs itself through `tool_started` and `tool_result`, so the transcript records the `task` call.
   Every call made from inside a subagent names the `task` call it runs in (`namespace`), and subagents hand their replies to `model_result` too.
@@ -97,8 +98,13 @@ Every call is authenticated with the run token.
 - **State:** graph state preparation and the loop write that MDA does not know rides in `open_swe_state` and goes back with every call.
   Custom stream events the backend emits are re-emitted here, so the UI gets them too.
 - **MDA-native behaviour:** model-call shaping stays MDA's own: retries, the fallback model the backend names, call limits, caching, and automatic summarization.
-  Innermost around every model call, subagents' included, `rt/model_calls.py` sends a history the provider accepts on replay (parallel tool results in call order, no empty Anthropic thinking blocks, no unresolvable OpenAI reasoning ids, no legacy Fireworks `function_call`) and fails a call that outlives 15 minutes, its retries included, with `ModelCallTimeoutError`.
-  An agent's call that fails transiently (a timeout, a dropped connection, 429, 5xx, an overload) goes again, alternating between its model and the fallback model with waits of 0, 5, 15, 30 and 45 seconds; once every attempt failed, the run ends with a message saying so.
+  Innermost around every model call, subagents' included, `rt/model_calls.py` sends a history the provider accepts on replay (parallel tool results in call order, no empty Anthropic thinking blocks, no unresolvable OpenAI reasoning ids, no legacy Fireworks `function_call`) and fails an attempt that outlives 15 minutes, its retries included, with `ModelCallTimeoutError`.
+  `rt/model_retries.py` owns up to five transient-error retries for OpenAI, Anthropic, Fireworks and Google GenAI; `rt/models.py` disables their SDK retries (Google counts total attempts, so receives one).
+  Other integrations keep SDK ownership and receive no extra middleware retries.
+  Backoff uses jitter and honors `Retry-After`, with at most 60 seconds of total retry sleep per provider call; an excessive hint fails rather than retrying before the provider permits it.
+  Structured logs and `model_retry` custom events report retry counts and waits without including provider error text.
+  An agent's call that still fails transiently (a timeout, a dropped connection, 429, 5xx, an overload) goes again, alternating between its model and the fallback model with waits of 0, 5, 15, 30 and 45 seconds, all within 45 minutes; once every attempt failed, the run ends with a message saying so.
+  Each retry or failover marks the failed attempt's streamed message ids superseded, so the dashboard discards its partial text and unexecuted tool calls; failed attempts never enter graph history, and completed tools are never replayed.
   An error another attempt would repeat ends the run at once, after telling the backend why (`model_failed`), so the failure reply names it; a model the workspace may not use answers with that instead.
   A subagent has no fallback: its timed-out call becomes its answer, which its `task` call hands back to the agent that delegated it.
   A call to a model that reads no images (`reads_images` in the catalog's `RunModels`) goes to the catalog's vision model once the conversation holds an image.
@@ -153,6 +159,7 @@ The backend:
 | `MDA_RUNTIME_URL` | This deployment's URL; every new agent, reviewer and review scout thread runs here |
 | `MDA_RUNTIME_API_KEY` | LangSmith service key the backend calls this deployment with |
 | `MDA_WORKSPACE_ID` | This deployment's LangSmith workspace, if not the backend's; dashboard follow-ups on a channel's thread run as the person's principal there |
+| `MDA_LANGSMITH_PROJECT` | This deployment's LangSmith project (its `LANGSMITH_PROJECT`, the deployment name), where its runs are traced; the backend's trace links, costs, feedback and reviewer evals read runs there. Unset: the backend's `LANGSMITH_PROJECT` |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
 | `MDA_SERVICE_SECRET` | The same value as this deployment's; `/mda/channel-api/*` and `/github/channel/*` answer only calls signed with it |
 | `MDA_GITHUB_PROXY_CONNECTION` | `mda/github-token`: MDA writes the proxy config of the sandboxes it owns whose thread reaches the whole App installation, their GitHub rules filled from that connection. Set it only once this deployment runs a build that writes it: an older one leaves those sandboxes without one. Unset: the backend writes every sandbox's |
@@ -184,6 +191,12 @@ Each deployment's configuration is `OPEN_SWE_BACKEND_URL`, `LANGSMITH_GATEWAY_AP
 The gateway key is its backend's, so model calls count against that key's gateway spend cap; without it they fall back to the deployment's own LangSmith key and the workspace's cap.
 `deploy_mda.yml` reads it from the `LANGSMITH_GATEWAY_API_KEY_PROD` or `LANGSMITH_GATEWAY_API_KEY_STAGING` repository secret; `build_preview_branch.yml` reads `LANGSMITH_GATEWAY_API_KEY_PREVIEW`.
 Deploys fail if their gateway key is missing.
+For `open-swe-mda-prod`, set the Open SWE repository's Actions secret `LANGSMITH_RUNS_ENDPOINTS_PROD` to a JSON array of tracing destinations, each with `api_url`, `api_key` and `workspace_id`.
+The workflow requires both `https://dev.api.smith.langchain.com` (workspace `d6684905-655c-429b-bd14-ba302d94c03b`) and `https://api.smith.langchain.com` (workspace `ebbaf2eb-769b-4505-aca2-d11de10372a4`), and forwards the compact JSON as `LANGSMITH_RUNS_ENDPOINTS` in `mda/.env`.
+Missing or invalid configuration fails the prod deploy without printing credentials; staging and preview do not receive these replicas.
+Add the secret before deploying this workflow, then run **Deploy Managed Deep Agents** from `main` with environment **prod** after the change merges.
+Updating only the backend's `LANGSMITH_RUNS_ENDPOINTS` in Terraform does not configure MDA tracing.
+For a manual prod deploy, include the same `LANGSMITH_RUNS_ENDPOINTS` in the project `.env` alongside its other deployment secrets.
 The backends' `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET` live in their Terraform.
 To deploy one by hand from the repository root, with `mda/.env` holding that deployment's backend URL, gateway key and `MDA_SERVICE_SECRET`:
 

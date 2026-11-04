@@ -347,6 +347,9 @@ async function shootCard(page: Page, name: string) {
 test.describe("Human review in Slack", () => {
   test.beforeEach(async ({ request }) => {
     await request.post("/control/reset");
+    await control(request, "/control/team-settings", {
+      expedited_review_enabled: false,
+    });
     await grantWrite(request);
   });
 
@@ -386,7 +389,7 @@ test.describe("Human review in Slack", () => {
       .toBe(1);
     await expect
       .poll(async () =>
-        (await channelMessages(request, "C_DEMO", asked.thread_ts)).map(
+        (await channelMessages(request, "CDEMO01", asked.thread_ts)).map(
           (m) => m.text,
         ),
       )
@@ -802,25 +805,7 @@ test.describe("Human review in Slack", () => {
         name: "GitHub-only review request",
         exact: true,
       }),
-    ).toHaveCount(0);
-    await page
-      .getByRole("button", { name: "Show my GitHub review requests" })
-      .click();
-    await expect(
-      page.getByRole("button", {
-        name: "GitHub-only review request",
-        exact: true,
-      }),
     ).toBeVisible();
-    await page
-      .getByRole("button", { name: "Back to Open SWE assignments" })
-      .click();
-    await expect(
-      page.getByRole("button", {
-        name: "GitHub-only review request",
-        exact: true,
-      }),
-    ).toHaveCount(0);
 
     // 4. Bob is the only reviewer, so his approval merges it at once.
     await approveOnGitHub(request, seeded.number, BOB.login);

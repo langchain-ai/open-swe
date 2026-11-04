@@ -5,10 +5,10 @@ import { Button } from "@langchain/macaw-components/Button"
 import { Card } from "@langchain/macaw-components/Card"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Text } from "@langchain/macaw-components/Text"
-import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 
 import { LogoMark } from "@/components/Branding"
 import { loginUrl } from "@/lib/api"
+import { appDistribution } from "@/lib/pageTitle"
 import { pageTitle } from "@/lib/pageTitle"
 import {
   DEFAULT_AUTH_REDIRECT,
@@ -61,19 +61,22 @@ function Login() {
         className="flex w-full max-w-md flex-col gap-space-5 p-space-6 shadow-md"
       >
         <div className="flex flex-col items-center gap-space-3 text-center">
-          <LogoMark alt="Open SWE" className="size-8" />
+          <LogoMark alt={appDistribution.name} className="size-8" />
           <Text as="h1" variant="h3">
-            Sign in to Open SWE
+            {`Sign in to ${appDistribution.name}`}
           </Text>
         </div>
         <Button
           as={<a href={loginUrl(intendedPath)} />}
           size="md"
-          leftDecorator={GithubLogoIcon}
           className="w-full"
         >
-          Continue with GitHub
+          Continue with LangSmith
         </Button>
+        <Text as="p" variant="sm" color="secondary">
+          Link your GitHub account after signing in to use coding features and
+          return to your existing coding threads.
+        </Text>
       </Card>
     </main>
   )

@@ -1,5 +1,7 @@
 """The backend reads MDA as LangSmith Studio does, and writes only as itself."""
 
+from datetime import UTC, datetime
+
 import httpx
 import pytest
 
@@ -68,3 +70,28 @@ async def test_a_missing_thread_reads_as_none(mda: runtimes.MdaRuntime) -> None:
     )
 
     assert await threads.get("t1") is None
+    assert await threads.latest_run("t1") is None
+
+
+@pytest.mark.parametrize("queued_status", ["pending", "interrupted"])
+async def test_latest_work_run_keeps_the_live_run_ahead_of_a_queued_follow_up(
+    mda: runtimes.MdaRuntime, queued_status: runtimes.RunStatus
+) -> None:
+    live = runtimes.MdaRun(run_id="live", status="running", created_at=datetime.now(UTC))
+    queued = runtimes.MdaRun(run_id="follow-up", status=queued_status, created_at=datetime.now(UTC))
+    threads = runtimes._MdaThreads(mda)
+    threads.reads = httpx.AsyncClient(
+        base_url=mda.url,
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json=[
+                    (live if request.url.params.get("status") == "running" else queued).model_dump(
+                        mode="json"
+                    )
+                ],
+            )
+        ),
+    )
+    run = await threads.latest_run("work")
+    assert run is not None and run.run_id == "live" and run.active

@@ -718,6 +718,13 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(
       page.getByText(/compare it with the latest capture/).first(),
     ).toBeVisible();
+    await expect(
+      page.getByText("**Checking the snapshot status**"),
+    ).toHaveCount(0);
+    await test.info().attach("expanded-reasoning", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
   });
 
   test("stops a Slack-started run from the web app", async ({ page }) => {
@@ -868,9 +875,11 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     // The held request would block `load`, so stop waiting at the first byte.
     await page.goto("/agents", { waitUntil: "commit" });
 
-    const skeleton = page.getByTestId("sidebar-threads-skeleton");
+    const skeleton = page.locator(
+      "[data-testid=sidebar-threads-skeleton]:visible",
+    );
     await expect(skeleton).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole("status")).toContainText("Loading threads");
+    await expect(skeleton.getByRole("status")).toContainText("Loading threads");
 
     release();
     await expect(skeleton).toBeHidden({ timeout: 30_000 });
@@ -911,7 +920,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     });
     await page.goto("/agents", { waitUntil: "commit" });
 
-    const skeleton = page.getByTestId("sidebar-threads-skeleton");
+    const skeleton = page.locator(
+      "[data-testid=sidebar-threads-skeleton]:visible",
+    );
     await expect(skeleton).toBeVisible({ timeout: 30_000 });
 
     await sidebarRequest;

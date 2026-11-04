@@ -257,19 +257,6 @@ async def _no_reply_needed(call: _Call, arguments: Mapping[str, JsonValue]) -> _
     return answer
 
 
-async def _suggest_task(_call: _Call, arguments: Mapping[str, JsonValue]) -> _Answer:
-    answer = _checked(results.suggest_task, arguments)
-    logger.info(
-        "Unrelated task suggested",
-        extra={
-            "suggested_task_repo": arguments.get("repo"),
-            "suggested_task_description": arguments.get("description"),
-            "suggested_task_directories": arguments.get("directories"),
-        },
-    )
-    return dict(answer)
-
-
 async def _record_human_input(_call: _Call, arguments: Mapping[str, JsonValue]) -> _Answer:
     text, summary = _checked(results.record_human_input, arguments)
     return text, {"human_input_summary": summary}
@@ -294,7 +281,6 @@ _LOCAL_TOOLS: Final[Mapping[str, _LocalTool]] = {
     "fetch_url": _with_call(fetch_url),
     "http_request": _with_call(http_request, offloads=True),
     "slack_no_reply_needed": _LocalTool(_no_reply_needed),
-    "suggest_task": _LocalTool(_suggest_task),
     "cli_result": _plain(results.cli_result),
     "record_human_input": _LocalTool(_record_human_input),
     "note_on_diff": _plain(results.note_on_diff),

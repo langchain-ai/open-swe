@@ -4,11 +4,11 @@ from collections.abc import Mapping
 
 from langchain_typesafe import Choice
 from runtime_api import classifier
-from runtime_api.classifier import JevDecision
+from runtime_api.classifier import JevDecision, SystemOneGateway
 
 from openswe.utils.http_pool import pooled_transport
 
-__all__ = ["JevDecision", "select_jev_choice", "select_jev_choices"]
+__all__ = ["JevDecision", "SystemOneGateway", "select_jev_choice", "select_jev_choices"]
 
 
 async def select_jev_choice[ChoiceT: str](

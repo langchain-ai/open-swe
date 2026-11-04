@@ -228,7 +228,7 @@ def label_slack_channel_mentions(text: str, channel_names_by_id: Mapping[str, st
 
 def convert_mentions_to_slack_format(text: str) -> str:
     """Convert @Name(USER_ID) patterns to Slack's <@USER_ID> mention format."""
-    return re.sub(r"@[^()]+\(([A-Z0-9]+)\)", r"<@\1>", text)
+    return re.sub(r"(?<![\w<@])@[^()<>@\r\n]+\(([UW][A-Z0-9]{8,})\)", r"<@\1>", text)
 
 
 def verify_slack_signature(
@@ -573,7 +573,6 @@ async def _post_slack_message_with_ts(
 
     # A code channel is one flowing session: replies belong in the channel.
     reply_ts = None if is_code_channel_session(thread_ts) else thread_ts
-    broadcast = {"reply_broadcast": True} if reply_broadcast and reply_ts else {}
     text, blocks = await pr_review_links(text, blocks)
 
     try:
@@ -585,7 +584,7 @@ async def _post_slack_message_with_ts(
                 unfurl_links=unfurl_links,
                 unfurl_media=unfurl_media,
                 blocks=blocks or None,
-                **broadcast,
+                reply_broadcast=True if reply_broadcast and reply_ts else None,
             )
         message_ts = data.get("ts")
         if isinstance(message_ts, str) and message_ts:

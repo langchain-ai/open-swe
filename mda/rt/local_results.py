@@ -44,10 +44,6 @@ def slack_no_reply_needed(reason: str, confirmation: str, *, next_step: str) -> 
     return {"success": True, "turn_closed": True, "next_step": next_step}
 
 
-def suggest_task(repo: str, description: str, directories: list[str]) -> dict[str, str]:  # noqa: ARG001
-    return {"status": "logged_only"}
-
-
 def cli_result(stdout: str, exit_code: int, unchanged: bool = False) -> dict[str, bool | str]:  # noqa: ARG001, FBT001, FBT002
     if not 0 <= exit_code <= MAX_EXIT_CODE:
         return {"success": False, "error": f"exit_code must be between 0 and {MAX_EXIT_CODE}"}

@@ -230,6 +230,7 @@ async def api_list_threads_page(
     exclude_source: Annotated[list[str] | None, Query()] = None,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     hierarchy: bool = False,
+    project: Annotated[str | None, Query(max_length=64)] = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not session_is_admin(session):
@@ -261,6 +262,7 @@ async def api_list_threads_page(
         exclude_sources=frozenset(exclude_source or ()),
         sort_by=sort_by,
         hierarchy=hierarchy,
+        project=project,
     )
 
 

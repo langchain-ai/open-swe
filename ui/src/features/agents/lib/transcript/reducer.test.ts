@@ -220,6 +220,39 @@ describe("transcript snapshot", () => {
     expect(messages[1]?.timestamp).toBe("2026-01-01T00:00:02Z")
   })
 
+  it("hides the context Claude Code adds to a mirrored prompt", () => {
+    const sender = { login: "octocat", kind: "claude_code" }
+    const messages = toMessages(
+      fromSnapshot(
+        snapshot({
+          turns: [turn("t1", "2026-01-01T00:00:00Z")],
+          messages: [
+            messageRow({
+              message_id: "human-1",
+              turn_id: "t1",
+              role: "human",
+              text: "<system-reminder>\nIn a worktree\n</system-reminder>\n\nFix it",
+              sender,
+              created_at: "2026-01-01T00:00:00Z",
+            }),
+            messageRow({
+              message_id: "human-2",
+              turn_id: "t1",
+              role: "human",
+              text: "<task-notification>\n<status>done</status>\n</task-notification>",
+              sender,
+              created_at: "2026-01-01T00:00:01Z",
+            }),
+          ],
+        })
+      )
+    )
+
+    expect(messages.map((entry) => [entry.id, entry.chunks])).toEqual([
+      ["human-1", [{ kind: "text", text: "Fix it" }]],
+    ])
+  })
+
   it("keeps a subagent's nested work out of the root transcript, on its task call", () => {
     const messages = toMessages(fromSnapshot(twoTurnSnapshot()))
     const chunks = messages[3]?.chunks ?? []

@@ -69,8 +69,11 @@ class GitHubDeliveryFacts(BaseModel):
 
     # A workspace owns the repository, or the delivery names none.
     routable: bool
-    # The repository allowlist takes it.
+    # The repository allowlist takes it; a delivery it doesn't take starts nothing.
     allowed: bool
+    # The public-repo gate turned away the sender of a pull request opened, reopened,
+    # marked ready or pushed to: the delivery starts nothing but a merge queue wakeup.
+    gated: bool = False
     # Automatic review is on for the repository; only read for pull requests and pushes.
     auto_review: bool
     # The handles that mention Open SWE, lowercased, such as ``@openswe``.
@@ -95,6 +98,10 @@ type GitHubWorkName = Literal[
     "settle_review_on_close",
     "settle_human_reviews",
     "update_reviewer_watch",
+    # The walkthrough plans an open pull request, drafts included, past the public-repo gate.
+    "walkthrough_pull_request",
+    # A review thread resolved or unresolved: the reviewer's findings follow it.
+    "sync_review_thread",
     # Automatic review of a pull request opened or marked ready, behind the public-repo gate.
     "review_pull_request",
     "review_push",

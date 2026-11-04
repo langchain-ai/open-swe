@@ -34,11 +34,12 @@ import type {
   WorkflowApprovalStatus,
   WorkflowPushApprovalsResponse,
 } from "./types"
+import { pendingSenderName } from "./queuedMessages"
 import { CLAUDE_CODE_SOURCE } from "./sidebarFilter"
 import type { PassageReply } from "@/features/agents/utils/passageReply"
 import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
-import type { Skill, SkillInput } from "@/lib/api"
+import type { SessionUser, Skill, SkillInput } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { api } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
@@ -52,6 +53,7 @@ export const agentThreadKeys = {
     includeAutomations: boolean
     owned: boolean
     includeClaudeCode: boolean
+    includeSlack: boolean
   }) => ["agent-threads", "lists", "repos", params] as const,
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
@@ -97,8 +99,9 @@ function patchAgentThread(
     agentThreadKeys.detail(threadId),
     (prev) => (prev ? update(prev) : prev)
   )
-  queryClient.setQueryData<Array<AgentThread>>(agentThreadKeys.pinned, (prev) =>
-    prev?.map(update)
+  queryClient.setQueriesData<Array<AgentThread>>(
+    { queryKey: agentThreadKeys.pinned },
+    (prev) => prev?.map(update)
   )
   queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
     { queryKey: ["agent-threads", "lists", "infinite-pages"] },
@@ -119,6 +122,22 @@ function patchAgentThread(
     agentThreadKeys.sidebarActive(threadId),
     (prev) => (prev ? update(prev) : prev)
   )
+}
+
+/** A thread's cached summaries, refetched when its transcript settles a turn. */
+export class ThreadSummaryCache {
+  constructor(
+    private readonly queryClient: QueryClient,
+    private readonly threadId: string
+  ) {}
+
+  reconcile(): void {
+    void this.queryClient.invalidateQueries({
+      queryKey: agentThreadKeys.detail(this.threadId),
+      exact: true,
+    })
+    invalidateAgentThreadLists(this.queryClient)
+  }
 }
 
 export function setAgentThreadStatus(
@@ -148,8 +167,9 @@ function findCachedAgentThread(
       agentThreadKeys.sidebarActive(threadId)
     ) ??
     queryClient
-      .getQueryData<Array<AgentThread>>(agentThreadKeys.pinned)
-      ?.flatMap(threadFamily)
+      .getQueriesData<Array<AgentThread>>({ queryKey: agentThreadKeys.pinned })
+      .flatMap(([, threads]) => threads ?? [])
+      .flatMap(threadFamily)
       .find(matches) ??
     queryClient
       .getQueriesData<InfiniteData<ThreadsPage>>({
@@ -174,17 +194,18 @@ function setAgentThreadPinned(
   pinned: boolean
 ): void {
   const thread = findCachedAgentThread(queryClient, threadId)
-  queryClient.setQueryData<Array<AgentThread>>(
-    agentThreadKeys.pinned,
-    (prev) => {
+  for (const [key] of queryClient.getQueriesData<Array<AgentThread>>({
+    queryKey: agentThreadKeys.pinned,
+  })) {
+    queryClient.setQueryData<Array<AgentThread>>(key, (prev) => {
       if (!prev) return prev
       const isPinned = prev.some((candidate) => candidate.id === threadId)
-      if (pinned) return isPinned || !thread ? prev : [thread, ...prev]
+      if (pinned) return isPinned || !thread ? prev : [...prev, thread]
       return isPinned
         ? prev.filter((candidate) => candidate.id !== threadId)
         : prev
-    }
-  )
+    })
+  }
 }
 
 function updateThreadPageResolved(
@@ -277,7 +298,6 @@ export async function beginAgentThreadUpdate(
     }),
     queryClient.cancelQueries({
       queryKey: agentThreadKeys.pinned,
-      exact: true,
     }),
     queryClient.cancelQueries({
       queryKey: ["agent-threads", "lists", "infinite-pages"],
@@ -340,8 +360,8 @@ export function markAgentThreadViewed(
     agentThreadKeys.sidebarActive(threadId),
     (prev) => (prev ? view(prev) : prev)
   )
-  queryClient.setQueryData<Array<AgentThread>>(
-    agentThreadKeys.pinned,
+  queryClient.setQueriesData<Array<AgentThread>>(
+    { queryKey: agentThreadKeys.pinned },
     (prev) => (prev ? viewList(prev) : prev)
   )
   queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
@@ -399,8 +419,9 @@ export function setAgentThreadResolved(
     agentThreadKeys.detail(threadId),
     (prev) => (prev ? update(prev) : prev)
   )
-  queryClient.setQueryData<Array<AgentThread>>(agentThreadKeys.pinned, (prev) =>
-    prev?.map(update)
+  queryClient.setQueriesData<Array<AgentThread>>(
+    { queryKey: agentThreadKeys.pinned },
+    (prev) => prev?.map(update)
   )
   for (const [key] of queryClient.getQueriesData<InfiniteData<ThreadsPage>>({
     queryKey: ["agent-threads", "lists", "infinite-pages"],
@@ -640,9 +661,14 @@ export const SIDEBAR_PAGE_SIZE = 10
 
 /** The sources the sidebar asks the server to leave out. */
 function excludedSources(
-  includeClaudeCode: boolean
+  includeClaudeCode: boolean,
+  includeSlack: boolean
 ): Pick<ThreadsPageParams, "excludeSources"> {
-  return includeClaudeCode ? {} : { excludeSources: [CLAUDE_CODE_SOURCE] }
+  const excludeSources = [
+    ...(!includeClaudeCode ? [CLAUDE_CODE_SOURCE] : []),
+    ...(!includeSlack ? ["slack" as const] : []),
+  ]
+  return excludeSources.length ? { excludeSources } : {}
 }
 
 function sidebarPageParams({
@@ -650,11 +676,13 @@ function sidebarPageParams({
   includeResolved,
   owned,
   includeClaudeCode,
+  includeSlack,
 }: {
   includeAutomations: boolean
   includeResolved: boolean
   owned: boolean
   includeClaudeCode: boolean
+  includeSlack: boolean
 }): Omit<ThreadsPageParams, "offset"> {
   return {
     limit: SIDEBAR_PAGE_SIZE,
@@ -662,14 +690,14 @@ function sidebarPageParams({
     ...(includeResolved ? {} : { resolved: false }),
     scope: includeAutomations ? "all" : "interactive",
     ...(owned ? { owned } : {}),
-    ...excludedSources(includeClaudeCode),
+    ...excludedSources(includeClaudeCode, includeSlack),
   }
 }
 
 export function useSidebarPinnedThreads({ enabled = true } = {}) {
   return useQuery({
     queryKey: agentThreadKeys.pinned,
-    queryFn: agentsApi.listPinnedThreads,
+    queryFn: () => agentsApi.listPinnedThreads(),
     enabled,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
@@ -682,25 +710,30 @@ export function useSidebarRepos({
   includeResolved = false,
   owned = false,
   includeClaudeCode = true,
+  includeSlack = true,
   enabled = true,
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
   includeClaudeCode?: boolean
+  includeSlack?: boolean
   enabled?: boolean
 }) {
   const params = { includeAutomations, includeResolved, owned }
   const hydrated = useSidebarPrefsHydrated()
   return useQuery({
-    queryKey: agentThreadKeys.repos({ ...params, includeClaudeCode }),
+    queryKey: agentThreadKeys.repos({
+      ...params,
+      includeClaudeCode,
+      includeSlack,
+    }),
     queryFn: () =>
       agentsApi.listThreadRepos({
         ...params,
-        ...excludedSources(includeClaudeCode),
+        ...excludedSources(includeClaudeCode, includeSlack),
       }),
     enabled: enabled && hydrated,
-    placeholderData: (previous) => previous,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
   })
@@ -770,15 +803,14 @@ export function useSidebarActiveThread({
     enabled && !listed && !rootDetail
   )
   const row = listed ?? rootDetail ?? fetched ?? active
-  return (
-    row &&
-    mergeTaskFamily(
-      row,
-      [rootDetail, fetched, active].flatMap((thread) =>
-        thread ? [thread] : []
+  return row && !row.concierge
+    ? mergeTaskFamily(
+        row,
+        [rootDetail, fetched, active].flatMap((thread) =>
+          thread ? [thread] : []
+        )
       )
-    )
-  )
+    : undefined
 }
 
 function useSidebarThreadPages(
@@ -809,6 +841,7 @@ export function sidebarRecentsParams({
   includeResolved = false,
   owned = false,
   includeClaudeCode = true,
+  includeSlack = true,
   sort = "created",
 }: {
   repoMode: boolean
@@ -816,6 +849,7 @@ export function sidebarRecentsParams({
   includeResolved?: boolean
   owned?: boolean
   includeClaudeCode?: boolean
+  includeSlack?: boolean
   sort?: ChatSort
 }): Omit<ThreadsPageParams, "offset"> {
   return {
@@ -824,6 +858,7 @@ export function sidebarRecentsParams({
       includeResolved,
       owned,
       includeClaudeCode,
+      includeSlack,
     }),
     ...(repoMode ? { ownerless: true } : {}),
     sortBy: sort === "created" ? "created_at" : "updated_at",
@@ -836,6 +871,7 @@ export function useSidebarRecents({
   includeResolved = false,
   owned = false,
   includeClaudeCode = true,
+  includeSlack = true,
   sort = "created",
   enabled = true,
 }: {
@@ -844,6 +880,7 @@ export function useSidebarRecents({
   includeResolved?: boolean
   owned?: boolean
   includeClaudeCode?: boolean
+  includeSlack?: boolean
   sort?: ChatSort
   enabled?: boolean
 }) {
@@ -854,6 +891,7 @@ export function useSidebarRecents({
       includeResolved,
       owned,
       includeClaudeCode,
+      includeSlack,
       sort,
     }),
     enabled
@@ -862,18 +900,23 @@ export function useSidebarRecents({
 
 export function useSidebarRepoThreads({
   repoFullName,
+  projectId = null,
   includeAutomations = false,
   includeResolved = false,
   owned = false,
   includeClaudeCode = true,
+  includeSlack = true,
   sort = "created",
   enabled = true,
 }: {
   repoFullName: string | null
+  /** A project folder lists the project's threads instead of the repository's. */
+  projectId?: string | null
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
   includeClaudeCode?: boolean
+  includeSlack?: boolean
   sort?: ChatSort
   enabled?: boolean
 }) {
@@ -884,11 +927,16 @@ export function useSidebarRepoThreads({
         includeResolved,
         owned,
         includeClaudeCode,
+        includeSlack,
       }),
-      ...(repoFullName ? { repo: repoFullName } : {}),
+      ...(projectId
+        ? { project: projectId }
+        : repoFullName
+          ? { repo: repoFullName }
+          : {}),
       sortBy: sort === "created" ? "created_at" : "updated_at",
     },
-    enabled && Boolean(repoFullName)
+    enabled && Boolean(projectId || repoFullName)
   )
 }
 
@@ -918,7 +966,10 @@ export function useAgentThread(threadId: string) {
     // session cookie), so a dropped event stream must not leave the view — and
     // its stop button — believing the run already ended.
     refetchInterval: (current) =>
-      current.state.data?.status === "running" ? 3000 : false,
+      current.state.data?.status === "running" ||
+      current.state.data?.waitingForDelegatedWork
+        ? 3000
+        : false,
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
     // would 404 and replace the seeded view with a load error.
@@ -1270,9 +1321,17 @@ export function optimisticThread(
      * page picks the SDK stream first and swaps sources on the next refetch.
      */
     recorded?: boolean
+    /** Who started it: the thread's owner, and the sender of its prompt. */
+    owner?: SessionUser | null
+    /** When the prompt was sent, so every placeholder built for it agrees. */
+    sentAt?: number
   } = {}
 ): AgentThread {
-  const now = Date.now()
+  const now = options.sentAt ?? Date.now()
+  const owner = options.owner
+  const senderName = owner
+    ? pendingSenderName([], owner.login, owner.display_name || undefined)
+    : undefined
   const text = vars.prompt.trim()
   const repoFullName = vars.repo ?? ""
   const chunks: Array<Chunk> = [
@@ -1283,10 +1342,12 @@ export function optimisticThread(
     id: vars.client_message_id ?? `optimistic-user-${threadId}`,
     author: "user",
     timestamp: new Date(now).toISOString(),
+    ...(senderName ? { structuredSenderName: senderName } : {}),
     chunks,
   }
   return {
     id: threadId,
+    ...(owner ? { ownerLogin: owner.login } : {}),
     visibility: vars.visibility ?? "public",
     ...(options.recorded ? { transcript: "v2" as const } : {}),
     title: text.slice(0, 80) || "New agent",
@@ -1307,7 +1368,7 @@ export function optimisticThread(
     // The thread page reads the transcript from its own source, which starts
     // empty while it hydrates. Carrying the prompt as a pending message keeps
     // it on screen across the handoff; the source drops it again as soon as it
-    // has the message under the same id.
+    // has the message under the same id. Its run has already started.
     pendingMessages:
       chunks.length > 0
         ? [
@@ -1316,7 +1377,7 @@ export function optimisticThread(
               content: text,
               images: vars.images,
               createdAt: now,
-              status: "sending",
+              status: "sent",
             },
           ]
         : [],
@@ -1651,7 +1712,6 @@ export function useThreadsPage(
     queryKey: agentThreadKeys.page(params),
     queryFn: () => agentsApi.listThreadsPage(params),
     enabled: options.enabled,
-    placeholderData: (prev) => prev,
     refetchInterval: (query) =>
       options.pollWhileRunning
         ? sidebarRefreshInterval(query.state.data?.items)

@@ -195,6 +195,29 @@ class NativeQueueRuntime:
                     workflow_digest=workflow_digest,
                 )
 
+    async def _reconcile_checks(self, queue: MergeQueue, repo: RepoClient, lease: Lease) -> None:
+        assert self.dispatcher is not None
+        snapshot = await repo.native_queue(queue.target_branch)
+        if snapshot.repository_id != self.repository_id:
+            raise ValueError("Native queue repository identity changed")
+        async with queue.native_check_update(snapshot, lease) as update:
+            if update is None:
+                return
+            envelope = update.envelope
+            if envelope.expires_at <= datetime.now(UTC) - timedelta(days=1):
+                logger.warning(
+                    "Native check cleanup exceeded receipt retention",
+                    extra={"attempt_id": str(envelope.contract.attempt_id)},
+                )
+                return
+            await self.dispatcher.report(
+                envelope.contract,
+                envelope.expires_at,
+                update.state,
+                workflow_policy_revision=envelope.workflow_policy_revision,
+                workflow_digest=envelope.workflow_digest,
+            )
+
     async def reconcile(self, payload: QueueJob) -> None:
         if payload.queue_id != self.queue_id:
             return
@@ -211,7 +234,22 @@ class NativeQueueRuntime:
                     raise ValueError("Native queue repository identity changed")
                 await queue.record_native_snapshot(snapshot, lease)
                 if self.dispatcher is not None:
-                    await self._validate(queue, repo, snapshot, lease)
+                    try:
+                        await self._validate(queue, repo, snapshot, lease)
+                    finally:
+                        try:
+                            async with asyncio.timeout(8):
+                                await self._reconcile_checks(queue, repo, lease)
+                        except LeaseLost:
+                            logger.info(
+                                "Native check cleanup lost its lease",
+                                extra={"queue_id": str(queue.id)},
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Native check reconciliation failed",
+                                extra={"queue_id": str(queue.id)},
+                            )
         finally:
             try:
                 async with asyncio.timeout(10):

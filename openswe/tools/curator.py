@@ -1,11 +1,10 @@
 """Tools only a workspace's curator thread has: read memories, decide them, publish a prompt."""
 
-from typing import Literal
 from uuid import UUID
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.memories.curator import WorkspaceCurator
-from openswe.memories.store import MAX_WORKSPACE_PROMPT_CHARS, MEMORIES
+from openswe.memories.store import MAX_WORKSPACE_PROMPT_CHARS, MEMORIES, Decision, Status
 from openswe.tools.access import Policy, access
 
 _CURATOR = Policy(trusted="curator")
@@ -13,7 +12,7 @@ _CURATOR = Policy(trusted="curator")
 
 @access(_CURATOR)
 async def list_memories(
-    status: Literal["pending", "held", "adopted", "declined"] = "pending",
+    status: Status = "pending",
 ) -> dict[str, object]:
     """Implement the `list_memories` tool."""
     memories = await MEMORIES.for_curator(WorkspaceCurator.for_run().slug, status)
@@ -27,9 +26,7 @@ async def read_workspace_prompt() -> dict[str, object]:
 
 
 @access(_CURATOR)
-async def decide_memory(
-    memory_id: str, decision: Literal["adopted", "declined"], note: str
-) -> dict[str, object]:
+async def decide_memory(memory_id: str, decision: Decision, note: str) -> dict[str, object]:
     """Implement the `decide_memory` tool."""
     try:
         parsed = UUID(memory_id)

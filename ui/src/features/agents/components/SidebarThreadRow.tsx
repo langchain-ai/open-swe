@@ -29,6 +29,7 @@ import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { LockIcon } from "@phosphor-icons/react/dist/ssr/Lock"
+import { HourglassIcon } from "@phosphor-icons/react/dist/ssr/Hourglass"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
@@ -240,7 +241,7 @@ function sidebarRowClassName({
   archived: boolean
 }): string {
   return cn(
-    "flex items-center gap-space-2 rounded-lg pr-space-2 transition-colors",
+    "relative flex items-center gap-space-2 rounded-lg pr-space-2 transition-colors",
     paddingLeft,
     // Only ever on screen while "Show archived" is on; without this an
     // archived row is indistinguishable from a live one.
@@ -250,83 +251,6 @@ function sidebarRowClassName({
     active
       ? "bg-selected group-hover/row:bg-selected-hover"
       : "group-hover/row:bg-surface-level-2-hover"
-  )
-}
-
-export function SidebarConversationRow({
-  title,
-  threadId,
-  active,
-  compact,
-  onNavigate,
-  pinned,
-  archived,
-  pending,
-  onPin,
-  onArchive,
-}: {
-  title: string
-  threadId: string
-  active: boolean
-  compact: boolean
-  onNavigate: () => void
-  pinned: boolean
-  archived: boolean
-  pending: boolean
-  onPin: () => void
-  onArchive: () => void
-}) {
-  const marquee = useTitleMarquee()
-  return (
-    <div
-      className="group/row relative mb-0.5"
-      onMouseEnter={marquee.measure}
-      onMouseLeave={marquee.reset}
-    >
-      <Link
-        to="/agents/$threadId"
-        params={{ threadId }}
-        aria-current={active ? "page" : undefined}
-        onClick={onNavigate}
-        className={cn(
-          "flex items-center rounded-xl px-space-2 text-secondary transition-colors group-focus-within/row:bg-surface-level-3 group-focus-within/row:pr-14 group-hover/row:bg-surface-level-3 group-hover/row:pr-14 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
-          compact ? "h-7" : "h-8",
-          active && "bg-surface-level-3"
-        )}
-      >
-        <SidebarRowTitle title={title} marquee={marquee} />
-      </Link>
-      <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 rounded-xl bg-surface-level-3 opacity-0 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100">
-        <IconButton
-          icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
-          label={pinned ? "Unpin chat" : "Pin chat"}
-          className="text-tertiary hover:text-secondary"
-          size="xs"
-          color="secondary"
-          variant="plain"
-          disabled={pending}
-          onClick={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            onPin()
-          }}
-        />
-        <IconButton
-          icon={archived ? ArrowCounterClockwiseIcon : ArchiveIcon}
-          label={archived ? "Unarchive chat" : "Archive chat"}
-          className="text-tertiary hover:text-secondary"
-          size="xs"
-          color="secondary"
-          variant="plain"
-          disabled={pending}
-          onClick={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            onArchive()
-          }}
-        />
-      </span>
-    </div>
   )
 }
 
@@ -505,52 +429,61 @@ export function SidebarThreadRow({
 
   const rowContent = (
     <>
-      {hasSubagents && (
-        <span
-          role="button"
-          tabIndex={0}
-          aria-expanded={!subagentsCollapsed}
-          aria-label={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
-          title={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
-          onClick={onToggleSubagents}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ")
-              onToggleSubagents(event)
-          }}
-          className="flex h-5 w-4 shrink-0 items-center justify-center text-tertiary transition-colors hover:text-primary"
-        >
-          <SubagentCaret size={12} weight="bold" />
-        </span>
-      )}
-      {workers.length > 0 && (
-        <span
-          role="button"
-          tabIndex={0}
-          aria-expanded={workersExpanded}
-          aria-label={
-            workersExpanded ? "Hide task workers" : "Show task workers"
-          }
-          onClick={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            setWorkersExpanded((expanded) => !expanded)
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
+      <span
+        className={cn(
+          "absolute inset-y-0 flex -translate-x-full flex-col justify-center",
+          indent ? "left-space-5" : "left-space-2"
+        )}
+      >
+        {hasSubagents && (
+          <span
+            role="button"
+            tabIndex={0}
+            aria-expanded={!subagentsCollapsed}
+            aria-label={
+              subagentsCollapsed ? "Show subagents" : "Hide subagents"
+            }
+            title={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
+            onClick={onToggleSubagents}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ")
+                onToggleSubagents(event)
+            }}
+            className="flex max-h-5 min-h-0 w-4 flex-1 items-center justify-center text-tertiary transition-colors hover:text-primary"
+          >
+            <SubagentCaret size={12} weight="bold" />
+          </span>
+        )}
+        {workers.length > 0 && (
+          <span
+            role="button"
+            tabIndex={0}
+            aria-expanded={workersExpanded}
+            aria-label={
+              workersExpanded ? "Hide task workers" : "Show task workers"
+            }
+            onClick={(event) => {
               event.preventDefault()
               event.stopPropagation()
               setWorkersExpanded((expanded) => !expanded)
-            }
-          }}
-          className="flex h-5 w-4 shrink-0 items-center justify-center text-tertiary transition-colors hover:text-primary"
-        >
-          {workersExpanded ? (
-            <CaretDownIcon size={12} weight="bold" />
-          ) : (
-            <CaretRightIcon size={12} weight="bold" />
-          )}
-        </span>
-      )}
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault()
+                event.stopPropagation()
+                setWorkersExpanded((expanded) => !expanded)
+              }
+            }}
+            className="flex max-h-5 min-h-0 w-4 flex-1 items-center justify-center text-tertiary transition-colors hover:text-primary"
+          >
+            {workersExpanded ? (
+              <CaretDownIcon size={12} weight="bold" />
+            ) : (
+              <CaretRightIcon size={12} weight="bold" />
+            )}
+          </span>
+        )}
+      </span>
       <SidebarRowTitle marquee={marquee} title={item.title} />
 
       <span className="flex shrink-0 items-center gap-space-2 group-hover/row:hidden">
@@ -585,6 +518,13 @@ export function SidebarThreadRow({
         )}
         {item.status === "running" ? (
           <RunningIndicator label="Thread running" />
+        ) : item.waitingForDelegatedWork ? (
+          <HourglassIcon
+            size={ICON_SIZE}
+            weight="regular"
+            className="text-icon-secondary"
+            aria-label="Waiting for delegated work"
+          />
         ) : unread ? (
           <span
             className="size-2 rounded-full bg-brand"
@@ -617,14 +557,7 @@ export function SidebarThreadRow({
   const rowClassName = sidebarRowClassName({
     compact,
     active: rowIsActive,
-    paddingLeft:
-      hasSubagents || workers.length > 0
-        ? indent
-          ? "pl-space-4"
-          : "pl-space-2"
-        : indent
-          ? "pl-space-5"
-          : "pl-space-2",
+    paddingLeft: indent ? "pl-space-5" : "pl-space-2",
     archived,
   })
 
@@ -1004,7 +937,7 @@ function SidebarTaskWorkerRow({
                 toggleSubagentsCollapsed(`cloud:${worker.id}`)
               }
             }}
-            className="flex h-5 w-4 shrink-0 items-center justify-center text-tertiary transition-colors hover:text-primary"
+            className="absolute top-1/2 flex h-5 w-4 -translate-x-full -translate-y-1/2 items-center justify-center text-tertiary transition-colors hover:text-primary"
           >
             <SubagentCaret size={12} weight="bold" />
           </span>

@@ -144,7 +144,11 @@ class StallWatchdog:
         if task is None:
             return _Stall(stack=stack, task=None, serving={})
         coro = task.get_coro()
-        name = task.get_name() if coro is None else f"{task.get_name()} {coro.__qualname__}"
+        name = (
+            task.get_name()
+            if coro is None
+            else f"{task.get_name()} {getattr(coro, '__qualname__', type(coro).__qualname__)}"
+        )
         serving: Mapping[str, object] | None = None
         if self._logging_context is not None:
             serving = task.get_context().get(self._logging_context)

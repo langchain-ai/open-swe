@@ -26,7 +26,6 @@ from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
 from openswe.tools.record_human_input import record_human_input
 from openswe.tools.sandbox_output import chunk_output_as_jsonl
-from openswe.tools.suggest_task import suggest_task
 from openswe.tools.web_search import _bounded_inline_results
 
 _ROOT = Path(__file__).parents[2]
@@ -79,11 +78,6 @@ def _mdas(answer: object) -> str:
         (propose_pr_review, _MDA.propose_pr_review, {"event": "COMMENT", "body": "x" * 10_001}),
         (cli_result, _MDA.cli_result, {"stdout": "ok", "exit_code": 0}),
         (cli_result, _MDA.cli_result, {"stdout": "", "exit_code": 256, "unchanged": True}),
-        (
-            suggest_task,
-            _MDA.suggest_task,
-            {"repo": "o/r", "description": "Fix", "directories": ["src"]},
-        ),
     ],
 )
 async def test_a_tool_mda_runs_answers_as_the_backends(

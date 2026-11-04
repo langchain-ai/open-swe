@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 // Shared fixtures for the specs that drive the REAL built ui/ app (served
 // same-origin from the harness). Only the LLM/GitHub/Slack/token boundaries
@@ -28,6 +28,21 @@ export async function loginAs(
 ) {
   const res = await page.request.post("/control/login", { data: user });
   expect(res.ok()).toBeTruthy();
+  await seedRepoSidebar(page);
+}
+
+/** Suites written for the repository-grouped sidebar with its nav links shown. */
+export async function seedRepoSidebar(page: Page) {
+  await page.addInitScript(() => {
+    if (!localStorage.getItem("open-swe.agents.sidebar-prefs"))
+      localStorage.setItem(
+        "open-swe.agents.sidebar-prefs",
+        JSON.stringify({
+          organize: "workspace",
+          hiddenNavItems: ["/agents/bots", "/incidents"],
+        }),
+      );
+  });
 }
 
 // What a message sent while a run is live does. It is the person's saved
@@ -60,11 +75,21 @@ export function composerFor(page: Page, placeholder: RegExp) {
   };
 }
 
+// The dashboard is server-rendered, so the composer is visible before Lexical
+// takes it over. Keys typed before then land in the static markup, which Lexical
+// replaces with its own empty state: the text, and any @ trigger, are lost.
+// Lexical marks the element with data-lexical-editor once it owns it.
+export async function readyComposerEditor(page: Page): Promise<Locator> {
+  const editor = page.getByTestId("composer-editor");
+  await expect(editor).toHaveAttribute("data-lexical-editor", "true");
+  return editor;
+}
+
 // Typing goes through real key events rather than `fill()`: the editor builds
 // its state from beforeinput/keydown, and `fill()`'s single bulk insert leaves
 // it out of sync with the DOM.
 export async function typeIntoComposer(page: Page, text: string) {
-  const editor = page.getByTestId("composer-editor");
+  const editor = await readyComposerEditor(page);
   await editor.click();
   await editor.pressSequentially(text);
   await editor.press("Enter");
@@ -250,7 +275,14 @@ export async function readPullRequest(
 // follow-up. It may finish while the UI observes the next server refresh.
 export async function openRunningThreadViaSlackLink(page: Page) {
   await page.goto("/mock/slack");
-  await page.locator("#reset").click();
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/control/reset") &&
+        response.request().method() === "POST",
+    ),
+    page.locator("#reset").click(),
+  ]);
   await expect(page.locator("#thread")).toContainText("No messages yet");
   await page
     .locator("#text")
@@ -270,7 +302,14 @@ export async function openThreadViaSlackLink(
   options: { repoPrivate?: boolean; message?: string } = {},
 ) {
   await page.goto("/mock/slack");
-  await page.locator("#reset").click();
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/control/reset") &&
+        response.request().method() === "POST",
+    ),
+    page.locator("#reset").click(),
+  ]);
   if (options.repoPrivate) {
     await setRepoPrivate(page, true);
   }
@@ -295,7 +334,14 @@ export async function openThreadViaSlackLink(
 // briefly lag; a reload re-fetches it. Retry until the PR link renders.
 export async function openMultiRepoPrThreadViaSlackLink(page: Page) {
   await page.goto("/mock/slack");
-  await page.locator("#reset").click();
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/control/reset") &&
+        response.request().method() === "POST",
+    ),
+    page.locator("#reset").click(),
+  ]);
   await page
     .locator("#text")
     .fill(

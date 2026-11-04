@@ -14,6 +14,7 @@ from runtime_api.github import FiredGitHubAutomation, GitHubThreadRun
 from openswe.github import channel as github_channel
 from openswe.github import webhook as github_webhooks
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
+from openswe.review.findings import get_thread_slack_ref
 from openswe.review.reviews import trigger_re_review
 from openswe.schedules import store as schedules
 from openswe.slack.client import GitHubPrRef
@@ -89,6 +90,11 @@ async def test_github_webhook_skips_automatic_review_when_disabled(
 
     monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(github_webhooks, "process_github_pr_ready", fake_process_github_pr_ready)
+    walkthrough = AsyncMock()
+    monkeypatch.setattr(github_webhooks, "process_github_pr_walkthrough", walkthrough)
+    monkeypatch.setattr(
+        webhook_common, "enforce_public_repo_org_gate", AsyncMock(return_value=None)
+    )
     if wakeup_fails:
         monkeypatch.setattr(
             github_channel,
@@ -102,13 +108,14 @@ async def test_github_webhook_skips_automatic_review_when_disabled(
         {
             "action": "opened",
             "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
-            "pull_request": {"number": 1244},
+            "pull_request": {"number": 1244, "draft": True, "user": {"login": "alice"}},
         },
     )
 
     assert delivered.facts.auto_review is False
     assert "review_pull_request" not in delivered.work
     assert called is False
+    walkthrough.assert_awaited_once()
 
 
 async def test_github_webhook_plans_issue_automation_for_external_author(
@@ -328,7 +335,11 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
     called: dict[str, object] = {}
 
     async def fake_process_github_pr_comment(
-        payload: dict[str, object], event_type: str, *, agent_thread_id: str | None = None
+        payload: dict[str, object],
+        event_type: str,
+        *,
+        agent_thread_id: str | None = None,
+        channel: object = None,
     ) -> None:
         called["agent_thread_id"] = agent_thread_id
 
@@ -487,11 +498,14 @@ def test_trigger_pr_review_from_ref_refuses_draft(monkeypatch) -> None:
     assert ref.url in result["error"]
 
 
-@pytest.mark.parametrize("dashboard_draft", [False, True])
-def test_trigger_pr_review_from_ref_creates_reviewer_run(
-    monkeypatch, dashboard_draft: bool
-) -> None:
+@pytest.mark.parametrize("review_source", ["slack", "dashboard", "goal"])
+def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch, review_source: str) -> None:
+    dashboard_draft = review_source == "dashboard"
+    goal_mode = review_source == "goal"
     captured: dict[str, object] = {}
+    metadata: dict[str, object] = {
+        "slack_thread": {"channel_id": "COLD", "thread_ts": "1700000000.000001"}
+    }
     auto_review_checked = False
 
     async def fake_auto_review_enabled(_repo_config: dict[str, str]) -> bool:
@@ -511,7 +525,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(
         captured["metadata_token"] = token
         return {
             "html_url": pr_ref.url,
-            "draft": dashboard_draft,
+            "draft": dashboard_draft or goal_mode,
             "base": {"sha": "base-sha"},
             "head": {"sha": "head-sha", "ref": "feature-branch"},
         }
@@ -541,6 +555,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(
     async def fake_set_reviewer_thread_metadata(thread_id: str, **kwargs: object) -> None:
         captured["set_metadata_thread_id"] = thread_id
         captured["set_metadata_kwargs"] = kwargs
+        metadata.update({key: value for key, value in kwargs.items() if value is not None})
 
     monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(
@@ -577,8 +592,9 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(
                 url="https://github.com/langchain-ai/open-swe/pull/1244",
             ),
             source="slack",
-            slack_channel_id="C123",
-            slack_thread_ts="1700000000.000100",
+            slack_channel_id="" if goal_mode else "C123",
+            slack_thread_ts="" if goal_mode else "1700000000.000100",
+            allow_draft=goal_mode,
         )
     )
 
@@ -601,13 +617,15 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(
     assert config["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert config["pr_number"] == 1244
     assert config["review_requested"] is True
-    if dashboard_draft:
+    if dashboard_draft or goal_mode:
         assert "slack_thread" not in config
+        assert get_thread_slack_ref(metadata) is None
     else:
         assert config["slack_thread"] == {
             "channel_id": "C123",
             "thread_ts": "1700000000.000100",
         }
+        assert get_thread_slack_ref(metadata) == config["slack_thread"]
     # The live head must be persisted to metadata so resolve_review_head_sha
     # doesn't return a stale head left by a prior push/ready dispatch.
     metadata_kwargs = cast(dict[str, object], captured["set_metadata_kwargs"])

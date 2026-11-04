@@ -77,6 +77,11 @@ _COMMENT_CLAIMS: Final = "github_channel_comment"
 _WORK_CLAIM_TTL: Final = timedelta(hours=24)
 
 type _Payload = dict[str, Any]
+# Pull request actions the public-repo gate checks the sender of before the delivery
+# starts anything (``GitHubDeliveryFacts.gated``).
+_GATED_PULL_REQUEST_ACTIONS: Final = frozenset(
+    {"opened", "reopened", "ready_for_review", "synchronize"}
+)
 
 
 def _repo_config(payload: dict[str, JsonValue]) -> dict[str, str]:
@@ -92,11 +97,22 @@ async def record_github_delivery(
 ) -> GitHubDeliveryFacts:
     """Log the delivery once, and what Open SWE knows about its repository.
 
-    A workspace lookup that fails raises, so the delivery fails rather than drop
-    work a workspace may own.
+    A repository outside the allowlist is neither logged nor looked up: its delivery
+    starts nothing. A workspace lookup that fails raises, so the delivery fails rather
+    than drop work a workspace may own.
     """
     body = json.dumps(delivery.payload).encode()
     refs = EventRefs.github(body)
+    # The owner alone, as installation events name it, passes when any of its repositories do.
+    named_repo = {"owner": refs.github_owner, "name": refs.github_repository.partition("/")[2]}
+    if refs.github_owner and not common.is_repo_allowed(named_repo):
+        logger.info(
+            "Dropping GitHub delivery for a repository outside the allowlist",
+            extra={"github_owner": refs.github_owner, "github_delivery": delivery.delivery_id},
+        )
+        return GitHubDeliveryFacts(
+            routable=False, allowed=False, auto_review=False, tags=list(OPEN_SWE_TAGS)
+        )
     await EventLog.record_once(
         call.request,
         body,
@@ -110,9 +126,14 @@ async def record_github_delivery(
     repo = _repo_config(delivery.payload)
     named = bool(repo["owner"] and repo["name"])
     reviews = named and delivery.event in {"pull_request", "push"}
+    payload = cast(_Payload, delivery.payload)
+    gates = (
+        delivery.event == "pull_request" and payload.get("action") in _GATED_PULL_REQUEST_ACTIONS
+    )
     return GitHubDeliveryFacts(
         routable=not named or await repo_is_routable(repo["owner"], repo["name"]),
-        allowed=common.is_repo_allowed(repo),
+        allowed=True,
+        gated=gates and not await _gated(payload, "pull_request"),
         auto_review=reviews and await common.is_repo_auto_review_enabled(repo),
         tags=list(OPEN_SWE_TAGS),
     )
@@ -205,6 +226,9 @@ def _tasks(work: ActOnGitHubDelivery) -> dict[GitHubWorkName, Callable[[], Await
         "settle_human_reviews": lambda: service.settle_human_reviews(payload),
         "update_reviewer_watch": lambda: service.process_github_pr_close(payload),
         "review_pull_request": lambda: _review_pull_request(payload),
+        # The gate let the sender in as the delivery was routed (``GitHubDeliveryFacts.gated``).
+        "walkthrough_pull_request": lambda: service.process_github_pr_walkthrough(payload),
+        "sync_review_thread": lambda: service.process_github_review_thread(payload),
         "review_push": lambda: service.process_github_push_event(payload),
         "ci_event": lambda: service.process_github_ci_event(payload, event, delivery_id),
         "record_completed_review": lambda: CompletedReview.record(payload),

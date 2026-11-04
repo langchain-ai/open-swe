@@ -14,7 +14,7 @@ from fastapi import HTTPException
 
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.expedited_review.channels import sendable_channel, still_internal
-from openswe.expedited_review.eligibility import ChangedFile, fingerprint_matches
+from openswe.expedited_review.eligibility import FILE_PAGES, ChangedFile, fingerprint_matches
 from openswe.expedited_review.reviews import github_token_hint, submit_approval
 from openswe.github.http import (
     GitHubAppUnavailable,
@@ -120,7 +120,7 @@ async def _submit_review(approval: HumanReviewRequest, voter_user_id: UUID) -> s
         async with GitHubClient.as_app(pr.owner, pr.repo) as github:
             pull = github.repo(pr.owner, pr.repo).pull_request(pr.number)
             head_sha = await or_none(pull.head_sha())
-            files = await ChangedFile.of_pull(pull)
+            files = await ChangedFile.of_pull(pull, max_pages=FILE_PAGES)
     except GitHubAppUnavailable:
         return unavailable
     if head_sha is None or files is None:

@@ -200,13 +200,19 @@ export function WorkspacesSection({
   const qc = useQueryClient()
   const workspaces = useWorkspaceOptions()
   const options = workspaces.data
-  // Channel names are an admin's view; everyone else sees the stored ids.
-  const channelDirectory = useSlackChannelDirectory(isAdmin)
-  const channelLabel = (id: string) =>
-    slackChannelLabel(channelDirectory.data, id)
-
+  const channelDirectory = useSlackChannelDirectory(true)
   const [adding, setAdding] = useState(false)
   const [createDraft, setCreateDraft] = useState<WorkspaceDraft>(EMPTY_DRAFT)
+  const channelIds = [
+    ...new Set([
+      ...(options?.workspaces.flatMap(
+        (workspace) => workspace.slack_channel_ids
+      ) ?? []),
+      ...createDraft.slackChannelIds,
+    ]),
+  ]
+  const channelLabel = (id: string) =>
+    slackChannelLabel(channelDirectory.data, id, channelIds)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 

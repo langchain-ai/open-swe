@@ -48,6 +48,5 @@ def stub_mda_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
         return {"graph": assistant_id, "__run_token": sign_runtime_token(run)}
 
     monkeypatch.setattr(runtimes, "remote_run_context", context)
-    monkeypatch.setattr(runtimes, "get_tracer_project", lambda: "open-swe-test")
     monkeypatch.setattr(runtimes.RUNTIMES, "_mda", runtimes.MdaRuntime("https://mda.test"))
     monkeypatch.setattr(runtimes.Runtimes, "mda_runtime", property(lambda self: self._mda))

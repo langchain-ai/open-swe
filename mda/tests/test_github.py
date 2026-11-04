@@ -95,9 +95,17 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             "issues", _issue(), _facts(routable=False), False, Route(), id="unowned-repository"
         ),
         pytest.param(
+            "pull_request",
+            {"action": "opened"},
+            _facts(allowed=False),
+            False,
+            Route(),
+            id="outside-the-allowlist",
+        ),
+        pytest.param(
             "merge_group",
             {"action": "checks_requested"},
-            _facts(allowed=False),
+            _FACTS,
             False,
             Route(("wake_merge_queue",)),
             id="merge-group",
@@ -110,6 +118,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             Route(
                 (
                     "wake_merge_queue",
+                    "walkthrough_pull_request",
                     "track_pull_request_state",
                     "track_pull_request_usage",
                     "review_pull_request",
@@ -120,12 +129,29 @@ def _review(action: str = "submitted", body: str = "") -> dict:
         ),
         pytest.param(
             "pull_request",
+            {"action": "opened"},
+            _facts(gated=True),
+            False,
+            Route(("wake_merge_queue",)),
+            id="pr-opened-by-a-sender-the-public-repo-gate-turns-away",
+        ),
+        pytest.param(
+            "pull_request_review_thread",
+            {"action": "resolved"},
+            _FACTS,
+            False,
+            Route(("sync_review_thread",)),
+            id="review-thread-resolved",
+        ),
+        pytest.param(
+            "pull_request",
             {"action": "ready_for_review"},
-            _facts(allowed=False, auto_review=False),
+            _facts(auto_review=False),
             False,
             Route(
                 (
                     "wake_merge_queue",
+                    "walkthrough_pull_request",
                     "track_pull_request_state",
                     "track_pull_request_usage",
                     "settle_human_reviews",
@@ -141,6 +167,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             Route(
                 (
                     "wake_merge_queue",
+                    "walkthrough_pull_request",
                     "track_pull_request_state",
                     "withdraw_superseded_approvals",
                     "notify_pr_updated",
@@ -316,7 +343,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
         pytest.param(
             "installation_repositories",
             {"action": "added", "repositories_added": [], "repositories_removed": []},
-            _facts(routable=True, allowed=False),
+            _facts(routable=True),
             False,
             Route(("forget_cached_repos",)),
             id="installation-changed",

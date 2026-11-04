@@ -9,6 +9,7 @@ import {
   formatToolDisplayParts,
 } from "@/features/agents/components/chat/toolExecutionDisplay"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
+import { Thought } from "@/features/agents/components/messages/thought"
 
 export type WorkEntryIconName =
   | "bot"
@@ -31,6 +32,7 @@ export interface WorkEntryView {
   /** Dimmed argument shown after the heading; null when it would just repeat it. */
   preview: string | null
   previewTooltip?: string
+  destinationHref?: string
   diffStats?: { additions: number; deletions: number }
   tone: WorkEntryTone
   status: AcpToolStatus
@@ -143,6 +145,38 @@ export function latestDiff(chunk: ToolExecutionChunk) {
     : chunk.diffData
 }
 
+export function routedMessageHref(
+  chunk: ToolExecutionChunk
+): string | undefined {
+  const name = (
+    chunk.toolName ?? chunk.title.trim().split(/\s+/, 1)[0]
+  )?.toLowerCase()
+  if (
+    chunk.status !== "completed" ||
+    !(
+      name === "message_task_thread" ||
+      (name === "manage_thread" && chunk.input?.action === "send_message")
+    )
+  )
+    return undefined
+  try {
+    const result: unknown = JSON.parse(chunk.output ?? "")
+    if (
+      typeof result === "object" &&
+      result !== null &&
+      "success" in result &&
+      result.success === true &&
+      "recipient_thread_id" in result &&
+      typeof result.recipient_thread_id === "string" &&
+      /^[0-9a-f-]{36}$/i.test(result.recipient_thread_id)
+    )
+      return `/agents/${result.recipient_thread_id}`
+  } catch {
+    return undefined
+  }
+  return undefined
+}
+
 export function describeWorkEntry(
   chunk: ToolExecutionChunk,
   repoPath?: string
@@ -191,6 +225,7 @@ export function describeWorkEntry(
         ? resolvedPreview
         : null,
     previewTooltip,
+    destinationHref: routedMessageHref(chunk),
     tone: toneForChunk(chunk),
     status: chunk.status,
     expandedText: expandedTextForChunk(chunk, repoPath),
@@ -239,7 +274,10 @@ export function liveActivityLabel(
     let chunk = chunks[index]
     if (!chunk) continue
 
-    if (chunk.kind === "reasoning") return "Thinking…"
+    if (chunk.kind === "reasoning") {
+      const label = new Thought(chunk.text).liveLabel
+      return label ? `${label}…` : "Thinking…"
+    }
     if (chunk.kind === "text") {
       if (chunk.text.trim()) return "Writing response…"
       continue

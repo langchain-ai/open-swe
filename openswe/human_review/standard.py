@@ -12,12 +12,13 @@ approved reaction, and once its pull request has sat green and unapproved for
 the workspace auto-assignment timeout the agent picks a reviewer, the same way.
 """
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
 from typing import Literal, Self
-from uuid import UUID
+from uuid import UUID, uuid7
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx2
@@ -60,7 +61,13 @@ from openswe.human_review.picking import (
     Wait,
     choose_reviewer,
 )
-from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
+from openswe.human_review.readiness import offer_readiness
+from openswe.human_review.requests import (
+    AUTO_ASSIGN_ASKED,
+    HumanReviewParticipant,
+    HumanReviewRequest,
+    RequestKind,
+)
 from openswe.human_review.supplementary import (
     STEP_PREFIX as SUPPLEMENTARY_STEP,
 )
@@ -88,6 +95,7 @@ from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_base_url
 from openswe.utils.json_types import JsonObject
 from openswe.utils.preview import skip_on_preview
+from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
@@ -100,7 +108,6 @@ SETTLED_KINDS: tuple[RequestKind, ...] = ("standard", "posted")
 # A deadline run may start a little before the wait its timer was set for has passed.
 _SCHEDULER_EARLINESS = timedelta(minutes=1)
 _DEADLINE_RETRY = timedelta(minutes=5)
-_AUTO_ASSIGN_ASKED = "auto_assign_asked"
 _REMAINING_OWNERS_ASKED = "remaining_owners_asked"
 
 
@@ -191,7 +198,7 @@ def summary_line(text: str) -> str:
     return flat[: SUMMARY_MAX_CHARS - 1].rsplit(" ", 1)[0].rstrip(" ,.;:") + "…"
 
 
-def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
+def request_blockers(snapshot: PullRequestSnapshot | PullRequestPayload) -> list[str]:
     """Why a pull request may not be put up for review yet."""
     blockers: list[str] = []
     if snapshot.merged:
@@ -219,13 +226,14 @@ async def _review_author_allowed(author: str, owner: str, repo: str) -> bool | N
 
 async def review_blockers(pull: PullRequestClient) -> list[str] | None:
     """Why ``pull`` may not be put up for review now; ``None`` when GitHub was unavailable."""
-    readiness = await Readiness.assess(pull)
-    if readiness is None:
+    payload = await or_none(pull.pull())
+    if payload is None:
         return None
-    blockers = request_blockers(readiness.snapshot)
-    author_allowed = await _review_author_allowed(
-        readiness.snapshot.author, pull.repo.owner, pull.repo.name
-    )
+    snapshot = PullRequestPayload.model_validate(payload)
+    if not snapshot.head_sha:
+        return None
+    blockers = request_blockers(snapshot)
+    author_allowed = await _review_author_allowed(snapshot.author, pull.repo.owner, pull.repo.name)
     if author_allowed is None:
         return None
     if not author_allowed:
@@ -233,7 +241,7 @@ async def review_blockers(pull: PullRequestClient) -> list[str] | None:
     return blockers
 
 
-async def _target_channel(
+async def target_channel(
     pr_ref: GitHubPrRef, pull: PullRequestClient, override: str
 ) -> SlackChannel | RequestResult:
     configured = override.strip()
@@ -351,13 +359,14 @@ async def _request_supplementary(
     result: RequestResult,
     policy_id: str,
     reason: str,
+    area: str = "",
 ) -> RequestResult:
     """Add a supplementary review to an open request without touching its engineering card."""
     blockers = await review_blockers(pull)
     if blockers is None or blockers:
         return _failure("The pull request must be open and not a draft for a supplementary review.")
     try:
-        await SupplementaryReviews(active).ask(pull, policy_id.strip(), reason)
+        await SupplementaryReviews(active).ask(pull, policy_id.strip(), reason, area)
     except SupplementaryReviewRefused as refused:
         return _failure(str(refused))
     return result
@@ -393,6 +402,7 @@ async def request_review(
     auto_merge: bool | None = None,
     supplementary_review: str = "",
     supplementary_review_reason: str = "",
+    supplementary_review_area: str = "",
 ) -> RequestResult:
     """Post a standard review card for ``pr_ref``, or return the one already open.
 
@@ -400,7 +410,7 @@ async def request_review(
     """
     try:
         async with PullRequestClient.as_app(pr_ref.owner, pr_ref.repo, pr_ref.number) as pull:
-            return await _request_review(
+            result = await _request_review(
                 pr_ref,
                 pull,
                 origin,
@@ -409,9 +419,29 @@ async def request_review(
                 auto_merge=auto_merge,
                 supplementary_review=supplementary_review,
                 supplementary_review_reason=supplementary_review_reason,
+                supplementary_review_area=supplementary_review_area,
             )
     except GitHubAppUnavailable:
-        return _failure("Open SWE cannot reach this repository's GitHub App installation.")
+        result = _failure("Open SWE cannot reach this repository's GitHub App installation.")
+    await EventLog.append(
+        "human_review",
+        {
+            "pull_request_url": pr_ref.url,
+            "thread_id": origin.thread_id,
+            "requested_by_user_id": str(origin.requester.id) if origin.requester else None,
+            "success": result.success,
+            "error": result.error,
+            "request_id": result.request_id,
+        },
+        event_type="request.finished",
+        delivery_id=str(uuid7()),
+        refs=EventRefs(
+            github_repository=f"{pr_ref.owner}/{pr_ref.repo}",
+            pull_request_number=pr_ref.number,
+            slack_channel_id=origin.slack_channel_id,
+        ),
+    )
+    return result
 
 
 async def _request_review(
@@ -424,6 +454,7 @@ async def _request_review(
     auto_merge: bool | None = None,
     supplementary_review: str = "",
     supplementary_review_reason: str = "",
+    supplementary_review_area: str = "",
 ) -> RequestResult:
     if bool(supplementary_review.strip()) != bool(supplementary_review_reason.strip()):
         return _failure("Pass supplementary_review and supplementary_review_reason together.")
@@ -435,10 +466,15 @@ async def _request_review(
             return result
         if supplementary_review:
             return await _request_supplementary(
-                active, pull, result, supplementary_review, supplementary_review_reason
+                active,
+                pull,
+                result,
+                supplementary_review,
+                supplementary_review_reason,
+                supplementary_review_area,
             )
         if active.kind == "standard" and channel.strip():
-            target = await _target_channel(pr_ref, pull, channel)
+            target = await target_channel(pr_ref, pull, channel)
             if isinstance(target, RequestResult):
                 return target
             if target.id != active.slack_channel_id:
@@ -453,14 +489,34 @@ async def _request_review(
     if blockers is None:
         return _failure("GitHub was unavailable while checking the pull request.")
     if blockers:
+        readiness_note = ""
+        if (
+            "it is a draft" in blockers
+            and "it is closed" not in blockers
+            and "it is already merged" not in blockers
+        ):
+            try:
+                readiness_note = await offer_readiness(pr_ref, pull, origin)
+            except Exception:
+                logger.warning(
+                    "Could not offer draft readiness in Slack",
+                    extra={"pr_url": pr_ref.url},
+                    exc_info=True,
+                )
+                readiness_note = (
+                    "Could not confirm delivery of the author-only Mark ready button. "
+                    "Ask the author to use Ready for review on GitHub."
+                )
         return _failure(
             f"{pr_ref.url} cannot be put up for review: "
             + "; ".join(blockers)
             + ". "
+            + readiness_note
+            + " "
             + prompt("tools/human-review-blocked")
         )
 
-    target = await _target_channel(pr_ref, pull, channel)
+    target = await target_channel(pr_ref, pull, channel)
     if isinstance(target, RequestResult):
         return target
     recorded = await record_pull_request(pull)
@@ -526,7 +582,10 @@ async def _request_review(
     if supplementary_review:
         try:
             await SupplementaryReviews(request).ask(
-                pull, supplementary_review.strip(), supplementary_review_reason
+                pull,
+                supplementary_review.strip(),
+                supplementary_review_reason,
+                supplementary_review_area,
             )
         except SupplementaryReviewRefused as refused:
             refusal = str(refused)
@@ -554,8 +613,15 @@ async def _request_github_review(request: HumanReviewRequest, login: str) -> boo
         async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
             await pull.request_reviewers([login])
     except GitHubAppUnavailable:
+        await request.log_event("github.request", github_login=login, status="unavailable")
         return False
     except GitHubError as refused:
+        await request.log_event(
+            "github.request",
+            github_login=login,
+            status="refused",
+            status_code=refused.response.status_code,
+        )
         logger.warning(
             "GitHub refused a review request",
             extra={
@@ -566,12 +632,14 @@ async def _request_github_review(request: HumanReviewRequest, login: str) -> boo
         )
         return False
     except httpx2.HTTPError:
+        await request.log_event("github.request", github_login=login, status="failed")
         logger.warning(
             "GitHub review request did not complete",
             extra={"request_id": str(request.id)},
             exc_info=True,
         )
         return False
+    await request.log_event("github.request", github_login=login, status="sent")
     return True
 
 
@@ -676,6 +744,7 @@ async def snooze(request: HumanReviewRequest, user: User | None, length: str) ->
         request, "pick_expiry", duration + timedelta(minutes=await _assignment_minutes(request))
     )
     await _schedule(request, f"snooze:{user.id}", duration)
+    await request.log_event("reviewer.snoozed", user_id=str(user.id), until=until.isoformat())
     return Outcome(f"Review snoozed for {length}; your pick stays reserved until then.")
 
 
@@ -687,6 +756,7 @@ async def decline(request: HumanReviewRequest, user: User | None, reason: str) -
     dropped = await ReviewPicks(request).drop({user.id}, None, expired=True)
     if not dropped:
         return Outcome("This reviewer pick is no longer pending for you.")
+    await request.log_event("reviewer.declined", user_id=str(user.id), reason=reason)
     logger.info(
         "Reviewer declined a pending pick",
         extra={"request_id": str(request.id), "user_id": str(user.id), "reason": reason},
@@ -723,8 +793,7 @@ async def assign(
     owns, and unasked only once someone approved. ``replace`` is a person naming the reviewer:
     Open SWE's pending picks for the same code are withdrawn first.
     """
-    approvers = await _github_approvers(request)
-    coverage = await Coverage.load(request)
+    approvers, coverage = await asyncio.gather(_github_approvers(request), Coverage.load(request))
     if approvers and (coverage is None or not coverage.uncovered(approvers)):
         names = ", ".join(f"@{login}" for login in approvers)
         return _failure(
@@ -801,7 +870,7 @@ async def assign(
     if replace:
         async with HumanReviewRequest.locked(added.id) as (_, row):
             if row is not None:
-                row.run_config = {**row.run_config, _AUTO_ASSIGN_ASKED: True}
+                row.run_config = {**row.run_config, AUTO_ASSIGN_ASKED: True}
     await _request_github_review(added, github_login)
     minutes = await _assignment_minutes(added)
     if not await _schedule(added, "pick_expiry", timedelta(minutes=minutes)):
@@ -833,6 +902,9 @@ async def assign(
                 ]
             ),
             origin=origin,
+        )
+        await added.log_event(
+            "notification.pick", user_id=str(user.id), sent=sent is not None, reason=reason
         )
         if sent is not None:
             await added.record_pick_message(
@@ -887,8 +959,9 @@ class ReviewStatus(BaseModel):
                 )
             )
         requester = request.requested_by
-        approvers = await _github_approvers(request)
-        coverage = await Coverage.load(request)
+        approvers, coverage = await asyncio.gather(
+            _github_approvers(request), Coverage.load(request)
+        )
         assigned = [p.github_login for p in request.reviewers + request.picks]
         return cls(
             requested_by=requester.login_for("github") if requester else "",
@@ -1208,11 +1281,20 @@ async def start_auto_assign(
     if asked:
         async with HumanReviewRequest.locked(request.id) as (_, row):
             if row is not None:
-                row.run_config = {**row.run_config, _AUTO_ASSIGN_ASKED: True}
+                row.run_config = {**row.run_config, AUTO_ASSIGN_ASKED: True}
     result = (
         AutoAssignResult("disabled")
         if not asked and skip_on_preview("start_auto_assign")
         else await _auto_assign(request, asked=asked, trigger=trigger)
+    )
+    await request.log_event(
+        "assignment.finished",
+        asked=asked,
+        status=result.status,
+        github_login=result.reviewer,
+        until=result.at.isoformat() if result.at else None,
+        trigger=trigger.kind if trigger else None,
+        reason=trigger.reason if trigger else "",
     )
     logger.info(
         "Auto-assign finished",
@@ -1340,12 +1422,16 @@ async def _wake_picker(
                 extra={"request_id": str(request.id), "slack_channel": request.slack_channel_id},
                 exc_info=True,
             )
+            await request.log_event("assignment.wake", sent=False, asked=asked)
             await _schedule(request, "unclaimed", _DEADLINE_RETRY)
             return False
+        await request.log_event("assignment.wake", sent=True, asked=asked)
         return True
-    return await ReviewCard(request).notify_agent(
+    sent = await ReviewCard(request).notify_agent(
         text, title=f"Pick a reviewer for {pr.repo}#{pr.number}", unlisted=True
     )
+    await request.log_event("assignment.wake", sent=sent, asked=asked)
+    return sent
 
 
 async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
@@ -1442,6 +1528,7 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
         )
         if sent:
             row.run_config = {**row.run_config, marker: True}
+    await request.log_event("notification.reminder", user_id=user_id, sent=sent)
     if not sent:
         await _schedule(request, f"remind:{user_id}", _DEADLINE_RETRY)
         return "retrying"
@@ -1533,6 +1620,7 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     trigger = PickTrigger("expired", tuple(p.github_login for p in idle))
     suggestions = [Suggestion(choice, area)]
     if not await _wake_picker(current, asked=False, trigger=trigger, suggestions=suggestions):
+        await current.log_event("assignment.rotation_failed")
         return "rotation_failed"
     return "rotating"
 
@@ -1556,7 +1644,7 @@ async def _auto_assign_hold(request: HumanReviewRequest, step: str) -> str | Non
     A pull request merely linked outside a review channel only gets reactions, so
     its unaccepted picks are withdrawn.
     """
-    if request.kind != "posted" or _AUTO_ASSIGN_ASKED in request.run_config:
+    if request.kind != "posted" or request.auto_assign_asked:
         return None
     pr = request.pull_request
     try:
@@ -1593,8 +1681,11 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         request = None
     if request is None or request.state != "open":
         return {"status": "closed"}
+    await request.log_event("deadline.fired", step=step)
     if step.startswith(SUPPLEMENTARY_STEP):
-        return {"status": await SupplementaryReviews(request).run(step)}
+        status = await SupplementaryReviews(request).run(step)
+        await request.log_event("supplementary.finished", step=step, status=status)
+        return {"status": status}
     if step.startswith("snooze:"):
         user_id = UUID(step.removeprefix("snooze:"))
         participant = request.participant(user_id)
@@ -1623,6 +1714,9 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
                     ]
                 ),
                 origin=origin,
+            )
+            await request.log_event(
+                "notification.snooze", user_id=str(user_id), sent=sent is not None
             )
             if sent is not None:
                 await request.record_pick_message(

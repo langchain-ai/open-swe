@@ -31,6 +31,7 @@ from openswe.slack.routes import router as slack_webhook_router
 from openswe.threads.plan_api import plan_router
 from openswe.threads.router import ThreadRouter
 from openswe.threads.workflow_approval_api import workflow_approval_router
+from openswe.users.authorization import AccountConflict
 from openswe.users.records import UnknownUser
 from openswe.utils.dashboard_ui import mount_dashboard_ui
 from openswe.utils.event_loop import pin_single_event_loop, watch_for_stalls
@@ -61,6 +62,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.slack.http import validate_slack_startup_config
+    from openswe.threads.local_writes import LOCAL_WRITES
     from openswe.transcript import listener as transcript_listener
     from openswe.ui_invalidations.hub import HUB
     from openswe.users import User
@@ -71,6 +73,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     validate_local_dev_llm_config()
     validate_mda_startup_config()
     validate_slack_startup_config()
+    # Before anything is served: no thread or run is ever made on this Agent Server.
+    LOCAL_WRITES.seal()
     database.require_configured()
     await database.migrate()
     try:
@@ -130,7 +134,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await database.close()
 
 
-async def _unknown_user(_request: Request, exc: Exception) -> JSONResponse:
+async def _conflict(_request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse({"detail": str(exc)}, status_code=409)
 
 
@@ -162,7 +166,8 @@ def create_app() -> FastAPI:
     add_trace_resource_names(app)
     add_request_ids(app)
     add_github_error_handlers(app)
-    app.add_exception_handler(UnknownUser, _unknown_user)
+    app.add_exception_handler(UnknownUser, _conflict)
+    app.add_exception_handler(AccountConflict, _conflict)
     app.include_router(dashboard_router)
     app.include_router(plan_router)
     app.include_router(workflow_approval_router)

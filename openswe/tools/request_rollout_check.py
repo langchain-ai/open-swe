@@ -30,16 +30,15 @@ def _flag(cfg: RunConfig) -> dict[str, JsonValue]:
 
 
 async def _copy_flag(thread: IndexedThread, flag: dict[str, JsonValue]) -> None:
-    """Copy the flag onto every runtime that keeps this thread. A failed copy stays in the index."""
-    for runtime in RUNTIMES.copies(thread.runtime):
-        try:
-            await runtime.update(thread.thread_id, flag)
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Copying the rollout check to its runtime failed",
-                extra={"thread_id": thread.thread_id},
-                exc_info=True,
-            )
+    """Copy the flag onto the runtime this thread runs on. A failed copy stays in the index."""
+    try:
+        await RUNTIMES.runs_on(thread.runtime).update(thread.thread_id, flag)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Copying the rollout check to its runtime failed",
+            extra={"thread_id": thread.thread_id},
+            exc_info=True,
+        )
 
 
 async def request_rollout_check() -> dict[str, object]:

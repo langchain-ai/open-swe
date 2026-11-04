@@ -12,7 +12,6 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk import get_client
 
-from openswe.act_as.gate import require_consent
 from openswe.agent_api.connections import GITHUB_USER
 from openswe.agent_api.git_metadata import record_pr_target
 from openswe.analytics.usage import record_agent_pr_usage
@@ -1118,17 +1117,6 @@ async def _open_pull_request(
                 branch_pushed=None,
                 failed_step="workspace_repo",
             )
-        if refusal := await require_consent(
-            thread_id=_configurable().thread_id,
-            token_kind=kind,
-            author=author,
-            owner=owner,
-            repo=repo,
-            head=head,
-            base=base,
-            title=title,
-        ):
-            return dict(refusal)
         preflight_failure = await _preflight_pr_access(
             client=client,
             token=token,
@@ -1153,6 +1141,21 @@ async def _open_pull_request(
             "body": body,
             "draft": draft,
         }
+        from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+        from openswe.threads.store import THREADS
+
+        cfg = _configurable()
+        if (
+            cfg.thread_id
+            and (await cached_workspace_settings(cfg.workspace_slug)).get(
+                "implementation_walkthrough_enabled"
+            )
+            is True
+        ):
+            await THREADS.update(
+                cfg.thread_id,
+                {"implementation_pr_target": {"repository": f"{owner}/{repo}", "head": head}},
+            )
         resp = await client.post(
             f"{GITHUB_API}/repos/{owner}/{repo}/pulls",
             headers=_auth_headers(token),

@@ -94,7 +94,7 @@ class DispatchGateway:
         self,
         contract: ValidationRequest,
         expires_at: datetime,
-        state: Literal["in_progress", "success"],
+        state: Literal["in_progress", "recovering", "cancelled", "success"],
         *,
         run_id: int | None = None,
         workflow_policy_revision: int | None = None,
@@ -178,5 +178,5 @@ class DispatchGateway:
 class CheckReport(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     dispatch_body: str
-    state: Literal["in_progress", "success"]
+    state: Literal["in_progress", "recovering", "cancelled", "success"]
     run_id: int | None = None

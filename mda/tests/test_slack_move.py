@@ -94,7 +94,9 @@ def test_a_move_in_its_own_channel_posts_through_mda_and_hands_the_thread_over(
 ) -> None:
     backend = _backend(monkeypatch, SlackMovePlan(root_text="Moved here", via_mda=True))
 
-    result = asyncio.run(_middleware().awrap_tool_call(_tool_call(message="Moved here"), _handled))
+    result = asyncio.run(
+        _middleware().awrap_tool_call(_tool_call(message="Moved here", destination="C1"), _handled)
+    )
 
     assert isinstance(result, ToolMessage)
     assert json.loads(cast(str, result.content)) == _MOVED
@@ -106,7 +108,7 @@ def test_a_move_in_its_own_channel_posts_through_mda_and_hands_the_thread_over(
     ]
     [(prepared, plan), (recorded, moved)] = backend.calls
     assert (prepared, recorded) == ("slack_move", "slack_moved")
-    assert plan == SlackMoveRequest(run_id="run-1", message="Moved here", channel_id=None)
+    assert plan == SlackMoveRequest(run_id="run-1", message="Moved here", channel_id="C1")
     # The backend records the root MDA posted, for the run its token names.
     # The old thread hears where the conversation went, as after /breakout.
     assert moved == SlackMoved(run_id="run-1", thread_ts="200.1", mark_source=True)
@@ -119,7 +121,7 @@ def test_a_move_into_another_channel_posts_there_through_mda(
     backend = _backend(monkeypatch, plan)
 
     result = asyncio.run(
-        _middleware().awrap_tool_call(_tool_call(message="Moved", channel_id="C2"), _handled)
+        _middleware().awrap_tool_call(_tool_call(message="Moved", destination="C2"), _handled)
     )
 
     assert isinstance(result, ToolMessage)
@@ -135,13 +137,32 @@ def test_a_move_into_another_channel_posts_there_through_mda(
     assert moved == SlackMoved(run_id="run-1", thread_ts="200.1", channel_id="C2", mark_source=True)
 
 
+@pytest.mark.parametrize("args", [{}, {"destination": "web"}, {"destination": "#eng"}])
+def test_a_move_without_a_channel_to_go_to_is_refused(
+    monkeypatch: pytest.MonkeyPatch, channel: _Channel, args: dict[str, object]
+) -> None:
+    backend = _backend(monkeypatch, SlackMovePlan(root_text="Moved here", via_mda=True))
+
+    result = asyncio.run(
+        _middleware().awrap_tool_call(_tool_call(message="Moved", **args), _handled)
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert json.loads(cast(str, result.content)) == {
+        "success": False,
+        "error": "destination must be a Slack channel ID",
+    }
+    assert backend.calls == []
+    assert channel.posts == []
+
+
 def test_a_thread_the_backend_holds_moves_with_the_backends_tool(
     monkeypatch: pytest.MonkeyPatch, channel: _Channel
 ) -> None:
     _backend(monkeypatch, SlackMovePlan(root_text="Moved here", via_mda=False))
 
     result = asyncio.run(
-        _middleware().awrap_tool_call(_tool_call(message="Moved", channel_id="C2"), _handled)
+        _middleware().awrap_tool_call(_tool_call(message="Moved", destination="C2"), _handled)
     )
 
     assert isinstance(result, ToolMessage)
@@ -155,7 +176,9 @@ def test_a_move_the_checks_stop_posts_nothing(
     refused = {"success": False, "error": "Private threads cannot be moved"}
     _backend(monkeypatch, SlackMovePlan(result=refused))
 
-    result = asyncio.run(_middleware().awrap_tool_call(_tool_call(message="Moved"), _handled))
+    result = asyncio.run(
+        _middleware().awrap_tool_call(_tool_call(message="Moved", destination="C1"), _handled)
+    )
 
     assert isinstance(result, ToolMessage)
     assert json.loads(cast(str, result.content)) == refused
@@ -225,7 +248,7 @@ def test_any_other_turn_calls_the_model(monkeypatch: pytest.MonkeyPatch, channel
 
 
 def _backend_move_tool() -> StructuredTool:
-    async def move(runtime: ToolRuntime, message: str, channel_id: str | None = None) -> str:
+    async def move(runtime: ToolRuntime, message: str, destination: str) -> str:
         return "backend moved it"
 
     return StructuredTool.from_function(
@@ -256,7 +279,7 @@ def test_a_move_from_code_mode_goes_through_mda_as_the_models_own_call(
     backend = _backend(monkeypatch, SlackMovePlan(root_text="Moved here", via_mda=True))
     code_tool = _middleware().code_tool(_backend_move_tool())
 
-    result = _from_code(code_tool, message="Moved here", channel_id="C1")
+    result = _from_code(code_tool, message="Moved here", destination="C1")
 
     assert isinstance(result, ToolMessage)
     assert json.loads(cast(str, result.content)) == _MOVED
@@ -276,7 +299,7 @@ def test_a_move_from_code_mode_mda_doesnt_hold_is_the_backends(
     _backend(monkeypatch, SlackMovePlan(via_mda=False))
     code_tool = _middleware().code_tool(_backend_move_tool())
 
-    result = _from_code(code_tool, message="Moved here")
+    result = _from_code(code_tool, message="Moved here", destination="C1")
 
     assert isinstance(result, ToolMessage)
     assert result.content == "backend moved it"

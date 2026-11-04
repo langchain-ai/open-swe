@@ -1,5 +1,10 @@
 /** @vitest-environment jsdom */
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import {
+  agentThreadKeys,
+  optimisticThread,
+} from "@/features/agents/lib/queries"
 import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import type { TranscriptEventHandlers } from "./api"
@@ -9,11 +14,9 @@ import { useThreadTranscript } from "./useThreadTranscript"
 const stream = vi.hoisted(() => ({
   handlers: null as TranscriptEventHandlers | null,
 }))
-vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({}) }))
-vi.mock("@/features/agents/lib/queries", () => ({}))
 vi.mock("./api", () => ({
-  fetchTranscript: async () => ({
-    thread_id: "completion",
+  fetchTranscript: async (id: string) => ({
+    thread_id: id,
     version: 0,
     thread: { status: "idle" },
     turns: [],
@@ -38,10 +41,22 @@ afterEach(() => {
 
 it("publishes first text immediately and flushes buffered text on completion", async () => {
   vi.useFakeTimers()
-  const view = renderHook(() => useThreadTranscript("completion"))
+  const client = new QueryClient()
+  const thread = optimisticThread("completion", { prompt: "Work" })
+  const detailKey = agentThreadKeys.detail(thread.id)
+  client.setQueryData(detailKey, thread)
+  client.setQueryData(agentThreadKeys.pinned, [thread])
+  const view = renderHook(() => useThreadTranscript("completion"), {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  })
   await act(async () => {
     await view.result.current.hydration
   })
+  act(() => stream.handlers?.onSynchronized())
+  expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true)
+  client.setQueryData(detailKey, thread)
   const emit = (event: StoredEvent) => stream.handlers?.onEvent(event)
   const envelope = { occurred_at: "2026-01-01T00:00:00Z" }
   const append = (version: number): StoredEvent => ({
@@ -63,6 +78,8 @@ it("publishes first text immediately and flushes buffered text on completion", a
       event_type: "turn.started",
       payload: { turn_id: "turn" },
     })
+    expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true)
+    client.setQueryData(detailKey, thread)
     emit(append(2))
   })
   expect(view.result.current.state?.messages.message?.text).toBe("x")
@@ -71,6 +88,7 @@ it("publishes first text immediately and flushes buffered text on completion", a
     emit(append(4))
   })
   expect(view.result.current.state?.version).toBe(2)
+  expect(client.getQueryState(detailKey)?.isInvalidated).toBe(false)
   act(() =>
     emit({
       ...envelope,
@@ -81,4 +99,5 @@ it("publishes first text immediately and flushes buffered text on completion", a
   )
   expect(view.result.current.state?.messages.message?.text).toBe("xxx")
   expect(view.result.current.isRunning).toBe(false)
+  expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true)
 })

@@ -30,6 +30,7 @@ import {
   type ContextUsage,
   contextUsageFromUsageMetadata,
 } from "@/features/agents/lib/contextUsage"
+import { CLAUDE_CODE_SOURCE } from "@/features/agents/lib/sidebarFilter"
 import { attachmentUrl, fetchToolOutput } from "./api"
 import type { StructuredEntity } from "@/features/agents/lib/structuredInputMessages"
 import type {
@@ -65,6 +66,8 @@ export interface TranscriptMessageState {
   attachments: ReadonlyArray<TranscriptAttachment>
   /** The GitHub login of a human message's sender, when the server knows it. */
   senderLogin: string | null
+  /** Where a human message's sender wrote it, such as `claude_code`. */
+  senderKind?: string
   /** What a system message's sender is called when its text introduces no name. */
   senderName?: string
   /** Invocation an AI message ran under, when the provider reported usage. */
@@ -186,6 +189,7 @@ function indexMessages(
       namespace: row.namespace,
       attachments: row.attachments ?? [],
       senderLogin: row.sender?.login ?? null,
+      senderKind: row.sender?.kind,
       senderName: row.sender?.display_name ?? undefined,
       invocationId: row.usage?.invocation_id ?? undefined,
       createdAt: row.created_at,
@@ -646,6 +650,7 @@ export function applyEvent(
         namespace: [],
         attachments: payload.attachments,
         senderLogin: payload.sender?.login ?? null,
+        senderKind: payload.sender?.kind,
         senderName: payload.sender?.display_name ?? undefined,
         createdAt: at,
       })
@@ -709,6 +714,7 @@ export function applyEvent(
         namespace: payload.namespace,
         attachments: existing?.attachments ?? [],
         senderLogin: existing?.senderLogin ?? null,
+        senderKind: existing?.senderKind,
         createdAt: existing?.createdAt ?? at,
       })
       break
@@ -727,6 +733,7 @@ export function applyEvent(
         namespace: payload.namespace,
         attachments: payload.attachments ?? existing?.attachments ?? [],
         senderLogin: payload.sender?.login ?? existing?.senderLogin ?? null,
+        senderKind: payload.sender?.kind ?? existing?.senderKind,
         senderName: payload.sender?.display_name ?? existing?.senderName,
         invocationId: payload.usage?.invocation_id ?? undefined,
         createdAt: payload.created_at || existing?.createdAt || at,
@@ -989,6 +996,17 @@ function imageChunks(
   return chunks
 }
 
+// Context Claude Code wraps around a prompt or sends as one. The transcript
+// keeps it; nobody typed it, so it is not shown.
+const CLAUDE_CODE_CONTEXT =
+  /<(system-reminder|local-command-caveat|local-command-stdout|local-command-stderr|task-notification|ci-monitor-event|side-sessions-event|agent-message|cross-session-message|artifact-view-context|ide_opened_file|ide_selection)\b[^>]*>[\s\S]*?<\/\1>\s*/g
+
+function shownText(row: TranscriptMessageState): string {
+  return row.senderKind === CLAUDE_CODE_SOURCE
+    ? row.text.replace(CLAUDE_CODE_CONTEXT, "")
+    : row.text
+}
+
 interface HumanCacheEntry {
   entities: ReadonlyMap<string, StructuredEntity>
   /** `null` when the message is one the transcript deliberately hides. */
@@ -1016,7 +1034,7 @@ function buildHumanMessage(
   row: TranscriptMessageState,
   entities: ReadonlyMap<string, StructuredEntity>
 ): Message | null {
-  const parsed = parseStructuredInput(row.text, entities)
+  const parsed = parseStructuredInput(shownText(row), entities)
   if (parsed.type === "entity") return null
   if (parsed.type === "message" && isSilentSender(parsed.sender)) return null
   const entity =

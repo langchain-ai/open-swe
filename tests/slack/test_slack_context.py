@@ -660,7 +660,9 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
     run_create = captured["run_create"]
     assert isinstance(run_create, dict)
     kwargs = run_create["kwargs"]
-    assert kwargs["multitask_strategy"] == ("interrupt" if explicitly_tagged else "enqueue")
+    assert kwargs["multitask_strategy"] == (
+        "interrupt" if explicitly_tagged or kitchen_channel else "enqueue"
+    )
     trigger = ElementTree.fromstring(kwargs["input"]["messages"][-1]["content"][0]["text"])
     assert trigger.get("explicit_bot_mention") == str(explicitly_tagged).lower()
     assert "<@UBOT>" not in (trigger.text or "")

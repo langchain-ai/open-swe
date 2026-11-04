@@ -8,6 +8,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Final
+from uuid import UUID
 
 from pydantic import JsonValue
 
@@ -23,6 +24,8 @@ from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announceme
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
 from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
+from openswe.github.required_check_cache import REFRESH_JOB as REQUIRED_CHECK_REFRESH
+from openswe.github.required_check_cache import refresh_required_checks
 from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.standard import run_deadline
 from openswe.jobs import queue
@@ -37,9 +40,13 @@ from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
 from openswe.merge_queue.runtime import reconcile_queue
 from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
 from openswe.monitors.delivery import poll_monitors
+from openswe.notifications.service import JOB_KIND as NOTIFICATION_FALLBACK
+from openswe.notifications.service import AppNotification
 
 __all__ = ["WORKER"]
 from openswe.reconcile import reconcile_stale_runs
+from openswe.review_guide.sessions import ARCHIVE_JOB as REVIEW_GUIDE_ARCHIVE
+from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.sandboxes.retry import (
     SANDBOX_ATTACH_MAX_ELAPSED,
     is_transient_sandbox_error,
@@ -66,6 +73,7 @@ RECONCILE: Final = "reconcile"
 _FIRE_CLAIM_TTL: Final = timedelta(days=2)
 
 WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
+WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
 
 
 def _text(job: Job, key: str) -> str | None:
@@ -186,6 +194,16 @@ async def _thread_status_reconcile(_job: Job) -> object:
     }
 
 
+@WORKER.register(REVIEW_GUIDE_ARCHIVE)
+async def _review_guide_archive(job: Job) -> None:
+    thread_id, head_sha = _text(job, "thread_id"), _text(job, "head_sha")
+    if thread_id is None or head_sha is None:
+        return
+    session = await ReviewGuideSession.get(thread_id)
+    if session is not None:
+        await session.archive_finished(head_sha)
+
+
 @WORKER.register(SLACK_CHANNEL_DIRECTORY)
 async def _slack_channel_directory(_job: Job) -> None:
     await sync_directory()
@@ -219,6 +237,13 @@ async def _wake_thread(job: Job) -> None:
         logger.exception("Thread wakeup failed", extra={"job_id": str(job.id)})
         return
     logger.info("Thread woken", extra={"job_id": str(job.id), "run_id": run_id})
+
+
+@WORKER.register(NOTIFICATION_FALLBACK)
+async def notification_fallback(job: Job) -> None:
+    await AppNotification.deliver_fallback(
+        UUID(str(job.payload["recipient_id"])), str(job.payload["key"])
+    )
 
 
 async def start_jobs() -> None:

@@ -62,6 +62,8 @@ afterEach(() => {
   for (const client of clients) client.clear()
   clients.length = 0
   vi.restoreAllMocks()
+  Reflect.deleteProperty(window, "openSweDesktop")
+  localStorage.clear()
 })
 
 function testClient() {
@@ -576,6 +578,32 @@ describe("sidebar queries", () => {
     }
   )
 
+  it("does not reinsert an open concierge conversation into the sidebar", () => {
+    const opened = {
+      id: "concierge-thread",
+      concierge: true,
+    } as AgentThread
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.detail(opened.id), opened)
+    const { result } = renderHook(
+      () =>
+        useSidebarActiveThread({
+          activeThreadId: opened.id,
+          loadedThreads: [],
+        }),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+
+    expect(result.current).toBeUndefined()
+    expect(client.getQueryData(agentThreadKeys.detail(opened.id))).toEqual(
+      opened
+    )
+  })
+
   it("refetches detail after sidebar rerenders", async () => {
     const opened = { id: "opened-thread", status: "idle" } as AgentThread
     const updated = { ...opened, title: "Refreshed title" }
@@ -905,6 +933,37 @@ describe("optimistic thread mutations", () => {
     limit: 25,
     offset: 0,
     hasMore: false,
+  })
+
+  it("appends a new pin without reordering after the server refresh", async () => {
+    const existing = { ...thread, id: "existing-pin" }
+    const request = deferred<void>()
+    vi.spyOn(agentsApi, "pinThread").mockReturnValue(request.promise)
+    const listPins = vi
+      .spyOn(agentsApi, "listPinnedThreads")
+      .mockResolvedValueOnce([existing])
+      .mockResolvedValue([existing, thread])
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.detail(thread.id), thread)
+    const { result } = renderHook(
+      () => ({
+        pins: useSidebarPinnedThreads(),
+        mutation: usePinAgentThread(),
+      }),
+      { wrapper: wrapperFor(client) }
+    )
+    await waitFor(() => expect(result.current.pins.data).toEqual([existing]))
+
+    act(() =>
+      result.current.mutation.mutate({ threadId: thread.id, pinned: true })
+    )
+    await waitFor(() =>
+      expect(result.current.pins.data).toEqual([existing, thread])
+    )
+    await act(async () => request.resolve(undefined))
+    await waitFor(() => expect(listPins).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.pins.isFetching).toBe(false))
+    expect(result.current.pins.data).toEqual([existing, thread])
   })
 
   it("renames across detail, pinned, and page caches and rolls back on failure", async () => {
