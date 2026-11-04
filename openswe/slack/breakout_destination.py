@@ -4,7 +4,9 @@ import logging
 from dataclasses import dataclass
 
 from openswe.slack.channels import ChannelLookupUnavailable, SlackChannel
+from openswe.slack.failures import SlackRequestError
 from openswe.workspaces.routing import resolve_workspace
+from openswe.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +15,16 @@ logger = logging.getLogger(__name__)
 class BreakoutDestination:
     channel_id: str
     workspace: str
+
+    async def kitchen(self) -> BreakoutDestination:
+        workspace = await WORKSPACES.get(self.workspace)
+        kitchens = workspace.kitchen_channel_ids if workspace else []
+        if len(kitchens) != 1:
+            raise SlackRequestError(
+                "This workspace needs exactly one kitchen channel for :cooking: breakouts. "
+                "Use `@Open SWE /breakout #channel` to choose a destination."
+            )
+        return BreakoutDestination(kitchens[0], self.workspace)
 
     async def channel_error(self, source_channel: str) -> str | None:
         for channel_id in dict.fromkeys((source_channel, self.channel_id)):

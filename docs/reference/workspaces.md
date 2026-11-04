@@ -38,6 +38,11 @@ A workspace has an immutable slug and a display name, plus:
 - **Slack channels.**
   Zero or more channel ids whose messages route here.
   A channel routes to one workspace.
+  Mark bound channels as kitchens to receive untagged messages there.
+  React to a message with :cooking: to start a new thread in the source workspace's kitchen, carrying the source transcript and acting for the reactor.
+  This shortcut requires exactly one configured kitchen; otherwise it asks you to choose a destination with `@Open SWE /breakout #channel`.
+  Cross-channel breakouts require a public source and destination, and the shortcut is disabled in DMs and code channels.
+  Only the first reactor starts work; :openswe: still summons Open SWE in the source thread.
 - **MCP connections** of its own, layered over the instance-wide set that existed before workspaces (see "Settings tiers").
 - **Settings**, the former team settings: model defaults, review toggles, organization guidelines, gateway and Fable toggles, default repository.
   These are tiered; see "Settings tiers" below.

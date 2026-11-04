@@ -21,6 +21,7 @@ from openswe.slack.client import (
     post_slack_top_level_message_with_ts,
     update_slack_message,
 )
+from openswe.slack.failures import SlackRequestError as SlackBreakoutError
 from openswe.slack.http import SlackRequestError
 from openswe.slack.move import move_slack_thread
 from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
@@ -45,6 +46,7 @@ class BreakoutCommand:
     prior_text: str = ""
     options: str = ""
     workspace: str | None = None
+    kitchen: bool = False
 
     @classmethod
     def from_message(cls, message: ParsedSlackMessage) -> BreakoutCommand:
@@ -304,6 +306,8 @@ async def process_slack_breakout(
             tag=command.workspace,
             login=await service.slack_login(request.user_id) if request.user_id else None,
         )
+        if command.kitchen:
+            destination = await destination.kitchen()
         target = destination.channel_id
         if error := await destination.channel_error(request.channel_id):
             await _tell_sender(request, error)
@@ -318,6 +322,9 @@ async def process_slack_breakout(
             )
         else:
             await _move(request, target)
+    except SlackBreakoutError as exc:
+        logger.info("Slack breakout rejected", extra={"agent_thread_id": request.thread_id})
+        await _tell_sender(request, exc.user_message)
     except Exception:
         logger.exception("Slack breakout failed", extra={"agent_thread_id": request.thread_id})
         await _tell_sender(request, "Could not break out this thread; try again.")
