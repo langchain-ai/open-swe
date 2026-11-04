@@ -102,7 +102,8 @@ def test_a_move_in_its_own_channel_posts_through_mda_and_hands_the_thread_over(
     assert (prepared, recorded) == ("slack_move", "slack_moved")
     assert plan == SlackMoveRequest(run_id="run-1", message="Moved here", channel_id=None)
     # The backend records the root MDA posted, for the run its token names.
-    assert moved == SlackMoved(run_id="run-1", thread_ts="200.1", mark_source=False)
+    # The old thread hears where the conversation went, as after /breakout.
+    assert moved == SlackMoved(run_id="run-1", thread_ts="200.1", mark_source=True)
 
 
 def test_a_move_into_another_channel_stays_the_backends(

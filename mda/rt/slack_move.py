@@ -90,7 +90,7 @@ class SlackMoveMiddleware(AgentMiddleware):
         post = channel.post if channel is not None else None
         if post is None:
             return None
-        result = await self._move(runtime, message=None, channel_id=None, mark_source=True)
+        result = await self._move(runtime, message=None, channel_id=None)
         if result is None:
             text = "I can move this conversation only within this Slack channel for now."
         elif result.get("success") is True:
@@ -107,7 +107,6 @@ class SlackMoveMiddleware(AgentMiddleware):
         *,
         message: str | None,
         channel_id: str | None,
-        mark_source: bool = False,
     ) -> Mapping[str, JsonValue] | None:
         """The move's answer, or ``None`` when the backend moves it into another channel."""
         plan = await call(
@@ -132,7 +131,8 @@ class SlackMoveMiddleware(AgentMiddleware):
         moved = await call(
             self._backend,
             SLACK_MOVED,
-            SlackMoved(run_id=run_id(), thread_ts=posted["id"], mark_source=mark_source),
+            # The old Slack thread says where it went, as the agent's tool moves it too.
+            SlackMoved(run_id=run_id(), thread_ts=posted["id"], mark_source=True),
         )
         return moved.result
 
