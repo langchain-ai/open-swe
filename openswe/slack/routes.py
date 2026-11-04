@@ -1151,7 +1151,7 @@ async def slack_interactivity(
     if not _answered_here(interaction):
         # Trigger Server takes every other click and MDA's Slack channel decides what it
         # does; where Trigger Server refuses it, the backend acts on it after all.
-        return _hand_to_mda(
+        handed = _hand_to_mda(
             background_tasks,
             body,
             mda_forwarding.forwarded_headers(request.headers),
@@ -1161,6 +1161,8 @@ async def slack_interactivity(
             url=mda_forwarding.TRIGGER_INTERACTIVITY_URL,
             on_refused=functools.partial(_act_here, interaction, payload_raw),
         )
+        # Slack closes a submitted modal only on an empty answer, as Trigger Server gives.
+        return {} if interaction.type == "view_submission" else handed
     return await act_on_interaction(interaction, payload_raw, background_tasks)
 
 
