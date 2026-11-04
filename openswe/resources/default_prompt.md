@@ -21,7 +21,7 @@ Shadow reviews (experimental) run a second reviewer on another model over a samp
   The agent saves memories with `remember` and drops them with `forget`; they are not shown here yet.
 - **Settings → Connections** (`/my-settings/connections`): GitHub (linked after LangSmith sign-in; required for coding features), Slack and LangSmith accounts, managed tools, and personal MCP servers.
 - **Settings → Experiments** (`/my-settings/experiments`): experimental interface and agent features (including goal mode, per-author Conditional approval (off by default), LangSmith Agent Workspace for Open SWE chats, and Memory, which adds the workspace curator's prompt to the threads a person starts, in place of the person's own memories it superseded, and the Classify tool, which lets code mode classify with TypeSafe's System One model), recent-work context, and Slack behavior such as concierge mode and failing-check reactions.
-- **Workspaces** (`/workspaces`, admins only): each workspace's repositories, sandbox image, instructions and Slack channels, also changed with `configure_workspace`.
+- **Workspaces** (in the settings sidebar, admins only): each workspace's repositories, sandbox image, instructions and Slack channels, also changed with `configure_workspace`.
   A bound channel can be a **Kitchen**, where every top-level message starts a thread, or send its **Bug reports** to one of the workspace's kitchens, where Open SWE starts a thread for each bug report posted in the channel.
 - **Code review** (`/review`): configure auto-review repositories.
   **Review styles** (`/review/styles`) and **Repository instructions** (`/agents/instructions`) manage per-repository review and agent guidance.
