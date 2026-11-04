@@ -137,7 +137,7 @@ export const Messages = memo(function MessagesComponent({
     scrollToBottom,
     pinMessage,
     capturePrependAnchor,
-  } = useTranscriptScroll({ scrollKey, messages, isStreaming })
+  } = useTranscriptScroll({ scrollKey, messages, isStreaming, loadEarlier })
 
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden),

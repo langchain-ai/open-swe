@@ -14,7 +14,10 @@ export function getRouter() {
     // Vite's `base`, so a build made for a mount prefix routes under it.
     basepath: import.meta.env.BASE_URL,
 
-    scrollRestoration: true,
+    scrollRestoration: ({ location }): boolean =>
+      !router
+        .matchRoutes(location)
+        .some((match) => match.routeId === "/agents/$threadId"),
     scrollToTopSelectors: [".review-code-view"],
     defaultPreload: "intent",
     defaultErrorComponent: ({ error }) => <LoadError error={error} />,
