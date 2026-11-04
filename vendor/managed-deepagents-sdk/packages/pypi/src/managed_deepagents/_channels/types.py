@@ -132,9 +132,10 @@ class ChannelInfo:
     event: ChannelEvent | None
     #: The provider's payload, in the run its message started only.
     raw_event: JsonValue = None
-    #: The provider conversation the channel posts to, in every run of the
-    #: thread. ``None`` for a provider without a typed target, such as
-    #: ``channels.http()``.
+    #: Where the channel posts: the provider conversation that ``post`` and the
+    #: run's answers go to, which is the conversation the thread came from, in
+    #: every run of the thread. ``None`` for a provider without a typed target,
+    #: such as ``channels.http()``.
     target: ChannelTarget | None = None
 
 
