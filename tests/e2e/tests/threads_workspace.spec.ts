@@ -84,6 +84,7 @@ function baseMetadata(
 ): Record<string, unknown> {
   return {
     participant_logins: { [USER.login]: true },
+    owner_login: USER.login,
     title,
     source: "dashboard",
     origin: "dashboard",
@@ -400,6 +401,7 @@ test.describe("threads workspace", () => {
       id: THREAD_IDS.shared,
       metadata: {
         ...baseMetadata(Date.now(), TITLES.shared, 1_000, {
+          owner_login: "teammate",
           github_login: "teammate",
           triggering_user_email: "teammate@example.com",
           source: "slack",
@@ -539,9 +541,15 @@ test.describe("threads workspace", () => {
 
     const sidebar = page.locator("[data-sidebar-frame]");
     await sidebar.getByRole("button", { name: "Projects options" }).click();
-    await page
-      .getByRole("menuitemradio", { name: "Last updated", exact: true })
-      .click();
+    await expect(
+      page.getByRole("menuitemcheckbox", {
+        name: "Only my threads",
+        exact: true,
+      }),
+    ).toBeChecked();
+    await expect(
+      page.getByRole("menuitemradio", { name: "Last updated", exact: true }),
+    ).toHaveCount(0);
     await page.keyboard.press("Escape");
     const workspaceLinks = sidebar.locator(
       `a[href^="/agents/"]:has-text("${WORKSPACE_QUERY}")`,
@@ -629,6 +637,7 @@ test.describe("threads workspace", () => {
         id: THREAD_IDS.noRepo,
         metadata: baseMetadata(now, TITLES.noRepo, 1_000, {
           participant_logins: { [ADMIN_USER.login]: true },
+          owner_login: ADMIN_USER.login,
           repo_owner: "",
           repo_name: "",
         }),
@@ -637,6 +646,7 @@ test.describe("threads workspace", () => {
         id: THREAD_IDS.pinnedRepo,
         metadata: baseMetadata(now, TITLES.pinnedRepo, 2_000, {
           participant_logins: { [ADMIN_USER.login]: true },
+          owner_login: ADMIN_USER.login,
         }),
       },
     ]);
@@ -659,12 +669,18 @@ test.describe("threads workspace", () => {
 
     await sidebar.getByRole("button", { name: "Projects options" }).click();
     await expect(
-      page.getByRole("menuitemradio", { name: "Created", exact: true }),
+      page.getByRole("menuitemcheckbox", {
+        name: "Only my threads",
+        exact: true,
+      }),
     ).toBeChecked();
-    const sortScreenshotPath = testInfo.outputPath("sort-by-created.png");
-    await page.screenshot({ path: sortScreenshotPath });
-    await testInfo.attach("sort-by-created", {
-      path: sortScreenshotPath,
+    await expect(
+      page.getByRole("menuitemradio", { name: "Created", exact: true }),
+    ).toHaveCount(0);
+    const viewScreenshotPath = testInfo.outputPath("project-view-options.png");
+    await page.screenshot({ path: viewScreenshotPath });
+    await testInfo.attach("project-view-options", {
+      path: viewScreenshotPath,
       contentType: "image/png",
     });
     await page.keyboard.press("Escape");
