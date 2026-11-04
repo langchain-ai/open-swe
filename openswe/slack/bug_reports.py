@@ -169,6 +169,7 @@ class SlackBugReport:
                 "Bug report kitchen unavailable",
                 extra={**self._log_context, "breakout_error": error},
             )
+            await event_claims.release(_CLAIM_SCOPE, self._claim_key)
             return
         label = f"Bug report from <#{self.channel_id}>"
         suffix = "".join(
