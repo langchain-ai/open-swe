@@ -4,16 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Generic, Literal
+from typing import TYPE_CHECKING, Generic, Literal, TypeAlias
 
 from typing_extensions import TypedDict, TypeVar
 
 from managed_deepagents._channels.actor import LinearActor, LinearEndpointActor
-from managed_deepagents._channels.channel_types import (
-    ChannelEventCallback,
-    ChannelEventResult,
-    ReadsThreadState,
-)
 from managed_deepagents._channels.http.endpoint import EndpointRequest, EventEndpoint
 from managed_deepagents._channels.linear_schema import (
     LinearCommentCreatePayload,
@@ -22,6 +17,11 @@ from managed_deepagents._channels.linear_schema import (
     LinearIssueUpdatePayload,
     LinearSessionCreatedPayload,
     LinearSessionPromptedPayload,
+)
+from managed_deepagents._channels.types import (
+    ChannelEventCallback,
+    ChannelEventResult,
+    ReadsThreadState,
 )
 
 if TYPE_CHECKING:
@@ -192,7 +192,7 @@ class LinearAppOptions(TypedDict, total=False):
     team access in Linear too."""
 
 
-LinearEventResult = ChannelEventResult
+LinearEventResult: TypeAlias = ChannelEventResult
 """What an event handler returns: a run's input, as ``agent.invoke`` takes it (a
 string, a message such as ``HumanMessage(...)``, or state such as
 ``{"messages": [...]}``), one run on the event's conversation; or a list of runs

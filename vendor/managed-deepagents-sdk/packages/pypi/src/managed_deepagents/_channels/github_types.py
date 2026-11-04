@@ -4,16 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Generic, Literal
+from typing import TYPE_CHECKING, Generic, Literal, TypeAlias
 
 from typing_extensions import TypedDict, TypeVar
 
 from managed_deepagents._channels.actor import GitHubActor, GitHubEndpointActor
-from managed_deepagents._channels.channel_types import (
-    ChannelEventCallback,
-    ChannelEventResult,
-    ReadsThreadState,
-)
 from managed_deepagents._channels.github_schema import (
     GitHubInstallationEventKey,
     GitHubInstallationPayload,
@@ -40,6 +35,11 @@ from managed_deepagents._channels.github_schema import (
     _WorkflowPayload,
 )
 from managed_deepagents._channels.http.endpoint import EndpointRequest, EventEndpoint
+from managed_deepagents._channels.types import (
+    ChannelEventCallback,
+    ChannelEventResult,
+    ReadsThreadState,
+)
 
 if TYPE_CHECKING:
     from langgraph_sdk.schema import ThreadState
@@ -184,7 +184,7 @@ class GitHubAppOptions(TypedDict, total=False):
     so install the App only on the ones the agent may change."""
 
 
-GitHubEventResult = ChannelEventResult
+GitHubEventResult: TypeAlias = ChannelEventResult
 """What an event handler returns: a run's input, as ``agent.invoke`` takes it (a
 string, a message such as ``HumanMessage(...)``, or state such as
 ``{"messages": [...]}``), one run on the event's conversation; or a list of runs

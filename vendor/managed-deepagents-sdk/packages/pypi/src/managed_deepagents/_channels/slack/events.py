@@ -19,10 +19,6 @@ from managed_deepagents._channels.actor import (
     SlackEndpointActor,
     endpoint_actor,
 )
-from managed_deepagents._channels.channel_types import (
-    ChannelEventCallback,
-    ReadsThreadState,
-)
 from managed_deepagents._channels.http.endpoint import (
     EndpointEvent,
     EndpointRequest,
@@ -30,7 +26,9 @@ from managed_deepagents._channels.http.endpoint import (
 )
 from managed_deepagents._channels.http.provider import CachedRead
 from managed_deepagents._channels.types import (
+    ChannelEventCallback,
     JsonValue,
+    ReadsThreadState,
 )
 from managed_deepagents._log import logger
 

@@ -22,11 +22,6 @@ from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.actor import ChannelActor, GitHubActor
-    from managed_deepagents._channels.channel_types import (
-        ChannelEventCallback,
-        ChannelEventResult,
-        ChannelThread,
-    )
     from managed_deepagents._channels.github_types import (
         GitHubAccount,
         GitHubAppOptions,
@@ -154,11 +149,14 @@ if TYPE_CHECKING:
     from managed_deepagents._channels.types import (
         ChannelContentMessage,
         ChannelEvent,
+        ChannelEventCallback,
+        ChannelEventResult,
         ChannelInfo,
         ChannelMessage,
         ChannelNativeMessage,
         ChannelReply,
         ChannelTarget,
+        ChannelThread,
         GitHubChannelTarget,
         JsonValue,
         LinearChannelTarget,
@@ -273,9 +271,9 @@ _EXPORTS: dict[str, str] = {
     "EndpointThread": "managed_deepagents._channels.http.endpoint",
     "EventEndpoint": "managed_deepagents._channels.http.endpoint",
     "EventFinished": "managed_deepagents._channels.http.provider",
-    "ChannelEventCallback": "managed_deepagents._channels.channel_types",
-    "ChannelEventResult": "managed_deepagents._channels.channel_types",
-    "ChannelThread": "managed_deepagents._channels.channel_types",
+    "ChannelEventCallback": "managed_deepagents._channels.types",
+    "ChannelEventResult": "managed_deepagents._channels.types",
+    "ChannelThread": "managed_deepagents._channels.types",
     "GeneratedSkill": "managed_deepagents.define_deep_agent",
     "GitHubAccount": "managed_deepagents._channels.github_types",
     "GitHubActor": "managed_deepagents._channels.actor",
