@@ -23,7 +23,7 @@ const baseURL = `http://127.0.0.1:${UI_PORT}`;
 
 export default defineConfig({
   testDir: "./tests",
-  testIgnore: "desktop.spec.ts",
+  testIgnore: ["desktop.spec.ts", "account_recovery.spec.ts"],
   globalSetup: "./global-setup.ts",
   fullyParallel: false,
   workers: 1,

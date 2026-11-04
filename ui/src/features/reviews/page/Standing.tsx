@@ -60,6 +60,7 @@ import {
   rankFindings,
 } from "./findings"
 import { InlineCode } from "./inlineCode"
+import { ProfileLink } from "./notes/Byline"
 import {
   reviewQueries,
   useOpenConversations,
@@ -208,6 +209,7 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
       )}
       {(!open || !status) && (
         <div className="divide-y border-t border-default">
+          {detail.pr.merged_at && <ApprovalsRow status={status} />}
           {open &&
             status === undefined &&
             ["Checks", "Reviews"].map((label) => (
@@ -338,7 +340,7 @@ function Row({
           iconWeight="regular"
           label="Toggle review status"
           tooltipProps={{ disabled: true }}
-          className="-my-space-1 self-stretch py-space-1"
+          className="-my-space-1 h-auto self-stretch py-space-1"
           iconClassName={cn("transition-transform", expanded && "rotate-90")}
           type="button"
           tabIndex={-1}
@@ -607,6 +609,46 @@ function ReviewsRow({
   )
 }
 
+/** Who approved a merged pull request, which outlives its other rows. */
+function ApprovalsRow({
+  status,
+}: {
+  status: OpenPullRequest | null | undefined
+}) {
+  const approvers = (status?.reviewers ?? []).filter(
+    (reviewer) => reviewer.state === "approved"
+  )
+  return (
+    <Row
+      icon={
+        status === undefined ? (
+          <span className="size-3.5 rounded-full bg-surface-level-3" />
+        ) : approvers.length > 0 ? (
+          passIcon
+        ) : (
+          warnIcon
+        )
+      }
+      label="Approved by"
+    >
+      {status === undefined ? (
+        <Skeleton className="h-3 w-40" />
+      ) : !status?.reviewers ? (
+        "GitHub didn't say who approved it"
+      ) : approvers.length === 0 ? (
+        "Merged without an approving review"
+      ) : (
+        approvers.map((approver, index) => (
+          <span key={approver.login}>
+            {index > 0 && ", "}
+            <ProfileLink author={approver} className="font-medium" />
+          </span>
+        ))
+      )}
+    </Row>
+  )
+}
+
 function BranchRow({
   pr,
   detail,
@@ -746,7 +788,9 @@ function OpenSweRow({
                 ? "approved"
                 : verdict.decision === "would_approve"
                   ? "would approve"
-                  : "needs human review"
+                  : verdict.decision === "would_approve_conditionally"
+                    ? "would approve subject to human approval"
+                    : "needs human review"
               : null,
             bugs || flags
               ? [bugs && plural(bugs, "bug"), flags && plural(flags, "flag")]

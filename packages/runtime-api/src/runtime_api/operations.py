@@ -59,6 +59,8 @@ class OperationResult(BaseModel):
     events: list[JsonValue] = []
     # The thread's sandbox did not answer; the backend has told the person, and the run ends.
     sandbox_unreachable: bool = False
+    # Browser sessions MCP results carried, by handle: kept by the run, never shown the model.
+    sessions: dict[str, dict[str, JsonValue]] = {}
 
 
 OPERATION = Endpoint("operation", RunOperation, OperationResult)

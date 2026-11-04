@@ -87,7 +87,6 @@ import { reportError } from "@/lib/errorReporting"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
-import { useWorkThreadRead } from "@/features/agents/lib/useWorkThreadRead"
 import { useConnectionStatus } from "@/features/agents/lib/stream/useReconnectStatus"
 import { runTranscriptCommitted } from "@/lib/perf/streaming"
 import { ReplyOptionContext } from "@/features/agents/components/chat/ReplyCard"
@@ -144,7 +143,6 @@ export function AgentThreadView({
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const source = useThreadSource()
-  useWorkThreadRead(thread, source)
   const [dismissedWarning, setDismissedWarning] = useState("")
   const workspaceWarningKey = JSON.stringify([
     thread.id,
@@ -969,6 +967,9 @@ export function AgentThreadView({
                     streamIsLoading={source.isRunning}
                     scrollControlRef={scrollControlRef}
                     isThinking={isThinking}
+                    isWaitingForDelegatedWork={
+                      thread.waitingForDelegatedWork && !source.isRunning
+                    }
                     isOffloading={source.isOffloading}
                     reconnectLabel={reconnect.label}
                     settingUpSandbox={settingUpSandbox}
@@ -1001,6 +1002,12 @@ export function AgentThreadView({
               )}
               {reviewChat && <ReviewExcerptChips />}
               <AgentPromptBar
+                key={`${session.data?.user_id}:${thread.id}`}
+                draftKey={
+                  session.data?.user_id
+                    ? `${session.data.user_id}:thread:${thread.id}`
+                    : undefined
+                }
                 placeholder={
                   moving
                     ? `Moving this thread to ${moving === "local" ? "This Mac" : "Cloud"}…`
@@ -1037,7 +1044,10 @@ export function AgentThreadView({
                 {...(localThread
                   ? {
                       runTarget: "local" as const,
-                      selectedLocalRepoPath: localThread.cwd,
+                      // A task folder is the thread's own, not a project.
+                      selectedLocalRepoPath: localThread.managedTaskFolder
+                        ? null
+                        : localThread.cwd,
                       localRepoBranches: localRepoRefs,
                       selectedLocalRepoBranch: localBranch,
                       onRefreshLocalRepoBranch: () =>

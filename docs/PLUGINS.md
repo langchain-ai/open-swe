@@ -182,7 +182,7 @@ function Themed() {
 ```
 
 `useDashboardTheme` toggles `html.dark` and sets `color-scheme` and `data-theme`, which is what the web UI's Macaw design system reads.
-To match the web UI, use Macaw, as the starter does (`@langchain/macaw-components` and `@langchain/macaw-tokens` from `ui/vendor/macaw`).
+To match the web UI, use Macaw, as the starter does (the published `@langchain/macaw-components` and `@langchain/macaw-tokens` packages).
 
 ### Navigation and links
 
@@ -431,7 +431,7 @@ A failed request rejects with `HostError`, which carries `message` and an HTTP-l
 ## Building the bundle
 
 Start from [`plugins/starter`](../plugins/starter): React, the Macaw design system, Tailwind and the SDK, with a Vite build that writes `bundle/index.html` with `manifest.json` embedded.
-Macaw 2 and the SDK aren't on npm yet, so the starter takes them by path from this repository (`ui/vendor/macaw`, `plugins/sdk`); keep an app beside them, or copy those directories too.
+Macaw comes from npm. The SDK is local to this repository (`plugins/sdk`); keep an app beside it, or copy that directory too.
 
 The bundle is one self-contained HTML file: every script, stylesheet and font inline, with the manifest script inside.
 It must be at most 64 MB and contain no NUL characters (escape them as `\u0000`).

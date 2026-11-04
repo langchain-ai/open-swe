@@ -62,7 +62,7 @@ class ManagedToolsError(ValueError):
 
 class LangSmithNotConnected(ManagedToolsError):
     def __init__(self) -> None:
-        super().__init__("Connect LangSmith in Settings first")
+        super().__init__("Sign in with LangSmith again first")
 
 
 class MissingCredential(BaseModel):

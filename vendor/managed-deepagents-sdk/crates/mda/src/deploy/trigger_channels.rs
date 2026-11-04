@@ -15,6 +15,7 @@ use super::channel_setup::ChannelStatus;
 use super::slack_app::{self, SlackApp};
 use super::trigger_icon;
 use crate::compile::ChannelRequirements;
+use crate::error::{categorize_unclassified, ErrorCategory};
 use crate::langsmith::{
     self, is_transient_setup_error, ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus,
     ChannelSetupTarget, SlackAppInUse, SlackChannelApp, SlackChannelOptions, SlackChannelSetup,
@@ -526,11 +527,24 @@ pub(crate) fn register(
             )
         },
         |_| Ok(()),
-    )?;
+    )
+    .map_err(transient_failure_category)?;
     if registered.is_some() {
         ui.success(READY)?;
     }
     Ok(())
+}
+
+/// A setup request that might have succeeded when made again, and was not:
+/// Trigger Server or Slack was busy (a 5xx or 429), which is the server's
+/// failure, or the request got no answer, which a timeout already says.
+/// Categorized only here, so retries can still tell it is transient.
+fn transient_failure_category(error: anyhow::Error) -> anyhow::Error {
+    if is_transient_setup_error(&error) {
+        categorize_unclassified(ErrorCategory::Remote, error)
+    } else {
+        error
+    }
 }
 
 const READY: &str =
@@ -1840,6 +1854,30 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("HTTP 400"), "{error}");
+    }
+
+    #[test]
+    fn a_setup_that_stayed_busy_is_the_servers_failure() {
+        let busy = transient_failure_category(anyhow::Error::new(
+            crate::langsmith::TransientSetupError("Channel setup failed (HTTP 503).".into()),
+        ));
+        let refused = transient_failure_category(crate::error::categorized(
+            ErrorCategory::Authentication,
+            "Channel setup failed (HTTP 401).",
+        ));
+        let other =
+            transient_failure_category(anyhow!("Channel setup returned an invalid response."));
+
+        assert_eq!(busy.to_string(), "Channel setup failed (HTTP 503).");
+        assert_eq!(crate::error::category_of(&busy), ErrorCategory::Remote);
+        assert_eq!(
+            crate::error::category_of(&refused),
+            ErrorCategory::Authentication
+        );
+        assert_eq!(
+            crate::error::category_of(&other),
+            ErrorCategory::Unclassified
+        );
     }
 
     #[test]

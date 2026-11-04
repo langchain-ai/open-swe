@@ -1,7 +1,7 @@
 """Unit tests for the publish_review rendering and orchestration helpers."""
 
 from collections.abc import Callable, Iterator
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -51,6 +51,47 @@ async def test_stale_assessment_does_not_publish_or_advance_reviewed_commit() ->
     assert "commit" in result["error"]
     post.assert_not_awaited()
     metadata.assert_not_awaited()
+
+
+async def test_invalid_open_swe_config_requests_changes_instead_of_assessing() -> None:
+    from openswe.tools.publish_review import _publish_review_async
+
+    post_review = AsyncMock(return_value={"id": 99})
+    with (
+        patch("openswe.run_config.get_config", return_value={"configurable": {"thread_id": "tid"}}),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch("openswe.tools.publish_review.post_pull_request_review", post_review),
+        patch("openswe.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
+        patch(
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
+            AsyncMock(return_value=0),
+        ),
+        patch("openswe.tools.publish_review._store_thread_ids_on_findings", AsyncMock()),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
+        patch("openswe.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="a" * 40,
+            token="t",
+            severity_threshold="medium",
+            is_re_review=True,
+            assessment=_assessment(),
+            state={
+                "review_approval_policy": "Docs only",
+                "review_config_errors": ["`.open-swe/settings.json` is not valid JSON"],
+            },
+        )
+
+    assert result["success"] is True
+    post_review.assert_awaited_once()
+    kwargs = post_review.await_args.kwargs
+    assert kwargs["event"] == "REQUEST_CHANGES"
+    assert "`.open-swe/settings.json` is not valid JSON" in kwargs["body"]
+    assert "Risk:" not in kwargs["body"]
 
 
 def _f(**overrides: Any) -> Finding:
@@ -107,6 +148,7 @@ def _isolate_publish_review_pr_state() -> Iterator[None]:
         patch("openswe.tools.publish_review.open_swe_review_exists", AsyncMock(return_value=False)),
         patch("openswe.tools.publish_review.clear_review_started_comment", AsyncMock()),
         patch("openswe.tools.publish_review._withdraw_open_swe_approvals", AsyncMock()),
+        patch("openswe.tools.publish_review._withdraw_open_swe_change_requests", AsyncMock()),
         patch(
             "openswe.tools.publish_review.resolve_review_head_sha",
             AsyncMock(
@@ -195,13 +237,15 @@ async def test_eval_run_publishes_the_findings_it_recorded_without_postgres() ->
     )
     from openswe.tools.publish_review import publish_review
 
-    start_run_scoped_findings("tid")
+    # Run-scoped findings outlive the test in this process; another thread id keeps them
+    # out of the PostgreSQL findings tests that use "tid".
+    start_run_scoped_findings("eval-tid")
     await append_finding(
-        "tid", _f(id="f_one", severity="high", file="a.py", start_line=1, end_line=1)
+        "eval-tid", _f(id="f_one", severity="high", file="a.py", start_line=1, end_line=1)
     )
     with (
         patch("openswe.tools.publish_review.get_config", return_value=_eval_config()),
-        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="eval-tid"),
         patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
     ):
         result = await publish_review(ranking=["f_one"])
@@ -1068,15 +1112,27 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
 
 
 @pytest.mark.parametrize(
-    "prepared_policy,mode,current_head,expected_event,has_assessment",
+    "prepared_policy,mode,current_head,expected_event,has_assessment,conditional_enabled",
     [
-        (None, "approve", True, "COMMENT", False),
-        ("Docs only", "off", True, "COMMENT", False),
-        ("Docs only", "dry_run", True, "COMMENT", True),
-        ("Docs only", "approve", False, "COMMENT", True),
-        ("Docs only", "approve", True, "APPROVE", True),
+        (None, "approve", True, "COMMENT", False, None),
+        ("Docs only", "off", True, "COMMENT", False, None),
+        ("Docs only", "dry_run", True, "COMMENT", True, None),
+        ("Docs only", "approve", False, "COMMENT", True, None),
+        ("Docs only", "approve", True, "APPROVE", True, None),
+        ("Docs only", "approve", True, "COMMENT", True, False),
+        ("Docs only", "approve", True, "COMMENT", True, True),
+        ("Docs only", "approve", True, "COMMENT", True, "lookup-fails"),
     ],
-    ids=["no-policy", "switched-off", "dry-run", "head-moved", "approve"],
+    ids=[
+        "no-policy",
+        "switched-off",
+        "dry-run",
+        "head-moved",
+        "approve",
+        "conditional-off",
+        "conditional-on",
+        "conditional-author-unknown",
+    ],
 )
 async def test_publication_respects_the_base_policy_and_current_mode(
     prepared_policy: str | None,
@@ -1084,11 +1140,28 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     current_head: bool,
     expected_event: str,
     has_assessment: bool,
+    conditional_enabled: bool | Literal["lookup-fails"] | None,
     registry_db: None,
 ) -> None:
     from openswe.tools.publish_review import _publish_review_async
+    from openswe.users import UserPreferences
 
     with (
+        patch(
+            "openswe.github.pull_request_status.PullRequestClient.pull",
+            AsyncMock(return_value={"user": {"login": "pr-author"}}),
+        ),
+        patch(
+            "openswe.tools.publish_review.User.preferences_for_login",
+            AsyncMock(
+                side_effect=RuntimeError("database unavailable")
+                if conditional_enabled == "lookup-fails"
+                else None,
+                return_value=UserPreferences(
+                    experimental_conditional_approval=conditional_enabled is True
+                ),
+            ),
+        ) as author_preferences,
         patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("openswe.tools.publish_review.approval_mode_for", AsyncMock(return_value=mode)),
         patch(
@@ -1120,7 +1193,18 @@ async def test_publication_respects_the_base_policy_and_current_mode(
             token="t",
             severity_threshold="medium",
             is_re_review=False,
-            assessment=_assessment(),
+            assessment=(
+                _assessment()
+                if conditional_enabled is None
+                else ReviewAssessment(
+                    head_sha="a" * 40,
+                    risk_score=1,
+                    decision="would_approve_conditionally",
+                    approval_condition="Remove the legacy exporter",
+                    auto_approved="Documentation changes covered by Docs only",
+                    explanation="Implementation is covered; human approval of the removal is needed.",
+                )
+            ),
             state={"review_approval_policy": prepared_policy},
         )
     assert result["success"] is True
@@ -1141,6 +1225,15 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     if saved is not None:
         assert saved.dry_run is (mode == "dry_run")
         assert saved.approved is (expected_event == "APPROVE")
+
+        if conditional_enabled is not None:
+            author_preferences.assert_awaited_once_with("pr-author")
+            assert saved.decision == (
+                "would_approve_conditionally"
+                if conditional_enabled is True
+                else "needs_human_review"
+            )
+            assert bool(saved.approval_condition) is (conditional_enabled is True)
 
 
 @pytest.mark.parametrize(

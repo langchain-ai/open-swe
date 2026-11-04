@@ -74,13 +74,13 @@ test.describe("Slack thread moves", () => {
     expect(source.webhook.status).toBe("accepted");
 
     await expect
-      .poll(() => movedRoot(request, "C_TARGET"), { timeout: 60_000 })
+      .poll(() => movedRoot(request, "CTARGET01"), { timeout: 60_000 })
       .toBeTruthy();
-    const destination = await movedRoot(request, "C_TARGET");
+    const destination = await movedRoot(request, "CTARGET01");
     expect(destination).toBeTruthy();
 
     const destinationFollowup = await send(request, {
-      channel: "C_TARGET",
+      channel: "CTARGET01",
       thread_ts: destination!.thread_ts,
       text: "<@U0BOT> E2E_DESTINATION_FOLLOWUP confirm the state continued",
       mention_bot: true,

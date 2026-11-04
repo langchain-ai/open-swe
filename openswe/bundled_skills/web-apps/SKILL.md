@@ -34,17 +34,17 @@ Embed it in the HTML as a JSON script:
 ## Start from the starter
 
 `plugins/starter` in `langchain-ai/open-swe` is an app ready to change: React, the Macaw design system (Open SWE's own components, which follow the web UI's light and dark theme), Tailwind, the plugin SDK, and a Vite build that writes the one self-contained file with `manifest.json` inside it.
-Neither Macaw 2 nor the SDK is on npm, so take them from the repository:
+Macaw is published on npm; take the SDK and starter from the repository:
 
 ```bash
 APPS=/workspace/.openswe-apps/open-swe
 git clone --depth 1 --filter=blob:none --sparse https://github.com/langchain-ai/open-swe "$APPS"
-git -C "$APPS" sparse-checkout set plugins/sdk plugins/starter ui/vendor/macaw
+git -C "$APPS" sparse-checkout set plugins/sdk plugins/starter
 cp -r "$APPS/plugins/starter" "$APPS/plugins/<name>"
 cd "$APPS/plugins/<name>" && npm install && npm run build
 ```
 
-Clone it there, never over a checkout of the thread's own repository, and keep the app beside `plugins/sdk` and `ui/vendor/macaw`, where its `package.json` finds them.
+Clone it there, never over a checkout of the thread's own repository, and keep the app beside `plugins/sdk`, where its `package.json` finds the local SDK.
 Edit `manifest.json` and `src/App.tsx`; `npm run build` writes `bundle/index.html`, the file to preview.
 Build the UI from Macaw's components (`@langchain/macaw-components/<Component>`: Button, Card, Input, Select, Tabs, Dialog, Text and the rest) and its tokens (`p-space-4`, `text-secondary`, `bg-surface-level-2`) rather than your own styles, so the app looks like the web UI around it.
 The SDK's `README.md` and `src/client.ts` document the host API.

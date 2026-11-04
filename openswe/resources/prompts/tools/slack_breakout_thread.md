@@ -7,8 +7,7 @@ Invalid selections return `available_models` with valid IDs and efforts without 
 This is only for requested breakouts, not a general mechanism for creating Slack threads.
 Same-channel breakouts also work in private channels.
 Changing channels requires a public source channel and destination.
-Omit `channel_id` to use the current channel.
-Pass `channel_id` only when the user explicitly chooses a destination.
+Choose the destination from the user's request and applicable channel descriptions and workspace instructions before calling this tool; those instructions can designate a channel other than the source.
 The current conversation remains active; to move the current conversation and stop listening to the original thread, use `slack_move_thread` instead.
 
 Choose the breakout's model deliberately rather than automatically inheriting the parent's.
@@ -17,11 +16,11 @@ Prefer the stronger model when the added reasoning is likely to improve the outc
 Respect explicit model and effort choices, use only known supported model IDs and efforts, and pass your selection in `model` and `effort` rather than only describing it in `instructions`.
 This selects the new thread's model; it does not switch the current conversation's model.
 
-Set `web_only=true` only when the user explicitly asks for a web breakout (the equivalent of `/breakout:web`).
+Set `destination="web"` only when the user explicitly asks for a web breakout (the equivalent of `/breakout:web`).
 Never choose a web breakout proactively or merely because a question seems quick.
-It creates a private, web-only conversation seeded with the full Slack transcript, with no Slack thread binding or destination; omit `channel_id`.
+It creates a private, web-only conversation seeded with the full Slack transcript, with no Slack thread binding or destination.
 Share the returned `dashboard_url` with the requester.
-The Slack completion instructions below apply only when `web_only=false`.
+The Slack completion instructions below apply only for Slack destinations.
 
 When called from a Slack thread, post nothing in that thread before this call.
 On success the tool posts a link to the breakout thread itself, so end the turn with `slack_no_reply_needed`; on failure, tell the asker why.
