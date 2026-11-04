@@ -166,7 +166,7 @@ const PYTHON_MANAGED: &[Dependency] = &[
 /// `STAGEHAND_VERSION`).
 pub const PYTHON_BROWSER: Dependency = Dependency {
     name: "stagehand",
-    version: "==4.3.0",
+    version: "==4.4.0",
 };
 
 /// PyPI package behind that browser's `run`, `snapshot` and `screenshot`
@@ -174,7 +174,7 @@ pub const PYTHON_BROWSER: Dependency = Dependency {
 /// first release, and `browser.py` is written against how it closes and saves.
 pub const PYTHON_BROWSER_TOOLS: Dependency = Dependency {
     name: "stagehand-middleware",
-    version: "==0.1.0",
+    version: "==0.1.2",
 };
 
 /// npm package that drives a LangSmith browser from the deployment, for
@@ -183,7 +183,7 @@ pub const PYTHON_BROWSER_TOOLS: Dependency = Dependency {
 /// runs the Stagehand the package is tested against.
 pub const TYPESCRIPT_BROWSER: Dependency = Dependency {
     name: "@browserbasehq/stagehand",
-    version: "4.3.0",
+    version: "4.4.0",
 };
 
 /// npm package behind that browser's `run`, `snapshot` and `screenshot`
@@ -191,7 +191,7 @@ pub const TYPESCRIPT_BROWSER: Dependency = Dependency {
 /// to the release that `managed-deepagents` lists as a peer dependency.
 pub const TYPESCRIPT_BROWSER_TOOLS: Dependency = Dependency {
     name: "stagehand-middleware",
-    version: "0.1.1",
+    version: "0.1.2",
 };
 
 /// npm package that provides the local LangGraph in-memory dev server.

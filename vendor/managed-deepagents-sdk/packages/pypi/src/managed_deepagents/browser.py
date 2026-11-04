@@ -25,6 +25,7 @@ import logging
 import math
 import os
 import posixpath
+import re
 import shlex
 import shutil
 import tempfile
@@ -37,7 +38,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal, NotRequired, TypedDict, TypeVar, cast
 
 import httpx
-import websockets
 from deepagents.backends import CompositeBackend, StateBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware.async_subagents import (
@@ -61,7 +61,10 @@ from langsmith.sandbox import AsyncSandbox, AsyncSandboxClient, ResourceNotFound
 from langsmith.utils import get_env_var
 from pydantic import TypeAdapter, ValidationError
 from stagehand import BrowserContext, Page, Stagehand, get_extension_archive, local_browser
-from stagehand.browser import _invalidate_browser  # no public way to drop the CDP connection
+from stagehand.browser import (
+    StagehandBrowser,
+    _invalidate_browser,  # no public way to drop the CDP connection
+)
 from stagehand.rpc_client import RPCError
 from stagehand_middleware.facade import (
     StagehandFacadeExecutionError,
@@ -92,7 +95,7 @@ _Content = TypeVar("_Content", bound=str | list[Any])  # what a tool returns the
 Scope = Literal["thread", "user"]
 
 #: The client and the browser's extension must match; ``mda`` pins this in deployments.
-STAGEHAND_VERSION = "4.3.0"
+STAGEHAND_VERSION = "4.4.0"
 _WORKSPACE = "/workspace"  # where run code's screenshots land in the agent's files
 _INSTRUCTIONS = (
     # The facade's text and errors name its tools `run` and so on; ours gain `browser_`.
@@ -203,20 +206,11 @@ class _Session:
 
     @property
     def disconnected(self) -> bool:
-        """Whether the client lost Chrome, as when browserd restarts it: for good.
-
-        Stagehand closes its client once the connection ends, with no public way to ask.
-        """
-        client = self.stagehand._rpc_client  # noqa: SLF001
-        return client is not None and client._closed  # noqa: SLF001
+        """Whether the client lost Chrome, as when browserd restarts it: for good."""
+        return not self.stagehand.browser.connected
 
     async def close(self) -> None:
-        # Not `browser.close()`, which closes the browser. Closing Stagehand frees the
-        # extension; dropping the CDP connection lets the browser idle out.
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(self.stagehand.close(), 3)
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(_invalidate_browser(self.stagehand.browser), 3)
+        await _let_go(self.stagehand.browser)
         await asyncio.to_thread(shutil.rmtree, self.artifacts, ignore_errors=True)
 
 
@@ -983,9 +977,77 @@ async def _create(api: httpx.AsyncClient, browsers: str, name: str, idle_ttl_sec
 
 _BROWSER_GENERATIONS = 5
 _UNUSABLE = {"deleting", "deleted", "failed", "error"}  # browser states to move past
-_EXTENSION_DIR = f"/var/lib/browserd/extensions/stagehand-{STAGEHAND_VERSION}"
+_EXTENSIONS_DIR = "/var/lib/browserd/extensions"  # browserd loads every folder's extension
+_EXTENSION_DIR = f"{_EXTENSIONS_DIR}/stagehand-{STAGEHAND_VERSION}"
 _EXTENSION_ZIP = "/tmp/mda-stagehand.zip"  # noqa: S108 - in the browser sandbox
 _WINDOWS_FILE = "/var/lib/browserd/attachments.json"  # browserd's windows and their ports
+_DEVTOOLS_PORT_FILE = "/var/lib/browserd/profile/DevToolsActivePort"  # new with each launch
+# Run in the browser sandbox after Chrome is stopped: waits until browserd serves every
+# window from the Chrome it relaunched. Until then a client's connection reaches the
+# stopping Chrome or none, and fails. Arguments: the stopped launch's browser id, the
+# DevTools port file, and the windows file. The npm package runs the same program.
+_RELAUNCH_WAIT = """\
+import http.client, json, sys, time
+stopped, port_file, windows_file = sys.argv[1:4]
+
+
+def launch():
+    try:
+        with open(port_file) as f:
+            return f.read().split()[1]
+    except (OSError, IndexError):
+        return None
+
+
+def windows():
+    try:
+        with open(windows_file) as f:
+            return json.load(f)["attachments"]
+    except (OSError, ValueError, KeyError):
+        return []
+
+
+def get(window, path, headers):
+    conn = http.client.HTTPConnection("127.0.0.1", window["port"], timeout=2)
+    try:
+        conn.request("GET", path, headers=headers)
+        response = conn.getresponse()
+        return response.status, response.read() if response.status == 200 else b""
+    except OSError:
+        return 0, b""
+    finally:
+        conn.close()
+
+
+def served(window):
+    upgrade = {
+        "Connection": "Upgrade",
+        "Upgrade": "websocket",
+        "Sec-WebSocket-Version": "13",
+        "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+    }
+    if get(window, "/devtools/browser/" + window["id"], upgrade)[0] != 101:
+        return False
+    status, body = get(window, "/browserd/state", {})
+    try:
+        return status == 200 and bool(json.loads(body).get("tabs"))
+    except ValueError:
+        return False
+
+
+deadline = time.monotonic() + 60
+while time.monotonic() < deadline:
+    launched = launch()
+    if launched and launched != stopped and all(served(w) for w in windows()):
+        sys.exit(0)
+    time.sleep(0.2)
+sys.exit("Chrome did not come back within 60 s")
+"""
+# browserd relaunches Chrome; none running is fine.
+_RESTART_CHROME = (
+    f"stopped=$(sed -n 2p {_DEVTOOLS_PORT_FILE} 2>/dev/null); pkill -x chrome; [ $? -le 1 ] && "
+    f'python3 -c {shlex.quote(_RELAUNCH_WAIT)} "$stopped" {_DEVTOOLS_PORT_FILE} {_WINDOWS_FILE}'
+)
 _LOCALHOST_WINDOW = "mda-localhost"  # shares a sandbox's localhost with every window
 # The recorder runs in the browser's sandbox with these, installed beside it; the
 # package's tests run it with the same versions.
@@ -1041,16 +1103,10 @@ async def _open(key: str, window_name: str, idle_ttl_seconds: int) -> _Session:
         port = await _window_port(box, window["id"])
 
     local_url = f"ws://127.0.0.1:{port}/devtools/browser/{window['id']}"
-    try:
-        return await _connect(key, window_name, name, cdp_url, local_url, headers, box=box.id)
-    except Exception as err:
-        if "already initialized" not in str(err):
-            raise
-    # A client that never closed (a crash, another replica) left its claim in the
-    # extension; reloading it clears the claim without restarting Chrome.
-    # Known limit: two live clients of one browser (two replicas, user scope) take it from
-    # each other; the loser fails a call (~13 s RPC timeout) and reopens, never on the wrong window.
-    await _reload_extension(cdp_url, headers)
+    # Stagehand's extension drops a client whose connection ended (a crash) when the next
+    # one attaches. Known limit: one live client per browser. While another replica's
+    # client holds it (user scope), attaching fails with "A Stagehand client is already
+    # connected" until that client lets go.
     return await _connect(key, window_name, name, cdp_url, local_url, headers, box=box.id)
 
 
@@ -1137,8 +1193,7 @@ async def _connect(
     try:
         stagehand = await Stagehand.create(browser=browser)
     except BaseException:
-        with contextlib.suppress(Exception):
-            await _invalidate_browser(browser)
+        await _let_go(browser)
         raise
     # File work runs off the event loop: `langgraph dev` turns blocking calls on it away.
     artifacts = await asyncio.to_thread(lambda: tempfile.mkdtemp(prefix="mda-browser-"))
@@ -1156,6 +1211,21 @@ async def _connect(
     return _Session(window, stagehand, tools, artifacts, browser_name, box, local_url=local_url)
 
 
+async def _let_go(browser: StagehandBrowser) -> None:
+    """Close Stagehand and its CDP connection, but not the browser: it idles out."""
+    try:
+        # Bounded by Stagehand: 10 s to close Stagehand, 10 s for the detach.
+        await browser.disconnect()
+    except Exception:  # noqa: BLE001 - any failure can leave the connection open
+        # `disconnect()` drops the connection only once the extension acknowledges the
+        # detach, which browserd refuses while a person has control of the window. Left
+        # open, the connection keeps the extension claimed. Dropping it without the
+        # acknowledgement is safe here: the extension closes a browser on a lost client
+        # only when Stagehand launched it.
+        with contextlib.suppress(Exception):
+            await _invalidate_browser(browser)
+
+
 async def _newest_tab(context: BrowserContext) -> Page:
     """The window's newest tab, as it was: the client's CDP lists only its window's."""
     pages = await context.pages()
@@ -1163,20 +1233,70 @@ async def _newest_tab(context: BrowserContext) -> Page:
 
 
 async def _install_extension(box: AsyncSandbox) -> None:
-    """Unpack the client's own extension into the browser, unless it is there already."""
-    if (await box.run(f"test -f {_EXTENSION_DIR}/manifest.json", timeout=60)).exit_code == 0:
+    """Unpack the client's own extension into the browser, unless it is there already.
+
+    Older Stagehand versions are removed, and Chrome restarted without them: Stagehand
+    refuses a browser with two of its extensions. A browser with a newer one refuses this
+    client instead, so two MDA versions sharing it never take turns removing each other's.
+    """
+    versions = await _stagehands(box)
+    others = sorted(versions - {STAGEHAND_VERSION})
+    if newer := [version for version in others if not _older(version, STAGEHAND_VERSION)]:
+        msg = (
+            f"the browser has Stagehand {', '.join(newer)}, not older than this client's "
+            f"{STAGEHAND_VERSION}: upgrade managed-deepagents to use it"
+        )
+        raise RuntimeError(msg)
+    steps = [] if STAGEHAND_VERSION in versions else [await _unpack_command(box)]
+    if others:
+        old = " ".join(shlex.quote(f"{_EXTENSIONS_DIR}/stagehand-{version}") for version in others)
+        steps.append(f"rm -rf -- {old} && {{ {_RESTART_CHROME}; }}")
+    if not steps:
         return
+    ran = await box.run(" && ".join(steps), timeout=300)
+    if ran.exit_code != 0:
+        msg = f"could not install Stagehand in the browser: {ran.stderr[-500:]}"
+        raise RuntimeError(msg)
+
+
+async def _stagehands(box: AsyncSandbox) -> set[str]:
+    """The versions of the Stagehand extensions in the browser, as their folders name them."""
+    listed = await box.run(
+        # `*.tmp` is an older client's unpack folder, still being written.
+        f"cd {_EXTENSIONS_DIR} && for d in stagehand-*; do case $d in *.tmp) ;; "
+        '*) [ -f "$d/manifest.json" ] && echo "${d#stagehand-}" ;; esac; done; true',
+        timeout=60,
+    )
+    return set(listed.stdout.split())
+
+
+def _older(version: str, than: str) -> bool:
+    """Whether a Stagehand version comes before another: by release, a prerelease first.
+
+    Versions that neither orders, such as two prereleases of one release, are not older.
+    """
+    key, other = _version_key(version), _version_key(than)
+    return key is not None and other is not None and key < other
+
+
+def _version_key(version: str) -> tuple[tuple[int, ...], bool] | None:
+    """A version's release numbers, and whether it is that release rather than a prerelease."""
+    release = re.match(r"\d+(?:\.\d+)*", version)
+    if release is None:
+        return None
+    return tuple(int(part) for part in release[0].split(".")), release.end() == len(version)
+
+
+async def _unpack_command(box: AsyncSandbox) -> str:
+    """Write the client's extension into the browser, and return the command that unpacks it."""
     archive = await asyncio.to_thread(get_extension_archive)  # zips its folder: blocking
     await box.write(_EXTENSION_ZIP, archive, timeout=300)
-    tmp = f"{_EXTENSION_DIR}.tmp"  # unpacked aside, so a partial copy never passes the check
-    unpacked = await box.run(
+    # Unpacked aside, so a partial copy is never loaded: browserd skips dot-folders.
+    tmp = f"{_EXTENSIONS_DIR}/.stagehand-{STAGEHAND_VERSION}.tmp"
+    return (
         f"rm -rf {tmp} && python3 -m zipfile -e {_EXTENSION_ZIP} {tmp} && "
-        f"rm -rf {_EXTENSION_DIR} && mv {tmp} {_EXTENSION_DIR}",
-        timeout=300,
+        f"rm -rf {_EXTENSION_DIR} && mv {tmp} {_EXTENSION_DIR}"
     )
-    if unpacked.exit_code != 0:
-        msg = f"could not install Stagehand in the browser: {unpacked.stderr[-500:]}"
-        raise RuntimeError(msg)
 
 
 async def _start_take(
@@ -1291,25 +1411,6 @@ def _recorder_command(folder: str, action: str, *args: str) -> str:
     """Run the take's own copy of the recorder, in ``folder``, on ``folder``."""
     words = " ".join(shlex.quote(arg) for arg in (f"{folder}/recorder.py", action, folder, *args))
     return f"PYTHONPATH={shlex.quote(_RECORDER_PACKAGES_DIR)} {_RECORDER_PYTHON} {words}"
-
-
-async def _reload_extension(cdp_url: str, headers: dict[str, str]) -> None:
-    """Load Stagehand's extension again over CDP, which reloads it in place.
-
-    Not uninstalled first: Chrome uninstalls over CDP only an extension loaded over
-    CDP, and browserd loads it otherwise when Chrome starts.
-    """
-    async with asyncio.timeout(30), websockets.connect(cdp_url, additional_headers=headers) as ws:
-        await ws.send(
-            json.dumps(
-                {"id": 0, "method": "Extensions.loadUnpacked", "params": {"path": _EXTENSION_DIR}}
-            )
-        )
-        while (reply := json.loads(await ws.recv())).get("id") != 0:
-            pass  # events share the socket
-        if "error" in reply:
-            msg = f"CDP Extensions.loadUnpacked failed: {reply['error']}"
-            raise RuntimeError(msg)
 
 
 async def _window_port(box: AsyncSandbox, window_id: str) -> int:
