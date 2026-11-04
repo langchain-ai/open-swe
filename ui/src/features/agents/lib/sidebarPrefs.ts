@@ -7,12 +7,9 @@ export const SIDEBAR_PREFS_STORAGE_KEY = "open-swe.agents.sidebar-prefs"
 const STORAGE_KEY = SIDEBAR_PREFS_STORAGE_KEY
 
 const ORGANIZE_MODES = ["date", "repo", "workspace", "none"] as const
-const CHAT_SORTS = ["created", "updated"] as const
-const PINNED_SORTS = ["updated", "manual"] as const
 
 export type OrganizeMode = (typeof ORGANIZE_MODES)[number]
-export type ChatSort = (typeof CHAT_SORTS)[number]
-export type PinnedSort = (typeof PINNED_SORTS)[number]
+export type ChatSort = "created" | "updated"
 
 export interface SidebarPrefs {
   filters: SidebarFilters
@@ -27,8 +24,6 @@ export interface SidebarPrefs {
   /** Nav links moved into the "More" menu. */
   hiddenNavItems: Array<string>
   organize: OrganizeMode
-  sortChats: ChatSort
-  sortPinned: PinnedSort
 }
 
 export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
@@ -46,8 +41,6 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
     "/incidents",
   ],
   organize: "none",
-  sortChats: "created",
-  sortPinned: "manual",
 }
 
 function asStringArray(value: unknown): Array<string> {
@@ -152,16 +145,6 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
         raw.organize,
       ORGANIZE_MODES,
       DEFAULT_SIDEBAR_PREFS.organize
-    ),
-    sortChats: asEnum(
-      raw.sortChats,
-      CHAT_SORTS,
-      DEFAULT_SIDEBAR_PREFS.sortChats
-    ),
-    sortPinned: asEnum(
-      raw.sortPinned,
-      PINNED_SORTS,
-      DEFAULT_SIDEBAR_PREFS.sortPinned
     ),
   }
 }
@@ -292,11 +275,8 @@ export function useSidebarPrefs() {
     []
   )
   const setView = useCallback(
-    (
-      patch: Partial<
-        Pick<SidebarPrefs, "organize" | "sortChats" | "sortPinned">
-      >
-    ) => setPrefs((prev) => ({ ...prev, ...patch })),
+    (patch: Partial<Pick<SidebarPrefs, "organize">>) =>
+      setPrefs((prev) => ({ ...prev, ...patch })),
     []
   )
 

@@ -10,8 +10,9 @@ from fastapi import HTTPException
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import NotFoundError
 from langgraph_sdk.schema import ThreadSelectField
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
+from openswe.database import postgres
 from openswe.projects.store import NO_PROJECTS, PROJECT_ID_KEY, PROJECTS, ProjectFiling
 from openswe.review.session import ReviewSessionMetadata
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
@@ -21,6 +22,7 @@ from openswe.source_context import SourceContext
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
 from openswe.threads import index
 from openswe.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
+from openswe.threads.store import THREADS
 from openswe.threads.summary import (
     _SURFACED_SOURCES,
     DASHBOARD_SOURCE,
@@ -46,6 +48,7 @@ from openswe.threads.summary import (
     thread_updated_ms,
 )
 from openswe.transcript.subagents import attach_subagents
+from openswe.users.records import UserRecords
 from openswe.utils.json_types import JsonObject, ThreadLike, as_thread_dict
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import participant_search_filters
@@ -69,6 +72,113 @@ _RUNNING_METADATA_STATUSES = {"pending", "running"}
 DashboardThreadScope = Literal["all", "interactive", "automation", "bot"]
 
 logger = logging.getLogger(__name__)
+
+
+class SidebarOrderScope(BaseModel):
+    project: str | None = None
+    repo: str | None = None
+    ownerless: bool = False
+
+    @property
+    def key(self) -> str:
+        if self.project and self.project != "none":
+            return f"project:{self.project}"
+        if self.repo:
+            return f"repo:{self.repo.lower()}"
+        return "ownerless" if self.ownerless or self.project == "none" else "all"
+
+
+class SidebarThreadOrderBody(SidebarOrderScope):
+    project: str | None = Field(default=None, min_length=1, max_length=64)
+    repo: str | None = Field(default=None, min_length=1, max_length=200)
+    thread_ids: list[str] = Field(max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> SidebarThreadOrderBody:
+        if (
+            self.key == "all"
+            or (self.project and self.repo)
+            or (self.ownerless and (self.repo or self.project not in (None, "none")))
+        ):
+            raise ValueError("Choose one project, repository, or no-project folder")
+        return self
+
+
+class SidebarOrders:
+    def __init__(self) -> None:
+        self.records = UserRecords("thread_order")
+
+    async def ids(self, login: str, scope: SidebarOrderScope) -> list[str]:
+        if scope.key == "all" or not postgres.configured():
+            return []
+        record = await self.records.get(login, key=scope.key)
+        saved = record.get("thread_ids") if record else None
+        return (
+            [value for value in saved if isinstance(value, str)] if isinstance(saved, list) else []
+        )
+
+    async def reorder(
+        self, login: str, body: SidebarThreadOrderBody, *, email: str | None = None
+    ) -> None:
+        selected = set(body.thread_ids)
+        if len(selected) != len(body.thread_ids):
+            raise ValueError("thread_ids must not contain duplicates")
+        filing = await PROJECTS.filing_for(login)
+        project = None if body.project == "none" else body.project
+        if project is not None and project not in filing.projects:
+            raise ValueError("Project not found")
+        searches = _participant_search_filters(login, email=email)
+        if project:
+            searches = [*searches, {PROJECT_ID_KEY: project}]
+        previous = await self.ids(login, body)
+        candidates = await _collect_thread_candidates(
+            langgraph_client(),
+            searches,
+            viewer_login=login,
+            viewer_email=email,
+            project=project,
+            repo=body.repo,
+            ownerless=body.ownerless or body.project == "none",
+            filing=filing,
+            target_per_search=1,
+            order_ids=list(dict.fromkeys([*body.thread_ids, *previous])),
+        )
+        eligible = await self.visible_ids(login, candidates, email=email)
+        if not selected.issubset(eligible):
+            raise ValueError("Only readable threads in this folder can be reordered")
+        retained = [
+            thread_id
+            for thread_id in previous
+            if thread_id not in selected and thread_id in eligible
+        ]
+        await self.records.put(
+            login,
+            {"thread_ids": [*body.thread_ids, *retained]},
+            key=body.key,
+        )
+
+    async def visible_ids(
+        self, login: str, candidates: list[ThreadLike], *, email: str | None
+    ) -> set[str]:
+        eligible = {str(_thread_id(thread)) for thread in candidates}
+        memberships = await sidebar_memberships(list(eligible))
+        parents = {
+            membership.coordinator_thread_id
+            for membership in memberships.values()
+            if membership.role == "worker"
+        }
+        if parents:
+            for parent in await THREADS.search(
+                index.ThreadSearch(ids=list(parents), limit=len(parents))
+            ):
+                if thread_is_readable(parent.metadata, login, email) and not thread_is_unlisted(
+                    parent.metadata
+                ):
+                    eligible.add(parent.thread_id)
+        return eligible
+
+
+SIDEBAR_ORDERS = SidebarOrders()
 
 
 class _ScoutRunStatus(BaseModel):
@@ -525,6 +635,7 @@ async def _task_hierarchy_page(
     include_private: bool,
     sort_by: _ThreadSortBy,
     matches_metadata: Callable[[ThreadLike], bool],
+    order_ids: Sequence[str] = (),
 ) -> JsonObject:
     memberships = await sidebar_memberships(
         [thread_id for thread in candidates if (thread_id := _thread_id(thread))]
@@ -557,6 +668,8 @@ async def _task_hierarchy_page(
         roots[root_id] = root
         activity[root_id] = max(activity.get(root_id, 0), _thread_timestamp_ms(thread, sort_by))
     ordered = sorted(roots, key=lambda key: activity[key], reverse=True)
+    positions = {thread_id: position for position, thread_id in enumerate(order_ids)}
+    ordered.sort(key=lambda key: positions.get(key, len(positions)))
     items = await _summarize_threads(
         client, [roots[key] for key in ordered[offset : offset + limit]]
     )
@@ -640,11 +753,15 @@ async def _collect_thread_candidates(
     status: str | None = None,
     project: str | None = None,
     filing: ProjectFiling = NO_PROJECTS,
+    order_ids: Sequence[str] = (),
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
     root_ids: dict[str, str] = {}
     checked_parents: set[str] = set()
     readable_parents: dict[str, ThreadLike] = {}
+    if order_ids:
+        workers = await sidebar_memberships(list(order_ids), workers_of=True)
+        order_ids = list(dict.fromkeys([*order_ids, *workers]))
     for search_filter in searches:
         matched_for_search: set[str] = set()
         offset = 0
@@ -665,6 +782,14 @@ async def _collect_thread_candidates(
                 sort_by=sort_by,
                 text=query,
             )
+            batch_size = len(batch)
+            if offset == 0 and order_ids:
+                for start in range(0, len(order_ids), _PINNED_THREADS_BATCH_SIZE):
+                    ids = list(order_ids[start : start + _PINNED_THREADS_BATCH_SIZE])
+                    ordered = await THREADS.search(
+                        index.ThreadSearch(metadata=metadata_filter, ids=ids, limit=len(ids))
+                    )
+                    batch = [*batch, *(thread.as_langgraph() for thread in ordered)]
             if not batch:
                 break
             matching_batch: list[ThreadLike] = []
@@ -762,7 +887,7 @@ async def _collect_thread_candidates(
                 thread_id = str(_thread_id(thread))
                 matched_for_search.add(root_ids.get(thread_id, thread_id))
                 seen.setdefault(thread_id, thread)
-            if len(batch) < _THREADS_SEARCH_PAGE:
+            if batch_size < _THREADS_SEARCH_PAGE:
                 break
             if target_per_search is not None and len(matched_for_search) >= target_per_search:
                 break
@@ -1008,6 +1133,10 @@ async def list_dashboard_threads_page(
         searches = _participant_search_filters(
             search_login, email=search_email, include_all=include_all
         )
+    order_ids = await SIDEBAR_ORDERS.ids(
+        login, SidebarOrderScope(project=project, repo=repo, ownerless=ownerless)
+    )
+    positions = {thread_id: position for position, thread_id in enumerate(order_ids)}
     filing = (
         await PROJECTS.filing_for(login)
         if project is not None or repo or ownerless
@@ -1056,7 +1185,9 @@ async def list_dashboard_threads_page(
         status=status,
         project=project,
         filing=filing,
+        order_ids=order_ids,
     )
+    candidates.sort(key=lambda thread: positions.get(str(_thread_id(thread)), len(positions)))
 
     if hierarchy:
         return await _task_hierarchy_page(
@@ -1071,6 +1202,7 @@ async def list_dashboard_threads_page(
             status=status,
             include_private=include_private,
             sort_by=sort_by,
+            order_ids=order_ids,
             matches_metadata=lambda thread: (
                 _metadata_matches_filters(
                     _thread_metadata(thread),
@@ -1116,6 +1248,7 @@ async def list_dashboard_threads_page(
         ]
         summary_sort_field = "createdAt" if sort_by == "created_at" else "updatedAt"
         filtered.sort(key=lambda item: item.get(summary_sort_field, 0), reverse=True)
+        filtered.sort(key=lambda item: positions.get(str(item["id"]), len(positions)))
         items = filtered[safe_offset : safe_offset + safe_limit]
         has_more = len(filtered) > safe_offset + safe_limit
     else:

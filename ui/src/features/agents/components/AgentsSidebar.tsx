@@ -49,6 +49,7 @@ import type {
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import { SidebarNav } from "@/features/agents/components/SidebarNav"
+import { SortableThreadList } from "@/features/agents/components/SortableThreadList"
 import { SidebarThreadRow } from "@/features/agents/components/SidebarThreadRow"
 import {
   SidebarSectionAction,
@@ -65,17 +66,15 @@ import {
   filterThreads,
   hasActiveFilters,
 } from "@/features/agents/lib/sidebarFilter"
-import type {
-  ChatSort,
-  OrganizeMode,
-  PinnedSort,
-} from "@/features/agents/lib/sidebarPrefs"
+import type { OrganizeMode } from "@/features/agents/lib/sidebarPrefs"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
   agentMutationKeys,
   agentThreadKeys,
   useActiveAgentThread,
   usePinAgentThread,
+  useReorderPinnedThreads,
+  useReorderSidebarThreads,
   useResolveAgentThread,
   useSeedAgentThreadDetails,
   useSidebarActiveThread,
@@ -263,7 +262,7 @@ export function AgentsSidebar({
     owned: prefs.filters.ownedOnly,
     includeClaudeCode: prefs.filters.includeClaudeCode,
     includeSlack: prefs.filters.includeSlack,
-    sort: repoMode ? prefs.sortChats : "updated",
+    sort: "updated",
     enabled: true,
   })
   const sidebarReposQuery = useSidebarRepos({
@@ -282,6 +281,7 @@ export function AgentsSidebar({
     workspaceOrganize &&
     (workspaceOptionsQuery.data?.workspaces.length ?? 0) > 1
   const pinThread = usePinAgentThread()
+  const reorderPins = useReorderPinnedThreads()
   const resolveThread = useResolveAgentThread()
   const pendingPins = usePendingVariables<{ threadId: string }>(
     agentMutationKeys.pin
@@ -348,10 +348,15 @@ export function AgentsSidebar({
     repoMode && (activeProjectId || activeThread?.repoFullName.trim())
   )
   const recentThreads = [
-    ...(activeThread && !activeInRepo && !cloudPinnedIds.has(activeThread.id)
+    ...pageThreads.map((thread) =>
+      thread.id === activeThread?.id ? activeThread : thread
+    ),
+    ...(activeThread &&
+    !activeInRepo &&
+    !cloudPinnedIds.has(activeThread.id) &&
+    !pageThreads.some((thread) => thread.id === activeThread.id)
       ? [activeThread]
       : []),
-    ...pageThreads.filter((thread) => thread.id !== activeThread?.id),
   ]
   const visibleThreads = [...pinnedThreads, ...recentThreads]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
@@ -397,18 +402,19 @@ export function AgentsSidebar({
     pinnedThreadShortcuts(pinnedThreads).map(cloudSidebarThread)
   const threadItems = recentThreads.map(cloudSidebarThread)
   const allItems = [...pinnedItems, ...threadItems]
-  const filteredPinnedItems = sortSidebarThreads(
-    filterThreads(
-      pinnedItems,
-      { ...prefs.filters, includeResolved: true },
-      activeThreadId
-    ),
-    prefs.sortPinned
+  const filteredPinnedItems = filterThreads(
+    pinnedItems,
+    { ...prefs.filters, includeResolved: true },
+    activeThreadId
   )
-  const recents = sortSidebarThreads(
-    filterThreads(threadItems, prefs.filters, activeThreadId),
-    repoMode ? prefs.sortChats : "updated"
+  const filteredRecents = filterThreads(
+    threadItems,
+    prefs.filters,
+    activeThreadId
   )
+  const recents = repoMode
+    ? filteredRecents
+    : sortSidebarThreads(filteredRecents, "updated")
   // The folder each of this Mac's threads runs in, to file the ones without a
   // repository under their folder rather than under "No project".
   const macFolderOf = new Map(
@@ -590,17 +596,6 @@ export function AgentsSidebar({
           { value: "workspace", label: "Workspace" },
         ]}
       />
-      {repoMode && (
-        <MenuChoiceGroup<ChatSort>
-          label="Sort chats by"
-          value={prefs.sortChats}
-          onChange={(sortChats) => setView({ sortChats })}
-          options={[
-            { value: "created", label: "Created" },
-            { value: "updated", label: "Last updated" },
-          ]}
-        />
-      )}
       <DropdownMenuSeparator />
       <DropdownMenuGroup>
         <MenuCheckItem
@@ -686,7 +681,6 @@ export function AgentsSidebar({
       owned={prefs.filters.ownedOnly}
       includeClaudeCode={prefs.filters.includeClaudeCode}
       includeSlack={prefs.filters.includeSlack}
-      sort={prefs.sortChats}
       activeThreadId={activeThreadId}
       openThread={openThread}
       hydrate={hydrateRepoThreads}
@@ -854,25 +848,19 @@ export function AgentsSidebar({
                 label="Pinned"
                 collapsed={sectionCollapsed("pinned")}
                 onToggleCollapsed={() => toggleSectionCollapsed("pinned")}
-                menu={
-                  <SidebarSectionMenu label="Pinned options">
-                    <MenuChoiceGroup<PinnedSort>
-                      label="Sort pinned by"
-                      value={prefs.sortPinned}
-                      onChange={(sortPinned) => setView({ sortPinned })}
-                      options={[
-                        { value: "updated", label: "Last updated" },
-                        { value: "manual", label: "Manual order" },
-                      ]}
-                    />
-                  </SidebarSectionMenu>
-                }
               />
               {!sectionCollapsed("pinned") && (
                 <>
-                  {filteredPinnedItems.map((item) => (
-                    <SidebarThreadRow key={item.key} {...rowProps(item)} />
-                  ))}
+                  <SortableThreadList
+                    label="pinned threads"
+                    items={filteredPinnedItems}
+                    threadIds={pinnedThreads.map((thread) => thread.id)}
+                    disabled={reorderPins.isPending || pendingPins.length > 0}
+                    onReorder={(ids) => reorderPins.mutate(ids)}
+                    renderRow={(item) => (
+                      <SidebarThreadRow {...rowProps(item)} />
+                    )}
+                  />
                   {pinnedGroups.map(renderRepoGroup)}
                   {repoMode &&
                     noRepoPinned &&
@@ -1085,7 +1073,6 @@ function RepoGroup({
   owned,
   includeClaudeCode,
   includeSlack,
-  sort,
   activeThreadId,
   openThread,
   hydrate,
@@ -1109,7 +1096,6 @@ function RepoGroup({
   owned: boolean
   includeClaudeCode: boolean
   includeSlack: boolean
-  sort: ChatSort
   activeThreadId?: string
   openThread: (threadId: string) => void
   hydrate: (threads: Array<AgentThread>) => Array<SidebarThreadItem>
@@ -1135,19 +1121,28 @@ function RepoGroup({
     owned,
     includeClaudeCode,
     includeSlack,
-    sort,
+    sort: "updated",
     // A This Mac folder has no repository to ask for: its threads are filed in.
     enabled: !collapsed && Boolean(group.project || group.repoFullName),
   })
   const cloudThreads = withoutNestedWorkers([
-    ...(group.activeThread ? [group.activeThread] : []),
-    ...repo.items.filter((thread) => thread.id !== group.activeThread?.id),
+    ...repo.items.map((thread) =>
+      thread.id === group.activeThread?.id ? group.activeThread : thread
+    ),
+    ...(group.activeThread &&
+    !repo.items.some((thread) => thread.id === group.activeThread?.id)
+      ? [group.activeThread]
+      : []),
   ])
   useSeedAgentThreadDetails(cloudThreads, activeThreadId)
   useRunCompletionNotifier(cloudThreads, activeThreadId, openThread)
-  const threads = sortSidebarThreads(
-    [...hydrate(cloudThreads), ...group.threads],
-    sort
+  const threads = [...hydrate(cloudThreads), ...group.threads]
+  const reorderChats = useReorderSidebarThreads(
+    group.project
+      ? { project: group.project.id }
+      : group.repoFullName
+        ? { repo: group.repoFullName }
+        : { ownerless: true }
   )
   const pullRequestFor = useSidebarPullRequests(
     threads,
@@ -1228,7 +1223,14 @@ function RepoGroup({
       </div>
       {!collapsed && (
         <>
-          {shown.map((item) => renderRow(item, pullRequestFor(item)))}
+          <SortableThreadList
+            label={`chats in ${group.label}`}
+            items={shown}
+            threadIds={threads.map((thread) => thread.id)}
+            disabled={reorderChats.isPending}
+            onReorder={(ids) => reorderChats.mutate(ids)}
+            renderRow={(item) => renderRow(item, pullRequestFor(item))}
+          />
           {shown.length === 0 && loading && (
             <div className="flex items-center gap-space-2 py-space-1 pr-space-2 pl-space-5 text-xs text-tertiary">
               <Spinner size="xxs" />

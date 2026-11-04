@@ -17,6 +17,8 @@ import {
   useAgentThreadBrowser,
   useAgentThreadWorkingTreeDiff,
   usePinAgentThread,
+  useReorderPinnedThreads,
+  useReorderSidebarThreads,
   useRenameAgentThread,
   useResolveAgentThread,
   useSeedAgentThreadDetails,
@@ -933,6 +935,63 @@ describe("optimistic thread mutations", () => {
     limit: 25,
     offset: 0,
     hasMore: false,
+  })
+
+  it("reorders a project's loaded pages without changing another folder and rolls back failures", async () => {
+    const second = { ...thread, id: "second" }
+    const request = deferred<{ ok: boolean }>()
+    vi.spyOn(agentsApi, "reorderSidebarThreads").mockReturnValue(
+      request.promise
+    )
+    const client = testClient()
+    const key = agentThreadKeys.infinitePages({ project: "project-a" })
+    const other = agentThreadKeys.infinitePages({ project: "project-b" })
+    const original = {
+      pages: [pageOf([thread]), pageOf([second])],
+      pageParams: [0, 1],
+    }
+    client.setQueryData(key, original)
+    client.setQueryData(other, original)
+    const { result } = renderHook(
+      () => useReorderSidebarThreads({ project: "project-a" }),
+      { wrapper: wrapperFor(client) }
+    )
+    act(() => result.current.mutate([second.id, thread.id]))
+    await waitFor(() =>
+      expect(
+        client
+          .getQueryData<InfiniteData<ThreadsPage>>(key)
+          ?.pages.map((entry) => entry.items[0]?.id)
+      ).toEqual(["second", "thread-1"])
+    )
+    expect(client.getQueryData(other)).toEqual(original)
+    await act(async () => request.reject(new Error("save failed")))
+    await waitFor(() => expect(client.getQueryData(key)).toEqual(original))
+  })
+
+  it("reorders pins optimistically and restores their order on failure", async () => {
+    const second = { ...thread, id: "second" }
+    const request = deferred<{ ok: boolean }>()
+    vi.spyOn(agentsApi, "reorderPinnedThreads").mockReturnValue(request.promise)
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.pinned, [thread, second])
+    const { result } = renderHook(() => useReorderPinnedThreads(), {
+      wrapper: wrapperFor(client),
+    })
+    act(() => result.current.mutate([second.id, thread.id]))
+    await waitFor(() =>
+      expect(client.getQueryData(agentThreadKeys.pinned)).toEqual([
+        second,
+        thread,
+      ])
+    )
+    await act(async () => request.reject(new Error("save failed")))
+    await waitFor(() =>
+      expect(client.getQueryData(agentThreadKeys.pinned)).toEqual([
+        thread,
+        second,
+      ])
+    )
   })
 
   it("appends a new pin without reordering after the server refresh", async () => {

@@ -12,6 +12,7 @@ A thread can override its own model, for example by asking the agent to switch t
 Shadow reviews (experimental) run a second reviewer on another model over a sample of pull requests without posting anything; an admin sets them under **Defaults** (`/admin`), overrides them on a workspace's page, or uses `manage_review_shadow`.
 
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work.
+  Sidebar order is personal and persisted across devices: use `reorder_thread_pins` for the requester's already pinned threads, or `reorder_sidebar_threads` within a project, repository, or no-project folder. Global recents stay in activity order.
 - **Projects** (sidebar folders and the composer's project picker): named folders of threads, personal or shared with teammates, each in a workspace and optionally bound to one repository whose threads then file under it.
   Use `list_projects`, `create_project`, `update_project`, `share_project`, `unshare_project` and `move_thread_to_project`; deleting a project stays in the dashboard.
 - **Settings → General** (`/my-settings`): theme, thread defaults (visibility, workspace, follow-up behavior), and notifications.

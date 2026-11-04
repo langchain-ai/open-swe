@@ -30,13 +30,11 @@ function warmApiRequests(
     let includeClaudeCode = true
     let includeSlack = true
     let repoMode = false
-    let sortByCreated = false
     try {
       const raw = localStorage.getItem(prefsKey)
       const prefs = raw ? JSON.parse(raw) : null
       const filters = prefs?.filters
       repoMode = prefs?.organize === "repo" || prefs?.organize === "workspace"
-      sortByCreated = repoMode && prefs?.sortChats !== "updated"
       if (filters) {
         includeAutomations =
           filters.includeAutomations === true ||
@@ -62,7 +60,7 @@ function warmApiRequests(
     if (owned) search.set("owned", "true")
     if (!includeClaudeCode) search.append("exclude_source", "claude_code")
     if (!includeSlack) search.append("exclude_source", "slack")
-    search.set("sort_by", sortByCreated ? "created_at" : "updated_at")
+    search.set("sort_by", "updated_at")
     targets.push(sidebarPath + "?" + search.toString())
   }
 
