@@ -234,7 +234,9 @@ async def test_connect_links_come_from_lmt_for_oauth_and_secret_services(monkeyp
     assert await tools.connect_link(NOTION_ID) == managed.ConsentLink(
         url="https://smith.langchain.com/connect/notion", auth_id="notion-auth"
     )
-    assert (await tools.connect_link("exa")).auth_id == "s1"
+    assert await tools.connect_link("exa") == managed.ConsentLink(
+        url="https://smith.langchain.com/secret/exa"
+    )
     assert await tools.connect_link(LINEAR_ID) is None
     assert [server.name for server in await tools.unconnected(["notion"])] == ["Notion"]
     assert [server.name for server in await tools.unconnected()] == ["Notion", "Exa"]

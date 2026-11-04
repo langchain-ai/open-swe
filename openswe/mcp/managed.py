@@ -541,7 +541,9 @@ class PersonalTools(ManagedTools):
             )
             if (link := _link(response.json())) is None:
                 raise ManagedToolsError("LangSmith did not return a setup link; retry")
-            return link
+            # Its status lives elsewhere in Agent Auth, so nothing waits on it; the next
+            # listing (within a minute) shows the service connected.
+            return ConsentLink(url=link.url)
 
         async def ping(client: Client[StreamableHttpTransport]) -> None:
             await client.list_tools_mcp()
