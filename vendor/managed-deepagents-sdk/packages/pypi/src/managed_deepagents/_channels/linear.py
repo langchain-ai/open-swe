@@ -21,14 +21,17 @@ from managed_deepagents._channel_icon import validate_channel_icon_path
 from managed_deepagents._channels.actor import endpoint_actor
 from managed_deepagents._channels.auto_post import channel_auto_post
 from managed_deepagents._channels.http import HttpChannel, channel_thread_id, http_channel
+from managed_deepagents._channels.http.input_state import input_state_reader
 from managed_deepagents._channels.http.provider import (
     EventFinished,
     EventHandlerOutcome,
+    EventReceived,
     channel_name,
     check_event_keys,
     event_snapshot,
     finish_events,
     read_deployment_secret,
+    receive_events,
     reset_deployment_secrets,
     resolve_endpoints,
     run_event_handler,
@@ -96,6 +99,7 @@ if TYPE_CHECKING:
         HttpChannelRequest,
         HttpDelivery,
         HttpFinishedDelivery,
+        HttpOnReceived,
         HttpPostedMessage,
         JsonValue,
     )
@@ -116,6 +120,7 @@ def linear_channel(
     ignore_bots: bool = True,
     on_finish: EventFinished[LinearEvent, LinearChannelThread] | None = None,
     resolve_user: ResolveUser | EventEndpoint | None = None,
+    on_received: EventReceived[LinearEvent, LinearChannelThread] | None = None,
 ) -> HttpChannel:
     """Options for ``channels.linear(...)``: the app's scope, event handlers and sessions.
 
@@ -160,6 +165,13 @@ def linear_channel(
             delivery whose actor isn't a person, or the creation of an issue
             or comment with a ``botActor``), so automations don't trigger each
             other. The app's own changes are always ignored.
+        on_received: A delivery of a handled event reached its thread, once,
+            with the event and its thread, before MDA reads the thread or asks
+            the handler, as ``channels.github``'s ``on_received`` is. It runs
+            after the channel acknowledges an agent session, fires even when
+            the thread then waits on a decision or the handler declines, and
+            runs in the background, before ``on_finish``; failures are logged
+            and don't stop the run.
         on_finish: A delivery of a handled event is done, once, with the
             event, its thread, the run it started and how that run ended, as
             LangGraph names it, and the decisions the thread waits on. A
@@ -202,7 +214,11 @@ def linear_channel(
     async def run_input(
         message: HttpChannelInboundMessage, raw_event: JsonValue | None
     ) -> ChannelRunResult | ChannelReplyResult | None:
-        thread = LinearChannelThread(id=message["thread_id"], channel=ChannelName(name=name()))
+        thread = LinearChannelThread(
+            id=message["thread_id"],
+            channel=ChannelName(name=name()),
+            _get_state=input_state_reader(),
+        )
         return await _handler_input(handlers, raw_event, thread)
 
     channel = http_channel(
@@ -212,7 +228,15 @@ def linear_channel(
         input=run_input,
         post=_post_reply,
         on_error=_report_error,
-        on_received=_acknowledge_session,
+        on_received=_received_after_acknowledgement(
+            receive_events(
+                on_received,
+                _event,
+                lambda thread_id: LinearChannelThread(
+                    id=thread_id, channel=ChannelName(name=name())
+                ),
+            )
+        ),
         on_finish=finish_events(
             _notify_finished,
             on_finish,
@@ -781,6 +805,28 @@ def _release_session(session_id: str) -> None:
         return
     kept.task.cancel()
     del _keepalives[session_id]
+
+
+def _received_after_acknowledgement(
+    on_received: HttpOnReceived | None,
+) -> HttpOnReceived:
+    """The channel's own acknowledgement of an agent session, then the author's
+    ``on_received``, which hears every handled delivery even when acknowledging
+    fails: that failure is logged, as the author's own is by the channel."""
+
+    async def received(target: JsonValue, delivery: HttpDelivery) -> None:
+        try:
+            await _acknowledge_session(target, delivery)
+        except Exception as error:
+            if on_received is None:
+                raise
+            logger.warning(
+                "Linear session could not be acknowledged (%s)", logger.safe_error_label(error)
+            )
+        if on_received is not None:
+            await on_received(target, delivery)
+
+    return received
 
 
 async def _acknowledge_session(target: JsonValue, delivery: HttpDelivery) -> None:

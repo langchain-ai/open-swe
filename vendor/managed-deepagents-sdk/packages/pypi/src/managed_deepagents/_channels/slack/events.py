@@ -19,6 +19,10 @@ from managed_deepagents._channels.actor import (
     SlackEndpointActor,
     endpoint_actor,
 )
+from managed_deepagents._channels.channel_types import (
+    ChannelEventCallback,
+    ReadsThreadState,
+)
 from managed_deepagents._channels.http.endpoint import (
     EndpointEvent,
     EndpointRequest,
@@ -34,7 +38,6 @@ if TYPE_CHECKING:
     from langgraph_sdk.schema import ThreadState
 
     from managed_deepagents._channels.http.types import ChannelName, HttpFinishedDelivery
-    from managed_deepagents._channels.reply import HandlerResult
     from managed_deepagents._channels.trigger.http import TriggerChannelThread
     from managed_deepagents._channels.trigger.types import (
         TriggerChannelMessageEvent,
@@ -269,7 +272,7 @@ edit, deletion or reaction (``SlackActivityEvent``), or a channel's own change
 
 
 @dataclass(frozen=True)
-class SlackChannelThread:
+class SlackChannelThread(ReadsThreadState):
     """The conversation's thread a message belongs to.
 
     A handler runs before any run exists, so this is not a run's runtime.
@@ -286,43 +289,21 @@ class SlackChannelThread:
         default=None, repr=False, compare=False
     )
 
-    async def get_state(self) -> ThreadState | None:
-        """The thread's state, as Agent Server's ``threads.get_state`` reads it:
-        its ``values`` (such as ``messages``) as its last run left them, ``next``,
-        ``tasks`` and ``interrupts``; ``None`` when no run started on it yet.
-        Only a handler deciding an event can read it.
-        """
-        if self._get_state is None:
-            raise RuntimeError("only a handler deciding an event can read its thread's state")
-        return await self._get_state()
 
-
-SlackEventCallback = Callable[
-    [SlackMessageEvent, SlackChannelThread],
-    "HandlerResult | Awaitable[HandlerResult | None] | None",
-]
+SlackEventCallback = ChannelEventCallback[SlackMessageEvent, SlackChannelThread]
 """A handler: returns a run's input, as ``agent.invoke`` takes it, or a list of one
 run with options, as ``[{"input", "context", "metadata", "webhook"}]``, ``None`` to
 start nothing, or ``reply(message)`` to start nothing and post ``message`` in the
 thread."""
 
-SlackInteractionCallback = Callable[
-    [SlackInteractionEvent, SlackChannelThread],
-    "HandlerResult | Awaitable[HandlerResult | None] | None",
-]
+SlackInteractionCallback = ChannelEventCallback[SlackInteractionEvent, SlackChannelThread]
 """An ``interaction`` handler, as a ``SlackEventCallback`` but for an interaction."""
 
-SlackActivityCallback = Callable[
-    [SlackActivityEvent, SlackChannelThread],
-    "HandlerResult | Awaitable[HandlerResult | None] | None",
-]
+SlackActivityCallback = ChannelEventCallback[SlackActivityEvent, SlackChannelThread]
 """An ``edit``, ``delete``, ``reaction`` or ``shortcut`` handler, as a
 ``SlackEventCallback`` but for something that happened to a message."""
 
-SlackChannelCallback = Callable[
-    [SlackChannelEvent, SlackChannelThread],
-    "HandlerResult | Awaitable[HandlerResult | None] | None",
-]
+SlackChannelCallback = ChannelEventCallback[SlackChannelEvent, SlackChannelThread]
 """A ``channel`` handler, as a ``SlackEventCallback`` but for a channel's own change."""
 
 

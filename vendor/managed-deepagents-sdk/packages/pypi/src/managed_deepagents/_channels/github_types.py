@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Generic, Literal
 
 from typing_extensions import TypedDict, TypeVar
 
 from managed_deepagents._channels.actor import GitHubActor, GitHubEndpointActor
+from managed_deepagents._channels.channel_types import (
+    ChannelEventCallback,
+    ChannelEventResult,
+    ReadsThreadState,
+)
 from managed_deepagents._channels.github_schema import (
     GitHubInstallationEventKey,
     GitHubInstallationPayload,
@@ -35,10 +40,10 @@ from managed_deepagents._channels.github_schema import (
     _WorkflowPayload,
 )
 from managed_deepagents._channels.http.endpoint import EndpointRequest, EventEndpoint
-from managed_deepagents._channels.reply import ChannelReplyResult
-from managed_deepagents._channels.run_input import ChannelRunResult
 
 if TYPE_CHECKING:
+    from langgraph_sdk.schema import ThreadState
+
     from managed_deepagents._channels.http.types import ChannelName
 
 _Payload = TypeVar("_Payload", bound=GitHubPayload, default=GitHubPayload)
@@ -129,7 +134,7 @@ class GitHubInstallationEvent(Generic[_InstallationPayloadT]):
 
 
 @dataclass(frozen=True)
-class GitHubChannelThread:
+class GitHubChannelThread(ReadsThreadState):
     """The conversation's thread an event belongs to.
 
     A handler runs before any run exists, so this is not a run's runtime.
@@ -145,6 +150,9 @@ class GitHubChannelThread:
     for this thread doesn't start: it only has the App tell the issue or pull
     request that a decision is pending. Runs on threads of its own choosing
     (``thread``) still start."""
+    _get_state: Callable[[], Awaitable[ThreadState | None]] | None = field(
+        default=None, repr=False, compare=False
+    )
 
 
 class GitHubAppOptions(TypedDict, total=False):
@@ -176,7 +184,7 @@ class GitHubAppOptions(TypedDict, total=False):
     so install the App only on the ones the agent may change."""
 
 
-GitHubEventResult = ChannelRunResult | ChannelReplyResult | None
+GitHubEventResult = ChannelEventResult
 """What an event handler returns: a run's input, as ``agent.invoke`` takes it (a
 string, a message such as ``HumanMessage(...)``, or state such as
 ``{"messages": [...]}``), one run on the event's conversation; or a list of runs
@@ -402,13 +410,9 @@ GitHubEndpointRequest = (
 so one receiver validates every key it is sent with
 ``TypeAdapter(GitHubEndpointRequest)``."""
 
-GitHubEventCallback = Callable[
-    [GitHubEvent[_Payload], GitHubChannelThread],
-    GitHubEventResult | Awaitable[GitHubEventResult],
-]
-GitHubInstallationEventCallback = Callable[
-    [GitHubInstallationEvent[_InstallationPayloadT], GitHubChannelThread],
-    GitHubEventResult | Awaitable[GitHubEventResult],
+GitHubEventCallback = ChannelEventCallback[GitHubEvent[_Payload], GitHubChannelThread]
+GitHubInstallationEventCallback = ChannelEventCallback[
+    GitHubInstallationEvent[_InstallationPayloadT], GitHubChannelThread
 ]
 
 __all__ = [

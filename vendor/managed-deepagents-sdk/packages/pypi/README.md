@@ -432,11 +432,12 @@ posted = await origin.channel.post(
 To move the conversation instead, pass `hand_off=True`. The new Slack thread
 takes the current run's thread, with its history: replies, Stop and decision
 buttons there reach it, and `thread_id` is the current thread's. The rest of
-the run answers, and waits on decisions, in the new Slack thread too. The old Slack
-thread no longer has a thread, so a run its later messages would start is
-refused; a handler that knows about the move can `reply()` instead. Only a
-channel conversation's run can hand off its thread, and not together with
-`run=`:
+the run answers, and waits on decisions, in the new Slack thread too, and
+`origin` is the new Slack thread's conversation from then on. MDA posts "This
+conversation moved to a new thread", with a link to it, in the old Slack thread.
+A later message there starts no run: MDA answers that the conversation moved,
+unless the channel's handler replies first. Only a channel conversation's run
+can hand off its thread, and not together with `run=`:
 
 ```python
 await origin.channel.post(
@@ -566,7 +567,7 @@ def on_mention(event: SlackMessageEvent, thread: SlackChannelThread):
 
 
 channel = channels.slack(
-    name="Support Bot",
+    app={"name": "Support Bot"},
     trigger_mode="thread",
     on_event={
         "mention": on_mention,
@@ -577,6 +578,15 @@ channel = channels.slack(
     multitask_strategy="enqueue",
 )
 ```
+
+`app` is the Slack app deploy sets up, as `channels.github` and
+`channels.linear` take theirs: its `name`, `description`, `icon` (a path
+relative to `channels/`) and `background_color`. Passing them to
+`channels.slack(...)` directly still works but is deprecated and will be
+removed in 0.12, and can't be combined with `app`. `ignore_bots` (default
+`True`, as on `channels.linear`) ignores other bots' messages; with `False`, a
+bot must still @-mention the agent. `allow_bot_triggers` is its deprecated
+opposite, also removed in 0.12.
 
 The keys are `"mention"`, a channel message that @-mentions the app;
 `"directMessage"`; and `"message"`, any other channel message, which only
@@ -821,7 +831,7 @@ that answers somewhere else:
 channels.slack(auto_post=False)
 ```
 
-Reactions, the status, Stop and `onFinish` work as before. `channels.linear`
+Reactions, the status, Stop and `on_finish` work as before. `channels.linear`
 and `channels.http` take the same option. `reply="none"` still works, with a
 deprecation warning; setting both raises. Deploying `auto_post=False` needs an
 `mda` CLI from this release; an older one refuses it.
@@ -1097,7 +1107,10 @@ nothing. The App's own activity is what the agent does with the App's token,
 such as its comments, its pushes or a pull request it opened; set
 `include_own_events=True` to hand those to handlers too, with `event.from_app`
 set. A handler that answers comments or reviews then skips `event.from_app`,
-or the agent answers itself. GitHub gets its answer first; then MDA asks the
+or the agent answers itself. `ignore_bots=True` also ignores issues, comments,
+pull requests and reviews from other bots, such as Dependabot, as Linear and
+Slack do; CI, `push` and `merge_group` events still reach their handlers. It's
+off by default. GitHub gets its answer first; then MDA asks the
 configured handler, a callback or an endpoint (see "Asking your service what to
 start"), and starts the run, so a slow handler never times out the delivery.
 Synchronous and async callbacks are supported. A handler returns
@@ -1117,7 +1130,9 @@ metadata, values and any error) to `url`, as `runs.create(webhook=...)` does;
 http(s), without credentials in the URL.
 The handler's second argument is the conversation's `thread`: `thread.id` is
 the thread the run starts on, for context that names it, such as a token your
-backend signs for the thread.
+backend signs for the thread. `await thread.get_state()` reads the thread's
+state as Agent Server's `threads.get_state` does, or `None` before any run, as
+on Slack and Linear; only a handler deciding an event can read it.
 `None` skips without a thread or run. `reply(message)` skips too, with a reply
 as `resolve_user`'s, which GitHub can't post.
 Other results are safely logged and start nothing. So does a handler that
@@ -1143,10 +1158,10 @@ The list may hold several runs for one event, on threads the handler chooses
 ```python
 def on_comment(event, thread):
     return [
-        # The issue's conversation; this run's answer isn't posted.
-        {"input": prompt, "auto_post": False},
-        # A fresh thread, deleted once the run ends; its answer posts on the issue.
-        {"input": triage, "thread": {"mode": "ephemeral"}, "auto_post": True},
+        # The issue's conversation.
+        {"input": prompt},
+        # A fresh thread, deleted once the run ends.
+        {"input": triage, "thread": {"mode": "ephemeral"}},
         # A thread your service keeps across events, by its UUID.
         {
             "input": plan,
@@ -1164,7 +1179,9 @@ nowhere, or a channel target, for now only the conversation's own (such as
 `GitHubChannelTarget(repository="owner/repo", number=42)`, or a run's
 `channel.target` passed back), which is `True`. Omitted, the conversation's run
 posts as the channel's `auto_post` says, and a run on any other thread posts
-nothing. `multitask_strategy` overrides the channel's for one run.
+nothing. GitHub posts no run's answer, so there `auto_post` changes nothing:
+the agent's tools post on GitHub. `multitask_strategy` overrides the
+channel's for one run.
 A persistent id must be a UUID; which ids an event may reach is yours to
 check. A delivery starts at most one run on each thread, so a resent one
 starts nothing there again, even if the handler now starts a different set of
@@ -1340,6 +1357,9 @@ names them (`LinearEventKey`). Each key has its event class, such as
 and rejects deliveries older than a minute. It ignores events about teams
 outside `app["teams"]`, changes by other apps and integrations (pass
 `ignore_bots=False` to keep them), and the app's own comments and changes.
+`on_received(event, thread)` hears each handled delivery as it reaches its
+thread, after the channel acknowledges an agent session, as GitHub's does; a
+handler's `thread.get_state()` reads the thread's state, as on GitHub and Slack.
 
 > **Experimental.** Agent sessions use Linear's Agents API, which is a
 > Developer Preview, so they may change as Linear changes it. Issue and

@@ -41,6 +41,7 @@ from managed_deepagents._channels.github_types import (
     SupportedEventKey,
 )
 from managed_deepagents._channels.http import HttpChannel, channel_thread_id, http_channel
+from managed_deepagents._channels.http.input_state import input_state_reader
 from managed_deepagents._channels.http.provider import (
     EventFinished,
     EventReceived,
@@ -94,6 +95,7 @@ def github_channel(
     on_received: EventReceived[GitHubEvent, GitHubChannelThread] | None = None,
     resolve_user: ResolveUser | EventEndpoint | None = None,
     include_own_events: bool = False,
+    ignore_bots: bool = False,
 ) -> HttpChannel:
     """Options for ``channels.github(...)``: App scope and event handlers that start runs.
 
@@ -128,6 +130,14 @@ def github_channel(
             as the comment that a decision is pending, in the background;
             failures are logged. See ``http_channel``'s ``on_finish`` for its
             limits.
+        ignore_bots: Ignore issues, comments, pull requests and reviews
+            written by other apps and bots, such as Dependabot, so automations
+            don't trigger each other, as ``channels.linear`` and
+            ``channels.slack`` do. ``False`` by default, so other bots still
+            start runs. CI events (``check_run``, ``check_suite``,
+            ``workflow_run``, ``status``), ``push`` and ``merge_group`` reach
+            their handlers whoever sent them. The App's own activity is always
+            ignored, unless ``include_own_events``.
         on_received: A delivery of a handled repository event reached its thread, once,
             with the event and its thread, before MDA reads the thread or asks
             the handler: the moment to acknowledge it, such as with a 👀
@@ -164,7 +174,9 @@ def github_channel(
         return channel_name(channel)
 
     async def parse(ctx: HttpChannelRequest) -> HttpChannelParseResult:
-        return await _parse(ctx, handlers, name(), repositories, include_own_events)
+        return await _parse(
+            ctx, handlers, name(), repositories, include_own_events, ignore_bots=ignore_bots
+        )
 
     async def run_input(
         message: HttpChannelInboundMessage, raw_event: JsonValue | None
@@ -172,7 +184,11 @@ def github_channel(
         return await _handler_input(
             handlers,
             raw_event,
-            GitHubChannelThread(id=message["thread_id"], channel=ChannelName(name=name())),
+            GitHubChannelThread(
+                id=message["thread_id"],
+                channel=ChannelName(name=name()),
+                _get_state=input_state_reader(),
+            ),
         )
 
     # Deliveries whose handler was asked while their thread waited: a run it
@@ -189,7 +205,10 @@ def github_channel(
             handlers,
             raw_event,
             GitHubChannelThread(
-                id=message["thread_id"], channel=ChannelName(name=name()), interrupted=True
+                id=message["thread_id"],
+                channel=ChannelName(name=name()),
+                interrupted=True,
+                _get_state=input_state_reader(),
             ),
         )
 
@@ -355,12 +374,26 @@ def _sender_user_id(sender: GitHubSender) -> str:
     return f"github:{sender.id}" if sender.type == "User" else "mda:channel"
 
 
+#: Events a person or a bot writes, which ``ignore_bots`` skips from bots.
+_AUTHORED_EVENTS = frozenset(
+    {
+        "issues",
+        "issue_comment",
+        "pull_request",
+        "pull_request_review",
+        "pull_request_review_comment",
+    }
+)
+
+
 async def _parse(
     ctx: HttpChannelRequest,
     handlers: Mapping[str, _Handler],
     channel_name: str,
     repositories: frozenset[str] | None,
     include_own_events: bool,
+    *,
+    ignore_bots: bool = False,
 ) -> HttpChannelParseResult:
     json_response = import_module("starlette.responses").JSONResponse
 
@@ -413,6 +446,10 @@ async def _parse(
         if not include_own_events or not isinstance(parsed_event, GitHubEvent):
             return {"type": "ignore", "response": response}
         parsed_event = replace(parsed_event, from_app=True)
+    # Another bot's issue, comment, pull request or review, unless the channel
+    # takes them. CI and push events come from bots as a rule.
+    elif ignore_bots and parsed_event.sender.type == "Bot" and event in _AUTHORED_EVENTS:
+        return {"type": "ignore", "response": response}
 
     # Preserve the original event even if a callback modifies its argument.
     snapshot = event_snapshot(parsed_event, "GitHub")

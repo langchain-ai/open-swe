@@ -15,8 +15,9 @@ from langgraph.config import get_config
 from managed_deepagents._channels.run_input import normalize_run_input, run_start_options
 from managed_deepagents._channels.runtime import require_text_content
 from managed_deepagents._channels.trigger.ingress import source_thread_id, start_ingress_agent
-from managed_deepagents._channels.trigger.transport import start_trigger_thread
+from managed_deepagents._channels.trigger.transport import TriggerTransport, start_trigger_thread
 from managed_deepagents._identity_runtime import _field
+from managed_deepagents._log import logger
 from managed_deepagents._managed_thread import current_run_thread
 from managed_deepagents._schedule_auth import channel_run_execution
 from managed_deepagents._thread_handoff import hand_off_thread
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from managed_deepagents._channels.binding import ChannelBinding
     from managed_deepagents._channels.run_input import ChannelRunResult
     from managed_deepagents._channels.trigger.client import TriggerClientLike
+    from managed_deepagents._channels.trigger.types import TriggerStartedThread
     from managed_deepagents._channels.types import (
         ChannelMessage,
         ChannelTarget,
@@ -81,6 +83,7 @@ async def start_trigger_conversation(
             "target": cast("JsonValue", started),
         }
         await hand_off_thread(thread, execution, moved)
+        await _say_moved(client, origin, _thread_url(origin, started))
         # The rest of this run answers, and waits on decisions, in the new thread.
         if "reply" in origin:
             moved["reply"] = origin["reply"]
@@ -110,11 +113,13 @@ async def start_trigger_conversation(
                 "target": cast("JsonValue", started),
             },
         )
-    message_id = str(started["address"]["thread_id"])
-    posted: PostedChannelThread = {"id": message_id, "thread_id": thread_id}
-    if origin["provider"] == "slack":
-        conversation = started["address"]["conversation_id"]
-        posted["url"] = f"https://slack.com/archives/{conversation}/p{message_id.replace('.', '')}"
+    posted: PostedChannelThread = {
+        "id": str(started["address"]["thread_id"]),
+        "thread_id": thread_id,
+    }
+    url = _thread_url(origin, started)
+    if url is not None:
+        posted["url"] = url
     return posted
 
 
@@ -132,6 +137,34 @@ def _conversation_of(origin: ChannelBinding, to: ChannelTarget) -> str:
     if not _SLACK_CONVERSATION_ID.fullmatch(to.conversation_id):
         raise ValueError("a Slack conversation id looks like C…, D… or G…")
     return to.conversation_id
+
+
+def _thread_url(origin: ChannelBinding, started: TriggerStartedThread) -> str | None:
+    """A link to the new thread's first message, where the provider has one (Slack)."""
+    if origin["provider"] != "slack":
+        return None
+    conversation = started["address"]["conversation_id"]
+    message_id = str(started["address"]["thread_id"])
+    return f"https://slack.com/archives/{conversation}/p{message_id.replace('.', '')}"
+
+
+async def _say_moved(client: TriggerClientLike, origin: ChannelBinding, url: str | None) -> None:
+    """Tell the old thread where its conversation went, once, as the hand-off happens.
+
+    Later messages there hear only that it moved, so this is the one with the
+    link. The conversation has already moved, so a failed post is logged.
+    """
+    where = f"[a new thread]({url})" if url is not None else "a new thread"
+    try:
+        await TriggerTransport(client).post(
+            message={"type": "content", "content": f"This conversation moved to {where}."},
+            target=origin["target"],
+        )
+    except Exception as error:  # noqa: BLE001 - the hand-off stands without the notice
+        logger.warning(
+            "the old thread could not be told the conversation moved (%s)",
+            logger.safe_error_label(error),
+        )
 
 
 def _hand_off_source() -> tuple[ManagedThread, ExecutionUser]:

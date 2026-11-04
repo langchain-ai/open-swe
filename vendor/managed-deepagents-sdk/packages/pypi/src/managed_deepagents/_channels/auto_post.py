@@ -35,7 +35,8 @@ def channel_auto_post(
     if reply not in CHANNEL_REPLIES:
         raise error(f"{label} reply must be auto or none")
     warnings.warn(
-        f'{label} reply is deprecated; use auto_post (reply="none" is auto_post=False).',
+        f"{label} reply is deprecated and will be removed in 0.12; "
+        'use auto_post (reply="none" is auto_post=False).',
         FutureWarning,
         stacklevel=3,
     )

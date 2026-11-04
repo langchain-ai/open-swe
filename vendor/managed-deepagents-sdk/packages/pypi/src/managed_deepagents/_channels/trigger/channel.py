@@ -74,7 +74,35 @@ _TRIGGER_ON_ALL_MESSAGES_DEPRECATION = (
     "channels.slack(trigger_on_all_messages=...) is deprecated; use trigger_mode instead "
     '(trigger_on_all_messages=True is trigger_mode="all").'
 )
+_ALLOW_BOT_TRIGGERS_DEPRECATION = (
+    "channels.slack(allow_bot_triggers=...) is deprecated and will be removed in 0.12; "
+    "use ignore_bots instead (allow_bot_triggers=True is ignore_bots=False), "
+    "as channels.linear takes it."
+)
+_APP_FIELDS_DEPRECATION = (
+    "channels.slack(name=..., description=..., icon=..., background_color=...) is deprecated "
+    "and will be removed in 0.12; "
+    "set them in app instead, as channels.github and channels.linear take theirs "
+    '(channels.slack(app={"name": ...})).'
+)
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+class SlackAppOptions(TypedDict, total=False):
+    """The Slack app ``mda deploy`` sets up: how it looks."""
+
+    name: str
+    """Your agent's name, used in mentions like ``@support-agent``: up to 35
+    letters, numbers, spaces, underscores, dashes and periods."""
+    description: str
+    """A short description of what your agent does: up to 139 characters."""
+    icon: str
+    """A 512x512 PNG of at most 1 MB, as a path relative to ``channels/``."""
+    background_color: str
+    """The Slack app background as a ``#RRGGBB`` hex color."""
+
+
+_APP_KEYS = frozenset(SlackAppOptions.__annotations__)
 
 
 class TriggerSlackAppConfig(TypedDict, total=False):
@@ -500,15 +528,54 @@ class _TriggerSlackArgs(BaseModel):
         return self
 
 
+def _allow_bot_triggers(ignore_bots: object, allow_bot_triggers: object) -> object:
+    """Trigger Server's ``allowBotTriggers``, from ``ignore_bots`` or the deprecated
+    ``allow_bot_triggers``; both set and contradictory is an error."""
+    if ignore_bots is not None and not isinstance(ignore_bots, bool):
+        raise ValueError("channels.slack(...) ignore_bots must be true or false")
+    if allow_bot_triggers is not None:
+        warnings.warn(_ALLOW_BOT_TRIGGERS_DEPRECATION, FutureWarning, stacklevel=3)
+        if ignore_bots is not None and allow_bot_triggers == ignore_bots:
+            raise ValueError(
+                "channels.slack(...) allow_bot_triggers conflicts with ignore_bots; "
+                "set only ignore_bots"
+            )
+    if ignore_bots is not None:
+        return not ignore_bots
+    return False if allow_bot_triggers is None else allow_bot_triggers
+
+
+def _app_look(
+    app: SlackAppOptions | None, top_level: Mapping[str, object]
+) -> tuple[Mapping[str, object], bool]:
+    """The app's look, from ``app`` or the deprecated top-level fields, and
+    whether those were used. Both at once is an error."""
+    deprecated = any(value is not None for value in top_level.values())
+    if app is None:
+        return top_level, deprecated
+    if deprecated:
+        raise ValueError(
+            "channels.slack(...) app conflicts with name, description, icon or "
+            "background_color; set them only in app"
+        )
+    if not isinstance(app, Mapping) or not set(app) <= _APP_KEYS:
+        raise ValueError(
+            "channels.slack(...) app takes only name, description, icon and background_color"
+        )
+    return {key: app.get(key) for key in top_level}, False
+
+
 def slack_channel(
     *,
+    app: SlackAppOptions | None = None,
     name: str | None = None,
     description: str | None = None,
     icon: str | None = None,
     background_color: str | None = None,
     trigger_mode: SlackTriggerMode | None = None,
     trigger_on_all_messages: bool | None = None,
-    allow_bot_triggers: bool = False,
+    ignore_bots: bool | None = None,
+    allow_bot_triggers: bool | None = None,
     reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
     status: SlackStatusChoice | None = None,
     on_event: SlackHandlers | None = None,
@@ -521,10 +588,13 @@ def slack_channel(
     """Declare a Trigger Server-backed Slack channel.
 
     Args:
-        name: Your agent's name, used in mentions like ``@support-agent``.
-        description: A short description of what your agent does.
-        icon: Optional path to a custom Slack app icon under ``channels/``.
-        background_color: Optional Slack app background as a ``#RRGGBB`` hex color.
+        app: The Slack app ``mda deploy`` sets up, as ``channels.github`` and
+            ``channels.linear`` take theirs: its ``name``, ``description``,
+            ``icon`` and ``background_color``.
+        name: Deprecated; use ``app["name"]``.
+        description: Deprecated; use ``app["description"]``.
+        icon: Deprecated; use ``app["icon"]``.
+        background_color: Deprecated; use ``app["background_color"]``.
         trigger_mode: Which channel messages start a run; see
             ``SlackTriggerMode``. New Slack apps use ``"mention"``; set
             ``"thread"`` to keep replying in a thread after one mention. When
@@ -534,9 +604,12 @@ def slack_channel(
         trigger_on_all_messages: Deprecated; use ``trigger_mode`` instead.
             ``True`` is ``trigger_mode="all"``. When both are set they must
             agree.
-        allow_bot_triggers: Let messages from other bots start runs. In every
-            trigger mode, a bot must still @-mention your agent explicitly in
-            the message.
+        ignore_bots: Ignore messages from other bots, so automations don't
+            trigger each other. ``True`` by default, as on ``channels.linear``.
+            With ``False``, a bot must still @-mention your agent explicitly,
+            in every trigger mode. Your agent's own messages are always ignored.
+        allow_bot_triggers: Deprecated and removed in 0.12; use
+            ``ignore_bots``. ``True`` is ``ignore_bots=False``.
         reactions: Emoji to react with when a message starts a run; ``eyes`` by
             default, and ``True`` keeps it. Pass ``False`` for none, another
             Slack emoji short name, or a callable that picks one per message.
@@ -560,9 +633,13 @@ def slack_channel(
             ``"directMessage"``, and ``"message"`` (any other channel message,
             which only ``trigger_mode`` ``"thread"`` or ``"all"`` delivers). A
             handler gets the ``SlackMessageEvent`` and its ``SlackChannelThread``, and
-            returns a prompt (string, message, or state), a list of one run
-            with options as ``[{"input", "context", "metadata", "webhook"}]``, or
-            ``None`` to start no run: then the agent doesn't react or reply. A
+            returns a prompt (string, message, or state), a list of runs
+            ``[{"input": ..., **options}]`` with options such as ``context``,
+            ``metadata``, ``webhook``, ``thread``, ``auto_post`` or
+            ``multitask_strategy``, ``reply(message)``, or ``None`` to start no
+            run: then the agent doesn't react or reply. ``"edit"``, ``"delete"``,
+            ``"reaction"``, ``"shortcut"`` and ``"channel"`` take what happened to
+            a message or a channel, and start only the run they return. A
             message kind without a handler starts a run with the message, as
             without ``on_event``. The message's blocks, attachments and files
             still reach the run. ``"interaction"`` decides what a click on a
@@ -607,9 +684,11 @@ def slack_channel(
     Example::
 
         channels.slack(
-            name="Support Bot",
+            app={"name": "Support Bot"},
             on_event={
-                "mention": lambda e, _: (e.text, {"metadata": {"slack_channel": e.channel_id}}),
+                "mention": lambda e, _: [
+                    {"input": e.text, "metadata": {"slack_channel": e.channel_id}}
+                ],
                 "message": lambda e, _: None,
             },
         )
@@ -623,16 +702,22 @@ def slack_channel(
             "channels.slack(...) multitask_strategy must be enqueue, interrupt, rollback or reject"
         )
     posts = channel_auto_post(auto_post, reply, label="channels.slack(...)", error=ValueError)
+    look, deprecated = _app_look(
+        app,
+        {
+            "name": name,
+            "description": description,
+            "icon": icon,
+            "background_color": background_color,
+        },
+    )
     try:
         parsed = _TriggerSlackArgs.model_validate(
             {
-                "name": name,
-                "description": description,
-                "icon": icon,
-                "background_color": background_color,
+                **look,
                 "trigger_mode": trigger_mode,
                 "trigger_on_all_messages": trigger_on_all_messages,
-                "allow_bot_triggers": allow_bot_triggers,
+                "allow_bot_triggers": _allow_bot_triggers(ignore_bots, allow_bot_triggers),
                 "reactions": reactions,
                 "status": status,
             }
@@ -641,6 +726,8 @@ def slack_channel(
         raise ValueError(f"channels.slack(...) received invalid configuration:\n{error}") from error
     if trigger_on_all_messages is not None:
         warnings.warn(_TRIGGER_ON_ALL_MESSAGES_DEPRECATION, FutureWarning, stacklevel=2)
+    if deprecated:
+        warnings.warn(_APP_FIELDS_DEPRECATION, FutureWarning, stacklevel=2)
     _warn_unreachable_handlers(parsed.trigger_mode, on_event)
     app: TriggerSlackAppConfig = {}
     if parsed.name is not None:

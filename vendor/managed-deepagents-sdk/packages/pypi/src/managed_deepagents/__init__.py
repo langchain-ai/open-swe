@@ -22,6 +22,11 @@ from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.actor import ChannelActor, GitHubActor
+    from managed_deepagents._channels.channel_types import (
+        ChannelEventCallback,
+        ChannelEventResult,
+        ChannelThread,
+    )
     from managed_deepagents._channels.github_types import (
         GitHubAccount,
         GitHubAppOptions,
@@ -145,6 +150,7 @@ if TYPE_CHECKING:
         SlackStatusStepStatus,
         SlackStatusValue,
     )
+    from managed_deepagents._channels.trigger.channel import SlackAppOptions
     from managed_deepagents._channels.types import (
         ChannelContentMessage,
         ChannelEvent,
@@ -267,6 +273,9 @@ _EXPORTS: dict[str, str] = {
     "EndpointThread": "managed_deepagents._channels.http.endpoint",
     "EventEndpoint": "managed_deepagents._channels.http.endpoint",
     "EventFinished": "managed_deepagents._channels.http.provider",
+    "ChannelEventCallback": "managed_deepagents._channels.channel_types",
+    "ChannelEventResult": "managed_deepagents._channels.channel_types",
+    "ChannelThread": "managed_deepagents._channels.channel_types",
     "GeneratedSkill": "managed_deepagents.define_deep_agent",
     "GitHubAccount": "managed_deepagents._channels.github_types",
     "GitHubActor": "managed_deepagents._channels.actor",
@@ -378,6 +387,7 @@ _EXPORTS: dict[str, str] = {
     "SharedInputs": "managed_deepagents.agent_entry",
     "SkillSelection": "managed_deepagents.define_deep_agent",
     "SlackActor": "managed_deepagents._channels.slack.events",
+    "SlackAppOptions": "managed_deepagents._channels.trigger.channel",
     "SlackChannelTarget": "managed_deepagents._channels.types",
     "SlackChannelThread": "managed_deepagents._channels.slack.events",
     "SlackEndpointRequest": "managed_deepagents._channels.slack.events",
@@ -477,6 +487,8 @@ __all__ = [
     "ChannelContentMessage",
     "ChannelContext",
     "ChannelEvent",
+    "ChannelEventCallback",
+    "ChannelEventResult",
     "ChannelInfo",
     "ChannelMessage",
     "ChannelName",
@@ -487,6 +499,7 @@ __all__ = [
     "ChannelRunInput",
     "ChannelRunResult",
     "ChannelTarget",
+    "ChannelThread",
     "ConnectionNotFoundError",
     "CredentialAuthorizationRequiredError",
     "CredentialStoreError",
@@ -610,6 +623,7 @@ __all__ = [
     "SlackActivityEvent",
     "SlackActivityKey",
     "SlackActor",
+    "SlackAppOptions",
     "SlackChannelEvent",
     "SlackChannelTarget",
     "SlackChannelThread",

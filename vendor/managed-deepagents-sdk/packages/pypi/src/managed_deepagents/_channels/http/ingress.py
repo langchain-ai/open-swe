@@ -31,7 +31,7 @@ from managed_deepagents._ingress_runs import (
 
 if TYPE_CHECKING:
     from langgraph_sdk.client import LangGraphClient
-    from langgraph_sdk.schema import Interrupt, MultitaskStrategy
+    from langgraph_sdk.schema import Interrupt, MultitaskStrategy, ThreadState
 
     from managed_deepagents._channels.binding import ChannelBinding
     from managed_deepagents._channels.http.types import HttpRunStatus
@@ -125,6 +125,30 @@ async def http_ingress_thread_state(
     )
     read = await ingress_thread_state(client=client, thread_id=thread_id, delivery_key=delivery_key)
     return read["state"]
+
+
+async def http_ingress_get_state(
+    *,
+    user_id: str,
+    source_thread_key: str,
+    source_provider: str,
+    thread_id: str,
+    principal_id: str | None = None,
+) -> ThreadState | None:
+    """The thread's state as Agent Server's ``threads.get_state`` reads it, under
+    the conversation's own key, as its runs read it; ``None`` before any run."""
+    client = _create_ingress_loopback_client(
+        user_id=user_id,
+        source_thread_key=source_thread_key,
+        source_provider=source_provider,
+        principal_id=principal_id,
+    )
+    try:
+        return await client.threads.get_state(thread_id)
+    except Exception as error:
+        if lookup_status(error) == HTTPStatus.NOT_FOUND:
+            return None
+        raise
 
 
 async def record_http_ingress_delivery(

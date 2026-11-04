@@ -832,6 +832,18 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     except Exception as error:  # noqa: BLE001 - never expose Agent Server details in the response
         logger.error("channel thread could not be found (%s)", logger.safe_error_label(error))
         return _start_failed_response()
+
+    async def moved_away(error: Exception) -> bool:
+        """Whether the run was refused because this conversation handed its thread on."""
+        return await _handed_off(
+            error,
+            thread_exists=thread_exists,
+            thread_id=thread_id,
+            source_provider=source_provider,
+            source_thread_key=event["source_thread_key"],
+            user_id=user_id,
+        )
+
     thread: TriggerChannelThread = {
         "id": thread_id,
         "source_thread_key": event["source_thread_key"],
@@ -1093,6 +1105,10 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             try:
                 started = await start(decided.input)
             except Exception as error:  # noqa: BLE001 - never log Agent Server details
+                if await moved_away(error):
+                    await reply_instead(MOVED_AWAY)
+                    await finish(_skipped("ignored"))
+                    return
                 logger.error(
                     "channel run could not be started (%s)",
                     logger.safe_error_label(error),
@@ -1139,6 +1155,10 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         )
         return _accepted_response(event)
     except Exception as error:  # noqa: BLE001 - never expose Agent Server details in the response
+        if await moved_away(error):
+            await reply_instead(MOVED_AWAY)
+            finish_later(_skipped("ignored"))
+            return _accepted_response(event)
         logger.error(
             "channel run could not be started (%s)",
             logger.safe_error_label(error),
@@ -1198,6 +1218,43 @@ def _log_no_run(event: TriggerChannelEvent, decision: TriggerMessageDecision) ->
         "its handler failed, " if decision.type == "failed" else "",
         logger.log_identifier(event["delivery_id"]),
     )
+
+
+#: What a message in a thread whose conversation moved to a new thread hears
+#: instead of a run (``post(..., new_thread=True, hand_off=True)``).
+MOVED_AWAY: ChannelMessage = {
+    "type": "content",
+    "content": "This conversation moved to a new thread.",
+}
+
+
+async def _handed_off(
+    error: Exception,
+    *,
+    thread_exists: ThreadExistsFn | None,
+    thread_id: str,
+    source_provider: str,
+    source_thread_key: str,
+    user_id: str,
+) -> bool:
+    """Whether a refused run is a conversation that handed its thread to a new one.
+
+    Ingress creates a conversation's thread before its first run, so its own
+    thread refuses a run with a not-found or conflict only once another
+    conversation owns it, and then this one can no longer see it. Any other
+    failure, or a failed lookup, is not a move.
+    """
+    if lookup_status(error) not in (HTTPStatus.NOT_FOUND, HTTPStatus.CONFLICT):
+        return False
+    try:
+        return not await (thread_exists or ingress_thread_exists)(
+            thread_id=thread_id,
+            source_provider=source_provider,
+            source_thread_key=source_thread_key,
+            user_id=user_id,
+        )
+    except Exception:  # noqa: BLE001 - a failed lookup is not a move
+        return False
 
 
 def _start_failed_response() -> object:

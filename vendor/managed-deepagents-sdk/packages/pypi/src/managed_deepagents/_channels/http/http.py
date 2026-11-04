@@ -17,6 +17,11 @@ from starlette.types import Message
 
 from managed_deepagents import _ingress
 from managed_deepagents._channels.http import ingress as http_ingress
+from managed_deepagents._channels.http.input_state import (
+    ReadState,
+    reset_input_state_reader,
+    set_input_state_reader,
+)
 from managed_deepagents._channels.http.types import (
     HttpChannelCancelResult,
     HttpChannelMessageResult,
@@ -229,6 +234,14 @@ async def handle_http_request(ctx: ChannelEventsContext, channel: HttpChannel) -
         result.get("raw_event"),
         waiter,
         withheld=user is not None and user["type"] != "principal",
+        read_state=functools.partial(
+            http_ingress.http_ingress_get_state,
+            user_id=user_id,
+            principal_id=principal_id,
+            source_thread_key=source_thread_key,
+            source_provider=channel.kind,
+            thread_id=thread_id,
+        ),
     )
     plan = _ConversationRun(
         run_input=_run_input(user, ctx["name"], channel, message, prepare, waiter),
@@ -575,6 +588,14 @@ async def _plan_runs(plan: _ConversationRun, delivery: _Delivery, waiter: _Threa
         waiter,
         _run_channel(delivery.name, channel, message),
         interrupted=paused,
+        read_state=functools.partial(
+            http_ingress.http_ingress_get_state,
+            user_id=delivery.user_id,
+            principal_id=delivery.principal_id,
+            source_thread_key=_source_thread_key(delivery.name, thread_id),
+            source_provider=channel.kind,
+            thread_id=thread_id,
+        ),
     )
     conversation = next((run for run in runs if "thread" not in run), None)
     if (paused or conversation is None) and any("thread" in run for run in runs):
@@ -646,6 +667,7 @@ async def _prepare_runs(
     *,
     interrupted: bool = False,
     withheld: bool = False,
+    read_state: ReadState | None = None,
 ) -> list[NormalizedRunInput]:
     """What the channel's ``input`` starts; failures start nothing, and a reply is
     posted instead, unless resolve_user held the sender back.
@@ -656,6 +678,7 @@ async def _prepare_runs(
     input_ = (channel.interrupted_input if interrupted else None) or channel.input
     if input_ is None:
         return []
+    token = set_input_state_reader(read_state)
     try:
         result = await _resolve(
             input_(_copied_message(message), None if raw_event is None else json_copy(raw_event))
@@ -663,6 +686,8 @@ async def _prepare_runs(
     except Exception as error:  # noqa: BLE001
         logger.error("channel input failed (%s)", logger.safe_error_label(error), error=error)
         return []
+    finally:
+        reset_input_state_reader(token)
     if isinstance(result, ChannelReplyResult):
         waiter.replied = True
         # For a sender resolve_user held back, its answer stands instead.
@@ -1028,6 +1053,7 @@ async def _prepare(
     waiter: _ThreadWaiter,
     *,
     withheld: bool,
+    read_state: ReadState | None = None,
 ) -> NormalizedRunInput | None:
     """What the channel's ``input`` starts on the event's conversation; failures start nothing.
 
@@ -1041,6 +1067,7 @@ async def _prepare(
         waiter,
         _run_channel(name, channel, message),
         withheld=withheld,
+        read_state=read_state,
     )
     return next((run for run in runs if "thread" not in run), None)
 
