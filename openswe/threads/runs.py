@@ -862,7 +862,12 @@ async def _attributed_run_messages(
         notices.append(
             (
                 _PULL_REQUEST_THREAD_SYSTEM,
-                prompt("runs/pull-request-review-chat", url=review_chat_pr_url),
+                prompt(
+                    "runs/pull-request-review-ask"
+                    if metadata.get("review_ask") is True
+                    else "runs/pull-request-review-chat",
+                    url=review_chat_pr_url,
+                ),
             )
         )
     structured = build_input_messages(

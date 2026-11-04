@@ -15,7 +15,9 @@ import {
 import type { PullRequestRef } from "@/features/reviews/lib/reviewKeys"
 import { findEntry, isRenderable, type DiffEntry } from "./diffEntries"
 
-export type RailTab = "chat" | "discussion"
+export type RailTab = "chat" | "ask" | "discussion"
+/** The PR's builder thread, or the reviewer's private side chat about it. */
+export type ChatTab = Exclude<RailTab, "discussion">
 export type DiffOrder = "files" | "guide"
 export type NavigatorLayout = "tabs" | "stacked"
 
@@ -96,7 +98,7 @@ interface VisitState {
   atEnd: boolean
   /** Bumped per request so asking for the same target twice still scrolls. */
   jump: { key: number; target: DiffTarget } | null
-  chatDraft: { key: number; text: string } | undefined
+  chatDraft: { key: number; text: string; tab: ChatTab } | undefined
   /** A question the chat sends as soon as it can, then clears. */
   chatQuestion: string | undefined
   /** Events not yet taken by the part of the page they're for. */
@@ -148,8 +150,9 @@ interface ReviewPageActions {
   /** Edits a pending review comment, or stops editing it with null. */
   setPendingEdit: (commentId: number, text: string | null) => void
   setThreadOpen: (threadId: number, open: boolean) => void
-  focusChat: () => void
-  askInChat: (text: string) => void
+  focusChat: (tab?: ChatTab) => void
+  /** Fills a chat's composer; questions go to Ask, work on the branch to the builder's chat. */
+  askInChat: (text: string, tab?: ChatTab) => void
   sendInChat: (text: string) => void
   clearChatQuestion: () => void
   attachToChat: (excerpts: ReadonlyArray<CodeExcerpt>) => void
@@ -509,13 +512,13 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       set({ events })
       return true
     },
-    focusChat: () => {
-      set({ railTab: "chat", railOpen: true })
-      focusChatComposer()
+    focusChat: (tab = "ask") => {
+      set({ railTab: tab, railOpen: true })
+      focusChatComposer(tab)
     },
-    askInChat: (text) => {
-      set({ chatDraft: { key: (get().chatDraft?.key ?? 0) + 1, text } })
-      get().focusChat()
+    askInChat: (text, tab = "ask") => {
+      set({ chatDraft: { key: (get().chatDraft?.key ?? 0) + 1, text, tab } })
+      get().focusChat(tab)
     },
     sendInChat: (chatQuestion) => {
       set({ chatQuestion })
@@ -605,10 +608,10 @@ export function usePageEvent(event: PageEvent, handle: () => void): void {
 }
 
 /** The chat composer lives in the agents thread view; reach it through the DOM. */
-function focusChatComposer(): void {
+function focusChatComposer(tab: ChatTab): void {
   requestAnimationFrame(() => {
     const editor = document.querySelector<HTMLElement>(
-      '[data-review-rail] [data-testid="composer-editor"]'
+      `[data-review-rail] [data-rail-panel="${tab}"] [data-testid="composer-editor"]`
     )
     if (!editor) return
     editor.focus()

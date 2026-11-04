@@ -343,7 +343,8 @@ export function ThreadCard({
               askInChat(
                 suggestion
                   ? `${quote}Apply ${displayName(suggestion.author)}'s suggested change on this branch.`
-                  : quote
+                  : quote,
+                "chat"
               )
             }
           >

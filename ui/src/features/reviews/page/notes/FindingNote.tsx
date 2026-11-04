@@ -134,7 +134,7 @@ export function FindingNote({
                   size="sm"
                   color="secondary"
                   variant="plain"
-                  onClick={() => askInChat(fixFinding(finding))}
+                  onClick={() => askInChat(fixFinding(finding), "chat")}
                 >
                   Fix it
                 </Button>

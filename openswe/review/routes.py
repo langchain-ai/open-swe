@@ -26,6 +26,7 @@ from openswe.review.assessment_feedback import (
 )
 from openswe.review.chat import (
     ReviewChat,
+    get_review_ask,
     get_review_chat,
     proxy_review_chat_commands,
     proxy_review_chat_history,
@@ -522,9 +523,13 @@ async def api_get_review_chat(
     owner: str,
     repo: str,
     pr_number: int,
+    ask: bool = False,
     session: dict[str, Any] = SESSION_DEP,
 ) -> ReviewChat:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    if ask:
+        review = ReviewSession(owner=owner, repo=repo, pr_number=pr_number, login=session["sub"])
+        return await get_review_ask(review, session.get("email"))
     return await get_review_chat(owner, repo, pr_number, session["sub"], session.get("email"))
 
 

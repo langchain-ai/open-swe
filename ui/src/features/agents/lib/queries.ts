@@ -395,10 +395,12 @@ export function markReviewViewed(
     )
 }
 
-export function reviewChatQuery(review: ReviewPageRef) {
+/** The PR's builder chat, or with `ask` the reviewer's private side chat about it. */
+export function reviewChatQuery(review: ReviewPageRef, ask = false) {
   return {
-    queryKey: ["review-chat", review.owner, review.repo, review.number],
-    queryFn: () => api.getReviewChat(review.owner, review.repo, review.number),
+    queryKey: ["review-chat", review.owner, review.repo, review.number, ask],
+    queryFn: () =>
+      api.getReviewChat(review.owner, review.repo, review.number, ask),
   } as const
 }
 

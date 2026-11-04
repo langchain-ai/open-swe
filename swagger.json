@@ -16818,6 +16818,16 @@
               "title": "Pr Number",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "ask",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Ask",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
