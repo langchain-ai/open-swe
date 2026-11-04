@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, cast
@@ -95,13 +96,27 @@ def resolve_channel_binding(
     except (ValueError, TypeError):
         return None
     user = configurable.get("langgraph_auth_user")
+    source = _field(user, "mda_source_thread_id")
     if (
         _field(user, "mda_source_provider") != binding["provider"]
-        or _field(user, "mda_source_thread_id") != binding["source_thread_key"]
+        # A run on a thread the channel's handler chose runs as the channel's handler
+        # threads; its binding still names the conversation that started it.
+        or source not in (binding["source_thread_key"], handler_threads_key(binding["name"]))
         or not _is_declared_route(binding)
     ):
         return None
     return binding
+
+
+def handler_threads_key(channel_name: str) -> str:
+    """The source key that owns the threads a channel's handlers choose.
+
+    One per channel, so a thread several conversations start runs on has one
+    owner, and Stop and answers can search them. MDA derives it; no request does.
+    """
+    return "mda:v1:" + json.dumps(
+        [channel_name, "handler-threads"], ensure_ascii=False, separators=(",", ":")
+    )
 
 
 def _is_declared_route(binding: ChannelBinding) -> bool:
