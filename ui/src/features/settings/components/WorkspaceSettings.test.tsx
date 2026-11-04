@@ -119,7 +119,19 @@ function mockApis(record: WorkspaceRecord = RECORD) {
     effective: SETTINGS,
     overrides: {},
   })
-  vi.spyOn(api, "getInstanceMCPs").mockResolvedValue([])
+  vi.spyOn(api, "getMyManagedTools").mockResolvedValue({
+    configured: false,
+    langsmith_connected: false,
+    servers: [],
+  })
+  vi.spyOn(api, "listManagedToolsKits").mockResolvedValue([])
+  vi.spyOn(api, "listManagedToolsProfiles").mockResolvedValue([])
+  vi.spyOn(api, "getWorkspaceBotTools").mockResolvedValue({
+    kit_id: null,
+    profile_id: null,
+    status: null,
+    error: null,
+  })
   vi.spyOn(api, "listSlackChannels").mockResolvedValue({
     channels: [
       {

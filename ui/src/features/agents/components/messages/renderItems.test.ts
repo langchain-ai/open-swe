@@ -28,28 +28,50 @@ function iframeChunk(): ToolExecutionChunk {
 }
 
 describe("buildRenderItems", () => {
-  it("shows a managed tools offer as a card, and a failed one as a tool call", () => {
-    const offer = {
-      status: "connection_required",
-      gateway: { id: "gw-1", name: "Engineering" },
-      missing: [{ slug: "linear", display_name: "Linear", kind: "oauth" }],
-    }
+  it("shows a managed tools offer as a card, and a failed or outdated one as a tool call", () => {
+    const missing = [{ id: "srv-1", name: "Linear", kind: "oauth" }]
     const card: ToolExecutionChunk = {
       kind: "tool-execution",
       toolCallId: "managed-1",
       title: "Connect managed tools",
       toolKind: "managed-tools",
       status: "completed",
-      output: JSON.stringify({ success: true, ...offer }),
+      output: JSON.stringify({
+        success: true,
+        status: "connection_required",
+        missing,
+        continues_automatically: true,
+      }),
     }
     const failed: ToolExecutionChunk = {
       ...card,
       toolCallId: "managed-2",
       output: JSON.stringify({ success: false, error: "Not private" }),
     }
-    expect(buildRenderItems([card, failed])).toEqual([
-      { type: "managed-tools-item", key: "tool-managed-1", chunk: card, offer },
+    // Before the instance tool kit went away, cards named services by slug.
+    const outdated: ToolExecutionChunk = {
+      ...card,
+      toolCallId: "managed-3",
+      output: JSON.stringify({
+        success: true,
+        status: "connection_required",
+        gateway: { id: "gw-1", name: "Engineering" },
+        missing: [{ slug: "linear", display_name: "Linear", kind: "oauth" }],
+      }),
+    }
+    expect(buildRenderItems([card, failed, outdated])).toEqual([
+      {
+        type: "managed-tools-item",
+        key: "tool-managed-1",
+        chunk: card,
+        offer: {
+          status: "connection_required",
+          missing,
+          continuesAutomatically: true,
+        },
+      },
       { type: "tool-item", key: "tool-managed-2", chunk: failed },
+      { type: "tool-item", key: "tool-managed-3", chunk: outdated },
     ])
   })
 

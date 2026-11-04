@@ -19,8 +19,10 @@ Shadow reviews (experimental) run a second reviewer on another model over a samp
 - **Settings → Git** (`/my-settings/git`): default repository, base branch, branch prefix, and pull request draft/review preferences.
 - **Settings → Instructions** (`/my-settings/instructions`): personal standing instructions.
   The agent saves memories with `remember` and drops them with `forget`; they are not shown here yet.
-- **Settings → Connections** (`/my-settings/connections`): GitHub (linked after LangSmith sign-in; required for coding features), Slack and LangSmith accounts, managed tools, and personal MCP servers.
+- **Settings → Connections** (`/my-settings/connections`): GitHub (linked after LangSmith sign-in; required for coding features), Slack and LangSmith accounts, the person's own LangSmith Managed Tools services (connect or disconnect; they load in their private threads), and personal MCP servers.
 - **Settings → Experiments** (`/my-settings/experiments`): experimental interface and agent features (including goal mode, per-author Conditional approval (off by default), LangSmith Agent Workspace for Open SWE chats, and Memory, which adds the workspace curator's prompt to the threads a person starts, in place of the person's own memories it superseded, and the Classify tool, which lets code mode classify with TypeSafe's System One model), recent-work context, and Slack behavior such as concierge mode and failing-check reactions.
+- **Workspaces** (`/workspaces`, admins): each workspace's page holds its repositories, sandbox image, model and review defaults, MCP servers, and the workspace bot: a LangSmith Managed Tools kit and bot profile every run in the workspace loads, with a connect button for each of the kit's services the bot has not connected.
+  Use `manage_workspace_bot` to read or set the kit and profile; connecting the bot's services stays in the dashboard.
 - **Code review** (`/review`): configure auto-review repositories.
   **Review styles** (`/review/styles`) and **Repository instructions** (`/agents/instructions`) manage per-repository review and agent guidance.
 - **Usage** (`/usage`): view agent usage and reviewer statistics.
