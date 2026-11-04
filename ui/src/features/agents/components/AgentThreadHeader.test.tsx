@@ -9,7 +9,9 @@ import {
 } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { AgentThreadHeader } from "./AgentThreadHeader"
+import type { AgentThread } from "@/features/agents/lib/types"
 
 vi.mock("@/lib/session", () => ({ useSession: () => ({ data: null }) }))
 vi.mock("@/features/agents/lib/desktopLocal", () => ({
@@ -70,6 +72,31 @@ describe("AgentThreadHeader", () => {
           }) as HTMLButtonElement
         ).disabled
       ).toBe(false)
+    )
+  })
+
+  it("starts the inline title editor from the actions menu without losing focus", async () => {
+    render(
+      <TooltipProvider>
+        <AgentThreadHeader
+          title={title}
+          target="Cloud"
+          panelCollapsed={false}
+          thread={{ id: "thread-1", title, repoFullName: "" } as AgentThread}
+          onRename={vi.fn().mockResolvedValue(undefined)}
+        />
+      </TooltipProvider>
+    )
+    fireEvent.keyDown(screen.getByRole("button", { name: "Thread actions" }), {
+      key: "Enter",
+    })
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Rename thread" })
+    )
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("textbox", { name: "Thread title" })
+      )
     )
   })
 

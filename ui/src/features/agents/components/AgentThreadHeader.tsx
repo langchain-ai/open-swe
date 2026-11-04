@@ -199,6 +199,14 @@ export function AgentThreadHeader({
       pinned={pinned}
       archived={archived}
       isDeleting={isDeleting}
+      onRename={
+        onRename
+          ? () => {
+              editingRef.current = true
+              requestAnimationFrame(startRename)
+            }
+          : undefined
+      }
       onTogglePin={() => {
         if (!pinThread.isPending) {
           pinThread.mutate({ threadId: current.id, pinned: !pinned })
