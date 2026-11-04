@@ -7,7 +7,9 @@ from typing import Any, cast
 
 import pytest
 import rt.slack_move as slack_move
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain.tools import ToolRuntime
+from langchain_core.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
+from langchain_core.tools import StructuredTool
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from pydantic import BaseModel
 from runtime_api.endpoint import Endpoint
@@ -175,3 +177,80 @@ def test_any_other_turn_calls_the_model(monkeypatch: pytest.MonkeyPatch, channel
     assert update is None
     assert backend.calls == []
     assert channel.posts == []
+
+
+def _backend_move_tool() -> StructuredTool:
+    async def move(runtime: ToolRuntime, message: str, channel_id: str | None = None) -> str:
+        return "backend moved it"
+
+    return StructuredTool.from_function(
+        coroutine=move, name="slack_move_thread", description="Move the conversation."
+    )
+
+
+def _from_code(tool: StructuredTool, **args: object) -> object:
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda _chunk: None,
+        tool_call_id="code-1",
+        store=None,
+    )
+    call_ = ToolCall(
+        name=tool.name, args={**args, "runtime": runtime}, id="code-1", type="tool_call"
+    )
+    return asyncio.run(tool.ainvoke(call_))
+
+
+def test_a_move_from_code_mode_goes_through_mda_as_the_models_own_call(
+    monkeypatch: pytest.MonkeyPatch, channel: _Channel
+) -> None:
+    # Code mode calls its tools past every awrap_tool_call; its move must still hand the
+    # thread to the new Slack thread, or that thread's messages can't run.
+    backend = _backend(monkeypatch, SlackMovePlan(root_text="Moved here", via_mda=True))
+    code_tool = _middleware().code_tool(_backend_move_tool())
+
+    result = _from_code(code_tool, message="Moved here", channel_id="C1")
+
+    assert isinstance(result, ToolMessage)
+    assert json.loads(cast(str, result.content)) == _MOVED
+    assert channel.posts == [
+        ({"type": "content", "content": "Moved here"}, {"new_thread": True, "hand_off": True})
+    ]
+    assert [name for name, _ in backend.calls] == ["slack_move", "slack_moved"]
+    assert cast(SlackMoved, backend.calls[1][1]).mark_source is True
+
+
+def test_a_move_from_code_mode_mda_doesnt_hold_is_the_backends(
+    monkeypatch: pytest.MonkeyPatch, channel: _Channel
+) -> None:
+    _backend(monkeypatch, SlackMovePlan(via_mda=False))
+    code_tool = _middleware().code_tool(_backend_move_tool())
+
+    result = _from_code(code_tool, message="Moved here")
+
+    assert isinstance(result, ToolMessage)
+    assert result.content == "backend moved it"
+    assert channel.posts == []
+
+
+def test_code_mode_offers_the_move_through_mda() -> None:
+    from rt.run_tools import RunTools  # noqa: PLC0415 - only this test builds a run's tools
+    from runtime_api.catalog import Catalog, ToolSpec  # noqa: PLC0415
+
+    move = ToolSpec(
+        name="slack_move_thread", description="Move.", parameters={}, grant="move:grant"
+    )
+    lookup = ToolSpec(name="lookup", description="Look.", parameters={}, grant="lookup:grant")
+    files = SimpleNamespace(code_tools=lambda _names: [])
+    tools = RunTools(
+        Catalog(operations=[move, lookup], code_only=["slack_move_thread", "lookup"]),
+        cast(Any, object()),
+        cast(Any, files),
+    )
+
+    by_name = {tool.name: tool for tool in tools.from_code}
+    # The move code mode calls isn't the backend's operation; the other tool is.
+    assert by_name["slack_move_thread"] is not tools.by_name["slack_move_thread"]
+    assert by_name["lookup"] is tools.by_name["lookup"]
