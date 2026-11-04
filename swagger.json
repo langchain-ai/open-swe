@@ -4756,6 +4756,23 @@
         "title": "PendingReviewDiscarded",
         "type": "object"
       },
+      "PinnedThreadOrderBody": {
+        "properties": {
+          "thread_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Thread Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "thread_ids"
+        ],
+        "title": "PinnedThreadOrderBody",
+        "type": "object"
+      },
       "PlanUpdate": {
         "properties": {
           "dismissed": {
@@ -7752,6 +7769,54 @@
           "prompt"
         ],
         "title": "SessionCreateBody",
+        "type": "object"
+      },
+      "SidebarThreadOrderBody": {
+        "properties": {
+          "ownerless": {
+            "default": false,
+            "title": "Ownerless",
+            "type": "boolean"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project"
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo"
+          },
+          "thread_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Thread Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "thread_ids"
+        ],
+        "title": "SidebarThreadOrderBody",
         "type": "object"
       },
       "SkillCreate": {
@@ -20398,6 +20463,57 @@
         ]
       }
     },
+    "/dashboard/api/threads/order": {
+      "put": {
+        "operationId": "api_reorder_sidebar_threads_dashboard_api_threads_order_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SidebarThreadOrderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Api Reorder Sidebar Threads Dashboard Api Threads Order Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Reorder Sidebar Threads",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
     "/dashboard/api/threads/page": {
       "get": {
         "operationId": "api_list_threads_page_dashboard_api_threads_page_get",
@@ -20720,6 +20836,57 @@
           }
         ],
         "summary": "Api List Pinned Threads",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/pinned/order": {
+      "put": {
+        "operationId": "api_reorder_pinned_threads_dashboard_api_threads_pinned_order_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PinnedThreadOrderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Api Reorder Pinned Threads Dashboard Api Threads Pinned Order Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Reorder Pinned Threads",
         "tags": [
           "dashboard",
           "threads"
