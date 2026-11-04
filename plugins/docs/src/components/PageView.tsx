@@ -369,16 +369,15 @@ export function PageView({
     const view = mounted()
     const range = view && resolveAnchor(view.state.doc, thread.comment)
     if (!view || !range || thread.comment.suggestion === null) return
-    const applied = view
-      .chain()
-      .focus()
-      .insertContentAt(
-        range,
-        thread.comment.suggestion
-          ? { type: "text", text: thread.comment.suggestion }
-          : []
-      )
-      .run()
+    const command = view.chain().focus()
+    const applied = thread.comment.suggestion
+      ? command
+          .insertContentAt(range, {
+            type: "text",
+            text: thread.comment.suggestion,
+          })
+          .run()
+      : command.deleteRange(range).run()
     if (!applied) throw new Error("The suggestion couldn't be applied.")
     await setStatus(thread.id, "accepted")
   }
