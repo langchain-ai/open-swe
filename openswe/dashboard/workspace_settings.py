@@ -93,9 +93,10 @@ class WorkspaceSettingsUpdate(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
-    # The LangSmith Managed Tools gateway private threads load with the owner's own
-    # LangSmith connection; unset means none. Only the instance record's value is read.
+    # The workspace bot: the LangSmith Managed Tools kit every run in the workspace loads,
+    # run as this LMT profile. Both unset (or either) means the workspace has no bot.
     managed_tools_gateway_id: str | None = None
+    managed_tools_profile_id: str | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -119,15 +120,15 @@ class WorkspaceSettingsUpdate(BaseModel):
     review_shadow_model: str | None = None
     review_shadow_reasoning_effort: str | None = None
 
-    @field_validator("managed_tools_gateway_id", mode="before")
+    @field_validator("managed_tools_gateway_id", "managed_tools_profile_id", mode="before")
     @classmethod
-    def _gateway_id(cls, v: object) -> str | None:
+    def _lmt_id(cls, v: object) -> str | None:
         if v is None or (isinstance(v, str) and not v.strip()):
             return None
         try:
             return str(UUID(str(v).strip()))
         except ValueError:
-            raise ValueError("managed tools gateway must be a gateway id") from None
+            raise ValueError("managed tools kits and profiles are named by their id") from None
 
     @field_validator("org_guidelines", mode="before")
     @classmethod
@@ -269,6 +270,7 @@ def _default_settings() -> dict[str, Any]:
         "sandbox_openai_enabled": False,
         "slack_follow_up_suggestions": False,
         "managed_tools_gateway_id": None,
+        "managed_tools_profile_id": None,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -716,8 +718,14 @@ class WorkspaceSettings(Mapping[str, Any]):
 
     @property
     def managed_tools_gateway_id(self) -> str | None:
-        """The LangSmith Managed Tools gateway this workspace's private threads load."""
+        """The LangSmith Managed Tools kit the workspace bot loads."""
         value = self.get("managed_tools_gateway_id")
+        return value if isinstance(value, str) and value else None
+
+    @property
+    def managed_tools_profile_id(self) -> str | None:
+        """The LMT profile the workspace bot runs its kit's tools as."""
+        value = self.get("managed_tools_profile_id")
         return value if isinstance(value, str) and value else None
 
     @property

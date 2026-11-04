@@ -35,12 +35,11 @@ _SECRET_QUERY_SUFFIXES = (
 
 _HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}")
 
-type MCPScope = Literal["instance", "workspace", "user", "managed"]
+type MCPScope = Literal["workspace", "bot", "user", "managed"]
 
 # Whose credential a tier's server reads from its MDA connection: the deployment's for
 # the servers every run gets, the person's own for theirs.
 CONNECTION_OWNERS: Final[Mapping[MCPScope, Literal["agent", "user"]]] = {
-    "instance": "agent",
     "workspace": "agent",
     "user": "user",
 }

@@ -25,7 +25,6 @@ from openswe.agent_api.run_catalog import RunCatalog
 from openswe.agent_api.tokens import RemoteRun
 from openswe.incidents import runtime, service, turns
 from openswe.incidents.models import Incident, IncidentPolicy
-from openswe.mcp.instance import instance_mcp_source
 from openswe.mcp.runtime import _tool_name
 from openswe.mcp.workspace import workspace_mcp_source
 from openswe.sandboxes.tool_runtime import ToolSurface
@@ -96,9 +95,8 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
         result = await _agent_catalog(_incident_config())
     surface = cast(ToolSurface, result["surface"])
     mcps.assert_awaited_once()
-    # System runs load the instance tier and the default workspace's, never a person's.
+    # System runs load the default workspace's, never a person's.
     assert [source.namespace for source in mcps.await_args.args] == [
-        instance_mcp_source().namespace,
         workspace_mcp_source(DEFAULT_WORKSPACE_SLUG).namespace,
     ]
     names = {_registered_tool_name(tool) for tool in surface.base_tools}

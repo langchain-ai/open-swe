@@ -3,7 +3,6 @@
 from langchain_core.tools import BaseTool
 
 from openswe.mcp import MCPConnectionUpdate, discover_tools, load_mcp_tools
-from openswe.mcp.instance import instance_mcp_source
 from openswe.mcp.workspace import (
     get_workspace_mcp,
     prepare_workspace_mcp,
@@ -30,7 +29,5 @@ async def discover_workspace_mcp(
 async def load_workspace_mcp_tools(
     workspace: str, *, connection_name: str | None = None
 ) -> list[BaseTool]:
-    """The workspace's MCP tools, including the instance-wide ones it inherits."""
-    return await load_mcp_tools(
-        instance_mcp_source(), workspace_mcp_source(workspace), connection_name=connection_name
-    )
+    """The workspace's MCP tools."""
+    return await load_mcp_tools(workspace_mcp_source(workspace), connection_name=connection_name)

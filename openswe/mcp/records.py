@@ -1,7 +1,6 @@
 """Each tier's MCP connections in PostgreSQL, by name.
 
-The instance's and each workspace's live in ``mcp_connection``, the instance's
-without a workspace, and a person's in ``user_record``. A tier's ``namespace`` keys its
+Each workspace's live in ``mcp_connection``, and a person's in ``user_record``. A tier's ``namespace`` keys its
 discovery and OAuth token caches.
 """
 
@@ -25,7 +24,6 @@ from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
 
-INSTANCE_MCPS_NAMESPACE = ("instance_mcps",)
 WORKSPACE_MCPS_NAMESPACE = ("workspace_mcps",)
 USER_MCPS_NAMESPACE = ("user_mcps",)
 _PERSONAL_KIND = "mcp_connection"
@@ -91,21 +89,14 @@ class MCPConnections(ABC):
 
 
 class SharedMCPConnections(MCPConnections):
-    """The instance tier's connections, or one workspace's."""
+    """One workspace's connections."""
 
-    def __init__(self, workspace: str | None = None) -> None:
-        """``workspace`` is a workspace's slug, or ``None`` for the instance tier."""
-        self.workspace = None if workspace is None else workspace.strip().lower()
-        self.scope = "instance" if self.workspace is None else "workspace"
-        self.namespace = (
-            INSTANCE_MCPS_NAMESPACE
-            if self.workspace is None
-            else (*WORKSPACE_MCPS_NAMESPACE, self.workspace)
-        )
+    def __init__(self, workspace: str) -> None:
+        self.workspace = workspace.strip().lower()
+        self.scope = "workspace"
+        self.namespace = (*WORKSPACE_MCPS_NAMESPACE, self.workspace)
 
     def _in_tier(self) -> ColumnElement[bool]:
-        if self.workspace is None:
-            return MCPConnectionRow.workspace.is_(None)
         return MCPConnectionRow.workspace == self.workspace
 
     def _where(self, name: str | None = None) -> ColumnElement[bool]:
@@ -128,15 +119,10 @@ class SharedMCPConnections(MCPConnections):
             upsert = insert(MCPConnectionRow).values(
                 id=uuid7(), workspace=self.workspace, name=name, connection=value
             )
-            # Each tier's names are unique through a partial index of its own.
-            index_elements = (
-                [MCPConnectionRow.name]
-                if self.workspace is None
-                else [MCPConnectionRow.workspace, MCPConnectionRow.name]
-            )
+            # A workspace's names are unique through a partial index of their own.
             await session.execute(
                 upsert.on_conflict_do_update(
-                    index_elements=index_elements,
+                    index_elements=[MCPConnectionRow.workspace, MCPConnectionRow.name],
                     index_where=self._in_tier(),
                     set_={"connection": value, "updated_at": func.clock_timestamp()},
                 )
@@ -145,9 +131,6 @@ class SharedMCPConnections(MCPConnections):
     async def delete(self, name: str) -> None:
         async with postgres.session() as session:
             await session.execute(delete(MCPConnectionRow).where(self._where(name)))
-
-
-INSTANCE_CONNECTIONS = SharedMCPConnections()
 
 
 class UserMCPConnections(MCPConnections):
