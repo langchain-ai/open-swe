@@ -39,10 +39,11 @@ import shlex
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
-from typing import Any, Literal, Self, TypedDict
+from typing import Annotated, Any, Literal, Self, TypedDict
 from uuid import UUID
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -92,23 +93,15 @@ def normalize_slack_channel_id(value: str) -> str:
     return channel_id
 
 
+SlackChannelId = Annotated[str, AfterValidator(normalize_slack_channel_id)]
+
+
 def _validate_slack_channel_ids(value: list[str] | None) -> list[str]:
     if not value:
         return []
     if len(value) > MAX_SLACK_CHANNELS:
         raise ValueError(f"at most {MAX_SLACK_CHANNELS} Slack channels per workspace")
     return list(dict.fromkeys(normalize_slack_channel_id(entry) for entry in value))
-
-
-def _validate_bug_report_kitchens(value: dict[str, str] | None) -> dict[str, str]:
-    if not value:
-        return {}
-    if len(value) > MAX_SLACK_CHANNELS:
-        raise ValueError(f"at most {MAX_SLACK_CHANNELS} Slack channels per workspace")
-    return {
-        normalize_slack_channel_id(channel): normalize_slack_channel_id(kitchen)
-        for channel, kitchen in value.items()
-    }
 
 
 def _require_bound_kitchen_channels(kitchen: list[str], channels: list[str]) -> None:
@@ -452,7 +445,9 @@ class WorkspaceCreate(BaseModel):
     repos: list[str] = Field(default_factory=list)
     slack_channel_ids: list[str] = Field(default_factory=list)
     kitchen_channel_ids: list[str] = Field(default_factory=list)
-    bug_report_kitchens: dict[str, str] = Field(default_factory=dict)
+    bug_report_kitchens: dict[SlackChannelId, SlackChannelId] = Field(
+        default_factory=dict, max_length=MAX_SLACK_CHANNELS
+    )
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
     fs_capacity_bytes: int | None = Field(default=None, gt=0)
@@ -493,11 +488,6 @@ class WorkspaceCreate(BaseModel):
     def _check_slack_channel_ids(cls, v: list[str]) -> list[str]:
         return _validate_slack_channel_ids(v)
 
-    @field_validator("bug_report_kitchens")
-    @classmethod
-    def _check_bug_report_kitchens(cls, v: dict[str, str]) -> dict[str, str]:
-        return _validate_bug_report_kitchens(v)
-
     @field_validator("create_params")
     @classmethod
     def _check_create_params(cls, v: dict[str, JsonValue]) -> dict[str, JsonValue]:
@@ -526,7 +516,9 @@ class WorkspaceUpdate(BaseModel):
     repos: list[str] | None = None
     slack_channel_ids: list[str] | None = None
     kitchen_channel_ids: list[str] | None = None
-    bug_report_kitchens: dict[str, str] | None = None
+    bug_report_kitchens: dict[SlackChannelId, SlackChannelId] | None = Field(
+        default=None, max_length=MAX_SLACK_CHANNELS
+    )
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
     fs_capacity_bytes: int | None = Field(default=None, gt=0)
@@ -561,11 +553,6 @@ class WorkspaceUpdate(BaseModel):
     @classmethod
     def _check_slack_channel_ids(cls, v: list[str] | None) -> list[str] | None:
         return None if v is None else _validate_slack_channel_ids(v)
-
-    @field_validator("bug_report_kitchens")
-    @classmethod
-    def _check_bug_report_kitchens(cls, v: dict[str, str] | None) -> dict[str, str] | None:
-        return None if v is None else _validate_bug_report_kitchens(v)
 
     @field_validator("create_params")
     @classmethod
@@ -621,7 +608,9 @@ class Workspace(BaseModel):
     slack_channel_ids: list[str] = Field(default_factory=list)
     kitchen_channel_ids: list[str] = Field(default_factory=list)
     # A bound channel, other than a kitchen, mapped to the kitchen its bug reports start threads in.
-    bug_report_kitchens: dict[str, str] = Field(default_factory=dict)
+    bug_report_kitchens: dict[SlackChannelId, SlackChannelId] = Field(
+        default_factory=dict, max_length=MAX_SLACK_CHANNELS
+    )
     mem_bytes: int | None = None
     vcpus: int | None = None
     fs_capacity_bytes: int | None = None
@@ -664,11 +653,6 @@ class Workspace(BaseModel):
     @classmethod
     def _check_slack_channel_ids(cls, v: list[str]) -> list[str]:
         return _validate_slack_channel_ids(v)
-
-    @field_validator("bug_report_kitchens")
-    @classmethod
-    def _check_bug_report_kitchens(cls, v: dict[str, str]) -> dict[str, str]:
-        return _validate_bug_report_kitchens(v)
 
     @classmethod
     def seed(cls, create: WorkspaceCreate, created_by: str) -> Workspace:

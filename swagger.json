@@ -8990,6 +8990,7 @@
             "additionalProperties": {
               "type": "string"
             },
+            "maxProperties": 50,
             "title": "Bug Report Kitchens",
             "type": "object"
           },
@@ -9309,6 +9310,7 @@
             "additionalProperties": {
               "type": "string"
             },
+            "maxProperties": 50,
             "title": "Bug Report Kitchens",
             "type": "object"
           },
@@ -9954,6 +9956,7 @@
                 "additionalProperties": {
                   "type": "string"
                 },
+                "maxProperties": 50,
                 "type": "object"
               },
               {

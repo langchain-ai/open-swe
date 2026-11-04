@@ -13,11 +13,8 @@ from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.agent_overrides import get_profile_default_repo
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
-from openswe.workspaces.configuration import (
-    configure_workspace,
-    require_bug_reports_routable,
-    require_kitchen_eligible,
-)
+from openswe.slack.channels import SlackChannel
+from openswe.workspaces.configuration import configure_workspace, require_kitchen_eligible
 from openswe.workspaces.refresh import (
     RefreshStartError,
     ensure_refresh_cron,
@@ -80,7 +77,7 @@ async def api_create_workspace(
 ) -> Workspace:
     try:
         await require_kitchen_eligible(body.kitchen_channel_ids)
-        await require_bug_reports_routable(body.bug_report_kitchens)
+        await SlackChannel.require_bug_report_routes(body.bug_report_kitchens)
         record = await WORKSPACES.create(body, _admin["sub"])
     except ValueError as e:
         raise _save_conflict(e) from e

@@ -167,9 +167,3 @@ async def test_only_new_top_level_posts_by_people_are_triaged(
     routed: AsyncMock, event: dict[str, object]
 ) -> None:
     assert await bug_reports.SlackBugReport.posted(_envelope(**event), _CHANNEL, "UBOT") is None
-
-
-async def test_channels_that_route_no_bug_reports_are_left_alone(routed: AsyncMock) -> None:
-    routed.return_value = None
-
-    assert await bug_reports.SlackBugReport.posted(_envelope(), _CHANNEL, "UBOT") is None

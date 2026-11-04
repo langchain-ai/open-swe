@@ -325,6 +325,24 @@ class SlackChannel(Base):
         return None
 
     @classmethod
+    async def require_bug_report_routes(cls, routes: dict[str, str]) -> None:
+        """Reject routes whose channels Slack would not deliver, or that would expose one.
+
+        A route copies a message into a thread in another channel, so, as for a
+        breakout between channels, both must be public and joined by Open SWE.
+        """
+        channel_ids = sorted({*routes, *routes.values()})
+        channels = await asyncio.gather(
+            *(cls.load(channel_id, use_cache=False) for channel_id in channel_ids)
+        )
+        for channel_id, channel in zip(channel_ids, channels, strict=True):
+            if channel is None or not (channel.can_be_kitchen and channel.public):
+                raise ValueError(
+                    f"Slack channel {channel_id} cannot route bug reports: choose public Slack "
+                    "channels that Open SWE has joined."
+                )
+
+    @classmethod
     async def fetch(cls, channel_id: str, *, use_cache: bool = True) -> JsonObject | None:
         """The raw Slack channel object, for callers reading fields this model omits."""
         channel = await cls.load(channel_id, use_cache=use_cache)
