@@ -1066,10 +1066,9 @@ async def _auto_merge_hold(request: HumanReviewRequest) -> str | None:
                 return "auto-merge paused — could not verify PR thread activity"
             if thread.status == "busy":
                 return "auto-merge paused — a PR thread has an active run"
-            client = RUNTIMES.runs_on(thread.runtime).client
-            for run_status in ("pending", "running"):
-                if await client.runs.list(thread_id, status=run_status, limit=1):
-                    return "auto-merge paused — a PR thread has an active run"
+            # Not the SDK's write client: an MDA channel's own threads are readable only.
+            if await RUNTIMES.runs_on(thread.runtime).has_active_run(thread_id):
+                return "auto-merge paused — a PR thread has an active run"
     except Exception:
         logger.warning(
             "Could not check PR thread activity before auto-merge",
