@@ -313,7 +313,8 @@ Under `mda dev` the token comes from `MDA_DEV_MDA__GITHUB_TOKEN`.
 
 The deployment's Slack channel (`channels/slack.py`) takes the Slack conversations it can start; every other conversation stays on the backend's own Slack intake.
 Open SWE's Slack app keeps its URLs at the backend's `/webhooks/slack`.
-When the first message of a new conversation is one MDA's channel can start, the backend forwards Slack's request to LangSmith Trigger Server unchanged: same bytes, same Slack signature, without Slack's retry headers. It claims nothing and remembers nothing: the channel decides what the message starts from the message itself, so nothing changes in the channel when Slack's Events URL points at Trigger Server instead.
+When the first message of a new conversation is one MDA's channel can start, the backend forwards Slack's request to LangSmith Trigger Server unchanged: same bytes, same Slack signature, without Slack's retry headers.
+It claims nothing and remembers nothing: the channel decides what the message starts from the message itself, so nothing changes in the channel when Slack's Events URL points at Trigger Server instead.
 Later messages in that Slack thread, and Slack's Stop, go the same way.
 A kitchen channel's untagged messages start conversations too, each Slack thread its own; the backend routes the run to the channel's workspace when it builds it.
 A concierge DM is one conversation for the whole DM: a DM no thread holds yet goes to MDA as a whole, bound for Slack's `0` timestamp to the DM's thread (`uuid5` of `slack:v1:{app}:{team}:{channel}:0`), and each Slack thread a message opens in it is bound to that thread too, so Slack's Stop there and the handler's question find it.
@@ -323,8 +324,10 @@ It asks the backend only for what needs Open SWE's records: `slack_message_facts
 `start_slack_turn` gates the turn as the backend gates its own Slack runs (a person without a usable GitHub account gets a reply saying so, and the conversation stays unclaimed), binds a new conversation's Slack thread to the thread MDA's channel keys it by (`uuid5` of Trigger Server's `slack:v1:{app}:{team}:{channel}:{root_ts}`) and indexes it as the channel's, writes the thread's metadata, signs the run, and answers what the prompt needs from its records: logins, the people a private thread may quote, the channel's context block, a review card's pull request, where a DM started.
 A `/btw` question, a breakout and a move come back built, as the backend always built them.
 The handler leaves out of the prompt what the thread already holds, from `thread.get_state()`, Agent Server's state as LangGraph's `threads.get_state` reads it (MDA #1231).
-A person's edit of a message the conversation holds goes to the `edit` handler (`/webhooks/slack` forwards it unchanged; once Slack's Events URL points at Trigger Server, Trigger Server does, MDA #1175): an edit of its text by its author, of a message the thread's state shows the agent got, becomes `start_slack_turn`'s `edit`, which gives the agent the correction as the backend does, a note for the run in progress or a turn of its own. An unfurl, another author's or a bot's edit, and a concierge DM's edits start nothing; deletions start nothing, as on the backend.
-Reactions reach the `reaction` handler once Slack's Events URL points at Trigger Server, which hands them to the backend's `/mda/slack/reactions`: it records a feedback reaction on the run that posted the message and treats the summon reaction as its reactor tagging Open SWE, as `/webhooks/slack` does, and starts no run of MDA's. Until then the backend hears reactions itself.
+A person's edit of a message the conversation holds goes to the `edit` handler (`/webhooks/slack` forwards it unchanged; once Slack's Events URL points at Trigger Server, Trigger Server does, MDA #1175): an edit of its text by its author, of a message the thread's state shows the agent got, becomes `start_slack_turn`'s `edit`, which gives the agent the correction as the backend does, a note for the run in progress or a turn of its own.
+An unfurl, another author's or a bot's edit, and a concierge DM's edits start nothing; deletions start nothing, as on the backend.
+Reactions reach the `reaction` handler once Slack's Events URL points at Trigger Server, which hands them to the backend's `/mda/slack/reactions`: it records a feedback reaction on the run that posted the message and treats the summon reaction as its reactor tagging Open SWE, as `/webhooks/slack` does, and starts no run of MDA's.
+Until then the backend hears reactions itself.
 A mention, a direct message or an explicit request redirects the thread's run in progress (`interrupt`); any other follow-up waits its turn behind it (`enqueue`), as on the backend's own Slack threads.
 The agent replies with Open SWE's Slack tools (`auto_post=False`), and the channel shows the run's status and Stop.
 
@@ -353,7 +356,12 @@ When MDA retries `start_slack_turn` (same `webhook-id`), the backend builds the 
 Each forward logs one outcome line (`forward_outcome`: `delivered`, `refused` or `gave_up`, with `status` and `attempts`); each answer without a run logs its `no_run_reason`.
 A GitHub issue mention MDA's channel never takes gets a 😕 on its comment.
 
-A `/btw` question, a breakout into a new thread and a `/breakout:web` question branch off the conversation they're sent in (`openswe/slack/forks.py`). Each runs on a new thread of its own, which belongs to the person who asked. When MDA's channel holds that conversation and the person may read its thread (a private thread's owner), the Slack handler starts the new thread with the conversation thread's state, read with `thread.get_state()` (`branches_conversation` on `start_slack_turn`'s answer): it knows what the agent did there, and its first turn adds only the Slack messages the agent never got. The new thread is the channel's, so MDA can start its runs; an Agent Server copy of the conversation's thread would keep the conversation as its owner, and MDA would refuse the run (409). Otherwise the branch is seeded from the Slack thread as before. The original thread and its running work are left alone.
+A `/btw` question, a breakout into a new thread and a `/breakout:web` question branch off the conversation they're sent in (`openswe/slack/forks.py`).
+Each runs on a new thread of its own, which belongs to the person who asked.
+When MDA's channel holds that conversation and the person may read its thread (a private thread's owner), the Slack handler starts the new thread with the conversation thread's state, read with `thread.get_state()` (`branches_conversation` on `start_slack_turn`'s answer): it knows what the agent did there, and its first turn adds only the Slack messages the agent never got.
+The new thread is the channel's, so MDA can start its runs; an Agent Server copy of the conversation's thread would keep the conversation as its owner, and MDA would refuse the run (409).
+Otherwise the branch is seeded from the Slack thread as before.
+The original thread and its running work are left alone.
 
 Which conversations go where (`mda_can_start` in `openswe/slack/mda_forwarding.py`):
 
