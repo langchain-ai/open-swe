@@ -95,10 +95,7 @@ class SlackMoveMiddleware(AgentMiddleware):
         if post is None:
             return None
         result = await self._move(
-            runtime,
-            message=None,
-            channel_id=marker if isinstance(marker, str) else None,
-            mark_source=True,
+            runtime, message=None, channel_id=marker if isinstance(marker, str) else None
         )
         if result is None:
             text = "Could not move this thread: try again."
@@ -116,7 +113,6 @@ class SlackMoveMiddleware(AgentMiddleware):
         *,
         message: str | None,
         channel_id: str | None,
-        mark_source: bool = False,
     ) -> Mapping[str, JsonValue] | None:
         """The move's answer, or ``None`` when the backend holds the thread and moves it."""
         plan = await call(
@@ -145,11 +141,12 @@ class SlackMoveMiddleware(AgentMiddleware):
         moved = await call(
             self._backend,
             SLACK_MOVED,
+            # The old Slack thread says where it went, as the agent's tool moves it too.
             SlackMoved(
                 run_id=run_id(),
                 thread_ts=posted["id"],
                 channel_id=plan.channel_id,
-                mark_source=mark_source,
+                mark_source=True,
             ),
         )
         return moved.result
