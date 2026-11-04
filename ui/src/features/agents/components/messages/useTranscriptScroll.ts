@@ -10,6 +10,7 @@ import { transcriptPositions } from "./transcriptPositions"
 import type { TranscriptPosition } from "./transcriptPositions"
 import type { LoadEarlier } from "./types"
 
+const MAX_RESTORE_PAGES = 2
 const BOTTOM_LOCK_THRESHOLD_PX = 24
 /** A sent message that hasn't rendered by now never will; stop waiting for it. */
 const PENDING_PIN_TIMEOUT_MS = 5000
@@ -150,7 +151,7 @@ export function useTranscriptScroll({
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const reserveRef = useRef<HTMLDivElement>(null)
-  const restorePage = useRef<string | null>(null)
+  const restorePages = useRef(new Set<string>())
   const state = useRef<ScrollState>({
     followTail: true,
     manualTop: 0,
@@ -338,7 +339,12 @@ export function useTranscriptScroll({
       const position = state.current.pendingRestore
       if (!position) return false
       const target = transcriptPositions.target(el, position)
-      if (target === null && loadEarlier) return true
+      if (
+        target === null &&
+        loadEarlier &&
+        (loadEarlier.loading || restorePages.current.size < MAX_RESTORE_PAGES)
+      )
+        return true
       el.scrollTop = Math.min(target ?? position.top, maxScrollTop(el))
       settle(el, el.scrollTop)
       return true
@@ -432,7 +438,7 @@ export function useTranscriptScroll({
     if (!el) return
     clearPin()
     state.current.prependAnchor = null
-    restorePage.current = null
+    restorePages.current.clear()
     const remembered = scrollKey
       ? transcriptPositions.read(scrollKey)
       : undefined
@@ -443,18 +449,7 @@ export function useTranscriptScroll({
     } else {
       scrollToBottom()
     }
-    const savePosition = () => {
-      if (!scrollKey || state.current.pendingRestore) return
-      transcriptPositions.remember(
-        scrollKey,
-        transcriptPositions.capture(
-          el,
-          state.current.followTail && isNearBottom(el)
-        )
-      )
-      transcriptPositions.persist()
-    }
-    return savePosition
+    return () => transcriptPositions.persist()
   }, [clearPin, scrollKey, scrollToBottom])
 
   useLayoutEffect(() => {
@@ -464,17 +459,16 @@ export function useTranscriptScroll({
     const pending = state.current.pendingRestore
     if (!pending || messages.length === 0) return
     if (transcriptPositions.target(el, pending) === null && loadEarlier) {
+      if (loadEarlier.loading) return
       const oldestMessage =
         el.querySelector<HTMLElement>("[data-message-id]")?.dataset.messageId
-      if (
-        !loadEarlier.loading &&
-        oldestMessage &&
-        restorePage.current !== oldestMessage
-      ) {
-        restorePage.current = oldestMessage
-        loadEarlier.onLoadEarlier()
+      if (oldestMessage && restorePages.current.size < MAX_RESTORE_PAGES) {
+        if (!restorePages.current.has(oldestMessage)) {
+          restorePages.current.add(oldestMessage)
+          loadEarlier.onLoadEarlier()
+        }
+        return
       }
-      return
     }
     state.current.pendingRestore = null
     state.current.readingPosition =

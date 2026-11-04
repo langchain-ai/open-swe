@@ -11,6 +11,7 @@ let resize = () => {}
 class TranscriptFixture {
   heights = [300, 300, 300, 300, 300, 300]
   first = 0
+  prefix = "message"
   private tops = new WeakMap<HTMLElement, number>()
 
   attach = (el: HTMLDivElement | null) => {
@@ -79,9 +80,9 @@ function Transcript({
         <div ref={contentRef}>
           {messages.map((height, index) => (
             <div
-              key={fixture.first + index}
+              key={`${fixture.prefix}-${fixture.first + index}`}
               ref={(node) => fixture.measure(node, fixture.first + index)}
-              data-message-id={`message-${fixture.first + index}`}
+              data-message-id={`${fixture.prefix}-${fixture.first + index}`}
               style={{ height }}
             />
           ))}
@@ -151,9 +152,11 @@ it("keeps different threads independent and persists the final position on pageh
   const el = fixture.scroll(650)
   fireEvent(window, new Event("pagehide"))
   expect(window.localStorage.getItem(STORAGE_KEY)).toContain("independent-a")
+  fixture.prefix = "other-message"
   view.rerender(<Transcript fixture={fixture} scrollKey="independent-b" />)
   expect(el.scrollTop).toBe(1400)
   fixture.scroll(100)
+  fixture.prefix = "message"
   view.rerender(<Transcript fixture={fixture} scrollKey="independent-a" />)
   expect(el.scrollTop).toBe(650)
 })
@@ -210,5 +213,51 @@ it("loads older history before restoring an anchor outside the current window", 
   expect(load).toHaveBeenCalledOnce()
   fixture.first = 0
   later.rerender(<Transcript fixture={fixture} scrollKey="older-thread" />)
+  expect(screen.getByTestId("transcript").scrollTop).toBe(350)
+})
+
+it("bounds automatic history loading when the remembered message no longer exists", () => {
+  window.localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify([
+      [
+        "missing-anchor",
+        {
+          top: 350,
+          atBottom: false,
+          anchor: { messageId: "missing-message", offset: -50 },
+        },
+      ],
+    ])
+  )
+  const fixture = new TranscriptFixture()
+  fixture.first = 5
+  const load = vi.fn()
+  const view = render(
+    <Transcript
+      fixture={fixture}
+      scrollKey="missing-anchor"
+      loadEarlier={{ loading: false, onLoadEarlier: load }}
+    />
+  )
+  expect(load).toHaveBeenCalledTimes(1)
+  fixture.first = 4
+  view.rerender(
+    <Transcript
+      fixture={fixture}
+      scrollKey="missing-anchor"
+      loadEarlier={{ loading: false, onLoadEarlier: load }}
+    />
+  )
+  expect(load).toHaveBeenCalledTimes(2)
+  fixture.first = 3
+  view.rerender(
+    <Transcript
+      fixture={fixture}
+      scrollKey="missing-anchor"
+      loadEarlier={{ loading: false, onLoadEarlier: load }}
+    />
+  )
+  expect(load).toHaveBeenCalledTimes(2)
   expect(screen.getByTestId("transcript").scrollTop).toBe(350)
 })
