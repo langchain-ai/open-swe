@@ -206,7 +206,8 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
     """
     webhook_id = call.request.headers.get("webhook-id", "")
     fields = {"agent_thread_id": str(turn.thread_id), "slack_message_ts": turn.message_ts}
-    if not await _claim_once(
+    # An edit keeps its message's timestamp, and a message may be edited more than once.
+    if turn.kind != "edit" and not await _claim_once(
         (_TURN_SCOPE, _TURN_TTL),
         _TURN_CALL_SCOPE,
         f"{turn.channel_id}:{turn.message_ts}",

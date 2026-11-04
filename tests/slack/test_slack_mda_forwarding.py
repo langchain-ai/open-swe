@@ -994,6 +994,20 @@ async def test_a_message_slack_sends_twice_starts_one_turn(
     assert prepare.await_count == 2
 
 
+async def test_an_edit_of_a_message_that_started_a_turn_is_not_claimed_as_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
+    _prepared(monkeypatch, prompt=_PROMPT)
+    app = _start_app(monkeypatch)
+    claim = AsyncMock(return_value=True)
+    monkeypatch.setattr(event_claims, "claim", claim)
+
+    await _start(app, kind="edit", msg_id="msg_delivery-2")
+
+    assert all(call.args[0] != "slack_turn" for call in claim.await_args_list)
+
+
 async def test_an_allowed_bots_turn_links_no_account_and_no_person_owns_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
