@@ -166,6 +166,13 @@ class _SdkThreads:
         """The thread's current state here."""
         return _object.validate_python(dict(await self.client.threads.get_state(thread_id)))
 
+    async def has_active_run(self, thread_id: str) -> bool:
+        """Whether a run on the thread here is still pending or running."""
+        for status in ("pending", "running"):
+            if await self.client.runs.list(thread_id, status=status, limit=1):
+                return True
+        return False
+
     async def create(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
         await self.client.threads.create(
             thread_id=thread_id, if_exists="do_nothing", metadata=dict(metadata)
@@ -532,6 +539,16 @@ class _MdaThreads(_SdkThreads):
         response = await self.reads.get(f"/threads/{thread_id}/state")
         response.raise_for_status()
         return _object.validate_python(response.json())
+
+    async def has_active_run(self, thread_id: str) -> bool:
+        for status in ("pending", "running"):
+            response = await self.reads.get(
+                f"/threads/{thread_id}/runs", params={"status": status, "limit": 1}
+            )
+            response.raise_for_status()
+            if response.json():
+                return True
+        return False
 
 
 class Runtimes:
