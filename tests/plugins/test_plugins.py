@@ -134,9 +134,17 @@ async def test_documents_come_back_ordered_and_bounded() -> None:
     assert await keys(newest) == ["t-b", "t-a", "t-Z"]
 
 
-async def test_a_chat_is_its_persons_and_each_call_is_answered_once() -> None:
+async def test_a_chat_is_its_persons_and_each_call_is_answered_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     ada, bob = await _person("ada", "1"), await _person("bob", "2")
     installation = await _install(ada, _bundle(permissions=["agent"]))
+    await PluginInstallations.share(installation, ada, ["acme/app"])
+
+    async def readable(_login: str, _repository: str) -> bool:
+        return True
+
+    monkeypatch.setattr(installed_module, "can_read_repository", readable)
     mine, theirs = PluginChats(installation, ada), PluginChats(installation, bob)
     chat = await mine.record("repo", "acme/app", "thread-1")
     read_page = ClientToolSpec(
@@ -177,6 +185,50 @@ async def test_a_chat_is_its_persons_and_each_call_is_answered_once() -> None:
     await PluginChat.deliver_input("thread-1", ada, {"messages": held})
     assert await PluginChat.person_wrote("thread-1", ada) == []
     assert await chat.calls.spend_resume(2)
+
+
+async def test_existing_chats_lose_access_when_repository_or_agent_grants_are_revoked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada = await _person("ada", "1")
+    installation_id = await _install(ada, _bundle(permissions=["agent"]))
+    await PluginInstallations.share(installation_id, ada, ["acme/app"])
+    chats = PluginChats(installation_id, ada)
+    chat = await chats.record("repo", "acme/app", "thread-1")
+    await chats.offer(
+        chat.id,
+        [ClientToolSpec(kind="function", name="docs__read_page", parameters={"type": "object"})],
+        "Read the page first.",
+    )
+    readable = True
+
+    async def can_read(_login: str, _repository: str) -> bool:
+        return readable
+
+    monkeypatch.setattr(installed_module, "can_read_repository", can_read)
+    plugin = _installed(await PluginInstallations.get(installation_id, ada), ada)
+    assert (await plugin.own_chat(chat.id)).id == chat.id
+    assert await PluginChat.run_config(chat.thread_id, ada) is not None
+
+    readable = False
+    with pytest.raises(RepositoryNotGranted):
+        await plugin.own_chat(chat.id)
+    assert await PluginChat.run_config(chat.thread_id, ada) is None
+
+    readable = True
+    await PluginInstallations.unshare(installation_id, ada, "acme/app")
+    plugin = _installed(await PluginInstallations.get(installation_id, ada), ada)
+    with pytest.raises(RepositoryNotGranted):
+        await plugin.own_chat(chat.id)
+    assert await PluginChat.run_config(chat.thread_id, ada) is None
+
+    await PluginInstallations.share(installation_id, ada, ["acme/app"])
+    version = await PluginApps.publish(ada, _bundle(permissions=[]), origin={})
+    await PluginInstallations.upgrade(installation_id, version, by=ada)
+    plugin = _installed(await PluginInstallations.get(installation_id, ada), ada)
+    with pytest.raises(PluginPermissionDenied):
+        await plugin.own_chat(chat.id)
+    assert await PluginChat.run_config(chat.thread_id, ada) is None
 
 
 async def test_a_new_preview_forgets_the_build_it_replaced(

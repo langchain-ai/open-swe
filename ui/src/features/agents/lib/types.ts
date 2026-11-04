@@ -573,7 +573,7 @@ export type TaskMembership =
   | { role: "worker"; taskId: string; coordinatorThreadId: string | null }
 
 export interface AgentThread {
-  experience?: "coding" | "agent_workspace"
+  waitingForDelegatedWork?: boolean
   taskMembership?: TaskMembership
   taskWorkers?: Array<AgentThread>
   ownerLogin?: string | null
@@ -592,12 +592,15 @@ export interface AgentThread {
   title: string
   repo: string
   repoFullName: string
+  /** The Open SWE project the thread was started in or moved to. */
+  projectId?: string | null
   branch: string
   model: string
   effort?: string | null
   modelSelection?: "auto" | "explicit" | null
   planStatus?: string | null
   adminThread?: boolean
+  concierge?: boolean
   source?: AgentSource
   origin?: AgentSource | string
   threadCategory?: AgentThreadCategory | string
@@ -610,7 +613,6 @@ export interface AgentThread {
   status: AgentStatus
   viewed: boolean
   viewedAt?: number | null
-  latestRunId?: string | null
   resolved?: boolean
   resolvedAt?: number | null
   attentionReason?: string | null

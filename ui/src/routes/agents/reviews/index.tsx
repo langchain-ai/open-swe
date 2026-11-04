@@ -95,7 +95,7 @@ function ReviewsPage() {
               "flex items-center gap-space-3",
               clearTrafficLights && "relative -top-4",
               clearTrafficLights &&
-                (selection ? "pl-28" : "pl-[clamp(0px,708px-50vw,112px)]")
+                (selection ? "pl-44" : "pl-[clamp(0px,772px-50vw,176px)]")
             )}
           >
             <Text as="h1" variant="h3" weight="medium" color="primary">

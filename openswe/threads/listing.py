@@ -12,9 +12,11 @@ from langgraph_sdk.errors import NotFoundError
 from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel
 
+from openswe.projects.store import NO_PROJECTS, PROJECT_ID_KEY, PROJECTS, ProjectFiling
 from openswe.review.session import ReviewSessionMetadata
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.records import lookup_slack_link_thread_id
+from openswe.slack.routed_work import RoutedWork
 from openswe.source_context import SourceContext
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
 from openswe.threads import index
@@ -64,7 +66,6 @@ _PINNED_THREADS_BATCH_SIZE = 1000
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
 
-DashboardThreadExperience = Literal["coding", "agent_workspace"]
 DashboardThreadScope = Literal["all", "interactive", "automation", "bot"]
 
 logger = logging.getLogger(__name__)
@@ -165,16 +166,24 @@ def _metadata_matches_filters(
     admin_threads: bool | None = None,
     owner: str | None = None,
     exclude_sources: Collection[str] = (),
-    experience: DashboardThreadExperience | None = None,
+    project: str | None = None,
+    filing: ProjectFiling = NO_PROJECTS,
 ) -> bool:
-    """Metadata-only filters that don't require fetching the latest run."""
-    if experience is not None and metadata.get("experience", "coding") != experience:
-        return False
+    """Metadata-only filters that don't require fetching the latest run.
+
+    A thread filed in one of the viewer's projects (``filing``) shows in that
+    project's folder rather than in its repository's or among those with none.
+    """
     if thread_is_unlisted(metadata):
         return False
     if owner and not thread_is_owner(metadata, owner):
         return False
     thread_repo = _metadata_repo(metadata)[2]
+    filed = filing.project_for(metadata, thread_repo)
+    if project is not None and filed != project:
+        return False
+    if (repo or ownerless) and filed is not None:
+        return False
     if repo and thread_repo.lower() != repo.lower():
         return False
     if ownerless and thread_repo:
@@ -269,10 +278,6 @@ def _should_refresh_latest_run(thread: ThreadLike) -> bool:
     thread_status = thread.get("status")
     return (
         thread_status == "busy"
-        or (
-            metadata.get("experience") == "agent_workspace"
-            and metadata.get("work_run_synced") is not True
-        )
         or metadata_status in _RUNNING_METADATA_STATUSES
         or not isinstance(metadata_status, str)
     )
@@ -376,7 +381,6 @@ async def _readable_threads_by_id(
     *,
     include_private: bool = True,
     resolved: bool | None = None,
-    experience: DashboardThreadExperience | None = None,
 ) -> dict[str, ThreadLike]:
     threads_by_id: dict[str, ThreadLike] = {}
     for offset in range(0, len(thread_ids), _PINNED_THREADS_BATCH_SIZE):
@@ -390,7 +394,6 @@ async def _readable_threads_by_id(
                 thread_id
                 and thread_is_readable(metadata, login, email)
                 and not thread_is_unlisted(metadata)
-                and (experience is None or metadata.get("experience", "coding") == experience)
                 and (include_private or metadata.get("visibility", "public") == "public")
                 and (resolved is None or _is_thread_resolved(metadata) is resolved)
             ):
@@ -439,9 +442,27 @@ async def attach_task_workers(
     resolved: bool | None = None,
     include_private: bool = True,
     filter_workers: Callable[[list[ThreadLike]], Awaitable[list[ThreadLike]]] | None = None,
-    experience: DashboardThreadExperience | None = None,
 ) -> None:
     """Attach independently readable task children without recursively expanding them."""
+    semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
+
+    async def attach_waiting(summary: JsonObject) -> None:
+        summary["waitingForDelegatedWork"] = False
+        if summary.get("status") == "running" or not isinstance(
+            thread_id := summary.get("id"), str
+        ):
+            return
+        async with semaphore:
+            try:
+                summary["waitingForDelegatedWork"] = await RoutedWork(thread_id).delegated_active(
+                    prune=False
+                )
+            except Exception:
+                logger.exception(
+                    "Could not read delegated work status", extra={"thread_id": thread_id}
+                )
+
+    await asyncio.gather(*(attach_waiting(summary) for summary in summaries))
     ids = [thread_id for summary in summaries if isinstance(thread_id := summary.get("id"), str)]
     memberships = await sidebar_memberships(ids)
     if not memberships:
@@ -457,7 +478,6 @@ async def attach_task_workers(
         login,
         email,
         include_private=include_private,
-        experience=experience,
     )
     worker_threads = [
         related[key]
@@ -505,7 +525,6 @@ async def _task_hierarchy_page(
     include_private: bool,
     sort_by: _ThreadSortBy,
     matches_metadata: Callable[[ThreadLike], bool],
-    experience: DashboardThreadExperience | None = None,
 ) -> JsonObject:
     memberships = await sidebar_memberships(
         [thread_id for thread in candidates if (thread_id := _thread_id(thread))]
@@ -523,7 +542,6 @@ async def _task_hierarchy_page(
         email,
         include_private=include_private,
         resolved=resolved,
-        experience=experience,
     )
     roots: dict[str, ThreadLike] = {}
     activity: dict[str, int] = {}
@@ -587,7 +605,6 @@ async def _task_hierarchy_page(
         resolved=resolved,
         include_private=include_private,
         filter_workers=filter_workers,
-        experience=experience,
     )
     return {
         "items": items,
@@ -612,7 +629,6 @@ async def _collect_thread_candidates(
     owned: bool = False,
     admin_threads: bool | None = None,
     exclude_sources: Collection[str] = (),
-    experience: DashboardThreadExperience | None = None,
     viewer_login: str | None = None,
     viewer_email: str | None = None,
     include_private: bool = True,
@@ -622,6 +638,8 @@ async def _collect_thread_candidates(
     hierarchy: bool = False,
     viewed: bool | None = None,
     status: str | None = None,
+    project: str | None = None,
+    filing: ProjectFiling = NO_PROJECTS,
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
     root_ids: dict[str, str] = {}
@@ -677,7 +695,8 @@ async def _collect_thread_candidates(
                     admin_threads=admin_threads,
                     owner=viewer_login if owned else None,
                     exclude_sources=exclude_sources,
-                    experience=experience,
+                    project=project,
+                    filing=filing,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -723,7 +742,6 @@ async def _collect_thread_candidates(
                         viewer_email,
                         include_private=include_private,
                         resolved=resolved,
-                        experience=experience,
                     )
                 )
                 checked_parents.update(parent_ids)
@@ -787,7 +805,6 @@ async def list_dashboard_threads(
     email: str | None = None,
     limit: int = 50,
     include_all: bool = False,
-    experience: DashboardThreadExperience | None = None,
 ) -> list[dict[str, Any]]:
     page = await list_dashboard_threads_page(
         login,
@@ -795,7 +812,6 @@ async def list_dashboard_threads(
         limit=limit,
         offset=0,
         include_all=include_all,
-        experience=experience,
     )
     return page["items"]
 
@@ -804,8 +820,6 @@ async def _pinned_thread_summaries(
     client: LangGraphClient,
     login: str,
     email: str | None,
-    *,
-    experience: DashboardThreadExperience | None = None,
 ) -> list[JsonObject]:
     pin_ids = await list_thread_pin_ids(login)
     threads_by_id: dict[str, ThreadLike] = {}
@@ -826,7 +840,6 @@ async def _pinned_thread_summaries(
                 thread_id
                 and thread_is_readable(metadata, login, email)
                 and not (slack_thread is not None and slack_thread.is_concierge)
-                and (experience is None or metadata.get("experience", "coding") == experience)
             ):
                 threads_by_id[thread_id] = thread
     # Search order is unrelated to pin order; deleted/inaccessible IDs are omitted.
@@ -835,7 +848,7 @@ async def _pinned_thread_summaries(
         [threads_by_id[thread_id] for thread_id in pin_ids if thread_id in threads_by_id],
         minimal_run_update=True,
     )
-    await attach_task_workers(client, summaries, login, email, experience=experience)
+    await attach_task_workers(client, summaries, login, email)
     return summaries
 
 
@@ -843,22 +856,7 @@ async def list_dashboard_pinned_threads(
     login: str,
     *,
     email: str | None = None,
-    experience: DashboardThreadExperience | None = None,
 ) -> list[dict[str, Any]]:
-    if experience is not None:
-        threads = await list_dashboard_pinned_threads(login, email=email)
-        return [
-            {
-                **thread,
-                "taskWorkers": [
-                    worker
-                    for worker in thread.get("taskWorkers", [])
-                    if worker.get("experience", "coding") == experience
-                ],
-            }
-            for thread in threads
-            if thread.get("experience", "coding") == experience
-        ]
     return await _pinned_thread_summaries(langgraph_client(), login, email)
 
 
@@ -871,14 +869,16 @@ async def list_dashboard_thread_repos(
     owned: bool = False,
     include_all: bool = False,
     exclude_sources: Collection[str] = (),
-    experience: DashboardThreadExperience | None = None,
 ) -> list[dict[str, Any]]:
-    """The repositories the viewer's threads ran in, newest activity first.
+    """The sidebar's folders: the viewer's projects and the repositories their other
+    threads ran in, newest activity first.
 
-    Each entry names the workspace that owns the repository so the sidebar can
-    nest repositories under their workspace; an unassigned repository belongs
-    to ``default``.
+    Each entry names the workspace it belongs to so the sidebar can nest folders
+    under their workspace; an unassigned repository belongs to ``default``. A
+    project's entry carries its ``projectId`` and is listed even before it has a
+    thread.
     """
+    filing = await PROJECTS.filing_for(login)
     candidates = await _collect_thread_candidates(
         langgraph_client(),
         _participant_search_filters(login, email=email, include_all=include_all),
@@ -888,26 +888,47 @@ async def list_dashboard_thread_repos(
         scope="all" if include_automations else "interactive",
         owned=owned,
         exclude_sources=exclude_sources,
-        experience=experience,
     )
     repos: dict[str, dict[str, Any]] = {}
+    project_activity: dict[str, int] = {}
     for thread in candidates:
-        _, name, full_name = _metadata_repo(_thread_metadata(thread))
+        metadata = _thread_metadata(thread)
+        _, name, full_name = _metadata_repo(metadata)
+        updated_at = thread_updated_ms(thread)
+        if (project_id := filing.project_for(metadata, full_name)) is not None:
+            project_activity[project_id] = max(project_activity.get(project_id, 0), updated_at)
+            continue
         if not full_name:
             continue
         key = full_name.lower()
-        updated_at = thread_updated_ms(thread)
         current = repos.get(key)
         if current is None or updated_at > current["updatedAt"]:
             repos[key] = {
                 "repoFullName": full_name,
                 "name": name,
                 "updatedAt": updated_at,
+                "projectId": None,
             }
     for entry in repos.values():
         owner, _, repo_name = str(entry["repoFullName"]).partition("/")
         entry["workspace"] = await workspace_for_repo(owner, repo_name) or DEFAULT_WORKSPACE_SLUG
-    return sorted(repos.values(), key=lambda entry: entry["updatedAt"], reverse=True)
+    folders = [
+        *repos.values(),
+        *(
+            {
+                "repoFullName": project.repo_full_name,
+                "name": project.name,
+                "updatedAt": max(
+                    project_activity.get(project_id, 0),
+                    int(project.updated_at.timestamp() * 1000),
+                ),
+                "projectId": project_id,
+                "workspace": project.workspace,
+            }
+            for project_id, project in filing.projects.items()
+        ),
+    ]
+    return sorted(folders, key=lambda entry: entry["updatedAt"], reverse=True)
 
 
 async def pin_dashboard_thread(thread_id: str, login: str) -> None:
@@ -945,14 +966,15 @@ async def list_dashboard_threads_page(
     ownerless: bool = False,
     owned: bool = False,
     exclude_sources: Collection[str] = (),
-    experience: DashboardThreadExperience | None = None,
     filter_participant_login: str | None = None,
     include_private: bool = True,
     surfaced_only: bool = False,
     admin_threads: bool | None = None,
     sort_by: _ThreadSortBy = "updated_at",
     hierarchy: bool = False,
+    project: str | None = None,
 ) -> dict[str, Any]:
+    """A page of threads; ``project`` is a project id, ``"none"`` meaning outside every one."""
     client = langgraph_client()
     normalized_query = query.strip() if query else ""
     if parse_slack_thread_url(normalized_query):
@@ -965,10 +987,8 @@ async def list_dashboard_threads_page(
                 thread = None
             if thread is not None:
                 metadata = _thread_metadata(thread)
-                if (
-                    thread_is_readable(metadata, login, email)
-                    and (include_private or metadata.get("visibility", "public") == "public")
-                    and (experience is None or metadata.get("experience", "coding") == experience)
+                if thread_is_readable(metadata, login, email) and (
+                    include_private or metadata.get("visibility", "public") == "public"
                 ):
                     items = [await _summarize_thread(client, thread)]
         return {"items": items, "limit": 1, "offset": max(offset, 0), "hasMore": False}
@@ -988,6 +1008,24 @@ async def list_dashboard_threads_page(
         searches = _participant_search_filters(
             search_login, email=search_email, include_all=include_all
         )
+    filing = (
+        await PROJECTS.filing_for(login)
+        if project is not None or repo or ownerless
+        else NO_PROJECTS
+    )
+    if project == "none":
+        # Outside every project is what the "no repository" folder already means.
+        project, ownerless = None, True
+    elif project is not None:
+        if project not in filing.projects:
+            return {
+                "items": [],
+                "limit": min(max(limit, 1), 100),
+                "offset": max(offset, 0),
+                "hasMore": False,
+            }
+        # Teammates' threads in a shared project, alongside the viewer's own.
+        searches = [*searches, {PROJECT_ID_KEY: project}]
     safe_offset = max(offset, 0)
     safe_limit = min(max(limit, 1), 100)
     summary_filters = viewed is not None or status is not None
@@ -1007,7 +1045,6 @@ async def list_dashboard_threads_page(
         owned=owned,
         admin_threads=admin_threads,
         exclude_sources=exclude_sources,
-        experience=experience,
         viewer_login=login,
         viewer_email=email,
         include_private=include_private,
@@ -1017,6 +1054,8 @@ async def list_dashboard_threads_page(
         hierarchy=hierarchy,
         viewed=viewed,
         status=status,
+        project=project,
+        filing=filing,
     )
 
     if hierarchy:
@@ -1032,7 +1071,6 @@ async def list_dashboard_threads_page(
             status=status,
             include_private=include_private,
             sort_by=sort_by,
-            experience=experience,
             matches_metadata=lambda thread: (
                 _metadata_matches_filters(
                     _thread_metadata(thread),
@@ -1046,7 +1084,8 @@ async def list_dashboard_threads_page(
                     admin_threads=admin_threads,
                     owner=login if owned else None,
                     exclude_sources=exclude_sources,
-                    experience=experience,
+                    project=project,
+                    filing=filing,
                 )
                 and (
                     not surfaced_only

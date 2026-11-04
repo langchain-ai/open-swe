@@ -10,14 +10,19 @@ import atexit
 import json
 import re
 import ssl
+import time
 import urllib.error
 import urllib.parse
 from collections.abc import Mapping
+from http import HTTPStatus
 from http.cookiejar import CookieJar, DefaultCookiePolicy
 from typing import Final
 
 import httpx
 
+from managed_deepagents._resilience import RetryPolicy, backoff_seconds
+
+_HTTP_SERVER_ERROR_END = 600
 AGENT_AUTH_TIMEOUT_SECONDS = 10.0
 AGENT_AUTH_PROBLEM_HINT_MAX_CHARS = 200
 _PROBLEM_HINT_FIELDS: Final = ("detail", "remedy")
@@ -73,6 +78,18 @@ class CredentialStoreError(RuntimeError):
         super().__init__(with_status if hint is None else f"{with_status}: {hint}")
 
 
+class CredentialStoreUnavailableError(CredentialStoreError):
+    """A transient Agent Auth read failure exhausted its retries."""
+
+
+_READ_RETRY_POLICY = RetryPolicy(
+    max_attempts=3,
+    base_delay_seconds=0.25,
+    max_delay_seconds=1.0,
+    retry_on=lambda error: isinstance(error, CredentialStoreUnavailableError),
+)
+
+
 class ConnectionsNotConfiguredError(CredentialStoreError):
     """The runtime lacks a setting every Agent Auth call needs.
 
@@ -109,6 +126,7 @@ __all__ = [
     "AGENT_AUTH_PROBLEM_HINT_MAX_CHARS",
     "AGENT_AUTH_TIMEOUT_SECONDS",
     "CredentialStoreError",
+    "CredentialStoreUnavailableError",
     "agent_auth_credential_query",
     "agent_auth_headers",
     "agent_auth_problem_hint",
@@ -178,10 +196,27 @@ def request_agent_auth_json(
     headers: Mapping[str, str],
     timeout: float,
 ) -> tuple[int, dict[str, object]]:
-    """Issue one Agent Auth HTTP call: no redirects, bounded timeout, JSON body."""
+    """Call Agent Auth with bounded retries for transient GET failures."""
     data = None if body is None else json.dumps(dict(body)).encode("utf-8")
-    try:
-        response = _CLIENT.request(method, url, content=data, headers=headers, timeout=timeout)
-    except httpx.RequestError as exc:
-        raise urllib.error.URLError(exc) from exc
-    return response.status_code, _decode_json_object(response.content)
+    read = method.upper() == "GET"
+    attempts = _READ_RETRY_POLICY.max_attempts if read else 1
+    for attempt in range(1, attempts + 1):
+        status = None
+        try:
+            response = _CLIENT.request(method, url, content=data, headers=headers, timeout=timeout)
+        except httpx.RequestError as exc:
+            if not read:
+                raise urllib.error.URLError(exc) from exc
+        else:
+            if not read or not (
+                response.status_code == HTTPStatus.TOO_MANY_REQUESTS
+                or HTTPStatus.INTERNAL_SERVER_ERROR <= response.status_code < _HTTP_SERVER_ERROR_END
+            ):
+                return response.status_code, _decode_json_object(response.content)
+            status = response.status_code
+        if attempt == attempts:
+            raise CredentialStoreUnavailableError(
+                "Agent Auth is temporarily unavailable; retry later", status
+            ) from None
+        time.sleep(backoff_seconds(attempt, _READ_RETRY_POLICY))
+    raise AssertionError("unreachable")

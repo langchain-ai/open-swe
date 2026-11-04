@@ -1,4 +1,4 @@
-"""Where runs are traced: the LangSmith SDK's own project setting."""
+"""Where runs are traced: the MDA deployment's own project."""
 
 from openswe.config import ENV
 
@@ -6,10 +6,10 @@ from openswe.config import ENV
 def tracing_project() -> str:
     """LangSmith project every run traces into and trace links point at.
 
-    Read the way the SDK's tracer reads it, ``LANGSMITH_PROJECT`` with the legacy
-    ``LANGCHAIN_PROJECT`` as fallback (the registry aliases), else ``default``, so
-    links, cost lookups, and feedback query the project the runs actually went to.
-    LangGraph Platform sets both names to the deployment name. The SDK's own
-    helper is not used because it caches the first value it sees.
+    Runs execute on the MDA deployment, which traces them into its own project,
+    ``MDA_LANGSMITH_PROJECT``, so links, cost lookups, feedback and reviewer evals
+    query the project the runs actually went to. Unset, it is this backend's
+    ``LANGSMITH_PROJECT`` (with the legacy ``LANGCHAIN_PROJECT`` alias), as when
+    both run locally under one project.
     """
-    return ENV.LANGSMITH_PROJECT.get()
+    return ENV.MDA_LANGSMITH_PROJECT.optional() or ENV.LANGSMITH_PROJECT.get()

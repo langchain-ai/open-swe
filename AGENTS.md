@@ -66,6 +66,9 @@ The backend never runs middleware around a model call; the only middleware objec
 - The dashboard (`ui/`) builds with the React Compiler, which memoizes components, values and callbacks itself.
   Write derived values and handlers as plain expressions; keep `useMemo`/`useCallback` only where a hook's dependency list needs a stable identity.
 - Create database migrations with `make migration m="Short description"`.
+- Delayed, retried or periodic background work goes through the job queue: `queue.schedule(kind, payload, due_at=..., key=...)` from `openswe/jobs/queue.py`, with its handler registered in `openswe/jobs/kinds.py`.
+  A handler raises to retry with backoff.
+  Never hand-roll due-time columns, claim tokens, attempt counters or polling sweeps on a feature's own table.
 - Don't add new uses of the LangGraph SDK client (`langgraph_client`, `get_client`, `LangGraphClient`) in the backend.
   Everything must be on MDA now; use MDA for runs and PostgreSQL for thread state.
   Read and change threads, their metadata included, through `THREADS` (`openswe/threads/store.py`).

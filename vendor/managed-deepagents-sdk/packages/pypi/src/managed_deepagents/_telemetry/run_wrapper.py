@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from managed_deepagents._telemetry.client import TelemetryClient
 from managed_deepagents._telemetry.gates import is_telemetry_disabled
-from managed_deepagents._telemetry.otel import LogAttributes, record_log
+from managed_deepagents._telemetry.otel import LogAttributes, record_log, set_log_attributes
 from managed_deepagents._telemetry.run import finish_run
 from managed_deepagents._telemetry.transport import posthog_transport
 from managed_deepagents.define_browser import BROWSER_TOOL_PREFIX
@@ -87,6 +87,14 @@ def observe_run(agent: AgentT, pending: PendingRun) -> AgentT:  # noqa: C901 - l
             # tracing parent, so parent_run_id=None is not a reliable filter.
             if self.root is None:
                 self.root = run_id
+                # Every later record in the run, ``run failed`` included,
+                # names the deployment and channel it belongs to.
+                set_log_attributes(
+                    {
+                        "deployment_id": pending.identity["deployment_id"],
+                        "channel": pending.configuration.channel,
+                    }
+                )
 
         def on_tool_start(
             self,
@@ -120,19 +128,24 @@ def observe_run(agent: AgentT, pending: PendingRun) -> AgentT:  # noqa: C901 - l
             **_kwargs: Any,
         ) -> None:
             if run_id == self.root:
-                # Agent Server cancels a run by cancelling its task.
-                if isinstance(error, asyncio.CancelledError):
+                # Agent Server cancels a run by cancelling its task, and a
+                # consumer that stops streaming closes the run's generator.
+                if isinstance(error, asyncio.CancelledError | GeneratorExit):
                     self.report("cancelled")
                     return
                 record_log("ERROR", "run failed", error=error)
-                self.report("failure")
+                self.report("failure", error)
 
-        def report(self, outcome: RunOutcome) -> None:
+        def report(self, outcome: RunOutcome, error: BaseException | None = None) -> None:
             if pending.emitted:
                 return
             pending.emitted = True
             event = finish_run(pending, outcome)
-            record_log("INFO", "run completed", attributes=_completion_attributes(event))
+            attributes = _completion_attributes(event)
+            if error is not None:
+                # Lets failures be counted by kind without joining ``run failed``.
+                attributes["error.kind"] = type(error).__name__
+            record_log("INFO", "run completed", attributes=attributes)
             client = _run_client()
             if client is not None:
                 client.record(event)

@@ -542,10 +542,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         : {})}
     >
       <div
-        className={cn(
-          "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-space-1 pl-space-2",
-          props.layoutControls ? "pr-space-3" : "pr-space-2"
-        )}
+        className="flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-space-1 px-space-2"
         data-right-panel-tabbar
       >
         <div

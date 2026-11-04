@@ -94,8 +94,8 @@ function StandardUserMessage({ message }: { message: Message }) {
           className={cn(
             "relative max-w-full overflow-hidden rounded-xl p-space-3",
             isSystem
-              ? "mt-space-1 border border-default bg-surface-level-2"
-              : "bg-surface-level-2"
+              ? "mt-space-1 border border-default bg-user-message"
+              : "bg-user-message"
           )}
         >
           {excerpts.map((excerpt, i) => (

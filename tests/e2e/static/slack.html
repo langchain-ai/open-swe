@@ -75,7 +75,7 @@
     <script>
       const $ = (id) => document.getElementById(id);
       const userNames = {};
-      let selectedChannel = "C_DEMO";
+      let selectedChannel = "CDEMO01";
       let pickedChannel = false;
       let selectedIsCodeChannel = false;
       let knownCodeChannels = 0;
@@ -268,7 +268,7 @@
       $("text").addEventListener("keydown", (event) => { if (event.key === "Enter") $("send").click(); });
       $("reset").addEventListener("click", async () => {
         await fetch("/control/reset", { method: "POST" });
-        selectedChannel = "C_DEMO";
+        selectedChannel = "CDEMO01";
         selectedIsCodeChannel = false;
         knownCodeChannels = 0;
         $("text").value = "<@U0BOT> investigate the flaky CI failures — use a dedicated code channel if this warrants one E2E_CODE_CHANNEL";

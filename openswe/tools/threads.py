@@ -29,7 +29,8 @@ from openswe.schedules import store as schedules
 from openswe.slack.allowed_bots import authorized_slack_bot_run
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.records import lookup_slack_link_thread_id
-from openswe.threads import plan_api, workflow_approval_api
+from openswe.slack.workflow_approval_cards import share_workflow_approval
+from openswe.threads import plan_api
 from openswe.threads.handlers import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
@@ -78,8 +79,7 @@ ThreadAction = Literal[
     "add_plan_comment",
     "delete_plan_comment",
     "update_plan",
-    "approve_workflow_push",
-    "reject_workflow_push",
+    "share_workflow_approval",
 ]
 PlanFormat = Literal["html", "markdown"]
 _MAX_MESSAGE_CHARS = 20_000
@@ -452,9 +452,17 @@ async def list_threads(
     if pr_ref:
         items = [item for item in items if _summary_matches_pr(item, pr_ref.url)]
     try:
-        results = [
-            await _compact_list_item(item) if compact else _list_item(item) for item in items
-        ]
+        if compact:
+            results = []
+            for start in range(0, len(items), 8):
+                async with asyncio.TaskGroup() as tasks:
+                    batch = [
+                        tasks.create_task(_compact_list_item(item))
+                        for item in items[start : start + 8]
+                    ]
+                results.extend(task.result() for task in batch)
+        else:
+            results = [_list_item(item) for item in items]
     except Exception:
         logger.exception("Could not load thread outcomes")
         return _failure("Could not list threads")
@@ -733,7 +741,7 @@ async def _thread_cost(thread_id: str, run: Any) -> dict[str, Any]:
         snapshot = await get_langsmith_thread_cost(
             thread_id,
             invocation_id,
-            **({"lookup_start": str(lookup_start)} if lookup_start else {}),
+            lookup_start=str(lookup_start) if lookup_start else None,
         )
     except LangSmithCostUnavailable:
         return {"status": "unavailable", "total_usd": None}
@@ -945,7 +953,7 @@ def _available_actions(
     if plan_status:
         actions.append("update_plan")
     if any(record.get("status") == WORKFLOW_APPROVAL_PENDING for record in approvals.values()):
-        actions.extend(["approve_workflow_push", "reject_workflow_push"])
+        actions.append("share_workflow_approval")
     if admin and running:
         actions.append("admin_cancel")
     return actions
@@ -981,9 +989,11 @@ async def get_thread(
             pending_runs_task = tasks.create_task(
                 client.runs.list(thread_id, status="pending", limit=1000)
             )
+            runs = await runs_task
+            cost_task = tasks.create_task(_thread_cost(thread_id, runs[0] if runs else None))
         thread = thread_task.result()
         thread_state = state_task.result()
-        runs = runs_task.result()
+        cost = cost_task.result()
         plan_content = plan_content_task.result()
         plan_comments = plan_comments_task.result()
         approvals = approvals_task.result()
@@ -1006,7 +1016,6 @@ async def get_thread(
     can_delete_plan_comment = any(
         comment.get("author_login") == actor.login for comment in plan_comments
     )
-    cost = await _thread_cost(thread_id, latest_run)
     pr = summary.get("pr")
     pr_url = pr.get("url") if isinstance(pr, Mapping) else None
     links = {
@@ -1107,7 +1116,25 @@ async def _send_message(
         return _failure(reply.detail or "Could not start thread run", status_code=status_code)
     result = reply.result
     mode = "steered" if result.steered else "queued" if result.queued else "started"
-    return {"success": True, "mode": mode, "run_id": result.run_id}
+    if isinstance(caller_thread_id, str) and caller_thread_id != thread_id:
+        from openswe.slack.routed_work import RoutedWork
+
+        work = RoutedWork(caller_thread_id)
+        try:
+            await work.track(thread_id)
+            await work.sync_slack_status()
+        except Exception:
+            logger.exception(
+                "Could not track routed thread progress",
+                extra={"origin_thread_id": caller_thread_id, "destination_thread_id": thread_id},
+            )
+    return {
+        "success": True,
+        "mode": mode,
+        "run_id": result.run_id,
+        "recipient_thread_id": thread_id,
+        "web_url": dashboard_thread_url(thread_id),
+    }
 
 
 class _CommandResult(BaseModel):
@@ -1154,8 +1181,7 @@ def _unexpected_action_arguments(
         "add_plan_comment": {"comment"},
         "delete_plan_comment": {"comment_id"},
         "update_plan": {"content", "content_format"},
-        "approve_workflow_push": {"fingerprint"},
-        "reject_workflow_push": {"fingerprint"},
+        "share_workflow_approval": {"fingerprint"},
     }.get(action, set())
     provided = {
         key
@@ -1308,15 +1334,18 @@ async def manage_thread(
                 "content_length": len(content or ""),
                 "plan_url": dashboard_plan_url(thread_id),
             }
-        if action in {"approve_workflow_push", "reject_workflow_push"}:
+        if action == "share_workflow_approval":
             if error := _required(fingerprint, "fingerprint", action):
                 return error
-            handler = (
-                workflow_approval_api.approve_workflow_push
-                if action == "approve_workflow_push"
-                else workflow_approval_api.reject_workflow_push
+            current_thread_id = RunConfig.parse(_config().get("configurable")).thread_id
+            if not current_thread_id:
+                return _failure("A current thread is required to share a workflow approval")
+            result = await share_workflow_approval(
+                thread_id,
+                fingerprint or "",
+                current_thread_id=current_thread_id,
+                actor_login=actor.login,
             )
-            result = await handler(thread_id, fingerprint or "", session=actor.session)
             return {"success": True, **result}
         return _failure(f"unsupported action: {action}")
     except HTTPException as exc:

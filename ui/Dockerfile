@@ -9,7 +9,6 @@ WORKDIR /app
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY ui/package.json ui/package.json
-COPY ui/vendor ui/vendor
 COPY plugins/sdk/package.json plugins/sdk/package.json
 COPY ui/patches ui/patches
 COPY desktop/patches desktop/patches

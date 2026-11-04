@@ -982,10 +982,13 @@ class PluginChat:
     @staticmethod
     async def run_config(thread_id: str, user_id: UUID) -> PluginChatConfig | None:
         """What a run of ``thread_id`` gets from the plugin it chats beside, if it is a plugin chat."""
+        from openswe.plugins.installed import can_read_repository
+        from openswe.users import User
+
         async with postgres.session() as session:
             found = (
                 await session.execute(
-                    select(PluginChatRow, PluginVersionRow.manifest)
+                    select(PluginChatRow, PluginVersionRow.manifest, _granted_by(user_id))
                     .join(
                         PluginInstallationRow,
                         PluginInstallationRow.id == PluginChatRow.installation,
@@ -996,9 +999,21 @@ class PluginChat:
             ).one_or_none()
         if found is None:
             return None
-        row, manifest = found
+        row, manifest, repositories = found
         plugin = PluginManifest.model_validate(manifest)
+        if PluginPermission.AGENT not in plugin.permissions:
+            return None
         chat = PluginChat.of(row)
+        if chat.repository is not None:
+            if chat.repository not in repositories:
+                return None
+            user = await User.get(user_id)
+            if (
+                user is None
+                or not user.github_login
+                or not await can_read_repository(user.github_login, chat.repository)
+            ):
+                return None
         return PluginChatConfig(
             chat_id=str(chat.id),
             plugin=plugin.display_name,

@@ -23,6 +23,7 @@ from openswe.dashboard import routes
 from openswe.dashboard.oauth import COOKIE_NAME, issue_session
 from openswe.slack import connect
 from openswe.slack.oauth import SlackIdentity
+from openswe.users import User
 
 _VERIFIER = "desktop-connect-verifier"
 _CHALLENGE = (
@@ -51,14 +52,14 @@ def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         )
 
     collected: list[dict[str, Any]] = []
-    user = connect.User()
+    user = User()
 
-    async def fake_link(provider: str, external_id: str, **kwargs: Any) -> connect.User:
+    async def fake_link(provider: str, external_id: str, **kwargs: Any) -> User:
         collected.append({"provider": provider, "external_id": external_id, **kwargs})
         return user
 
     monkeypatch.setattr(user, "link", fake_link)
-    monkeypatch.setattr(connect.User, "for_session", AsyncMock(return_value=user))
+    monkeypatch.setattr(User, "for_session", AsyncMock(return_value=user))
     monkeypatch.setattr(connect, "slack_oauth_configured", lambda: True)
     monkeypatch.setattr(
         connect,
@@ -121,7 +122,7 @@ def test_desktop_slack_connect_links_under_the_session_the_app_holds(
         assert wrong_verifier.status_code == 400
 
         wrong_provider = client.post(
-            "/dashboard/api/langsmith/desktop/exchange",
+            "/dashboard/api/github/desktop/exchange",
             json={"code": handoff, "verifier": _VERIFIER},
             headers=_APP_ORIGIN,
         )

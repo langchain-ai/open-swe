@@ -47,7 +47,8 @@ The key needs permission to manage the workspace's integrations or to create dep
 
 The GitHub channel's `mda deploy` keeps the GitHub App's installation token under this reserved slug, and Agent Auth renews it.
 Deploy this change first: `mda/channels/github.py` now asks for the App's repository permissions, and deploy renews the token with them.
-Check the deploy report lists contents, pull requests, issues, checks and workflows as write, and statuses, security events and actions as read; an installation that has not granted all of them keeps the old token.
+Set the GitHub App's **Code scanning alerts** permission to **Read & write**, and have an organization admin approve the expanded permission for existing installations before deploying.
+Check the deploy report lists contents, pull requests, issues, checks, security events and workflows as write, and statuses and actions as read; an installation that has not granted all of them keeps the old token.
 Then check Agent Auth holds the deployment's App, which it stores as `mda/github-app/<deployment id>`:
 
 ```bash

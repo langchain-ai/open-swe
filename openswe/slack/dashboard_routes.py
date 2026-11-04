@@ -25,6 +25,7 @@ from openswe.slack.client import get_slack_user_names
 from openswe.slack.connect import router as connect_router
 from openswe.slack.dm import CONCIERGE_TS, open_dm
 from openswe.slack.records import lookup_slack_thread_id
+from openswe.slack.user_options import SlackUserDirectory, SlackUserOption
 from openswe.threads.summary import assert_thread_readable
 from openswe.users import User
 from openswe.utils.json_types import thread_metadata
@@ -32,6 +33,13 @@ from openswe.utils.thread_ops import langgraph_client
 
 router = APIRouter(tags=["slack"])
 router.include_router(connect_router)
+
+
+@router.get("/slack/users")
+async def api_slack_users(
+    _session: dict[str, object] = SESSION_DEP,
+) -> SlackUserDirectory:
+    return SlackUserDirectory(users=await SlackUserOption.all())
 
 
 @router.get("/slack/users/{user_id}/name")

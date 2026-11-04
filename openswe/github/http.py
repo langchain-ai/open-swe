@@ -44,7 +44,7 @@ from openswe.github.queue import (
     ValidationRuns,
     WorkflowRun,
 )
-from openswe.utils.dashboard_links import dashboard_api_base_url
+from openswe.utils.dashboard_links import dashboard_api_base_url, dashboard_base_url
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.url_safety import request_with_safe_redirects
 
@@ -226,10 +226,10 @@ async def github_request(
 
 def github_reauth_message(login: str | None = None) -> str:
     person = f" for {login}" if login else ""
-    url = f"{dashboard_api_base_url()}/dashboard/api/auth/login"
+    url = f"{dashboard_base_url() or dashboard_api_base_url()}/my-settings/connections"
     return (
-        f"GitHub token unavailable{person}. Reconnect GitHub by signing in to Open SWE: {url}. "
-        "Then retry the action."
+        f"GitHub token unavailable{person}. Link GitHub again in Open SWE's connections "
+        f"settings: {url}. Then retry the action."
     )
 
 
@@ -591,6 +591,28 @@ class RepoClient:
                 blob = repository.get(f"f{i}")
                 if isinstance(blob, Mapping) and isinstance(blob.get("text"), str):
                     found[path] = blob["text"]
+        return found
+
+    async def read_dir(self, path: str, ref: str | None) -> dict[str, str | None]:
+        """Text of each file directly in ``path`` at ``ref`` (the default branch when ``None``).
+
+        A file GitHub returns no text for (binary or too large) maps to ``None``.
+        """
+        data = await self.graphql(
+            "query($owner:String!,$repo:String!,$expression:String!)"
+            "{repository(owner:$owner,name:$repo){object(expression:$expression)"
+            "{...on Tree{entries{path type object{...on Blob{text}}}}}}}",
+            {"expression": f"{ref or 'HEAD'}:{path}"},
+        )
+        tree = (data.get("repository") or {}).get("object")
+        entries = tree.get("entries") if isinstance(tree, Mapping) else None
+        found: dict[str, str | None] = {}
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, Mapping) or entry.get("type") != "blob":
+                continue
+            blob = entry.get("object")
+            text = blob.get("text") if isinstance(blob, Mapping) else None
+            found[entry["path"]] = text if isinstance(text, str) else None
         return found
 
     async def can_write(self, login: str) -> bool:
