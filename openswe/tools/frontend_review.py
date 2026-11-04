@@ -48,7 +48,7 @@ class _RunPullRequest:
 
     def exact_head(self) -> str:
         """The PR head this run was started at: evidence of any other revision is refused."""
-        if self.head_sha is None:
+        if not self.head_sha:
             raise ValueError("Frontend evidence needs a run bound to the exact pull request head")
         return self.head_sha
 
@@ -60,7 +60,7 @@ class _RunPullRequest:
         validate_preview_url(request.base_url)
         validate_preview_url(request.head_url)
         review = await self.evidence.create(
-            request, expected_base_sha=self.base_sha, expected_head_sha=self.head_sha
+            request, expected_base_sha=self.base_sha, expected_head_sha=self.exact_head()
         )
         if request.auth_mode != "none":
             return review

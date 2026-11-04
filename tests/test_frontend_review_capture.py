@@ -63,6 +63,30 @@ async def test_a_capture_needs_a_run_bound_to_a_pull_request(
         )
 
 
+async def test_capture_requires_a_frozen_head_before_creating_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        RunConfig,
+        "from_runtime",
+        lambda: RunConfig.parse(
+            {
+                "thread_id": "thread-1",
+                "repo": {"owner": "acme", "name": "widgets"},
+                "pr_number": 7,
+            }
+        ),
+    )
+    create = AsyncMock(side_effect=AssertionError("must not create unbound evidence"))
+    monkeypatch.setattr(frontend_review_tools.FrontendReviews, "create", create)
+
+    with pytest.raises(ValueError, match="exact pull request head"):
+        await frontend_review_tools.review_frontend(
+            "https://base.vercel.app", "https://head.vercel.app"
+        )
+    assert not create.called
+
+
 async def test_a_run_cannot_read_evidence_from_another_head(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
