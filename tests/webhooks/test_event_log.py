@@ -253,7 +253,7 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
         await asyncio.wait_for(started.wait(), timeout=2)
     finally:
         release.set()
-        await asyncio.gather(*event_log._POSTHOG_TASKS)
+        await asyncio.gather(*event_log._TASKS)
 
     async with transaction() as conn:
         row = (

@@ -22,6 +22,7 @@ from openswe.jobs import queue
 from openswe.jobs.queue import Job
 from openswe.schedules import store as schedules
 from openswe.schedules.store import (
+    EventTrigger,
     GitHubTrigger,
     LinearTrigger,
     ScheduleCreateBody,
@@ -31,6 +32,7 @@ from openswe.schedules.store import (
     TriggerConfig,
 )
 from openswe.slack.payloads import SlackChannelContext, SlackEventEnvelope
+from openswe.webhooks.event_log import LoggedEvent
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 SCHED_1 = "11111111-1111-4111-8111-111111111111"
@@ -897,6 +899,91 @@ async def test_open_swe_events_do_not_trigger_automations(
 
     assert await schedules.launch_github_automations("pull_request", payload, "d-1") == []
     assert fake_client.runs.created == []
+
+
+def _reaction(delivery: str, reaction: str, *, user: str = "UALICE", **fields: Any) -> LoggedEvent:
+    return LoggedEvent.model_validate(
+        {
+            "source": "slack",
+            "event_type": "reaction_added",
+            "delivery_id": delivery,
+            "received_at": datetime.now(UTC),
+            "user_id": None,
+            "workspace_id": None,
+            "repository_id": None,
+            "pull_request_id": None,
+            "payload": {
+                "type": "event_callback",
+                "event": {
+                    "type": "reaction_added",
+                    "user": user,
+                    "reaction": reaction,
+                    "item": {"type": "message", "channel": "C0KITCHEN1", "ts": "1.5"},
+                },
+            },
+            **fields,
+        }
+    )
+
+
+async def test_event_triggers_fire_on_matching_event_log_rows_once(
+    fake_client: _FakeClient, auth: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UOPENSWE")
+    created = await schedules.create_agent_schedule(
+        "alice",
+        ScheduleCreateBody(
+            workspace="default",
+            prompt="Break the thread out",
+            triggers=[
+                EventTrigger(
+                    sources=["slack"],
+                    event_types=["reaction_added"],
+                    payload_match={"event": {"reaction": "kitchen"}},
+                )
+            ],
+        ),
+    )
+    workspace_id = await WORKSPACES.id_for_slug("default")
+
+    async def launch(event: LoggedEvent) -> list[str]:
+        results = await schedules.launch_event_automations(event)
+        return [result["schedule_id"] for result in results]
+
+    # Filtered out: another emoji, Open SWE's own reaction, another workspace, a private row.
+    assert await launch(_reaction("Ev1", "eyes", workspace_id=workspace_id)) == []
+    assert (
+        await launch(_reaction("Ev2", "kitchen", user="UOPENSWE", workspace_id=workspace_id)) == []
+    )
+    assert await launch(_reaction("Ev3", "kitchen", workspace_id=uuid.uuid4())) == []
+    assert (
+        await launch(_reaction("Ev4", "kitchen", workspace_id=workspace_id, visibility="private"))
+        == []
+    )
+
+    assert await launch(_reaction("Ev5", "kitchen", workspace_id=workspace_id)) == [created["id"]]
+    # A redelivery doesn't run twice.
+    assert await launch(_reaction("Ev5", "kitchen", workspace_id=workspace_id)) == []
+
+    [run] = fake_client.runs.created
+    message = run["input"]["messages"][-1]["content"]
+    prompt = ElementTree.fromstring(message).text or ""
+    assert "`reaction_added`" in prompt and ":kitchen: on 1.5" in prompt and "C0KITCHEN1" in prompt
+
+
+async def test_only_admin_automations_name_admin_only_event_sources(
+    fake_client: _FakeClient, auth: None
+) -> None:
+    with pytest.raises(HTTPException) as refused:
+        await schedules.create_agent_schedule(
+            "alice",
+            ScheduleCreateBody(
+                workspace="default",
+                prompt="Watch refreshes",
+                triggers=[EventTrigger(sources=["workspace"], event_types=["refresh"])],
+            ),
+        )
+    assert refused.value.status_code == 422
 
 
 async def test_launch_scheduled_agent_run_gates_fable_by_the_automations_workspace(

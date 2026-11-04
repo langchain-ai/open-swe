@@ -10,6 +10,7 @@ import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Input } from "@langchain/macaw-components/Input"
 import { Switch } from "@langchain/macaw-components/Switch"
+import { BroadcastIcon } from "@phosphor-icons/react/dist/ssr/Broadcast"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { KanbanIcon } from "@phosphor-icons/react/dist/ssr/Kanban"
@@ -38,6 +39,7 @@ import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
 import { describeCron } from "@/features/automations/lib/cron"
 import type { TriggerDraft } from "@/features/automations/lib/triggers"
 import {
+  describeEventTrigger,
   draftProblem,
   draftsFor,
   githubDraft,
@@ -591,6 +593,30 @@ export function AutomationEditor({
                   </div>
                   {hint(
                     "Top-level messages only. Open SWE must be in the channel; messages reach the run as untrusted context."
+                  )}
+                </TriggerCard>
+              )
+            }
+            if (draft.kind === "event") {
+              const { payload_match: payloadMatch } = draft.trigger
+              return (
+                <TriggerCard
+                  key={draft.key}
+                  icon={BroadcastIcon}
+                  removeLabel="Remove event trigger"
+                  onRemove={() => removeDraft(draft.key)}
+                  canManage={canManage}
+                >
+                  <p className="text-sm text-primary">
+                    {describeEventTrigger(draft.trigger)}
+                  </p>
+                  {payloadMatch && Object.keys(payloadMatch).length > 0 && (
+                    <p className="mt-space-1 font-mono text-xs break-all text-tertiary">
+                      {JSON.stringify(payloadMatch)}
+                    </p>
+                  )}
+                  {hint(
+                    "Ask Open SWE in an admin thread to change this trigger."
                   )}
                 </TriggerCard>
               )

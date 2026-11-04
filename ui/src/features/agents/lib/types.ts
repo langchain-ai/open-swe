@@ -287,6 +287,15 @@ export type AutomationTriggerConfig =
       project?: string | null
       max_runs_per_hour?: number | null
     }
+  | {
+      /** Any event-log event in the workspace; configured through the agent's automation tools. */
+      kind: "event"
+      sources?: Array<string>
+      event_types: Array<string>
+      /** A JSON object the event payload must contain. */
+      payload_match?: Record<string, unknown>
+      max_runs_per_hour?: number | null
+    }
 
 export type AutomationTriggerProvider = AutomationTriggerConfig["kind"]
 

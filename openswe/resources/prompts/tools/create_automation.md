@@ -16,6 +16,12 @@ Args:
   - ``{"kind": "linear", "team": "ENG", "events": [...]}`` runs on issue events in a Linear team, passed to the run as untrusted context: "issue.created" and "issue.labeled" (a label was added).
     Optional filters: ``labels`` (names; the issue must carry, or for "issue.labeled" gain, one of them), ``project`` (a project name), and ``max_runs_per_hour``.
     A GitHub trigger's ``repo`` must be one the configuring admin can access.
+  - ``{"kind": "event", "event_types": [...]}`` runs on any event in the workspace's event log, the same events `listen_events` sees, passed to the run with its payload as untrusted context.
+    ``event_types`` are named as `list_event_types` lists them; a bare name such as ``pull_request`` matches every action.
+    Optional filters: ``sources`` (empty means every source except ``workspace``, ``human_review``, and ``reviewer``, which must be named and need ``admin_thread``), ``payload_match`` (a JSON object the payload must contain, as in `listen_events`), and ``max_runs_per_hour``.
+    E.g. a Slack reaction: ``{"kind": "event", "sources": ["slack"], "event_types": ["reaction_added"], "payload_match": {"event": {"reaction": "eyes", "item": {"channel": "C0123456789"}}}}``.
+    Use `list_event_types(source=..., event_type=...)` to see a payload's shape first.
+    Events Open SWE caused never fire it, and an admin-thread automation fires only for events from people Open SWE knows in private repositories or Slack.
 - name: Short display name.
 - model_id: Optional supported model ID.
 - effort: Optional reasoning effort for the model.

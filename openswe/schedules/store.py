@@ -2,8 +2,9 @@
 
 Records live in PostgreSQL (``automation`` and ``automation_trigger``); each
 schedule trigger owns one LangGraph cron, whose input names the automation.
-GitHub triggers fire from the GitHub webhook, and every inbound event is
-claimed once per automation in ``event_claim`` before it runs.
+GitHub triggers fire from the GitHub webhook and event triggers from any event
+log row, and every inbound event is claimed once per automation in
+``event_claim`` before it runs.
 """
 
 import json
@@ -16,7 +17,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
-from pydantic import BaseModel, Field, TypeAdapter, field_validator
+from pydantic import BaseModel, Field, JsonValue, TypeAdapter, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -53,6 +54,8 @@ from openswe.users import User
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.time import now_iso, now_ms
 from openswe.webhooks.common import enforce_public_repo_org_gate, repo_private_from_payload
+from openswe.webhooks.event_log import ADMIN_ONLY_SOURCES, LoggedEvent, WebhookSource
+from openswe.webhooks.event_subscriptions import EventSummary
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 logger = logging.getLogger(__name__)
@@ -84,6 +87,9 @@ LINEAR_EVENT_DESCRIPTIONS: dict[LinearTriggerEvent, str] = {
 }
 _LINEAR_TEAM_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,9}$")
 _LINEAR_DESCRIPTION_MAX_CHARS = 8_000
+_EVENT_TYPE_MAX_CHARS = 100
+_EVENT_PAYLOAD_MATCH_MAX_CHARS = 4_000
+_EVENT_PAYLOAD_MAX_CHARS = 12_000
 _RATE_WINDOW = timedelta(hours=1)
 _DELIVERY_CLAIM_SCOPE = "automation_delivery"
 _DELIVERY_CLAIM_TTL = timedelta(hours=24)
@@ -178,8 +184,46 @@ class LinearTrigger(BaseModel):
         return value.strip() if value and value.strip() else None
 
 
+class EventTrigger(BaseModel):
+    """Fires on any event log row in the automation's workspace that matches its filters."""
+
+    kind: Literal["event"] = "event"
+    # Empty means every source but the admin-only ones, which must be named.
+    sources: list[WebhookSource] = Field(default_factory=list)
+    # A bare type (``pull_request``) matches every action; ``pull_request.closed`` only that one.
+    event_types: list[str] = Field(min_length=1, max_length=20)
+    # A JSON object the payload must contain, as PostgreSQL's ``@>`` decides.
+    payload_match: dict[str, JsonValue] = Field(default_factory=dict)
+    max_runs_per_hour: int | None = Field(default=None, ge=1, le=100)
+
+    @field_validator("sources")
+    @classmethod
+    def _valid_sources(cls, value: list[WebhookSource]) -> list[WebhookSource]:
+        return sorted(set(value))
+
+    @field_validator("event_types")
+    @classmethod
+    def _valid_event_types(cls, value: list[str]) -> list[str]:
+        types = sorted({item.strip() for item in value if item.strip()})
+        if not types:
+            raise ValueError("event_types needs at least one event type")
+        if any(len(item) > _EVENT_TYPE_MAX_CHARS for item in types):
+            raise ValueError(f"event types must be at most {_EVENT_TYPE_MAX_CHARS} characters")
+        return types
+
+    @field_validator("payload_match")
+    @classmethod
+    def _valid_payload_match(cls, value: dict[str, JsonValue]) -> dict[str, JsonValue]:
+        if len(json.dumps(value)) > _EVENT_PAYLOAD_MATCH_MAX_CHARS:
+            raise ValueError(
+                f"payload_match must be at most {_EVENT_PAYLOAD_MATCH_MAX_CHARS} characters of JSON"
+            )
+        return value
+
+
 TriggerConfig = Annotated[
-    ScheduleTrigger | GitHubTrigger | SlackTrigger | LinearTrigger, Field(discriminator="kind")
+    ScheduleTrigger | GitHubTrigger | SlackTrigger | LinearTrigger | EventTrigger,
+    Field(discriminator="kind"),
 ]
 _TRIGGERS = TypeAdapter(list[TriggerConfig])
 
@@ -667,6 +711,27 @@ async def _refuse_public_events_for_admin(
             )
 
 
+def _refuse_admin_sources_without_admin_thread(
+    triggers: Sequence[TriggerConfig], *, admin_thread: bool
+) -> None:
+    """Admin-only event sources reach only admin-thread automations, as they reach only admin threads."""
+    if admin_thread:
+        return
+    named = sorted(
+        {
+            source
+            for trigger in triggers
+            if isinstance(trigger, EventTrigger)
+            for source in trigger.sources
+            if source in ADMIN_ONLY_SOURCES
+        }
+    )
+    if named:
+        raise HTTPException(
+            422, f"only admin-thread automations can run on {', '.join(named)} events"
+        )
+
+
 def _repo_dict(full_name: str | None) -> dict[str, str] | None:
     if not full_name or "/" not in full_name:
         return None
@@ -704,6 +769,7 @@ async def create_agent_schedule(
         body.triggers, login, use_workspace_credentials=use_workspace_credentials
     )
     await _refuse_public_events_for_admin(triggers, admin_thread=body.admin_thread)
+    _refuse_admin_sources_without_admin_thread(triggers, admin_thread=body.admin_thread)
     workspace = await _existing_workspace(body.workspace)
     workspace_id = await WORKSPACES.id_for_slug(workspace)
     if workspace_id is None:
@@ -805,6 +871,7 @@ async def update_agent_schedule(
     # and launches skip repositories that went public since.
     if triggers is not current_triggers or (admin_thread and not was_admin):
         await _refuse_public_events_for_admin(triggers, admin_thread=admin_thread)
+    _refuse_admin_sources_without_admin_thread(triggers, admin_thread=admin_thread)
 
     enabled = bool(columns.get("enabled", existing.get("enabled")))
     rebuild_triggers = triggers is not current_triggers or enabled != bool(existing.get("enabled"))
@@ -1655,6 +1722,134 @@ async def launch_linear_automations(
             logger.error(
                 "Linear automation did not start",
                 extra={"schedule_id": schedule_id, "launch_status": result.get("status")},
+            )
+            await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
+        results.append(result)
+    return results
+
+
+_EVENT_TRIGGER_MATCHES = text(
+    """
+    SELECT t.automation_id, t.config
+    FROM automation_trigger t JOIN automation a ON a.id = t.automation_id
+    WHERE t.kind = 'event' AND a.enabled AND a.workspace_id = :workspace_id
+      AND jsonb_exists_any(t.config -> 'event_types', CAST(:event_types AS text[]))
+      AND (jsonb_exists(t.config -> 'sources', CAST(:source AS text))
+           OR (jsonb_array_length(t.config -> 'sources') = 0 AND NOT :admin_only))
+      AND CAST(:payload AS jsonb) @> (t.config -> 'payload_match')
+    ORDER BY t.created_at, t.id
+    """
+)
+
+
+def _event_prompt(record: dict[str, Any], event: LoggedEvent, summary: EventSummary) -> str:
+    payload = json.dumps(event.payload)[:_EVENT_PAYLOAD_MAX_CHARS]
+    context = "\n\n".join(part for part in (summary.details, f"Payload:\n{payload}") if part)
+    return prompt(
+        "runs/event-automation-event",
+        prompt=record["prompt"],
+        source=event.source,
+        event_type=event.event_type,
+        event_context=fence_github_comment_body(context, registered=summary.trusted),
+    )
+
+
+def _event_repository(event: LoggedEvent) -> tuple[str, str, bool | None] | None:
+    """The owner, name, and privacy of the repository a GitHub event happened in."""
+    if event.source != "github" or not isinstance(event.payload, dict):
+        return None
+    repository = event.payload.get("repository")
+    full_name = repository.get("full_name") if isinstance(repository, dict) else None
+    if not isinstance(full_name, str) or "/" not in full_name:
+        return None
+    owner, name = full_name.split("/", 1)
+    private = repository.get("private") if isinstance(repository, dict) else None
+    return owner, name, private if isinstance(private, bool) else None
+
+
+async def launch_event_automations(event: LoggedEvent) -> list[dict[str, Any]]:
+    """Run every automation an event log row triggers, each at most once per delivery.
+
+    Only public rows in a workspace fire, never one Open SWE itself caused; an
+    admin-thread automation fires only for events from people Open SWE knows.
+    """
+    if event.workspace_id is None or event.visibility != "public":
+        return []
+    if not event.delivery_id:
+        logger.warning(
+            "Event log row has no delivery ID for automations",
+            extra={"webhook_source": event.source, "event_type": event.event_type},
+        )
+        return []
+    summary = EventSummary.of(event)
+    if summary.from_open_swe:
+        return []
+    async with transaction() as conn:
+        rows = (
+            (
+                await conn.execute(
+                    _EVENT_TRIGGER_MATCHES,
+                    {
+                        "workspace_id": event.workspace_id,
+                        "event_types": sorted({event.event_type, event.base_event_type}),
+                        "source": event.source,
+                        "admin_only": event.source in ADMIN_ONLY_SOURCES,
+                        "payload": json.dumps(event.payload),
+                    },
+                )
+            )
+            .mappings()
+            .all()
+        )
+        if not rows:
+            return []
+        configs: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            configs.setdefault(str(row["automation_id"]), dict(row["config"]))
+        records = await _load_records(
+            conn,
+            "WHERE a.id = ANY(:ids)",
+            {"ids": [uuid.UUID(automation_id) for automation_id in configs]},
+        )
+    repository = _event_repository(event)
+    results: list[dict[str, Any]] = []
+    for record in records:
+        schedule_id = record["id"]
+        log_context = {"schedule_id": schedule_id, "event_delivery_id": event.delivery_id}
+        if event.source in ADMIN_ONLY_SOURCES and not _admin_thread_enabled(record):
+            continue
+        if record.get("admin_thread") is True and (
+            not summary.trusted or (repository is not None and repository[2] is not True)
+        ):
+            logger.warning(
+                "Skipping an admin-thread automation for an untrusted event", extra=log_context
+            )
+            continue
+        claim_prefix = f"{schedule_id}:event:"
+        claim_key = f"{claim_prefix}{event.source}:{event.delivery_id}"
+        if not await _claim_delivery(
+            claim_key, claim_prefix, configs[schedule_id].get("max_runs_per_hour"), schedule_id
+        ):
+            continue
+        try:
+            result = await _launch_agent_schedule_record(
+                record,
+                repo=f"{repository[0]}/{repository[1]}" if repository else None,
+                prompt=_event_prompt(record, event, summary),
+                token_repositories=event_token_repositories(
+                    repository[0], repository[1], private=repository[2]
+                )
+                if repository
+                else None,
+            )
+        except Exception:
+            logger.exception("Failed to launch event automation", extra=log_context)
+            await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
+            continue
+        if result.get("status") != "started":
+            logger.error(
+                "Event automation did not start",
+                extra={**log_context, "launch_status": result.get("status")},
             )
             await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
         results.append(result)

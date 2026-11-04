@@ -45,6 +45,12 @@ export type TriggerDraft =
       project: string
       maxRunsPerHour: string
     }
+  | {
+      key: string
+      kind: "event"
+      /** Kept as saved: the dashboard shows event-log triggers but does not edit them. */
+      trigger: Extract<AutomationTriggerConfig, { kind: "event" }>
+    }
 
 let nextKey = 0
 const draftKey = () => `trigger-${++nextKey}`
@@ -108,6 +114,8 @@ export function draftsFor(
         return slackDraft(trigger)
       case "linear":
         return linearDraft(trigger)
+      case "event":
+        return { key: draftKey(), kind: "event", trigger }
     }
   })
 }
@@ -121,6 +129,8 @@ export function draftProblem(draft: TriggerDraft): string | null {
   switch (draft.kind) {
     case "schedule":
       return draft.cron.trim() ? null : "Enter a cron schedule."
+    case "event":
+      return null
     case "github":
       if (!draft.repo) return "Pick the repository whose events run this."
       return draft.events.length === 0 ? "Pick at least one event." : null
@@ -153,6 +163,8 @@ export function toTriggers(
     switch (draft.kind) {
       case "schedule":
         return [{ kind: "schedule", cron: draft.cron.trim() }]
+      case "event":
+        return [draft.trigger]
       case "github":
         return draft.repo
           ? [{ kind: "github", repo: draft.repo, events: draft.events }]
@@ -192,6 +204,7 @@ export function toTriggers(
 export function describeTriggers(schedule: AgentSchedule): string {
   const parts = schedule.triggers.map((trigger) => {
     if (trigger.kind === "schedule") return describeCron(trigger.cron)
+    if (trigger.kind === "event") return describeEventTrigger(trigger)
     const provider = AUTOMATION_EVENT_PROVIDERS[trigger.kind]
     const events: Record<string, string> = provider.events
     const named = trigger.events.map((event) => events[event]).join(", ")
@@ -204,4 +217,12 @@ export function describeTriggers(schedule: AgentSchedule): string {
     return `${provider.label} ${scope}: ${named}`
   })
   return parts.length > 0 ? parts.join(" · ") : "No trigger"
+}
+
+/** E.g. "Events slack: reaction_added". */
+export function describeEventTrigger(
+  trigger: Extract<AutomationTriggerConfig, { kind: "event" }>
+): string {
+  const sources = trigger.sources?.length ? trigger.sources.join(", ") : "any"
+  return `Events ${sources}: ${trigger.event_types.join(", ")}`
 }

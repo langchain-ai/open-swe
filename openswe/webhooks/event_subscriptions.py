@@ -90,11 +90,19 @@ class _GitHubDelivery(BaseModel):
     workflow_run: _GitHubCheck | None = None
 
 
+class _SlackItem(BaseModel):
+    channel: JsonValue = ""
+    ts: JsonValue = ""
+
+
 class _SlackMessage(BaseModel):
     user: JsonValue = ""
     text: JsonValue = ""
     channel: JsonValue = ""
     channel_type: JsonValue = ""
+    reaction: JsonValue = ""
+    # The message a reaction was added to or removed from.
+    item: _SlackItem | None = None
 
     @property
     def user_id(self) -> str:
@@ -102,7 +110,18 @@ class _SlackMessage(BaseModel):
 
     @property
     def channel_id(self) -> str:
-        return self.channel if isinstance(self.channel, str) else ""
+        if isinstance(self.channel, str) and self.channel:
+            return self.channel
+        channel = self.item.channel if self.item else ""
+        return channel if isinstance(channel, str) else ""
+
+    @property
+    def status(self) -> str:
+        """``:emoji: on <ts>`` for a reaction, naming the message it is on."""
+        if not isinstance(self.reaction, str) or not self.reaction:
+            return ""
+        ts = self.item.ts if self.item else ""
+        return f":{self.reaction}: on {ts}" if isinstance(ts, str) and ts else f":{self.reaction}:"
 
     @property
     def message_text(self) -> str:
@@ -234,6 +253,7 @@ class EventSummary(BaseModel):
             event_type=event.event_type,
             target=f"<#{message.channel_id}>" if message.channel_id else "",
             sender=f"<@{message.user_id}>" if message.user_id else "",
+            status=message.status,
             body=message.message_text,
             trusted=event.user_id is not None,
             from_open_swe=bool(own_user) and message.user_id == own_user,

@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import Coroutine
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal, Self
 from urllib.parse import parse_qs
@@ -40,7 +41,8 @@ _DELIVERY_CLAIM_TTL = timedelta(hours=24)
 
 _ROTATED_AT: float | None = None
 _ROTATION_LOCK = asyncio.Lock()
-_POSTHOG_TASKS: set[asyncio.Task[None]] = set()
+# Work an append starts but never waits for: analytics and automation launches.
+_TASKS: set[asyncio.Task[object]] = set()
 
 _INSERT = text(
     f"""
@@ -372,11 +374,30 @@ class EventLog:
         from openswe.analytics.posthog import record_webhook
 
         event = LoggedEvent.model_validate({**row, "payload": payload})
-        task = asyncio.create_task(record_webhook(event))
-        _POSTHOG_TASKS.add(task)
-        task.add_done_callback(_POSTHOG_TASKS.discard)
+        cls._spawn(record_webhook(event))
         await EventSubscription.deliver(event)
+        cls._spawn(cls._launch_automations(event))
         return True
+
+    @staticmethod
+    def _spawn(work: Coroutine[object, object, object]) -> None:
+        task = asyncio.create_task(work)
+        _TASKS.add(task)
+        task.add_done_callback(_TASKS.discard)
+
+    @staticmethod
+    async def _launch_automations(event: LoggedEvent) -> None:
+        """Start the automations ``event`` triggers, off the request that delivered it."""
+        from openswe.schedules.store import launch_event_automations  # noqa: PLC0415
+
+        try:
+            await launch_event_automations(event)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Launching event automations failed",
+                extra={"webhook_source": event.source, "event_delivery_id": event.delivery_id},
+                exc_info=True,
+            )
 
     @classmethod
     async def record_once(
