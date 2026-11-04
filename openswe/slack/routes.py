@@ -28,6 +28,7 @@ from openswe.slack.ask import (
     process_slack_ask,
 )
 from openswe.slack.breakout import BreakoutCommand, process_slack_breakout, process_slack_web
+from openswe.slack.bug_reports import SlackBugReport
 from openswe.slack.channels import DIRECTORY_EVENTS, SlackChannel
 from openswe.slack.dm import CONCIERGE_TS, is_dm_channel
 from openswe.slack.failures import (
@@ -544,6 +545,11 @@ async def slack_webhook(
         # Independent of the handling below: a watched channel's messages fire
         # automations whether or not they address Open SWE.
         background_tasks.add_task(_launch_slack_automations, envelope, channel_context)
+    if channel_context is not None and (
+        bug_report := await SlackBugReport.posted(envelope, channel_context, bot_user_id)
+    ):
+        # Likewise independent: an untagged message there is otherwise ignored below.
+        background_tasks.add_task(bug_report.triage)
 
     if event.type == "code_channel_action":
         action = event.action

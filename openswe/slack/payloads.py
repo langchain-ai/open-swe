@@ -22,6 +22,8 @@ NOISE_SUBTYPES = frozenset(
 _POSTED_SUBTYPES = frozenset(
     {"", "file_share", "thread_broadcast", "bot_message", "message_changed", "me_message"}
 )
+# Message subtypes that are someone posting, as opposed to edits, joins, or deletions.
+_NEW_POST_SUBTYPES = frozenset({"", "bot_message", "file_share"})
 
 
 class SlackPayload(BaseModel):
@@ -136,6 +138,27 @@ class SlackEvent(SlackPayload):
     @property
     def is_from_bot(self) -> bool:
         return self.subtype == "bot_message" or bool(self.bot_id)
+
+    @property
+    def top_level_post(self) -> bool:
+        """Whether this event is a new message posted to a channel, not a reply or an edit."""
+        return (
+            self.type == "message"
+            and self.subtype in _NEW_POST_SUBTYPES
+            and bool(self.ts)
+            and (not self.thread_ts or self.thread_ts == self.ts)
+        )
+
+    @property
+    def shown_text(self) -> str:
+        """The text a message shows, with alert attachments (where bots put their content)."""
+        parts = [self.text or ""]
+        for attachment in self.attachments:
+            for field in ("pretext", "title", "text", "fallback"):
+                value = attachment.get(field)
+                if isinstance(value, str) and value.strip() and value not in parts:
+                    parts.append(value)
+        return "\n".join(part for part in parts if part.strip())
 
 
 class SlackAuthorization(SlackPayload):

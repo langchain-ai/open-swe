@@ -886,6 +886,8 @@ export interface WorkspaceCreate {
   repos?: Array<string>
   slack_channel_ids?: Array<string>
   kitchen_channel_ids?: Array<string>
+  /** Maps a bound non-kitchen channel to the kitchen its bug reports start threads in. */
+  bug_report_kitchens?: Record<string, string>
   setup_script?: string
   update_script?: string
 }
@@ -907,6 +909,8 @@ export interface WorkspaceUpdate {
   repos?: Array<string>
   slack_channel_ids?: Array<string>
   kitchen_channel_ids?: Array<string>
+  /** Replaces every bug report route; when omitted, the routes still valid are kept. */
+  bug_report_kitchens?: Record<string, string>
   setup_script?: string
   update_script?: string
   vcpus?: number | null
@@ -930,6 +934,8 @@ export interface WorkspaceRecord {
   repos: Array<string>
   slack_channel_ids: Array<string>
   kitchen_channel_ids: Array<string>
+  /** Maps a bound non-kitchen channel to the kitchen its bug reports start threads in. */
+  bug_report_kitchens?: Record<string, string>
   setup_script?: string
   update_script?: string
   base_snapshot_id?: string | null

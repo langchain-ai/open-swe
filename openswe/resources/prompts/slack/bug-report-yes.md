@@ -1,0 +1,1 @@
+The author reports something broken or behaving incorrectly: an error, crash, failure, outage, regression, wrong or missing data, or a feature that does not work as documented or as it used to, including asking whether something is broken for others too.

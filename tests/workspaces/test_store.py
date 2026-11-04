@@ -406,8 +406,9 @@ def _fully_populated(now: str) -> Workspace:
         update_script="git pull",
         base_snapshot_id="snap-base",
         repos=["acme/api"],
-        slack_channel_ids=["C0API"],
+        slack_channel_ids=["C0API", "C0ASK"],
         kitchen_channel_ids=["C0API"],
+        bug_report_kitchens={"C0ASK": "C0API"},
         mem_bytes=8 * 1024**3,
         vcpus=4,
         fs_capacity_bytes=128 * 1024**3,
@@ -566,6 +567,41 @@ async def test_kitchen_mode_is_limited_to_bound_channels() -> None:
     assert stored is not None
     assert stored.kitchen_channel_ids == []
     assert not await WORKSPACES.is_kitchen_channel("C0WEB")
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_bug_reports_route_only_to_one_of_the_workspaces_kitchens() -> None:
+    with pytest.raises(ValidationError, match="bug reports route only"):
+        WorkspaceCreate(
+            name="Core",
+            slack_channel_ids=["C0ASK", "C0KITCHEN"],
+            bug_report_kitchens={"C0ASK": "C0KITCHEN"},
+        )
+    created = await WORKSPACES.create(
+        WorkspaceCreate(
+            name="Core",
+            repos=["acme/api"],
+            slack_channel_ids=["C0ASK", "C0KITCHEN"],
+            kitchen_channel_ids=["C0KITCHEN"],
+            bug_report_kitchens={"c0ask": "c0kitchen"},
+        ),
+        "alice",
+    )
+    assert created.bug_report_kitchens == {"C0ASK": "C0KITCHEN"}
+    assert await WORKSPACES.bug_report_kitchen(" c0ask ") == "C0KITCHEN"
+    assert await WORKSPACES.bug_report_kitchen("C0KITCHEN") is None
+
+    with pytest.raises(ValueError, match="bug reports route only"):
+        await WORKSPACES.apply_update(
+            "core", WorkspaceUpdate(bug_report_kitchens={"C0KITCHEN": "C0ASK"})
+        )
+
+    # Bug reports never keep going to a channel that stopped being a kitchen.
+    await WORKSPACES.apply_update("core", WorkspaceUpdate(kitchen_channel_ids=[]))
+    stored = await WORKSPACES.get("core")
+    assert stored is not None
+    assert stored.bug_report_kitchens == {}
+    assert await WORKSPACES.bug_report_kitchen("C0ASK") is None
 
 
 @pytest.mark.usefixtures("registry_db")

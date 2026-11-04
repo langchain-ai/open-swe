@@ -1,0 +1,5 @@
+Bug report from <#{{ channel_id }}>, posted by <@{{ reporter }}>.
+Open SWE's bug report triage judged that message, shown above, to report a bug, so it started this thread in <#{{ kitchen_id }}> and linked it from the original message.
+Handle the report as if <@{{ reporter }}> had posted it here, acting for them.
+Replies in the original thread (`{{ channel_id }}`, timestamp {{ message_ts }}) don't reach this one; reread it with `slack_read_thread_messages` when they matter.
+If it turns out not to report a bug, say so briefly and stop.

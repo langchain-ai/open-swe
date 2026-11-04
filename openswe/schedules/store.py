@@ -1328,19 +1328,6 @@ async def launch_github_issue_automations(
 
 
 _SLACK_FENCE_RE = re.compile(r"<(\s*/?\s*untrusted_slack_message)", re.IGNORECASE)
-# Message subtypes that are someone posting, as opposed to edits, joins, or deletions.
-_SLACK_POST_SUBTYPES = frozenset({"", "bot_message", "file_share"})
-
-
-def _slack_message_text(event: SlackEvent) -> str:
-    """The text a message shows, with alert attachments (where bots put their content)."""
-    parts = [event.text or ""]
-    for attachment in event.attachments:
-        for field in ("pretext", "title", "text", "fallback"):
-            value = attachment.get(field)
-            if isinstance(value, str) and value.strip() and value not in parts:
-                parts.append(value)
-    return "\n".join(part for part in parts if part.strip())
 
 
 def _slack_trigger_fires(
@@ -1421,13 +1408,7 @@ async def launch_slack_automations(
 ) -> list[dict[str, Any]]:
     """Run every automation a posted Slack message triggers, each at most once per message."""
     event = envelope.event
-    if (
-        event is None
-        or event.type != "message"
-        or event.subtype not in _SLACK_POST_SUBTYPES
-        or (event.thread_ts and event.thread_ts != event.ts)
-        or not event.ts
-    ):
+    if event is None or not event.top_level_post:
         return []
     channel_id = event.resolve_channel_id().upper()
     if not _SLACK_TRIGGER_CHANNEL_RE.fullmatch(channel_id) or not channel.allows_operations:
@@ -1444,7 +1425,7 @@ async def launch_slack_automations(
             "WHERE kind = 'slack' AND match_key = :channel)",
             {"channel": channel_id},
         )
-    text = _slack_message_text(event)
+    text = event.shown_text
     results: list[dict[str, Any]] = []
     for record in records:
         schedule_id = record["id"]

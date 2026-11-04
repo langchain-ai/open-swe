@@ -1134,6 +1134,8 @@ async def _process_slack_mention_impl(
     }
     if request.breakout_root_suffix is not None:
         slack_thread_context["breakout_root_suffix"] = request.breakout_root_suffix
+    if request.breakout_root_label is not None:
+        slack_thread_context["breakout_root_label"] = request.breakout_root_label
     if user_timezone:
         slack_thread_context["triggering_user_timezone"] = user_timezone
     if allowed_bot is not None:

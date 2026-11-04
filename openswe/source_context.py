@@ -36,7 +36,9 @@ class SlackThreadRef(BaseModel):
     thread_ts: str = ""
     reply_thread_ts: str = ""
     trace_message_ts: str = ""
+    # A breakout's root reads "<label>: <title><suffix>" once the thread has a title.
     breakout_root_suffix: str | None = None
+    breakout_root_label: str = "`/breakout`"
     triggering_user_id: str = ""
     triggering_user_name: str = ""
     triggering_user_email: str = ""

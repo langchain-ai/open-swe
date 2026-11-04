@@ -12,6 +12,7 @@ module reads these rows, so the record model is imported where it is used
 instead of at module scope.
 """
 
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid7
@@ -94,12 +95,53 @@ class WorkspaceSlackChannelRow(Base):
     workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspace.id", ondelete="CASCADE"))
     # Untagged human messages here start and continue threads.
     kitchen: Mapped[bool] = mapped_column(server_default="false", default=False)
+    # The workspace's kitchen channel that bug reports posted here start threads in.
+    bug_report_kitchen_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workspace_slack_channel.channel_id", ondelete="SET NULL"), default=None
+    )
     linked_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
-def to_workspace(
-    row: WorkspaceRow, repos: list[str], channels: list[str], kitchen_channels: list[str]
-) -> Workspace:
+@dataclass
+class ChannelBindings:
+    """A workspace's Slack channels, which are kitchens, and where the rest send bug reports."""
+
+    channels: list[str] = field(default_factory=list)
+    kitchen: list[str] = field(default_factory=list)
+    bug_report_kitchens: dict[str, str] = field(default_factory=dict)
+
+    def add(self, channel_id: str, *, kitchen: bool, bug_report_kitchen_id: str | None) -> None:
+        """Take in one bound channel as its row stores it."""
+        self.channels.append(channel_id)
+        if kitchen:
+            self.kitchen.append(channel_id)
+        if bug_report_kitchen_id:
+            self.bug_report_kitchens[channel_id] = bug_report_kitchen_id
+
+    def unroutable(self) -> list[str]:
+        """Channels sending bug reports somewhere they can't go.
+
+        Only a bound channel that is not a kitchen routes them, and only to one
+        of these kitchens: a kitchen already starts a thread for every message.
+        """
+        return [
+            channel
+            for channel, kitchen in self.bug_report_kitchens.items()
+            if channel not in self.channels
+            or channel in self.kitchen
+            or kitchen not in self.kitchen
+        ]
+
+    def require_routable(self) -> None:
+        """Raise when a channel sends bug reports somewhere they can't go."""
+        if unroutable := self.unroutable():
+            raise ValueError(
+                "bug reports route only from a bound channel that is not a kitchen to one of "
+                "this workspace's kitchen channels: " + ", ".join(unroutable)
+            )
+
+
+def to_workspace(row: WorkspaceRow, repos: list[str], channels: ChannelBindings) -> Workspace:
     """The record this row stores, with the bindings that route to it.
 
     Validated on the way out: the columns are typed, but ``create_params`` and
@@ -117,8 +159,9 @@ def to_workspace(
             "update_script": row.update_script,
             "base_snapshot_id": row.base_snapshot_id,
             "repos": repos,
-            "slack_channel_ids": channels,
-            "kitchen_channel_ids": kitchen_channels,
+            "slack_channel_ids": channels.channels,
+            "kitchen_channel_ids": channels.kitchen,
+            "bug_report_kitchens": channels.bug_report_kitchens,
             "mem_bytes": row.mem_bytes,
             "vcpus": row.vcpus,
             "fs_capacity_bytes": row.fs_capacity_bytes,

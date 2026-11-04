@@ -380,6 +380,7 @@ describe("WorkspaceSettingsPanel", () => {
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
         kitchen_channel_ids: [],
+        bug_report_kitchens: {},
         prompt: "Run make test.",
       })
     )
@@ -389,6 +390,56 @@ describe("WorkspaceSettingsPanel", () => {
       ).toBe("OSS support")
     )
     expect(screen.queryByRole("status")).toBeNull()
+  })
+
+  it("drops the bug report routes to a channel that stops being a kitchen", async () => {
+    mockApis({
+      ...RECORD,
+      slack_channel_ids: ["C1", "C2"],
+      kitchen_channel_ids: ["C2"],
+      bug_report_kitchens: { C1: "C2" },
+    })
+    vi.mocked(api.listSlackChannels).mockResolvedValue({
+      channels: ["oss-help", "oss-kitchen"].map((name, index) => ({
+        id: `C${index + 1}`,
+        name,
+        is_private: false,
+        is_member: true,
+        is_ext_shared: false,
+        num_members: 3,
+      })),
+      refreshing: false,
+    })
+    const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue(RECORD)
+    renderPage()
+
+    const route = await screen.findByRole("combobox", {
+      name: "Bug reports for #oss-help",
+    })
+    expect(route.textContent).toContain("#oss-kitchen")
+    const kitchen = screen.getByRole("switch", {
+      name: "Kitchen mode for #oss-kitchen",
+    })
+    fireEvent.click(kitchen)
+    expect(
+      screen.queryByRole("combobox", { name: "Bug reports for #oss-help" })
+    ).toBeNull()
+    fireEvent.click(kitchen)
+    expect(
+      screen.getByRole("combobox", { name: "Bug reports for #oss-help" })
+        .textContent
+    ).toContain("Off")
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith(
+        "oss",
+        expect.objectContaining({
+          kitchen_channel_ids: ["C2"],
+          bug_report_kitchens: {},
+        })
+      )
+    )
   })
 
   it.each([

@@ -8986,6 +8986,13 @@
             ],
             "title": "Base Snapshot Id"
           },
+          "bug_report_kitchens": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Bug Report Kitchens",
+            "type": "object"
+          },
           "create_params": {
             "additionalProperties": {
               "$ref": "#/components/schemas/pydantic__types__JsonValue"
@@ -9297,6 +9304,13 @@
               }
             ],
             "title": "Base Snapshot Id"
+          },
+          "bug_report_kitchens": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Bug Report Kitchens",
+            "type": "object"
           },
           "create_params": {
             "additionalProperties": {
@@ -9933,6 +9947,20 @@
               }
             ],
             "title": "Base Snapshot Id"
+          },
+          "bug_report_kitchens": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bug Report Kitchens"
           },
           "create_params": {
             "anyOf": [

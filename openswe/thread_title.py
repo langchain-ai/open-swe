@@ -159,7 +159,7 @@ async def generate_and_store_thread_title(
                 and ref.breakout_root_suffix is not None
             ):
                 try:
-                    root_text = f"`/breakout`: {title}{ref.breakout_root_suffix}"
+                    root_text = f"{ref.breakout_root_label}: {title}{ref.breakout_root_suffix}"
                     await update_slack_message(
                         *ref.location,
                         append_slack_web_link_footer(root_text, dashboard_thread_url(thread_id)),

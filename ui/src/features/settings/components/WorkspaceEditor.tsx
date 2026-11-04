@@ -2,6 +2,7 @@ import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import type { ReactNode } from "react"
 import { Input } from "@langchain/macaw-components/Input"
 import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Select } from "@langchain/macaw-components/Select"
 import { Switch } from "@langchain/macaw-components/Switch"
 import { QuestionIcon } from "@phosphor-icons/react/dist/ssr/Question"
 
@@ -84,6 +85,8 @@ export interface WorkspaceDraft {
   repos: Array<string>
   slackChannelIds: Array<string>
   kitchenChannelIds: Array<string>
+  /** Maps a bound non-kitchen channel to the kitchen its bug reports start threads in. */
+  bugReportKitchens: Record<string, string>
   prompt: string
   setupScript: string
   updateScript: string
@@ -95,6 +98,7 @@ export function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
     repos: workspace.repos,
     slackChannelIds: workspace.slack_channel_ids,
     kitchenChannelIds: workspace.kitchen_channel_ids,
+    bugReportKitchens: workspace.bug_report_kitchens ?? {},
     prompt: workspace.prompt,
     setupScript: "",
     updateScript: "",
@@ -106,10 +110,13 @@ export const EMPTY_DRAFT: WorkspaceDraft = {
   repos: [],
   slackChannelIds: [],
   kitchenChannelIds: [],
+  bugReportKitchens: {},
   prompt: "",
   setupScript: "",
   updateScript: "",
 }
+
+const BUG_REPORTS_OFF = "off"
 
 function SlackChannelRows({
   draft,
@@ -121,12 +128,19 @@ function SlackChannelRows({
   channelLabel: (id: string) => string
 }) {
   const kitchen = new Set(draft.kitchenChannelIds)
+  const bugReportOptions = [
+    { value: BUG_REPORTS_OFF, label: "Off" },
+    ...draft.kitchenChannelIds.map((id) => ({
+      value: id,
+      label: channelLabel(id),
+    })),
+  ]
   return (
     <ul className="w-full divide-y divide-default rounded-md border border-default">
       {draft.slackChannelIds.map((id) => (
         <li
           key={id}
-          className="flex items-center justify-between gap-space-3 px-space-2 py-space-1"
+          className="flex flex-wrap items-center justify-between gap-x-space-3 gap-y-space-1 px-space-2 py-space-1"
         >
           <MacawLink
             variant="xs"
@@ -140,18 +154,46 @@ function SlackChannelRows({
           >
             {channelLabel(id)}
           </MacawLink>
-          <label className="flex shrink-0 items-center gap-space-2 text-xs text-secondary">
-            Kitchen
-            <Switch
-              aria-label={`Kitchen mode for ${channelLabel(id)}`}
-              checked={kitchen.has(id)}
-              onChange={(on) => {
-                if (on) kitchen.add(id)
-                else kitchen.delete(id)
-                onChange({ ...draft, kitchenChannelIds: [...kitchen].sort() })
-              }}
-            />
-          </label>
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-x-space-3 gap-y-space-1">
+            {!kitchen.has(id) && kitchen.size > 0 && (
+              <label className="flex items-center gap-space-1 text-xs text-secondary">
+                Bug reports
+                <Select
+                  variant="plain"
+                  size="xs"
+                  align="end"
+                  aria-label={`Bug reports for ${channelLabel(id)}`}
+                  options={bugReportOptions}
+                  value={draft.bugReportKitchens[id] ?? BUG_REPORTS_OFF}
+                  onChange={(target) => {
+                    const routes = new Map(
+                      Object.entries(draft.bugReportKitchens)
+                    )
+                    if (target && target !== BUG_REPORTS_OFF)
+                      routes.set(id, target)
+                    else routes.delete(id)
+                    onChange({
+                      ...draft,
+                      bugReportKitchens: Object.fromEntries(routes),
+                    })
+                  }}
+                  triggerClassName="max-w-48"
+                />
+              </label>
+            )}
+            <label className="flex shrink-0 items-center gap-space-2 text-xs text-secondary">
+              Kitchen
+              <Switch
+                aria-label={`Kitchen mode for ${channelLabel(id)}`}
+                checked={kitchen.has(id)}
+                onChange={(on) => {
+                  if (on) kitchen.add(id)
+                  else kitchen.delete(id)
+                  onChange({ ...draft, kitchenChannelIds: [...kitchen].sort() })
+                }}
+              />
+            </label>
+          </div>
         </li>
       ))}
     </ul>
@@ -174,6 +216,23 @@ export function WorkspaceEditor({
   workspaces: Array<WorkspaceOption>
   channelLabel: (id: string) => string
 }) {
+  const onChannelsChange = (next: WorkspaceDraft) => {
+    const kitchens = next.kitchenChannelIds.filter((id) =>
+      next.slackChannelIds.includes(id)
+    )
+    onChange({
+      ...next,
+      kitchenChannelIds: kitchens,
+      bugReportKitchens: Object.fromEntries(
+        next.slackChannelIds.flatMap((id) => {
+          const kitchen = next.bugReportKitchens[id]
+          return kitchen && kitchens.includes(kitchen) && !kitchens.includes(id)
+            ? [[id, kitchen] as const]
+            : []
+        })
+      ),
+    })
+  }
   return (
     <div className="space-y-space-3 border-t border-default px-space-4 py-space-3 text-primary">
       <Input
@@ -218,7 +277,10 @@ export function WorkspaceEditor({
           <HelpTooltip label="About kitchen channels">
             Mentions in these channels start runs in this workspace. Turn on
             Kitchen for a channel to let every top-level message start a thread
-            and replies continue it without mentioning Open SWE.
+            and replies continue it without mentioning Open SWE. For any other
+            channel, pick a kitchen under Bug reports: Open SWE reads each new
+            top-level message there and starts a thread in that kitchen for
+            every bug report.
           </HelpTooltip>
         </span>
         <div
@@ -229,7 +291,7 @@ export function WorkspaceEditor({
           {draft.slackChannelIds.length > 0 ? (
             <SlackChannelRows
               draft={draft}
-              onChange={onChange}
+              onChange={onChannelsChange}
               channelLabel={channelLabel}
             />
           ) : (
@@ -240,13 +302,7 @@ export function WorkspaceEditor({
           <SlackChannelPicker
             selected={draft.slackChannelIds}
             onChange={(slackChannelIds) =>
-              onChange({
-                ...draft,
-                slackChannelIds,
-                kitchenChannelIds: draft.kitchenChannelIds.filter((id) =>
-                  slackChannelIds.includes(id)
-                ),
-              })
+              onChannelsChange({ ...draft, slackChannelIds })
             }
             workspaceSlug={workspaceSlug}
             workspaces={workspaces}

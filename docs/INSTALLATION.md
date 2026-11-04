@@ -432,6 +432,11 @@ When they are unset the link is simply hidden.
 Admins turn kitchen mode on per channel in the workspace editor (**Workspaces → edit workspace → Slack channels**); a channel must be bound to a workspace to be a kitchen channel, and Open SWE must have joined it.
 In a kitchen channel, a top-level human message starts a new agent thread and replies continue it without tagging Open SWE; ordinary untagged replies queue behind an active run.
 Other channels still require mentions.
+
+**Bug report routing.**
+In the same editor, pick one of the workspace's kitchens under **Bug reports** for any other bound channel, such as a team's help channel.
+Open SWE then classifies each new top-level message posted there with TypeSafe's System One model (through the LangSmith gateway key), and for each bug report starts a thread in that kitchen, acting for the reporter, and links it from the original message.
+Both channels must be public and joined by Open SWE.
 To enable private channels, update the Slack app with the current manifest and reinstall it so Slack sends the `message.groups` event (the base manifest already includes the `groups:history` scope).
 
 Existing Slack app installations must update their event subscriptions; saving the dashboard setting alone does not change them.
