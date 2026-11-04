@@ -15,10 +15,14 @@ Two things move a thread: the agent's ``slack_move_thread`` tool, and a person's
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
+from functools import partial
 from typing import Final
 
 from langchain.agents.middleware.types import AgentMiddleware, AgentState, hook_config
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain.tools import ToolRuntime
+from langchain_core.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
+from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
@@ -77,6 +81,30 @@ class SlackMoveMiddleware(AgentMiddleware):
             return await handler(request)
         return ToolMessage(
             content=json.dumps(result), tool_call_id=call_["id"] or "", name=MOVE_TOOL
+        )
+
+    def code_tool(self, tool: BaseTool) -> StructuredTool:
+        """``tool`` as code mode calls it: through this middleware, as the model's own call.
+
+        Code mode calls its tools directly, past every ``awrap_tool_call``; without this a
+        move from code takes the backend's move, which hands no thread to the new Slack
+        thread, so the conversation's later messages there can't run.
+        """
+
+        async def run(runtime: ToolRuntime, **arguments: JsonValue) -> ToolMessage | Command:
+            call_ = ToolCall(
+                name=tool.name, args=arguments, id=runtime.tool_call_id, type="tool_call"
+            )
+            request = ToolCallRequest(
+                tool_call=call_, tool=tool, state=runtime.state, runtime=runtime
+            )
+            return await self.awrap_tool_call(request, partial(_invoked, tool))
+
+        return StructuredTool.from_function(
+            coroutine=run,
+            name=tool.name,
+            description=tool.description,
+            args_schema=convert_to_openai_tool(tool)["function"]["parameters"],
         )
 
     @hook_config(can_jump_to=["end"])
@@ -150,6 +178,22 @@ class SlackMoveMiddleware(AgentMiddleware):
             ),
         )
         return moved.result
+
+
+async def _invoked(tool: BaseTool, request: ToolCallRequest) -> ToolMessage | Command:
+    """``tool``'s own answer to ``request``, as the backend's move gives it."""
+    call_id = request.tool_call.get("id") or ""
+    result = await tool.ainvoke(
+        ToolCall(
+            name=tool.name,
+            args={**request.tool_call["args"], "runtime": request.runtime},
+            id=call_id,
+            type="tool_call",
+        )
+    )
+    if isinstance(result, ToolMessage | Command):
+        return result
+    return ToolMessage(content=str(result), tool_call_id=call_id, name=tool.name)
 
 
 def _slack_channel(runtime: object) -> RuntimeChannel | None:
