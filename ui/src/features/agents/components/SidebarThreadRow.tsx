@@ -233,17 +233,14 @@ function SidebarRowTitle({
 function sidebarRowClassName({
   compact,
   active,
-  paddingLeft,
   archived,
 }: {
   compact: boolean
   active: boolean
-  paddingLeft: string
   archived: boolean
 }): string {
   return cn(
     "relative flex items-center gap-space-2 rounded-lg pr-space-2 transition-colors",
-    paddingLeft,
     // Only ever on screen while "Show archived" is on; without this an
     // archived row is indistinguishable from a live one.
     archived && "opacity-55",
@@ -308,6 +305,95 @@ function PullRequestIcon({
   )
 }
 
+const TREE_STEP = 20
+
+/** Left padding of a row `depth` levels below a top-level thread. */
+function rowInset(indent: boolean, depth: number): React.CSSProperties {
+  return { paddingLeft: (indent ? 16 : 8) + depth * TREE_STEP }
+}
+
+function DisclosureCaret({
+  expanded,
+  label,
+  onToggle,
+}: {
+  expanded: boolean
+  label: string
+  onToggle: () => void
+}) {
+  const Caret = expanded ? CaretDownIcon : CaretRightIcon
+  const toggle = (event: React.SyntheticEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onToggle()
+  }
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      aria-expanded={expanded}
+      aria-label={label}
+      title={label}
+      onClick={toggle}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") toggle(event)
+      }}
+      className="-mx-space-1 flex size-4 shrink-0 items-center justify-center text-tertiary transition-colors hover:text-primary"
+    >
+      <Caret size={10} weight="fill" />
+    </span>
+  )
+}
+
+/**
+ * Children of a sidebar row, joined to their parent by a guide line that
+ * runs down from under the parent's title and curves into each child.
+ */
+function SidebarTree({
+  label,
+  indent,
+  depth,
+  compact,
+  children,
+}: {
+  label: string
+  indent: boolean
+  depth: number
+  compact: boolean
+  children: React.ReactNode
+}) {
+  const guide = (indent ? 16 : 8) + (depth - 1) * TREE_STEP + 6
+  return (
+    <ul
+      aria-label={label}
+      style={
+        {
+          "--tree-x": `${guide}px`,
+          "--tree-mid": compact ? "14px" : "16px",
+        } as React.CSSProperties
+      }
+    >
+      {children}
+    </ul>
+  )
+}
+
+/** The guide line for one `SidebarTree` child; render it last in the `li`. */
+function TreeBranch() {
+  return (
+    <>
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -top-0.5 left-(--tree-x) h-[calc(var(--tree-mid)+2px)] w-2.5 rounded-bl-md border-b border-l border-default"
+      />
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -top-0.5 -bottom-0.5 left-(--tree-x) border-l border-default [:last-child>&]:hidden"
+      />
+    </>
+  )
+}
+
 export function SidebarThreadRow({
   item,
   isActive,
@@ -316,6 +402,7 @@ export function SidebarThreadRow({
   archived,
   live,
   compact = false,
+  indent = false,
   onNavigate,
   onTogglePin,
   onToggleArchived,
@@ -327,6 +414,8 @@ export function SidebarThreadRow({
   archived: boolean
   live?: PullRequestSnapshot
   compact?: boolean
+  /** Nested under a repository: indent the content, not the highlight box. */
+  indent?: boolean
   onNavigate?: () => void
   onTogglePin: () => void
   onToggleArchived: () => void
@@ -419,66 +508,23 @@ export function SidebarThreadRow({
     onNavigate?.()
   }
 
-  const onToggleSubagents = (event: React.SyntheticEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-    toggleSubagentsCollapsed(item.key)
-  }
-  const SubagentCaret = subagentsCollapsed ? CaretRightIcon : CaretDownIcon
-
   const rowContent = (
     <>
-      <span className="left-space-5 absolute inset-y-0 flex -translate-x-full flex-col justify-center">
-        {hasSubagents && (
-          <span
-            role="button"
-            tabIndex={0}
-            aria-expanded={!subagentsCollapsed}
-            aria-label={
-              subagentsCollapsed ? "Show subagents" : "Hide subagents"
-            }
-            title={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
-            onClick={onToggleSubagents}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ")
-                onToggleSubagents(event)
-            }}
-            className="flex max-h-5 min-h-0 w-4 flex-1 items-center justify-center text-tertiary transition-colors hover:text-primary"
-          >
-            <SubagentCaret size={12} weight="bold" />
-          </span>
-        )}
-        {workers.length > 0 && (
-          <span
-            role="button"
-            tabIndex={0}
-            aria-expanded={workersExpanded}
-            aria-label={
-              workersExpanded ? "Hide task workers" : "Show task workers"
-            }
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              setWorkersExpanded((expanded) => !expanded)
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault()
-                event.stopPropagation()
-                setWorkersExpanded((expanded) => !expanded)
-              }
-            }}
-            className="flex max-h-5 min-h-0 w-4 flex-1 items-center justify-center text-tertiary transition-colors hover:text-primary"
-          >
-            {workersExpanded ? (
-              <CaretDownIcon size={12} weight="bold" />
-            ) : (
-              <CaretRightIcon size={12} weight="bold" />
-            )}
-          </span>
-        )}
-      </span>
       <SidebarRowTitle marquee={marquee} title={item.title} />
+      {hasSubagents && (
+        <DisclosureCaret
+          expanded={!subagentsCollapsed}
+          label={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
+          onToggle={() => toggleSubagentsCollapsed(item.key)}
+        />
+      )}
+      {workers.length > 0 && (
+        <DisclosureCaret
+          expanded={workersExpanded}
+          label={workersExpanded ? "Hide task workers" : "Show task workers"}
+          onToggle={() => setWorkersExpanded((expanded) => !expanded)}
+        />
+      )}
 
       <span className="flex shrink-0 items-center gap-space-2 group-hover/row:hidden">
         {item.status === "error" && <ErrorIndicator label="Thread error" />}
@@ -551,7 +597,6 @@ export function SidebarThreadRow({
   const rowClassName = sidebarRowClassName({
     compact,
     active: rowIsActive,
-    paddingLeft: "pl-space-5",
     archived,
   })
 
@@ -565,6 +610,7 @@ export function SidebarThreadRow({
       }}
       onKeyDown={openContextMenuFromKeyboard}
       className={rowClassName}
+      style={rowInset(indent, 0)}
     >
       {rowContent}
     </Link>
@@ -575,6 +621,7 @@ export function SidebarThreadRow({
       onClick={handleNavigate}
       onKeyDown={openContextMenuFromKeyboard}
       className={rowClassName}
+      style={rowInset(indent, 0)}
     >
       {rowContent}
     </Link>
@@ -613,7 +660,12 @@ export function SidebarThreadRow({
         </ContextMenuContent>
       </ContextMenu>
       {hasSubagents && !subagentsCollapsed && (
-        <ul aria-label={`Subagents of ${item.title}`}>
+        <SidebarTree
+          label={`Subagents of ${item.title}`}
+          indent={indent}
+          depth={1}
+          compact={compact}
+        >
           {subagents.map((subagent) => (
             <SidebarSubagentRow
               key={subagent.toolCallId}
@@ -621,13 +673,20 @@ export function SidebarThreadRow({
               subagent={subagent}
               isActive={activeSubagent === subagent.toolCallId}
               compact={compact}
+              indent={indent}
+              depth={1}
               onNavigate={onNavigate}
             />
           ))}
-        </ul>
+        </SidebarTree>
       )}
       {workers.length > 0 && workersExpanded && (
-        <ul aria-label={`Task workers of ${item.title}`}>
+        <SidebarTree
+          label={`Task workers of ${item.title}`}
+          indent={indent}
+          depth={1}
+          compact={compact}
+        >
           {workers.map((worker) => (
             <SidebarTaskWorkerRow
               key={worker.id}
@@ -635,10 +694,11 @@ export function SidebarThreadRow({
               activeSubagentId={activeSubagentId}
               isActive={worker.id === activeThreadId}
               compact={compact}
+              indent={indent}
               onNavigate={onNavigate}
             />
           ))}
-        </ul>
+        </SidebarTree>
       )}
       {renameOpen && (
         <RenameThreadDialog
@@ -675,15 +735,17 @@ function SidebarSubagentRow({
   threadId,
   subagent,
   isActive,
-  nested = false,
   compact,
+  indent,
+  depth,
   onNavigate,
 }: {
   threadId: string
   subagent: AgentSubagentSummary
   isActive: boolean
-  nested?: boolean
   compact: boolean
+  indent: boolean
+  depth: number
   onNavigate?: () => void
 }) {
   const marquee = useTitleMarquee()
@@ -697,9 +759,9 @@ function SidebarSubagentRow({
       className={sidebarRowClassName({
         compact,
         active: isActive,
-        paddingLeft: nested ? "pl-space-9" : "pl-space-7",
         archived: false,
       })}
+      style={rowInset(indent, depth)}
     >
       <SidebarRowTitle marquee={marquee} title={subagent.title} />
       <span className="flex shrink-0 items-center gap-space-2">
@@ -723,6 +785,7 @@ function SidebarSubagentRow({
         trigger={link}
         card={<SubagentHoverCard subagent={subagent} />}
       />
+      <TreeBranch />
     </li>
   )
 }
@@ -849,12 +912,14 @@ function SidebarTaskWorkerRow({
   activeSubagentId,
   isActive,
   compact,
+  indent,
   onNavigate,
 }: {
   worker: AgentThread
   activeSubagentId: string | null
   isActive: boolean
   compact: boolean
+  indent: boolean
   onNavigate?: () => void
 }) {
   const queryClient = useQueryClient()
@@ -870,7 +935,6 @@ function SidebarTaskWorkerRow({
     `cloud:${worker.id}`
   )
   const rowIsActive = isActive && (!activeSubagent || subagentsCollapsed)
-  const SubagentCaret = subagentsCollapsed ? CaretRightIcon : CaretDownIcon
   const status =
     worker.status === "finished"
       ? "Completed"
@@ -900,44 +964,22 @@ function SidebarTaskWorkerRow({
         className={sidebarRowClassName({
           compact,
           active: rowIsActive,
-          paddingLeft: "pl-space-7",
           archived: worker.resolved === true,
         })}
+        style={rowInset(indent, 1)}
       >
+        <SidebarRowTitle marquee={marquee} title={worker.title} />
         {subagents.length > 0 && (
-          <span
-            role="button"
-            tabIndex={0}
-            aria-expanded={!subagentsCollapsed}
-            aria-label={
+          <DisclosureCaret
+            expanded={!subagentsCollapsed}
+            label={
               subagentsCollapsed
                 ? "Show worker subagents"
                 : "Hide worker subagents"
             }
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              toggleSubagentsCollapsed(`cloud:${worker.id}`)
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault()
-                event.stopPropagation()
-                toggleSubagentsCollapsed(`cloud:${worker.id}`)
-              }
-            }}
-            className="absolute top-1/2 flex h-5 w-4 -translate-x-full -translate-y-1/2 items-center justify-center text-tertiary transition-colors hover:text-primary"
-          >
-            <SubagentCaret size={12} weight="bold" />
-          </span>
+            onToggle={() => toggleSubagentsCollapsed(`cloud:${worker.id}`)}
+          />
         )}
-        <RobotIcon
-          size={ICON_SIZE}
-          weight="regular"
-          className="shrink-0 text-icon-secondary"
-          aria-label="Asynchronous task worker"
-        />
-        <SidebarRowTitle marquee={marquee} title={worker.title} />
         <span className="flex shrink-0 items-center gap-space-1 text-xxs text-secondary">
           {worker.status === "running" && (
             <RunningIndicator label="Worker running" />
@@ -949,7 +991,12 @@ function SidebarTaskWorkerRow({
         </span>
       </Link>
       {subagents.length > 0 && !subagentsCollapsed && (
-        <ul aria-label={`Subagents of ${worker.title}`}>
+        <SidebarTree
+          label={`Subagents of ${worker.title}`}
+          indent={indent}
+          depth={2}
+          compact={compact}
+        >
           {subagents.map((subagent) => (
             <SidebarSubagentRow
               key={subagent.toolCallId}
@@ -957,12 +1004,14 @@ function SidebarTaskWorkerRow({
               subagent={subagent}
               isActive={isActive && activeSubagentId === subagent.toolCallId}
               compact={compact}
-              nested
+              indent={indent}
+              depth={2}
               onNavigate={onNavigate}
             />
           ))}
-        </ul>
+        </SidebarTree>
       )}
+      <TreeBranch />
     </li>
   )
 }

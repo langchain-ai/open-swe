@@ -712,7 +712,7 @@ export function AgentsSidebar({
           : undefined
       }
       renderRow={(item, live) => (
-        <SidebarThreadRow key={item.key} {...rowProps(item, live)} />
+        <SidebarThreadRow key={item.key} {...rowProps(item, live)} indent />
       )}
     />
   )
