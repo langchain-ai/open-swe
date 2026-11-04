@@ -117,10 +117,10 @@ async def _dispatch_or_queue_slack_run(
     run_input: RunInput | list[dict[str, Any]],
     configurable: dict[str, Any],
     *,
-    explicitly_tagged: bool,
+    interrupt_active_run: bool,
     trigger_ts: str,
 ) -> dict[str, Any]:
-    """Dispatch explicit requests immediately and enqueue other Slack follow-ups."""
+    """Dispatch Slack turns using their channel's interruption policy."""
     if isinstance(run_input, list):
         run_input = {"messages": cast(list[Any], run_input)}
     return as_json_object(
@@ -136,7 +136,7 @@ async def _dispatch_or_queue_slack_run(
                 **({} if configurable.get("source") == "web" else {"slack_trigger_ts": trigger_ts}),
             },
             client=client,
-            multitask_strategy="interrupt" if explicitly_tagged else "enqueue",
+            multitask_strategy="interrupt" if interrupt_active_run else "enqueue",
         )
     )
 
@@ -1189,16 +1189,18 @@ async def _process_slack_mention_impl(
         and is_dm_channel(channel_context)
         else None
     )
-    dm_origin_section = (
-        prompt(
+    dm_origin_section = ""
+    if dm_origin is not None:
+        origin_permalink, origin_thread_id = await asyncio.gather(
+            slack_utils.get_slack_permalink(*dm_origin.location),
+            common.lookup_slack_thread_id(*dm_origin.location),
+        )
+        dm_origin_section = prompt(
             "slack/dm-origin",
             origin=dm_origin,
-            permalink=await slack_utils.get_slack_permalink(*dm_origin.location) or "",
-            agent_thread_id=await common.lookup_slack_thread_id(*dm_origin.location) or "",
+            permalink=origin_permalink or "",
+            agent_thread_id=origin_thread_id or "",
         )
-        if dm_origin is not None
-        else ""
-    )
     turn_context = "\n\n".join(
         section
         for section in (
@@ -1328,13 +1330,13 @@ async def _process_slack_mention_impl(
     # thing they type to redirect the work in front of them rather than queue
     # behind it. A review guide's turns wait instead: interrupting one mid-post
     # loses the chunk it was showing.
-    explicitly_tagged = not review_guide and (
+    interrupt_active_run = not review_guide and (
         concierge_mode
+        or request.kitchen_channel
         or _interrupts_active_run(
             text,
             bot_user_id,
-            treat_all_messages_as_mentions=treat_all_messages_as_mentions
-            and not request.kitchen_channel,
+            treat_all_messages_as_mentions=treat_all_messages_as_mentions,
             code_channel=code_channel,
             message_update=message_update,
             explicit_request=request.explicit_request or performance_command,
@@ -1398,7 +1400,7 @@ async def _process_slack_mention_impl(
             thread_id,
             run_input,
             configurable,
-            explicitly_tagged=explicitly_tagged,
+            interrupt_active_run=interrupt_active_run,
             trigger_ts=event_ts,
         )
     except Exception:

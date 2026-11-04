@@ -5,7 +5,6 @@ import { Button } from "@langchain/macaw-components/Button"
 import { Card } from "@langchain/macaw-components/Card"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Text } from "@langchain/macaw-components/Text"
-import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 
 import { LogoMark } from "@/components/Branding"
 import { loginUrl } from "@/lib/api"
@@ -67,30 +66,17 @@ function Login() {
             {`Sign in to ${appDistribution.name}`}
           </Text>
         </div>
-        {appDistribution.isDesktop && (
-          <Button
-            as={<a href={loginUrl(intendedPath, "langsmith")} />}
-            size="md"
-            className="w-full"
-          >
-            Continue with LangSmith
-          </Button>
-        )}
         <Button
-          as={<a href={loginUrl(intendedPath, "github")} />}
+          as={<a href={loginUrl(intendedPath)} />}
           size="md"
-          color={appDistribution.isDesktop ? "secondary" : "primary"}
-          leftDecorator={GithubLogoIcon}
           className="w-full"
         >
-          Continue with GitHub
+          Continue with LangSmith
         </Button>
-        {appDistribution.isDesktop && (
-          <Text as="p" variant="sm" color="secondary">
-            LangSmith and GitHub sign-ins use separate accounts. Use the same
-            provider to return to your existing chats.
-          </Text>
-        )}
+        <Text as="p" variant="sm" color="secondary">
+          Link your GitHub account after signing in to use coding features and
+          return to your existing coding threads.
+        </Text>
       </Card>
     </main>
   )

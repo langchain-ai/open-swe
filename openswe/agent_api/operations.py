@@ -20,6 +20,7 @@ from langgraph.prebuilt import InjectedState
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from pydantic import JsonValue, TypeAdapter
+from runtime_api.mcp_secrets import HELD_SESSIONS, Sessions
 from runtime_api.operations import OperationResult, RunOperation
 
 from openswe.agent_api.connections import carrying
@@ -216,5 +217,12 @@ class Operation:
             result = self._result(outcome)
             return result.model_copy(update={"pull_requests": pull_requests})
 
-        result = await in_graph_context({**config, "run_name": request.name}, run, events=events)
-        return result.model_copy(update={"events": [jsonable(e) for e in events]})
+        held: Sessions = {}
+        token = HELD_SESSIONS.set(held)
+        try:
+            result = await in_graph_context(
+                {**config, "run_name": request.name}, run, events=events
+            )
+        finally:
+            HELD_SESSIONS.reset(token)
+        return result.model_copy(update={"events": [jsonable(e) for e in events], "sessions": held})

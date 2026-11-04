@@ -76,7 +76,7 @@ class _GitHub:
         self.readiness.snapshot.approved_review_ids = frozenset(self.approved)
         return self.readiness
 
-    async def _files(self, *_: object) -> list[ChangedFile]:
+    async def _files(self, *_: object, **__: object) -> list[ChangedFile]:
         return self.files
 
     async def _pull(self, *_: object) -> dict[str, Any]:

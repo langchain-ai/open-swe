@@ -1,4 +1,3 @@
-import { desktopExperience, useDesktopExperience } from "@/lib/experience"
 import { MagnifyingGlassRegularIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import {
@@ -130,10 +129,8 @@ export function AppCommandPalette({
     const timer = window.setTimeout(() => setDebouncedQuery(threadQuery), 180)
     return () => window.clearTimeout(timer)
   }, [open, threadQuery])
-  const { experience } = useDesktopExperience()
   const cloudThreads = useInfiniteThreadsPages(
     {
-      experience,
       limit: 20,
       q: debouncedQuery || undefined,
       scope: prReference ? "all" : "interactive",
@@ -142,20 +139,17 @@ export function AppCommandPalette({
   )
   const pullRequests = usePullRequestSearch(
     query,
-    open && !actionsOnly && !prReference && experience !== "agent_workspace"
+    open && !actionsOnly && !prReference
   )
   const results: Array<PaletteResult> = [
     ...buildPaletteResults(
       commands,
       debouncedQuery === threadQuery
-        ? desktopExperience.filter(
-            cloudThreads.data?.pages.flatMap((page) => page.items) ?? [],
-            experience
-          )
+        ? (cloudThreads.data?.pages.flatMap((page) => page.items) ?? [])
         : [],
       query
     ),
-    ...(prReference && experience !== "agent_workspace"
+    ...(prReference
       ? [
           {
             id: `pr:${prReference.owner}/${prReference.repo}#${prReference.number}`,
@@ -168,7 +162,7 @@ export function AppCommandPalette({
           },
         ]
       : []),
-    ...(open && !actionsOnly && !prReference && experience !== "agent_workspace"
+    ...(open && !actionsOnly && !prReference
       ? (pullRequests.data?.pages.flatMap((page) =>
           page.pull_requests.map((pr): PullRequestResult => ({
             id: `pr:${pr.repo}#${pr.number}`,

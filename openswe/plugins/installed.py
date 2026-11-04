@@ -173,6 +173,8 @@ class InstalledPlugin:
         chat = await self.chats.by_id(chat_id)
         if chat is None:
             raise PluginChatNotFound
+        if chat.repository is not None:
+            await self.repository(chat.repository)
         return chat
 
     def tool(self, name: str, description: str, parameters: JsonObject) -> ClientToolSpec:

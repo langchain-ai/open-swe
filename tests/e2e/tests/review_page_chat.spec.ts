@@ -197,6 +197,91 @@ test.describe("review page", () => {
     expect(pillBox!.x + pillBox!.width).toBeLessThanOrEqual(titleBox!.x);
   });
 
+  test("edits descriptions, cancels drafts, and keeps failed saves retryable", async ({
+    page,
+  }) => {
+    await openReview(page, pr);
+    const description = page.getByRole("article", {
+      name: "Description",
+      exact: true,
+    });
+    const edit = description.getByRole("button", { name: "Edit description" });
+    const input = description.getByRole("textbox", { name: "PR description" });
+    const save = description.getByRole("button", { name: "Save description" });
+    await edit.click();
+    await expect(input).toBeFocused();
+    await expect(description.locator(".view-lines")).toContainText(DESCRIPTION);
+    await expect(save).toBeDisabled();
+    await input.press("ControlOrMeta+f");
+    const find = description.locator(".find-widget");
+    await expect(find).toHaveAttribute("aria-hidden", "false");
+    await page.keyboard.press("Escape");
+    await expect(find).toHaveAttribute("aria-hidden", "true");
+    await expect(input).toBeFocused();
+    await input.focus();
+    await input.press("ControlOrMeta+A");
+    await page.keyboard.insertText("Discard this draft");
+    await description
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
+    await expect(description).toContainText(DESCRIPTION);
+    await edit.click();
+    await expect(description.locator(".view-lines")).toContainText(DESCRIPTION);
+    const updated = "## Updated description\n\nSaved **from the review page**.";
+    await input.focus();
+    await input.press("ControlOrMeta+A");
+    await page.keyboard.insertText(updated);
+    await input.press("Control+Enter");
+    await expect(input).toBeHidden();
+    await expect(
+      description.getByRole("heading", { name: "Updated description" }),
+    ).toBeVisible();
+    await page.reload();
+    await edit.click();
+    await expect(description.locator(".view-lines")).toContainText(
+      "Updated description",
+    );
+    const endpoint = `**${reviewApi(pr, "/description")}`;
+    await page.route(endpoint, (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({
+          detail: "You do not have permission to edit this PR",
+        }),
+      }),
+    );
+    await input.focus();
+    await input.press("ControlOrMeta+A");
+    await page.keyboard.insertText("Retry this draft");
+    await save.click();
+    await expect(description.locator(".view-lines")).toContainText(
+      "Retry this draft",
+    );
+    await expect(
+      page.getByText("Couldn't update description", { exact: true }),
+    ).toBeVisible();
+    await page.unroute(endpoint);
+    await description
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
+    await expect(
+      description.getByRole("heading", { name: "Updated description" }),
+    ).toBeVisible();
+    await edit.click();
+    await input.focus();
+    await input.press("ControlOrMeta+A");
+    await input.press("Backspace");
+    await save.click();
+    await expect(
+      description.getByText("No description.", { exact: true }),
+    ).toBeVisible();
+    await page.reload();
+    await expect(
+      description.getByText("No description.", { exact: true }),
+    ).toBeVisible();
+  });
+
   test("links description references to GitHub without assuming they are pull requests", async ({
     page,
   }) => {
@@ -303,7 +388,7 @@ test.describe("review page", () => {
 
     await openReview(page, pr);
     const guidance = page.getByRole("group", {
-      name: "Requested behavior",
+      name: "Requested changes",
     });
     const request = guidance.getByText(
       "Asked to keep the constants in flat modules",

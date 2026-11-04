@@ -28,13 +28,14 @@ function warmApiRequests(
     let includeResolved = false
     let owned = false
     let includeClaudeCode = true
-    let repoMode = true
+    let includeSlack = true
+    let repoMode = false
     let sortByCreated = true
     try {
       const raw = localStorage.getItem(prefsKey)
       const prefs = raw ? JSON.parse(raw) : null
       const filters = prefs?.filters
-      repoMode = prefs?.organize !== "list"
+      repoMode = prefs?.organize === "repo" || prefs?.organize === "workspace"
       sortByCreated = repoMode && prefs?.sortChats !== "updated"
       if (filters) {
         includeAutomations =
@@ -44,6 +45,7 @@ function warmApiRequests(
         includeResolved = filters.includeResolved === true
         owned = filters.ownedOnly === true
         includeClaudeCode = filters.includeClaudeCode !== false
+        includeSlack = filters.includeSlack !== false
       }
     } catch {
       // An unreadable preference just means the default (false).
@@ -59,6 +61,7 @@ function warmApiRequests(
     if (repoMode) search.set("ownerless", "true")
     if (owned) search.set("owned", "true")
     if (!includeClaudeCode) search.append("exclude_source", "claude_code")
+    if (!includeSlack) search.append("exclude_source", "slack")
     search.set("sort_by", sortByCreated ? "created_at" : "updated_at")
     targets.push(sidebarPath + "?" + search.toString())
   }

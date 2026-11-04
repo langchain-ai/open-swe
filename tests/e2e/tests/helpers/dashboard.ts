@@ -28,9 +28,21 @@ export async function loginAs(
 ) {
   const res = await page.request.post("/control/login", { data: user });
   expect(res.ok()).toBeTruthy();
-  await page.addInitScript((login) => {
-    localStorage.setItem(`open-swe.desktop.experience:${login}`, "coding");
-  }, user.login);
+  await seedRepoSidebar(page);
+}
+
+/** Suites written for the repository-grouped sidebar with its nav links shown. */
+export async function seedRepoSidebar(page: Page) {
+  await page.addInitScript(() => {
+    if (!localStorage.getItem("open-swe.agents.sidebar-prefs"))
+      localStorage.setItem(
+        "open-swe.agents.sidebar-prefs",
+        JSON.stringify({
+          organize: "workspace",
+          hiddenNavItems: ["/agents/bots", "/incidents"],
+        }),
+      );
+  });
 }
 
 // What a message sent while a run is live does. It is the person's saved

@@ -121,7 +121,7 @@ class HumanReviewRequest(Base):
         ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
     diff_fingerprint: Mapped[str] = mapped_column(server_default="", default="")
-    # Hunks the agent left off an expedited card as qualifying under the target repo's APPROVALS.md.
+    # Hunks the agent left off an expedited card as qualifying under the target repo's auto-approve rules.
     excluded_hunks: Mapped[list[ExcludedHunk]] = mapped_column(JSONB, default_factory=list)
     tldr: Mapped[str] = mapped_column(server_default="", default="")
     state: Mapped[RequestState] = mapped_column(Text, default="open")
@@ -222,6 +222,18 @@ class HumanReviewRequest(Base):
     def approvers(self) -> list[str]:
         """GitHub handles of the approvers, for display."""
         return [participant.github_login for participant in self.approvals]
+
+    @property
+    def approval_condition(self) -> str:
+        """What an expedited card asks voters to okay in place of the hunks it hides."""
+        return next(
+            (e["guideline"] for e in self.excluded_hunks if e.get("approval_condition")), ""
+        )
+
+    @property
+    def auto_approved(self) -> str:
+        """What Open SWE's review judged the approval criteria already cover besides the condition."""
+        return next((e["reason"] for e in self.excluded_hunks if e.get("approval_condition")), "")
 
     def participant(self, user_id: UUID) -> HumanReviewParticipant | None:
         return next((p for p in self.participants if p.user_id == user_id), None)

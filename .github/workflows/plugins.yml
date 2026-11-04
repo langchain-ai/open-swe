@@ -6,7 +6,6 @@ on:
   pull_request:
     paths:
       - "plugins/**"
-      - "ui/vendor/macaw/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - ".github/workflows/plugins.yml"

@@ -215,6 +215,12 @@ ENV.var(
     "in; defaults to this backend's own workspace.",
 )
 ENV.var(
+    "MDA_LANGSMITH_PROJECT",
+    "LangSmith project the deployment at MDA_RUNTIME_URL traces its runs into (its "
+    "LANGSMITH_PROJECT, which LangGraph Platform sets to the deployment name); trace links, "
+    "costs, feedback and reviewer evals read runs there. Defaults to LANGSMITH_PROJECT.",
+)
+ENV.var(
     "MDA_SERVICE_SECRET",
     "Secret shared with the MDA deployment at MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): MDA "
     "signs each call its channels make to /linear/channel/* and /github/channel/* with it "
@@ -381,11 +387,6 @@ ENV.var(
     secret=True,
 )
 ENV.var(
-    "LANGSMITH_LOGIN_ORG_ID",
-    "Organization allowed to sign in to Agent Workspace with LangSmith. Unset disables "
-    "LangSmith login without affecting personal LangSmith connections.",
-)
-ENV.var(
     "LMT_TENANT_ID",
     "Optional LangSmith workspace to pin Managed Tools to. Unset uses the workspace each "
     "person chose when connecting LangSmith.",
@@ -408,7 +409,10 @@ ENV.var(
     "`preview` also lets startup drop superseded migration revisions and turns off reviewer auto-assignment.",
 )
 ENV.var(
-    "POSTHOG_API_KEY", "Optional PostHog project API key for server-side usage capture.", default=""
+    "POSTHOG_API_KEY",
+    "Optional PostHog project API key; public by design, it is also served to the dashboard "
+    "for browser capture.",
+    default="",
 )
 ENV.var("POSTHOG_HOST", "PostHog ingestion host.", default="https://us.i.posthog.com")
 ENV.var("DD_ENV", "Shared Datadog and analytics environment.", default="production")

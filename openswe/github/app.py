@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
-import httpx
+import httpx2
 from githubkit.auth import AppAuthStrategy
 from githubkit.exception import RequestError, RequestFailed
 from githubkit_schemas.v2022_11_28.types import (
@@ -243,6 +243,6 @@ async def get_github_app_installation_token_with_expiry(
                     )
                 )
             elif isinstance(exc, RequestError):
-                retryable = isinstance(exc.exc, httpx.TransportError)
+                retryable = isinstance(exc.exc, httpx2.TransportError)
             raise GitHubAppUnavailable("GitHub App token unavailable", retryable=retryable) from exc
         return None, None
