@@ -1558,6 +1558,25 @@ async def test_every_click_goes_to_trigger_server_as_slack_sent_it(
     assert callable(kwargs["on_refused"])
 
 
+async def test_a_modal_trigger_server_opened_closes_when_handed_to_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submission = {
+        "type": "view_submission",
+        "team": {"id": "T1"},
+        "user": {"id": "U1"},
+        "trigger_id": "trigger-1",
+        "view": {"id": "V1", "callback_id": "mda_modal::expedited_review_channel:r1"},
+    }
+
+    response, tasks, _ = await _interact(monkeypatch, submission)
+
+    # Slack shows an error on a submitted modal for any answer but an empty one.
+    assert response == {}
+    [(task, _)] = tasks.tasks
+    assert task is mda_forwarding.forward_to_trigger_server
+
+
 @pytest.mark.parametrize(
     "payload",
     [
