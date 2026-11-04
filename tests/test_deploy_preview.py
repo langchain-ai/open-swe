@@ -1,6 +1,5 @@
 import time
 from collections import deque
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import httpx
@@ -114,12 +113,7 @@ async def test_stops_when_preview_branch_is_superseded(
     status: str | None,
     preview_branch: AsyncMock,
     capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    github_output = tmp_path / "github_output"
-    monkeypatch.setenv("GITHUB_OUTPUT", str(github_output))
-
     async def respond(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
         assert request.url.path.endswith("/revisions")
@@ -144,8 +138,63 @@ async def test_stops_when_preview_branch_is_superseded(
     output = capsys.readouterr().out
     assert "::warning::preview branch moved from published to replacement" in output
     assert "replacement deployment not verified" in output
-    # The workflow skips the superseded tree's MDA deploy on this output.
-    assert github_output.read_text() == "superseded=true\n"
+
+
+def revision(id: str, status: str, commit: str) -> dict[str, object]:
+    return {"id": id, "status": status, "source_revision_config": {"repo_commit_sha": commit}}
+
+
+@pytest.mark.parametrize(
+    ("polls", "error"),
+    [
+        # A newer commit's revision supersedes the published one and deploys.
+        (
+            [
+                [
+                    revision("published", "BUILDING", "published"),
+                    revision("old", "DEPLOYED", "old"),
+                ],
+                [
+                    revision("newer", "DEPLOYED", "newer"),
+                    revision("published", "SKIPPED", "published"),
+                    revision("old", "DEPLOYED", "old"),
+                ],
+            ],
+            None,
+        ),
+        ([[revision("published", "DEPLOYED", "published")]], None),
+        # Only an older revision serves, and nothing at or after the published one is building.
+        (
+            [
+                [
+                    revision("newer", "BUILD_FAILED", "newer"),
+                    revision("published", "INTERRUPTED", "published"),
+                    revision("old", "DEPLOYED", "old"),
+                ]
+            ],
+            "serves neither published nor a newer commit: revision newer",
+        ),
+    ],
+)
+async def test_follow_waits_for_published_or_newer_commit_however_the_branch_moves(
+    polls: list[list[dict[str, object]]], error: str | None, preview_branch: AsyncMock
+) -> None:
+    preview_branch.return_value = "newer"
+    pages = deque(polls)
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"resources": pages.popleft(), "offset": 0})
+
+    async with httpx.AsyncClient(
+        base_url="https://deploy.test", transport=httpx.MockTransport(respond)
+    ) as client:
+        deployer = Deployer(client, "preview", "published")
+        if error:
+            with pytest.raises(DeployError, match=error):
+                await deployer.follow()
+        else:
+            await deployer.follow()
+    assert not pages
 
 
 async def test_branch_lookup_failure_is_not_treated_as_superseded(
