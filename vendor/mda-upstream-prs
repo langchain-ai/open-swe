@@ -1,1 +1,3 @@
 1073 17c2e4c9deac10088c09d5cfd656c65ff43d56a6 feat(linear): let an endpoint tell a declined session why
+1213 a6ab4bd2b9e3f823711528864e7695cbab40f226 fix(browser): use Stagehand 4.4's watchdog and disconnect() instead of 4.3.0 workarounds
+1216 8b9891db9fa5af09cd311b562d3de97e5be5293a fix(browser): remove other Stagehand extensions when installing one

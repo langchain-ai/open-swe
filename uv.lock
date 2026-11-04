@@ -1953,8 +1953,8 @@ typing = [
     { name = "langchain", extras = ["mcp"], specifier = ">=1.4.6,<2" },
     { name = "mcp", specifier = ">=2.2.0,<3" },
     { name = "pillow", specifier = ">=11" },
-    { name = "stagehand", specifier = "==4.3.0" },
-    { name = "stagehand-middleware", specifier = "==0.1.0" },
+    { name = "stagehand", specifier = "==4.4.0" },
+    { name = "stagehand-middleware", specifier = "==0.1.2" },
     { name = "ty", specifier = ">=0.0.80,<0.0.91" },
 ]
 
