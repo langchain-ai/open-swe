@@ -415,12 +415,6 @@ ENV.var(
     default="",
 )
 ENV.var("POSTHOG_HOST", "PostHog ingestion host.", default="https://us.i.posthog.com")
-ENV.var(
-    "SEGMENT_BROWSER_WRITE_KEY",
-    "Optional public Segment browser source write key, served to the web and desktop UI. "
-    "Unset disables Segment; use a separate source for each deployment environment.",
-    default="",
-)
 ENV.var("DD_ENV", "Shared Datadog and analytics environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")

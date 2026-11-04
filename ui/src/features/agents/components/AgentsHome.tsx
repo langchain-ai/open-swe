@@ -63,7 +63,6 @@ import { api } from "@/lib/api"
 import { hasLinkedGitHub } from "@/lib/linkedGitHub"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
-import { productAnalytics } from "@/lib/analytics"
 import {
   requestNotificationPermission,
   setNotificationsPref,
@@ -647,14 +646,6 @@ export function AgentsHome({
         }
         return
       }
-      productAnalytics.track(
-        "agents_thread_created",
-        {
-          run_target: localRun ? "local" : "cloud",
-          has_attachments: images.length > 0,
-        },
-        session.data?.user_id ?? null
-      )
       // Seeded so the thread route renders the prompt immediately; the real
       // record lands with the next detail fetch.
       const thread: AgentThread = {

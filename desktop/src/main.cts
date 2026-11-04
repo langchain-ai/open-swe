@@ -885,9 +885,26 @@ function configureDesktopIpc() {
         throw error;
       }
     }
-    const cwd = await projectForRepo(input.repo);
-    if (!cwd)
-      throw new Error(`Add a checkout of ${input?.repo} to Open SWE first`);
+    let cwd = await projectForRepo(input.repo);
+    if (!cwd) {
+      const options = {
+        title: `Choose your checkout of ${input.repo}`,
+        properties: ["openDirectory"],
+      };
+      const result = mainWindow
+        ? await dialog.showOpenDialog(mainWindow, options)
+        : await dialog.showOpenDialog(options);
+      const picked = result.canceled ? null : result.filePaths[0];
+      if (!picked)
+        throw new Error(
+          `Choose a checkout of ${input.repo} to move this thread`,
+        );
+      const origin = await originRepo(picked);
+      if (origin?.toLowerCase() !== input.repo.toLowerCase())
+        throw new Error(`${picked} is not a checkout of ${input.repo}`);
+      cwd = addProject(projectsPath(), picked).cwd;
+      void sendProjectsChanged();
+    }
     let thread = localThreadStore.create({ id: input?.threadId, cwd });
     try {
       thread = await createThreadWorktree(thread, null);

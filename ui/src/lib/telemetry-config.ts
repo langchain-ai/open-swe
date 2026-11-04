@@ -9,8 +9,7 @@ export interface PostHogProject {
 export class TelemetryConfig {
   constructor(
     readonly environment: string,
-    readonly posthog: PostHogProject | null,
-    readonly segmentWriteKey: string | null = null
+    readonly posthog: PostHogProject | null
   ) {}
 
   static async load(): Promise<TelemetryConfig> {
@@ -43,11 +42,6 @@ export class TelemetryConfig {
         typeof posthog.host === "string" &&
         posthog.host
         ? { key: posthog.key, host: posthog.host }
-        : null,
-      "segment_write_key" in config &&
-        typeof config.segment_write_key === "string" &&
-        config.segment_write_key.trim()
-        ? config.segment_write_key.trim()
         : null
     )
   }

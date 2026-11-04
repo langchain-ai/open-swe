@@ -17,7 +17,6 @@ async def test_telemetry_config_is_public_and_names_the_posthog_project(monkeypa
     monkeypatch.setenv("DD_ENV", "staging")
     monkeypatch.setenv("POSTHOG_API_KEY", "phc_project")
     monkeypatch.setenv("POSTHOG_HOST", "https://eu.i.posthog.com")
-    monkeypatch.setenv("SEGMENT_BROWSER_WRITE_KEY", "segment_browser_source")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -26,16 +25,10 @@ async def test_telemetry_config_is_public_and_names_the_posthog_project(monkeypa
         assert response.json() == {
             "environment": "staging",
             "posthog": {"key": "phc_project", "host": "https://eu.i.posthog.com"},
-            "segment_write_key": "segment_browser_source",
         }
         monkeypatch.setenv("POSTHOG_API_KEY", "")
-        monkeypatch.setenv("SEGMENT_BROWSER_WRITE_KEY", " ")
         response = await client.get("/dashboard/api/analytics/config")
-    assert response.json() == {
-        "environment": "staging",
-        "posthog": None,
-        "segment_write_key": None,
-    }
+    assert response.json() == {"environment": "staging", "posthog": None}
 
 
 @pytest.mark.asyncio
