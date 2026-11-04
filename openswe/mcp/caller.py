@@ -29,6 +29,7 @@ _TOOL_MODULES: Final = (
     "openswe.tools.manage_feature_flags",
     "openswe.tools.manage_review_approval_mode",
     "openswe.tools.manage_review_shadow",
+    "openswe.tools.manage_workspace_bot",
     "openswe.tools.manage_review_repos",
     "openswe.tools.read_only_sql",
     "openswe.tools.fetch_url",

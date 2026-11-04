@@ -269,6 +269,7 @@ from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
 from openswe.tools.manage_review_repos import manage_review_repos
 from openswe.tools.manage_review_shadow import manage_review_shadow
+from openswe.tools.manage_workspace_bot import manage_workspace_bot
 from openswe.tools.note_on_diff import note_on_diff
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
@@ -812,6 +813,7 @@ AGENT_TOOLS: Final = (
     manage_feature_flags,
     manage_review_approval_mode,
     manage_review_shadow,
+    manage_workspace_bot,
     manage_review_repos,
 )
 
