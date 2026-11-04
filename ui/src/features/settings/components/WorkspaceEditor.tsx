@@ -10,7 +10,10 @@ import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
 import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
 import { WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
 import { type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
-import { slackChannelHref } from "@/lib/slack-channels"
+import {
+  slackChannelHref,
+  useSlackChannelDirectory,
+} from "@/lib/slack-channels"
 import { cn, INHERITED_LINK } from "@/lib/utils"
 
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
@@ -127,14 +130,35 @@ function SlackChannelRows({
   onChange: (next: WorkspaceDraft) => void
   channelLabel: (id: string) => string
 }) {
+  const directory = useSlackChannelDirectory(true).data
+  // A route copies messages between channels, so the server takes it only between
+  // public channels Open SWE has joined; one the directory doesn't list is left to it.
+  const routable = (id: string) => {
+    const channel = directory?.channels.find((entry) => entry.id === id)
+    return (
+      !channel ||
+      (!channel.is_private && channel.is_member && !channel.is_ext_shared)
+    )
+  }
   const kitchen = new Set(draft.kitchenChannelIds)
-  const bugReportOptions = [
-    { value: BUG_REPORTS_OFF, label: "Off" },
-    ...draft.kitchenChannelIds.map((id) => ({
-      value: id,
-      label: channelLabel(id),
-    })),
-  ]
+  const routableKitchens = draft.kitchenChannelIds.filter(routable)
+  const bugReportOptions = (id: string) => {
+    const current = draft.bugReportKitchens[id]
+    return [
+      { value: BUG_REPORTS_OFF, label: "Off" },
+      ...draft.kitchenChannelIds
+        .filter((kitchenId) => kitchenId === current || routable(kitchenId))
+        .map((kitchenId) => ({
+          value: kitchenId,
+          label: channelLabel(kitchenId),
+        })),
+    ]
+  }
+  // A route already set stays editable, so it can always be turned off.
+  const routesBugReports = (id: string) =>
+    !kitchen.has(id) &&
+    (id in draft.bugReportKitchens ||
+      (routable(id) && routableKitchens.length > 0))
   return (
     <ul className="w-full divide-y divide-default rounded-md border border-default">
       {draft.slackChannelIds.map((id) => (
@@ -155,7 +179,7 @@ function SlackChannelRows({
             {channelLabel(id)}
           </MacawLink>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-x-space-3 gap-y-space-1">
-            {!kitchen.has(id) && kitchen.size > 0 && (
+            {routesBugReports(id) && (
               <label className="flex items-center gap-space-1 text-xs text-secondary">
                 Bug reports
                 <Select
@@ -163,7 +187,7 @@ function SlackChannelRows({
                   size="xs"
                   align="end"
                   aria-label={`Bug reports for ${channelLabel(id)}`}
-                  options={bugReportOptions}
+                  options={bugReportOptions(id)}
                   value={draft.bugReportKitchens[id] ?? BUG_REPORTS_OFF}
                   onChange={(target) => {
                     const routes = new Map(
@@ -278,9 +302,9 @@ export function WorkspaceEditor({
             Mentions in these channels start runs in this workspace. Turn on
             Kitchen for a channel to let every top-level message start a thread
             and replies continue it without mentioning Open SWE. For any other
-            channel, pick a kitchen under Bug reports: Open SWE reads each new
-            top-level message there and starts a thread in that kitchen for
-            every bug report.
+            public channel, pick a public kitchen under Bug reports: Open SWE
+            reads each new top-level message there and starts a thread in that
+            kitchen for every bug report.
           </HelpTooltip>
         </span>
         <div

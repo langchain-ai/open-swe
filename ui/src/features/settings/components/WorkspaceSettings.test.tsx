@@ -392,18 +392,20 @@ describe("WorkspaceSettingsPanel", () => {
     expect(screen.queryByRole("status")).toBeNull()
   })
 
-  it("drops the bug report routes to a channel that stops being a kitchen", async () => {
+  it("routes bug reports only between public channels, and drops a kitchen's routes when it stops being one", async () => {
     mockApis({
       ...RECORD,
-      slack_channel_ids: ["C1", "C2"],
+      slack_channel_ids: ["C1", "C2", "C3"],
       kitchen_channel_ids: ["C2"],
       bug_report_kitchens: { C1: "C2" },
     })
     vi.mocked(api.listSlackChannels).mockResolvedValue({
-      channels: ["oss-help", "oss-kitchen"].map((name, index) => ({
-        id: `C${index + 1}`,
-        name,
-        is_private: false,
+      channels: [
+        { id: "C1", name: "oss-help", is_private: false },
+        { id: "C2", name: "oss-kitchen", is_private: false },
+        { id: "C3", name: "oss-private", is_private: true },
+      ].map((channel) => ({
+        ...channel,
         is_member: true,
         is_ext_shared: false,
         num_members: 3,
@@ -417,6 +419,9 @@ describe("WorkspaceSettingsPanel", () => {
       name: "Bug reports for #oss-help",
     })
     expect(route.textContent).toContain("#oss-kitchen")
+    expect(
+      screen.queryByRole("combobox", { name: "Bug reports for #oss-private" })
+    ).toBeNull()
     const kitchen = screen.getByRole("switch", {
       name: "Kitchen mode for #oss-kitchen",
     })
