@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { CaptureResult, PostHog, PostHogConfig } from "posthog-js"
 
 import type { SessionUser } from "./api"
-import { productAnalytics } from "./posthog"
+import { posthogAnalytics as productAnalytics } from "./posthog"
 
 function postHogClient() {
   const client = {

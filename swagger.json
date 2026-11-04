@@ -8182,11 +8182,23 @@
                 "type": "null"
               }
             ]
+          },
+          "segment_write_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Segment Write Key"
           }
         },
         "required": [
           "environment",
-          "posthog"
+          "posthog",
+          "segment_write_key"
         ],
         "title": "TelemetryConfig",
         "type": "object"

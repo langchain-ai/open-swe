@@ -15,6 +15,7 @@ import {
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
 import { reportError } from "@/lib/errorReporting"
+import { productAnalytics } from "@/lib/analytics"
 
 export interface SubmitAgentMessageVariables extends SendAgentMessageVariables {
   /** The stream can reject after the optimistic mutation has already resolved. */
@@ -79,6 +80,10 @@ export function useSubmitAgentMessage(threadId: string) {
           .catch(() => setAgentThreadStatus(queryClient, threadId, "error"))
         return
       }
+      productAnalytics.track("agents_message_submitted", {
+        mode: vars.enqueue ? "queue" : source.isRunning ? "steer" : "new_turn",
+        has_attachments: Boolean(vars.images?.length),
+      })
       const id = vars.client_message_id ?? crypto.randomUUID()
       const pendingMessage: PendingThreadMessage = {
         id,
