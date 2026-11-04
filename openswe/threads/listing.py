@@ -144,7 +144,7 @@ class SidebarOrders:
             searches = [*searches, {PROJECT_ID_KEY: project}]
         previous = await self.ids(login, body)
         candidates = await _collect_thread_candidates(
-            langgraph_client(),
+            None,
             searches,
             viewer_login=login,
             viewer_email=email,
@@ -245,6 +245,15 @@ async def _search_threads_batch(
     The thread index narrows to and ranks ``text`` matches in SQL; callers still
     match each thread exactly with :func:`_metadata_matches_filters`.
     """
+    if client is None:
+        return [
+            thread.as_langgraph()
+            for thread in await THREADS.search(
+                index.ThreadSearch(
+                    metadata=metadata, limit=limit, offset=offset, sort_by=sort_by, text=text
+                )
+            )
+        ]
     batch = await client.threads.search(
         metadata=metadata,
         limit=limit,
