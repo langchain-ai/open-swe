@@ -534,6 +534,54 @@ async def test_a_channel_thread_takes_runs_stops_and_answers_as_its_conversation
     assert THREAD not in harness.runtimes.mda_runtime._mda_threads
 
 
+# The threads MDA's Slack channel's handlers choose: their owner there.
+AS_THE_SLACK_HANDLER_THREADS = {
+    **AS_THE_CONVERSATION,
+    "x-mda-source-provider": "slack",
+    "x-mda-source-thread-id": 'mda:v1:["slack","handler-threads"]',
+}
+
+
+async def test_a_handler_thread_the_backend_makes_takes_its_first_run_as_the_handlers(
+    monkeypatch: pytest.MonkeyPatch, secret: None
+) -> None:
+    """A breakout the agent's tool opens: made on MDA as one of the threads the Slack
+    channel's handlers choose, so the backend's first run there and the handler's later
+    runs share its owner."""
+    monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
+    harness = _Harness(monkeypatch)
+    await router.adopt_channel_run(THREAD, "slack")
+    harness.runtimes.mda_runtime._mda_threads.discard(THREAD)
+
+    await harness.runtimes.mda_runtime.create_handler_thread(
+        THREAD, provider="slack", channel="slack"
+    )
+    status, _ = await harness.request(
+        "POST", f"/threads/{THREAD}/runs", {"assistant_id": "agent", "input": {}}
+    )
+
+    assert status == 200
+    assert harness.forwarded[0] == ("/threads", {"thread_id": THREAD, "if_exists": "do_nothing"})
+    assert [path for path, _ in harness.forwarded[1:]] == [f"/threads/{THREAD}/runs"]
+    assert harness.acted_as == [AS_THE_SLACK_HANDLER_THREADS, AS_THE_SLACK_HANDLER_THREADS]
+    # MDA isn't asked who owns the thread it was just told.
+    assert harness.read == []
+
+
+async def test_no_handler_thread_is_made_without_the_service_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MDA_SERVICE_SECRET", raising=False)
+    harness = _Harness(monkeypatch)
+
+    with pytest.raises(runtimes.ChannelThreadError):
+        await harness.runtimes.mda_runtime.create_handler_thread(
+            THREAD, provider="slack", channel="slack"
+        )
+
+    assert harness.forwarded == []
+
+
 async def test_a_channel_thread_takes_a_run_started_by_command(
     monkeypatch: pytest.MonkeyPatch, secret: None
 ) -> None:

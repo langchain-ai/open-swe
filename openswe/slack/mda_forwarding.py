@@ -32,6 +32,7 @@ from openswe.slack.dm import CONCIERGE_TS
 from openswe.slack.records import bind_slack_thread_id, lookup_slack_thread_id
 from openswe.threads import index
 from openswe.threads.router import adopt_channel_run
+from openswe.threads.runtimes import RUNTIMES
 from openswe.utils.http_pool import pooled_transport
 from openswe.webhooks.common import (
     PROVISIONAL_VISIBILITY_KEY,
@@ -168,6 +169,23 @@ async def claim_side(thread_id: str, *, owner_login: str | None = None) -> None:
     """Make a side thread (:func:`side_thread_id`) MDA's channel's, before its request is
     remembered."""
     await _adopt(thread_id, owner_login)
+
+
+async def holds(thread_id: str) -> bool:
+    """Whether ``thread_id`` is a conversation of MDA's Slack channel."""
+    thread = await index.get(thread_id) if thread_id else None
+    return thread is not None and channel_of(thread.metadata) == CHANNEL
+
+
+async def claim_breakout(thread_id: str, *, owner_login: str | None = None) -> None:
+    """Make a breakout the agent opens with its tool MDA's channel's: a side thread the
+    channel's handlers run from its first reply on, which the backend starts first.
+
+    Made on MDA as the handlers' own thread before the backend starts that run there,
+    since the channel never started one.
+    """
+    await _adopt(thread_id, owner_login)
+    await RUNTIMES.mda_runtime.create_handler_thread(thread_id, provider=CHANNEL, channel=CHANNEL)
 
 
 def concierge_thread_id(app_id: str, team_id: str, channel_id: str) -> str:

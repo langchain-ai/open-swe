@@ -26,6 +26,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import NotFoundError
 from managed_deepagents._agent_auth import AgentAuth, AgentAuthContext
+from managed_deepagents._channels.binding import handler_threads_key
 from managed_deepagents._connections import (
     PLATFORM_API_URL_ENV,
     TRUSTED_BACKEND_PROVIDER,
@@ -282,11 +283,42 @@ class MdaRuntime:
             if not provider or not key:
                 raise ChannelThreadError(f"MDA names no conversation owning thread {thread_id}")
             conversation = (provider, key)
-            self._channel_conversations[thread_id] = (provider, key, time.monotonic())
-            self._channel_conversations.move_to_end(thread_id)
-            if len(self._channel_conversations) > _CHANNEL_CONVERSATIONS_LIMIT:
-                self._channel_conversations.popitem(last=False)
+            self._remember_conversation(thread_id, provider, key)
         provider, key = conversation
+        return await self._conversation_write(secret, provider, key, user_id=user_id)
+
+    async def create_handler_thread(self, thread_id: str, *, provider: str, channel: str) -> None:
+        """Make ``thread_id`` on MDA one of the threads ``channel``'s handlers choose.
+
+        Such a thread is owned by the channel's handler threads (``handler_threads_key``),
+        not by one conversation, so the handler can start later runs on it for whichever
+        conversation it joins, as it does on the side threads it opens itself. The
+        backend creates it before it starts its first run there (:meth:`channel_write`).
+        Raises ``ChannelThreadError`` without the secret.
+        """
+        secret = ENV.MDA_SERVICE_SECRET.optional()
+        if not secret:
+            raise ChannelThreadError("No MDA_SERVICE_SECRET to act on MDA's channel threads")
+        key = handler_threads_key(channel)
+        write = await self._conversation_write(secret, provider, key)
+        response = await self.http.post(
+            "/threads",
+            json={"thread_id": thread_id, "if_exists": "do_nothing"},
+            headers=write.headers,
+        )
+        response.raise_for_status()
+        self._remember_conversation(thread_id, provider, key)
+
+    def _remember_conversation(self, thread_id: str, provider: str, key: str) -> None:
+        self._channel_conversations[thread_id] = (provider, key, time.monotonic())
+        self._channel_conversations.move_to_end(thread_id)
+        if len(self._channel_conversations) > _CHANNEL_CONVERSATIONS_LIMIT:
+            self._channel_conversations.popitem(last=False)
+
+    async def _conversation_write(
+        self, secret: str, provider: str, key: str, *, user_id: str | None = None
+    ) -> ChannelWrite:
+        """MDA's trusted-backend ingress for the conversation ``(provider, key)``."""
         principal = await self.user_principal(user_id) if user_id else None
         headers = {
             "x-mda-ingress-secret": secret,

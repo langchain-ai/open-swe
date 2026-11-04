@@ -4,6 +4,7 @@ import re
 import uuid
 from typing import Annotated, Any
 
+import httpx
 from fastapi import HTTPException
 from pydantic import Field
 
@@ -13,7 +14,7 @@ from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.dispatch import dispatch_agent_run
 from openswe.prompts import prompt
 from openswe.run_config import Repo, RunConfig
-from openswe.slack import webhook
+from openswe.slack import mda_forwarding, webhook
 from openswe.slack.blocks import block_payload
 from openswe.slack.breakout_destination import resolve_breakout_destination
 from openswe.slack.breakout_links import breakout_root_blocks, mark_broken_out, source_thread_line
@@ -32,13 +33,18 @@ from openswe.slack.solo_threads import allow_solo_thread_followup
 from openswe.slack.staged_files import queue_slack_files, slack_file_entries, slack_files_section
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.threads.creation import create_thread
+from openswe.threads.runtimes import ChannelThreadError
 from openswe.users.models import User
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import participant_metadata
-from openswe.webhooks.common import SlackRepoResolution, is_repo_allowed
+from openswe.webhooks.common import (
+    PROVISIONAL_VISIBILITY_KEY,
+    SlackRepoResolution,
+    is_repo_allowed,
+)
 
 _TITLE_MAX_CHARS = 160
 _INSTRUCTIONS_MAX_CHARS = 12000
@@ -288,6 +294,9 @@ async def slack_breakout_thread(
     if not cfg.thread_id:
         return {"success": False, "error": "Missing parent thread_id"}
     parent_metadata = thread_metadata(await client.threads.get(cfg.thread_id))
+    # A conversation MDA's Slack channel holds breaks out into one it holds too, so the
+    # new Slack thread's replies reach it once Slack sends its events to MDA alone.
+    via_mda = await mda_forwarding.holds(cfg.thread_id)
     visibility = parent_metadata.get("visibility", "public")
     owner_type = parent_metadata.get("owner_type", "user")
     if visibility not in ("public", "private") or owner_type not in ("user", "system"):
@@ -425,6 +434,16 @@ async def slack_breakout_thread(
             await asyncio.sleep(delay)
 
     await bind_slack_thread_id(clean_channel_id, message_ts, thread_id)
+    if via_mda:
+        try:
+            await mda_forwarding.claim_breakout(thread_id, owner_login=owner_login or None)
+        except ChannelThreadError, httpx.HTTPError:
+            logger.warning(
+                "Could not open a breakout on MDA's Slack channel",
+                extra={"agent_thread_id": thread_id},
+                exc_info=True,
+            )
+            return {"success": False, "error": "Could not open the new thread; try again."}
     if requester:
         await allow_solo_thread_followup(
             client,
@@ -452,6 +471,8 @@ async def slack_breakout_thread(
         "title": thread_title,
         "visibility": visibility,
         "owner_type": owner_type,
+        # The visibility the channel's claim held back is settled here.
+        **({PROVISIONAL_VISIBILITY_KEY: None} if via_mda else {}),
         "source_context": SourceContext.parse(
             {"slack_thread": new_slack_thread, "breakout_from": breakout_from}
         ).dump(),
