@@ -11,6 +11,7 @@ from sqlalchemy import ColumnElement, ForeignKey, ScalarSelect, and_, delete, se
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
 
+from openswe.audit_logs.context import current_audit_log
 from openswe.dashboard.oauth import session_user_id
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
@@ -108,6 +109,8 @@ class AllowedSlackBot(BaseModel):
 
     async def add(self, actor: UUID | ScalarSelect[UUID] | None) -> bool:
         """Allow the bot as the person ``actor`` names; ``False`` when it already is."""
+        if entry := current_audit_log.get():
+            entry.enrichments.resource_ids.append(f"slack:{self.team_id}:{self.bot_id}")
         async with postgres.session() as session:
             added = await session.scalar(
                 insert(AllowedSlackBotRow)
@@ -127,6 +130,8 @@ class AllowedSlackBot(BaseModel):
     @classmethod
     async def remove(cls, team_id: str, bot_id: str) -> None:
         """Revoke the bot."""
+        if entry := current_audit_log.get():
+            entry.enrichments.resource_ids.append(f"slack:{team_id}:{bot_id}")
         async with postgres.session() as session:
             await session.execute(delete(AllowedSlackBotRow).where(cls._is(team_id, bot_id)))
 

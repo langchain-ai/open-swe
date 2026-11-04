@@ -276,6 +276,7 @@ from openswe.tools.note_on_diff import note_on_diff
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
 from openswe.tools.review_walkthrough import walkthrough_tools
+from openswe.tools.slack_bots import allow_slack_bot, list_slack_bots, remove_slack_bot
 from openswe.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from openswe.tools.task_threads import (
     control_worker,
@@ -822,6 +823,9 @@ AGENT_TOOLS: Final = (
     manage_review_approval_mode,
     manage_review_shadow,
     manage_review_repos,
+    list_slack_bots,
+    allow_slack_bot,
+    remove_slack_bot,
 )
 
 
