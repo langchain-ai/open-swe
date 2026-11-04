@@ -1,7 +1,14 @@
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
+import {
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { toast } from "sonner"
 
 import { AgentThreadPage } from "@/features/agents/components/AgentThreadPage"
@@ -9,6 +16,7 @@ import { EmbeddedThreadContext } from "@/features/agents/lib/embeddedThread"
 import type { ComposerDraft } from "@/features/agents/lib/types"
 import type { InstalledPlugin } from "@/features/plugins/lib/api"
 import { pluginsApi } from "@/features/plugins/lib/api"
+import { PluginChatDeliveries } from "@/features/plugins/lib/chatDelivery"
 import type {
   AgentToolOffer,
   ChatTarget,
@@ -199,56 +207,47 @@ function useAnsweredCalls(
         : [],
     },
   })
-  const [paused, setPaused] = useState(false)
+  const [deliveries] = useState(() => new PluginChatDeliveries(plugin.id))
+  const paused = useSyncExternalStore(
+    (listener) => deliveries.subscribe(listener),
+    () => (chatId ? deliveries.isPaused(chatId) : false),
+    () => false
+  )
   const [retries, setRetries] = useState(0)
-  const busy = useRef(false)
-  const undelivered = useRef(new Map<string, string>())
+  const mounted = useRef(false)
   const retry = useRef<ReturnType<typeof setTimeout> | null>(null)
   const name = plugin.manifest.displayName
 
   const answer = useEffectEvent(async () => {
-    if (!chatId || !tools || busy.current) return
-    busy.current = true
+    if (!chatId || !tools) return
     try {
-      const offered = new Set(tools.offer.tools.map((tool) => tool.name))
-      for (const call of await pluginsApi.claimCalls(plugin.id, chatId)) {
-        if (undelivered.current.has(call.call_id)) continue
-        const output = offered.has(call.tool)
-          ? await tools
-              .run(call.tool, call.arguments)
-              .catch(
-                (error: unknown) =>
-                  `Error: ${error instanceof Error ? error.message : String(error)}`
-              )
-          : `Error: ${name} does not offer ${call.tool} now.`
-        undelivered.current.set(call.call_id, output)
-      }
-      const outputs = [...undelivered.current].map(([call_id, output]) => ({
-        call_id,
-        output,
-      }))
-      if (outputs.length === 0) return
-      const sent = await pluginsApi.answerCalls(plugin.id, chatId, outputs)
-      undelivered.current.clear()
-      setPaused(sent.paused)
+      await deliveries.answer(chatId, tools, name)
     } catch (error) {
       toast.error(`Couldn't send ${name}'s answer to the agent`, {
         description: error instanceof Error ? error.message : undefined,
       })
     } finally {
-      busy.current = false
-      if (retry.current) clearTimeout(retry.current)
-      retry.current = setTimeout(() => setRetries((n) => n + 1), 5_000)
+      if (mounted.current) {
+        if (retry.current) clearTimeout(retry.current)
+        retry.current = setTimeout(() => setRetries((n) => n + 1), 5_000)
+      }
     }
   })
   useEffect(() => {
-    if (calls.data?.length || undelivered.current.size) void answer()
-  }, [calls.data, tools, retries])
-  useEffect(
-    () => () => {
+    if (chatId && (calls.data?.length || deliveries.hasUndelivered(chatId)))
+      void answer()
+  }, [chatId, calls.data, tools, retries, deliveries])
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
       if (retry.current) clearTimeout(retry.current)
+    }
+  }, [])
+  return {
+    paused,
+    dismiss: () => {
+      if (chatId) deliveries.dismiss(chatId)
     },
-    []
-  )
-  return { paused, dismiss: () => setPaused(false) }
+  }
 }
