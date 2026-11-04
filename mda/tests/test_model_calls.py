@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from copy import deepcopy
 from typing import Protocol, cast
@@ -349,7 +350,7 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
         RunPromptMiddleware(),
         _Skills(),
         ThreadPromptMiddleware(),
-        model_call_guards()[-1],
+        *model_call_guards()[-2:],
     ]
     for thread in ("First thread's part", "Next thread's part"):
         call = ModelCall(
@@ -674,3 +675,80 @@ async def test_cancelling_retry_backoff_does_not_start_another_model_attempt(
     with pytest.raises(asyncio.CancelledError):
         await task
     assert handler.await_count == 1
+
+
+class _OpenAIResponsesTransport(httpx2.AsyncBaseTransport):
+    def __init__(self) -> None:
+        self.requests: list[httpx2.Request] = []
+
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+        self.requests.append(request)
+        return httpx2.Response(
+            200,
+            json={
+                "id": "resp-test",
+                "object": "response",
+                "created_at": 1,
+                "status": "completed",
+                "model": "test",
+                "output": [
+                    {
+                        "type": "message",
+                        "id": "msg-test",
+                        "role": "assistant",
+                        "status": "completed",
+                        "content": [{"type": "output_text", "text": "ok", "annotations": []}],
+                    }
+                ],
+            },
+        )
+
+
+class TestOpenAIPromptCaching:
+    @pytest.mark.parametrize("model_name", ["gpt-5.5", "gpt-5.5-pro", "unsupported"])
+    @pytest.mark.parametrize("use_gateway", [False, True])
+    @pytest.mark.parametrize("subagent", [False, True])
+    async def test_request_cache_settings_reach_responses_api(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        model_name: str,
+        use_gateway: bool,
+        subagent: bool,
+    ) -> None:
+        monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "test")
+        monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", "https://gateway.invalid")
+        model = build_model(
+            ModelSpec(model_id=f"openai:{model_name}", kwargs={"api_key": "test"}),
+            use_gateway=use_gateway,
+        )
+        assert isinstance(model, ChatOpenAI)
+        transport = _OpenAIResponsesTransport()
+        async with httpx2.AsyncClient(transport=transport) as client:
+            sdk = openai.AsyncOpenAI(
+                api_key="test", base_url=model.openai_api_base, http_client=client
+            )
+            graph = create_agent(
+                model=model.model_copy(update={"root_async_client": sdk}),
+                middleware=model_call_guards(subagent=subagent),
+            )
+            for thread_id in ("first-thread", "second-thread", None):
+                result = await graph.ainvoke(
+                    {"messages": [HumanMessage(content="go")]},
+                    config={"configurable": {"thread_id": thread_id}} if thread_id else {},
+                )
+                assert result["messages"][-1].content[0]["text"] == "ok"
+        assert len(transport.requests) == 3
+        for request, thread_id in zip(
+            transport.requests, ("first-thread", "second-thread", None), strict=True
+        ):
+            payload = json.loads(request.content)
+            if thread_id:
+                assert payload["prompt_cache_key"] == thread_id
+            else:
+                assert "prompt_cache_key" not in payload
+            if model_name == "unsupported":
+                assert "prompt_cache_retention" not in payload
+            else:
+                assert payload["prompt_cache_retention"] == "24h"
+            if use_gateway:
+                assert str(request.url) == "https://gateway.invalid/openai/v1/responses"
