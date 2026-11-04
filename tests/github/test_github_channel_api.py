@@ -492,3 +492,20 @@ async def test_automation_rules_name_each_automations_events_on_the_repository(
     assert [(rule.id, rule.prompt, rule.events) for rule in answer.automations] == [
         (record["id"], "Triage it", ["issues.opened"])
     ]
+
+
+@pytest.mark.parametrize("status", [404, 500])
+async def test_an_issue_thread_mda_never_ran_has_not_started(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    request = httpx.Request("GET", "http://mda.test/threads/t1/state")
+    error = httpx.HTTPStatusError(
+        "MDA answered", request=request, response=httpx.Response(status, request=request)
+    )
+    monkeypatch.setattr(github_webhooks.THREADS, "state", AsyncMock(side_effect=error))
+
+    if status == 404:
+        assert await github_webhooks.conversation_started("t1") is False
+    else:
+        with pytest.raises(httpx.HTTPStatusError):
+            await github_webhooks.conversation_started("t1")

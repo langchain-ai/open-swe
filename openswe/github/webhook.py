@@ -7,6 +7,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import Any, Final, Protocol
 
+import httpx
 from langgraph_sdk.errors import NotFoundError
 from pydantic import AliasChoices, AliasPath, BaseModel, Field, JsonValue, ValidationError
 
@@ -1528,6 +1529,11 @@ async def conversation_started(thread_id: str) -> bool:
     except NotFoundError:
         # Indexed, but no run created it on MDA yet.
         return False
+    except httpx.HTTPStatusError as error:
+        # A channel's thread is read over HTTP, which says so with a 404.
+        if error.response.status_code == httpx.codes.NOT_FOUND:
+            return False
+        raise
     return bool(_state_messages(state))
 
 
