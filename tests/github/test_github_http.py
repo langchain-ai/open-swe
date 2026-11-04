@@ -223,8 +223,8 @@ async def test_as_user_asks_for_sign_in_when_github_rejects_the_refreshed_token(
 
 
 @pytest.mark.parametrize("conclusion", ["cancelled", "stale", "failure"])
-@pytest.mark.parametrize("replacement", ["success", "failure", None])
-async def test_check_runs_only_discards_superseded_cancellations(
+@pytest.mark.parametrize("replacement", ["success", "failure", "skipped", None])
+async def test_check_runs_discards_superseded_results(
     monkeypatch: pytest.MonkeyPatch, conclusion: str, replacement: str | None
 ) -> None:
     runs = [
@@ -241,18 +241,21 @@ async def test_check_runs_only_discards_superseded_cancellations(
         {"id": suite, "check_suite_id": suite, "workflow_id": 100, "event": "pull_request"}
         for suite in (10, 20)
     ]
-    pages = AsyncMock(side_effect=[runs, workflows])
+    pages = AsyncMock(side_effect=[runs, workflows, runs])
     monkeypatch.setattr(github_http.RepoClient, "pages", pages)
     async with httpx2.AsyncClient() as http:
-        result = await GitHubClient(http).repo("acme", "app").check_runs("a" * 40)
-    assert result == (runs if conclusion == "failure" else [runs[1]])
+        repo = GitHubClient(http).repo("acme", "app")
+        result = await repo.check_runs("a" * 40)
+        assert await repo.check_runs("a" * 40, include_superseded=True) == runs
+    assert result == [runs[1]]
 
 
+@pytest.mark.parametrize("conclusion", ["cancelled", "failure"])
 @pytest.mark.parametrize(
     "distinct", ["workflow", "app", "event", "same_run", "older_success", "unavailable"]
 )
-async def test_check_runs_retains_cancellations_without_a_known_replacement(
-    monkeypatch: pytest.MonkeyPatch, distinct: str
+async def test_check_runs_retains_results_without_a_known_replacement(
+    monkeypatch: pytest.MonkeyPatch, conclusion: str, distinct: str
 ) -> None:
     runs = [
         {
@@ -262,7 +265,7 @@ async def test_check_runs_retains_cancellations_without_a_known_replacement(
             "app": {"id": 15368, "slug": "github-actions"},
             "check_suite": {"id": suite},
         }
-        for suite, result in [(10, "cancelled"), (20, "success")]
+        for suite, result in [(10, conclusion), (20, "success")]
     ]
     workflows = [
         {"id": suite, "check_suite_id": suite, "workflow_id": 100, "event": "pull_request"}
@@ -271,7 +274,7 @@ async def test_check_runs_retains_cancellations_without_a_known_replacement(
     if distinct == "workflow":
         workflows[1]["workflow_id"] = 200
     elif distinct == "app":
-        runs[1]["app"] = {"id": 123, "slug": "other-app"}
+        runs[1]["app"] = {"id": 123, "slug": "github-actions"}
     elif distinct == "event":
         workflows[1]["event"] = "push"
     elif distinct == "same_run":
@@ -286,7 +289,8 @@ async def test_check_runs_retains_cancellations_without_a_known_replacement(
     )
     monkeypatch.setattr(github_http.RepoClient, "pages", pages)
     async with httpx2.AsyncClient() as http:
-        assert await GitHubClient(http).repo("acme", "app").check_runs("a" * 40) == runs
+        result = await GitHubClient(http).repo("acme", "app").check_runs("a" * 40)
+    assert result == ([runs[0]] if distinct == "older_success" else runs)
 
 
 @pytest.mark.parametrize("outcome", ["success", "proxy_failure", "cancelled"])
