@@ -95,7 +95,8 @@ def lmt(monkeypatch):
             return state.profiles
         assert path == managed.SERVERS_PATH
         if isinstance(self, managed.BotTools):
-            return state.servers.get(f"profile:{self.profile}", [])
+            # A new profile sees every workspace server, connected to none of them.
+            return state.servers.get(f"profile:{self.profile}", state.servers["profile:None"])
         return state.servers.get(self.login, [])
 
     async def request(self, method, path, *, body=None, ok=()):
@@ -217,7 +218,7 @@ async def test_owners_own_connection_replaces_the_bots_in_their_private_thread(m
 
 
 async def test_the_bot_gets_one_profile_and_one_kit_as_admins_give_it_servers(
-    monkeypatch, lmt, registry_db
+    monkeypatch, lmt, remote, registry_db
 ):
     monkeypatch.setattr(
         managed.PersonalTools, "consent_outcome", AsyncMock(return_value="completed")
