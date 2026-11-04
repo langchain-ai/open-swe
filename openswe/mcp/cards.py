@@ -94,8 +94,12 @@ async def connect_service(login: str, server_id: str) -> ConsentLink | None:
 
 
 async def connect_bot_service(admin: str, bot: BotTools, server_id: str) -> ConsentLink:
-    """A consent link where an admin connects one kit service for a workspace bot."""
+    """A consent link where an admin connects one service for a workspace bot, making the
+    bot's profile first if it has none."""
     tools = PersonalTools(admin)
+    if (await tools.server(server_id)).kind == "none":
+        raise ManagedToolsError("This service needs no connection")
+    bot = await tools.bot_profile(bot)
     link = await tools.connect_for_bot(bot, server_id)
     if link.auth_id:
         _wait_in_background(_refresh_after(tools, bot, link.auth_id))

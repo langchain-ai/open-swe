@@ -404,7 +404,6 @@ export interface WorkspaceSettings {
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
   /** The workspace bot's LangSmith Managed Tools kit; every run in the workspace loads it. */
-  managed_tools_gateway_id?: string | null
   /** The LangSmith Managed Tools profile the workspace bot runs its kit's tools as. */
   managed_tools_profile_id?: string | null
   org_guidelines?: string | null
@@ -507,35 +506,21 @@ export interface ManagedConnectResult {
   url?: string | null
 }
 
-/** A LangSmith Managed Tools kit: the tools a workspace bot loads. */
-export interface ManagedToolsKit {
-  id: string
-  name: string
-  tool_count: number
-}
-
-/** A LangSmith Managed Tools profile: the credentials a workspace bot runs as. */
-export interface ManagedToolsProfile {
-  id: string
-  name: string
-}
-
-export interface BotServerStatus {
-  id: string
-  name: string
-  tool_count: number
-  connected: boolean
-}
-
+/** A workspace bot's services: every one its LMT profile connected loads in the workspace's runs. */
 export interface WorkspaceBotTools {
-  kit_id: string | null
-  profile_id: string | null
   status: {
-    kit: ManagedToolsKit
-    profile_id: string
-    servers: BotServerStatus[]
+    profile_id: string | null
+    servers: ManagedServer[]
   } | null
   error: string | null
+}
+
+/** An MCP server an admin registers in LangSmith for the workspace bot. */
+export interface NewBotServer {
+  name: string
+  url: string
+  kind: "oauth" | "secret"
+  header?: string | null
 }
 
 export interface AdminUser {
@@ -1828,23 +1813,26 @@ export const api = {
       `/my-managed-tools/services/${encodeURIComponent(serverId)}`,
       { method: "DELETE" }
     ),
-  listManagedToolsKits: () => request<ManagedToolsKit[]>("/managed-tools/kits"),
-  listManagedToolsProfiles: () =>
-    request<ManagedToolsProfile[]>("/managed-tools/profiles"),
-  createManagedToolsProfile: (name: string) =>
-    request<ManagedToolsProfile>("/managed-tools/profiles", {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    }),
   getWorkspaceBotTools: (workspace: string) =>
     request<WorkspaceBotTools>(
       `/workspaces/${encodeURIComponent(workspace)}/bot-tools`
     ),
-  /** A link where the admin connects one kit service for the workspace bot. */
+  /** A link where the admin connects one service for the workspace bot. */
   connectWorkspaceBotTool: (workspace: string, serverId: string) =>
     request<ManagedConnectResult>(
       `/workspaces/${encodeURIComponent(workspace)}/bot-tools/connect/${encodeURIComponent(serverId)}`,
       { method: "POST" }
+    ),
+  /** Registers a server in LangSmith, returning a link connecting it for the workspace bot. */
+  addWorkspaceBotServer: (workspace: string, server: NewBotServer) =>
+    request<{ server: ManagedServer; url: string }>(
+      `/workspaces/${encodeURIComponent(workspace)}/bot-tools/servers`,
+      { method: "POST", body: JSON.stringify(server) }
+    ),
+  disconnectWorkspaceBotTool: (workspace: string, serverId: string) =>
+    request<void>(
+      `/workspaces/${encodeURIComponent(workspace)}/bot-tools/services/${encodeURIComponent(serverId)}`,
+      { method: "DELETE" }
     ),
   listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),

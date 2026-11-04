@@ -13,7 +13,6 @@ from mcp.types import Tool
 from openswe.mcp import cards, managed, routes, runtime
 from openswe.users.models import User
 
-KIT_ID = "01a0f8da-0f4b-7817-b2da-27b7bfa5f0f8"
 PROFILE_ID = "01a0f8da-0000-7000-8000-0000000000aa"
 LINEAR_ID = "01a0f8da-0000-7000-8000-000000000001"
 NOTION_ID = "01a0f8da-0000-7000-8000-000000000002"
@@ -32,7 +31,8 @@ def server(server_id, name, *, connected, kind="oauth", enabled=True):
 
 @pytest.fixture(autouse=True)
 def lmt(monkeypatch):
-    """LMT as plain data: each caller's server list and the bot's kit, with no cache."""
+    """LMT as plain data: each caller's server list and the workspace's profiles, with no
+    cache. A bot sees its profile's own credentials."""
     monkeypatch.delenv("LMT_TENANT_ID", raising=False)
     monkeypatch.setenv("LANGSMITH_API_KEY", "openswe-key")
     monkeypatch.setattr(managed, "langsmith_oauth_configured", lambda: True)
@@ -53,48 +53,43 @@ def lmt(monkeypatch):
                     **server("weather", "Weather", connected=True, kind="none"),
                     "has_credential": False,
                 },
-            ]
-        },
-        kit={
-            "id": KIT_ID,
-            "name": "Eng bot",
-            "tools": [
+            ],
+            f"profile:{PROFILE_ID}": [
+                server(LINEAR_ID, "Linear", connected=True),
+                server(NOTION_ID, "Notion", connected=False),
                 {
-                    "server_id": LINEAR_ID,
-                    "tool_name": "list_issues",
-                    "mcp_name": "linear_list_issues",
+                    **server("weather", "Weather", connected=True, kind="none"),
+                    "has_credential": False,
                 },
-                {
-                    "server_id": LINEAR_ID,
-                    "tool_name": "save_issue",
-                    "mcp_name": "linear_save_issue",
-                },
-                {"server_id": NOTION_ID, "tool_name": "search", "mcp_name": "notion_search"},
             ],
         },
-        # The kit tools LMT lists to the bot's profile: only those it has connected.
-        usable=["linear_list_issues"],
+        profiles=[],
+        posts=[],
     )
 
     async def cached(self, listing):
         return await self._loaders()[listing]()
 
     async def pages(self, path):
+        if path == managed.PROFILES_PATH:
+            return state.profiles
         assert path == managed.SERVERS_PATH
         if isinstance(self, managed.BotTools):
-            raise managed.ManagedToolsError("API keys cannot list servers")
+            return state.servers.get(f"profile:{self.profile}", [])
         return state.servers.get(self.login, [])
 
-    async def load_detail(self):
-        return state.kit
-
-    async def load_usable(self):
-        return state.usable
+    async def request(self, method, path, *, body=None, ok=()):
+        state.posts.append((method, path))
+        if path == managed.PROFILES_PATH:
+            await asyncio.sleep(0)
+            profile = {"id": f"01a0f8da-0000-7000-8000-0000000001{len(state.profiles):02d}", **body}
+            state.profiles.append(profile)
+            return httpx.Response(201, json=profile)
+        return httpx.Response(201, json={"verification_url": "https://smith.langchain.com/c/1"})
 
     monkeypatch.setattr(managed.ManagedTools, "_cached", cached)
     monkeypatch.setattr(managed.ManagedTools, "_pages", pages)
-    monkeypatch.setattr(managed.BotTools, "_load_detail", load_detail)
-    monkeypatch.setattr(managed.BotTools, "_load_usable", load_usable)
+    monkeypatch.setattr(managed.ManagedTools, "_request", request)
     return state
 
 
@@ -154,26 +149,29 @@ async def test_personal_tools_are_every_connected_service_for_the_private_owner_
     assert await runtime.load_mcp_tools(managed.PersonalTools("bob").source()) == []
 
 
-async def test_bot_loads_only_kit_tools_its_profile_can_call(remote):
-    bot = managed.BotTools("eng", KIT_ID, PROFILE_ID)
+async def test_bot_loads_every_service_its_profile_connected(remote):
+    bot = managed.BotTools("eng", PROFILE_ID)
     tools = await runtime.load_mcp_tools(bot.source())
 
-    # Notion is in the kit, but nobody connected it for the bot; save_issue is not in
-    # the profile's listing either, so neither loads.
-    assert [tool.name for tool in tools] == ["mcp_linear_list_issues"]
-    [(url, headers)] = remote
+    # Nobody connected Notion for the bot, and a public server is no one's own.
+    assert sorted(tool.name for tool in tools) == [
+        "mcp_linear_list_issues",
+        "mcp_linear_save_issue",
+        "mcp_linear_search",
+    ]
+    [(url, headers)] = {(url, tuple(headers.items())) for url, headers in remote}
     assert url.endswith(f"/v1/managed-tools/servers/{LINEAR_ID}/mcp")
-    assert headers == {"X-Api-Key": "openswe-key", "X-LangSmith-Profile": PROFILE_ID}
+    assert dict(headers) == {"X-Api-Key": "openswe-key", "X-LangSmith-Profile": PROFILE_ID}
     status = await bot.status()
     assert [(item.name, item.connected) for item in status.servers] == [
-        ("linear", True),
-        ("notion", False),
+        ("Linear", True),
+        ("Notion", False),
     ]
 
 
 async def test_owners_own_connection_replaces_the_bots_in_their_private_thread(monkeypatch, remote):
     private_thread(monkeypatch, "alice")
-    bot = managed.BotTools("eng", KIT_ID, PROFILE_ID)
+    bot = managed.BotTools("eng", PROFILE_ID)
     tools = await runtime.load_mcp_tools(bot.source(), managed.PersonalTools("alice").source())
 
     linear = next(tool for tool in tools if tool.name == "mcp_linear_list_issues")
@@ -186,26 +184,27 @@ async def test_owners_own_connection_replaces_the_bots_in_their_private_thread(m
     ]
 
 
-async def test_workspace_bot_needs_both_a_kit_and_a_profile(registry_db):
-    from openswe.dashboard.workspace_settings import (
-        WorkspaceSettingsUpdate,
-        upsert_workspace_overrides,
+async def test_the_first_bot_connect_makes_one_profile_per_workspace(lmt, registry_db):
+    assert await managed.BotTools.for_workspace("eng") is None
+    bot = await managed.BotTools.of("eng")
+    # Admins connecting at once make one profile between them.
+    await asyncio.gather(
+        cards.connect_bot_service("alice", bot, NOTION_ID),
+        cards.connect_bot_service("alice", bot, NOTION_ID),
+    )
+    assert [p["name"] for p in lmt.profiles] == ["Open SWE bot (eng)"]
+    eng = await managed.BotTools.for_workspace("eng")
+    assert eng is not None and eng.profile == lmt.profiles[0]["id"]
+    assert (
+        lmt.posts.count(("POST", f"{eng.profile_server_path(NOTION_ID)}/credential-sessions")) == 2
     )
 
-    assert await managed.BotTools.for_workspace("eng") is None
-    await upsert_workspace_overrides(
-        "eng", WorkspaceSettingsUpdate(managed_tools_gateway_id=KIT_ID)
-    )
-    assert await managed.BotTools.for_workspace("eng") is None
-    await upsert_workspace_overrides(
-        "eng",
-        WorkspaceSettingsUpdate(
-            managed_tools_gateway_id=KIT_ID, managed_tools_profile_id=PROFILE_ID
-        ),
-    )
-    bot = await managed.BotTools.for_workspace("eng")
-    assert bot is not None and (bot.kit, bot.profile) == (KIT_ID, PROFILE_ID)
-    assert await managed.BotTools.for_workspace("other") is None
+    # A workspace whose setting was lost gets back the profile LangSmith kept for it.
+    lmt.profiles.append({"id": PROFILE_ID, "name": "Open SWE bot (ops)"})
+    await cards.connect_bot_service("alice", await managed.BotTools.of("ops"), NOTION_ID)
+    ops = await managed.BotTools.for_workspace("ops")
+    assert ops is not None and ops.profile == PROFILE_ID
+    assert len(lmt.profiles) == 2
 
 
 async def test_connect_links_come_from_lmt_for_oauth_and_secret_services(monkeypatch):

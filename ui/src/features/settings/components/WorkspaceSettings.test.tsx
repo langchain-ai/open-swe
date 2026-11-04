@@ -124,11 +124,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
     langsmith_connected: false,
     servers: [],
   })
-  vi.spyOn(api, "listManagedToolsKits").mockResolvedValue([])
-  vi.spyOn(api, "listManagedToolsProfiles").mockResolvedValue([])
   vi.spyOn(api, "getWorkspaceBotTools").mockResolvedValue({
-    kit_id: null,
-    profile_id: null,
     status: null,
     error: null,
   })

@@ -308,9 +308,7 @@ export function WorkspaceSettingsPanel({
         )}
       />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
-      {canEdit && (
-        <WorkspaceBotSection slug={slug} workspaceName={record.data.name} />
-      )}
+      {canEdit && <WorkspaceBotSection slug={slug} />}
       {canEdit && slug !== DEFAULT_WORKSPACE_SLUG && (
         <SettingsSection
           title="Delete workspace"

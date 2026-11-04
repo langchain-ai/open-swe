@@ -1,223 +1,263 @@
+import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
+import { Input } from "@langchain/macaw-components/Input"
 import { Select } from "@langchain/macaw-components/Select"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { useScopedSettings } from "@/features/settings/lib/settingsScope"
-import { api, ApiError, type ManagedToolsProfile } from "@/lib/api"
-import { SignInWithLangSmithButton } from "./ConnectionsSection"
+import { optimisticUpdate } from "@/lib/optimistic"
+import {
+  api,
+  type ManagedServer,
+  type NewBotServer,
+  type WorkspaceBotTools,
+} from "@/lib/api"
 import {
   ConnectButton,
   managedToolsQuery,
   useConnectPopup,
 } from "./ManagedToolsSection"
 
-const NONE = "none"
-const KITS_KEY = ["managedToolsKits"]
-const PROFILES_KEY = ["managedToolsProfiles"]
 const botToolsKey = (slug: string) => ["workspaceBotTools", slug]
-
-/** Options for a picker of LMT ids, keeping a saved id selectable when the list can't be read. */
-function pickerOptions(
-  items: Array<{ value: string; label: string }>,
-  current: string | null,
-  unlisted: string
-) {
-  return [
-    { value: NONE, label: "None" },
-    ...items,
-    ...(current && !items.some((item) => item.value === current)
-      ? [{ value: current, label: unlisted }]
-      : []),
-  ]
-}
+const NEW_SERVER = "new-server"
+const AUTH_KINDS = [
+  { value: "oauth", label: "OAuth sign-in" },
+  { value: "secret", label: "API key header" },
+] as const
+const EMPTY: NewBotServer = { name: "", url: "", kind: "oauth", header: "" }
 
 /**
- * The workspace bot: a LangSmith Managed Tools kit every run in the workspace
- * loads, called as an LMT profile that holds the bot's own connections.
+ * The workspace bot: the LangSmith Managed Tools services every run in the
+ * workspace loads, connected as an LMT profile Open SWE makes on the first connect.
  */
-export function WorkspaceBotSection({
-  slug,
-  workspaceName,
-}: {
-  slug: string
-  workspaceName: string
-}) {
+export function WorkspaceBotSection({ slug }: { slug: string }) {
   const qc = useQueryClient()
-  const settings = useScopedSettings({ kind: "workspace", slug }, () => {
-    void qc.invalidateQueries({ queryKey: botToolsKey(slug) })
-  })
+  const key = botToolsKey(slug)
   const managed = useQuery(managedToolsQuery)
-  const kits = useQuery({
-    queryKey: KITS_KEY,
-    queryFn: api.listManagedToolsKits,
-    retry: false,
-  })
-  const profiles = useQuery({
-    queryKey: PROFILES_KEY,
-    queryFn: api.listManagedToolsProfiles,
-    retry: false,
-  })
   const bot = useQuery({
-    queryKey: botToolsKey(slug),
+    queryKey: key,
     queryFn: () => api.getWorkspaceBotTools(slug),
   })
-  const popup = useConnectPopup(botToolsKey(slug), (serverId) =>
+  const popup = useConnectPopup(key, (serverId) =>
     api.connectWorkspaceBotTool(slug, serverId)
   )
-  const profileName = `Open SWE: ${workspaceName}`
-  // LangSmith picks the new profile's id, so it can't be shown before it exists.
-  const createProfile = useMutation({
-    meta: { errorTitle: "Couldn't create the profile" },
-    mutationFn: () => api.createManagedToolsProfile(profileName),
-    onSuccess: (profile) => {
-      qc.setQueryData<Array<ManagedToolsProfile>>(PROFILES_KEY, (current) => [
-        ...(current ?? []),
-        profile,
-      ])
-      settings.save({ managed_tools_profile_id: profile.id })
+  const [draft, setDraft] = useState<NewBotServer | null>(null)
+  const [picked, setPicked] = useState<string | null>(null)
+  const add = useConnectPopup(key, async () => {
+    if (!draft) return { connected: false }
+    const added = await api.addWorkspaceBotServer(slug, {
+      ...draft,
+      header: draft.kind === "secret" ? draft.header : null,
+    })
+    setDraft(null)
+    return { connected: false, url: added.url }
+  })
+  const disconnect = useMutation({
+    meta: { errorTitle: "Couldn't disconnect the service" },
+    mutationFn: (serverId: string) =>
+      api.disconnectWorkspaceBotTool(slug, serverId),
+    onMutate: async (serverId) => ({
+      undo: await optimisticUpdate<WorkspaceBotTools>(qc, key, (current) => ({
+        ...current,
+        status: current.status && {
+          ...current.status,
+          servers: current.status.servers.map((server) =>
+            server.id === serverId ? { ...server, connected: false } : server
+          ),
+        },
+      })),
+    }),
+    onError: (_e, _v, ctx) => ctx?.undo(),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: key })
     },
   })
 
   if (managed.data && !managed.data.configured) return null
 
-  const kitId = settings.data?.managed_tools_gateway_id ?? null
-  const profileId = settings.data?.managed_tools_profile_id ?? null
-  const signInNeeded = [kits.error, profiles.error].some(
-    (error) => error instanceof ApiError && error.status === 409
-  )
-  const listError = kits.error ?? profiles.error
   const status = bot.data?.status
   const services = status?.servers ?? []
+  const connected = services.filter((server) => server.connected)
+  const available = services.filter(
+    (server) => server.enabled && !server.connected
+  )
+  const chosen = available.find((server) => server.id === picked)
+  const addable =
+    !!draft &&
+    draft.name.trim() !== "" &&
+    draft.url.startsWith("https://") &&
+    (draft.kind === "oauth" || !!draft.header?.trim())
 
   return (
     <SettingsSection
       title="Workspace bot"
-      description="Tools every run in this workspace can use: a LangSmith Managed Tools kit, called as a LangSmith profile that holds the bot's own connections. In someone's private threads, a service they connected themselves replaces the bot's service of the same name."
+      description="LangSmith Managed Tools services every run in this workspace can use, signed in as the workspace bot rather than as you. In someone's private threads, a service they connected themselves replaces the bot's service of the same name."
     >
-      {signInNeeded ? (
-        <SettingsRow
-          label="LangSmith"
-          description="Your LangSmith sign-in expired. Sign in again to list tool kits and profiles."
-          control={<SignInWithLangSmithButton />}
-        />
-      ) : listError ? (
+      {bot.isLoading ? (
+        <p className="p-space-4 text-xs text-secondary">Loading…</p>
+      ) : bot.isError || bot.data?.error ? (
         <p role="alert" className="p-space-4 text-xs text-error-secondary">
-          {`Tool kits or profiles could not be listed: ${listError.message}`}
+          {`The bot's services could not be read: ${bot.data?.error ?? bot.error?.message}`}
         </p>
-      ) : null}
-      <SettingsRow
-        label="Tool kit"
-        description="The tools the bot offers."
-        control={
-          <Select
-            aria-label="Tool kit"
-            options={pickerOptions(
-              (kits.data ?? []).map((kit) => ({
-                value: kit.id,
-                label: `${kit.name} · ${kit.tool_count} ${kit.tool_count === 1 ? "tool" : "tools"}`,
-              })),
-              kitId,
-              "Configured tool kit"
-            )}
-            value={kitId ?? NONE}
-            onChange={(next) =>
-              next &&
-              settings.save({
-                managed_tools_gateway_id: next === NONE ? null : next,
-              })
-            }
-            disabled={!settings.data || kits.isLoading}
-            triggerClassName="w-64"
-          />
-        }
-      />
-      <SettingsRow
-        label="Bot profile"
-        description={`The credentials the bot calls them with. Create profile makes one named “${profileName}”.`}
-        control={
-          <div className="flex items-center gap-space-2">
-            <Select
-              aria-label="Bot profile"
-              options={pickerOptions(
-                (profiles.data ?? []).map((profile) => ({
-                  value: profile.id,
-                  label: profile.name,
-                })),
-                profileId,
-                "Configured profile"
-              )}
-              value={profileId ?? NONE}
-              onChange={(next) =>
-                next &&
-                settings.save({
-                  managed_tools_profile_id: next === NONE ? null : next,
-                })
-              }
-              disabled={!settings.data || profiles.isLoading}
-              triggerClassName="w-64"
+      ) : !status ? (
+        <p className="p-space-4 text-xs text-secondary">
+          Open SWE has no LangSmith API key, so the workspace bot can&apos;t
+          load services.
+        </p>
+      ) : (
+        <>
+          {connected.map((server) => (
+            <BotServerRow
+              key={server.id}
+              server={server}
+              onDisconnect={(serverId) => disconnect.mutate(serverId)}
             />
+          ))}
+          <SettingsRow
+            label="Connect a service"
+            description={
+              connected.length === 0
+                ? "The bot has no services yet. Each one you connect loads in every run in this workspace."
+                : "Signs a service in for the bot, not for you."
+            }
+            control={
+              <div className="flex items-center gap-space-2">
+                <Select
+                  aria-label="Service to connect"
+                  options={available.map((server) => ({
+                    value: server.id,
+                    label: server.name,
+                  }))}
+                  value={chosen?.id}
+                  onChange={(next) => setPicked(next ?? null)}
+                  placeholder="Choose a service"
+                  triggerClassName="w-56"
+                />
+                {chosen ? (
+                  <ConnectButton
+                    server={chosen}
+                    label="Connect for bot"
+                    connecting={popup.connecting === chosen.id}
+                    onConnect={popup.start}
+                  />
+                ) : null}
+              </div>
+            }
+          />
+        </>
+      )}
+      {draft ? (
+        <div className="flex flex-col gap-space-3 p-space-4">
+          <Input
+            label="Name"
+            aria-label="Server name"
+            size="md"
+            required
+            maxLength={100}
+            value={draft.name}
+            onChange={(name) => setDraft({ ...draft, name })}
+          />
+          <Input
+            label="Server URL"
+            aria-label="Server URL"
+            size="md"
+            required
+            type="url"
+            placeholder="https://example.com/mcp"
+            value={draft.url}
+            onChange={(url) => setDraft({ ...draft, url })}
+          />
+          <Select
+            aria-label="Authentication"
+            size="md"
+            options={[...AUTH_KINDS]}
+            value={draft.kind}
+            onChange={(kind) => kind && setDraft({ ...draft, kind })}
+          />
+          {draft.kind === "secret" ? (
+            <Input
+              label="Header"
+              aria-label="API key header"
+              size="md"
+              required
+              placeholder="X-API-Key"
+              value={draft.header ?? ""}
+              onChange={(header) => setDraft({ ...draft, header })}
+            />
+          ) : null}
+          <p className="text-xs text-secondary">
+            Adds the server to your LangSmith workspace, then opens LangSmith to
+            sign it in for this workspace&apos;s bot. You enter any API key
+            there, not here.
+          </p>
+          <div className="flex items-center gap-space-2">
+            <Button
+              size="xs"
+              color="primary"
+              disabled={!addable || add.connecting === NEW_SERVER}
+              onClick={() => add.start(NEW_SERVER)}
+            >
+              {add.connecting === NEW_SERVER ? "Adding…" : "Add and connect"}
+            </Button>
             <Button
               size="xs"
               color="secondary"
               variant="outlined"
-              disabled={!settings.data || createProfile.isPending}
-              onClick={() => createProfile.mutate()}
+              onClick={() => setDraft(null)}
             >
-              {createProfile.isPending ? "Creating…" : "Create profile"}
+              Cancel
             </Button>
           </div>
-        }
-      />
-      {kitId && profileId ? (
-        bot.data?.error ? (
-          <p role="alert" className="p-space-4 text-xs text-error-secondary">
-            {`The bot's tools could not be read: ${bot.data.error}`}
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-space-2 px-space-4 py-space-3">
+          <p className="text-xs text-secondary">
+            Services come from your LangSmith workspace&apos;s Tools. Add one
+            that isn&apos;t there yet.
           </p>
-        ) : bot.isLoading ? (
-          <p className="p-space-4 text-xs text-secondary">Loading…</p>
-        ) : bot.isError ? (
-          <p role="alert" className="p-space-4 text-xs text-error-secondary">
-            {bot.error.message}
-          </p>
-        ) : !status ? (
-          <p className="p-space-4 text-xs text-secondary">
-            Open SWE has no LangSmith API key, so the workspace bot can't load
-            its tools.
-          </p>
-        ) : (
-          <>
-            {services.map((server) => (
-              <SettingsRow
-                key={server.id}
-                label={server.name}
-                description={`${server.tool_count} ${server.tool_count === 1 ? "tool" : "tools"}`}
-                control={
-                  server.connected ? (
-                    <Badge color="primary" size="xs">
-                      Connected
-                    </Badge>
-                  ) : (
-                    <ConnectButton
-                      server={server}
-                      label="Connect for bot"
-                      connecting={popup.connecting === server.id}
-                      onConnect={popup.start}
-                    />
-                  )
-                }
-              />
-            ))}
-            <p className="px-space-4 py-space-3 text-xs text-secondary">
-              {services.length === 0
-                ? "This tool kit has no services yet. "
-                : "Connecting a service signs it in for the bot, not for you. "}
-              Edit the kit&apos;s tools in LangSmith under Settings &gt; Tools.
-            </p>
-          </>
-        )
-      ) : null}
+          <Button
+            size="xs"
+            color="secondary"
+            variant="outlined"
+            disabled={!status}
+            onClick={() => setDraft(EMPTY)}
+          >
+            Add MCP server
+          </Button>
+        </div>
+      )}
     </SettingsSection>
+  )
+}
+
+function BotServerRow({
+  server,
+  onDisconnect,
+}: {
+  server: ManagedServer
+  onDisconnect: (serverId: string) => void
+}) {
+  return (
+    <SettingsRow
+      label={server.name}
+      description="Loads in every run in this workspace"
+      control={
+        <div className="flex items-center gap-space-2">
+          <Badge color="primary" size="xs">
+            Connected
+          </Badge>
+          <Button
+            size="xs"
+            color="secondary"
+            variant="outlined"
+            aria-label={`Disconnect ${server.name} for the bot`}
+            onClick={() => onDisconnect(server.id)}
+          >
+            Disconnect
+          </Button>
+        </div>
+      }
+    />
   )
 }

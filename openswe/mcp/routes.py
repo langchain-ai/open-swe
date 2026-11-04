@@ -14,12 +14,11 @@ from openswe.mcp.cards import ConnectCard, connect_bot_service, connect_service
 from openswe.mcp.managed import (
     BotStatus,
     BotTools,
-    Kit,
     LangSmithNotConnected,
     ManagedServer,
     ManagedToolsError,
+    NewServer,
     PersonalTools,
-    Profile,
     managed_tools_configured,
 )
 from openswe.mcp.models import (
@@ -185,16 +184,15 @@ class ManagedConnectResponse(BaseModel):
 
 
 class BotToolsView(BaseModel):
-    """A workspace bot's kit and profile, and which of the kit's services it can use."""
+    """A workspace bot's services: those its profile connected, and those it could."""
 
-    kit_id: str | None
-    profile_id: str | None
     status: BotStatus | None = None
     error: str | None = None
 
 
-class NewProfile(BaseModel):
-    name: str
+class NewBotServer(BaseModel):
+    server: ManagedServer
+    url: str
 
 
 managed_mcp_router = APIRouter(route_class=MCPRoute)
@@ -204,64 +202,18 @@ def _managed_error(exc: ManagedToolsError) -> HTTPException:
     return HTTPException(409 if isinstance(exc, LangSmithNotConnected) else 502, str(exc))
 
 
-@managed_mcp_router.get("/managed-tools/kits", response_model=list[Kit])
-async def api_list_managed_tools_kits(admin: dict[str, Any] = ADMIN_DEP) -> list[Kit]:
-    """Tool kits an admin can give a workspace bot, read with the admin's own LangSmith login."""
-    try:
-        return await PersonalTools(admin["sub"]).kits()
-    except ManagedToolsError as exc:
-        raise _managed_error(exc) from None
-
-
-@managed_mcp_router.get("/managed-tools/profiles", response_model=list[Profile])
-async def api_list_managed_tools_profiles(admin: dict[str, Any] = ADMIN_DEP) -> list[Profile]:
-    """LMT profiles a workspace bot can run as; LangSmith lists them only to its admins."""
-    try:
-        return await PersonalTools(admin["sub"]).profiles()
-    except ManagedToolsError as exc:
-        raise _managed_error(exc) from None
-
-
-@managed_mcp_router.post("/managed-tools/profiles", response_model=Profile, status_code=201)
-@audit_endpoint
-async def api_create_managed_tools_profile(
-    body: NewProfile, admin: dict[str, Any] = ADMIN_DEP
-) -> Profile:
-    name = body.name.strip()
-    if not name:
-        raise HTTPException(400, "Name the profile")
-    try:
-        return await PersonalTools(admin["sub"]).create_profile(name)
-    except ManagedToolsError as exc:
-        raise _managed_error(exc) from None
-
-
-async def _bot(workspace: str) -> BotTools:
-    bot = await BotTools.for_workspace(_normalized_workspace(workspace))
-    if bot is None:
-        raise HTTPException(404, "Give this workspace a tool kit and a bot profile first")
-    return bot
-
-
 @managed_mcp_router.get("/workspaces/{workspace}/bot-tools", response_model=BotToolsView)
 async def api_workspace_bot_tools(
     workspace: str, _admin: dict[str, Any] = ADMIN_DEP
 ) -> BotToolsView:
-    from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
-
     slug = _normalized_workspace(workspace)
-    settings = await cached_workspace_settings(slug)
-    view = BotToolsView(
-        kit_id=settings.managed_tools_gateway_id, profile_id=settings.managed_tools_profile_id
-    )
-    if (bot := await BotTools.for_workspace(slug)) is None:
-        return view
+    if not managed_tools_configured():
+        return BotToolsView()
     try:
-        view.status = await bot.status()
+        return BotToolsView(status=await (await BotTools.of(slug)).status())
     except ManagedToolsError as exc:
         logger.warning("Workspace bot status unavailable", extra={"workspace": slug}, exc_info=True)
-        view.error = str(exc)
-    return view
+        return BotToolsView(error=str(exc))
 
 
 @managed_mcp_router.post(
@@ -271,12 +223,42 @@ async def api_workspace_bot_tools(
 async def api_connect_workspace_bot_tool(
     workspace: str, server: str, admin: dict[str, Any] = ADMIN_DEP
 ) -> ManagedConnectResponse:
-    """A consent link where the admin connects one kit service for the workspace bot."""
+    """A consent link where the admin connects one service for the workspace bot."""
+    bot = await BotTools.of(_normalized_workspace(workspace))
     try:
-        link = await connect_bot_service(admin["sub"], await _bot(workspace), server)
+        link = await connect_bot_service(admin["sub"], bot, server)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
     return ManagedConnectResponse(connected=False, url=link.url)
+
+
+@managed_mcp_router.post(
+    "/workspaces/{workspace}/bot-tools/servers", response_model=NewBotServer, status_code=201
+)
+@audit_endpoint
+async def api_add_workspace_bot_server(
+    workspace: str, body: NewServer, admin: dict[str, Any] = ADMIN_DEP
+) -> NewBotServer:
+    """Register a server in LMT, then a consent link connecting it for the workspace bot."""
+    bot = await BotTools.of(_normalized_workspace(workspace))
+    try:
+        server = await PersonalTools(admin["sub"]).create_server(body)
+        link = await connect_bot_service(admin["sub"], bot, server.id)
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return NewBotServer(server=server, url=link.url)
+
+
+@managed_mcp_router.delete("/workspaces/{workspace}/bot-tools/services/{server}", status_code=204)
+@audit_endpoint
+async def api_disconnect_workspace_bot_tool(
+    workspace: str, server: str, admin: dict[str, Any] = ADMIN_DEP
+) -> None:
+    bot = await BotTools.of(_normalized_workspace(workspace))
+    try:
+        await PersonalTools(admin["sub"]).disconnect_for_bot(bot, server)
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
 
 
 @managed_mcp_router.get("/my-managed-tools", response_model=ManagedToolsView)
