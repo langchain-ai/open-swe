@@ -407,7 +407,7 @@ export function AgentsSidebar({
   )
   const recents = sortSidebarThreads(
     filterThreads(threadItems, prefs.filters, activeThreadId),
-    prefs.sortChats
+    repoMode ? prefs.sortChats : "updated"
   )
   // The folder each of this Mac's threads runs in, to file the ones without a
   // repository under their folder rather than under "No project".
