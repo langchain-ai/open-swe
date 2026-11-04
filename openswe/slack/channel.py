@@ -73,7 +73,12 @@ _CLICK_SCOPE: Final = "slack_click"
 _CLICK_TTL: Final = timedelta(days=7)
 #: The call that claimed a message, which may be sent again.
 _CLICK_CALL_SCOPE: Final = "slack_click_call"
-_CLICK_CALL_TTL: Final = timedelta(minutes=10)
+_CALL_TTL: Final = timedelta(minutes=10)
+#: A message starts one turn: Slack sends a mention as both ``app_mention`` and ``message``.
+_TURN_SCOPE: Final = "slack_turn"
+_TURN_TTL: Final = timedelta(days=1)
+#: The call that claimed a message's turn, which may be sent again.
+_TURN_CALL_SCOPE: Final = "slack_turn_call"
 #: A turn's decline is answered once per call; the claim outlives the call's retries.
 _DECLINE_SCOPE: Final = "slack_turn_decline"
 _DECLINE_TTL: Final = timedelta(minutes=10)
@@ -201,6 +206,15 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
     """
     webhook_id = call.request.headers.get("webhook-id", "")
     fields = {"agent_thread_id": str(turn.thread_id), "slack_message_ts": turn.message_ts}
+    # An edit keeps its message's timestamp, and a message may be edited more than once.
+    if turn.kind != "edit" and not await _claim_once(
+        (_TURN_SCOPE, _TURN_TTL),
+        _TURN_CALL_SCOPE,
+        f"{turn.channel_id}:{turn.message_ts}",
+        webhook_id,
+    ):
+        _no_run("another event of this message started its turn", **fields)
+        return SlackTurnStarted()
     channel_context = await common.resolve_slack_channel_context(turn.channel_id)
     key_ts = CONCIERGE_TS if turn.concierge else turn.thread_ts
     owner_login = None if turn.bot_id else await service.slack_login(turn.user_id)
@@ -492,7 +506,7 @@ async def act_on_slack_click(call: ChannelCall, click: ActOnSlackClick) -> Slack
     """Act on a click as the backend always has, as the person Trigger Server verified."""
     webhook_id = call.request.headers.get("webhook-id", "")
     if webhook_id and not await event_claims.claim(
-        _CLICK_CALL_SCOPE, f"act:{webhook_id}", ttl=_CLICK_CALL_TTL
+        _CLICK_CALL_SCOPE, f"act:{webhook_id}", ttl=_CALL_TTL
     ):
         return SlackClickActed(acted=False)
     payload = dict(click.payload)
@@ -514,14 +528,26 @@ async def act_on_slack_click(call: ChannelCall, click: ActOnSlackClick) -> Slack
 
 async def _claim_click(plan: PlanSlackClick, webhook_id: str) -> Literal["first", "again"] | None:
     """``first`` or ``again`` (the same webhook ID) when this call acts on the message."""
-    message = f"{plan.channel_id}:{plan.message_ts}"
+    return await _claim_once(
+        (_CLICK_SCOPE, _CLICK_TTL),
+        _CLICK_CALL_SCOPE,
+        f"{plan.channel_id}:{plan.message_ts}",
+        webhook_id,
+    )
+
+
+async def _claim_once(
+    claim: tuple[str, timedelta], call_scope: str, message: str, webhook_id: str
+) -> Literal["first", "again"] | None:
+    """``first`` when this call claims ``message``, ``again`` when the same webhook ID did."""
+    scope, ttl = claim
     call = f"{webhook_id}:{message}"
-    if webhook_id and await event_claims.held(_CLICK_CALL_SCOPE, call):
+    if webhook_id and await event_claims.held(call_scope, call):
         return "again"
-    if not await event_claims.claim(_CLICK_SCOPE, message, ttl=_CLICK_TTL):
+    if not await event_claims.claim(scope, message, ttl=ttl):
         return None
     if webhook_id:
-        await event_claims.claim(_CLICK_CALL_SCOPE, call, ttl=_CLICK_CALL_TTL)
+        await event_claims.claim(call_scope, call, ttl=_CALL_TTL)
     return "first"
 
 
