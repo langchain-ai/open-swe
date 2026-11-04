@@ -387,11 +387,8 @@ class ManagedTools(ABC):
             server = offer.server
             name = server.connection_name
             if name in connections:
-                logger.warning(
-                    "Skipping a managed tools server whose name another one has",
-                    extra={"mcp_name": name},
-                )
-                continue
+                # LangSmith lets a registered server share a built-in's name (Linear, Pylon).
+                name = f"{name}-{server.id[:8].lower()}"
             connections[name] = _ServerConnection(
                 name=name,
                 url=f"{langsmith_issuer()}{SERVERS_PATH}/{quote(server.id, safe='')}/mcp",
@@ -510,7 +507,13 @@ class PersonalTools(ManagedTools):
             raise RuntimeError("Personal managed tools require the private thread owner")
 
     async def _offers(self) -> list[_Offer]:
-        return [_Offer(server) for server in await self.servers() if server.usable]
+        # Public servers count as connected for everyone; only those the person connected
+        # an account to are theirs. A workspace puts public ones in its bot's kit.
+        return [
+            _Offer(server)
+            for server in await self.servers()
+            if server.usable and server.has_credential
+        ]
 
     async def server(self, server_id: str) -> ManagedServer:
         found = next((item for item in await self.servers() if item.id == server_id), None)

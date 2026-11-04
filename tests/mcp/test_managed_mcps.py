@@ -48,6 +48,11 @@ def lmt(monkeypatch):
                 server(NOTION_ID, "Notion", connected=False),
                 server("exa", "Exa", connected=False, kind="secret"),
                 server("off", "Off", connected=True, enabled=False),
+                # Public servers are connected for everyone, but are not the person's own.
+                {
+                    **server("weather", "Weather", connected=True, kind="none"),
+                    "has_credential": False,
+                },
             ]
         },
         kit={
