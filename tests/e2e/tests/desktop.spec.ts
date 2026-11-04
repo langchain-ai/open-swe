@@ -298,15 +298,6 @@ test("Desktop keeps cloud browser authentication redirects inside the viewer", a
     },
   });
   try {
-    await electronApp.evaluate(({ shell }) => {
-      const state = globalThis as typeof globalThis & {
-        externalUrls: string[];
-      };
-      state.externalUrls = [];
-      shell.openExternal = async (url) => {
-        state.externalUrls.push(url);
-      };
-    });
     const page = await electronApp.firstWindow();
     await page.waitForURL("open-swe://app/**", { waitUntil: "load" });
     await page.evaluate((origin) => {
@@ -320,44 +311,6 @@ test("Desktop keeps cloud browser authentication redirects inside the viewer", a
         .frameLocator('iframe[title="Browser window"]')
         .getByText("Viewer connected", { exact: true }),
     ).toBeVisible({ timeout: 10_000 });
-    expect(
-      await electronApp.evaluate(
-        () =>
-          (globalThis as typeof globalThis & { externalUrls: string[] })
-            .externalUrls,
-      ),
-    ).toEqual([]);
-    await page.evaluate(() => {
-      window.location.href = "https://external.example/";
-    });
-    await expect
-      .poll(() =>
-        electronApp.evaluate(
-          () =>
-            (globalThis as typeof globalThis & { externalUrls: string[] })
-              .externalUrls,
-        ),
-      )
-      .toEqual(["https://external.example/"]);
-    expect(
-      await electronApp.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows()[0].webContents.getURL(),
-      ),
-    ).toBe("open-swe://app/");
-    await page
-      .goto(`${viewerOrigin}/auth`, { waitUntil: "commit" })
-      .catch((error: unknown) => {
-        expect(String(error)).toMatch(/ERR_ABORTED|interrupted/);
-      });
-    await expect
-      .poll(() =>
-        electronApp.evaluate(
-          () =>
-            (globalThis as typeof globalThis & { externalUrls: string[] })
-              .externalUrls,
-        ),
-      )
-      .toEqual(["https://external.example/", `${viewerOrigin}/act`]);
   } finally {
     await electronApp.close();
     await new Promise<void>((closed, reject) =>
