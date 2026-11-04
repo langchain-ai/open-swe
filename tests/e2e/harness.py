@@ -1030,7 +1030,8 @@ if os.environ.get("E2E_OAUTH"):
     os.environ["LANGSMITH_CONNECTION_URL"] = oauth_providers.issuer
     os.environ["LANGSMITH_OAUTH_CLIENT_ID"] = "e2e-langsmith"
     os.environ["LANGSMITH_OAUTH_CLIENT_SECRET"] = "e2e-langsmith-secret"
-    os.environ["LANGSMITH_LOGIN_ORG_ID"] = "e2e-org"
+    os.environ["LANGSMITH_ENDPOINT"] = oauth_providers.issuer
+    os.environ["LANGSMITH_API_KEY"] = "e2e-deployment-key"
     os.environ["TOKEN_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
     os.environ["GITHUB_APP_CLIENT_ID"] = "e2e-github"
     auth_routes.GITHUB_AUTHORIZE_URL = BASE_URL + "/fake-gh/link/authorize"

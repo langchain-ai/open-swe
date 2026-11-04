@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Literal
 
-import httpx
+import httpx2
 from githubkit import GitHub
 from githubkit.auth import BaseAuthStrategy
 
@@ -17,7 +17,7 @@ async def github_sdk[A: BaseAuthStrategy](
 ) -> AsyncIterator[GitHub[A]]:
     async with GitHub(
         auth,
-        timeout=httpx.Timeout(timeout, connect=connect_timeout),
+        timeout=httpx2.Timeout(timeout, connect=connect_timeout),
         # Access checks must observe removals immediately. Token caching stays
         # scoped by repository and permission in openswe.github.app.
         http_cache=False,

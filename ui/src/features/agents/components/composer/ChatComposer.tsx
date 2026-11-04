@@ -23,6 +23,8 @@ import {
   type ContextWindowMeterProps,
 } from "./ContextWindowMeter"
 import { WorkspaceSelector } from "./WorkspaceSelector"
+import { ProjectSelector } from "@/features/projects/components/ProjectSelector"
+import type { Project } from "@/features/projects/lib/projects"
 import {
   LocalBranchSelector,
   LocalProjectSelector,
@@ -212,6 +214,11 @@ export interface ChatComposerProps {
   onRemoveLocalRepo?: (cwd: string) => void
   onRefreshLocalRepoBranch?: () => void
   onSelectLocalRepoBranch?: (branch: string) => void
+  /** Projects a new cloud thread can be filed in; the picker shows with `onProjectChange`. */
+  projects?: Array<Project>
+  selectedProjectId?: string | null
+  onProjectChange?: (projectId: string | null) => void
+  onCreateProject?: (name: string) => void
   /** Workspaces a new thread can boot from. The picker appears only when there are several. */
   workspaceOptions?: Array<WorkspaceOption>
   selectedWorkspace?: string | null
@@ -378,6 +385,10 @@ export const ChatComposer = memo(function ChatComposer({
   onRemoveLocalRepo,
   onRefreshLocalRepoBranch,
   onSelectLocalRepoBranch,
+  projects = [],
+  selectedProjectId = null,
+  onProjectChange,
+  onCreateProject,
   workspaceOptions = [],
   selectedWorkspace = null,
   onWorkspaceChange,
@@ -860,21 +871,35 @@ export const ChatComposer = memo(function ChatComposer({
           side="top"
         />
       )}
+      {runTarget !== "local" && onProjectChange && onCreateProject && (
+        <ProjectSelector
+          onCreate={onCreateProject}
+          onRepoChange={gitHubLinkUser ? undefined : onRepoChange}
+          onSelect={onProjectChange}
+          projects={projects}
+          repos={gitHubLinkUser ? undefined : repos}
+          selectedId={selectedProjectId}
+          selectedRepo={selectedRepo}
+        />
+      )}
       {runTarget !== "local" && onRepoChange && gitHubLinkUser && (
         <GitHubLinkRepoSelector user={gitHubLinkUser} side="top" />
       )}
-      {runTarget !== "local" && onRepoChange && !gitHubLinkUser && (
-        <RepoSelector
-          emptySelectionLabel="Don't work in a repository"
-          noMatchesLabel="No matching repositories"
-          onRepoChange={onRepoChange}
-          placeholder="Select repository"
-          repos={repos}
-          searchPlaceholder="Search repositories…"
-          selectedRepo={selectedRepo}
-          side="top"
-        />
-      )}
+      {runTarget !== "local" &&
+        onRepoChange &&
+        !gitHubLinkUser &&
+        !onProjectChange && (
+          <RepoSelector
+            emptySelectionLabel="Don't work in a repository"
+            noMatchesLabel="No matching repositories"
+            onRepoChange={onRepoChange}
+            placeholder="Select repository"
+            repos={repos}
+            searchPlaceholder="Search repositories…"
+            selectedRepo={selectedRepo}
+            side="top"
+          />
+        )}
       {runTarget === "local" && (
         <LocalProjectSelector
           onAdd={onAddLocalRepo}

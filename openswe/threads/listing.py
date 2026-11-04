@@ -12,6 +12,7 @@ from langgraph_sdk.errors import NotFoundError
 from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel
 
+from openswe.projects.store import NO_PROJECTS, PROJECT_ID_KEY, PROJECTS, ProjectFiling
 from openswe.review.session import ReviewSessionMetadata
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.records import lookup_slack_link_thread_id
@@ -165,13 +166,24 @@ def _metadata_matches_filters(
     admin_threads: bool | None = None,
     owner: str | None = None,
     exclude_sources: Collection[str] = (),
+    project: str | None = None,
+    filing: ProjectFiling = NO_PROJECTS,
 ) -> bool:
-    """Metadata-only filters that don't require fetching the latest run."""
+    """Metadata-only filters that don't require fetching the latest run.
+
+    A thread filed in one of the viewer's projects (``filing``) shows in that
+    project's folder rather than in its repository's or among those with none.
+    """
     if thread_is_unlisted(metadata):
         return False
     if owner and not thread_is_owner(metadata, owner):
         return False
     thread_repo = _metadata_repo(metadata)[2]
+    filed = filing.project_for(metadata, thread_repo)
+    if project is not None and filed != project:
+        return False
+    if (repo or ownerless) and filed is not None:
+        return False
     if repo and thread_repo.lower() != repo.lower():
         return False
     if ownerless and thread_repo:
@@ -626,6 +638,8 @@ async def _collect_thread_candidates(
     hierarchy: bool = False,
     viewed: bool | None = None,
     status: str | None = None,
+    project: str | None = None,
+    filing: ProjectFiling = NO_PROJECTS,
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
     root_ids: dict[str, str] = {}
@@ -681,6 +695,8 @@ async def _collect_thread_candidates(
                     admin_threads=admin_threads,
                     owner=viewer_login if owned else None,
                     exclude_sources=exclude_sources,
+                    project=project,
+                    filing=filing,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -854,12 +870,15 @@ async def list_dashboard_thread_repos(
     include_all: bool = False,
     exclude_sources: Collection[str] = (),
 ) -> list[dict[str, Any]]:
-    """The repositories the viewer's threads ran in, newest activity first.
+    """The sidebar's folders: the viewer's projects and the repositories their other
+    threads ran in, newest activity first.
 
-    Each entry names the workspace that owns the repository so the sidebar can
-    nest repositories under their workspace; an unassigned repository belongs
-    to ``default``.
+    Each entry names the workspace it belongs to so the sidebar can nest folders
+    under their workspace; an unassigned repository belongs to ``default``. A
+    project's entry carries its ``projectId`` and is listed even before it has a
+    thread.
     """
+    filing = await PROJECTS.filing_for(login)
     candidates = await _collect_thread_candidates(
         langgraph_client(),
         _participant_search_filters(login, email=email, include_all=include_all),
@@ -871,23 +890,45 @@ async def list_dashboard_thread_repos(
         exclude_sources=exclude_sources,
     )
     repos: dict[str, dict[str, Any]] = {}
+    project_activity: dict[str, int] = {}
     for thread in candidates:
-        _, name, full_name = _metadata_repo(_thread_metadata(thread))
+        metadata = _thread_metadata(thread)
+        _, name, full_name = _metadata_repo(metadata)
+        updated_at = thread_updated_ms(thread)
+        if (project_id := filing.project_for(metadata, full_name)) is not None:
+            project_activity[project_id] = max(project_activity.get(project_id, 0), updated_at)
+            continue
         if not full_name:
             continue
         key = full_name.lower()
-        updated_at = thread_updated_ms(thread)
         current = repos.get(key)
         if current is None or updated_at > current["updatedAt"]:
             repos[key] = {
                 "repoFullName": full_name,
                 "name": name,
                 "updatedAt": updated_at,
+                "projectId": None,
             }
     for entry in repos.values():
         owner, _, repo_name = str(entry["repoFullName"]).partition("/")
         entry["workspace"] = await workspace_for_repo(owner, repo_name) or DEFAULT_WORKSPACE_SLUG
-    return sorted(repos.values(), key=lambda entry: entry["updatedAt"], reverse=True)
+    folders = [
+        *repos.values(),
+        *(
+            {
+                "repoFullName": project.repo_full_name,
+                "name": project.name,
+                "updatedAt": max(
+                    project_activity.get(project_id, 0),
+                    int(project.updated_at.timestamp() * 1000),
+                ),
+                "projectId": project_id,
+                "workspace": project.workspace,
+            }
+            for project_id, project in filing.projects.items()
+        ),
+    ]
+    return sorted(folders, key=lambda entry: entry["updatedAt"], reverse=True)
 
 
 async def pin_dashboard_thread(thread_id: str, login: str) -> None:
@@ -931,7 +972,9 @@ async def list_dashboard_threads_page(
     admin_threads: bool | None = None,
     sort_by: _ThreadSortBy = "updated_at",
     hierarchy: bool = False,
+    project: str | None = None,
 ) -> dict[str, Any]:
+    """A page of threads; ``project`` is a project id, ``"none"`` meaning outside every one."""
     client = langgraph_client()
     normalized_query = query.strip() if query else ""
     if parse_slack_thread_url(normalized_query):
@@ -965,6 +1008,24 @@ async def list_dashboard_threads_page(
         searches = _participant_search_filters(
             search_login, email=search_email, include_all=include_all
         )
+    filing = (
+        await PROJECTS.filing_for(login)
+        if project is not None or repo or ownerless
+        else NO_PROJECTS
+    )
+    if project == "none":
+        # Outside every project is what the "no repository" folder already means.
+        project, ownerless = None, True
+    elif project is not None:
+        if project not in filing.projects:
+            return {
+                "items": [],
+                "limit": min(max(limit, 1), 100),
+                "offset": max(offset, 0),
+                "hasMore": False,
+            }
+        # Teammates' threads in a shared project, alongside the viewer's own.
+        searches = [*searches, {PROJECT_ID_KEY: project}]
     safe_offset = max(offset, 0)
     safe_limit = min(max(limit, 1), 100)
     summary_filters = viewed is not None or status is not None
@@ -993,6 +1054,8 @@ async def list_dashboard_threads_page(
         hierarchy=hierarchy,
         viewed=viewed,
         status=status,
+        project=project,
+        filing=filing,
     )
 
     if hierarchy:
@@ -1021,6 +1084,8 @@ async def list_dashboard_threads_page(
                     admin_threads=admin_threads,
                     owner=login if owned else None,
                     exclude_sources=exclude_sources,
+                    project=project,
+                    filing=filing,
                 )
                 and (
                     not surfaced_only

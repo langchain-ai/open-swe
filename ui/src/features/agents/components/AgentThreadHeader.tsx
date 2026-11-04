@@ -55,7 +55,9 @@ function ThreadRepoIndicator({ thread }: { thread: AgentThread }) {
   const repo = thread.repoFullName.trim()
   const repoName =
     cloudRepos.data?.find(
-      (candidate) => candidate.repoFullName.toLowerCase() === repo.toLowerCase()
+      (candidate) =>
+        !candidate.projectId &&
+        candidate.repoFullName?.toLowerCase() === repo.toLowerCase()
     )?.name ?? (repo ? thread.repo || repo : undefined)
   if (!repoName) return null
 

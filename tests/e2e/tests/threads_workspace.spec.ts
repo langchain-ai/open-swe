@@ -538,7 +538,7 @@ test.describe("threads workspace", () => {
     await dismissOnboardingIfShown(page);
 
     const sidebar = page.locator("[data-sidebar-frame]");
-    await sidebar.getByRole("button", { name: "Repositories options" }).click();
+    await sidebar.getByRole("button", { name: "Projects options" }).click();
     await page
       .getByRole("menuitemradio", { name: "Last updated", exact: true })
       .click();
@@ -587,7 +587,7 @@ test.describe("threads workspace", () => {
     await betaGroup.click();
     await expect(workspaceLinks).toHaveCount(5);
 
-    await sidebar.getByRole("button", { name: "Repositories options" }).click();
+    await sidebar.getByRole("button", { name: "Projects options" }).click();
     await page
       .getByRole("menuitemcheckbox", { name: "Show archived", exact: true })
       .click();
@@ -619,7 +619,7 @@ test.describe("threads workspace", () => {
     });
   });
 
-  test("groups repository-less chats in a pinnable No repository folder", async ({
+  test("groups repository-less chats in a pinnable No project folder", async ({
     page,
     request,
   }, testInfo) => {
@@ -651,13 +651,13 @@ test.describe("threads workspace", () => {
 
     const sidebar = page.locator("[data-sidebar-frame]");
     const noRepo = sidebar.getByRole("button", {
-      name: "No repository",
+      name: "No project",
       exact: true,
     });
     await expect(noRepo).toBeVisible();
     await expect(sidebar).toContainText(TITLES.noRepo);
 
-    await sidebar.getByRole("button", { name: "Repositories options" }).click();
+    await sidebar.getByRole("button", { name: "Projects options" }).click();
     await expect(
       page.getByRole("menuitemradio", { name: "Created", exact: true }),
     ).toBeChecked();
@@ -670,7 +670,7 @@ test.describe("threads workspace", () => {
     await page.keyboard.press("Escape");
 
     const pinNoRepo = sidebar.getByRole("button", {
-      name: "Pin No repository",
+      name: "Pin No project",
       includeHidden: true,
     });
     // Rows seeded by earlier tests can still shift the folder after the hover lands.
@@ -680,14 +680,14 @@ test.describe("threads workspace", () => {
     }).toPass();
     await expect(sidebar.getByText("Pinned", { exact: true })).toBeVisible();
     await expect(
-      sidebar.getByRole("button", { name: "No repository", exact: true }),
+      sidebar.getByRole("button", { name: "No project", exact: true }),
     ).toBeVisible();
 
     await page.reload();
     await dismissOnboardingIfShown(page);
     await expect(sidebar).toContainText(TITLES.noRepo);
     const unpinNoRepo = sidebar.getByRole("button", {
-      name: "Unpin No repository",
+      name: "Unpin No project",
       includeHidden: true,
     });
     await expect(async () => {

@@ -911,6 +911,7 @@ export function useSidebarRecents({
 
 export function useSidebarRepoThreads({
   repoFullName,
+  projectId = null,
   includeAutomations = false,
   includeResolved = false,
   owned = false,
@@ -920,6 +921,8 @@ export function useSidebarRepoThreads({
   enabled = true,
 }: {
   repoFullName: string | null
+  /** A project folder lists the project's threads instead of the repository's. */
+  projectId?: string | null
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
@@ -937,10 +940,14 @@ export function useSidebarRepoThreads({
         includeClaudeCode,
         includeSlack,
       }),
-      ...(repoFullName ? { repo: repoFullName } : {}),
+      ...(projectId
+        ? { project: projectId }
+        : repoFullName
+          ? { repo: repoFullName }
+          : {}),
       sortBy: sort === "created" ? "created_at" : "updated_at",
     },
-    enabled && Boolean(repoFullName)
+    enabled && Boolean(projectId || repoFullName)
   )
 }
 

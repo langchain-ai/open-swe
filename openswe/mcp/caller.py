@@ -36,6 +36,7 @@ _TOOL_MODULES: Final = (
     "openswe.tools.web_search",
     "openswe.tools.remember",
     "openswe.tools.save_user_settings",
+    "openswe.tools.projects",
     "openswe.tools.connect_claude_code",
     "openswe.tools.user_skills",
     "openswe.tools.threads",
