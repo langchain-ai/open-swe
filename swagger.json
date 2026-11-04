@@ -110,6 +110,20 @@
         "title": "AgentInstructionsUpdate",
         "type": "object"
       },
+      "AllowGitHubBot": {
+        "additionalProperties": false,
+        "properties": {
+          "login": {
+            "title": "Login",
+            "type": "string"
+          }
+        },
+        "required": [
+          "login"
+        ],
+        "title": "AllowGitHubBot",
+        "type": "object"
+      },
       "AllowSlackBot": {
         "additionalProperties": false,
         "properties": {
@@ -122,6 +136,30 @@
           "bot_id"
         ],
         "title": "AllowSlackBot",
+        "type": "object"
+      },
+      "AllowedGitHubBot": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "default": "",
+            "title": "Created By",
+            "type": "string"
+          },
+          "login": {
+            "title": "Login",
+            "type": "string"
+          }
+        },
+        "required": [
+          "login",
+          "created_at"
+        ],
+        "title": "AllowedGitHubBot",
         "type": "object"
       },
       "AllowedSlackBot": {
@@ -12169,6 +12207,134 @@
         "tags": [
           "dashboard",
           "review"
+        ]
+      }
+    },
+    "/dashboard/api/github/allowed-bots": {
+      "get": {
+        "operationId": "api_list_allowed_github_bots_dashboard_api_github_allowed_bots_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AllowedGitHubBot"
+                  },
+                  "title": "Response Api List Allowed Github Bots Dashboard Api Github Allowed Bots Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Allowed Github Bots",
+        "tags": [
+          "dashboard",
+          "github"
+        ]
+      },
+      "post": {
+        "operationId": "api_allow_github_bot_dashboard_api_github_allowed_bots_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AllowGitHubBot"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AllowedGitHubBot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Allow Github Bot",
+        "tags": [
+          "dashboard",
+          "github"
+        ]
+      }
+    },
+    "/dashboard/api/github/allowed-bots/{login}": {
+      "delete": {
+        "operationId": "api_remove_allowed_github_bot_dashboard_api_github_allowed_bots__login__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "login",
+            "required": true,
+            "schema": {
+              "title": "Login",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Api Remove Allowed Github Bot Dashboard Api Github Allowed Bots  Login  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Remove Allowed Github Bot",
+        "tags": [
+          "dashboard",
+          "github"
         ]
       }
     },

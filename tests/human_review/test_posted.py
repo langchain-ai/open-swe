@@ -6,6 +6,7 @@ import pytest
 from openswe.database import postgres
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.expedited_review.readiness import PullRequestSnapshot, Readiness
+from openswe.github.allowed_bots import AllowedGitHubBot
 from openswe.github.codeowners import CodeOwners
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
@@ -43,6 +44,7 @@ async def test_external_authors_are_not_watched(
     monkeypatch.setattr(posted, "skip_on_preview", lambda _: False)
     monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=User()))
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=None))
+    monkeypatch.setattr(AllowedGitHubBot, "allows", AsyncMock(return_value=False))
     monkeypatch.setattr(HumanReviewRequest, "active_for", AsyncMock(return_value=None))
     details = PullRequestPayload.model_validate({"user": {"login": "external"}, "state": "open"})
     monkeypatch.setattr(
