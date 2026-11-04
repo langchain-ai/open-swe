@@ -308,31 +308,9 @@ A task started from `http://localhost:3000` is a real run on that deployment, an
 
 ## Test a PR in preview (LangChain maintainers)
 
-The shared [preview environment](https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents) combines `main`, `preview-manual`, and open PRs labeled `preview` whose branch lives in this repository (anyone with write access; a fork's code stays out); it is not an isolated deployment per PR. (Note: staging follows `main` and is for post-merge testing.)
-
-1. Add the **`preview`** label to your PR.
-1. Labeling starts a run of [Build preview branch](https://github.com/langchain-ai/open-swe/actions/workflows/build_preview_branch.yml), as does every push to the PR and to `main`, and a scheduled run at :04, :19, :34, and :49 each hour; run it by hand with **force** unchecked to rebuild sooner.
-1. In the run summary, confirm your PR and head commit appear under **Preview tree → Merged**, not **Skipped**.
-   A successful run may still omit a PR.
-1. Wait for the run's **Deploy the preview tree** job.
-   It rolls the preview deployment to the published `preview` commit and fails, with the revision's build or server logs, unless the revision deploys.
-1. Open [preview](https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents) and test with non-production tasks and repositories.
-   For local UI iteration against that backend, see [Dashboard against a deployed backend](#dashboard-against-a-deployed-backend).
-
-When PRs conflict with the preview tree, the run makes one `oswe` call (an Open SWE agent on the backend in the `OPEN_SWE_BACKEND_URL` repository variable) that merges all of them; the summary marks those PRs `conflicts resolved by oswe`, and later runs replay the resolution from a git rerere cache.
-PRs the agent cannot resolve are skipped, unlabeled, and receive resolution instructions for the shared `preview-manual` branch.
-Resolve the conflict before reapplying the label.
-Use **force** only to rebuild an unchanged preview tree.
-The build cannot push a change to a workflow file, so the preview keeps the workflow files it last published; they never run there, since every workflow runs from `main`'s.
-
-Before publishing a changed tree, the run typechecks the dashboard.
-On failure it reassembles once without the rerere cache, then asks `oswe` to commit a fix-up (`preview: fix typecheck errors (oswe)`), which later runs replay while the tree underneath is unchanged.
-If the typecheck still fails, nothing is published, the run fails, and `refs/preview-failed` records the tree so later runs fail fast until it changes.
-
-The label stays on through pushes: each push to a labeled PR rebuilds the preview with its new head.
-
-To remove a PR, remove its label and trigger or await another run; the current deployment remains until its replacement deploys, and changes in `main` or `preview-manual` remain.
-Every Sunday, the first scheduled run between 07:00 and 07:59 `America/New_York` resets preview to `main`, removes labels, and deletes `preview-manual`.
+The shared [preview environment](https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents) is built from LangChain's internal monorepo, where Open SWE is developed, so pull requests in this repository are not previewed.
+Staging follows `main` and is for post-merge testing.
+For local UI iteration against a deployed backend, see [Dashboard against a deployed backend](#dashboard-against-a-deployed-backend).
 
 ## Desktop app (experimental)
 
