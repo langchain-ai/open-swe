@@ -208,9 +208,25 @@ test.describe("my pull requests", () => {
     await expect
       .poll(() => changes.evaluate((node) => node.scrollTop))
       .toBeGreaterThan(1000);
+    // Hold the approval so the page is checked while it is about to move on.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/submit-review", async (route) => {
+      await held;
+      await route.continue();
+    });
     await page
       .getByRole("button", { name: "Approve & next", exact: true })
       .click();
+    await expect(
+      page.getByRole("button", { name: "Approved", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Next", exact: true }),
+    ).toHaveCount(0);
+    release();
     await expect(page).toHaveURL(new RegExp(`/demo/${mine.number}`));
     await expect.poll(() => changes.evaluate((node) => node.scrollTop)).toBe(0);
     await page

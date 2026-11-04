@@ -117,6 +117,8 @@ export function ReviewButton({
     setOpenedOn(null)
   }
   const [body, setBody] = useState("")
+  // An approval that opens the next pull request already moves on, so Next would repeat it.
+  const [movingOn, setMovingOn] = useState(false)
   const needsBody = event !== "APPROVE" && pendingCount === 0
   const submit = useMutation({
     retry: false,
@@ -124,6 +126,7 @@ export function ReviewButton({
       api.submitPullRequestReview(owner, repo, number, review),
     meta: { errorTitle: "Couldn't submit the review", silent: true },
     onMutate: async (review) => {
+      setMovingOn(review.event === "APPROVE" && onApproved !== undefined)
       if (!login) return {}
       const undo = await optimisticUpdate<OpenPullRequest | null>(
         queryClient,
@@ -138,7 +141,10 @@ export function ReviewButton({
       )
       return { undo }
     },
-    onError: (_error, _review, context) => context?.undo?.(),
+    onError: (_error, _review, context) => {
+      setMovingOn(false)
+      context?.undo?.()
+    },
     onSuccess: (result, review) => {
       toast.success(
         review.event === "APPROVE" ? "Approved" : "Review submitted",
@@ -191,6 +197,7 @@ export function ReviewButton({
     >
       {nextLabel &&
         onNext &&
+        !movingOn &&
         (approved || (isAuthor && !status.data?.draft)) && (
           <Button size="sm" onClick={onNext}>
             {nextLabel}
@@ -202,6 +209,9 @@ export function ReviewButton({
             <MarkReadyButton
               pr={status.data}
               label={readyLabel}
+              onMarking={(marking) =>
+                setMovingOn(marking && onApproved !== undefined)
+              }
               onReady={() => {
                 refresh.status()
                 onApproved?.()
@@ -416,18 +426,28 @@ export function ReviewButton({
 /** The author's one click out of draft. */
 function MarkReadyButton({
   pr,
+  onMarking,
   onReady,
   label,
 }: {
   pr: OpenPullRequest
   label: string
+  /** Reports the optimistic ready state, which unmounts this button until it rolls back. */
+  onMarking: (marking: boolean) => void
   onReady: () => void
 }) {
   const queryClient = useQueryClient()
   const ready = usePullRequestAction({
     pr,
     action: "mark-ready",
-    apply: () => markPullRequestReady(queryClient, pr),
+    apply: () => {
+      onMarking(true)
+      const undo = markPullRequestReady(queryClient, pr)
+      return () => {
+        undo()
+        onMarking(false)
+      }
+    },
     onDone: onReady,
   })
   return (
