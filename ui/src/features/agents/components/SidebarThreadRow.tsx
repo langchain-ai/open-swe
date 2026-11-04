@@ -315,7 +315,6 @@ export function SidebarThreadRow({
   archived,
   live,
   compact = false,
-  indent = false,
   onNavigate,
   onTogglePin,
   onToggleArchived,
@@ -327,8 +326,6 @@ export function SidebarThreadRow({
   archived: boolean
   live?: PullRequestSnapshot
   compact?: boolean
-  /** Nested under a repository: indent the content, not the highlight box. */
-  indent?: boolean
   onNavigate?: () => void
   onTogglePin: () => void
   onToggleArchived: () => void
@@ -429,12 +426,7 @@ export function SidebarThreadRow({
 
   const rowContent = (
     <>
-      <span
-        className={cn(
-          "absolute inset-y-0 flex -translate-x-full flex-col justify-center",
-          indent ? "left-space-5" : "left-space-2"
-        )}
-      >
+      <span className="left-space-5 absolute inset-y-0 flex -translate-x-full flex-col justify-center">
         {hasSubagents && (
           <span
             role="button"
@@ -557,7 +549,7 @@ export function SidebarThreadRow({
   const rowClassName = sidebarRowClassName({
     compact,
     active: rowIsActive,
-    paddingLeft: indent ? "pl-space-5" : "pl-space-2",
+    paddingLeft: "pl-space-5",
     archived,
   })
 
@@ -626,7 +618,6 @@ export function SidebarThreadRow({
               subagent={subagent}
               isActive={activeSubagent === subagent.toolCallId}
               compact={compact}
-              indent={indent}
               onNavigate={onNavigate}
             />
           ))}
@@ -641,7 +632,6 @@ export function SidebarThreadRow({
               activeSubagentId={activeSubagentId}
               isActive={worker.id === activeThreadId}
               compact={compact}
-              indent={indent}
               onNavigate={onNavigate}
             />
           ))}
@@ -678,7 +668,6 @@ function SidebarSubagentRow({
   isActive,
   nested = false,
   compact,
-  indent,
   onNavigate,
 }: {
   threadId: string
@@ -686,7 +675,6 @@ function SidebarSubagentRow({
   isActive: boolean
   nested?: boolean
   compact: boolean
-  indent: boolean
   onNavigate?: () => void
 }) {
   const marquee = useTitleMarquee()
@@ -700,13 +688,7 @@ function SidebarSubagentRow({
       className={sidebarRowClassName({
         compact,
         active: isActive,
-        paddingLeft: nested
-          ? indent
-            ? "pl-18"
-            : "pl-space-9"
-          : indent
-            ? "pl-13.5"
-            : "pl-11.5",
+        paddingLeft: nested ? "pl-16" : "pl-10",
         archived: false,
       })}
     >
@@ -858,14 +840,12 @@ function SidebarTaskWorkerRow({
   activeSubagentId,
   isActive,
   compact,
-  indent,
   onNavigate,
 }: {
   worker: AgentThread
   activeSubagentId: string | null
   isActive: boolean
   compact: boolean
-  indent: boolean
   onNavigate?: () => void
 }) {
   const queryClient = useQueryClient()
@@ -911,7 +891,7 @@ function SidebarTaskWorkerRow({
         className={sidebarRowClassName({
           compact,
           active: rowIsActive,
-          paddingLeft: indent ? "pl-13.5" : "pl-11.5",
+          paddingLeft: "pl-10",
           archived: worker.resolved === true,
         })}
       >
@@ -968,7 +948,6 @@ function SidebarTaskWorkerRow({
               subagent={subagent}
               isActive={isActive && activeSubagentId === subagent.toolCallId}
               compact={compact}
-              indent={indent}
               nested
               onNavigate={onNavigate}
             />
