@@ -200,7 +200,7 @@ export function AgentThreadHeader({
       archived={archived}
       isDeleting={isDeleting}
       onRename={
-        onRename
+        onRename && savingTitle === null
           ? () => {
               editingRef.current = true
               requestAnimationFrame(startRename)

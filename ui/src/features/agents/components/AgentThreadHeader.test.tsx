@@ -75,7 +75,14 @@ describe("AgentThreadHeader", () => {
     )
   })
 
-  it("starts the inline title editor from the actions menu without losing focus", async () => {
+  it("keeps rename focus and returns menu focus normally while a rename is saving", async () => {
+    let finishRename!: () => void
+    const onRename = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRename = resolve
+        })
+    )
     render(
       <TooltipProvider>
         <AgentThreadHeader
@@ -83,7 +90,7 @@ describe("AgentThreadHeader", () => {
           target="Cloud"
           panelCollapsed={false}
           thread={{ id: "thread-1", title, repoFullName: "" } as AgentThread}
-          onRename={vi.fn().mockResolvedValue(undefined)}
+          onRename={onRename}
         />
       </TooltipProvider>
     )
@@ -97,6 +104,25 @@ describe("AgentThreadHeader", () => {
       expect(document.activeElement).toBe(
         screen.getByRole("textbox", { name: "Thread title" })
       )
+    )
+    const input = screen.getByRole("textbox", { name: "Thread title" })
+    fireEvent.change(input, { target: { value: "New title" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    const actions = screen.getByRole("button", { name: "Thread actions" })
+    fireEvent.keyDown(actions, { key: "Enter" })
+    const pin = await screen.findByRole("menuitem", { name: "Pin thread" })
+    expect(screen.queryByRole("menuitem", { name: "Rename thread" })).toBeNull()
+    fireEvent.keyDown(pin, { key: "Escape" })
+    await waitFor(() => expect(document.activeElement).toBe(actions))
+    finishRename()
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole("button", {
+            name: "Rename thread",
+          }) as HTMLButtonElement
+        ).disabled
+      ).toBe(false)
     )
   })
 
