@@ -97,9 +97,20 @@ body.version-mismatch {
    and borders sit a step lower than Macaw's defaults. */
 html.dark,
 .dark[data-theme-scope] {
-    --bg-elevated: var(--neutral-200);
-    --bg-elevated-hover: var(--neutral-300);
-    --bg-user-message: var(--neutral-200);
+    --bg-surface-level-1: var(--neutral-25);
+    --bg-surface-level-1-hover: var(--neutral-35);
+    --bg-surface-level-2: var(--neutral-35);
+    --bg-surface-level-2-hover: var(--neutral-50);
+    --bg-surface-level-3: var(--neutral-50);
+    --bg-surface-level-4: var(--neutral-100);
+    --bg-elevated: var(--neutral-50);
+    --bg-elevated-hover: var(--neutral-100);
+    --bg-elevated-selected: var(--neutral-100);
+    --bg-input: var(--neutral-35);
+    --bg-input-hover: var(--neutral-50);
+    --bg-input-plain: var(--neutral-35);
+    --bg-popover: var(--bg-elevated);
+    --bg-user-message: var(--bg-elevated);
     --border-default: var(--neutral-300);
     --border-subtle: var(--neutral-200);
 }
