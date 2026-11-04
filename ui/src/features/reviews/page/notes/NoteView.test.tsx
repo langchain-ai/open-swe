@@ -2,6 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -18,6 +19,7 @@ import type {
 import { reviewKeys } from "@/features/reviews/lib/reviewKeys"
 import type { Note } from "@/features/reviews/page/diffEntries"
 import { useReviewPage } from "@/features/reviews/page/store"
+import { Discussion } from "@/features/reviews/page/Discussion"
 import { renderNote } from "./NoteView"
 import { ThreadSummary } from "./ThreadNote"
 
@@ -98,6 +100,51 @@ it("announces a folded conversation's status and comment count", () => {
       name: "src/a.ts:1: ana: Keep the selected state, 2 comments, Outdated",
     })
   ).toBeTruthy()
+})
+
+it("shows review threads once until the open-conversation index is requested", () => {
+  useReviewPage.getState().open(pr, null)
+  const client = new QueryClient({
+    defaultOptions: { queries: { enabled: false } },
+  })
+  const conversation = thread(1, "Scope the audience per workspace")
+  conversation.comments[0].review_id = 7
+  client.setQueryData(reviewKeys.conversation(pr), {
+    items: [
+      {
+        kind: "review",
+        id: 7,
+        author: conversation.comments[0].author,
+        created_at: conversation.comments[0].created_at,
+        body: "",
+        html_url: "",
+        state: "COMMENTED",
+      },
+    ],
+    threads: [conversation],
+  } satisfies Conversation)
+  client.setQueryData(reviewKeys.detail(pr), {
+    findings: [],
+    pr: { author: null },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <Discussion pr={pr} />
+    </QueryClientProvider>
+  )
+
+  const index = screen.getByRole("button", { name: "Open conversations 1" })
+  const rows = () =>
+    screen.getAllByRole("button", { name: /Scope the audience/ })
+  expect(index.getAttribute("aria-expanded")).toBe("false")
+  expect(rows()).toHaveLength(1)
+  fireEvent.click(index)
+  expect(rows()).toHaveLength(2)
+  fireEvent.click(index)
+  expect(rows()).toHaveLength(1)
+  act(() => useReviewPage.getState().showOpenConversations())
+  expect(index.getAttribute("aria-expanded")).toBe("true")
+  expect(rows()).toHaveLength(2)
 })
 
 it("keeps a half-written reply with its thread when a note is added above it", async () => {

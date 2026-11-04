@@ -315,7 +315,7 @@ function OpenConversations({
       sameLogin(thread.comments.at(-1)?.author?.login, author)
   )
   // Folding holds until something asks for the conversations again.
-  const [folded, setFolded] = useState(false)
+  const [folded, setFolded] = useState(true)
   usePageEvent("showOpenConversations", () => {
     setFolded(false)
     ref.current?.scrollIntoView({ block: "start", behavior: "smooth" })
