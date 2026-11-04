@@ -1,157 +1,129 @@
 ---
-type: contributor guide
-title: Open SWE Codebase Guide
-description: Start here to set up Open SWE, choose the entrypoint and owner for a safe change, and run focused validation. Links route contributors to the detailed architecture, workflow, integration, operations, and testing guides.
-tags: [open-swe, contributor-guide, development, langgraph, testing]
+type: contributor orientation
+title: Open SWE orientation and change routing
+description: Start here to run Open SWE locally and identify the narrowest backend, Managed Deep Agents, UI, integration, or test boundary that owns a change. Source code and focused tests are authoritative; linked OpenWiki pages provide optional just-in-time context.
+tags: [open-swe, contributor-guide, local-development, managed-deep-agents, testing]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
+    at: 2026-11-04T08:09:12.042Z
 sources:
-  - id: openwiki-source-328bde9e94017848bb09ba23
-    resource: repo://agent/api/app.py
-  - id: openwiki-source-921ec88ab63280d28b3dddb5
-    resource: repo://agent/chat.py
-  - id: openwiki-source-c48b309c5ca416cf623f0866
-    resource: repo://agent/dispatch.py
-  - id: openwiki-source-f8665996049065d2172f68e2
-    resource: repo://agent/graphs/agent.py
-  - id: openwiki-source-f2c7a9cbc0f7af0b4db77658
-    resource: repo://agent/graphs/analyzer.py
-  - id: openwiki-source-368e3a3da2c40119aead4316
-    resource: repo://agent/graphs/chat.py
-  - id: openwiki-source-73db7609f2a24f4a0ff5c32c
-    resource: repo://agent/graphs/reviewer.py
-  - id: openwiki-source-1116ea2d477f08cf0f5b2ef0
-    resource: repo://agent/graphs/scheduler.py
-  - id: openwiki-source-276ab38291eb5741b4c2141c
-    resource: repo://agent/reviewer.py
-  - id: openwiki-source-3e15117ace082a39e1f130d8
-    resource: repo://agent/scheduler.py
-  - id: openwiki-source-856ade03ef31ac38e1347f7c
-    resource: repo://agent/server.py
-  - id: openwiki-source-3096620cfd0eb1bae6d9e78c
-    resource: repo://agent/webapp.py
   - id: openwiki-source-8037e2358a2c4f9b2c722a11
     resource: repo://AGENTS.md
+  - id: openwiki-source-19973c87ca458faa5d03fecc
+    resource: repo://docs/DEVELOPMENT.md
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
   - id: openwiki-source-012f2c78e3b1446dfc35803f
     resource: repo://Makefile
-  - id: openwiki-source-5b54a58d1b51cd490b0e7162
-    resource: repo://package.json
-  - id: openwiki-source-05ccef8d4cf1698187f20464
-    resource: repo://pyproject.toml
-  - id: openwiki-source-f0a6e7dc03522b2682f88655
-    resource: repo://tests/conftest.py
-  - id: openwiki-source-859f98720585f4648f0f7b2e
-    resource: repo://tests/e2e/playwright.config.ts
-  - id: openwiki-source-4b944ec14a3d793a6f771403
-    resource: repo://tests/e2e/playwright.desktop.config.ts
+  - id: openwiki-source-5cd2390b551b634ef547ebee
+    resource: repo://mda/pyproject.toml
+  - id: openwiki-source-e5b7abf11bb2daa504eef827
+    resource: repo://mda/README.md
+  - id: openwiki-source-932730a18e85495ceba5df6d
+    resource: repo://openswe/threads/router.py
+  - id: openwiki-source-3bd49e1c2bb74350a7519268
+    resource: repo://openswe/webapp.py
   - id: openwiki-source-7ef60dc4372e1a33c7728fe6
     resource: repo://tests/e2e/README.md
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-11-04T08:09:12.042Z" }
 ---
 
-# Open SWE Codebase Guide
+# Open SWE orientation and change routing
 
-Open SWE is a LangGraph and Deep Agents software-engineering framework: work can arrive from the dashboard, GitHub, Slack, Linear, or a schedule; coding work runs in a thread-scoped isolated sandbox and can produce a pull request. This page is a change-routing hub. Read the relevant source and tests first; the linked OpenWiki pages are optional just-in-time context, not an authority over the repository.
+Open SWE is a software factory built on Deep Agents: it can investigate and change a repository, validate work, deliver a pull request, review pull requests, and respond to later feedback. It is no longer an in-process coding-agent architecture. The backend is the FastAPI/PostgreSQL control plane; the separate Managed Deep Agents (MDA) deployment owns every `agent`, `reviewer`, and `review-scout` model loop, checkpoint, sandbox, tool call, and runtime middleware.
 
-## Start a local developer loop
+**Start with the code and the nearest behavioral test.** This page is a routing aid, not a substitute for them. In particular, do not copy legacy backend LangGraph-client patterns: new work belongs in MDA for agent execution and in PostgreSQL for backend-owned state.
 
-Use Python 3.14 and `uv` for the backend. The dashboard and desktop workspace use `pnpm`.
+## Local prerequisites and process topology
+
+Install Python 3.14+, `uv`, Node 26+ and `pnpm`. Running MDA locally also builds its vendored CLI and therefore needs Rust's `cargo`. Docker is needed when using the default local PostgreSQL container. Webhook work additionally needs a static HTTPS tunnel and the corresponding GitHub/Slack application setup; follow `docs/DEVELOPMENT.md` before exposing a local server.
+
+The backend and MDA have separate environments. Set the backend root `.env` with at least `MDA_RUNTIME_URL=http://localhost:2025` and `REMOTE_RUNTIME_TOKEN_SECRET`; the backend refuses to start without them. In `mda/.env`, set `OPEN_SWE_BACKEND_URL=http://localhost:2024`, `LANGSMITH_API_KEY`, and the model credentials used by the runtime. Keep database URLs, keys, and local state ignored.
 
 ```bash
-make install            # uv sync --extra dev
-make dev                # uv run langgraph dev --no-browser --port 2024
-make run                # uv run uvicorn agent.webapp:app --reload --port 8000
-make dev-ui             # Vite plus LangGraph development server
-make web                # pnpm run dev
-make desktop            # pnpm run dev:desktop
+make install                    # backend Python dependencies
+make build-dashboard            # optional bundled dashboard build
+make dev                        # backend + Agent Server on :2024; starts local Postgres unless POSTGRES_URI is set
+make dev-mda                    # MDA runtime on :2025, in a second terminal
+
+# UI iteration instead of a bundled dashboard
+make dev-ui                     # Vite on :3000, backend fronting it on :2024
 ```
 
-Use `make dev` when a change needs LangGraph graph execution; it serves the registered graphs and HTTP app. `make run` is FastAPI-only. `make dev-ui` fronts Vite through the backend at `:2024`; `make desktop` starts Electron and requires the backend separately. For local webhook exposure, `make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev` restricts the ngrok policy to `/webhooks/*` because the development server has no authentication.
-
-Python is async-first: implement the async path. Add a synchronous method only when an interface requires it, and make that method raise `NotImplementedError`; do not maintain parallel implementations.
-
-## Entrypoints and execution boundaries
-
-`langgraph.json` is the deployment registration point. Its graph targets are thin `agent/graphs/` re-export shims; change the owning module, not the shim, unless the public entrypoint itself must move. It also mounts `agent.webapp:app` and configures the deployed checkpointer with delete-based TTL cleanup (60-minute sweep and 43,200-minute default retention).
-
-| Entrypoint | Owning concern | Start here for changes to… |
-| --- | --- | --- |
-| `agent.graphs.agent:traced_agent` | Main coding graph (`agent/server.py`) | Agent assembly, tools, skills, models, prompts, middleware, and coding sandbox preparation. |
-| `agent.graphs.reviewer:traced_reviewer_agent` | Reviewer graph (`agent/reviewer.py`) | Diff-grounded findings, review publication, reviewer sandbox behavior, and reviewer middleware. |
-| `agent.graphs.analyzer:traced_analyzer` | Style analyzer (`agent/analyzer.py`) | Repository review-style analysis and learned guidance. |
-| `agent.graphs.chat:traced_chat_agent` | PR chat (`agent/chat.py`) | Dashboard “chat with this PR,” virtual PR files, and read-only repository access. |
-| `agent.graphs.scheduler:get_scheduler` | Scheduler (`agent/scheduler.py`) | Cron routing, scheduled work, stale-run repair, CI watches, background tasks, and cost refreshes. |
-| `agent.webapp:app` | FastAPI composition (`agent/api/app.py`) | Dashboard APIs/UI mount, health, plan/approval APIs, CORS, and webhook ingress. |
+`make dev` is the normal local entry point: it serves the FastAPI app, Agent Server routes, and a built dashboard. `make dev-ui` keeps the browser on `:2024` while the backend proxies the Vite dev server, so dashboard APIs remain same-origin. `make run` is useful for inspecting the FastAPI app alone on `:8000`, but it has no LangGraph runtime and cannot create runs. `make desktop` starts the Electron wrapper and needs the backend separately.
 
 ```mermaid
 flowchart LR
-    Trigger["Dashboard Slack Linear GitHub"] --> Api["FastAPI routes"]
-    Api --> Dispatch["dispatch_agent_run"]
-    Dispatch --> Run["Durable LangGraph run"]
-    Run --> Agent["Agent or reviewer graph"]
-    Cron["Cron tick"] --> Scheduler["Scheduler graph"]
-    Scheduler --> Run
+    Person["Dashboard or channel user"] --> Backend["Backend control plane on 2024"]
+    Backend --> Database["PostgreSQL thread and product state"]
+    Backend --> Runtime["MDA runtime on 2025"]
+    Runtime --> BackendAPI["Typed agent API calls"]
+    BackendAPI --> Backend
+    Runtime --> Sandbox["Thread sandbox and model loop"]
 ```
 
-This is the principal work-routing boundary: interactive coding and review triggers converge on durable run creation, while the scheduler selects maintenance work or launches a scheduled agent run.
+This shows the local ownership boundary: the backend plans and authorizes a run, while MDA executes it and calls named backend endpoints with the signed run context.
 
-### Invariants worth preserving
+### Public surfaces and safety boundaries
 
-- The main agent factory is stateless and rebuilt for execution. Thread continuity belongs to LangGraph state/metadata and the thread sandbox, not to a long-lived graph object.
-- A missing sandbox may be recreated, but do **not** silently replace an unreachable main-agent sandbox: it could contain uncommitted work. Reviewer code may opt into replacement because it recreates its checkout for each review.
-- The reviewer has no commit, push, or PR-opening tools. PR chat is also sandbox-less and excludes shell and file mutation; it receives `/pr/` virtual files and uses a repository-scoped GitHub App token for GitHub-backed reads.
-- `dispatch_agent_run` is the shared Slack, Linear, GitHub, and dashboard creation contract for `agent` or `reviewer`. Its default multitask strategy is `interrupt`, and callers must choose either a prebuilt input or content/context/identities—not both.
-- FastAPI pins a single event loop before queue construction, validates sandbox and local-development model configuration at startup, and closes cached models at shutdown. Credentialed CORS is added only for configured origins; `*` is rejected.
+- `langgraph.json` registers three compatibility graph names—`agent`, `reviewer`, and `review-scout`—and `openswe.webapp:app`. The backend's thread router is in front of Agent Server thread and run routes: new threads run on MDA, whereas pre-MDA local threads are read-only compatibility records.
+- The browser dashboard is at `/`; dashboard APIs live under `/dashboard/api/*`. `/ok` and `/health` are health checks. GitHub and Slack use `/webhooks/*`; MDA channel event callbacks use `/github/channel/events` and `/linear/channel/events`.
+- All new agent runs use the one MDA graph, `open-swe`. The backend derives a run catalog once from backend-owned settings, access, and integrations, signs a token, and MDA calls typed `POST /agent-api/{endpoint}` operations. Keep per-run execution state in MDA and durable product/thread state in PostgreSQL—not backend process memory.
+- A normal coding sandbox is persistent per thread. Do not silently replace an unreachable coding sandbox because it can contain uncommitted work. The runtime, not the backend, owns MDA sandbox lifecycle and execution.
+- New backend endpoints belong to the feature package that owns them, not a catch-all dashboard route. Prompts belong in `openswe/resources/prompts/`; delayed or retried work belongs in the PostgreSQL job queue.
 
-## Choose the detailed guide
+For a local webhook tunnel, use `make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev`. Its supplied policy exposes only `/webhooks/*`; do not publish the whole unauthenticated `langgraph dev` port. The detailed local configuration, callback, and verification procedure is in [Local development, deployment, and operations](operations/local-development-and-deployment.md).
 
-### Architecture and extensibility
+## Route a change to its owner
 
-- [Runtime and Product Architecture](architecture/overview.md) — deployment topology, FastAPI composition, durable dispatch, and surface boundaries.
-- [Coding Agent Assembly](architecture/agent-graph.md) — `get_agent`, backend/model/profile resolution, curated tools, skills, subagents, and preparation.
-- [Middleware and Failure Boundaries](architecture/middleware-stack.md) — ordering-sensitive retries, timeouts, guards, queues, fallbacks, and error reporting.
-- [Thread Sandbox Lifecycle](architecture/sandbox-lifecycle.md) and [Sandbox Provider Integration](integrations/sandbox-providers.md) — thread binding, safe recovery, proxy state, provider selection, and adding a provider.
-- [Review and Style Analysis Graphs](architecture/reviewer-and-analyzer.md) — the non-mutating reviewer, finding lifecycle, and style analysis.
-- [Threads, Durable Runs, and State](concepts/threads-and-state.md) — checkpoints, metadata, thread identity, and ownership boundaries.
-- [Tool Catalog and Authorization](concepts/tools.md) — exporting, wiring, authorizing, and safely changing tools.
-- [Models, Profiles, and Instructions](concepts/models-profiles-instructions.md) — configuration precedence and prompt inputs.
+Choose the narrowest system first, then read its code and nearby tests. The pages below are the planned navigation map; absence of a page is not a reason to broaden a change into another subsystem.
 
-### Ingress, product, and delivery workflows
+| If the task changes… | Start in the repository | Read for context |
+| --- | --- | --- |
+| Thread records, API composition, transcript/inbox state, runtime forwarding, or background workers | `openswe/api/`, `openswe/threads/`, `openswe/transcript/`, `openswe/jobs/` | [Backend control plane, threads, and durable state](architecture/backend-control-plane.md) |
+| Agent/reviewer/scout graph assembly, model loop, file/shell tools, sandbox execution, runtime reports, or recovery | `mda/agent.py`, `mda/rt/`, `mda/tests/` | [Managed Deep Agents runtime](architecture/managed-runtime.md) |
+| Which side owns a capability, UI/channel boundary, or deployment topology | the affected backend package and `mda/` | [System architecture and ownership boundaries](architecture/overview.md) |
+| A signed runtime endpoint, catalog/token field, backend-to-MDA call, report idempotency, or tool-set lookup | `packages/runtime-api/`, `openswe/agent_api/`, `mda/rt/` | [Signed runtime API contract](architecture/runtime-api-contract.md) |
+| Settings, identity, secrets, tokens, GitHub credential scope, or authorization | `openswe/config.py`, `openswe/users/`, `openswe/api_keys/`, `openswe/credential_scope.py` | [Configuration, identity, and security boundaries](concepts/security-and-configuration.md) |
+| Catalog resolution, tool grants, MCP exposure, skills, prompts, or model selection | `openswe/agent_api/`, `openswe/tools/`, `openswe/tool_loaders/`, `openswe/resources/prompts/` | [Run catalogs, tools, prompts, and models](concepts/tools-and-catalogs.md) |
+| Dashboard, desktop, Slack, Linear, GitHub conversation routing, or streaming UI | `ui/`, `desktop/`, `openswe/dashboard/`, `openswe/slack/`, `openswe/linear/`, `openswe/mda_channels/` | [Dashboard, desktop, and conversation channels](integrations/dashboard-and-channels.md) |
+| GitHub App/webhooks, sandbox providers, browser, proxy credentials, or MCP servers | `openswe/github/`, `openswe/sandboxes/`, `openswe/mcp/`, `mda/rt/` | [GitHub, sandboxes, and MCP integrations](integrations/github-and-mcp.md) |
+| Dispatch, follow-ups, interrupts, completion, run status, or ingress from any surface | `openswe/dispatch.py`, `openswe/invocation.py`, `openswe/threads/`, `openswe/completion.py` | [Invocation, dispatch, and continuation](workflows/run-lifecycle.md) |
+| Schedules, job leases/retries, tasks, reconciliation, CI monitoring, or a wakeup/note to a thread owner | `openswe/jobs/`, `openswe/schedules/`, `openswe/tasks/`, `openswe/baby_sit.py`, `openswe/reconcile.py` | [Scheduling, jobs, tasks, and monitoring](workflows/background-automation.md) |
+| PR creation, findings, review/scout behavior, publishing, approval, CI feedback, or delivery | `openswe/review/`, `openswe/reviewer.py`, `openswe/review_scout/`, `openswe/github/` | [Pull request work, review, and delivery](workflows/review-and-delivery.md) |
+| Local startup, deployment, health, observability, or a webhook tunnel | `docs/DEVELOPMENT.md`, `Makefile`, `compose.yaml`, `mda/README.md` | [Local development, deployment, and operations](operations/local-development-and-deployment.md) |
+| What test to add or run, test database setup, MDA isolation, or browser/Electron E2E | nearest test under `tests/` or `mda/tests/` | [Testing strategy and test boundaries](testing/strategy.md) |
 
-- [Inbound Invocation to Durable Run](workflows/invocation.md) — validation, identity/context construction, threads, dispatch, and completion across dashboard, desktop, Slack, Linear, GitHub, and automation.
-- [Follow-ups, Interrupts, and Stop Control](workflows/follow-up-messages.md) — continuation and cancellation semantics for active durable work.
-- [Pull Request Delivery and Approval](workflows/pr-creation.md) — commits, pushes, workflow approval gates, PR creation, and CI state.
-- [Pull Request Review Workflow](workflows/pr-review.md) — manual/automatic reviews, findings, publishing, replies, and settlement.
-- [Scheduling, Background Work, and CI Monitoring](workflows/scheduling-and-baby-sit.md) — schedule lifecycle, reconciliation, watches, and background tasks.
-- [Dashboard and Desktop Clients](integrations/dashboard-ui.md) — authenticated browser APIs, UI proxy/mount behavior, Electron supervision, and local projects.
-- [Authentication, Authorization, and Secret Boundaries](concepts/auth-and-security.md) — webhook verification, membership gates, OAuth/App tokens, encryption, and credential proxies.
-- [Observability, Browser, and MCP Integrations](integrations/observability-and-mcp.md) — optional integrations and their configuration/authorization gates.
+## Change conventions that prevent cross-boundary regressions
 
-### Operations
+- Implement Python asynchronously. If an interface forces a synchronous method, make it raise `NotImplementedError` rather than maintaining two execution paths. Keep Python and TypeScript strongly typed; do not use `Any`/`any` to silence a type error.
+- Model execution policy belongs in `mda/rt`; file and shell guards belong in `mda/rt/file_tools.py`. If backend credentials or durable data are required, define a named typed runtime endpoint rather than a generic callback or untyped payload.
+- Resolve a provider identity to `users.id` at ingress and use that ID internally. Use named GitHub client methods rather than raw REST or GraphQL calls outside the designated transport modules.
+- Put persistent backend data in PostgreSQL. Use `THREADS` for threads and `queue.schedule(...)` with a registered job handler for delayed, recurring, or retrying work. Background work wakes or notes the owning thread rather than posting directly to its Slack channel.
+- Before changing `ui/`, read `ui/AGENTS.md` and `ui/DESIGN.md`. Flag native-shell, preload, IPC, packaging, or bundled bridge/CLI changes as potential desktop-release work.
 
-- [Configuration and Startup Validation](operations/configuration.md) — lazy environment settings, persisted administrator settings, credentials, aliases, and failure behavior.
-- [Development, Deployment, and Serving](operations/deployment.md) — local versus deployed serving, dashboard builds/mount prefixes, webhook exposure, and desktop distribution.
+## Focused validation
 
-## Validate only the changed boundary
-
-**Never run the full suite locally.** Select the narrowest test that owns the behavior, then run the relevant quality check.
+Never run the full test suite locally. Run the narrowest behavioral test that proves the changed behavior, then the check for the language or boundary you touched.
 
 ```bash
-make test TEST_FILE=tests/github/test_open_pull_request.py
-uv run pytest -vvv tests/path/to_test.py::test_name
+# Backend test or a single node
+make test TEST_FILE=tests/threads/test_router.py
+uv run pytest -vvv tests/threads/test_router.py::test_name
+
+# Backend quality checks
 make lint
 make format-check
 make typecheck
+
+# MDA is intentionally a separate project and environment
+make mda-test PYTEST_ARGS="mda/tests/test_file.py"
+make mda-typecheck
 ```
 
-`make test` accepts an existing path; use direct `pytest` for a node id. Pytest uses asyncio auto mode; shared fixtures substitute an in-memory store through the production serialization route, clear the global TTL cache before and after each case, hide any locally bundled dashboard, and enable auto-review by default. Override those defaults explicitly when testing their gates.
+Backend tests can require `TEST_ANALYTICS_POSTGRES_URI`; without it, database-dependent tests skip. MDA must never import `openswe`: both sides test the models exchanged through `packages/runtime-api`, not each other's implementation. Add a test only for a concrete behavioral regression—especially authorization, integrity, or state transitions—and prefer extending a nearby behavioral test to creating a mock-heavy harness.
 
-Use focused pytest families such as `tests/agent/`, `tests/reviewer/`, `tests/sandbox/`, `tests/webhooks/`, `tests/dashboard/`, `tests/github/`, `tests/slack/`, `tests/middleware/`, or `tests/tools/` according to the changed owner. Run a focused dashboard or desktop workspace check through its package when changing frontend code.
-
-Escalate to a single Playwright spec only for a genuine cross-boundary contract:
+For a dashboard or desktop change, use the package's narrow check first. Escalate to a single Playwright spec only for a real end-to-end contract:
 
 ```bash
 pnpm install --frozen-lockfile
@@ -159,4 +131,4 @@ pnpm run test:e2e:install
 pnpm exec playwright test tests/full_flow.spec.ts
 ```
 
-The E2E harness exercises real agent code, a temporary local sandbox, local git, the real dashboard, and Electron paths while faking the model and external SaaS HTTP boundaries. Browser runs use one worker; the separate desktop configuration selects `desktop.spec.ts`. See [Focused Validation Strategy](testing/overview.md) for test ownership, fakes, artifacts, and narrow frontend/desktop commands.
+The E2E harness runs the real backend, MDA runtime, agent code, dashboard, Electron paths, a temporary local sandbox, and local Git; it scripts the model and fakes external SaaS HTTP boundaries. See [Testing strategy and test boundaries](testing/strategy.md) before changing the harness or relying on a skipped integration test.

@@ -1,3 +1,3 @@
 # Files
 
-- [Focused Validation Strategy](overview.md) - Select the narrowest Python, frontend, or Playwright validation that owns an Open SWE change. This guide explains shared fakes, production-boundary coverage, and focused commands.
+- [Testing strategy and test boundaries](strategy.md) - Choose the narrowest behavioral validation for Open SWE backend, Managed Deep Agents runtime, UI, database, and end-to-end changes. This guide defines the separate test environments, controlled seams, prerequisites, and ownership boundaries for state, authorization, and runtime contracts.

@@ -1,0 +1,222 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:869e6beb34376da472c7fa2cda54b9ab56bf4f19a499de407de29bab418153e8",
+  "claims": [
+    {
+      "id": "claim_7ca7d316ca7742c2af60a2f3778703cd",
+      "statement": "Local development uses a LangGraph backend on port 2024, a separately started Managed Deep Agents runtime on port 2025, and PostgreSQL; `make dev` starts the local database unless `POSTGRES_URI` is configured, while `make dev-mda` starts MDA.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile#L10-L24",
+          "version": "repo-lines-v1:sha256:7b714d1b278f14a56a1f36fbfc15388f25a83190359f7d4ea2cddf29c5e790c3:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNlOTZlNGIwOGI4MTg1MzgwYWNjZDUxZjE1OGI2MzNlZjAxYTI2YWZiYjM0ZWFkN2ExNDQ5ZGI3NWY3ZjgyNTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhM2QzYmFiY2FiMjYwZDdmMjYwYjQ3N2QwMmM5MjM4ODAxMmQ0YzM5MTc3ZWY4Mzc2NGQyYzdiN2U4NGJlMDAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM3YTljZGQ2ZjRhMzVkYmZlNTM1OWUxMGRmZTEzZjZmZDVmY2Q4YjhlMzRlNTI2MmE3NzU3MTVjZjhmNWVhZmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFlMTJmMDdhNjI0YzFkNTI5MTRiNjRjYjdiMWJlYTQxOWZkYzQzZTE0MGFjZTZiYzQ0Zjk2MDEyZTc0NDNmNTkifQ"
+        },
+        {
+          "resource": "repo://docs/DEVELOPMENT.md#L136-L149",
+          "version": "repo-lines-v1:sha256:59d5ba7e62833c24f42597b0c27b4f48ff6518eebef412d47d1ac101beb3c54d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFjMWYxZTY2OGRjMDczZjIyZWRkMDI4YWI3ZDViMTlmODUwNjNhNjJkYmM4NjIzODUxNzg3MmRhNjQ1ZjMyMzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjViY2EyZGUyNWFmMTBjMmE5Mjk5YzQxNTFiYTQ4NDgyYjQxYmM0MTUxN2NiODFmMWJjOWIzZDgxMGQzMzgxMDIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNiZjk4MWYxZDhmOTNjMWQ5MDJjM2E0ZjdmMjY5OTU5MWQ1MTY1NjM3ZWEzZTgxMzg2Njg2MGM2NjJjY2YwMTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM5NTU1M2MyYjliNDk3MjFmMmU0M2U4MTY1MTQ3NmJiMzY1NjYwODlhYTRmNDYzMmQxNjlhMjRiNzQ2MzliMDUifQ"
+        },
+        {
+          "resource": "repo://mda/README.md#L168-L177",
+          "version": "repo-lines-v1:sha256:f7a506f053728cd9fbcef44ec3dc0c43251a36ce42b345d888adde57575cb4de:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIwYmQzZmRiOGMwMWQ3NmE0N2JkNTQyNWFmNGNlOGQ5YWMyMjdkNTFhYjc0MmVjMzQ4MTgzNDQ3NGY0M2YxZTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk5ODY1MDBjMGFjNGUxZDU1MjVhZDZiZjRhNTljYmUzZThkYmY4YzgzNGQ4MjVhZjcyM2IxYTkxODVkNTNhYWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMyMGI0MTNmMWVhMzUzMDUwMjVlNmViNjRjNjNjMDEyMzdiYzRlOGM2YWZhNmYzMzVhZDhkYWQ5N2QxMzkzNWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkyOGYyYjc0ZGY0NzBlMTE4MWNhNzBkYThhMjJmYjliYzdkZDQ0YWJmMDc1MDZhZDNjZTRiNmNhMjdkNDBhMDAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_bf5fcfbc17a14a2aa978b78a974bc73a",
+      "statement": "Every new Open SWE agent, reviewer, and review-scout thread runs on the configured MDA deployment; the backend requires an absolute `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET`, and signs run tokens MDA presents to the backend agent API.",
+      "evidence": [
+        {
+          "resource": "repo://mda/README.md#L125-L140",
+          "version": "repo-lines-v1:sha256:f0332926fc392dd6112242ebd790d5e41925036815f09e2c08b454ff3d35756d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhmMjc5ODdhMTY5N2JkYjE3MDgwM2IxYTIzNTljNjNjMGYyY2Y3NDMxNGJjZmZjZDA5NGQ2ZmY1ZTE3MTA0NjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJhYmY1MGUxMjM5OGY5MjM3NTJjODBjOTU2MDA1YmQ2N2VmMTllNzI3YTFhYzM1YjczZGI3ZTZkNGIxMTMxYmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM5MDVkODU0MjY0MzAxYWIzZDc2MjA5YWVhYzlkYzkwN2U3MTllZmY1MzJjYTBjMjFiZDU5MTFkODVjMWJlNjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYzMTk1YjZlZWNlNGEyNGQ2OWU1NmU1NGQxNWY5YzU5ZTQyMzhlMTkxZjhiYTFiMzVhMTVmODdiY2Y0NGYwZWIifQ"
+        },
+        {
+          "resource": "repo://openswe/agent_api/client.py#L58-L78",
+          "version": "repo-lines-v1:sha256:0a5afce3f19d85b870015e100e67a6b1f4fb87eff72cebf0ef5d7a3ec58ff7a3:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQyOTE2NDVlZWQ1NzI3ZTJkMWI4MDQ4MDgxNWFmZjY1MmJjNmI0ODM0MjRlYjVkZGNkOWNmNjlmMWNmZTYxZDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdlOWM3MWI2ZGIxYmZlOTU1OWU1NGU2Nzc5Y2JkN2Q0ZmJjYzBkZTI5MjA5YTUyY2E2MmY1NWRhNDMzNDM3MzMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM2ZWYyY2I4YTZkMjQ1N2MxMzVmMTU3ODVmY2ZmMjdlMjVhZGQxNGYzMDBmNjBlOWYwZjFhNzE3ZmE2NzBmODQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMxM2ZhNDYzYmZiMTQ4OGNiNWYxYjAzYmIzYzE1YjBhMjAxNmZiNWQ4OTg3NjU5MDYyOTM0MzRkMmFlNWFlZGQifQ"
+        },
+        {
+          "resource": "repo://openswe/config.py#L197-L255",
+          "version": "repo-lines-v1:sha256:29273144ffbccc9040168746b20f6aac44771bbcae390331258d03854b7fb29d:eyJzZWxlY3RlZExpbmVDb3VudCI6NTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVmNzE5YjI4NGNmYzQ4YzQzODA2ZTljMzcxNzQ0YzEyMTI3MDFiNTUwYzFhMGJkMWJmYzEyNjM0NTQzM2E1ZjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhZmJhMDUyN2MzOTUzYzRiNmUwZTViNTczOWJhODM2MTJmODA1M2JjZGM5NDY2NzMwMTkzY2QxZDU5MGI0MDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFiZGFhMTNmOWMzZjc0NmFhYTlkZTNjNDU5ZGRlMmU2ZWUwYzYyYzc3ODMyODRiZTc2Y2UwM2E4MzI2YjJkYmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjY1NGFjODZkNDc2YWQ4YmYxOTMxMzc2ZDNiOWExNmY2ZTZjYmY1MmNlZWFhMDMwOTczZTFlMTA3MGI2M2ZkMzkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_64ecb246dd524856a7babf8b277bfaad",
+      "statement": "The FastAPI application composes dashboard, webhook, channel, health, and agent API routes, applies `ThreadRouter` ahead of core thread/run routes, and mounts the dashboard UI after its API routers.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/api/app.py#L143-L197",
+          "version": "repo-lines-v1:sha256:65dee6a8e1353e534198f9b5c254b87634144766ecef4fcf8242f5e5aba8a30d:eyJzZWxlY3RlZExpbmVDb3VudCI6NTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3MTgyOTc0NzkyNjRjNGIzMTA4MWJhMDE4MDUzYmQ5ZDE0YjcyM2JjYTY3ZTA3NzI2MDdlZTRiMjE1ZDU4ZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkNjdiNDY2Mzc4NzVjM2JiN2Y5MDNiMWRiODczNGI0YTI5NjY4NWRmNGRiZTY2YTRmNmNlZjdmZGM0MTE2M2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdiNzA1NTdhNTcxYjg5NTA3MTRmNzFlMTQwNDdkMzIxZTlmYzE2Njc2ODZlOTk4NGUwYjQyYmFhYmM1MTAzMmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc3ZjdlNzJkYTFjMTA1MmNjMDBhY2U2MDBjMGNlZjljODAzZGViYWM5NmFlN2ZjYmY5MGViMTlmZjlmMTNhMTQifQ"
+        },
+        {
+          "resource": "repo://openswe/utils/dashboard_ui.py#L261-L286",
+          "version": "repo-lines-v1:sha256:0ff7a84208c98b9f4ce44c6f56110d9a854fb769c429a0b76df96bd7e6a277f8:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlhNzU5ZmM3YTYxYTY2YzMxYzhhYTgyZjdmOTA1NzE0MTFlYWNjN2JlMGMwNjM5YzMzOWMzZDViM2VhZWQxZTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlmZjdlNzNkMjcyYTZiNTQ1ZmMyOTMyYzEwNjhhMDhlYjU4ODhmYTA3MTZmNjRjNzQ1N2M1NmYwNGU1Y2Q5M2EiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJiNzk3NTBhNmFjNWU2ODk0NGNlOTA4NmE4MTgwNTNlN2JkYTcyYzQzNTdkODZkZDlhZTEyMGYwMDQyNDExM2MifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_bc00420909344ebd8fc5d4db3e6f594f",
+      "statement": "Webhook tunnels for local development must expose only `/webhooks/*`: `langgraph dev` leaves Agent Server routes unauthenticated, and the supplied ngrok policy returns 404 for non-webhook paths.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile#L53-L61",
+          "version": "repo-lines-v1:sha256:ee25f9c3b4c69bff750e377214fd43d1c2cffb04c7b6acda098e571071c43898:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNGIxNzdhMDJjYTNkMTU2YmY2Yjk0YmZjMTQ5NWViNDRlOGVkMjVlNWEyNjI0ZmQwMTI5NjRmZGE2OGM5Njk3NSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYjMyZWI5MzdlYzIwNTBjMjRhMjQxYmRlMTdiY2VlNjJiMTZiZGJmMGMxZTgwYjBiM2I4YjY1MmJjMWMyMmU5OSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOTE1MmE3Y2ZlNDQ5NzExNjYzNDgxZDA2Zjk4Y2RjMTNkYWUxMjdkODkzNWI3ZjUyN2U3ZWJiNWE5NjE2ZjJmZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTgxOTRkMTAwNTc5MzJhNjljYWU1ZDBiOTIyMDA0MWQzYzJiNmY0YWJhOGY4ODc0NDQxMGFmZmYxOWQ5MGNiMSJ9"
+        },
+        {
+          "resource": "repo://docs/DEVELOPMENT.md#L55-L65",
+          "version": "repo-lines-v1:sha256:6636171fc6a74534a9b4bb8e3845fe1753915a43a1ad519c0279f5442da3a998:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMyZjUwZGFkM2Y4MjE4N2FiMDEwYmU0MGIxYzU5MjQ4MWQ0MmIwYTQzNTgyZWRhNjBmNTk5NjNkMTAzM2MyYmYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3YTAxODRmNTc2YzY5YzYyMmFhYjU1MDBhMjczZmY5OGJlOTc0NjY4OGQyYzlmMzg5Zjk3NGM0NTgwZWE5MGMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk2ODk4ZTYwM2FlOGE1NDYwN2VmNzA4NDI1OTcwYjBiY2JmNzU4ZGNmMWM1YTg2NGYzYzIyYWQ1MWExOGYyNmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFlZjAwYjEzZWFiNTQ4NGVjOTMwMDllMGE3YTZmMThiYjYyMzI0MDNkNmUxODM5NjE1ZmIyNGE0ZDI0MTkyY2YifQ"
+        },
+        {
+          "resource": "repo://examples/ngrok/webhooks-only.yml#L1-L14",
+          "version": "repo-lines-v1:sha256:6b87603cba283ea92d7fcc1e5caa694566e9c383aed112029345bb49550ad6f5:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg4OWIxMjgxYjM1OTM2YTkxZDkyMjU3MmZjN2U5YzAyMjBmNDVjNDllMmVhOTkxY2Y1NGVhMjVmMjdhMjVlNjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkMjAxNDVkYmUzMDg0MGFiZmRiYmY5YWNkYTAxNTU3YTZmMjMzOGRmZmY1ODUyMzhjNmIxMzRiMTVmMTY1OGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_cbf0dec6a0ca4edb912849c6629f9d33",
+      "statement": "The local Compose PostgreSQL service is PostgreSQL 16, bound only to `127.0.0.1:5433`, health-checked, and backed by the named `open-swe-postgres` volume; local Open SWE defaults its application database URI to that service.",
+      "evidence": [
+        {
+          "resource": "repo://compose.yaml#L1-L19",
+          "version": "repo-lines-v1:sha256:6bdc8ad8e650afa7ee7e7ab143ba98dc93ee12c68693f3eca1b84d0b5cfbf442:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhNzNmY2NkYzk5ZWE4MzU5NjdjN2RlZTdlZmJlZDFmM2NhODcyNjBkOTI5MzE4NTBmZGQ2NmRhOGNiMTJmMWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJiYTVjOTU5ZGMzOGExMzcxYmNjY2ZhYThjMzIzMGY5YTRlOTI4NWY5ODkzY2IyYTlhZWQ0YTgwYTY4MDFiODkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://docs/DEVELOPMENT.md#L121-L125",
+          "version": "repo-lines-v1:sha256:45173641640d5941f057bc97ade1e67a0227d260bab41fe6d2c1f24e7dfa272f:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNjRiNzQ0YWRlZjQ5NGI0Y2Y0MzBiN2M4OTY0NWJjYzVhNWFhZDkyMDU2NDVkNTA2ZWIxZmJlNWFhZDg4OWRiYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiM2Q0MGEzNzYzMjkwMGIzMGM2ZGZmODNhZjA4N2IxNWQwYTQ4NWFjNDk2OGNjMGQ3ZWJkMjUyZWJhYmQxYjQwZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOGEwYTk2ZmIxM2VlMTczYzg0Yjc0OTMxZWY5ZWJiMGFjOTVkOGI0M2M1NjcyZDg3NjQ0ZTk1ZWQ4NzI2YTcyMiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOGViNjVmMDIzNzA2ZjdkY2MwN2QwN2RhZGM0MzBlZjgxOTJkNzgxN2JmOWZjZTYyOWJhZDFiNzcwNzNkOWRkMCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_bfc14b045c6d485e933907c39b23ac2c",
+      "statement": "`make dev-ui` runs Vite and the backend together, with the backend reverse-proxying non-reserved UI paths so the browser remains on port 2024 while API routes remain backend-owned and Vite HMR connects directly to port 3000.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile#L44-L51",
+          "version": "repo-lines-v1:sha256:5925d0ec531119faccc8e48ee681f6a2ecf7bf63bf47a9190373653afb6de0c3:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMTBjNmMwZGM4ZTY4MDNlYTY2M2RhMWM1NWVhOWQ1ZmJiN2FjMGEwZGRkNjhlMDljMDE1OTBkZDQ0NWQ5NjU2OSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOGU0ZWZlNTQ5NjliMzZmZTliZTNiNDliZGUzMzNmZjljNjRhZjdmN2E3NGY4OGFjZTYzMjExN2IyNzlmYzljNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjFmZWE3NWIxZTMwOTk5ZTNjZjA1ZmQ3ZjM3OGViOWQyMTk5ODhlNDI1ZGVmMmE5OWQ2YzAyOGJlNjQyMTc4YiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjNkNjQ1NGQ2NGQ0ODUxNDBhMDA0Mzg5MzQ4NDFmMmQ0MGY5MDdmYTZiMDk4NzA4YTNkZGJhMzBhY2NjODgxZiJ9"
+        },
+        {
+          "resource": "repo://docs/DEVELOPMENT.md#L152-L162",
+          "version": "repo-lines-v1:sha256:6c8a7f5b7de8cf4e6dd06e46398fe7199c0ed85084472e9a94c164aca53c9f51:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE5Nzg3ODBkMzU1YzQwYjdhZmMxYzE1YjM5NmU5NjNmYmNhMjlmMTNiMmI3MWUzNjBlYjE3NTEwMTM4MjhmMmYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxZGUzMjI3YzA4YjBjOTg5MDY0M2Q5NWRmNTM0NGU4MjFlZGIwNGM2NDJhNGQ4MTExMTIyYjgxYjEwYzljOTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU4MmFkODY0OWZkYmE5ZjUxY2RkNTdhYjBmZDdjZDExOTk1ZjRiZmZmMWY5ODYwNWE1ZjdjYmI5NDViYzBkOTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJkZmM3MWM3NWM1ZGRlY2ZmZDI4Y2I2ODZlMzdlOTIzYTkwYjk1NzY1NmFjZDNjNDk1NjExM2VhNjYwOTYyNzgifQ"
+        },
+        {
+          "resource": "repo://openswe/utils/dashboard_ui.py#L192-L242",
+          "version": "repo-lines-v1:sha256:90d0476d11f7c3f1242b4b23a4f84c65cb97029e3947a9bf98d4554f8d49c3a3:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZmNmMzMDM3ODViNDFkNTgzNDBmOWY5NGNmMTJhNDI4YmY0ZGY1ZGQ1OTI0MmEwYjc1YWU0ZTM2ZGJiMWZkYjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhhODQ5NmVlOTY0MjcyZmM5MTFhMmMyMmVlNDFkYTBmY2U3Zjg0OWJmYWRlMzQwNjUxMmJlMWQyYzgxODhjZWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAxZGM2NWI4Y2RlYWEzYmExMDk4ZDg5NjZlMzMyNjkxYTdiMjUyZGRlMmU2MjhlZjgwN2QzOTIzYzI5NGYxODYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM1NmIwMDdmMDZiZWM5Y2ZjNzc2YzNkYzJmMTA2YmZlMGNkNWVmMTM2ZmRmZTVlMGI4ZWEzNGUzMjllNDFkNTMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_912809c5e0b44414b2ac7076a3e0f4bf",
+      "statement": "Backend startup validates the GitHub login allowlist, sandbox configuration, local model credentials, MDA configuration, and Slack configuration; then it requires/migrates the application database and starts workers/listeners, while several auxiliary listener and warmup failures are logged without preventing service.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/api/app.py#L51-L136",
+          "version": "repo-lines-v1:sha256:0d7aed405014303779856bf11bdf21ae2b8ce7aeec7a95eee08083116ddce84f:eyJzZWxlY3RlZExpbmVDb3VudCI6ODYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3Y2ZmM2YxNzg0MmRlYzZlN2U5MWMzZTNiOGZjZTBhODIyZmMzMTEyNzM4MWIwMGY0NGE5ZjEzMzMzMDNhMmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM0ZGEyNDVjNjU3N2QzYTA0ZWM3MGJhZTEwN2E1NDZiODJlYmQ4ZmNmMTFkOTE4OTk0NzJiMDJjNTM1OTczNTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjNTgzMDM2ZTQ5MGMxYjdkNjI3MjYwNGJkN2I3N2QyYTc5MGViOGFmMGZhM2EwZTQ3MTgyZDc5MDdiZThlOTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI5OTFhMDdjMDcwYzNjOTcyYzIwODczOTVmZjYzODExNjcwMmEzM2U0YzI2OTFlNmQ2ZWQ4M2IwYWNiODliZTUifQ"
+        },
+        {
+          "resource": "repo://openswe/dashboard/oauth.py#L253-L268",
+          "version": "repo-lines-v1:sha256:f7a02b482372d89ebb6b2e42725cf254ffb378f093a4ffd983ada447362af1fc:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjczYzQxOTM1YjMxN2Y4OTU3MzNmYTk1Y2RkYjQ5NzhhNWZhYmUzYWJmZDg2OWZlM2MxNmY1NDQ4YTg1MzdiNTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZjNDgxYTNmZGNjNmMzNDg1OGExNThlZWFiODM5NmYwNDYwYzRhYTc0MzU4Y2U4NTlhNjYxNWZmZTdmMTYwODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU4ZDc0NDI3YzdlOWU3ZjkyMDFmZGM5NWRhNGM0NzAxZDFlNzE4NmI0NzlkZTY1ZDc3NTEwNWMwMWVmZjZkOTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMyYjc2YTFmNjRjNmE4MDZlNjg4ZTBlZDhiNTUwZjcyYjlkOTIzMTMzZjQ1MmI2NjNhMjRkZmZlNmU3YzU3ZjQifQ"
+        },
+        {
+          "resource": "repo://openswe/slack/http.py#L40-L59",
+          "version": "repo-lines-v1:sha256:ebce9a2eb7f3f57634ec81cc3372a5c71469ac6498c27b6342515d571fd57cca:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRhMTZiMmI2MTQ1MDViNzgxY2MwMDk5MTM3MzNmZDcxODZiYjNkZTNlMzc2OWM0Yjg1OGY1NTkzNjMxOTI0OTAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE5Y2NhMGY4ZDg4Njc2NDVkNjM4MzYzODY5NmE5ZDIxOTFkNTFkYWNiZDQ2ODdhZjg4MzI3OWM2NTVmOTI5MjgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1NzgxYTE1NDI2ZTVhNTJiMTZjZGVkZTU2ZDQzZTg0MzY4MTg3NGNkM2U2ZDAzYmY1ZmZjMmMwYzczMzM0OWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJiZjZlNGU3YzQ5NDczNDdjYzMxMWE0YTk3Yzc0NjM2MDM5ZGZlOTMwZjAzMWNjZjFiODdmNGI2NTJmZWU1MGUifQ"
+        },
+        {
+          "resource": "repo://openswe/utils/model.py#L301-L329",
+          "version": "repo-lines-v1:sha256:46f8cf2397e5496f6cd57a5f6c9de0488903661ed4de6c74505b42138acc9072:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZhYzAyMGNhYTY0OTcyZjg5YTIyODc1OWI5MGMwYmQyNzE0ZjkxZjEwYTNkMjVkYTEyZjU2ODZjZDJkYWNkZDUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM5MjgxYjk4NDFiNmRiY2IxMjJjODdmMDkyN2QzMjM4NGE0YjUzNGZjNTE3ODAwMTFmMzVkZDhmZDdiZGM1MGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI1ZjVkOTU1NTQ0NTZjNDdhZDNjM2VhODZlOGEwMDc3YmIxMzlmOGViODc3ODZhMGJjYTQ3MDlmOWIxYjIwYjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_3f184a0805e04fc49e3fb6366b503732",
+      "statement": "`GET /health` returns `{\"status\":\"healthy\"}`; this health endpoint does not itself establish dashboard, MDA, analytics, or webhook readiness.",
+      "evidence": [
+        {
+          "resource": "repo://docs/DEVELOPMENT.md#L179-L183",
+          "version": "repo-lines-v1:sha256:654cb62ccb05170b9953a1dc3ec0da51f68e524a8d6371b5d92863018a56f03a:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiM2U3ZGQzZGQ0MzBmNDVkMTc1ZTg3ZDc2YjJhMzNkOGU5MWYxMjQxYmQ5MDg2MjgzOWY0YjQwYzdlM2U1Y2JmZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZjdjODQxNjViZTAzYmRkZmU4ZjE1ZDE5ODQ1NTdmOGJmNDIxMGYwYzkzYzZjNzI3Yjk0NjllZWMyYTVkY2I5OSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNzRlZjRmMWFmYjAyN2E2NTBiYzkwZjNjMTU0YzgyODg4OThlMDU2MDA2MDJhZjMxZDE3NjU4N2RmYzIzMGU5ZCJ9"
+        },
+        {
+          "resource": "repo://docs/INSTALLATION.md#L129-L133",
+          "version": "repo-lines-v1:sha256:ece9afdb3a1aaddaa776c9bf08320034fa1b590f9f6167762ef350e99a507011:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzY0MmY0Zjg2NDU5OTFlOGU4ZTZhOWY4YjRiZWYyMjE3NDgxMGE1N2VhMDBjMjVlMWFlZGQ2NGZjYTU0Yzk1YyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZTE5M2ZhYzRhMzMwOTI3YTNjY2RmYzFmZGJkNjU4MjU4MDg2NWZlZmYxN2UxNDQyN2M2M2VhZjJlYjI3MmYyNCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNDk0NDE1ZjRmMGNiM2QxOWZkNWI4ZjJiOGM3ODFjNGRmYTZmNGIxMTc3NWI0ZGExNWZjZmNiMTdjZjg0MmYzZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYjI3MWQzN2FjZTQyMTAyODk1NjM5YzkzNjU3ZjQwOGVmMGM2OTgyMGI2MmVkMzk0ZGM5ZTQxMzQ2YTM3MGQ4NCJ9"
+        },
+        {
+          "resource": "repo://openswe/api/health.py#L12-L15",
+          "version": "repo-lines-v1:sha256:c2be3ecadf93d1a59a9a3ae639e562a83a856d4d950ff060d2e3cf4299c48482:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNjhjMDc1OGZmZjcxMjc5YjM4MGMzMjA5MTlkY2QzZWFjOTMzMDhmNjkzODJlNjQ1ZDdmODg4OWI5OTMzOTlhMSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMDQ4ZjhlMGZmMTJhYTdlMDI2YjJhYmVmOWUzMmZmZTYyZmU1MTg5OGQwOWE2NGU4NmY3OTk0M2I5NmFjZDIyYiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYTZkZjlhZGY1NzJmZTYzNmYxNmZmOWM3NDI4MGQwZmUzMmE4ZmI3ZDJiODQwZWIyY2UyMmM3MGNmNjI2MTI3OCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_499cb2a7f8aa4c008be64cfed7d6ea00",
+      "statement": "`langgraph.json` declares the graphs, custom FastAPI app, authentication path, `.env`, and a checkpointer TTL; its image build instructions bundle a dashboard when possible and stamp backend/UI build identity, while allowing a backend deployment to continue after a dashboard build failure.",
+      "evidence": [
+        {
+          "resource": "repo://langgraph.json#L1-L44",
+          "version": "repo-lines-v1:sha256:3f558e29058668381559c0b32b9ff937ebad59e8c52fdcc73f31274cfbe455d9:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2ZmIwOGZkYTFhY2I5NTdiNjExNmJkMzc4MTFhMWZlNDFhMDE2MTFjMDYzMWVkYmY3ODZkNjg4OWEyN2E1NWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwNjQ4Zjc3ZmQ1YTljNjNiM2NkZDBhZjQ5ZGFhMTI5OTIyMGI3NTQxZTg4Y2ExN2VmZTFhNmExMTRiOWZmMmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_bacc89f92df943dabe50b596302ad0e4",
+      "statement": "The root Dockerfile builds a production LangGraph API image that installs Open SWE, configures its HTTP app/checkpointer/graphs through environment variables, and exposes port 8000.",
+      "evidence": [
+        {
+          "resource": "repo://Dockerfile#L1-L24",
+          "version": "repo-lines-v1:sha256:bd50f0fa769b1df77fa784b7097ef7b224708253d77791b7cf1c1647d5fc58cc:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYwNzYzNTFlZmQ4MTMxYTZmYzAzZDExMzRkODFlZmIwYWUwMTEwOGNmZTNkZTUwOGJjZjVhMzNhYThhZjM3YzUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE1YWJjYjgyM2E1ZmU2NWFjZTM3NWNjYTBmMzI5NThjMjIxMGNkYTEzODcxODM2MWEyNTk1ZTM4NWIyOTc0NTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_fd8e8e1188f54bf39735e2e3364eb478",
+      "statement": "A standalone deployment must secure the Agent Server: `noop` authentication leaves `/threads`, `/runs`, `/assistants`, and `/store` open, whereas the documented `langsmith` mode requires LangSmith credentials; background runs also require non-scale-to-zero Redis/PostgreSQL-backed workers.",
+      "evidence": [
+        {
+          "resource": "repo://docs/INSTALLATION.md#L80-L110",
+          "version": "repo-lines-v1:sha256:eef3a39ac7001b5ef06c696ca95bad44386fe37b4ef5fc8415d02ac2174102ca:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVkODBmMmYxNjNkZjMwZjBmNWE1MTkzZTdhMDc0NzdmOTc4MzU3ZTMyYWQ4YjM4Yjc1NzU4NzkxOTkzYmM3NmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUyMDM1MzI2ZGE3YTdjNTFhMDVjMjA3ZWVmOTVkZTIyZDFlY2U2MWY4YThkOTA0MzY2ZGM0NGQxM2RiZTU0MTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQxZGUyODVlOTg5ODU1YjM3Njc5MTZhZDBkOWNjNzcyZmFkMmE0YzQ3MWFkOGMyYzc4NGNkNmM5NGM4ODliMDYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEyNmRhOWIxZTNkOTBhZTZmMGUzNmNlMmU2MmRlNjU1MjVkZWViNzM3NjRkYTJlODg0ZTQ1MjNkZmQzZGRkMDUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8cfeba05a9764e4aa8d95426e18869c8",
+      "statement": "MDA is a separate, independently locked Python project that does not import the backend; its runtime configuration includes the public backend URL, LangSmith/model credentials, and shared channel service secret.",
+      "evidence": [
+        {
+          "resource": "repo://mda/README.md#L120-L123",
+          "version": "repo-lines-v1:sha256:2d68eb7903d89af34fc64c6f6790e042fd0b3015db523eff58353df96e8b859e:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMjNlMThjNzk1MDY3OWM0MWZiMWRhZGRkMDA1NzZmOWQzM2Q4MWQwN2NmYWMwYzEwZjRiNjRhMzJjZjA5MzQ4ZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiN2Q0NDljNGE4ZGRiYTI5YmQxZjQyNjVjMjU1NTNhYzAwMzk5YWUwOTI5M2YxYzcwMDU1MGE4OWM4MTYxYzRiNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiY2I1ZmRmMjgwYWZjNWRjN2JmZGMxMWJjMWI4NTg2NmQ1MGU4MmE2OWI0YTMyMzBjYWQzZjcyYzg5ZjE2MTRmZiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZWVhZDc1NzY1NmJjYjZiYWI1NGU2YjkyYzFjM2I1ZDIyYmYyZWUwMTcwODkxZTYxNWE0Yjg2Y2IzNTU1OGRiMiJ9"
+        },
+        {
+          "resource": "repo://mda/README.md#L142-L165",
+          "version": "repo-lines-v1:sha256:cab42737ae1a3639c72dbc991736ac4655ef514725ca3783fe3eef5e2a58d35b:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ3YzkzNmI5NDM0ZjZjYzQ4ZDIzNDZjN2ZmYTljMmE4NDkzMjc0ZmM2ZTNmMDIyZjAxNjUwNTA4ZjU5NTFiOWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIzZTY1Njg3MWU4M2ZiZDJkNzhlYTlhNDQ0OTBkZmExOTBiYjA3Nzc0MjcyYWJhYjU5ZjQzNmNkZTcwODAxMzYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkzYzI4ZTQ5MzM5N2UyYzM5OTcxOTI5ZDUzODhmNDcyYTYwMWEzZGQ5OWI3YWI5YTljNGQ3ZmRiN2JhMjBjODMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ2MjM0YjJlNmQ5NjhlMWU2ZTZiYTZkZjBlNTRiMmYzNWI3MTNiOGVkNGU2ZTk5MGZkOTZiMTk1YTg1YzBmYjcifQ"
+        },
+        {
+          "resource": "repo://mda/pyproject.toml#L1-L55",
+          "version": "repo-lines-v1:sha256:8b779f7c4f9717a9309865c74c7c01a1e5945ef68c4fd31156c275f76d7bb222:eyJzZWxlY3RlZExpbmVDb3VudCI6NTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcwMmE4MWMzODM2ZWRlZjJkMGJhMTFkMjM1M2ZiNmRhYmM3NzcxNTBhN2NhODNlYTBkOWU5YTcwMzEzZmVhYmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEyMjg1ZTRmMTQyNGI4YjM5NWJlMDQ4OTdmNzU0MzVjMGYwYTA1NzFiZTY2YWZhM2I5ZDBlZDViMTRiOWE0ZmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQwMzFkY2U5MzcxNTg5NmE3YTJhMzRlMTAzNWFjN2YxYTBmOTcwYzc4ZTdjZGFiNWU5OGExZmViYzI0Y2ZhMmQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_94498fca49944334bfa9e79b685c2720",
+      "statement": "MDA deployment logs can be filtered by run ID or thread ID and expose queue, graph-load, backend agent-API, and model-request stages useful for diagnosing run latency or failure.",
+      "evidence": [
+        {
+          "resource": "repo://mda/README.md#L323-L352",
+          "version": "repo-lines-v1:sha256:5e21ea1462b2bad6844908c4d91b02850b737f8cee145d19ebd5b381ae0b5f64:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjYTA5MzI2N2Y5Mjc5ZGYxNzcyZDIzZDk1MWZjNzhkZTJlMDVhNjdkNDM0ZGNiNDFjZGJkZTM3NmVkNGM2Y2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFlM2ZiY2ExMzA1ZWM5OWRjOGQwZDZhYjU5ZjJmMzdkMThhN2E0YThiNTU4ZDBhZjAzNDg2YjgyNzA5YzY4MDIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQxNzNhZDZjZTczZTE1ZWM0ZTdhMjM5YTI0YWYzZjZkOTRkYmNhOTAzYTk2NWU2NWE3NzgyMWNiNzU0OGUwZTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ3YzA2YzU2MWQ1YzMyNzM0MzY4NTI2OGE0NmIzMzkxZjM5OThlZWU4OTBkMmJlNTFmMGQyMWNjNGE1M2FlNmQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7239c1792e1841708a59b5b5e4518a5f",
+      "statement": "The Makefile provides separate backend and MDA test/typecheck targets, and database-backed analytics tests require `TEST_ANALYTICS_POSTGRES_URI` plus database-creation privileges; without that variable the relevant tests skip.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile#L106-L150",
+          "version": "repo-lines-v1:sha256:f4bc43db5168a8689bf021ed8d6a7820b4d628f447c70d01f16ccaac75a573b1:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZiZTA4NmJjNzE2ZTQ1ZjVjN2NkMjMwMTFkZTgyNjgyNWU2ZjM5NmI5NDBlOTMyNDdjMzYxZjJmOWQ5YWNjOGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYzZjNmNWY2NDAyZTljNGFiY2I0ZTJiYWU4N2FmNjJkMmJhMGRiMzNjYjA0M2Q0MTNlYjAyOWUyYTdhM2U1NWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJiMGExMGJiYzAyMTY5M2VkNjhhOTljMmRmMjJiMzRlODdmMjI1YzNhMjk1ZGVhMzhkNjE2NTAxNzYwN2U5YzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJhYWI5YzQ3MzQ2NGI2ZGQ3YThmMzBlMTNlYzYzMzlkNzk5MWFmNDNkNjc5NTZlM2NiYmQ4NTE4NjA5ZjJhZWEifQ"
+        },
+        {
+          "resource": "repo://docs/DEVELOPMENT.md#L131-L134",
+          "version": "repo-lines-v1:sha256:e8b281a297a603b18f208a4cbe0daa3e4cf9ebe76d30f3b4231e2625dbde1075:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNGY1Y2U4ZmZhNDc2YmQ2NWQ0MjMwZGY0YjhmMDY0N2FkOTZlMDM5Y2Y3NTk1MGQ4MjM2MWU3NGJiMzg1M2JkNCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYjVlNTYyMTc0NDM0ZmFiNDA1MGM4ZjQ5YmUxZDIwOTczNTVlOTNiMzYwN2NkZGEyZTRmZTJhOTVhY2NjZDg2MiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYmI5MjRmOTA4N2UzNzVjZmVhMjUzYmUzYTMyYzM5ZDc3NGRkNmNmMjEyOTU2NTBjZjc4NDk3NmNlYjA0YmVlYiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNmNhNjMwMjgxMDA4Nzg4Mjg0YTY1NmZlNzIwNTM3MGI4YzU3OTA1NWZlYzkwNDU1MjIxMGI5OTkxZmE4ZDgzYyJ9"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-11-04T08:09:12.042Z"
+  }
+}
