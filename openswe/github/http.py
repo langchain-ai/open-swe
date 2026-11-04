@@ -738,12 +738,17 @@ class RepoClient:
     async def delete_review_comment(self, comment_id: int) -> None:
         await self.delete(f"pulls/comments/{comment_id}")
 
-    async def check_runs(self, sha: str) -> list[dict[str, Any]]:
-        """Latest checks on ``sha``, excluding superseded Actions cancellations."""
+    async def check_runs(
+        self, sha: str, *, include_superseded: bool = False
+    ) -> list[dict[str, Any]]:
+        """Current checks on ``sha``, or their history with ``include_superseded``."""
         runs = await self.pages(
-            f"commits/{sha}/check-runs", key="check_runs", params={"filter": "latest"}
+            f"commits/{sha}/check-runs",
+            key="check_runs",
+            params={"filter": "all" if include_superseded else "latest"},
         )
-        if not any(run.get("conclusion") in {"cancelled", "stale"} for run in runs):
+        names = [run["name"] for run in runs if isinstance(run.get("name"), str)]
+        if include_superseded or len(names) == len(set(names)):
             return runs
         try:
             payloads = await self.pages(
@@ -768,25 +773,23 @@ class RepoClient:
             if not isinstance(app, dict) or not isinstance(suite, dict):
                 continue
             app_id, suite_id = app.get("id"), suite.get("id")
-            name = run.get("name")
+            name, order = run.get("name"), run.get("id")
             if (
                 app.get("slug") != "github-actions"
                 or not isinstance(app_id, int)
                 or not isinstance(suite_id, int)
                 or not isinstance(name, str)
+                or not isinstance(order, int)
                 or (workflow := workflows.get(suite_id)) is None
             ):
                 continue
             identity = (app_id, workflow.workflow_id, workflow.event, name)
-            order = workflow.id
             identities[index], orders[index] = identity, order
             latest[identity] = max(latest.get(identity, order), order)
         return [
             run
             for index, run in enumerate(runs)
-            if run.get("conclusion") not in {"cancelled", "stale"}
-            or index not in identities
-            or orders[index] == latest[identities[index]]
+            if index not in identities or orders[index] == latest[identities[index]]
         ]
 
     async def workflow_for_suite(self, suite_id: int) -> WorkflowRun:
@@ -1008,7 +1011,6 @@ def _json_or_none(response: httpx2.Response) -> object:
 
 
 class _WorkflowRun(BaseModel):
-    id: int
     workflow_id: int
     check_suite_id: int
     event: str
