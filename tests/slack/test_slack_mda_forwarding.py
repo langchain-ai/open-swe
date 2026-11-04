@@ -950,7 +950,8 @@ async def test_a_person_who_cant_run_is_declined_before_anything_is_claimed_once
     assert first == _NO_RUN | {"declined": declined}
     # MDA sends a call again under its webhook ID: the decline was answered already.
     assert again == _NO_RUN
-    assert other_call["declined"] == declined
+    # Another event of the same message, as Slack sends a mention twice, answers nothing.
+    assert other_call == _NO_RUN
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()
     prepare.assert_not_awaited()
 
@@ -971,7 +972,26 @@ async def test_a_turn_the_backend_declines_is_declined_once_per_call(
 
     assert first == _NO_RUN | {"declined": declined.model_dump(mode="json")}
     assert again == _NO_RUN
-    assert other_call["declined"] == declined.model_dump(mode="json")
+    assert other_call == _NO_RUN
+
+
+async def test_a_message_slack_sends_twice_starts_one_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
+    prepare = _prepared(monkeypatch, prompt=_PROMPT)
+    app = _start_app(monkeypatch)
+
+    # Slack sends a mention as app_mention and as message; Trigger Server forwards both.
+    mention = await _start(app)
+    message = await _start(app, msg_id="msg_delivery-2")
+    again = await _start(app)
+
+    assert mention["run"] is not None
+    assert message == _NO_RUN
+    # MDA sends the first call again under its webhook ID: its run is built again.
+    assert again["run"] is not None
+    assert prepare.await_count == 2
 
 
 async def test_an_allowed_bots_turn_links_no_account_and_no_person_owns_it(
