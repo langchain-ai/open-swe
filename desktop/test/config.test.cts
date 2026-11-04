@@ -274,7 +274,20 @@ test("opens only dashboard links from the configured backend", () => {
     desktopDeepLinkUrl(`${backend}/agents/local/private-thread`, backend),
     `${APP_URL}agents/local/private-thread`,
   );
+  const localBackend = "http://localhost:2024";
+  assert.equal(
+    desktopDeepLinkUrl(
+      `${localBackend}/agents/thread-1?tab=plan#latest`,
+      localBackend,
+    ),
+    `${APP_URL}agents/thread-1?tab=plan#latest`,
+  );
+  assert.equal(
+    desktopDeepLinkUrl("http://localhost:2025/agents/thread-1", localBackend),
+    null,
+  );
   for (const url of [
+    "http://openswe.langchain.dev/agents/thread-1",
     "https://openswe.vercel.app/agents/thread-1",
     `${backend}/dashboard/api/auth/callback?code=secret`,
     `${backend}/assets/app.js`,
