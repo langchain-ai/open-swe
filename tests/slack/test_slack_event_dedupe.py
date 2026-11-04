@@ -103,6 +103,24 @@ def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClaims:
     return claims
 
 
+class TestKitchenReactionRoute:
+    async def test_kitchen_reaction_is_queued(self) -> None:
+        tasks = BackgroundTasks()
+        payload = _mention_payload("EvKitchen")
+        payload["event"] = {
+            "type": "reaction_added",
+            "reaction": "cooking",
+            "user": "U1",
+            "event_ts": "5.000",
+            "item": {"type": "message", "channel": "C1", "ts": "3.000"},
+        }
+        response = await slack_routes.slack_webhook(cast(Request, _FakeRequest(payload)), tasks)
+        assert response["status"] == "accepted"
+        assert len(tasks.tasks) == 1
+        assert tasks.tasks[0].func is slack_routes.process_slack_summon_reaction
+        assert tasks.tasks[0].args[0].reaction == "cooking"
+
+
 async def test_mention_and_message_deliveries_start_one_run(
     monkeypatch: pytest.MonkeyPatch,
     _patch_slack_webhook: _FakeClaims,

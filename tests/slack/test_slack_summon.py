@@ -1,6 +1,6 @@
 import pytest
 
-from openswe.slack import summon
+from openswe.slack import breakout, summon
 from openswe.slack.payloads import SlackChannelContext, SlackEvent
 from openswe.slack.request import SlackRequest
 
@@ -32,7 +32,10 @@ def dispatched(monkeypatch: pytest.MonkeyPatch) -> list[SlackRequest]:
             "ts": message_ts,
             "thread_ts": "1.000",
             "user": "UAUTHOR",
-            "reactions": [{"name": summon.SUMMON_REACTION, "users": ["UREACTOR", "USECOND"]}],
+            "reactions": [
+                {"name": reaction, "users": ["UREACTOR", "USECOND"]}
+                for reaction in (summon.SUMMON_REACTION, summon.BREAKOUT_REACTION)
+            ],
         }
 
     async def resolve_thread_id(client: object, channel_id: str, thread_ts: str) -> str:
@@ -80,6 +83,62 @@ async def test_summon_reaction_tags_open_swe_for_the_reactor(
     assert request.explicit_mention
 
 
+class TestKitchenReaction:
+    @pytest.mark.parametrize("kitchens", [["CKITCHEN"], [], ["CA", "CB"]])
+    async def test_routes_only_to_unambiguous_workspace_kitchen(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        dispatched: list[SlackRequest],
+        kitchens: list[str],
+    ) -> None:
+        from unittest.mock import AsyncMock
+
+        from openswe.slack.breakout_destination import BreakoutDestination
+        from openswe.workspaces.store import WORKSPACES, Workspace
+
+        monkeypatch.setattr(breakout.service, "slack_login", AsyncMock(return_value="alice"))
+        monkeypatch.setattr(breakout.common, "get_thread_workspace", AsyncMock(return_value="team"))
+        monkeypatch.setattr(
+            breakout,
+            "resolve_breakout_destination",
+            AsyncMock(return_value=BreakoutDestination("C123", "team")),
+        )
+        monkeypatch.setattr(
+            WORKSPACES,
+            "get",
+            AsyncMock(
+                return_value=Workspace(slug="team", name="Team", kitchen_channel_ids=kitchens)
+            ),
+        )
+        monkeypatch.setattr(BreakoutDestination, "channel_error", AsyncMock(return_value=None))
+        started = AsyncMock()
+        refused = AsyncMock()
+        monkeypatch.setattr(breakout, "_start", started)
+        monkeypatch.setattr(breakout, "post_slack_ephemeral_message", refused)
+        await summon.process_slack_summon_reaction(
+            _event("UREACTOR").model_copy(update={"reaction": summon.BREAKOUT_REACTION}),
+            "EvKitchen",
+            channel_context=SlackChannelContext(id="C123"),
+            bot_user_id="UBOT",
+            team_id="T1",
+        )
+        assert dispatched == []
+        if kitchens == ["CKITCHEN"]:
+            assert started.await_args is not None
+            request, command, target, _ = started.await_args.args
+            assert target == "CKITCHEN"
+            assert request.user_id == "UREACTOR"
+            assert request.thread_ts == "1.000"
+            assert request.original_message_ts == "3.000"
+            assert "3.000" in command.instruction
+            assert started.await_args.kwargs["inherited_workspace"] == "team"
+            refused.assert_not_awaited()
+        else:
+            started.assert_not_awaited()
+            assert refused.await_args is not None
+            assert "exactly one kitchen" in refused.await_args.args[2]
+
+
 @pytest.mark.parametrize("environment", ["preview", "staging"])
 async def test_summon_reactions_are_disabled_outside_production(
     monkeypatch: pytest.MonkeyPatch,
@@ -98,11 +157,12 @@ async def test_summon_reactions_are_disabled_outside_production(
     assert dispatched == []
 
 
+@pytest.mark.parametrize("reaction", [summon.SUMMON_REACTION, summon.BREAKOUT_REACTION])
 async def test_later_summon_reactions_do_not_restart_the_run(
-    dispatched: list[SlackRequest],
+    dispatched: list[SlackRequest], reaction: str
 ) -> None:
     await summon.process_slack_summon_reaction(
-        _event("USECOND"),
+        _event("USECOND").model_copy(update={"reaction": reaction}),
         "Ev1",
         channel_context=SlackChannelContext(id="C123"),
         bot_user_id="UBOT",
