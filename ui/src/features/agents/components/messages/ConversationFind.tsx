@@ -6,7 +6,14 @@ import {
   XIcon,
 } from "@langchain/macaw-components/icons"
 import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
-import { useEffect, useRef, useState, type RefObject } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react"
 import { useAppCommand, useRegisterAppCommands } from "@/lib/appCommands"
 import { eventMatchesShortcut } from "@/lib/hotkeys"
 
@@ -105,7 +112,7 @@ export function ConversationFind({
   const search = useRef<ConversationSearch | null>(null)
   const previousFocus = useRef<HTMLElement | null>(null)
 
-  const show = () => {
+  const show = useCallback(() => {
     if (!open)
       previousFocus.current =
         document.activeElement instanceof HTMLElement
@@ -116,7 +123,7 @@ export function ConversationFind({
       input.current?.focus()
       input.current?.select()
     })
-  }
+  }, [open])
   const close = () => {
     setOpen(false)
     previousFocus.current?.focus({ preventScroll: true })
@@ -129,16 +136,20 @@ export function ConversationFind({
     search.current?.reveal(next)
   }
 
-  const reviewFind = useAppCommand("review-find")
-  useRegisterAppCommands([
-    {
-      id: "conversation-find",
-      label: "Find in conversation",
-      group: "Conversation",
-      shortcuts: reviewFind ? [] : ["mod+f"],
-      run: show,
-    },
-  ])
+  const reviewFind = Boolean(useAppCommand("review-find"))
+  const commands = useMemo(
+    () => [
+      {
+        id: "conversation-find",
+        label: "Find in conversation",
+        group: "Conversation",
+        shortcuts: reviewFind ? [] : ["mod+f"],
+        run: show,
+      },
+    ],
+    [reviewFind, show]
+  )
+  useRegisterAppCommands(commands)
 
   useEffect(() => {
     if (!open || !root.current) return
