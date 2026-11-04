@@ -36,6 +36,7 @@ async function recordedSidebarUrl({
   includeResolved = false,
   includeClaudeCode = true,
   includeSlack = true,
+  owned = true,
   repoMode = false,
   sort = "updated",
 }: {
@@ -43,6 +44,7 @@ async function recordedSidebarUrl({
   includeResolved?: boolean
   includeClaudeCode?: boolean
   includeSlack?: boolean
+  owned?: boolean
   repoMode?: boolean
   sort?: ChatSort
 } = {}): Promise<string> {
@@ -50,6 +52,7 @@ async function recordedSidebarUrl({
   await agentsApi
     .listThreadsPage({
       ...sidebarRecentsParams({
+        owned,
         repoMode,
         includeAutomations,
         includeResolved,
@@ -147,6 +150,11 @@ describe("apiWarmupScript", () => {
   // a mismatch would silently fetch the sidebar twice.
   it.each([
     { name: "defaults", expected: {}, prefs: undefined },
+    {
+      name: "all owners explicitly selected",
+      expected: { owned: false },
+      prefs: { filters: { ownedOnly: false } },
+    },
     {
       name: "automations included",
       expected: { includeAutomations: true },

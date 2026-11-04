@@ -217,7 +217,6 @@ export function AgentsSidebar({
   )
   const {
     prefs,
-    setCompact,
     setFilters,
     toggleRepoPin,
     toggleRepoCollapsed,
@@ -534,7 +533,6 @@ export function AgentsSidebar({
     pinned: cloudPinnedIds.has(item.id),
     archived: isArchived(item),
     live,
-    compact: prefs.compact,
     onNavigate: layout.closeOnMobile,
     onTogglePin: () => togglePin(item),
     onToggleArchived: () => toggleArchived(item),
@@ -586,10 +584,10 @@ export function AgentsSidebar({
         value={prefs.organize}
         onChange={(organize) => setView({ organize })}
         options={[
+          { value: "none", label: "None" },
           { value: "date", label: "Date" },
           { value: "repo", label: "Project" },
           { value: "workspace", label: "Workspace" },
-          { value: "none", label: "None" },
         ]}
       />
       {repoMode && (
@@ -644,9 +642,6 @@ export function AgentsSidebar({
           }
         >
           Only my threads
-        </MenuCheckItem>
-        <MenuCheckItem checked={prefs.compact} onCheckedChange={setCompact}>
-          Compact rows
         </MenuCheckItem>
       </DropdownMenuGroup>
     </>
@@ -833,9 +828,7 @@ export function AgentsSidebar({
             className={isDesktop ? "pb-space-3" : "pb-space-4"}
             onNavigate={layout.closeOnMobile}
           />
-          {cloudPending && allItems.length === 0 && (
-            <ThreadListSkeleton compact={prefs.compact} />
-          )}
+          {cloudPending && allItems.length === 0 && <ThreadListSkeleton />}
           {cloudError && (
             <ThreadSourceError
               label="Cloud threads unavailable"
@@ -1290,7 +1283,7 @@ function RepoGroup({
  * rather than as an account with no threads. Widths vary per row because a
  * column of identical bars reads as a UI element, not as pending content.
  */
-function ThreadListSkeleton({ compact = false }: { compact?: boolean }) {
+function ThreadListSkeleton() {
   const groups = [
     [90, 64, 76],
     [72, 84],
@@ -1301,21 +1294,14 @@ function ThreadListSkeleton({ compact = false }: { compact?: boolean }) {
         Loading threads
       </span>
       {groups.map((widths, groupIndex) => (
-        <div
-          key={groupIndex}
-          className={compact ? "mb-space-2" : "mb-space-3"}
-          aria-hidden
-        >
+        <div key={groupIndex} className="mb-space-3" aria-hidden>
           <div className="flex items-center gap-space-1 px-space-2 py-space-1">
             <Skeleton className="h-2 w-16 rounded-sm" />
           </div>
           {widths.map((width, rowIndex) => (
             <div
               key={rowIndex}
-              className={cn(
-                "mb-0.5 flex items-center gap-space-2 px-space-2",
-                compact ? "h-7 gap-space-2" : "h-8"
-              )}
+              className="mb-0.5 flex h-8 items-center gap-space-2 px-space-2"
             >
               <Skeleton className="size-3 shrink-0 rounded-full" />
               <Skeleton className="h-2.5" style={{ width: `${width}%` }} />

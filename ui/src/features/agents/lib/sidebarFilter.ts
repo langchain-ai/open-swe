@@ -14,7 +14,7 @@ export const DEFAULT_SIDEBAR_FILTERS: SidebarFilters = {
   sources: [],
   includeAutomations: false,
   includeResolved: false,
-  ownedOnly: false,
+  ownedOnly: true,
   includeSlack: true,
   includeClaudeCode: true,
 }
@@ -73,6 +73,6 @@ export function hasActiveFilters(filters: SidebarFilters): boolean {
     filters.includeResolved !== DEFAULT_SIDEBAR_FILTERS.includeResolved ||
     filters.includeSlack !== DEFAULT_SIDEBAR_FILTERS.includeSlack ||
     filters.includeClaudeCode !== DEFAULT_SIDEBAR_FILTERS.includeClaudeCode ||
-    filters.ownedOnly
+    filters.ownedOnly !== DEFAULT_SIDEBAR_FILTERS.ownedOnly
   )
 }

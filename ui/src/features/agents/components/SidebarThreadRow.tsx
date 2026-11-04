@@ -230,23 +230,20 @@ function SidebarRowTitle({
 }
 
 function sidebarRowClassName({
-  compact,
   active,
   paddingLeft,
   archived,
 }: {
-  compact: boolean
   active: boolean
   paddingLeft: string
   archived: boolean
 }): string {
   return cn(
-    "relative flex items-center gap-space-2 rounded-lg pr-space-2 transition-colors",
+    "relative flex h-8 items-center gap-space-2 rounded-lg pr-space-2 transition-colors",
     paddingLeft,
     // Only ever on screen while "Show archived" is on; without this an
     // archived row is indistinguishable from a live one.
     archived && "opacity-55",
-    compact ? "h-7 gap-space-2" : "h-8",
     "text-primary",
     active
       ? "bg-selected group-hover/row:bg-selected-hover"
@@ -314,7 +311,6 @@ export function SidebarThreadRow({
   pinned,
   archived,
   live,
-  compact = false,
   indent = false,
   onNavigate,
   onTogglePin,
@@ -326,7 +322,6 @@ export function SidebarThreadRow({
   pinned: boolean
   archived: boolean
   live?: PullRequestSnapshot
-  compact?: boolean
   /** Nested under a repository: indent the content, not the highlight box. */
   indent?: boolean
   onNavigate?: () => void
@@ -555,7 +550,6 @@ export function SidebarThreadRow({
   )
 
   const rowClassName = sidebarRowClassName({
-    compact,
     active: rowIsActive,
     paddingLeft: indent ? "pl-space-5" : "pl-space-2",
     archived,
@@ -625,7 +619,6 @@ export function SidebarThreadRow({
               threadId={item.id}
               subagent={subagent}
               isActive={activeSubagent === subagent.toolCallId}
-              compact={compact}
               indent={indent}
               onNavigate={onNavigate}
             />
@@ -640,7 +633,6 @@ export function SidebarThreadRow({
               worker={worker}
               activeSubagentId={activeSubagentId}
               isActive={worker.id === activeThreadId}
-              compact={compact}
               indent={indent}
               onNavigate={onNavigate}
             />
@@ -677,7 +669,6 @@ function SidebarSubagentRow({
   subagent,
   isActive,
   nested = false,
-  compact,
   indent,
   onNavigate,
 }: {
@@ -685,7 +676,6 @@ function SidebarSubagentRow({
   subagent: AgentSubagentSummary
   isActive: boolean
   nested?: boolean
-  compact: boolean
   indent: boolean
   onNavigate?: () => void
 }) {
@@ -698,7 +688,6 @@ function SidebarSubagentRow({
       search={{ subagent: subagent.toolCallId }}
       onClick={() => onNavigate?.()}
       className={sidebarRowClassName({
-        compact,
         active: isActive,
         paddingLeft: nested
           ? indent
@@ -857,14 +846,12 @@ function SidebarTaskWorkerRow({
   worker,
   activeSubagentId,
   isActive,
-  compact,
   indent,
   onNavigate,
 }: {
   worker: AgentThread
   activeSubagentId: string | null
   isActive: boolean
-  compact: boolean
   indent: boolean
   onNavigate?: () => void
 }) {
@@ -909,7 +896,6 @@ function SidebarTaskWorkerRow({
           onNavigate?.()
         }}
         className={sidebarRowClassName({
-          compact,
           active: rowIsActive,
           paddingLeft: indent ? "pl-13.5" : "pl-11.5",
           archived: worker.resolved === true,
@@ -967,7 +953,6 @@ function SidebarTaskWorkerRow({
               threadId={worker.id}
               subagent={subagent}
               isActive={isActive && activeSubagentId === subagent.toolCallId}
-              compact={compact}
               indent={indent}
               nested
               onNavigate={onNavigate}

@@ -26,11 +26,11 @@ function warmApiRequests(
   if (sidebarPath) {
     let includeAutomations = false
     let includeResolved = false
-    let owned = false
+    let owned = true
     let includeClaudeCode = true
     let includeSlack = true
     let repoMode = false
-    let sortByCreated = true
+    let sortByCreated = false
     try {
       const raw = localStorage.getItem(prefsKey)
       const prefs = raw ? JSON.parse(raw) : null
@@ -43,12 +43,12 @@ function warmApiRequests(
           (Array.isArray(filters.sources) &&
             filters.sources.indexOf("schedule") !== -1)
         includeResolved = filters.includeResolved === true
-        owned = filters.ownedOnly === true
+        owned = filters.ownedOnly !== false
         includeClaudeCode = filters.includeClaudeCode !== false
         includeSlack = filters.includeSlack !== false
       }
     } catch {
-      // An unreadable preference just means the default (false).
+      // An unreadable preference just means the defaults.
     }
     // Parameter order has to match the api client's, because the handoff below
     // matches on the resolved URL.

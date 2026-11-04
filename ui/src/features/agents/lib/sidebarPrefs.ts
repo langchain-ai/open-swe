@@ -15,7 +15,6 @@ export type ChatSort = (typeof CHAT_SORTS)[number]
 export type PinnedSort = (typeof PINNED_SORTS)[number]
 
 export interface SidebarPrefs {
-  compact: boolean
   filters: SidebarFilters
   /** Repositories pinned into the sidebar's Pinned section. Client-side only. */
   pinnedRepoKeys: Array<string>
@@ -33,7 +32,6 @@ export interface SidebarPrefs {
 }
 
 export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
-  compact: false,
   filters: DEFAULT_SIDEBAR_FILTERS,
   pinnedRepoKeys: [],
   collapsedRepoKeys: [],
@@ -47,7 +45,7 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
     "/agents/reviews",
     "/incidents",
   ],
-  organize: "date",
+  organize: "none",
   sortChats: "created",
   sortPinned: "manual",
 }
@@ -83,7 +81,10 @@ function sanitizeFilters(value: unknown): SidebarFilters {
       typeof raw.includeResolved === "boolean"
         ? raw.includeResolved
         : DEFAULT_SIDEBAR_FILTERS.includeResolved,
-    ownedOnly: raw.ownedOnly === true,
+    ownedOnly:
+      typeof raw.ownedOnly === "boolean"
+        ? raw.ownedOnly
+        : DEFAULT_SIDEBAR_FILTERS.ownedOnly,
     includeSlack:
       typeof raw.includeSlack === "boolean"
         ? raw.includeSlack
@@ -125,10 +126,6 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
   const raw =
     value && typeof value === "object" ? (value as Record<string, unknown>) : {}
   return {
-    compact:
-      typeof raw.compact === "boolean"
-        ? raw.compact
-        : DEFAULT_SIDEBAR_PREFS.compact,
     filters: sanitizeFilters(raw.filters),
     pinnedRepoKeys: repoKeys(raw, "pinnedRepoKeys", "pinnedProjectKeys"),
     collapsedRepoKeys: repoKeys(
@@ -239,10 +236,6 @@ export function useSidebarPrefs() {
     () => DEFAULT_SIDEBAR_PREFS
   )
 
-  const setCompact = useCallback(
-    (compact: boolean) => setPrefs((prev) => ({ ...prev, compact })),
-    []
-  )
   const setFilters = useCallback(
     (filters: SidebarFilters) => setPrefs((prev) => ({ ...prev, filters })),
     []
@@ -309,7 +302,6 @@ export function useSidebarPrefs() {
 
   return {
     prefs,
-    setCompact,
     setFilters,
     toggleRepoPin,
     toggleRepoCollapsed,
