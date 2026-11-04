@@ -78,6 +78,7 @@ const {
   desktopEnvironmentsUrl,
   desktopExchangeUrl,
   desktopLoginUrl,
+  desktopDeepLinkUrl,
   resolveAppRuntime,
   resolveBackendUrl,
   connectExchangeUrl,
@@ -1672,10 +1673,12 @@ function handleNavigation(window, event, url) {
     void startExternalLogin(url);
     return;
   }
-  const callback = backendUrl ? localCallbackUrl(url, backendUrl) : null;
-  if (callback) {
+  const targetUrl = backendUrl
+    ? localCallbackUrl(url, backendUrl) || desktopDeepLinkUrl(url, backendUrl)
+    : null;
+  if (targetUrl) {
     event.preventDefault();
-    void window.loadURL(callback);
+    void window.loadURL(targetUrl);
     return;
   }
   if (isAppUrl(url)) return;
@@ -1717,12 +1720,7 @@ function createWindow(initialUrl = APP_URL) {
     if (mainWindow === window) mainWindow = null;
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
-    const scheme = new URL(url).protocol;
-    if (isAppLoginUrl(url)) {
-      void startExternalLogin(url);
-    } else if (["http:", "https:", "mailto:"].includes(scheme)) {
-      void shell.openExternal(url);
-    }
+    handleNavigation(window, { preventDefault() {} }, url);
     return { action: "deny" };
   });
   window.webContents.on("will-navigate", (event, url) =>
