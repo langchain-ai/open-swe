@@ -1728,9 +1728,9 @@ function createWindow(initialUrl = APP_URL) {
   window.webContents.on("will-navigate", (event, url) =>
     handleNavigation(window, event, url),
   );
-  window.webContents.on("will-redirect", (event, url) =>
-    handleNavigation(window, event, url),
-  );
+  window.webContents.on("will-redirect", (event) => {
+    if (event.isMainFrame) handleNavigation(window, event, event.url);
+  });
   window.webContents.on("will-attach-webview", (event) =>
     event.preventDefault(),
   );

@@ -12,6 +12,8 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { createServer } from "node:http";
+import { gzipSync } from "node:zlib";
 import { _electron as electron } from "playwright";
 
 const repoRoot = resolve(__dirname, "..", "..", "..");
@@ -236,6 +238,132 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     await electronApp.close().catch(() => {});
     if (!process.env.E2E_KEEP_TMP)
       rmSync(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("Desktop keeps cloud browser authentication redirects inside the viewer", async () => {
+  const stateRoot = mkdtempSync(join(tmpdir(), "desktop-browser-"));
+  const archive = join(stateRoot, "ui.json.gz");
+  writeFileSync(
+    archive,
+    gzipSync(
+      JSON.stringify({
+        files: [
+          {
+            path: "/_shell.html",
+            body: Buffer.from(
+              "<html><body>Browser fixture</body></html>",
+            ).toString("base64"),
+          },
+        ],
+      }),
+    ),
+  );
+  const server = createServer((request, response) => {
+    if (request.url === "/auth") {
+      response.writeHead(302, {
+        "set-cookie":
+          "viewer=session; HttpOnly; Path=/act; SameSite=None; Secure; Partitioned",
+        location: "/act",
+      });
+      response.end();
+      return;
+    }
+    const authenticated = request.headers.cookie === "viewer=session";
+    response.writeHead(authenticated ? 200 : 403, {
+      "content-type": "text/html",
+    });
+    response.end(
+      authenticated ? "Viewer connected" : "Window link is not valid",
+    );
+  });
+  await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
+  const address = server.address();
+  if (!address || typeof address === "string")
+    throw new Error("No viewer address");
+  const viewerOrigin = `http://127.0.0.1:${address.port}`;
+  const electronApp = await electron.launch({
+    executablePath: electronPath,
+    args: [
+      ...(process.platform === "linux" ? ["--no-sandbox"] : []),
+      desktopRoot,
+      "--backend-url=https://desktop.test",
+    ],
+    env: {
+      ...process.env,
+      HOME: stateRoot,
+      XDG_CONFIG_HOME: stateRoot,
+      APPDATA: stateRoot,
+      OPEN_SWE_DESKTOP_UI_ARCHIVE: archive,
+    },
+  });
+  try {
+    await electronApp.evaluate(({ shell }) => {
+      const state = globalThis as typeof globalThis & {
+        externalUrls: string[];
+      };
+      state.externalUrls = [];
+      shell.openExternal = async (url) => {
+        state.externalUrls.push(url);
+      };
+    });
+    const page = await electronApp.firstWindow();
+    await page.waitForURL("open-swe://app/**", { waitUntil: "load" });
+    await page.evaluate((origin) => {
+      const frame = document.createElement("iframe");
+      frame.title = "Browser window";
+      frame.src = `${origin}/auth`;
+      document.body.append(frame);
+    }, viewerOrigin);
+    await expect(
+      page
+        .frameLocator('iframe[title="Browser window"]')
+        .getByText("Viewer connected", { exact: true }),
+    ).toBeVisible({ timeout: 10_000 });
+    expect(
+      await electronApp.evaluate(
+        () =>
+          (globalThis as typeof globalThis & { externalUrls: string[] })
+            .externalUrls,
+      ),
+    ).toEqual([]);
+    await page.evaluate(() => {
+      window.location.href = "https://external.example/";
+    });
+    await expect
+      .poll(() =>
+        electronApp.evaluate(
+          () =>
+            (globalThis as typeof globalThis & { externalUrls: string[] })
+              .externalUrls,
+        ),
+      )
+      .toEqual(["https://external.example/"]);
+    expect(
+      await electronApp.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0].webContents.getURL(),
+      ),
+    ).toBe("open-swe://app/");
+    await page
+      .goto(`${viewerOrigin}/auth`, { waitUntil: "commit" })
+      .catch((error: unknown) => {
+        expect(String(error)).toMatch(/ERR_ABORTED|interrupted/);
+      });
+    await expect
+      .poll(() =>
+        electronApp.evaluate(
+          () =>
+            (globalThis as typeof globalThis & { externalUrls: string[] })
+              .externalUrls,
+        ),
+      )
+      .toEqual(["https://external.example/", `${viewerOrigin}/act`]);
+  } finally {
+    await electronApp.close();
+    await new Promise<void>((closed, reject) =>
+      server.close((error) => (error ? reject(error) : closed())),
+    );
+    rmSync(stateRoot, { recursive: true, force: true });
   }
 });
 
