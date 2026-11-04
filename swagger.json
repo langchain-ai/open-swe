@@ -1032,6 +1032,114 @@
         "title": "BlockSuggestionResponse",
         "type": "object"
       },
+      "BotServerStatus": {
+        "description": "One server in a workspace's tool kit, and whether the workspace bot can use it.",
+        "properties": {
+          "connected": {
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "tool_count": {
+            "title": "Tool Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "tool_count",
+          "connected"
+        ],
+        "title": "BotServerStatus",
+        "type": "object"
+      },
+      "BotStatus": {
+        "properties": {
+          "kit": {
+            "$ref": "#/components/schemas/Kit"
+          },
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "servers": {
+            "items": {
+              "$ref": "#/components/schemas/BotServerStatus"
+            },
+            "title": "Servers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kit",
+          "profile_id",
+          "servers"
+        ],
+        "title": "BotStatus",
+        "type": "object"
+      },
+      "BotToolsView": {
+        "description": "A workspace bot's kit and profile, and which of the kit's services it can use.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "kit_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kit Id"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kit_id",
+          "profile_id"
+        ],
+        "title": "BotToolsView",
+        "type": "object"
+      },
       "BridgeClaimBody": {
         "description": "One long poll: how long to wait, how many to take, and what the CLI is already running.",
         "properties": {
@@ -1502,35 +1610,6 @@
         "title": "CommentBody",
         "type": "object"
       },
-      "ConnectedService": {
-        "description": "A service in the gateway this person has connected.",
-        "properties": {
-          "disconnectable": {
-            "default": false,
-            "title": "Disconnectable",
-            "type": "boolean"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "tool_count": {
-            "title": "Tool Count",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "tool_count"
-        ],
-        "title": "ConnectedService",
-        "type": "object"
-      },
       "ConnectionRef": {
         "description": "A connection's slug, and whose credential under it the run reads.",
         "properties": {
@@ -1935,6 +2014,7 @@
       },
       "CredentialKind": {
         "enum": [
+          "none",
           "oauth",
           "secret"
         ],
@@ -2440,77 +2520,6 @@
         "title": "FunctionCallItem",
         "type": "object"
       },
-      "Gateway": {
-        "properties": {
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "tool_count": {
-            "title": "Tool Count",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "tool_count"
-        ],
-        "title": "Gateway",
-        "type": "object"
-      },
-      "GatewayStatus": {
-        "description": "What one person sees for a gateway: every service connected, or what is left.",
-        "properties": {
-          "all_required": {
-            "default": false,
-            "title": "All Required",
-            "type": "boolean"
-          },
-          "connected": {
-            "items": {
-              "$ref": "#/components/schemas/ConnectedService"
-            },
-            "title": "Connected",
-            "type": "array"
-          },
-          "gateway": {
-            "$ref": "#/components/schemas/Gateway"
-          },
-          "missing": {
-            "items": {
-              "$ref": "#/components/schemas/MissingCredential"
-            },
-            "title": "Missing",
-            "type": "array"
-          },
-          "ready": {
-            "title": "Ready",
-            "type": "boolean"
-          },
-          "tool_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tool Count"
-          }
-        },
-        "required": [
-          "gateway",
-          "ready"
-        ],
-        "title": "GatewayStatus",
-        "type": "object"
-      },
       "GitHubChannelCall": {
         "description": "What MDA's GitHub channel POSTs: the event and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
         "properties": {
@@ -2908,6 +2917,29 @@
         "type": "string"
       },
       "JsonValue-Input": {},
+      "Kit": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "tool_count": {
+            "default": 0,
+            "title": "Tool Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "Kit",
+        "type": "object"
+      },
       "LabelChange": {
         "properties": {
           "name": {
@@ -3429,29 +3461,67 @@
         "title": "ManagedConnectResponse",
         "type": "object"
       },
+      "ManagedServer": {
+        "description": "One LMT server, as one caller sees it.",
+        "properties": {
+          "connected": {
+            "default": false,
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "has_credential": {
+            "default": false,
+            "title": "Has Credential",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CredentialKind",
+            "default": "none"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "ManagedServer",
+        "type": "object"
+      },
       "ManagedToolsView": {
-        "description": "The instance's managed tools gateway (none or one), and what the caller still needs.",
+        "description": "The caller's own LMT services: those they connected, and those they could.",
         "properties": {
           "configured": {
             "title": "Configured",
             "type": "boolean"
           },
-          "gateways": {
-            "items": {
-              "$ref": "#/components/schemas/GatewayStatus"
-            },
-            "title": "Gateways",
-            "type": "array"
-          },
           "langsmith_connected": {
             "default": false,
             "title": "Langsmith Connected",
             "type": "boolean"
+          },
+          "servers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ManagedServer"
+            },
+            "title": "Servers",
+            "type": "array"
           }
         },
         "required": [
-          "configured",
-          "gateways"
+          "configured"
         ],
         "title": "ManagedToolsView",
         "type": "object"
@@ -3962,29 +4032,6 @@
         "title": "MintedSyncToken",
         "type": "object"
       },
-      "MissingCredential": {
-        "description": "A service in the gateway this person has not connected yet.",
-        "properties": {
-          "display_name": {
-            "title": "Display Name",
-            "type": "string"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/CredentialKind"
-          },
-          "slug": {
-            "title": "Slug",
-            "type": "string"
-          }
-        },
-        "required": [
-          "slug",
-          "display_name",
-          "kind"
-        ],
-        "title": "MissingCredential",
-        "type": "object"
-      },
       "ModelList": {
         "properties": {
           "data": {
@@ -4165,6 +4212,19 @@
           "lost"
         ],
         "type": "string"
+      },
+      "NewProfile": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "NewProfile",
+        "type": "object"
       },
       "OpenPullRequest": {
         "properties": {
@@ -5012,6 +5072,24 @@
           "priority"
         ],
         "title": "PriorityChange",
+        "type": "object"
+      },
+      "Profile": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "Profile",
         "type": "object"
       },
       "ProfileUpdate": {
@@ -9777,6 +9855,17 @@
             ],
             "title": "Managed Tools Gateway Id"
           },
+          "managed_tools_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Managed Tools Profile Id"
+          },
           "model_routing_enabled": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -12765,19 +12854,19 @@
         ]
       }
     },
-    "/dashboard/api/managed-tools/gateways": {
+    "/dashboard/api/managed-tools/kits": {
       "get": {
-        "description": "Gateways an admin can pick for the instance, read with the admin's own LangSmith login.",
-        "operationId": "api_list_managed_tools_gateways_dashboard_api_managed_tools_gateways_get",
+        "description": "Tool kits an admin can give a workspace bot, read with the admin's own LangSmith login.",
+        "operationId": "api_list_managed_tools_kits_dashboard_api_managed_tools_kits_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/Gateway"
+                    "$ref": "#/components/schemas/Kit"
                   },
-                  "title": "Response Api List Managed Tools Gateways Dashboard Api Managed Tools Gateways Get",
+                  "title": "Response Api List Managed Tools Kits Dashboard Api Managed Tools Kits Get",
                   "type": "array"
                 }
               }
@@ -12790,24 +12879,25 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api List Managed Tools Gateways",
+        "summary": "Api List Managed Tools Kits",
         "tags": [
           "dashboard"
         ]
       }
     },
-    "/dashboard/api/mcps": {
+    "/dashboard/api/managed-tools/profiles": {
       "get": {
-        "operationId": "api_list_instance_mcps_dashboard_api_mcps_get",
+        "description": "LMT profiles a workspace bot can run as; LangSmith lists them only to its admins.",
+        "operationId": "api_list_managed_tools_profiles_dashboard_api_managed_tools_profiles_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/MCPConnectionPublic"
+                    "$ref": "#/components/schemas/Profile"
                   },
-                  "title": "Response Api List Instance Mcps Dashboard Api Mcps Get",
+                  "title": "Response Api List Managed Tools Profiles Dashboard Api Managed Tools Profiles Get",
                   "type": "array"
                 }
               }
@@ -12820,80 +12910,29 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api List Instance Mcps",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/mcps/{name}": {
-      "delete": {
-        "operationId": "api_delete_instance_mcp_dashboard_api_mcps__name__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Delete Instance Mcp",
+        "summary": "Api List Managed Tools Profiles",
         "tags": [
           "dashboard"
         ]
       },
-      "put": {
-        "operationId": "api_save_instance_mcp_dashboard_api_mcps__name__put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
+      "post": {
+        "operationId": "api_create_managed_tools_profile_dashboard_api_managed_tools_profiles_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MCPConnectionUpdate"
+                "$ref": "#/components/schemas/NewProfile"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MCPConnectionPublic"
+                  "$ref": "#/components/schemas/Profile"
                 }
               }
             },
@@ -12915,120 +12954,7 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api Save Instance Mcp",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/mcps/{name}/discover": {
-      "post": {
-        "operationId": "api_discover_instance_mcp_dashboard_api_mcps__name__discover_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/MCPConnectionUpdate"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Update"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/MCPToolDescription"
-                  },
-                  "title": "Response Api Discover Instance Mcp Dashboard Api Mcps  Name  Discover Post",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Discover Instance Mcp",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/mcps/{name}/headers/reveal": {
-      "post": {
-        "operationId": "api_reveal_instance_mcp_headers_dashboard_api_mcps__name__headers_reveal_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Reveal Instance Mcp Headers",
+        "summary": "Api Create Managed Tools Profile",
         "tags": [
           "dashboard"
         ]
@@ -13626,26 +13552,17 @@
         ]
       }
     },
-    "/dashboard/api/my-managed-tools/{gateway}/connect/{slug}": {
+    "/dashboard/api/my-managed-tools/connect/{server}": {
       "get": {
         "description": "A Slack card button: mint the consent link here, for the signed-in owner only.",
-        "operationId": "connect_managed_tool_from_card_dashboard_api_my_managed_tools__gateway__connect__slug__get",
+        "operationId": "connect_managed_tool_from_card_dashboard_api_my_managed_tools_connect__server__get",
         "parameters": [
           {
             "in": "path",
-            "name": "gateway",
+            "name": "server",
             "required": true,
             "schema": {
-              "title": "Gateway",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
+              "title": "Server",
               "type": "string"
             }
           },
@@ -13700,23 +13617,14 @@
       },
       "post": {
         "description": "A consent link for one service; from a thread's card, the thread resumes once connected.",
-        "operationId": "api_connect_managed_tool_dashboard_api_my_managed_tools__gateway__connect__slug__post",
+        "operationId": "api_connect_managed_tool_dashboard_api_my_managed_tools_connect__server__post",
         "parameters": [
           {
             "in": "path",
-            "name": "gateway",
+            "name": "server",
             "required": true,
             "schema": {
-              "title": "Gateway",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
+              "title": "Server",
               "type": "string"
             }
           },
@@ -13786,26 +13694,17 @@
         ]
       }
     },
-    "/dashboard/api/my-managed-tools/{gateway}/services/{service}": {
+    "/dashboard/api/my-managed-tools/services/{server}": {
       "delete": {
-        "description": "Remove the caller's own LangSmith connection to one service in the tool kit.",
-        "operationId": "api_disconnect_managed_tool_dashboard_api_my_managed_tools__gateway__services__service__delete",
+        "description": "Remove the caller's own LangSmith connection to one service.",
+        "operationId": "api_disconnect_managed_tool_dashboard_api_my_managed_tools_services__server__delete",
         "parameters": [
           {
             "in": "path",
-            "name": "gateway",
+            "name": "server",
             "required": true,
             "schema": {
-              "title": "Gateway",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "service",
-            "required": true,
-            "schema": {
-              "title": "Service",
+              "title": "Server",
               "type": "string"
             }
           }
@@ -23641,6 +23540,110 @@
         "tags": [
           "dashboard",
           "workspaces"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{workspace}/bot-tools": {
+      "get": {
+        "operationId": "api_workspace_bot_tools_dashboard_api_workspaces__workspace__bot_tools_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotToolsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Workspace Bot Tools",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{workspace}/bot-tools/connect/{server}": {
+      "post": {
+        "description": "A consent link where the admin connects one kit service for the workspace bot.",
+        "operationId": "api_connect_workspace_bot_tool_dashboard_api_workspaces__workspace__bot_tools_connect__server__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server",
+            "required": true,
+            "schema": {
+              "title": "Server",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedConnectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Connect Workspace Bot Tool",
+        "tags": [
+          "dashboard"
         ]
       }
     },
