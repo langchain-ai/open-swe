@@ -23,6 +23,7 @@ class OAuthProviders:
         app.add_api_route(self.issuer_path + "/token", self.token, methods=["POST"])
         app.add_api_route(self.issuer_path + "/userinfo", self.userinfo)
         app.add_api_route(self.issuer_path + "/orgs", self.organizations)
+        app.add_api_route(self.issuer_path + "/auth/public", self.public_auth)
         app.add_api_route(self.issuer_path + "/revoke", self.revoke, methods=["POST"])
         app.add_api_route("/fake-gh/link/authorize", self.github_authorize)
 
@@ -82,6 +83,11 @@ class OAuthProviders:
         if email is None:
             raise HTTPException(401)
         return {"sub": "e2e-langsmith:" + email.lower(), "email": email, "ls_org_id": "e2e-org"}
+
+    async def public_auth(self, request: Request) -> dict[str, str]:
+        if request.headers.get("x-api-key") != "e2e-deployment-key":
+            raise HTTPException(401)
+        return {"organization_id": "e2e-org"}
 
     async def organizations(self, request: Request) -> list[dict[str, str]]:
         await self.userinfo(request)
