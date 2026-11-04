@@ -266,6 +266,7 @@ from openswe.tools.admin_gate import (
     actor_has_admin_context,
     participant_is_admin,
 )
+from openswe.tools.approve_pull_request import approve_pull_request
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
 from openswe.tools.manage_review_repos import manage_review_repos
@@ -650,6 +651,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         # The review page reads both from the parent's transcript.
         "note_on_diff",
         "add_review_comment",
+        "approve_pull_request",
         "get_thread",
         "code_channel_set_view",
         "manage_code_channel",
@@ -804,6 +806,7 @@ AGENT_TOOLS: Final = (
     propose_pr_review,
     note_on_diff,
     add_review_comment,
+    approve_pull_request,
     *ADMIN_TOOLS,
     cli_result,
     worktree_handoff,

@@ -22,7 +22,6 @@ from openswe.run_config import RunConfig
 from openswe.slack.code_channels import archive_code_channel, set_session_status_result
 from openswe.slack.http import SlackRequestError
 from openswe.slack.tools.reply import send_slack_reply
-from openswe.tools.approve_pull_request import approve_pull_request
 from openswe.tools.mark_pull_request_ready import mark_pull_request_ready
 from openswe.tools.plan_walkthrough import PLANNING_ERRORS
 from openswe.tools.record_author_feedback import record_author_feedback
@@ -338,9 +337,7 @@ async def walkthrough_end(message: str = "", archive: bool = False) -> dict[str,
 def walkthrough_tools(mode: GuideMode) -> list[Callable[..., Awaitable[Any]]]:
     """The tools a review walkthrough adds."""
     closing: list[Callable[..., Awaitable[Any]]] = (
-        [mark_pull_request_ready, record_author_feedback]
-        if mode == "author"
-        else [approve_pull_request]
+        [mark_pull_request_ready, record_author_feedback] if mode == "author" else []
     )
     return [
         walkthrough_show_chunk,
