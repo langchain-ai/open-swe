@@ -381,8 +381,11 @@ when a message arrives. They hold routing and principal IDs only, never message
 content. Only managed ingress can write them.
 
 The channel facts are available even when the channel cannot send. `post` uses
-a private, verified reply target, which callers can't replace. `target` names
-the conversation it posts to, in every run of the thread, typed by `provider`:
+a private, verified reply target, which callers can't replace. `target` is
+where the channel posts: the conversation that `post` and the run's answers go
+to. It is on `origin.channel` because a channel thread answers where it came
+from, so `target` names the origin conversation, in every run of the thread,
+typed by `provider`:
 
 - `SlackChannelTarget`: `conversation_id` (Slack's `channel`) and `thread_ts`
   (Slack's `thread_ts`).
