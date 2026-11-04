@@ -359,6 +359,21 @@ async def test_folder_order_precedes_pagination_and_keeps_access_and_scope(
         )
         assert [item["id"] for item in page["items"]] == [expected]
         assert page["hasMore"] is True
+    saved = await listing.SIDEBAR_ORDERS.saved("alice", page_scope)
+    assert saved.saved_at_ms is not None
+    thread_api.add("brand-new", **metadata)
+    thread_api.threads["brand-new"]["created_at"] = "2099-01-01T00:00:00Z"
+    thread_api.threads["brand-new"]["updated_at"] = "2099-01-01T00:00:00Z"
+    for offset, expected in enumerate(("brand-new", "t2", "t0", "t1", "t5")):
+        ordered_page = await listing.list_dashboard_threads_page(
+            "alice", hierarchy=hierarchy, offset=offset, limit=1, **page_kwargs
+        )
+        assert [item["id"] for item in ordered_page["items"]] == [expected]
+    summary_page = await listing.list_dashboard_threads_page(
+        "alice", status="finished", limit=5, **page_kwargs
+    )
+    assert [item["id"] for item in summary_page["items"]][:4] == ["brand-new", "t2", "t0", "t1"]
+    del thread_api.threads["brand-new"]
     bob_page = await listing.list_dashboard_threads_page("bob", limit=1, **page_kwargs)
     assert [item["id"] for item in bob_page["items"]] == ["t5"]
     global_page = await listing.list_dashboard_threads_page("alice", limit=1)

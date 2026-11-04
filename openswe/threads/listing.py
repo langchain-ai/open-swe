@@ -104,18 +104,30 @@ class SidebarThreadOrderBody(SidebarOrderScope):
         return self
 
 
+class SidebarThreadOrder(BaseModel):
+    thread_ids: list[str] = Field(default_factory=list)
+    saved_at_ms: int | None = None
+
+    def rank(self, thread_id: str, created_at_ms: int) -> int:
+        if thread_id in self.thread_ids:
+            return self.thread_ids.index(thread_id)
+        if self.saved_at_ms is not None and created_at_ms > self.saved_at_ms:
+            return -1
+        return len(self.thread_ids)
+
+
 class SidebarOrders:
     def __init__(self) -> None:
         self.records = UserRecords("thread_order")
 
-    async def ids(self, login: str, scope: SidebarOrderScope) -> list[str]:
+    async def saved(self, login: str, scope: SidebarOrderScope) -> SidebarThreadOrder:
         if scope.key == "all" or not postgres.configured():
-            return []
+            return SidebarThreadOrder()
         record = await self.records.get(login, key=scope.key)
-        saved = record.get("thread_ids") if record else None
-        return (
-            [value for value in saved if isinstance(value, str)] if isinstance(saved, list) else []
-        )
+        return SidebarThreadOrder.model_validate(record or {})
+
+    async def ids(self, login: str, scope: SidebarOrderScope) -> list[str]:
+        return (await self.saved(login, scope)).thread_ids
 
     async def reorder(
         self, login: str, body: SidebarThreadOrderBody, *, email: str | None = None
@@ -153,7 +165,10 @@ class SidebarOrders:
         ]
         await self.records.put(
             login,
-            {"thread_ids": [*body.thread_ids, *retained]},
+            {
+                "thread_ids": [*body.thread_ids, *retained],
+                "saved_at_ms": int(datetime.now(UTC).timestamp() * 1000),
+            },
             key=body.key,
         )
 
@@ -635,7 +650,7 @@ async def _task_hierarchy_page(
     include_private: bool,
     sort_by: _ThreadSortBy,
     matches_metadata: Callable[[ThreadLike], bool],
-    order_ids: Sequence[str] = (),
+    order: SidebarThreadOrder | None = None,
 ) -> JsonObject:
     memberships = await sidebar_memberships(
         [thread_id for thread in candidates if (thread_id := _thread_id(thread))]
@@ -668,8 +683,10 @@ async def _task_hierarchy_page(
         roots[root_id] = root
         activity[root_id] = max(activity.get(root_id, 0), _thread_timestamp_ms(thread, sort_by))
     ordered = sorted(roots, key=lambda key: activity[key], reverse=True)
-    positions = {thread_id: position for position, thread_id in enumerate(order_ids)}
-    ordered.sort(key=lambda key: positions.get(key, len(positions)))
+    if order is not None:
+        ordered.sort(
+            key=lambda key: order.rank(key, _thread_timestamp_ms(roots[key], "created_at"))
+        )
     items = await _summarize_threads(
         client, [roots[key] for key in ordered[offset : offset + limit]]
     )
@@ -1133,10 +1150,10 @@ async def list_dashboard_threads_page(
         searches = _participant_search_filters(
             search_login, email=search_email, include_all=include_all
         )
-    order_ids = await SIDEBAR_ORDERS.ids(
+    order = await SIDEBAR_ORDERS.saved(
         login, SidebarOrderScope(project=project, repo=repo, ownerless=ownerless)
     )
-    positions = {thread_id: position for position, thread_id in enumerate(order_ids)}
+    order_ids = order.thread_ids
     filing = (
         await PROJECTS.filing_for(login)
         if project is not None or repo or ownerless
@@ -1187,7 +1204,11 @@ async def list_dashboard_threads_page(
         filing=filing,
         order_ids=order_ids,
     )
-    candidates.sort(key=lambda thread: positions.get(str(_thread_id(thread)), len(positions)))
+    candidates.sort(
+        key=lambda thread: order.rank(
+            str(_thread_id(thread)), _thread_timestamp_ms(thread, "created_at")
+        )
+    )
 
     if hierarchy:
         return await _task_hierarchy_page(
@@ -1202,7 +1223,7 @@ async def list_dashboard_threads_page(
             status=status,
             include_private=include_private,
             sort_by=sort_by,
-            order_ids=order_ids,
+            order=order,
             matches_metadata=lambda thread: (
                 _metadata_matches_filters(
                     _thread_metadata(thread),
@@ -1248,7 +1269,7 @@ async def list_dashboard_threads_page(
         ]
         summary_sort_field = "createdAt" if sort_by == "created_at" else "updatedAt"
         filtered.sort(key=lambda item: item.get(summary_sort_field, 0), reverse=True)
-        filtered.sort(key=lambda item: positions.get(str(item["id"]), len(positions)))
+        filtered.sort(key=lambda item: order.rank(str(item["id"]), int(item.get("createdAt", 0))))
         items = filtered[safe_offset : safe_offset + safe_limit]
         has_more = len(filtered) > safe_offset + safe_limit
     else:
