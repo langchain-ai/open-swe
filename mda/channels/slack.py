@@ -24,7 +24,7 @@ channel = channels.slack(
     reactions=False,
     # Trigger Server forwards a bot's mention; the handler starts runs only for the bots
     # on Open SWE's allow-list.
-    allow_bot_triggers=True,
+    ignore_bots=False,
     # The handler picks each message's strategy; anything else redirects the work in progress.
     multitask_strategy="interrupt",
     on_event={
