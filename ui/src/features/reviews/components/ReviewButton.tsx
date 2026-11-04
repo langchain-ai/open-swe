@@ -122,11 +122,18 @@ export function ReviewButton({
   const needsBody = event !== "APPROVE" && pendingCount === 0
   const submit = useMutation({
     retry: false,
-    mutationFn: (review: { event: PullRequestReviewEvent; body: string }) =>
-      api.submitPullRequestReview(owner, repo, number, review),
+    mutationFn: ({
+      event,
+      body,
+    }: {
+      event: PullRequestReviewEvent
+      body: string
+      /** Hands off to `onApproved` once GitHub accepts the approval. */
+      moveOn: boolean
+    }) => api.submitPullRequestReview(owner, repo, number, { event, body }),
     meta: { errorTitle: "Couldn't submit the review", silent: true },
     onMutate: async (review) => {
-      setMovingOn(review.event === "APPROVE" && onApproved !== undefined)
+      setMovingOn(review.moveOn)
       if (!login) return {}
       const undo = await optimisticUpdate<OpenPullRequest | null>(
         queryClient,
@@ -158,12 +165,16 @@ export function ReviewButton({
       )
       refresh.reviewed()
       void pending.invalidate()
-      if (review.event === "APPROVE") onApproved?.()
+      if (review.moveOn) onApproved?.()
     },
   })
   const submitForm = () =>
     submit.mutate(
-      { event, body: body.trim() },
+      {
+        event,
+        body: body.trim(),
+        moveOn: event === "APPROVE" && onApproved !== undefined,
+      },
       {
         onSuccess: () => {
           setOpen(false)
@@ -173,9 +184,9 @@ export function ReviewButton({
       }
     )
   // The form explains a failed one-click approval and keeps its recovery links.
-  const approve = () =>
+  const approve = (moveOn: boolean) =>
     submit.mutate(
-      { event: "APPROVE", body: "" },
+      { event: "APPROVE", body: "", moveOn },
       { onError: () => onOpenReview("APPROVE") }
     )
   const canSubmit = !submit.isPending && (!needsBody || body.trim().length > 0)
@@ -203,6 +214,18 @@ export function ReviewButton({
             {nextLabel}
           </Button>
         )}
+      {onApproved && !isAuthor && !approved && (
+        <Button
+          size="sm"
+          color="secondary"
+          variant="outlined"
+          title="Approve and stay on this pull request"
+          disabled={submit.isPending}
+          onClick={() => approve(false)}
+        >
+          Approve
+        </Button>
+      )}
       {isAuthor ? (
         status.data?.draft ? (
           <ButtonGroup size="sm" color="primary" variant="normal">
@@ -249,7 +272,7 @@ export function ReviewButton({
               approved ? "Approved" : `${approveLabel}${pendingLabel}`
             }
             aria-live="polite"
-            onClick={approve}
+            onClick={() => approve(onApproved !== undefined)}
             className={cn(
               approved
                 ? "border-success! bg-success! text-success-secondary!"

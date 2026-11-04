@@ -165,6 +165,13 @@ test.describe("my pull requests", () => {
       files,
       ...approved,
     });
+    const alsoAssigned = await seedOpenPullRequest(page, {
+      repo: DEMO,
+      title: "Also assigned to Alice",
+      author: "bob",
+      updated_at: "2026-01-01T00:00:00Z",
+      ...approved,
+    });
     const assigned = await seedOpenPullRequest(page, {
       repo: DEMO,
       title: "Assigned to Alice",
@@ -178,11 +185,13 @@ test.describe("my pull requests", () => {
       author: "bob",
       ...approved,
     });
-    const requested = await page.request.post(
-      `/fake-gh/repos/fakeorg/demo/pulls/${assigned.number}/requested_reviewers`,
-      { data: { reviewers: [SAME_USER.login] } },
-    );
-    expect(requested.ok()).toBeTruthy();
+    for (const pr of [assigned, alsoAssigned]) {
+      const requested = await page.request.post(
+        `/fake-gh/repos/fakeorg/demo/pulls/${pr.number}/requested_reviewers`,
+        { data: { reviewers: [SAME_USER.login] } },
+      );
+      expect(requested.ok()).toBeTruthy();
+    }
 
     await openMine(page);
     await expect(card(page, mine)).toBeVisible();
@@ -196,7 +205,7 @@ test.describe("my pull requests", () => {
     ).toBeLessThan(
       titles.findIndex((text) => text.includes("My authored change")),
     );
-    await page.getByText("Review one by one (2)").click();
+    await page.getByText("Review one by one (3)").click();
     await expect(page).toHaveURL(new RegExp(`/demo/${assigned.number}`));
     const changes = page.locator(".review-code-view");
     await expect
@@ -227,6 +236,9 @@ test.describe("my pull requests", () => {
       page.getByRole("button", { name: "Next", exact: true }),
     ).toHaveCount(0);
     release();
+    await expect(page).toHaveURL(new RegExp(`/demo/${alsoAssigned.number}`));
+    await page.getByRole("button", { name: "Approve", exact: true }).click();
+    await page.getByRole("button", { name: "Next", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/demo/${mine.number}`));
     await expect.poll(() => changes.evaluate((node) => node.scrollTop)).toBe(0);
     await page
