@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import uuid
 from collections.abc import Mapping
 from http import HTTPStatus
@@ -13,6 +12,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Interrupt, ThreadState
 
+from managed_deepagents._channels.binding import handler_threads_key
 from managed_deepagents._channels.types import ChannelError
 from managed_deepagents._identity_auth import (
     AGENT_AUTH_PRINCIPAL_HEADER,
@@ -398,17 +398,6 @@ STARTED_FROM_METADATA = "mda_started_from"
 DELIVERS_METADATA = "mda_deliver_to_conversation"
 #: Most of a channel's handler threads searched for a Stop or an answer.
 _HANDLER_THREAD_SEARCH_LIMIT = 100
-
-
-def handler_threads_key(channel_name: str) -> str:
-    """The source key that owns the threads a channel's handlers choose.
-
-    One per channel, so a thread several conversations start runs on has one
-    owner, and Stop and answers can search them. MDA derives it; no request does.
-    """
-    return "mda:v1:" + json.dumps(
-        [channel_name, "handler-threads"], ensure_ascii=False, separators=(",", ":")
-    )
 
 
 async def cancel_handler_thread_runs(
