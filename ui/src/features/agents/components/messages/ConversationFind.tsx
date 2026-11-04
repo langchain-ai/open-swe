@@ -144,6 +144,7 @@ export function ConversationFind({
         label: "Find in conversation",
         group: "Conversation",
         shortcuts: reviewFind ? [] : ["mod+f"],
+        enableInFormFields: true,
         run: show,
       },
     ],

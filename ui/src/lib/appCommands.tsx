@@ -26,6 +26,7 @@ export interface AppCommand {
   label: string
   aliases?: ReadonlyArray<string>
   shortcuts?: ReadonlyArray<string>
+  enableInFormFields?: boolean
   group: string
   run?: () => void | Promise<void>
   available?: boolean
@@ -203,6 +204,7 @@ export function AppCommandProvider({
           )
       )
       if (!command?.run) return
+      if (isTypingContext(event.target) && !command.enableInFormFields) return
       if (
         !command.shortcuts?.some(isTypingSafeShortcut) &&
         isTypingContext(event.target)
