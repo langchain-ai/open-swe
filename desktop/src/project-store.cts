@@ -2,8 +2,16 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 
+const PROJECT_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function projectName(cwd) {
   return path.basename(cwd) || cwd;
+}
+
+/** The Open SWE project a folder belongs to; the path itself never leaves this Mac. */
+function projectIdOf(value) {
+  return typeof value === "string" && PROJECT_ID.test(value) ? value : null;
 }
 
 function readProjects(filePath) {
@@ -37,6 +45,7 @@ function readProjects(filePath) {
           typeof item.addedAt === "number" && Number.isFinite(item.addedAt)
             ? item.addedAt
             : 0,
+        projectId: projectIdOf(item.projectId),
       });
     }
     return [...projects.values()].sort(
@@ -72,6 +81,7 @@ function addProject(filePath, cwd, now = Date.now()) {
     cwd: normalized,
     name: projectName(normalized),
     addedAt: now,
+    projectId: null,
   };
   writeProjects(filePath, [project, ...projects]);
   return project;
@@ -85,4 +95,15 @@ function removeProject(filePath, cwd) {
   return true;
 }
 
-module.exports = { addProject, readProjects, removeProject };
+function linkProject(filePath, cwd, projectId) {
+  const linked = projectIdOf(projectId);
+  if (projectId !== null && !linked) throw new Error("Not a project id");
+  const projects = readProjects(filePath);
+  const project = projects.find((item) => item.cwd === cwd);
+  if (!project) return null;
+  project.projectId = linked;
+  writeProjects(filePath, projects);
+  return project;
+}
+
+module.exports = { addProject, linkProject, readProjects, removeProject };

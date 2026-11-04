@@ -18,6 +18,10 @@ export interface DesktopProject {
   addedAt: number
   /** Terminal/panel scope for the project itself, before a thread exists. */
   scopeId: string
+  /** The Open SWE project this folder belongs to; older desktop builds omit it. */
+  projectId?: string | null
+  /** The GitHub repository the folder is a clone of, if any; older builds omit it. */
+  repo?: string | null
 }
 
 /**
@@ -186,6 +190,11 @@ declare global {
       }) => Promise<DesktopLocalThread | null>
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>
+      /** Missing before desktop builds that link folders to Open SWE projects. */
+      linkProject?: (input: {
+        cwd: string
+        projectId: string | null
+      }) => Promise<DesktopProject | null>
       getVersion: () => Promise<string>
       getUpdateState: () => Promise<DesktopUpdateState>
       installUpdate: () => Promise<boolean>

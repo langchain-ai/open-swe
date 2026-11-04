@@ -52,6 +52,7 @@ from openswe.input_messages import (
 )
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
+from openswe.projects.store import PROJECT_ID_KEY, PROJECTS, ProjectError
 from openswe.prompts import prompt
 from openswe.slack.client import (
     SlackNotice,
@@ -982,8 +983,19 @@ async def _enrich_run_start_command(
                 if client_configurable.get("repo"):
                     raise HTTPException(403, "This account has no GitHub repository access")
             repo_config = _parse_repo(client_configurable.get("repo")) or {}
+            project_id = client_configurable.get("project_id")
+            try:
+                project = (
+                    await PROJECTS.for_run(project_id, await User.for_login("github", login))
+                    if isinstance(project_id, str) and project_id
+                    else None
+                )
+            except ProjectError as exc:
+                raise HTTPException(exc.status_code, str(exc)) from exc
             workspace = await _resolve_requested_workspace(
-                client_configurable.get("workspace") or client_configurable.get("environment"),
+                client_configurable.get("workspace")
+                or client_configurable.get("environment")
+                or (project.workspace if project is not None else None),
                 repo_config,
                 login=login,
             )
@@ -1001,6 +1013,7 @@ async def _enrich_run_start_command(
                 effort=client_configurable.get("agent_effort"),
                 model_selection=model_selection or "auto",
                 workspace=workspace,
+                extra_metadata={PROJECT_ID_KEY: str(project.id)} if project is not None else None,
                 profile=await profile_read or {},
             )
             metadata = thread_metadata(thread)
