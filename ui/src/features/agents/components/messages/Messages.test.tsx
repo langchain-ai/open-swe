@@ -18,6 +18,11 @@ import { Messages } from "./Messages"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import type { TaskEventMetadata } from "@/features/agents/lib/structuredInputMessages"
 
+vi.mock("@/lib/appCommands", () => ({
+  useAppCommand: () => undefined,
+  useRegisterAppCommands: () => {},
+}))
+
 vi.stubGlobal(
   "ResizeObserver",
   class {

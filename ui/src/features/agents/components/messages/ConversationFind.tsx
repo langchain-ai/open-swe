@@ -7,6 +7,8 @@ import {
 } from "@langchain/macaw-components/icons"
 import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 import { useEffect, useRef, useState, type RefObject } from "react"
+import { useAppCommand, useRegisterAppCommands } from "@/lib/appCommands"
+import { eventMatchesShortcut } from "@/lib/hotkeys"
 
 class ConversationSearch {
   ranges: Range[] = []
@@ -127,25 +129,16 @@ export function ConversationFind({
     search.current?.reveal(next)
   }
 
-  useEffect(() => {
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing) return
-      const target = event.target
-      if (
-        target instanceof Element &&
-        target.closest(
-          '.monaco-editor, .xterm, [data-hotkeys="ignore"], [role="dialog"]'
-        )
-      )
-        return
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
-        event.preventDefault()
-        show()
-      }
-    }
-    window.addEventListener("keydown", handleKey)
-    return () => window.removeEventListener("keydown", handleKey)
-  })
+  const reviewFind = useAppCommand("review-find")
+  useRegisterAppCommands([
+    {
+      id: "conversation-find",
+      label: "Find in conversation",
+      group: "Conversation",
+      shortcuts: reviewFind ? [] : ["mod+f"],
+      run: show,
+    },
+  ])
 
   useEffect(() => {
     if (!open || !root.current) return
@@ -160,7 +153,11 @@ export function ConversationFind({
     }
     refresh()
     finder.reveal(0)
-    const observer = new MutationObserver(refresh)
+    let frame = 0
+    const observer = new MutationObserver(() => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(refresh)
+    })
     observer.observe(root.current, {
       childList: true,
       characterData: true,
@@ -170,6 +167,7 @@ export function ConversationFind({
     })
     return () => {
       observer.disconnect()
+      cancelAnimationFrame(frame)
       finder.clear()
       search.current = null
     }
@@ -193,7 +191,8 @@ export function ConversationFind({
                 close()
               } else if (
                 event.key === "Enter" ||
-                ((event.metaKey || event.ctrlKey) && event.key === "g")
+                eventMatchesShortcut(event.nativeEvent, "mod+g") ||
+                eventMatchesShortcut(event.nativeEvent, "mod+shift+g")
               ) {
                 event.preventDefault()
                 step(event.shiftKey ? -1 : 1)

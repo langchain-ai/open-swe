@@ -191,7 +191,7 @@ export function AppCommandProvider({
   useEffect(() => {
     if (!enabled || paletteOpen || shortcutReferenceOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (shouldIgnoreHotkey(event)) return
+      if (shouldIgnoreHotkey(event, true)) return
       const desktop = Boolean(window.openSweDesktop)
       const command = commandsRef.current.find(
         (candidate) =>

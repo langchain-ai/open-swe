@@ -12,6 +12,17 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { ConversationFind } from "./ConversationFind"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 
+const commands = vi.hoisted(() => ({
+  registered: [] as ReadonlyArray<import("@/lib/appCommands").AppCommand>,
+  review: false,
+}))
+vi.mock("@/lib/appCommands", () => ({
+  useAppCommand: () => (commands.review ? { id: "review-find" } : undefined),
+  useRegisterAppCommands: (registered: typeof commands.registered) => {
+    commands.registered = registered
+  },
+}))
+
 const highlights = new Map<string, Set<Range>>()
 vi.stubGlobal("CSS", { highlights })
 vi.stubGlobal(
@@ -47,12 +58,15 @@ describe("ConversationFind", () => {
     const previous = document.createElement("textarea")
     document.body.append(previous)
     previous.focus()
-    render(
+    const { rerender } = render(
       <TooltipProvider>
         <ConversationFind root={{ current: root }} hasEarlier />
       </TooltipProvider>
     )
-    fireEvent.keyDown(previous, { key: "f", ctrlKey: true })
+    expect(commands.registered[0]?.shortcuts).toEqual(["mod+f"])
+    act(() => {
+      void commands.registered[0]?.run?.()
+    })
     await waitFor(() =>
       expect(document.activeElement).toBe(
         screen.getByRole("textbox", { name: "Find in conversation" })
@@ -72,7 +86,7 @@ describe("ConversationFind", () => {
     await act(async () => {
       root.insertAdjacentHTML("beforeend", "<p>version one</p>")
     })
-    expect(screen.getByText("1 of 3")).toBeTruthy()
+    await waitFor(() => expect(screen.getByText("1 of 3")).toBeTruthy())
     fireEvent.change(input, { target: { value: "absent" } })
     await waitFor(() => expect(screen.getByText("No results")).toBeTruthy())
     expect(
@@ -84,6 +98,14 @@ describe("ConversationFind", () => {
     expect(screen.queryByRole("search")).toBeNull()
     expect(highlights.size).toBe(0)
     expect(document.activeElement).toBe(previous)
+    commands.review = true
+    rerender(
+      <TooltipProvider>
+        <ConversationFind root={{ current: root }} hasEarlier />
+      </TooltipProvider>
+    )
+    expect(commands.registered[0]?.shortcuts).toEqual([])
+    commands.review = false
     root.remove()
     previous.remove()
   })
