@@ -66,6 +66,31 @@ Private events, such as a person's own threads, record only who acted, the sourc
 Delivery is best effort, not a durable export or historical backfill.
 Tool arguments/results, page URLs/query strings/thread identifiers, and raw webhook payloads are excluded; only allowlisted metadata properties are exported; IP geolocation is disabled.
 
+### Optional Segment UI tracking
+
+Set `SEGMENT_BROWSER_WRITE_KEY` on the connected backend to enable Segment in both the web and desktop UI.
+This is a public browser-source key, returned by `/dashboard/api/analytics/config`, not a backend credential.
+Without a key, Segment is not loaded and sends nothing; there is no bundled fallback key.
+Use a dedicated source for this app and separate sources for production and non-production deployments.
+Configure cloud-mode destinations in Segment; no destination SDKs, remote plugins or Signals are loaded in the UI.
+For warehouse separation, map this source to its own dataset rather than sharing another app's event tables.
+
+The UI sends `page` events on initial load and pathname navigation, named by the matched route template (dynamic parameters become `:id`).
+Query-only changes do not count as page views.
+It also tracks `agents_thread_created` after the backend accepts a new thread, with `run_target` (`local` or `cloud`) and `has_attachments`, and `agents_message_submitted` when a follow-up is submitted, with `mode` (`new_turn`, `queue` or `steer`) and `has_attachments`.
+Submission does not imply acceptance or run completion.
+Events carry `product: open-swe`, `environment` from `DD_ENV`, `platform` (`web` or `desktop`), optional `desktop_version`, and `schema_version: 1`.
+Users identify by their Open SWE user UUID, with email and GitHub login only as identify traits; sign-out resets identity.
+No cross-product identity linking is performed.
+
+Only allowlisted properties and normalized route context leave the UI; raw URLs, queries, referrers, page titles, prompts, local paths, tool content and SDK campaign enrichment are removed.
+IP context is set to `0.0.0.0`; disable any unwanted IP enrichment in the destination as well.
+Identity persists in localStorage (with an in-memory fallback), including on the desktop custom scheme.
+Early events queue in memory up to 100 entries with their original timestamp and route; logout or account changes discard them.
+Delivery is best effort, not an audit log or a reliable count of completed runs.
+The backend only serves configuration: existing PostHog capture and PostgreSQL analytics are unchanged.
+A UI update is sufficient; no native desktop shell release is required.
+
 ## 1. Create the deployment
 
 You need the deployment's public URL before the GitHub App can be created, so create the deployment first.
