@@ -91,8 +91,7 @@ from openswe.input_messages import (
     visible_dynamic_context_hashes,
 )
 from openswe.mcp import load_mcp_tools
-from openswe.mcp.instance import instance_mcp_source
-from openswe.mcp.managed import instance_gateway, managed_mcp_source
+from openswe.mcp.managed import BotTools, PersonalTools, managed_tools_configured
 from openswe.mcp.runtime import MCPTools, catalog_note
 from openswe.mcp.user import user_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
@@ -272,6 +271,7 @@ from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
 from openswe.tools.manage_review_repos import manage_review_repos
 from openswe.tools.manage_review_shadow import manage_review_shadow
+from openswe.tools.manage_workspace_bot import manage_workspace_bot
 from openswe.tools.note_on_diff import note_on_diff
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
@@ -822,6 +822,7 @@ AGENT_TOOLS: Final = (
     manage_feature_flags,
     manage_review_approval_mode,
     manage_review_shadow,
+    manage_workspace_bot,
     manage_review_repos,
     list_slack_bots,
     allow_slack_bot,
@@ -902,7 +903,7 @@ async def integration_tools(config: RunnableConfig) -> Mapping[str, BaseTool]:
     loaded = _integrations.get((login, workspace))
     if loaded is not None and loaded[0] > time.monotonic():
         return loaded[1]
-    _gateway, tools = await _run_mcp_tools(cfg.thread_id or "", login, workspace)
+    tools = await _run_mcp_tools(cfg.thread_id or "", login, workspace)
     by_name: dict[str, BaseTool] = {tool.name: tool for tool in tools if isinstance(tool, BaseTool)}
     _keep_integrations((login, workspace), by_name)
     return by_name
@@ -974,15 +975,15 @@ async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
     return "desktop" if metadata.get("sandbox_bridge_client") == "desktop" else "cli"
 
 
-async def _mcp_tools_for(
-    credential_login: str | None, workspace: str, managed_gateway: str | None
-) -> MCPTools:
-    """Load MCPs by precedence: instance, workspace, user, then the private owner's gateway."""
-    sources = [instance_mcp_source(), workspace_mcp_source(workspace)]
+async def _mcp_tools_for(credential_login: str | None, workspace: str) -> MCPTools:
+    """Load MCPs by precedence: the workspace's, its bot's managed tools, then in a private
+    thread the owner's own MCPs and managed tools, which replace same-named shared ones."""
+    sources = [workspace_mcp_source(workspace)]
+    if bot := await BotTools.for_workspace(workspace):
+        sources.append(bot.source())
     if credential_login:
         sources.append(user_mcp_source(credential_login))
-        if managed_gateway:
-            sources.append(managed_mcp_source(credential_login, managed_gateway))
+        sources.append(PersonalTools(credential_login).source())
     return await load_mcp_tools(*sources)
 
 
@@ -1019,13 +1020,10 @@ def _owned_mcp_servers(
     return owned
 
 
-async def _run_mcp_tools(
-    thread_id: str, credential_login: str | None, workspace: str
-) -> tuple[str | None, MCPTools]:
-    """The instance's Managed Tools gateway and the MCP tools the run may use."""
-    managed_gateway = await instance_gateway() if credential_login else None
+async def _run_mcp_tools(thread_id: str, credential_login: str | None, workspace: str) -> MCPTools:
+    """The MCP tools the run may use."""
     async with aphase(thread_id, "factory.mcp_tools"):
-        return managed_gateway, await _mcp_tools_for(credential_login, workspace, managed_gateway)
+        return await _mcp_tools_for(credential_login, workspace)
 
 
 # The sandbox's file and shell tools, which code mode offers directly as well.
@@ -1119,9 +1117,9 @@ async def _thread_settings(thread_id: str) -> tuple[ThreadSettings, bool]:
 
 async def _scoped_mcp_tools(
     thread_id: str, scope: Awaitable[tuple[str | None, bool]], workspace: str
-) -> tuple[str | None, MCPTools]:
+) -> MCPTools:
     login, known = await scope
-    return await _run_mcp_tools(thread_id, login, workspace) if known else (None, MCPTools())
+    return await _run_mcp_tools(thread_id, login, workspace) if known else MCPTools()
 
 
 async def _cached_profile(profile_login: str | None):
@@ -1992,7 +1990,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
 
     cli_result_required = bridge_client == "cli"
     sandbox_file_downloads = _sandbox_file_downloads_enabled(bridged=bridge_client is not None)
-    managed_gateway, mcp_tools = await mcp_tools_task
+    mcp_tools = await mcp_tools_task
     if incident_session is not None:
         # incident.io refuses publishing from this MCP client (surface_cannot_publish).
         mcp_tools = [
@@ -2020,7 +2018,11 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         *(() if goal_mode else (report_work_state,)),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
-        *(() if managed_gateway else (connect_managed_tools, discover_managed_tools)),
+        *(
+            ()
+            if credential_login and managed_tools_configured()
+            else (connect_managed_tools, discover_managed_tools)
+        ),
         *(
             ()
             if sandbox_file_downloads

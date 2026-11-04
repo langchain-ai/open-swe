@@ -8,18 +8,14 @@ from langgraph.prebuilt import InjectedState
 from openswe.credential_scope import private_credential_login
 from openswe.mcp.cards import ConnectCard
 from openswe.mcp.managed import (
-    Gateway,
-    GatewayStatus,
     LangSmithNotConnected,
+    ManagedServer,
     ManagedToolsError,
-    MissingCredential,
-    gateway_id,
-    gateway_status,
-    instance_gateway,
+    PersonalTools,
 )
 from openswe.middleware.require_user_reply import current_reply_surface
 from openswe.run_config import RunConfig
-from openswe.slack.blocks import Block, actions, block_payload, button, context, section
+from openswe.slack.blocks import Block, actions, block_payload, button, section
 from openswe.slack.tools.reply import send_slack_reply
 from openswe.utils.dashboard_links import dashboard_api_base_url, dashboard_thread_url
 
@@ -38,58 +34,31 @@ def _langsmith_blocks(card: ConnectCard) -> list[Block]:
     ]
 
 
-def _slack_blocks(
-    card: ConnectCard, gateway: Gateway, offered: list[MissingCredential]
-) -> list[Block]:
-    oauth = [item for item in offered if item.kind == "oauth"]
-    secret = [item for item in offered if item.kind == "secret"]
+def _slack_blocks(card: ConnectCard, offered: list[ManagedServer]) -> list[Block]:
+    oauth = [server for server in offered if server.kind == "oauth"]
+    secret = [server for server in offered if server.kind == "secret"]
     then = (
         "I'll continue here once they're connected."
         if not secret
         else "Once they're set up, ask me to continue."
     )
-    blocks: list[Block] = [
+    return [
         section(
-            f"Connect these services to use them through the *{gateway.name}* managed tools. "
-            "Each button opens the service's consent screen for your account only; sign "
-            f"in to Open SWE in your browser first. {then}"
-        )
-    ]
-    if oauth:
-        blocks.append(
-            actions(
-                *(
-                    button(
-                        f"Connect {item.display_name}",
-                        action_id=f"connect_managed_tool:{index}",
-                        url=card.button_url(item.slug),
-                    )
-                    for index, item in enumerate(oauth[:25])
+            "Connect these services to use them with your own accounts. Each button opens "
+            "the service's consent or API key page for your account only; sign in to Open "
+            f"SWE in your browser first. {then}"
+        ),
+        actions(
+            *(
+                button(
+                    f"{'Connect' if server.kind == 'oauth' else 'Set up'} {server.name}",
+                    action_id=f"connect_managed_tool:{index}",
+                    url=card.button_url(server.id),
                 )
+                for index, server in enumerate([*oauth, *secret][:25])
             )
-        )
-    if secret:
-        names = ", ".join(item.display_name for item in secret)
-        blocks.append(context(f"Set the API key for {names} in LangSmith."))
-    return blocks
-
-
-def _nothing_to_connect(status: GatewayStatus, services: list[str]) -> tuple[str, str]:
-    """What to tell the model, and a Slack reply, when no requested service is unconnected."""
-    if status.ready:
-        return (
-            "Every service is connected; the tools load on the person's next message",
-            f"Every service in the *{status.gateway.name}* managed tools is already "
-            "connected; they load on your next message.",
-        )
-    names = ", ".join(item.display_name for item in status.missing)
-    asked = ", ".join(services)
-    return (
-        f"None of {asked} is waiting to be connected: each is connected already (its tools "
-        f"load on the person's next message) or is not in this tool kit. Unconnected: {names}",
-        f"{asked} isn't waiting to be connected in the *{status.gateway.name}* managed tools; "
-        f"it's either connected already or not one of them. Not connected yet: {names}.",
-    )
+        ),
+    ]
 
 
 async def connect_managed_tools(
@@ -97,7 +66,7 @@ async def connect_managed_tools(
     state: Annotated[dict[str, object] | None, InjectedState] = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = "",
 ) -> dict[str, object]:
-    """Offer cards to connect services in the instance's managed tools."""
+    """Offer cards to connect the person's own accounts to LangSmith Managed Tools services."""
     cfg = RunConfig.from_config(get_config())
     try:
         login = await private_credential_login()
@@ -108,14 +77,11 @@ async def connect_managed_tools(
             "success": False,
             "error": "Managed tools only load in private threads; suggest continuing privately",
         }
-    configured = await instance_gateway()
-    if configured is None:
-        return {"success": False, "error": "No managed tools are set up on this Open SWE"}
-    gateway = gateway_id(configured)
+    tools = PersonalTools(login)
     try:
-        status = await gateway_status(login, gateway)
+        offered = await tools.unconnected(services or [])
     except LangSmithNotConnected:
-        status = None
+        offered = None
     except ManagedToolsError as exc:
         return {"success": False, "error": str(exc)}
     surface = current_reply_surface(state) if state is not None else cfg.source
@@ -131,42 +97,33 @@ async def connect_managed_tools(
             return {"success": False, "error": posted.get("error", "Could not reply")}
         return None
 
-    if status is None:
-        card = ConnectCard(
-            thread_id=cfg.thread_id, card_id=tool_call_id, login=login, gateway=gateway
-        )
+    card = ConnectCard(thread_id=cfg.thread_id, card_id=tool_call_id, login=login)
+    if offered is None:
         if failed := await post("Sign in with LangSmith", _langsmith_blocks(card)):
             return failed
         return {"success": True, "status": "langsmith_required"}
-
-    offered = status.missing_for(services or [])
     if not offered:
-        message, reply = _nothing_to_connect(status, services or [])
-        if failed := await post(reply):
+        asked = ", ".join(services or []) or "Nothing"
+        if failed := await post(
+            f"{asked} isn't waiting to be connected: it's connected already (its tools load "
+            "on your next message) or LangSmith has no such service."
+        ):
             return failed
         return {
             "success": True,
-            "status": "connected" if status.ready else "nothing_to_connect",
-            "gateway": status.gateway.model_dump(),
-            "message": message,
+            "status": "nothing_to_connect",
+            "message": f"None of {asked} is waiting to be connected: each is connected already "
+            "(its tools load on the person's next message) or not a LangSmith service",
         }
-    card = ConnectCard(
-        thread_id=cfg.thread_id,
-        card_id=tool_call_id,
-        login=login,
-        gateway=gateway,
-        services=[item.slug for item in offered],
-    )
+    card.services = [server.id for server in offered]
     await card.save()
-    if failed := await post(
-        "Connect your managed tools", _slack_blocks(card, status.gateway, offered)
-    ):
+    if failed := await post("Connect your managed tools", _slack_blocks(card, offered)):
         return failed
     return {
         "success": True,
         "status": "connection_required",
-        "gateway": status.gateway.model_dump(),
-        "missing": [item.model_dump() for item in offered],
-        "all_required": status.all_required,
-        "continues_automatically": all(item.kind == "oauth" for item in offered),
+        "missing": [
+            {"id": server.id, "name": server.name, "kind": server.kind} for server in offered
+        ],
+        "continues_automatically": all(server.kind == "oauth" for server in offered),
     }

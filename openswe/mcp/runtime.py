@@ -379,7 +379,7 @@ async def _load_tools(
         ]
         return tools, outcome
     except Exception as exc:
-        if source.scope == "managed":
+        if source.scope in ("managed", "bot"):
             failures.append(_discovery_error(exc))
         logger.warning("MCP discovery failed", extra={"mcp_name": record.name})
         return [], "failed"

@@ -2,7 +2,6 @@ import { createFileRoute } from "@tanstack/react-router"
 
 import { SettingsPage } from "@/components/AppShell"
 import { SlackIntegrationSection } from "@/features/settings/components/AdminSections"
-import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/admin_/integrations")({
@@ -11,15 +10,12 @@ export const Route = createFileRoute("/admin_/integrations")({
     <SettingsPage
       adminOnly
       title="Integrations"
-      description="The Slack app and MCP servers shared with every workspace."
+      description="The Slack app shared with every workspace."
     >
       {(user) => (
-        <>
-          <SlackIntegrationSection
-            backendUrl={user.slack_base_url ?? user.api_base_url}
-          />
-          <MCPConnectionsSection scope="instance" />
-        </>
+        <SlackIntegrationSection
+          backendUrl={user.slack_base_url ?? user.api_base_url}
+        />
       )}
     </SettingsPage>
   ),

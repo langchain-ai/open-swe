@@ -1,32 +1,35 @@
 import { useEffect, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import type { QueryKey } from "@tanstack/react-query"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { api } from "@/lib/api"
-import { invalidationTopic } from "@/lib/invalidations/topics"
 import { optimisticUpdate } from "@/lib/optimistic"
 import type {
-  ManagedToolsConnectCard,
-  ManagedToolsConnectedService,
-  ManagedToolsGatewayStatus,
-  ManagedToolsMissingCredential,
+  ConnectableServer,
+  ManagedConnectResult,
+  ManagedServer,
   ManagedToolsView,
 } from "@/lib/api"
 import { SignInWithLangSmithButton } from "./ConnectionsSection"
 
 export const MANAGED_TOOLS_KEY = ["myManagedTools"]
 
-/** The caller's managed tools; re-read whenever an admin saves settings, including the gateway. */
 export const managedToolsQuery = {
   queryKey: MANAGED_TOOLS_KEY,
   queryFn: api.getMyManagedTools,
-  meta: { invalidatedBy: [invalidationTopic("workspaces")] },
 }
 
-/** Opens LMT's consent page in a popup and re-checks the gateways when the person returns. */
-export function useConnectPopup(card?: ManagedToolsConnectCard) {
+/**
+ * Opens a consent page from `open` in a popup and re-reads `queryKey` when the
+ * person returns.
+ */
+export function useConnectPopup(
+  queryKey: QueryKey,
+  open: (serverId: string) => Promise<ManagedConnectResult>
+) {
   const qc = useQueryClient()
   const pending = useRef(false)
   const [connecting, setConnecting] = useState<string | null>(null)
@@ -36,24 +39,22 @@ export function useConnectPopup(card?: ManagedToolsConnectCard) {
       if (!pending.current) return
       pending.current = false
       setConnecting(null)
-      void qc.invalidateQueries({ queryKey: MANAGED_TOOLS_KEY })
+      void qc.invalidateQueries({ queryKey })
     }
     window.addEventListener("focus", refresh)
     return () => window.removeEventListener("focus", refresh)
-  }, [qc])
+  }, [qc, queryKey])
 
   const connect = useMutation({
     meta: { errorTitle: "Couldn't open the connection page" },
     mutationFn: async ({
-      gatewayId,
-      slug,
+      serverId,
       popup,
     }: {
-      gatewayId: string
-      slug: string
+      serverId: string
       popup: Window | null
     }) => {
-      const result = await api.connectManagedTool(gatewayId, slug, card)
+      const result = await open(serverId)
       if (result.url) {
         pending.current = true
         if (popup) {
@@ -66,7 +67,7 @@ export function useConnectPopup(card?: ManagedToolsConnectCard) {
       }
       return result
     },
-    onMutate: ({ gatewayId, slug }) => setConnecting(`${gatewayId}:${slug}`),
+    onMutate: ({ serverId }) => setConnecting(serverId),
     onError: (_e, { popup }) => {
       popup?.close()
       pending.current = false
@@ -75,50 +76,66 @@ export function useConnectPopup(card?: ManagedToolsConnectCard) {
     onSuccess: (result) => {
       if (!result.connected) return
       setConnecting(null)
-      void qc.invalidateQueries({ queryKey: MANAGED_TOOLS_KEY })
+      void qc.invalidateQueries({ queryKey })
     },
   })
 
   return {
     connecting,
-    start: (gatewayId: string, slug: string) => {
+    start: (serverId: string) => {
       const popup = window.openSweDesktop
         ? null
         : window.open("about:blank", "_blank")
       if (!popup && !window.openSweDesktop) return
       if (popup) popup.opener = null
-      connect.mutate({ gatewayId, slug, popup })
+      connect.mutate({ serverId, popup })
     },
   }
 }
 
-/** Removes the caller's own connection to one service; its row leaves at once. */
+export function ConnectButton({
+  server,
+  label,
+  connecting,
+  onConnect,
+}: {
+  server: Pick<ConnectableServer, "id" | "name"> &
+    Partial<Pick<ConnectableServer, "kind">>
+  label?: string
+  connecting: boolean
+  onConnect: (serverId: string) => void
+}) {
+  const action = label ?? (server.kind === "secret" ? "Set up" : "Connect")
+  return (
+    <Button
+      size="xs"
+      color="secondary"
+      variant="outlined"
+      aria-label={`${action} ${server.name}`}
+      disabled={connecting}
+      onClick={() => onConnect(server.id)}
+    >
+      {connecting ? "Waiting…" : action}
+    </Button>
+  )
+}
+
+/** Removes the caller's own connection to one service; its row turns connectable at once. */
 function useDisconnect() {
   const qc = useQueryClient()
   const disconnect = useMutation({
     meta: { errorTitle: "Couldn't disconnect the service" },
-    mutationFn: ({
-      gatewayId,
-      serviceId,
-    }: {
-      gatewayId: string
-      serviceId: string
-    }) => api.disconnectManagedTool(gatewayId, serviceId),
-    onMutate: async ({ gatewayId, serviceId }) => ({
+    mutationFn: api.disconnectManagedTool,
+    onMutate: async (serverId) => ({
       undo: await optimisticUpdate<ManagedToolsView>(
         qc,
         MANAGED_TOOLS_KEY,
         (current) => ({
           ...current,
-          gateways: current.gateways.map((status) =>
-            status.gateway.id === gatewayId
-              ? {
-                  ...status,
-                  connected: status.connected?.filter(
-                    (service) => service.id !== serviceId
-                  ),
-                }
-              : status
+          servers: current.servers.map((server) =>
+            server.id === serverId
+              ? { ...server, connected: false, has_credential: false }
+              : server
           ),
         })
       ),
@@ -128,159 +145,78 @@ function useDisconnect() {
       void qc.invalidateQueries({ queryKey: MANAGED_TOOLS_KEY })
     },
   })
-  return (gatewayId: string, serviceId: string) =>
-    disconnect.mutate({ gatewayId, serviceId })
+  return (serverId: string) => disconnect.mutate(serverId)
 }
 
-export function MissingRow({
-  gatewayId,
-  credential,
+function ServerRow({
+  server,
   connecting,
   onConnect,
+  onDisconnect,
 }: {
-  gatewayId: string
-  credential: ManagedToolsMissingCredential
+  server: ManagedServer
   connecting: boolean
-  onConnect: (gatewayId: string, slug: string) => void
+  onConnect: (serverId: string) => void
+  onDisconnect: (serverId: string) => void
 }) {
   return (
-    <li className="flex flex-wrap items-center justify-between gap-space-3 px-space-3 py-space-2">
-      <span className="text-sm text-primary">{credential.display_name}</span>
-      {credential.kind === "secret" ? (
-        <span className="text-xs text-secondary">
-          Set its API key in LangSmith
-        </span>
-      ) : (
-        <Button
-          size="xs"
-          color="secondary"
-          variant="outlined"
-          disabled={connecting}
-          onClick={() => onConnect(gatewayId, credential.slug)}
-        >
-          {connecting ? "Waiting…" : "Connect"}
-        </Button>
-      )}
-    </li>
-  )
-}
-
-function ConnectedRow({
-  gatewayId,
-  service,
-  onDisconnect,
-}: {
-  gatewayId: string
-  service: ManagedToolsConnectedService
-  onDisconnect: (gatewayId: string, serviceId: string) => void
-}) {
-  return (
-    <li className="flex flex-wrap items-center justify-between gap-space-3 px-space-3 py-space-2">
-      <span className="text-sm text-primary">{service.name}</span>
-      <div className="flex items-center gap-space-2">
-        <span className="text-xs text-secondary">
-          {`Connected · ${service.tool_count} ${service.tool_count === 1 ? "tool" : "tools"}`}
-        </span>
-        {service.disconnectable ? (
-          <Button
-            size="xs"
-            color="secondary"
-            variant="outlined"
-            onClick={() => onDisconnect(gatewayId, service.id)}
-          >
-            Disconnect
-          </Button>
-        ) : null}
-      </div>
-    </li>
-  )
-}
-
-function GatewayStatus({
-  status,
-  connecting,
-  onConnect,
-  onDisconnect,
-}: {
-  status: ManagedToolsGatewayStatus
-  connecting: string | null
-  onConnect: (gatewayId: string, slug: string) => void
-  onDisconnect: (gatewayId: string, serviceId: string) => void
-}) {
-  const connected = status.connected ?? []
-  return (
-    <section
-      aria-label={`${status.gateway.name} managed tools`}
-      className="rounded-md border border-default"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-space-3 p-space-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-primary">
-            {status.gateway.name}
-          </p>
-        </div>
-        {status.ready ? (
-          <Badge color="success" size="xs">
-            {`Ready · ${status.tool_count ?? status.gateway.tool_count} tools`}
-          </Badge>
-        ) : status.all_required ? (
-          <Badge color="warning" size="xs">
-            {`Connect ${status.missing.length} to use`}
-          </Badge>
+    <SettingsRow
+      label={server.name}
+      description={
+        server.connected
+          ? undefined
+          : server.kind === "secret"
+            ? "Needs your API key"
+            : "Not connected"
+      }
+      control={
+        server.connected ? (
+          <div className="flex items-center gap-space-2">
+            <Badge color="primary" size="xs">
+              Connected
+            </Badge>
+            {server.has_credential ? (
+              <Button
+                size="xs"
+                color="secondary"
+                variant="outlined"
+                aria-label={`Disconnect ${server.name}`}
+                onClick={() => onDisconnect(server.id)}
+              >
+                Disconnect
+              </Button>
+            ) : null}
+          </div>
         ) : (
-          <Badge color="warning" size="xs">
-            {`${status.missing.length} not connected`}
-          </Badge>
-        )}
-      </div>
-      <p className="px-space-3 pb-space-2 text-xs text-secondary">
-        These tools are only available in private threads.
-      </p>
-      {status.ready ? null : (
-        <p className="px-space-3 pb-space-2 text-xs text-secondary">
-          {status.all_required
-            ? "LangSmith offers this tool kit's tools only after every service in it is connected to your account."
-            : "Each service's tools load once you connect it to your account."}
-        </p>
-      )}
-      {status.missing.length + connected.length === 0 ? null : (
-        <ul className="divide-y divide-default border-t border-default">
-          {status.missing.map((credential) => (
-            <MissingRow
-              key={credential.slug}
-              gatewayId={status.gateway.id}
-              credential={credential}
-              connecting={
-                connecting === `${status.gateway.id}:${credential.slug}`
-              }
-              onConnect={onConnect}
-            />
-          ))}
-          {connected.map((service) => (
-            <ConnectedRow
-              key={service.id}
-              gatewayId={status.gateway.id}
-              service={service}
-              onDisconnect={onDisconnect}
-            />
-          ))}
-        </ul>
-      )}
-    </section>
+          <ConnectButton
+            server={server}
+            connecting={connecting}
+            onConnect={onConnect}
+          />
+        )
+      }
+    />
   )
 }
 
-/** The tool kit an admin picked for this instance, and what this person still needs. */
+/** The person's own LangSmith Managed Tools services, connected or connectable. */
 export function ManagedToolsSection() {
   const view = useQuery(managedToolsQuery)
-  const popup = useConnectPopup()
+  const popup = useConnectPopup(MANAGED_TOOLS_KEY, (serverId) =>
+    api.connectManagedTool(serverId)
+  )
   const disconnect = useDisconnect()
 
   if (!view.data?.configured && !view.isLoading) return null
+  // Public services with nothing to connect are always usable, so only list
+  // what the person connected or could.
+  const servers = (view.data?.servers ?? []).filter(
+    (server) => server.connected || server.kind !== "none"
+  )
   return (
     <SettingsSection
       title="Managed Tools"
-      description="Tools from the LangSmith Managed Tools tool kit an admin picked for Open SWE. They load only in your private threads and run with your own connections; provider tokens stay in LangSmith."
+      description="Your LangSmith Managed Tools services. Connected ones load in your private threads with your own accounts, in place of the workspace bot's service of the same name; provider tokens stay in LangSmith."
     >
       {view.isLoading ? (
         <p className="p-space-4 text-xs text-secondary">Loading…</p>
@@ -291,25 +227,23 @@ export function ManagedToolsSection() {
       ) : !view.data?.langsmith_connected ? (
         <SettingsRow
           label="LangSmith"
-          description="Your LangSmith sign-in expired. Sign in again to use the managed tools Open SWE offers."
+          description="Your LangSmith sign-in expired. Sign in again to use your managed tools."
           control={<SignInWithLangSmithButton />}
         />
-      ) : view.data.gateways.length === 0 ? (
+      ) : servers.length === 0 ? (
         <p className="p-space-4 text-xs text-secondary">
-          An admin has not picked a tool kit yet.
+          No services yet. Add them in LangSmith under Settings &gt; Tools.
         </p>
       ) : (
-        <div className="space-y-space-3 p-space-4">
-          {view.data.gateways.map((status) => (
-            <GatewayStatus
-              key={status.gateway.id}
-              status={status}
-              connecting={popup.connecting}
-              onConnect={popup.start}
-              onDisconnect={disconnect}
-            />
-          ))}
-        </div>
+        servers.map((server) => (
+          <ServerRow
+            key={server.id}
+            server={server}
+            connecting={popup.connecting === server.id}
+            onConnect={popup.start}
+            onDisconnect={disconnect}
+          />
+        ))
       )}
     </SettingsSection>
   )

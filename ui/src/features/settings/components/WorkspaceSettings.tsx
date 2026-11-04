@@ -34,6 +34,7 @@ import {
 } from "./WorkspaceEditor"
 import { WorkspaceSandboxSection } from "./WorkspaceSandboxSection"
 import { WorkspaceProxySection } from "./WorkspaceProxySection"
+import { WorkspaceBotServers } from "./WorkspaceBotServers"
 import {
   DefaultRepoSection,
   LLMGatewaySection,
@@ -306,7 +307,12 @@ export function WorkspaceSettingsPanel({
           (model) => model.can_be_default !== false
         )}
       />
-      <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
+      <MCPConnectionsSection
+        key={slug}
+        scope="workspace"
+        workspace={slug}
+        managed={canEdit ? <WorkspaceBotServers slug={slug} /> : undefined}
+      />
       {canEdit && slug !== DEFAULT_WORKSPACE_SLUG && (
         <SettingsSection
           title="Delete workspace"
