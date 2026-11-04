@@ -65,7 +65,7 @@ export function filterThreads<T extends FilterableThread>(
   })
 }
 
-/** True when any filter dimension differs from the defaults. */
+/** True when the empty sidebar should mention its filters. */
 export function hasActiveFilters(filters: SidebarFilters): boolean {
   return (
     filters.sources.length > 0 ||
@@ -73,6 +73,6 @@ export function hasActiveFilters(filters: SidebarFilters): boolean {
     filters.includeResolved !== DEFAULT_SIDEBAR_FILTERS.includeResolved ||
     filters.includeSlack !== DEFAULT_SIDEBAR_FILTERS.includeSlack ||
     filters.includeClaudeCode !== DEFAULT_SIDEBAR_FILTERS.includeClaudeCode ||
-    filters.ownedOnly !== DEFAULT_SIDEBAR_FILTERS.ownedOnly
+    filters.ownedOnly
   )
 }
