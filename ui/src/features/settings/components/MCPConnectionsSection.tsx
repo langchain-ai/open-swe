@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react"
+import { useId, useRef, useState, type ReactNode } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@langchain/macaw-components/Button"
 import { Checkbox } from "@langchain/macaw-components/Checkbox"
@@ -93,10 +93,16 @@ function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
 export function MCPConnectionsSection({
   scope,
   workspace = DEFAULT_WORKSPACE_SLUG,
+  managed,
 }: {
   scope: MCPScope
   /** Only meaningful for `scope: "workspace"`; ignored for personal MCPs. */
   workspace?: string
+  /**
+   * The servers LangSmith Managed Tools keeps, listed first; new servers go there,
+   * and the connections Open SWE stores itself stay editable below them.
+   */
+  managed?: ReactNode
 }) {
   const { description, queryKey, ...client } = scopeConfig(scope, workspace)
   const qc = useQueryClient()
@@ -690,8 +696,18 @@ export function MCPConnectionsSection({
   ) : null
 
   return (
-    <SettingsSection title="MCP Servers" description={description}>
+    <SettingsSection
+      title="MCP Servers"
+      description={managed ? undefined : description}
+    >
       <div className="space-y-space-4 p-space-4">
+        {managed}
+        {managed && (connections.data?.length ?? 0) > 0 && (
+          <p className="pt-space-2 text-xs text-secondary">
+            Stored in Open SWE: these keep their own credentials and load in
+            every run here too.
+          </p>
+        )}
         {connections.isLoading && (
           <p className="text-sm text-secondary">Loading connections…</p>
         )}
@@ -810,7 +826,7 @@ export function MCPConnectionsSection({
             }}
             onCancel={() => setImporting(false)}
           />
-        ) : !draft ? (
+        ) : managed && !draft ? null : !draft ? (
           <div className="flex gap-space-2">
             <Button
               size="xs"

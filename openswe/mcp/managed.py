@@ -5,11 +5,11 @@ Every LMT server a run uses is one MCP connection to that server's own route
 connection to a server therefore replaces the workspace bot's in their private threads,
 by the runtime's usual precedence.
 
-- The workspace bot is the workspace's LMT profile (``X-LangSmith-Profile``), called
-  with Open SWE's own LangSmith API key: its runs load every server the profile has
-  connected. Open SWE makes the profile the first time an admin connects a service for
-  the bot; only admins connect a profile's services, in LangSmith or from the
-  workspace's settings, where they can also register new servers.
+- The workspace bot is two LMT objects Open SWE makes for the workspace: a tool kit,
+  which tools its runs may call, and a profile (``X-LangSmith-Profile``), whose
+  credentials they call them with, through Open SWE's own LangSmith API key. Only admins
+  connect a profile's services or change the kit, in LangSmith or from the workspace's
+  MCP servers, where they can also register new servers.
 - A person's own connections are every LMT server they connected in LangSmith, called
   with their own LangSmith sign-in; they load only in that person's private threads.
 
@@ -23,7 +23,7 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from datetime import timedelta
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import quote
@@ -53,6 +53,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+KITS_PATH = "/v1/managed-tools/kits"
 SERVERS_PATH = "/v1/managed-tools/servers"
 PROFILES_PATH = "/v1/managed-tools/profiles"
 CONSENT_SESSIONS_PATH = "/v1/agent-auth/oauth-authorization-sessions"
@@ -143,15 +144,47 @@ def _match_key(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
-class BotStatus(BaseModel):
-    """The servers a workspace's admins can connect for its bot, and which it has."""
+class Kit(BaseModel):
+    id: str
+    name: str
+    tool_count: int = 0
 
-    profile_id: str | None
-    servers: list[ManagedServer]
+    @classmethod
+    def from_lmt(cls, item: dict[str, object]) -> Kit:
+        count, tools = item.get("tool_count"), item.get("tools")
+        return cls(
+            id=str(item["id"]),
+            name=str(item.get("name") or item["id"]),
+            tool_count=count
+            if isinstance(count, int)
+            else len(tools)
+            if isinstance(tools, list)
+            else 0,
+        )
+
+
+class BotServer(ManagedServer):
+    """One server as a workspace's bot has it: ``connected`` when the bot can call it, and
+    the kit's ``tools`` from it (none when it is not in the kit)."""
+
+    tools: list[str] = Field(default_factory=list)
 
     @property
-    def connected(self) -> list[ManagedServer]:
-        return [server for server in self.servers if server.connected]
+    def in_kit(self) -> bool:
+        return bool(self.tools)
+
+
+class BotStatus(BaseModel):
+    """The workspace bot's kit and profile, and every server its admins could give it."""
+
+    kit: Kit | None
+    profile_id: str | None
+    servers: list[BotServer]
+
+    @property
+    def missing(self) -> list[BotServer]:
+        """Servers in the kit the bot cannot call yet."""
+        return [server for server in self.servers if server.in_kit and not server.connected]
 
 
 class NewServer(BaseModel):
@@ -159,7 +192,7 @@ class NewServer(BaseModel):
 
     name: str = Field(min_length=1, max_length=100)
     url: str = Field(min_length=1, max_length=2048)
-    kind: Literal["oauth", "secret"]
+    kind: Literal["none", "oauth", "secret"]
     header: str | None = Field(default=None, max_length=128)
     """For ``secret``: the header its API key goes in."""
 
@@ -236,15 +269,16 @@ def _wrapped[E: BaseException](error: BaseException, kind: type[E]) -> E | None:
 
 class _ServerConnection(MCPConnection):
     """One LMT server's route, carrying the caller's current credential in memory, never
-    stored."""
+    stored. ``tools`` limits it to a tool kit's tools; ``None`` offers every tool."""
 
     headers: dict[str, str] = Field(default_factory=dict, repr=False, exclude=True)
+    tools: frozenset[str] | None = Field(default=None, exclude=True)
 
     def connection_headers(self) -> dict[str, str]:
         return self.headers
 
     def allows_tool(self, name: str) -> bool:
-        return True
+        return self.tools is None or name in self.tools
 
     @property
     def offers_tools(self) -> bool:
@@ -339,11 +373,14 @@ class ManagedTools(ABC):
             raise ManagedToolsError("LangSmith has no such service")
         return found
 
-    async def offered(self) -> list[ManagedServer]:
-        """The servers whose tools runs load: every one the caller connected an account to.
-        Public servers count as connected for everyone, so they are no one's own."""
+    async def offered(self) -> list[tuple[ManagedServer, frozenset[str] | None]]:
+        """The servers whose tools runs load, each with the tools they may call (``None``:
+        all): every one the caller connected an account to. Public servers count as
+        connected for everyone, so they are no one's own."""
         return [
-            server for server in await self.servers() if server.usable and server.has_credential
+            (server, None)
+            for server in await self.servers()
+            if server.usable and server.has_credential
         ]
 
     async def refresh(self) -> None:
@@ -381,7 +418,7 @@ class ManagedTools(ABC):
             logger.warning("Managed tools skipped; LangSmith listing failed", exc_info=True)
             return []
         connections: dict[str, MCPConnection] = {}
-        for server in offered:
+        for server, tools in offered:
             name = server.connection_name
             if name in connections:
                 # LangSmith lets a registered server share a built-in's name (Linear, Pylon).
@@ -389,9 +426,12 @@ class ManagedTools(ABC):
             connections[name] = _ServerConnection(
                 name=name,
                 url=f"{langsmith_issuer()}{SERVERS_PATH}/{quote(server.id, safe='')}/mcp",
-                revision=hashlib.sha256(server.id.encode()).hexdigest()[:16],
+                revision=hashlib.sha256(
+                    json.dumps([server.id, sorted(tools or [])]).encode()
+                ).hexdigest()[:16],
                 updated_at="",
                 headers=headers,
+                tools=tools,
             )
         return list(connections.values())
 
@@ -549,6 +589,16 @@ class PersonalTools(ManagedTools):
             raise ManagedToolsError("This service has no connection to remove")
         await self.refresh()
 
+    async def kits(self) -> list[Kit]:
+        return sorted(
+            (
+                Kit.from_lmt(item)
+                for item in await self._pages(KITS_PATH)
+                if isinstance(item, dict) and item.get("id")
+            ),
+            key=lambda kit: kit.name.lower(),
+        )
+
     async def bot_profile(self, bot: BotTools) -> BotTools:
         """``bot`` with an LMT profile, making and saving the workspace's first one.
 
@@ -564,7 +614,7 @@ class PersonalTools(ManagedTools):
             )
             if (current := await BotTools.of(bot.workspace)).profile:
                 return current
-            name = BotTools.profile_name(bot.workspace)
+            name = BotTools.lmt_name(bot.workspace)
             existing = next(
                 (
                     str(item["id"])
@@ -576,7 +626,61 @@ class PersonalTools(ManagedTools):
             if existing is None:
                 response = await self._request("POST", PROFILES_PATH, body={"name": name})
                 existing = str(response.json()["id"])
-            return await bot.adopt_profile(existing)
+            return await current.adopt(profile=existing)
+
+    async def set_bot_tools(self, bot: BotTools, server_id: str, tools: Iterable[str]) -> BotTools:
+        """Make ``tools`` the bot's kit's tools from one server, as this admin.
+
+        None takes the server out of the kit; the workspace's first tools make its kit.
+        Open SWE's writes to one workspace's kit wait on each other, so none drops another.
+        """
+        wanted = sorted(set(tools))
+        async with transaction() as conn:
+            await conn.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:lock))"),
+                {"lock": f"lmt-bot-kit:{bot.workspace}"},
+            )
+            bot = await BotTools.of(bot.workspace)
+            links = [
+                link
+                for link in BotTools.kit_links(await bot.load_kit())
+                if BotTools.link_source(link) != server_id
+            ]
+            links += [BotTools.tool_link(server_id, name) for name in wanted]
+            if bot.kit is None:
+                if not wanted:
+                    return bot
+                response = await self._request(
+                    "POST",
+                    KITS_PATH,
+                    body={
+                        "name": BotTools.lmt_name(bot.workspace),
+                        "scope": "workspace",
+                        "connection_policy": "ALLOW_PARTIAL",
+                        "tools": links,
+                    },
+                )
+                bot = await bot.adopt(kit=str(response.json()["id"]))
+            else:
+                await self._request(
+                    "PATCH", f"{KITS_PATH}/{quote(bot.kit, safe='')}", body={"tools": links}
+                )
+        await bot.refresh()
+        return bot
+
+    async def enable_for_bot(self, bot: BotTools, server_id: str) -> BotTools:
+        """Put every tool the bot can list from one server in its kit."""
+        return await self.set_bot_tools(bot, server_id, await bot.server_tools(server_id))
+
+    async def remove_from_bot(self, bot: BotTools, server_id: str) -> None:
+        """Take one server out of the bot's kit and delete the bot's credential for it;
+        LangSmith keeps the server for everyone else."""
+        bot = await self.set_bot_tools(bot, server_id, ())
+        if bot.profile is not None and (await bot.server(server_id)).kind != "none":
+            await self._request(
+                "DELETE", f"{bot.profile_server_path(server_id)}/credential", ok=(404,)
+            )
+            await bot.refresh()
 
     async def create_server(self, new: NewServer) -> ManagedServer:
         """Register a server in LMT for the LangSmith workspace, as this admin."""
@@ -593,62 +697,67 @@ class PersonalTools(ManagedTools):
             raise ManagedToolsError("LangSmith did not return a consent link; retry")
         return link
 
-    async def disconnect_for_bot(self, bot: BotTools, server_id: str) -> None:
-        """Delete the workspace bot's credential for one service; LangSmith keeps the server."""
-        response = await self._request(
-            "DELETE", f"{bot.profile_server_path(server_id)}/credential", ok=(404,)
-        )
-        if response.status_code == 404:
-            raise ManagedToolsError("The bot has no connection to this service")
-        await bot.refresh()
-
 
 class BotTools(ManagedTools):
-    """A workspace's bot: every server its LMT profile has connected.
+    """A workspace's bot: its tool kit's tools, called with its LMT profile's credentials.
 
     Every run in the workspace loads them, public threads and automations included, so
-    they run with credentials an admin connected for the whole workspace.
+    they run with credentials an admin connected for the whole workspace. Each kit server
+    is called on its own route, so a person's own connection to it replaces the bot's in
+    their private threads.
     """
 
     scope: MCPScope = "bot"
 
-    def __init__(self, workspace: str, profile: str | None = None) -> None:
+    def __init__(self, workspace: str, kit: str | None = None, profile: str | None = None) -> None:
         self.workspace = workspace.strip().lower()
-        # None until an admin first connects a service for the bot.
+        # Each is None until an admin first gives the bot a server.
+        self.kit = None if kit is None else lmt_id(kit, "tool kit")
         self.profile = None if profile is None else lmt_id(profile, "bot profile")
-        self.namespace = ("managed_tools", "bot", self.workspace, self.profile or "")
+        self.namespace = (
+            "managed_tools",
+            "bot",
+            self.workspace,
+            self.kit or "",
+            self.profile or "",
+        )
 
     @staticmethod
-    def profile_name(workspace: str) -> str:
+    def lmt_name(workspace: str) -> str:
+        """The name of the kit and the profile Open SWE makes for a workspace's bot."""
         return f"Open SWE bot ({workspace})"
 
     @classmethod
     async def of(cls, workspace: str) -> BotTools:
-        """The workspace's bot, with the profile it has so far."""
+        """The workspace's bot, with the kit and profile it has so far."""
         from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 
         settings = await cached_workspace_settings(workspace)
-        return cls(workspace, settings.managed_tools_profile_id)
+        return cls(workspace, settings.managed_tools_gateway_id, settings.managed_tools_profile_id)
 
     @classmethod
     async def for_workspace(cls, workspace: str) -> BotTools | None:
-        """The bot a run loads, once it has a profile and Open SWE has a LangSmith key."""
+        """The bot a run loads, once it has a kit and Open SWE has a LangSmith key."""
         bot = await cls.of(workspace)
-        return bot if bot.profile is not None and ENV.LANGSMITH_API_KEY.is_set() else None
+        return bot if bot.kit is not None and ENV.LANGSMITH_API_KEY.is_set() else None
 
-    async def adopt_profile(self, profile: str) -> BotTools:
-        """Save ``profile`` as the workspace bot's, returning the bot that runs as it."""
+    async def adopt(self, *, kit: str | None = None, profile: str | None = None) -> BotTools:
+        """Save a kit or profile Open SWE made as the workspace bot's, returning that bot."""
         from openswe.dashboard.workspace_settings import (
             WorkspaceSettingsUpdate,
             upsert_workspace_overrides,
             workspace_record,
         )
 
-        record = {**await workspace_record(self.workspace), "managed_tools_profile_id": profile}
+        record = await workspace_record(self.workspace)
+        if kit is not None:
+            record["managed_tools_gateway_id"] = kit
+        if profile is not None:
+            record["managed_tools_profile_id"] = profile
         await upsert_workspace_overrides(
             self.workspace, WorkspaceSettingsUpdate.model_validate(record)
         )
-        return BotTools(self.workspace, profile)
+        return BotTools(self.workspace, kit or self.kit, profile or self.profile)
 
     def profile_server_path(self, server_id: str) -> str:
         if self.profile is None:
@@ -669,23 +778,100 @@ class BotTools(ManagedTools):
             **self._tenant(),
         }
 
-    async def offered(self) -> list[ManagedServer]:
-        return [] if self.profile is None else await super().offered()
+    def _loaders(self) -> dict[str, Callable[[], Awaitable[object]]]:
+        return {**super()._loaders(), "kit": self.load_kit}
+
+    async def load_kit(self) -> dict[str, object]:
+        """The kit as LangSmith has it now, uncached."""
+        if self.kit is None:
+            return {}
+        return (await self._request("GET", f"{KITS_PATH}/{quote(self.kit, safe='')}")).json()
+
+    @staticmethod
+    def link_source(link: Mapping[str, object]) -> object:
+        return link.get("server_id") or link.get("builtin_server_key")
+
+    @staticmethod
+    def tool_link(server_id: str, tool_name: str) -> dict[str, object]:
+        """A kit link to one tool; built-ins are named by key, registered servers by ID."""
+        try:
+            source: dict[str, object] = {"server_id": str(UUID(server_id))}
+        except ValueError:
+            source = {"builtin_server_key": server_id}
+        return {**source, "tool_name": tool_name}
+
+    @staticmethod
+    def kit_links(detail: Mapping[str, object]) -> list[dict[str, object]]:
+        """The kit's links as LangSmith takes them back, so a write keeps every other one."""
+        tools = detail.get("tools")
+        links: list[dict[str, object]] = []
+        for tool in tools if isinstance(tools, list) else []:
+            if not isinstance(tool, dict) or not isinstance(tool.get("tool_name"), str):
+                continue
+            link = {
+                key: tool[key]
+                for key in ("server_id", "builtin_server_key", "tool_name", "exposed_name")
+                if tool.get(key)
+            }
+            if BotTools.link_source(link):
+                links.append(link)
+        return links
+
+    async def kit_tools(self) -> dict[str, frozenset[str]]:
+        """The kit's upstream tool names, by server."""
+        detail = await self._cached("kit")
+        grouped: dict[str, set[str]] = {}
+        for link in self.kit_links(detail if isinstance(detail, dict) else {}):
+            source, name = self.link_source(link), link["tool_name"]
+            if isinstance(source, str) and isinstance(name, str):
+                grouped.setdefault(source, set()).add(name)
+        return {source: frozenset(names) for source, names in grouped.items()}
+
+    def _can_call(self, server: ManagedServer) -> bool:
+        if not server.enabled:
+            return False
+        if server.kind == "none":
+            # Public servers need no credential, so they work without a profile.
+            return server.connected
+        return self.profile is not None and server.usable and server.has_credential
+
+    async def bot_servers(self) -> list[BotServer]:
+        """Every server the workspace's admins could give the bot, as the bot has it."""
+        servers, kit_tools = await asyncio.gather(self.servers(), self.kit_tools())
+        return [
+            BotServer(
+                **server.model_dump(),
+                tools=sorted(kit_tools.get(server.id, ())),
+            ).model_copy(update={"connected": self._can_call(server)})
+            for server in servers
+        ]
+
+    async def offered(self) -> list[tuple[ManagedServer, frozenset[str] | None]]:
+        if self.kit is None:
+            return []
+        return [
+            (server, frozenset(server.tools))
+            for server in await self.bot_servers()
+            if server.in_kit and server.connected
+        ]
+
+    async def server_tools(self, server_id: str) -> list[str]:
+        """The tools the bot can list from one server, live."""
+
+        async def listed(client: Client[StreamableHttpTransport]) -> list[str]:
+            return [tool.name for tool in await client.list_tools()]
+
+        try:
+            return await self._mcp(f"{SERVERS_PATH}/{quote(server_id, safe='')}/mcp", listed)
+        except _CredentialRequired:
+            raise ManagedToolsError("Connect this service for the bot first") from None
 
     async def status(self) -> BotStatus:
-        """Every server an admin could connect for the bot, and whether it has."""
-        servers = [server for server in await self.servers() if server.kind != "none"]
-        return BotStatus(
-            profile_id=self.profile,
-            servers=[
-                # Without a profile, the key reports no one's credentials.
-                server.model_copy(
-                    update={
-                        "connected": self.profile is not None
-                        and server.usable
-                        and server.has_credential
-                    }
-                )
-                for server in servers
-            ],
+        """The bot's kit and profile, and every server with whether the bot can call it."""
+        detail, servers = await asyncio.gather(self._cached("kit"), self.bot_servers())
+        kit = (
+            Kit.from_lmt({**detail, "id": self.kit})
+            if self.kit is not None and isinstance(detail, dict) and detail
+            else None
         )
+        return BotStatus(kit=kit, profile_id=self.profile, servers=servers)

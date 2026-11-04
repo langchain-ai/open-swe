@@ -93,8 +93,10 @@ class WorkspaceSettingsUpdate(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
-    # The workspace bot's LMT profile: every run in the workspace loads the servers it has
-    # connected. Open SWE makes it the first time an admin connects a service for the bot.
+    # The workspace bot: the LMT tool kit whose tools every run in the workspace loads,
+    # called with this LMT profile's credentials. Open SWE makes both for the workspace the
+    # first time an admin gives the bot a server; an admin may point it at another kit.
+    managed_tools_gateway_id: str | None = None
     managed_tools_profile_id: str | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
@@ -119,7 +121,7 @@ class WorkspaceSettingsUpdate(BaseModel):
     review_shadow_model: str | None = None
     review_shadow_reasoning_effort: str | None = None
 
-    @field_validator("managed_tools_profile_id", mode="before")
+    @field_validator("managed_tools_gateway_id", "managed_tools_profile_id", mode="before")
     @classmethod
     def _lmt_id(cls, v: object) -> str | None:
         if v is None or (isinstance(v, str) and not v.strip()):
@@ -127,7 +129,7 @@ class WorkspaceSettingsUpdate(BaseModel):
         try:
             return str(UUID(str(v).strip()))
         except ValueError:
-            raise ValueError("managed tools profiles are named by their id") from None
+            raise ValueError("managed tools kits and profiles are named by their id") from None
 
     @field_validator("org_guidelines", mode="before")
     @classmethod
@@ -268,6 +270,7 @@ def _default_settings() -> dict[str, Any]:
         "human_review_auto_assign_minutes": 120,
         "sandbox_openai_enabled": False,
         "slack_follow_up_suggestions": False,
+        "managed_tools_gateway_id": None,
         "managed_tools_profile_id": None,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
@@ -713,6 +716,12 @@ class WorkspaceSettings(Mapping[str, Any]):
     def sandbox_openai_enabled(self) -> bool:
         """Whether sandbox clients may use the experimental Responses API."""
         return self.get("sandbox_openai_enabled") is True
+
+    @property
+    def managed_tools_gateway_id(self) -> str | None:
+        """The LMT tool kit the workspace bot loads."""
+        value = self.get("managed_tools_gateway_id")
+        return value if isinstance(value, str) and value else None
 
     @property
     def managed_tools_profile_id(self) -> str | None:

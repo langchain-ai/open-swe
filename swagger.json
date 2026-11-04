@@ -1032,9 +1032,89 @@
         "title": "BlockSuggestionResponse",
         "type": "object"
       },
-      "BotStatus": {
-        "description": "The servers a workspace's admins can connect for its bot, and which it has.",
+      "BotServer": {
+        "description": "One server as a workspace's bot has it: ``connected`` when the bot can call it, and\nthe kit's ``tools`` from it (none when it is not in the kit).",
         "properties": {
+          "connected": {
+            "default": false,
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "has_credential": {
+            "default": false,
+            "title": "Has Credential",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CredentialKind",
+            "default": "none"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "BotServer",
+        "type": "object"
+      },
+      "BotServerTools": {
+        "description": "One server's tools the bot can list, and those its kit allows.",
+        "properties": {
+          "allowed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed",
+            "type": "array"
+          },
+          "available": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Available",
+            "type": "array"
+          }
+        },
+        "required": [
+          "available",
+          "allowed"
+        ],
+        "title": "BotServerTools",
+        "type": "object"
+      },
+      "BotStatus": {
+        "description": "The workspace bot's kit and profile, and every server its admins could give it.",
+        "properties": {
+          "kit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Kit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "profile_id": {
             "anyOf": [
               {
@@ -1048,21 +1128,38 @@
           },
           "servers": {
             "items": {
-              "$ref": "#/components/schemas/ManagedServer"
+              "$ref": "#/components/schemas/BotServer"
             },
             "title": "Servers",
             "type": "array"
           }
         },
         "required": [
+          "kit",
           "profile_id",
           "servers"
         ],
         "title": "BotStatus",
         "type": "object"
       },
+      "BotToolsUpdate": {
+        "properties": {
+          "tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tools"
+        ],
+        "title": "BotToolsUpdate",
+        "type": "object"
+      },
       "BotToolsView": {
-        "description": "A workspace bot's services: those its profile connected, and those it could.",
+        "description": "A workspace bot's kit and profile, and every server with whether the bot has it.",
         "properties": {
           "error": {
             "anyOf": [
@@ -2866,6 +2963,29 @@
         "type": "string"
       },
       "JsonValue-Input": {},
+      "Kit": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "tool_count": {
+            "default": 0,
+            "title": "Tool Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "Kit",
+        "type": "object"
+      },
       "LabelChange": {
         "properties": {
           "name": {
@@ -4145,13 +4265,19 @@
             "$ref": "#/components/schemas/ManagedServer"
           },
           "url": {
-            "title": "Url",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
           }
         },
         "required": [
-          "server",
-          "url"
+          "server"
         ],
         "title": "NewBotServer",
         "type": "object"
@@ -4173,6 +4299,7 @@
           },
           "kind": {
             "enum": [
+              "none",
               "oauth",
               "secret"
             ],
@@ -9800,6 +9927,17 @@
             ],
             "title": "Implementation Walkthrough Enabled"
           },
+          "managed_tools_gateway_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Managed Tools Gateway Id"
+          },
           "managed_tools_profile_id": {
             "anyOf": [
               {
@@ -12796,6 +12934,37 @@
         "tags": [
           "dashboard",
           "auth"
+        ]
+      }
+    },
+    "/dashboard/api/managed-tools/kits": {
+      "get": {
+        "description": "Tool kits an admin can point a workspace bot at, read with their own LangSmith login.",
+        "operationId": "api_list_managed_tools_kits_dashboard_api_managed_tools_kits_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Kit"
+                  },
+                  "title": "Response Api List Managed Tools Kits Dashboard Api Managed Tools Kits Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Managed Tools Kits",
+        "tags": [
+          "dashboard"
         ]
       }
     },
@@ -23431,7 +23600,7 @@
     },
     "/dashboard/api/workspaces/{workspace}/bot-tools/connect/{server}": {
       "post": {
-        "description": "A consent link where the admin connects one service for the workspace bot.",
+        "description": "Give the workspace bot one existing server: a consent link where the admin connects\nit, after which its tools join the bot's kit.",
         "operationId": "api_connect_workspace_bot_tool_dashboard_api_workspaces__workspace__bot_tools_connect__server__post",
         "parameters": [
           {
@@ -23488,7 +23657,7 @@
     },
     "/dashboard/api/workspaces/{workspace}/bot-tools/servers": {
       "post": {
-        "description": "Register a server in LMT, then a consent link connecting it for the workspace bot.",
+        "description": "Register a server in LMT, then give it to the workspace bot.",
         "operationId": "api_add_workspace_bot_server_dashboard_api_workspaces__workspace__bot_tools_servers_post",
         "parameters": [
           {
@@ -23546,7 +23715,8 @@
     },
     "/dashboard/api/workspaces/{workspace}/bot-tools/services/{server}": {
       "delete": {
-        "operationId": "api_disconnect_workspace_bot_tool_dashboard_api_workspaces__workspace__bot_tools_services__server__delete",
+        "description": "Take a server out of the bot's kit and delete the bot's credential for it.",
+        "operationId": "api_remove_workspace_bot_tool_dashboard_api_workspaces__workspace__bot_tools_services__server__delete",
         "parameters": [
           {
             "in": "path",
@@ -23587,7 +23757,128 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api Disconnect Workspace Bot Tool",
+        "summary": "Api Remove Workspace Bot Tool",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{workspace}/bot-tools/services/{server}/tools": {
+      "get": {
+        "operationId": "api_workspace_bot_server_tools_dashboard_api_workspaces__workspace__bot_tools_services__server__tools_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server",
+            "required": true,
+            "schema": {
+              "title": "Server",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotServerTools"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Workspace Bot Server Tools",
+        "tags": [
+          "dashboard"
+        ]
+      },
+      "put": {
+        "description": "Set which of one server's tools the bot's kit allows; none takes it out of the kit.",
+        "operationId": "api_set_workspace_bot_server_tools_dashboard_api_workspaces__workspace__bot_tools_services__server__tools_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server",
+            "required": true,
+            "schema": {
+              "title": "Server",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotToolsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotServerTools"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Set Workspace Bot Server Tools",
         "tags": [
           "dashboard"
         ]

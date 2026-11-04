@@ -93,16 +93,33 @@ async def connect_service(login: str, server_id: str) -> ConsentLink | None:
     return link
 
 
-async def connect_bot_service(admin: str, bot: BotTools, server_id: str) -> ConsentLink:
-    """A consent link where an admin connects one service for a workspace bot, making the
-    bot's profile first if it has none."""
+async def connect_bot_service(admin: str, bot: BotTools, server_id: str) -> ConsentLink | None:
+    """Give a workspace bot one service, as an admin: a consent link connecting it, after
+    which its tools join the bot's kit; None when it needs no connection and is in already.
+
+    Makes the bot's profile and kit first if it has none.
+    """
     tools = PersonalTools(admin)
     if (await tools.server(server_id)).kind == "none":
-        raise ManagedToolsError("This service needs no connection")
+        await tools.enable_for_bot(bot, server_id)
+        return None
     bot = await tools.bot_profile(bot)
     link = await tools.connect_for_bot(bot, server_id)
+
+    async def enable_once_connected(auth_id: str) -> None:
+        try:
+            if not await _consented(tools, bot, auth_id):
+                return
+            current = await BotTools.of(bot.workspace)
+            if server_id not in await current.kit_tools():
+                await tools.enable_for_bot(current, server_id)
+        except TimeoutError:
+            logger.info("Stopped waiting for managed tools consent")
+        except Exception:
+            logger.warning("Adding a connected service to the bot's kit failed", exc_info=True)
+
     if link.auth_id:
-        _wait_in_background(_refresh_after(tools, bot, link.auth_id))
+        _wait_in_background(enable_once_connected(link.auth_id))
     return link
 
 

@@ -1,5 +1,6 @@
 """Dashboard API for workspace and per-user MCP connections, and managed tools."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -14,6 +15,7 @@ from openswe.mcp.cards import ConnectCard, connect_bot_service, connect_service
 from openswe.mcp.managed import (
     BotStatus,
     BotTools,
+    Kit,
     LangSmithNotConnected,
     ManagedServer,
     ManagedToolsError,
@@ -184,7 +186,7 @@ class ManagedConnectResponse(BaseModel):
 
 
 class BotToolsView(BaseModel):
-    """A workspace bot's services: those its profile connected, and those it could."""
+    """A workspace bot's kit and profile, and every server with whether the bot has it."""
 
     status: BotStatus | None = None
     error: str | None = None
@@ -192,7 +194,19 @@ class BotToolsView(BaseModel):
 
 class NewBotServer(BaseModel):
     server: ManagedServer
-    url: str
+    url: str | None = None
+    """Where the admin connects it for the bot; None when it needed no connection."""
+
+
+class BotServerTools(BaseModel):
+    """One server's tools the bot can list, and those its kit allows."""
+
+    available: list[str]
+    allowed: list[str]
+
+
+class BotToolsUpdate(BaseModel):
+    tools: list[str]
 
 
 managed_mcp_router = APIRouter(route_class=MCPRoute)
@@ -200,6 +214,15 @@ managed_mcp_router = APIRouter(route_class=MCPRoute)
 
 def _managed_error(exc: ManagedToolsError) -> HTTPException:
     return HTTPException(409 if isinstance(exc, LangSmithNotConnected) else 502, str(exc))
+
+
+@managed_mcp_router.get("/managed-tools/kits", response_model=list[Kit])
+async def api_list_managed_tools_kits(admin: dict[str, Any] = ADMIN_DEP) -> list[Kit]:
+    """Tool kits an admin can point a workspace bot at, read with their own LangSmith login."""
+    try:
+        return await PersonalTools(admin["sub"]).kits()
+    except ManagedToolsError as exc:
+        raise _managed_error(exc) from None
 
 
 @managed_mcp_router.get("/workspaces/{workspace}/bot-tools", response_model=BotToolsView)
@@ -223,13 +246,14 @@ async def api_workspace_bot_tools(
 async def api_connect_workspace_bot_tool(
     workspace: str, server: str, admin: dict[str, Any] = ADMIN_DEP
 ) -> ManagedConnectResponse:
-    """A consent link where the admin connects one service for the workspace bot."""
+    """Give the workspace bot one existing server: a consent link where the admin connects
+    it, after which its tools join the bot's kit."""
     bot = await BotTools.of(_normalized_workspace(workspace))
     try:
         link = await connect_bot_service(admin["sub"], bot, server)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
-    return ManagedConnectResponse(connected=False, url=link.url)
+    return ManagedConnectResponse(connected=link is None, url=link.url if link else None)
 
 
 @managed_mcp_router.post(
@@ -239,24 +263,60 @@ async def api_connect_workspace_bot_tool(
 async def api_add_workspace_bot_server(
     workspace: str, body: NewServer, admin: dict[str, Any] = ADMIN_DEP
 ) -> NewBotServer:
-    """Register a server in LMT, then a consent link connecting it for the workspace bot."""
+    """Register a server in LMT, then give it to the workspace bot."""
     bot = await BotTools.of(_normalized_workspace(workspace))
     try:
         server = await PersonalTools(admin["sub"]).create_server(body)
         link = await connect_bot_service(admin["sub"], bot, server.id)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
-    return NewBotServer(server=server, url=link.url)
+    return NewBotServer(server=server, url=link.url if link else None)
+
+
+@managed_mcp_router.get(
+    "/workspaces/{workspace}/bot-tools/services/{server}/tools", response_model=BotServerTools
+)
+async def api_workspace_bot_server_tools(
+    workspace: str, server: str, _admin: dict[str, Any] = ADMIN_DEP
+) -> BotServerTools:
+    bot = await BotTools.of(_normalized_workspace(workspace))
+    try:
+        available, kit_tools = await asyncio.gather(bot.server_tools(server), bot.kit_tools())
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return BotServerTools(available=available, allowed=sorted(kit_tools.get(server, ())))
+
+
+@managed_mcp_router.put(
+    "/workspaces/{workspace}/bot-tools/services/{server}/tools", response_model=BotServerTools
+)
+@audit_endpoint
+async def api_set_workspace_bot_server_tools(
+    workspace: str, server: str, body: BotToolsUpdate, admin: dict[str, Any] = ADMIN_DEP
+) -> BotServerTools:
+    """Set which of one server's tools the bot's kit allows; none takes it out of the kit."""
+    bot = await BotTools.of(_normalized_workspace(workspace))
+    tools = PersonalTools(admin["sub"])
+    try:
+        available = await bot.server_tools(server)
+        if unknown := set(body.tools) - set(available):
+            raise ManagedToolsError(f"The server has no tool named {sorted(unknown)[0]}")
+        bot = await tools.set_bot_tools(bot, server, body.tools)
+        allowed = sorted((await bot.kit_tools()).get(server, ()))
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return BotServerTools(available=available, allowed=allowed)
 
 
 @managed_mcp_router.delete("/workspaces/{workspace}/bot-tools/services/{server}", status_code=204)
 @audit_endpoint
-async def api_disconnect_workspace_bot_tool(
+async def api_remove_workspace_bot_tool(
     workspace: str, server: str, admin: dict[str, Any] = ADMIN_DEP
 ) -> None:
+    """Take a server out of the bot's kit and delete the bot's credential for it."""
     bot = await BotTools.of(_normalized_workspace(workspace))
     try:
-        await PersonalTools(admin["sub"]).disconnect_for_bot(bot, server)
+        await PersonalTools(admin["sub"]).remove_from_bot(bot, server)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
 

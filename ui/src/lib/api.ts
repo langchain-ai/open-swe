@@ -405,6 +405,7 @@ export interface WorkspaceSettings {
   expedited_review_enabled?: boolean
   /** The workspace bot's LangSmith Managed Tools kit; every run in the workspace loads it. */
   /** The LangSmith Managed Tools profile the workspace bot runs its kit's tools as. */
+  managed_tools_gateway_id?: string | null
   managed_tools_profile_id?: string | null
   org_guidelines?: string | null
   default_agent_model?: string | null
@@ -506,11 +507,24 @@ export interface ManagedConnectResult {
   url?: string | null
 }
 
-/** A workspace bot's services: every one its LMT profile connected loads in the workspace's runs. */
+/** A LangSmith Managed Tools tool kit: the tools a workspace bot loads. */
+export interface ManagedToolsKit {
+  id: string
+  name: string
+  tool_count: number
+}
+
+/** One server as a workspace bot has it: `tools` are those its kit allows (none: not in the kit). */
+export interface BotServer extends ManagedServer {
+  tools: string[]
+}
+
+/** A workspace bot: its tool kit, its LMT profile, and every server it could have. */
 export interface WorkspaceBotTools {
   status: {
+    kit: ManagedToolsKit | null
     profile_id: string | null
-    servers: ManagedServer[]
+    servers: BotServer[]
   } | null
   error: string | null
 }
@@ -519,7 +533,7 @@ export interface WorkspaceBotTools {
 export interface NewBotServer {
   name: string
   url: string
-  kind: "oauth" | "secret"
+  kind: "none" | "oauth" | "secret"
   header?: string | null
 }
 
@@ -1817,7 +1831,8 @@ export const api = {
     request<WorkspaceBotTools>(
       `/workspaces/${encodeURIComponent(workspace)}/bot-tools`
     ),
-  /** A link where the admin connects one service for the workspace bot. */
+  listManagedToolsKits: () => request<ManagedToolsKit[]>("/managed-tools/kits"),
+  /** A link where the admin connects one server for the workspace bot; its tools then join the kit. */
   connectWorkspaceBotTool: (workspace: string, serverId: string) =>
     request<ManagedConnectResult>(
       `/workspaces/${encodeURIComponent(workspace)}/bot-tools/connect/${encodeURIComponent(serverId)}`,
@@ -1825,14 +1840,27 @@ export const api = {
     ),
   /** Registers a server in LangSmith, returning a link connecting it for the workspace bot. */
   addWorkspaceBotServer: (workspace: string, server: NewBotServer) =>
-    request<{ server: ManagedServer; url: string }>(
+    request<{ server: ManagedServer; url: string | null }>(
       `/workspaces/${encodeURIComponent(workspace)}/bot-tools/servers`,
       { method: "POST", body: JSON.stringify(server) }
     ),
-  disconnectWorkspaceBotTool: (workspace: string, serverId: string) =>
+  removeWorkspaceBotTool: (workspace: string, serverId: string) =>
     request<void>(
       `/workspaces/${encodeURIComponent(workspace)}/bot-tools/services/${encodeURIComponent(serverId)}`,
       { method: "DELETE" }
+    ),
+  getWorkspaceBotServerTools: (workspace: string, serverId: string) =>
+    request<{ available: string[]; allowed: string[] }>(
+      `/workspaces/${encodeURIComponent(workspace)}/bot-tools/services/${encodeURIComponent(serverId)}/tools`
+    ),
+  setWorkspaceBotServerTools: (
+    workspace: string,
+    serverId: string,
+    tools: string[]
+  ) =>
+    request<{ available: string[]; allowed: string[] }>(
+      `/workspaces/${encodeURIComponent(workspace)}/bot-tools/services/${encodeURIComponent(serverId)}/tools`,
+      { method: "PUT", body: JSON.stringify({ tools }) }
     ),
   listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
