@@ -505,7 +505,7 @@ function ChecksRow({
                       `Why is the \`${check.name}\` check failing on this pull request?`
                     )
                   }
-                  className="ml-auto h-auto border-0 px-0 text-secondary opacity-0 group-hover:opacity-100 hover:text-primary focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                  className="ml-auto h-auto border-0 text-secondary opacity-0 group-hover:opacity-100 hover:text-primary focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                 >
                   Ask why
                 </Button>
