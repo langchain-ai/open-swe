@@ -11,6 +11,7 @@ from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
 from openswe.slack import webhook as slack_webhooks
 from openswe.slack.allowed_bots import AllowedSlackBot
+from openswe.slack.breakout_links import BreakoutOrigin
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     format_slack_messages_for_prompt,
@@ -674,6 +675,79 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
 
     assert asyncio.run(opr._resolve_pr_author_token()) == ("bob-token", "user")
     assert saved_metadata["owner_login"] == "alice"
+
+
+@pytest.mark.parametrize(
+    ("started", "public", "reads_report"),
+    [
+        pytest.param(False, True, True, id="first-reply"),
+        pytest.param(True, True, False, id="later-reply"),
+        pytest.param(False, False, False, id="report-channel-went-private"),
+    ],
+)
+def test_a_reply_under_a_breakout_root_starts_from_the_thread_it_was_opened_for(
+    monkeypatch: pytest.MonkeyPatch, started: bool, public: bool, reads_report: bool
+) -> None:
+    """A bug report Open SWE couldn't act on leaves only a kitchen root, which the run skips
+    as its own post: the first reply there starts from the report, unless the report's
+    channel stopped being public, and later replies carry on in the kitchen thread."""
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+    client = slack_webhooks.get_langgraph_client()
+
+    async def get_thread(thread_id: str) -> dict:
+        if not started:
+            raise _FakeNotFoundError("not found")
+        return {"metadata": {"visibility": "public"}}
+
+    monkeypatch.setattr(client.threads, "get", get_thread)
+    report = BreakoutOrigin(channel_id="C0ASK", thread_ts="1690000000.000100")
+    monkeypatch.setattr(BreakoutOrigin, "of", AsyncMock(return_value=report))
+    monkeypatch.setattr(
+        SlackChannel,
+        "load",
+        AsyncMock(
+            side_effect=lambda channel_id, **_: SlackChannel.from_payload(
+                {
+                    "id": channel_id,
+                    "name": channel_id.lower(),
+                    "is_channel": True,
+                    "is_private": not public,
+                    "is_ext_shared": False,
+                    "is_pending_ext_shared": False,
+                }
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        webhook_common, "upsert_agent_thread_metadata", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(webhook_common, "store_slack_run_mapping", AsyncMock())
+
+    asyncio.run(
+        slack_webhooks.process_slack_mention(
+            SlackRequest(
+                channel_id="C0KITCHEN",
+                thread_ts="1700000000.000100",
+                event_ts="1700000000.000300",
+                user_id="U123",
+                text="please look into this",
+                bot_user_id="UBOT",
+                kitchen_channel=True,
+                treat_all_messages_as_mentions=True,
+            ),
+            None,
+        )
+    )
+
+    assert captured["fetch_thread"] == (
+        {"channel_id": "C0ASK", "thread_ts": "1690000000.000100"}
+        if reads_report
+        else {"channel_id": "C0KITCHEN", "thread_ts": "1700000000.000100"}
+    )
+    run = captured["run_create"]
+    assert isinstance(run, dict)
+    assert run["kwargs"]["config"]["configurable"].get("slack_breakout", False) is reads_report
 
 
 def test_process_slack_mention_unmapped_user_blocked_and_prompted(

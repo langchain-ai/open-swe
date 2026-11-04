@@ -237,8 +237,8 @@ class SlackRun(Base):
 
 
 class SlackMessage(Base):
-    """A Slack message Open SWE tracks: the run behind it, the channel thread a DM was sent
-    for, and the feedback reactions each person left on it."""
+    """A Slack message Open SWE tracks: the run behind it, the thread a DM or breakout root
+    was posted for, and the feedback reactions each person left on it."""
 
     __tablename__ = "slack_message"
 
@@ -289,7 +289,7 @@ class SlackMessage(Base):
 
     @classmethod
     async def origin(cls, dm_channel_id: str, message_ts: str) -> Self | None:
-        """The DM message, when it records the channel thread it was sent for."""
+        """The message, when it records the Slack thread it was posted for."""
         async with postgres.session() as session:
             return await session.scalar(
                 select(cls).where(
@@ -620,7 +620,7 @@ async def delete_slack_thread_associations(
             delete(SlackRun).where(SlackRun.channel_id == channel, SlackRun.thread_ts == timestamp)
         )
         in_thread = (SlackMessage.channel_id == channel) & (SlackMessage.thread_ts == timestamp)
-        # A message that holds nothing but its run goes; a DM origin or reactions stay.
+        # A message that holds nothing but its run goes; an origin or reactions stay.
         await session.execute(
             delete(SlackMessage).where(
                 in_thread,

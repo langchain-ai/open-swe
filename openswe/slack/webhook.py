@@ -39,6 +39,7 @@ from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
 from openswe.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
+from openswe.slack.breakout_links import BreakoutOrigin
 from openswe.slack.channels import SlackChannel
 from openswe.slack.dm import DmOrigin, dm_thread_title, is_concierge_thread, is_dm_channel
 from openswe.slack.failures import report_slack_failure
@@ -868,7 +869,16 @@ async def _process_slack_mention_impl(
         else _resolved(SlackSenderProfile(name=allowed_bot.name))
     )
     context_thread_ts = request.context_thread_ts or reply_thread_ts or thread_ts
-    mapped_login, thread_record, thread_messages, sender = await asyncio.gather(
+    # DMs keep their own origins (DmOrigin), and a breakout already reads its source thread.
+    reads_own_thread = not (
+        message_update
+        or request.context_thread_ts
+        or request.web_only
+        or code_channel
+        or concierge_mode
+        or is_dm_channel(channel_context)
+    )
+    mapped_login, thread_record, thread_messages, sender, origin = await asyncio.gather(
         slack_login(user_id, sender_profile) if allowed_bot is None else _resolved(None),
         common.ThreadRecord.read(thread_id),
         _resolved([])
@@ -877,7 +887,16 @@ async def _process_slack_mention_impl(
             request.context_channel_id or channel_id, context_thread_ts
         ),
         sender_profile,
+        BreakoutOrigin.of(channel_id, thread_ts)
+        if reads_own_thread and event_ts != thread_ts
+        else _resolved(None),
     )
+    if origin is not None and not thread_record.started and await origin.readable_in(channel_id):
+        request = origin.opening(request)
+        context_thread_ts = origin.thread_ts
+        thread_messages = await common.fetch_slack_thread_messages(
+            origin.channel_id, context_thread_ts
+        )
     user_email, user_name, user_timezone = sender.email, sender.name, sender.timezone
     thread_metadata = thread_record.authorize(mapped_login or "")
     # A new thread's metadata links back to Slack. Looking that link up here keeps

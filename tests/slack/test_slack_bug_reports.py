@@ -147,10 +147,10 @@ async def test_a_reporter_open_swe_cannot_act_for_leaves_the_thread_to_the_kitch
 
     slack.root.assert_awaited_once()
     slack.mention.assert_not_awaited()
-    assert [call.args[:2] for call in slack.notify.await_args_list] == [
+    assert {call.args[:2] for call in slack.notify.await_args_list} == {
         ("C0ASK", "100.0"),
         ("C0KITCHEN", "200.0"),
-    ]
+    }
 
 
 @pytest.mark.parametrize(

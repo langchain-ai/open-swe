@@ -16,7 +16,12 @@ from openswe.prompts import prompt
 from openswe.slack import webhook
 from openswe.slack.blocks import block_payload
 from openswe.slack.breakout_destination import resolve_breakout_destination
-from openswe.slack.breakout_links import breakout_root_blocks, notify_breakout, source_thread_line
+from openswe.slack.breakout_links import (
+    BreakoutOrigin,
+    breakout_root_blocks,
+    notify_breakout,
+    source_thread_line,
+)
 from openswe.slack.client import (
     append_slack_web_link_footer,
     get_slack_permalink,
@@ -242,6 +247,11 @@ class SlackBugReport:
             )
             await event_claims.release(_CLAIM_SCOPE, self._claim_key)
             return None
+        # Recorded first: whatever stops the run from starting below, the first reply
+        # in the kitchen thread still starts from the report.
+        await BreakoutOrigin(channel_id=self.channel_id, thread_ts=self.ts).save_for(
+            self.kitchen_id, root_ts
+        )
         thread_id = await bind_slack_thread_id(
             self.kitchen_id, root_ts, slack_thread_id(self.kitchen_id, root_ts)
         )
