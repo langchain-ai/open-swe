@@ -16,7 +16,7 @@ In a verified sole-writer shared thread, only an acknowledgement is returned; re
   Use `snapshotctl` for rebuilds and `publish_workspace` only to capture a provisioned sandbox.
 - This tool changes workspace definitions only, not behavioral settings or credentials.
   Use `manage_feature_flags` for supported boolean flags, `manage_review_approval_mode` for repository approval modes, `manage_review_shadow` for the shadow review experiment, and `manage_workspace_bot` for the workspace bot's managed tools kit and profile.
-  The default repository, organization guidelines, human-review auto-assignment delay, managed-tools gateway ID, and all default model/reasoning-effort pairs remain dashboard-only settings.
+  The default repository, organization guidelines, human-review auto-assignment delay, and all default model/reasoning-effort pairs remain dashboard-only settings.
   Manage credentials in the dashboard; never put them in workspace definitions.
 
 Use this tool for an explicit request to change shared workspace configuration.
