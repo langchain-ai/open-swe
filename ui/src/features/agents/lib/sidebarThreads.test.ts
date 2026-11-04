@@ -4,7 +4,7 @@ import type { AgentThread } from "./types"
 import {
   cloudSidebarThread,
   groupRepoGroupsByWorkspace,
-  groupSidebarThreadsByAge,
+  groupSidebarThreadsByDay,
   sortSidebarThreads,
 } from "./sidebarThreads"
 
@@ -73,15 +73,15 @@ describe("sortSidebarThreads", () => {
   })
 })
 
-describe("groupSidebarThreadsByAge", () => {
-  it("buckets by last-updated age and orders each bucket by creation", () => {
+describe("groupSidebarThreadsByDay", () => {
+  it("buckets by local last-updated day and orders each day by creation", () => {
     const now = new Date(2026, 5, 10, 15)
     const at = (day: number, hour: number) =>
       new Date(2026, 5, day, hour).getTime()
     const thread = (id: string, createdAt: number, updatedAt: number) =>
       cloudSidebarThread(cloudThread({ id, createdAt, updatedAt }))
 
-    const groups = groupSidebarThreadsByAge(
+    const groups = groupSidebarThreadsByDay(
       [
         thread("busy", at(1, 9), at(10, 14)),
         thread("fresh", at(10, 8), at(10, 9)),
@@ -97,7 +97,22 @@ describe("groupSidebarThreadsByAge", () => {
     ).toEqual([
       ["Today", ["fresh", "busy"]],
       ["Yesterday", ["yesterday"]],
-      ["Older", ["old", "older"]],
+      [
+        new Date(2026, 5, 4).toLocaleDateString([], {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        }),
+        ["older"],
+      ],
+      [
+        new Date(2026, 5, 3).toLocaleDateString([], {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        }),
+        ["old"],
+      ],
     ])
   })
 })
