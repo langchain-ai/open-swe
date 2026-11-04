@@ -47,6 +47,7 @@ import type {
 } from "@/features/agents/lib/types"
 import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
+import { RenameThreadDialog } from "@/features/agents/components/RenameThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
@@ -337,6 +338,7 @@ export function SidebarThreadRow({
   const deleteThread = useDeleteAgentThread()
   const worktreeThread = useLocalThread(item.id)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [renameOpen, setRenameOpen] = useState(false)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const marquee = useTitleMarquee()
   const { prefs, toggleSubagentsCollapsed } = useSidebarPrefs()
@@ -611,6 +613,7 @@ export function SidebarThreadRow({
             pinned={pinned}
             archived={archived}
             isDeleting={isDeleting}
+            onRename={() => setRenameOpen(true)}
             onTogglePin={onTogglePin}
             onToggleArchived={onToggleArchived}
             onDelete={() => setDeleteOpen(true)}
@@ -646,6 +649,12 @@ export function SidebarThreadRow({
             />
           ))}
         </ul>
+      )}
+      {renameOpen && (
+        <RenameThreadDialog
+          thread={thread}
+          onClose={() => setRenameOpen(false)}
+        />
       )}
       <DeleteThreadDialog
         open={deleteOpen}
