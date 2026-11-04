@@ -1,0 +1,427 @@
+"""What every model call here sends the provider, how long it may take, and what
+happens when the provider fails it.
+
+A thread's history is replayed to the provider on every call, and to whichever
+provider routing or the fallback picks, so a block one provider wrote can break
+every later call on another. A provider stall that never raises would park the
+run with nothing for the retry or the fallback to react to. Anthropic's prompt
+cache is marked here too, where the call's real model is known.
+
+A call the provider fails transiently goes again, alternating between the call's
+model and its fallback with a growing wait between attempts. Both providers can be
+routed through the same LLM Gateway, so a gateway outage takes out the
+"cross-provider" fallback too, and a single immediate failover cannot ride out even
+a short shared outage (the gateway's 502 page says "try again in 30 seconds"). Once
+every attempt failed, the run ends with a message saying so instead of a crash: its
+progress is checkpointed, so the person can start it again.
+"""
+
+import asyncio
+import logging
+<<<<<<<
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
+from typing import Final
+
+from langchain.agents.middleware import AgentMiddleware
+=======
+import random
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any, Final
+
+import anthropic
+import httpx2
+import openai
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    ModelRetryMiddleware,
+)
+>>>>>>>
+from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
+from langchain_anthropic import ChatAnthropic
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+from langchain_core.exceptions import ModelError
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
+from langchain_fireworks import ChatFireworks
+from langchain_openai import ChatOpenAI
+from runtime_api.model_errors import classify_exception, exception_fields
+
+from rt.model_retries import ModelRetriesMiddleware
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
+
+logger = logging.getLogger(__name__)
+
+# Covers provider-owned retries and the primary/fallback pair, including reasoning.
+MODEL_CALL_TIMEOUT_SECONDS: Final = 900.0
+# As the in-process graphs': a tool call can outlast the 5m default between model calls.
+PROMPT_CACHE_TTL: Final = "1h"
+# Bindings nest a few deep at most; the bound stops a self-referencing chain.
+_MAX_BINDINGS: Final = 10
+_SUBAGENT_TIMED_OUT: Final = "This subagent could not finish: its model call timed out."
+
+# Seconds waited before each attempt after the first; one more attempt than delays.
+# The first failover is immediate: one provider's outage should not delay the other.
+# Later waits grow past the ~30s the gateway's 502 page asks for. Each attempt also
+# gets the provider client's own retries (rt/models.py), so the run gives up after a
+# few minutes: far better for a long run than failing on a blip.
+BACKOFF_SCHEDULE: Sequence[float] = (0.0, 5.0, 15.0, 30.0, 45.0)
+MODEL_OUTAGE_MESSAGE: Final = (
+    "I wasn't able to reach the language model providers after several retries "
+    "(both the primary and fallback models returned transient errors, e.g. "
+    "502/503/overloaded). This is a temporary provider or gateway outage, not a "
+    "problem with your task. My progress so far has been saved — please retrigger "
+    "the run in a few minutes to continue."
+)
+_RETRYABLE_STATUS_CODES: Final = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
+_TRANSIENT_EXCEPTIONS: Final[tuple[type[BaseException], ...]] = (
+    anthropic.APIConnectionError,
+    anthropic.APITimeoutError,
+    anthropic.RateLimitError,
+    anthropic.InternalServerError,
+    openai.APIConnectionError,
+    openai.APITimeoutError,
+    openai.RateLimitError,
+    openai.InternalServerError,
+    httpx2.TransportError,
+    # A model call's deadline too: a wedged call is where the other provider helps most.
+    TimeoutError,
+)
+
+
+class ModelCallTimeoutError(TimeoutError):
+    """A model call exceeded its wall-clock deadline.
+
+    The backend's run-complete webhook reads this class name as a provider timeout.
+    """
+
+
+def _chat_model(model: object) -> object:
+    """The chat model under any bindings around it."""
+    for _ in range(_MAX_BINDINGS):
+        bound = getattr(model, "bound", None)
+        if bound is None or bound is model:
+            break
+        model = bound
+    return model
+
+
+def _replayable(block: object, model: object) -> bool:
+    if not isinstance(block, dict):
+        return True
+    if isinstance(model, ChatAnthropic):
+        # Anthropic rejects an empty thinking block.
+        return not (block.get("type") == "thinking" and not block.get("thinking"))
+    if isinstance(model, ChatOpenAI) and model.store is False:
+        # Without stored responses, OpenAI cannot resolve a reasoning item by id alone.
+        item_id = block.get("id")
+        return not (
+            block.get("type") == "reasoning"
+            and isinstance(item_id, str)
+            and item_id.startswith("rs_")
+            and not block.get("encrypted_content")
+        )
+    return True
+
+
+def _for_provider(message: AnyMessage, model: object) -> AnyMessage:
+    if not isinstance(message, AIMessage):
+        return message
+    update: dict[str, object] = {}
+    if isinstance(message.content, list):
+        content = [block for block in message.content if _replayable(block, model)]
+        if len(content) != len(message.content):
+            update["content"] = content
+    if isinstance(model, ChatFireworks) and "function_call" in message.additional_kwargs:
+        # The gateway rejects the legacy field, which ChatFireworks forwards even
+        # beside `tool_calls`.
+        update["additional_kwargs"] = {
+            k: v for k, v in message.additional_kwargs.items() if k != "function_call"
+        }
+    return message.model_copy(update=update) if update else message
+
+
+def _in_call_order(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
+    """Each parallel batch's results in the order of its tool calls.
+
+    They land in completion order, and the provider's prompt cache is a byte-prefix
+    match: one swapped pair re-prefills everything after it on a later run.
+    """
+    ordered: list[AnyMessage] = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        ordered.append(message)
+        index += 1
+        if not isinstance(message, AIMessage) or len(message.tool_calls) < 2:
+            continue
+        positions: dict[str, int] = {}
+        for position, call in enumerate(message.tool_calls):
+            if call["id"]:
+                positions.setdefault(call["id"], position)
+        start = index
+        while index < len(messages) and isinstance(messages[index], ToolMessage):
+            index += 1
+        ordered.extend(
+            sorted(
+                messages[start:index],
+                key=lambda result: positions.get(
+                    getattr(result, "tool_call_id", ""), len(positions)
+                ),
+            )
+        )
+    return ordered
+
+
+def _is_legacy_httpx_transport_error(exc: BaseException) -> bool:
+    return exc.__class__.__module__.partition(".")[0] == "httpx" and any(
+        cls.__name__ == "TransportError" and cls.__module__.partition(".")[0] == "httpx"
+        for cls in exc.__class__.__mro__
+    )
+
+
+def is_transient(exc: BaseException) -> bool:
+    """Whether another attempt, on this provider or the other, may succeed."""
+    if isinstance(exc, _TRANSIENT_EXCEPTIONS) or _is_legacy_httpx_transport_error(exc):
+        return True
+    if isinstance(exc, ModelError):
+        return exc.is_retryable
+    # Catches OverloadedError (529) and other 5xx/429 surfaced as APIStatusError.
+    if isinstance(exc, (anthropic.APIStatusError, openai.APIStatusError)):
+        status = getattr(exc, "status_code", None)
+        if isinstance(status, int) and status in _RETRYABLE_STATUS_CODES:
+            return True
+    if type(exc) is openai.APIError:
+        return classify_exception(exc) == "provider_overloaded"
+    return False
+
+
+def _error_body(exc: BaseException) -> dict[str, Any]:
+    body = getattr(exc, "body", None)
+    return body if isinstance(body, dict) else {}
+
+
+def _nested_str(data: dict[str, Any], *keys: str) -> str | None:
+    current: Any = data
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current if isinstance(current, str) and current else None
+
+
+def model_access_message(exc: BaseException) -> str | None:
+    """What to tell the person when the workspace may not use the call's model."""
+    if isinstance(exc, anthropic.BadRequestError):
+        body = _error_body(exc)
+        if _nested_str(body, "error", "details", "error_code") == "model_not_available":
+            provider_message = _nested_str(body, "error", "message") or str(exc)
+            return (
+                "The selected Anthropic model is not available to this workspace. "
+                f"Anthropic returned: {provider_message} "
+                "Choose a different model or update the workspace's Anthropic access and retry."
+            )
+    if isinstance(exc, (openai.BadRequestError, openai.NotFoundError)):
+        body = _error_body(exc)
+        if _nested_str(body, "error", "code") in {"model_not_found", "model_not_available"}:
+            provider_message = _nested_str(body, "error", "message") or str(exc)
+            return (
+                "The selected OpenAI model is not available to this workspace. "
+                f"OpenAI returned: {provider_message} "
+                "Choose a different model or update the workspace's OpenAI access and retry."
+            )
+    return None
+
+
+def _ignore(_on_fallback: bool) -> None:
+    return None
+
+
+async def call_with_fallback(
+    request: ModelRequest,
+    handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    fallback: Callable[[], BaseChatModel] | None,
+    *,
+    attempting: Callable[[bool], None] = _ignore,
+    backoff_schedule: Sequence[float] | None = None,
+) -> ModelResponse:
+    """``request``, and again while it fails transiently, alternating with ``fallback``.
+
+    Without a fallback the call is made once. ``attempting`` hears before each attempt
+    after the first whether it goes to the fallback. A provider that refuses the
+    workspace the model answers with why; any other error that is not transient
+    raises at once, and the last transient one gives way to the outage message.
+    """
+    if fallback is None:
+        return await handler(request)
+    schedule = tuple(BACKOFF_SCHEDULE if backoff_schedule is None else backoff_schedule)
+    attempts = len(schedule) + 1
+    fallback_request: ModelRequest | None = None
+    last: BaseException | None = None
+    for attempt in range(attempts):
+        on_fallback = attempt % 2 == 1
+        if on_fallback and fallback_request is None:
+            fallback_request = request.override(model=fallback())
+        attempt_request = fallback_request if on_fallback and fallback_request else request
+        try:
+            if last is not None:
+                attempting(on_fallback)
+                delay = schedule[attempt - 1]
+                if delay > 0:
+                    await asyncio.sleep(delay + random.uniform(0, delay * 0.25))
+            return await handler(attempt_request)
+        except Exception as exc:
+            if (message := model_access_message(exc)) is not None:
+                logger.warning(
+                    "Model access error surfaced to the person",
+                    extra={"model_access_error": exception_fields(exc)},
+                )
+                return ModelResponse(result=[AIMessage(content=message)])
+            if not is_transient(exc):
+                raise
+            last = exc
+            logger.warning(
+                "Model call failed transiently",
+                extra={
+                    "model_call_retry": {
+                        "failed_on": "fallback" if on_fallback else "primary",
+                        "attempt": attempt + 1,
+                        "attempts": attempts,
+                        **exception_fields(exc),
+                    }
+                },
+            )
+    assert last is not None  # every attempt failed
+    logger.error(
+        "Model call failed after retries across primary and fallback",
+        exc_info=last,
+        extra={"model_call_failure": {"attempts": attempts, **exception_fields(last)}},
+    )
+    return ModelResponse(result=[AIMessage(content=MODEL_OUTAGE_MESSAGE)])
+
+
+class _ModelCallGuard(AgentMiddleware):
+    # Its request carries the whole conversation, which the model call's own trace has.
+    trace_policy = MIDDLEWARE_TRACE_POLICY
+
+
+class ReplayableHistoryMiddleware(_ModelCallGuard):
+    """Send each call a history the provider it goes to accepts, in a stable order."""
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        model = _chat_model(request.model)
+        messages = [_for_provider(message, model) for message in _in_call_order(request.messages)]
+        if any(a is not b for a, b in zip(messages, request.messages, strict=True)):
+            request = request.override(messages=messages)
+        return await handler(request)
+
+
+class ModelCallTimeoutMiddleware(_ModelCallGuard):
+    """Fail a model call that outlives its deadline instead of letting it hang."""
+
+    def __init__(self, timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS) -> None:
+        super().__init__()
+        self._timeout_seconds = timeout_seconds
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        async with self.deadline():
+            return await handler(request)
+
+    @asynccontextmanager
+    async def deadline(self) -> AsyncIterator[asyncio.Timeout]:
+        """Bound model attempts together without reclassifying provider timeouts."""
+        timeout = asyncio.timeout(self._timeout_seconds)
+        try:
+            async with timeout:
+                yield timeout
+        except TimeoutError as exc:
+            if not timeout.expired():
+                raise
+            logger.warning(
+                "Model call exceeded its deadline", extra={"timeout_seconds": self._timeout_seconds}
+            )
+            raise ModelCallTimeoutError(
+                f"Model call exceeded the {self._timeout_seconds}s deadline"
+            ) from exc
+
+
+class SubagentTimeoutReplyMiddleware(_ModelCallGuard):
+    """Answer with a subagent's timed-out model call instead of raising it.
+
+    A subagent has no fallback model, and its ``task`` call does not catch what it
+    raises, so a stall would end the run that delegated to it. As its answer, the
+    timeout goes back to that agent, which can try again or carry on.
+    """
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        try:
+            return await handler(request)
+        except TimeoutError as exc:
+            logger.warning("A subagent's model call timed out", exc_info=True)
+            return ModelResponse(
+                result=[AIMessage(content=f"{_SUBAGENT_TIMED_OUT} ({type(exc).__name__}: {exc})")]
+            )
+
+
+class _RunPromptCaching(AnthropicPromptCachingMiddleware):
+    """Anthropic's prompt cache, less its breakpoint on the last tool.
+
+    The tools come before the system prompt, so ``RunPromptMiddleware``'s breakpoints
+    already cache them; the request's four go to the system prompt and conversation.
+    """
+
+    @property
+    def name(self) -> str:
+        """deepagents replaces its own prompt cache with the one of the same name."""
+        return AnthropicPromptCachingMiddleware.__name__
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelCallResult:
+        async def untagged_tools(tagged: ModelRequest) -> ModelResponse:
+            return await handler(tagged.override(tools=request.tools))
+
+        return await super().awrap_model_call(request, untagged_tools)
+
+
+def model_call_guards(
+    timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS, *, subagent: bool = False
+) -> list[AgentMiddleware]:
+    """Innermost around every model call, inside the middleware that picks its model.
+
+<<<<<<<
+    They see the model the call really goes to, the fallback included. Middleware
+    owns retries for providers whose SDK retries are disabled. BackendRunMiddleware
+    bounds primary and fallback together. A subagent's timeout becomes its answer.
+    The prompt cache replaces deepagents' own 5m one by name, in place.
+=======
+    They see the model the call really goes to, the fallback included. One deadline
+    covers the call and its retries. An agent's call that still fails raises, so
+    ``call_with_fallback`` tries again and the run-complete webhook sees why; a subagent's that
+    times out becomes its answer. The prompt cache replaces deepagents' own 5m
+    one by name, in place.
+>>>>>>>
+    """
+    return [
+        *([SubagentTimeoutReplyMiddleware()] if subagent else []),
+        ReplayableHistoryMiddleware(),
+        ModelCallTimeoutMiddleware(timeout_seconds),
+        ModelRetriesMiddleware(),
+        (AnthropicPromptCachingMiddleware if subagent else _RunPromptCaching)(
+            ttl=PROMPT_CACHE_TTL, unsupported_model_behavior="ignore"
+        ),
+    ]

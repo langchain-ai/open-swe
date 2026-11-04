@@ -1,0 +1,68 @@
+"""Jev (``runtime_api.classifier``) over the backend's pooled connections."""
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Self
+
+import httpx2
+from langchain_typesafe import Choice, TypeSafeClassifier
+from runtime_api import classifier
+from runtime_api.classifier import JevDecision
+
+from openswe.config import ENV
+from openswe.utils.gateway import gateway_base_url
+from openswe.utils.http_pool import pooled_transport
+
+__all__ = ["JevDecision", "select_jev_choice", "select_jev_choices"]
+
+SYSTEM_ONE_MODEL = "typesafe/jev-1.13.0"
+
+
+@dataclass(frozen=True)
+class SystemOneGateway:
+    """TypeSafe's System One model, reached through the LangSmith LLM Gateway."""
+
+    api_key: str
+
+    @classmethod
+    def configured(cls) -> Self | None:
+        """The gateway this deployment's LangSmith key reaches, or None without one."""
+        api_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
+        return cls(api_key) if api_key else None
+
+    def classifier(self, client: httpx2.AsyncClient) -> TypeSafeClassifier:
+        return TypeSafeClassifier(
+            model=SYSTEM_ONE_MODEL,
+            api_key=self.api_key,
+            base_url=gateway_base_url(),
+            async_client=client,
+        )
+
+
+async def select_jev_choice[ChoiceT: str](
+    task: str,
+    *,
+    question: str,
+    instructions: str,
+    criteria: Mapping[ChoiceT, str],
+    decision: JevDecision | None = None,
+) -> ChoiceT | None:
+    return await classifier.select_jev_choice(
+        task,
+        question=question,
+        instructions=instructions,
+        criteria=criteria,
+        decision=decision,
+        transport=pooled_transport(),
+    )
+
+
+async def select_jev_choices(
+    task: str,
+    *,
+    questions: Mapping[str, Choice],
+    decisions: Mapping[str, JevDecision | None] | None = None,
+) -> dict[str, str | None]:
+    return await classifier.select_jev_choices(
+        task, questions=questions, decisions=decisions, transport=pooled_transport()
+    )

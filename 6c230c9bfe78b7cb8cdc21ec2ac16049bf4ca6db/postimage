@@ -1,0 +1,15 @@
+1073 792bca6ac97b8d9dcf047ed6c53157afaef65eed feat(channels): reply from a handler or endpoint, as resolveUser does
+1143 d031eb7d3f3b155698cdcee1a92bceb42042f795 feat(channels): let a GitHub channel handle its own App's events
+1147 632c55844ce0de2e5d2567da56f3b32275e6fbd6 feat(channels): let handlers start runs on threads they choose
+1149 8bc4e362d4375238316e69972944e6386effa0b0 feat(channels): answer the provider first, then ask the channel's handler
+1171 59d0ff4a66f035aacd0d00222aaeb66be0a62cf3 feat(channels): let Slack handlers choose each run's thread
+1174 48365c151ff3dabfd9ac10665565c3dfcce59e23 feat(channels): handle every GitHub action of handled events, and installation events
+1175 99c6ace875a3a205354a41766725ed882843e51b feat(channels): let Slack handlers take edits, deletions and reactions
+1218 bfb0b1cbd764068fbf182f4dbf60af6bea0ef159 feat(channels): give a runtime channel a typed target
+1228 8ca71ad3dcdef0432cafa3a71fc9c7b54fe40a1f feat(channels): let a channel run hand its thread to a new Slack thread
+1229 cc2a11cd9cfa61244ab3eb071b67d0a0ac18e5df feat(channels): start a new Slack thread in another conversation of the channel
+1231 18d52b25093c2b00e0a1461112f49a784453cb51 feat(slack): let a handler read its thread's state and the workspace
+1239 66fd4a2f21e666af83f0380e48f715e531549859 feat(channels): set a Slack app's look in app, as GitHub and Linear do
+1245 5dcc41e9ca1a5fa78a56d7b6c78eab077f5120d6 refactor(channels): share one set of types across GitHub, Linear and Slack
+1213 a6ab4bd2b9e3f823711528864e7695cbab40f226 fix(browser): use Stagehand 4.4's watchdog and disconnect() instead of 4.3.0 workarounds
+1216 8b9891db9fa5af09cd311b562d3de97e5be5293a fix(browser): remove other Stagehand extensions when installing one
