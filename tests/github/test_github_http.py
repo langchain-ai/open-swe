@@ -368,3 +368,33 @@ async def test_ref_lookup_distinguishes_absence_from_api_failure(
         "https://api.github.com/repos/acme/widgets/git/matching-refs/"
         "merge-queue%2Fcandidates%2Fexample"
     )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../../../../repos/acme/private/contents/x.png",
+        "docs/./x.png",
+        "docs//x.png",
+        "..\\x.png",
+        "%2e%2e/%2E%2e/repos/acme/private/contents/x.png",
+    ],
+)
+async def test_a_file_path_never_leaves_its_repository(path: str) -> None:
+    # httpx resolves dot segments, so these would read another repository with the same token.
+    sent: list[str] = []
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        sent.append(str(request.url))
+        return httpx2.Response(200, content=b"png")
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handle)) as http:
+        repo = GitHubClient(http).repo("me", "shared")
+        with pytest.raises(github_http.UnsafeRepoPath):
+            await repo.raw_file(path, "main")
+        with pytest.raises(github_http.UnsafeRepoPath):
+            await repo.delete_branch(path)
+        assert await repo.raw_file("docs/a b.png", "main") == b"png"
+        with pytest.raises(github_http.UnsafeRepoPath):
+            GitHubClient(http).repo("..", "users")
+    assert sent == ["https://api.github.com/repos/me/shared/contents/docs/a%20b.png?ref=main"]

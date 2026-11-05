@@ -1,4 +1,6 @@
 import { useContext } from "react"
+import { EmbeddedThreadContext } from "@/features/agents/lib/embeddedThread"
+import { useThreadRunConfig } from "@/features/agents/lib/threadRunConfig"
 import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 
@@ -60,6 +62,7 @@ export function useSubmitAgentMessage(threadId: string) {
   const queryClient = useQueryClient()
   const source = useThreadSource()
   const review = useContext(ReviewChatActionsContext)
+  const embedded = useContext(EmbeddedThreadContext)
 
   return useMutation({
     meta: { errorTitle: "Couldn't send message" },
@@ -103,6 +106,8 @@ export function useSubmitAgentMessage(threadId: string) {
         { modelId: vars.model_id, effort: vars.effort },
         vars.model_selection_changed
       )
+      const surface = useThreadRunConfig.getState().byThread[threadId]
+      await Promise.all([embedded?.run?.prepare?.(), surface?.prepare?.()])
 
       void source
         .startRun({
@@ -114,6 +119,8 @@ export function useSubmitAgentMessage(threadId: string) {
           },
           configurable: {
             ...configurable,
+            ...embedded?.run?.configurable,
+            ...surface?.configurable,
             ...(review
               ? {
                   review_chat_pr_url: `https://github.com/${review.owner}/${review.repo}/pull/${review.number}`,

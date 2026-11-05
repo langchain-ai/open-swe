@@ -103,8 +103,8 @@ from openswe.middleware import (
     DynamicToolMiddleware,
     ModelSelectionMiddleware,
 )
-from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.model_selection import ModelSelectionState, RoutingMode
+from openswe.middleware.plugin_chat import PluginChatTools
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.require_cli_result import cli_result_nudge
 from openswe.middleware.require_user_reply import (
@@ -221,6 +221,8 @@ from openswe.tools import (
     open_pull_request,
     output_iframe,
     plan_walkthrough,
+    preview_app,
+    publish_app,
     publish_artifact,
     publish_workspace,
     publish_workspace_prompt,
@@ -749,6 +751,8 @@ AGENT_TOOLS: Final = (
     background_task,
     monitor,
     publish_artifact,
+    preview_app,
+    publish_app,
     remember,
     forget,
     list_memories,
@@ -2118,8 +2122,9 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     # A client's tool replaces any server tool of the same name, so the endpoint's
     # view of which calls the client runs matches the graph's.
     client_tool_names = frozenset(spec.name for spec in cfg.client_tools)
-    client_tools = ClientToolsMiddleware(cfg.client_tools) if cfg.client_tools else None
-    if client_tools is not None:
+    # A plugin's tools join the agent's own rather than replace any.
+    client_tools = PluginChatTools.of_run(cfg, thread_id)
+    if cfg.client_tools:
         excluded_tools = (excluded_tools | CLIENT_OWNED_SERVER_TOOLS) - client_tool_names
     main_tools = [
         tool for tool in static_tools if _registered_tool_name(tool) not in client_tool_names
@@ -2249,6 +2254,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         else None,
         task_coordination=task_coordination is not None,
         client_tools=client_tools is not None,
+        client_prompt=client_tools.instructions if client_tools is not None else "",
         refresh_github_proxy=not (task_coordination and task_coordination.is_worker),
         incident=incident_session is not None,
         offload_conversation=cfg.offload_conversation,
