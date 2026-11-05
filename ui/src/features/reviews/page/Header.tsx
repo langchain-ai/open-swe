@@ -1,7 +1,6 @@
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { CircularProgress } from "@langchain/macaw-components/CircularProgress"
 import { ArrowLeftIcon, ArrowUpIcon } from "@langchain/macaw-components/icons"
-import { Badge, type BadgeProps } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenu,
@@ -14,8 +13,6 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { ChatsCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatsCircle"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
-import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
-import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { KeyboardIcon } from "@phosphor-icons/react/dist/ssr/Keyboard"
 import { LinkIcon } from "@phosphor-icons/react/dist/ssr/Link"
@@ -36,26 +33,21 @@ import { statusLabels } from "@/features/reviews/lib/status"
 import { ProfileLink } from "./notes/Byline"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { isLive } from "./pullRequestStanding"
+import {
+  PullRequestStateBadge,
+  type PullRequestState,
+} from "./PullRequestStateBadge"
 import { RecentReviewPagesMenu } from "./RecentReviewPagesMenu"
 import { RelativeTimestamp } from "./RelativeTimestamp"
 import { ReviewQueueControls, useReviewQueue } from "./ReviewQueue"
 import { NextStepAction, StandingDot, usePullRequestStanding } from "./Standing"
 import { useReviewPage } from "./store"
 
-type PillState = ReviewDetail["pr"]["state"]
-
-const pillColor: Record<PillState, BadgeProps["color"]> = {
-  open: "success",
-  draft: "secondary",
-  merged: "primary",
-  closed: "error",
-}
-
 // The status is fresher than the detail once someone marks the PR ready.
 function pillState(
   detail: ReviewDetail,
   draft: boolean | null | undefined
-): PillState {
+): PullRequestState {
   if (!isLive(detail)) return detail.pr.state
   return (draft ?? detail.pr.state === "draft") ? "draft" : "open"
 }
@@ -142,16 +134,7 @@ export function Header({
           ) : live && status === undefined ? (
             <Skeleton className="h-5 w-16 shrink-0 rounded-full" />
           ) : state ? (
-            <Badge
-              size="xs"
-              color={pillColor[state]}
-              leftDecorator={
-                state === "merged" ? GitMergeIcon : GitPullRequestIcon
-              }
-              className="shrink-0 capitalize"
-            >
-              {state}
-            </Badge>
+            <PullRequestStateBadge state={state} />
           ) : (
             !detailQuery.isError && (
               <Skeleton className="h-5 w-14 shrink-0 rounded-full" />
@@ -162,15 +145,13 @@ export function Header({
               href={githubUrl}
               target="_blank"
               rel="noreferrer"
-              aria-label="Open on GitHub"
-              className="shrink-0 text-icon-secondary hover:text-icon-primary max-sm:hidden"
+              title="Open on GitHub"
+              className="min-w-0 truncate rounded-sm hover:underline"
             >
-              <GithubLogoIcon aria-hidden size={16} weight="regular" />
-            </a>
-            <RecentReviewPagesMenu pr={pr}>
               {detail?.pr.title ?? `${pr.owner}/${pr.repo}`}
               <span className="font-normal text-secondary"> #{pr.number}</span>
-            </RecentReviewPagesMenu>
+            </a>
+            <RecentReviewPagesMenu pr={pr} />
           </h1>
         </div>
         {detail ? (

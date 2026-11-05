@@ -1,9 +1,10 @@
 """Dashboard API for pull requests and the coding threads that work on them."""
 
-from typing import Any, Literal
+from datetime import datetime
+from typing import Annotated, Any, Literal, Self
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
@@ -74,6 +75,61 @@ async def api_search_pull_requests(
         ],
         has_more=len(rows) > limit,
     )
+
+
+class PullRequestKey(BaseModel):
+    repo: str = Field(min_length=3, max_length=200)
+    number: int = Field(ge=1)
+
+
+class PullRequestLookup(BaseModel):
+    pull_requests: Annotated[list[PullRequestKey], Field(max_length=50)]
+
+
+class StoredPullRequest(BaseModel):
+    """What PostgreSQL already knows about a pull request, without asking GitHub."""
+
+    repo: str
+    number: int
+    url: str
+    title: str
+    state: PrState
+    author: str
+    additions: int | None
+    deletions: int | None
+    changed_files: int | None
+    review_count: int
+    last_reviewed_at: datetime | None
+    last_review_findings: int | None
+
+    @classmethod
+    def of(cls, row: PullRequest) -> Self:
+        last_review = row.reviews[-1] if row.reviews else None
+        return cls(
+            repo=row.repo_full_name,
+            number=row.number,
+            url=row.url,
+            title=row.title,
+            state=row.state,
+            author=row.author,
+            additions=row.additions,
+            deletions=row.deletions,
+            changed_files=row.changed_files,
+            review_count=len(row.reviews),
+            last_reviewed_at=last_review.published_at if last_review else None,
+            last_review_findings=last_review.finding_count if last_review else None,
+        )
+
+
+@router.post("/pull-requests/lookup")
+async def api_lookup_pull_requests(
+    body: PullRequestLookup, session: dict[str, str] = SESSION_DEP
+) -> list[StoredPullRequest]:
+    accessible = await accessible_repo_full_names(session["sub"])
+    rows = await PullRequest.lookup(
+        [(key.repo, key.number) for key in body.pull_requests if key.repo.lower() in accessible]
+    )
+    return [StoredPullRequest.of(row) for row in rows]
 
 
 @router.get("/pull-requests")
