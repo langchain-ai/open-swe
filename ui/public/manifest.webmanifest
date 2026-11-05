@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "Open SWE",
-  "short_name": "Open SWE",
+  "name": "Robin",
+  "short_name": "Robin",
   "description": "Open-source coding agents for Slack, Linear, and GitHub.",
   "start_url": "./",
   "scope": "./",

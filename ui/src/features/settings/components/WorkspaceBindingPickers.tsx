@@ -158,7 +158,7 @@ export function SlackChannelPicker({
     disabled: !channel.is_member,
     warning: channel.is_member
       ? undefined
-      : "Invite Open SWE to this channel, then refresh to select it.",
+      : "Invite Robin to this channel, then refresh to select it.",
   }))
   return (
     <OwnershipPicker
@@ -194,7 +194,7 @@ export function SlackChannelPicker({
       notice={
         directory.data?.refreshing
           ? "Refreshing channels from Slack. New ones appear when it finishes."
-          : "Missing a channel? Invite Open SWE in Slack, then refresh this list."
+          : "Missing a channel? Invite Robin in Slack, then refresh this list."
       }
       disabled={disabled}
     />

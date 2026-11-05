@@ -739,7 +739,7 @@ export function AgentsSidebar({
           to="/my-settings"
           className="min-w-0 truncate font-heading text-lg font-semibold tracking-tight text-primary"
         >
-          Open SWE
+          Robin
         </Link>
         <div className="flex shrink-0 items-center gap-space-1">
           <IconButton

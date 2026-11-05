@@ -218,7 +218,7 @@ export function WorkspaceEditor({
           <HelpTooltip label="About kitchen channels">
             Mentions in these channels start runs in this workspace. Turn on
             Kitchen for a channel to let every top-level message start a thread
-            and replies continue it without mentioning Open SWE.
+            and replies continue it without mentioning Robin.
           </HelpTooltip>
         </span>
         <div

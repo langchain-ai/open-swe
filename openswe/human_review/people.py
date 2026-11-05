@@ -48,7 +48,7 @@ async def resolve_writer(request: HumanReviewRequest, user: User | None) -> Part
         async with GitHubClient.as_app(pr.owner, pr.repo) as github:
             can_write = await github.repo(pr.owner, pr.repo).can_write(login)
     except GitHubAppUnavailable:
-        return Outcome("Open SWE cannot reach this repository's GitHub App installation.")
+        return Outcome("Robin cannot reach this repository's GitHub App installation.")
     if not can_write:
         return Outcome(f"@{login} does not have write access to {pr.owner}/{pr.repo}.")
     return linked

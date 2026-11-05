@@ -97,7 +97,7 @@ describe("WorkflowApprovalCard", () => {
     expect(
       screen.getByText("Confirm workflow changes inherited from main")
     ).toBeTruthy()
-    expect(screen.getByText(/Open SWE did not author/)).toBeTruthy()
+    expect(screen.getByText(/Robin did not author/)).toBeTruthy()
   })
 
   it("submits the selected decision with the server fingerprint", async () => {

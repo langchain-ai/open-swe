@@ -1,6 +1,6 @@
 """After-agent middleware that closes a still-open review check run.
 
-``publish_review`` normally completes the ``Open SWE Review`` check run and
+``publish_review`` normally completes the ``Robin Review`` check run and
 clears ``review_check_run_id`` from reviewer thread metadata. If the run ends
 without ever publishing (crash, model-call limit, sandbox failure), the check
 would hang "in progress" on the PR forever. This hook closes it as neutral —
@@ -51,7 +51,7 @@ async def settle_review_check() -> None:
             conclusion = "neutral"
             title = "Review did not complete"
             summary = (
-                "The Open SWE review run ended without publishing a review. "
+                "The Robin review run ended without publishing a review. "
                 "Re-trigger the review by pushing a commit or re-requesting it."
             )
         await settle_review_check_run(

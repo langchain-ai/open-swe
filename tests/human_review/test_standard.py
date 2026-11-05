@@ -963,7 +963,7 @@ async def _review_github_app(owner: str, repo: str) -> AsyncIterator[GitHubClien
     ("author", "user", "draft", "allowed", "expected"),
     [
         ("ada", User(), False, [], []),
-        ("ada", None, False, [], ["its author is not an Open SWE user or in reviewAllowedAuthors"]),
+        ("ada", None, False, [], ["its author is not a Robin user or in reviewAllowedAuthors"]),
         ("open-swe[bot]", None, False, [], []),
         ("open-swe-preview[bot]", None, False, [], []),
         ("openswe-dev[bot]", None, False, [], []),
@@ -972,7 +972,7 @@ async def _review_github_app(owner: str, repo: str) -> AsyncIterator[GitHubClien
             None,
             False,
             ["langsmith-engine[bot]"],
-            ["its author is not an Open SWE user or in reviewAllowedAuthors"],
+            ["its author is not a Robin user or in reviewAllowedAuthors"],
         ),
         ("open-swe[bot]", None, True, [], ["it is a draft"]),
         ("LangSmith-Engine[bot]", None, False, [" langsmith-engine[bot] "], []),
@@ -1044,9 +1044,7 @@ async def test_review_author_allowlist_requires_valid_default_branch_settings(
     ):
         blockers = await review_blockers(_repo().pull_request(7))
     assert blockers == (
-        ["its author is not an Open SWE user or in reviewAllowedAuthors"]
-        if settings is None
-        else None
+        ["its author is not a Robin user or in reviewAllowedAuthors"] if settings is None else None
     )
 
 

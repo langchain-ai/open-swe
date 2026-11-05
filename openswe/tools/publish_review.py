@@ -782,11 +782,11 @@ async def _withdraw_open_swe_approvals(
 ) -> None:
     """Leave standing only this publish's own approval, if it posted one."""
     if keep_review_id is not None:
-        reason = "Superseded by Open SWE's approval of the current head."
+        reason = "Superseded by Robin's approval of the current head."
     elif keep_commit is not None:
-        reason = "New commits were pushed after Open SWE approved this pull request."
+        reason = "New commits were pushed after Robin approved this pull request."
     else:
-        reason = "Open SWE's latest review of this pull request does not approve it."
+        reason = "Robin's latest review of this pull request does not approve it."
     try:
         async with GitHubClient.connect(token=token) as github:
             refused = await (
@@ -820,14 +820,14 @@ async def _withdraw_open_swe_approvals(
 async def _withdraw_open_swe_change_requests(
     *, owner: str, repo: str, pr_number: int, token: str
 ) -> None:
-    """Dismiss Open SWE's change requests once the configuration they flagged is valid."""
+    """Dismiss Robin's change requests once the configuration they flagged is valid."""
     try:
         async with GitHubClient.connect(token=token) as github:
             refused = await (
                 github.repo(owner, repo)
                 .pull_request(pr_number)
                 .withdraw_open_swe_approvals(
-                    reason="The Open SWE configuration in this pull request is valid now.",
+                    reason="The Robin configuration in this pull request is valid now.",
                     state="changes_requested",
                 )
             )
@@ -865,7 +865,7 @@ async def _open_swe_already_reviewed(
 ) -> bool:
     """Decide whether to suppress a duplicate empty "no issues found" summary.
 
-    Suppress only when we are *certain* a prior Open SWE review exists, so a
+    Suppress only when we are *certain* a prior Robin review exists, so a
     transient GitHub failure never causes a double-post:
 
     - ``is_re_review`` is a durable signal (the dispatching webhook set it from
@@ -970,7 +970,7 @@ def _comment_id_by_finding_id(
 ) -> dict[str, int]:
     """Map each surfaced finding id to its GitHub comment id via the marker.
 
-    The embedded Open SWE marker is the *only* source of truth. Every comment
+    The embedded Robin marker is the *only* source of truth. Every comment
     this reviewer posts carries a ``<!-- open-swe-review-comment {...} -->``
     marker keyed by finding id (see ``render_inline_comment_body``), so the
     match is exact. The old ``(path, line, body)`` fallback collided whenever
@@ -1140,10 +1140,10 @@ async def _maybe_post_slack_completion_reply(
         return
 
     if surfaced_count == 0:
-        headline = "*Open SWE Review*: No issues found."
+        headline = "*Robin Review*: No issues found."
     else:
         issue_word = "issue" if surfaced_count == 1 else "issues"
-        headline = f"*Open SWE Review* found {surfaced_count} potential {issue_word}."
+        headline = f"*Robin Review* found {surfaced_count} potential {issue_word}."
 
     review_url = f"https://github.com/{owner}/{repo}/pull/{pr_number}"
     if isinstance(review_id, int):

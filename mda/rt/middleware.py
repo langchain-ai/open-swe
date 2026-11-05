@@ -905,7 +905,7 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
             return _refused(
                 tool_call["name"],
                 tool_call_id,
-                "Open SWE tracks its workers itself: use task_status, message_task_thread "
+                "Robin tracks its workers itself: use task_status, message_task_thread "
                 "or control_worker instead.",
             )
         if tool_call["name"] != LAUNCH_WORKER_TOOL:

@@ -257,7 +257,7 @@ def _chained_push_message(request: ToolCallRequest) -> ToolMessage:
         "error_type": "WorkflowPushMustStandAlone",
         "error": (
             "This command pushes as part of a longer command, and that push could carry "
-            "GitHub workflow file changes, so Open SWE cannot show the thread owner what it "
+            "GitHub workflow file changes, so Robin cannot show the thread owner what it "
             "pushes. Nothing ran. Commit first, then run the push on its own (for example "
             "`git -C <repo> push -u origin <branch>`); workflow changes then go to the "
             "thread owner for approval."
@@ -273,7 +273,7 @@ def _unsupported_push_message(request: ToolCallRequest) -> ToolMessage:
         "status": "error",
         "error_type": "WorkflowPushUnsupportedFlags",
         "error": (
-            "Open SWE cannot inspect this standalone git push. Nothing ran. Use "
+            "Robin cannot inspect this standalone git push. Nothing ran. Use "
             "`git [-C <repo>] push [options] origin <branch-or-refspec>` with optional "
             "-u/--set-upstream, --force-with-lease[=<ref>[:<sha>]], --force-if-includes, "
             "-f, or --force, targeting the current branch."
@@ -652,7 +652,7 @@ def _blocked_message(
         "error_type": "WorkflowPushApprovalRequired",
         "error": (
             "This git push includes GitHub workflow file changes and requires human "
-            "approval before Open SWE can push it. Retry the same standalone git push "
+            "approval before Robin can push it. Retry the same standalone git push "
             "after the thread owner approves the workflow diff in Slack or the web UI."
         ),
         "workflow_approval_status": status,

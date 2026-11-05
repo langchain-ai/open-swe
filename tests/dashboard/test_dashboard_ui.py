@@ -164,7 +164,7 @@ def test_mcp_consent_keeps_branding_on_root_auth_routes(
         },
     )
     assert response.status_code == 200
-    assert "Open SWE" in response.text
+    assert "Robin" in response.text
     if dashboard_url:
         assert f'src="{dashboard_url}/logo-mark.png"' in response.text
         assert f'href="{dashboard_url}"' in response.text

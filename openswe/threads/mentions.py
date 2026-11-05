@@ -83,7 +83,7 @@ class ThreadMentions:
                     claimed = True
                     await post_dm(
                         recipient,
-                        f"{self.login} mentioned you in Open SWE. <{url}|Open conversation> "
+                        f"{self.login} mentioned you in Robin. <{url}|Open conversation> "
                         "(sign in with an account that has access).",
                         origin=origin,
                     )

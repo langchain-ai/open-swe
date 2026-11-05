@@ -347,7 +347,7 @@ export function ThreadCard({
               )
             }
           >
-            {suggestion ? "Ask Open SWE to apply" : "Ask Open SWE"}
+            {suggestion ? "Ask Robin to apply" : "Ask Robin"}
           </Button>
           <Button
             size="xs"

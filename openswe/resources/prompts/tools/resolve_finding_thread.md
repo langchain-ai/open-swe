@@ -1,4 +1,4 @@
-Resolve the GitHub review thread for a tracked Open SWE finding.
+Resolve the GitHub review thread for a tracked Robin finding.
 
 Use ``status="resolved"`` when the code now fixes the issue.
 Use ``status="dismissed"`` when analysis shows the original review comment was not valid.

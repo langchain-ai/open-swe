@@ -10,9 +10,9 @@ backend = backend_endpoint("/linear/channel/events")
 
 channel = channels.linear(
     app={
-        "name": "Open SWE",
+        "name": "Robin",
         "description": (
-            "Open SWE's coding agent: mention it or delegate an issue to it, and it works "
+            "Robin: mention it or delegate an issue to it, and it works "
             "on the issue's repository and answers in the session."
         ),
     },

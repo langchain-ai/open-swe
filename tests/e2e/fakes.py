@@ -138,7 +138,7 @@ def create_code_channel(payload: dict[str, Any]) -> dict[str, Any]:
     channel_id = f"C_CODE_{_code_channel_seq[0]}"
     channel = {
         "id": channel_id,
-        "name": str(payload.get("name") or "Open SWE task"),
+        "name": str(payload.get("name") or "Robin task"),
         "session_id": str(payload.get("session_id") or ""),
         "origin_channel_id": str(payload.get("origin_channel_id") or ""),
         "origin_message_ts": str(payload.get("origin_message_ts") or ""),

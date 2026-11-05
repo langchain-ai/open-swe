@@ -14,7 +14,7 @@ Shadow reviews (experimental) run a second reviewer on another model over a samp
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work.
   Sidebar order is personal and persisted across devices: use `reorder_thread_pins` for the requester's already pinned threads, or `reorder_sidebar_threads` within a project, repository, or no-project folder.
   Global recents stay in activity order.
-- **Bots** (`/agents/bots`): bots allowed to trigger Open SWE from Slack.
+- **Bots** (`/agents/bots`): bots allowed to trigger Robin from Slack.
   Admins use `list_slack_bots`, `allow_slack_bot`, and `remove_slack_bot`.
   Listing requires a private admin surface; writes also work in verified sole-writer shared threads and are audited with the affected bot ID.
 - **Projects** (sidebar folders and the composer's project picker): named folders of threads, personal or shared with teammates, each in a workspace and optionally bound to one repository whose threads then file under it.
@@ -25,7 +25,7 @@ Shadow reviews (experimental) run a second reviewer on another model over a samp
 - **Settings → Instructions** (`/my-settings/instructions`): personal standing instructions.
   The agent saves memories with `remember` and drops them with `forget`; they are not shown here yet.
 - **Settings → Connections** (`/my-settings/connections`): GitHub (linked after LangSmith sign-in; required for coding features), Slack and LangSmith accounts, managed tools, and personal MCP servers.
-- **Settings → Experiments** (`/my-settings/experiments`): experimental interface and agent features (including goal mode, per-author Conditional approval (off by default), LangSmith Agent Workspace for Open SWE chats, and Memory, which adds the workspace curator's prompt to the threads a person starts, in place of the person's own memories it superseded, and the Classify tool, which lets code mode classify with TypeSafe's System One model), recent-work context, and Slack behavior such as concierge mode and failing-check reactions.
+- **Settings → Experiments** (`/my-settings/experiments`): experimental interface and agent features (including goal mode, per-author Conditional approval (off by default), LangSmith Agent Workspace for Robin chats, and Memory, which adds the workspace curator's prompt to the threads a person starts, in place of the person's own memories it superseded, and the Classify tool, which lets code mode classify with TypeSafe's System One model), recent-work context, and Slack behavior such as concierge mode and failing-check reactions.
 - **Code review** (`/review`): configure auto-review repositories.
   **Review styles** (`/review/styles`) and **Repository instructions** (`/agents/instructions`) manage per-repository review and agent guidance.
 - **Usage** (`/usage`): view agent usage and reviewer statistics.

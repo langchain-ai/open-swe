@@ -110,7 +110,7 @@ const appRuntime = resolveAppRuntime({
 const isDevelopment = appRuntime.isDevelopment;
 if (appRuntime.userDataPath) {
   fs.mkdirSync(appRuntime.userDataPath, { recursive: true });
-  app.setName(appRuntime.name);
+  app.setName(path.basename(appRuntime.userDataPath));
   app.setPath("userData", appRuntime.userDataPath);
 }
 app.setAppUserModelId(appRuntime.appUserModelId);
@@ -431,7 +431,7 @@ async function diffThread(threadId) {
 
 /** Whether the backend has a run in flight on this thread. */
 async function threadRunning(threadId) {
-  if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
+  if (!backendUrl) throw new Error("Robin is not connected to a backend");
   const response = await backendFetch(
     new URL(
       `/dashboard/api/threads/${encodeURIComponent(threadId)}?mark_viewed=false`,
@@ -451,7 +451,7 @@ async function threadRunning(threadId) {
  * brings its own abort signal; anything else gives up rather than hold a quit.
  */
 async function sendBridgeRequest(method, apiPath, { body, signal }) {
-  if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
+  if (!backendUrl) throw new Error("Robin is not connected to a backend");
   const response = await backendFetch(
     new URL(`/dashboard/api${apiPath}`, backendUrl).toString(),
     {
@@ -539,7 +539,7 @@ async function followCheckedOutBranch(thread, repo, ref) {
   const target = ref.worktreePath ? managedWorktree(ref.worktreePath) : null;
   if (ref.worktreePath && !target)
     throw new Error(
-      `“${ref.name}” is checked out in ${ref.worktreePath}, which Open SWE does not manage.`,
+      `“${ref.name}” is checked out in ${ref.worktreePath}, which Robin does not manage.`,
     );
   await moveThreadWorkspace(thread, target);
   sendLocalThreadsChanged();
@@ -634,7 +634,7 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:copy-page-link", (event) => {
     requireTrustedDesktopIpc(event);
-    if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
+    if (!backendUrl) throw new Error("Robin is not connected to a backend");
     const source = new URL(event.sender.getURL());
     const target = new URL(backendUrl);
     target.pathname = source.pathname;
@@ -771,7 +771,7 @@ function configureDesktopIpc() {
     const options = {
       type: "warning",
       title: "Remove project",
-      message: `Remove “${project.name}” from Open SWE?`,
+      message: `Remove “${project.name}” from Robin?`,
       detail: `${project.cwd}\n\nThis does not delete files from your Mac.`,
       buttons: ["Cancel", "Remove"],
       defaultId: 0,
@@ -975,7 +975,7 @@ function configureDesktopIpc() {
     if (ref?.worktreePath) {
       if (!managedWorktree(ref.worktreePath))
         throw new Error(
-          `“${branch}” is checked out in ${ref.worktreePath}, which Open SWE does not manage.`,
+          `“${branch}” is checked out in ${ref.worktreePath}, which Robin does not manage.`,
         );
       return moveThreadWorkspace(thread, ref.worktreePath);
     }
@@ -1105,7 +1105,7 @@ function isBackendSessionCookie(cookie) {
   );
 }
 
-/** Mirror the app's session into the shared config, so `oswe` is signed in whenever the app is. */
+/** Mirror the app's session into the shared config, so `robin` is signed in whenever the app is. */
 async function shareBackendSession() {
   if (isDevelopment) return;
   session.defaultSession.cookies.on(
@@ -1117,7 +1117,7 @@ async function shareBackendSession() {
         if (removed) unshareSession(configPath(), backendUrl, cookie.value);
         else shareSession(configPath(), backendUrl, cookie.value);
       } catch (error) {
-        console.warn("Could not share the desktop session with oswe", error);
+        console.warn("Could not share the desktop session with robin", error);
       }
     },
   );
@@ -1129,7 +1129,7 @@ async function shareBackendSession() {
     });
     if (cookie) shareSession(configPath(), backendUrl, cookie.value);
   } catch (error) {
-    console.warn("Could not share the desktop session with oswe", error);
+    console.warn("Could not share the desktop session with robin", error);
   }
 }
 
@@ -1953,6 +1953,7 @@ if (!hasSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    app.setName(appRuntime.name);
     migrateStoredConfig();
     try {
       backendUrl = resolveBackendUrl({

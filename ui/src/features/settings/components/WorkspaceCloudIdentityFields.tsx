@@ -143,7 +143,7 @@ export function WorkspaceCloudIdentityFields({
       <Input
         label="Subject Scope"
         size="sm"
-        hintText="Use tag:<LangSmith tag value UUID> and assign the same tag below. Workspace scope is not allowed: every Open SWE workspace shares one LangSmith workspace."
+        hintText="Use tag:<LangSmith tag value UUID> and assign the same tag below. Workspace scope is not allowed: every Robin workspace shares one LangSmith workspace."
         placeholder="tag:<LangSmith tag value UUID>"
         value={
           typeof identity.subject_scope === "string"

@@ -322,9 +322,7 @@ def current_run() -> Run:
     """The run in progress, which every call the graph makes acts as."""
     context = getattr(get_runtime(), "context", None)
     if not isinstance(context, RunContext):
-        raise BackendCallError(
-            "This run carries no Open SWE run context; start it through Open SWE"
-        )
+        raise BackendCallError("This run carries no Robin run context; start it through Robin")
     return context.run()
 
 
@@ -429,9 +427,7 @@ class OpenSweBackend:
         label = path.rsplit("/", 1)[-1]
         bearer = self.run.bearer
         if bearer is None:
-            raise BackendCallError(
-                "This run carries no Open SWE run token; start it through Open SWE"
-            )
+            raise BackendCallError("This run carries no Robin run token; start it through Robin")
         headers = {
             **(TurnTrace.current_headers() if trace is None else trace),
             "Authorization": f"Bearer {bearer}",

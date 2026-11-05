@@ -72,7 +72,7 @@ async def share_project(
         user = await PROJECTS.member_for_run(as_json_object(get_config()))
         member = await User.for_handle(person)
         if member is None:
-            return {"ok": False, "error": f"no Open SWE user {person!r}"}
+            return {"ok": False, "error": f"no Robin user {person!r}"}
         project = await PROJECTS.set_member(project_id, user, member, role)
     except ProjectError as exc:
         return {"ok": False, "error": str(exc)}
@@ -88,7 +88,7 @@ async def unshare_project(project_id: UUID, person: str) -> dict[str, object]:
         user = await PROJECTS.member_for_run(as_json_object(get_config()))
         member = await User.for_handle(person)
         if member is None:
-            return {"ok": False, "error": f"no Open SWE user {person!r}"}
+            return {"ok": False, "error": f"no Robin user {person!r}"}
         await PROJECTS.remove_member(project_id, user, member)
     except ProjectError as exc:
         return {"ok": False, "error": str(exc)}

@@ -322,7 +322,7 @@ test.describe("Expedited Slack review", () => {
     // 44 lines changed outside tests; only the 4 not covered by the auto-approve rule are
     // drawn, and the other 40 are listed by guideline.
     await expect(card(page)).toContainText(
-      /Open SWE judged these auto-approvable under `?\.open-swe\/auto-approve-rules\/`? \(not shown\)/,
+      /Robin judged these auto-approvable under `?\.open-swe\/auto-approve-rules\/`? \(not shown\)/,
     );
     await expect(card(page)).toContainText(
       /Release notes_?: `?CHANGELOG\.md`? \+30 −0/,

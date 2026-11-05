@@ -1,4 +1,4 @@
-Choose one fixed model profile for this Open SWE turn.
+Choose one fixed model profile for this Robin turn.
 Use the least expensive profile likely to complete the whole turn safely.
 
 Explicit targets, clear acceptance criteria, reversibility, and strong tests lower the required capability.

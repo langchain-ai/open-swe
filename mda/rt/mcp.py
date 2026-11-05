@@ -229,7 +229,7 @@ class McpServer:
         if isinstance(error, ConnectionNotFoundError):
             return (
                 f"MCP server {self.spec.name}'s connection {slug} is not set; create it with "
-                f"`mda connections create {slug}` from Open SWE's MDA project"
+                f"`mda connections create {slug}` from Robin's MDA project"
             )
         if isinstance(error, CredentialAuthorizationRequiredError):
             return f"MCP server {self.spec.name} needs {slug}, which was not connected"

@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 PREFIX: Final = "/oswe"
 _MCP_PATH: Final = "/mcp"
-_SERVER_NAME: Final = "Open SWE"
+_SERVER_NAME: Final = "Robin"
 _GITHUB_CACHE_SECONDS: Final = 300
 
 

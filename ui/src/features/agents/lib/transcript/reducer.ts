@@ -1071,7 +1071,7 @@ function buildHumanMessage(
           structuredSenderNote:
             entity?.senderType !== "bot" &&
             entity?.openSweAccount === "unlinked"
-              ? "not an Open SWE user"
+              ? "not a Robin user"
               : undefined,
           structuredSenderIsBot: entity?.senderType === "bot",
         }

@@ -84,7 +84,7 @@ function PolicyForm({
     <form onSubmit={onSubmit} className="space-y-space-4">
       <SettingsSection
         title="Incidents"
-        description="Investigate matching Slack channels and maintain incident summaries with Open SWE."
+        description="Investigate matching Slack channels and maintain incident summaries with Robin."
       >
         <SlackConnectionStatus settings={settings} />
         <SettingsRow

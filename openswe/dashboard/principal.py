@@ -136,4 +136,4 @@ class DashboardPrincipal:
                 "auth/desktop/exchange",
                 "auth/logout",
             }:
-                raise HTTPException(403, "Link GitHub to return to your existing Open SWE account")
+                raise HTTPException(403, "Link GitHub to return to your existing Robin account")

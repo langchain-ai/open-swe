@@ -246,7 +246,7 @@ async def process_slack_web(
 ) -> None:
     """Start an unattached web conversation with the source Slack transcript."""
     if not command.instruction:
-        await _tell_sender(request, "Add a question after `@Open SWE /breakout:web`.")
+        await _tell_sender(request, "Add a question after `@Robin /breakout:web`.")
         return
     thread_id = str(uuid4())
     try:

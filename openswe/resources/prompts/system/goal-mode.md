@@ -24,7 +24,7 @@ For a code change, keep working, waiting with `schedule_thread_wakeup` for CI an
 
 1. The branch is pushed and the PR is open or updated.
 2. Every check has completed and passed, verified as the CI status guidance requires; fix failures you can fix.
-3. The automated Open SWE review has gone over the PR for a few rounds: call `request_pr_review`, wait for the `Open SWE Review` check on the head commit to complete, read its findings on the PR, fix the clear and valid ones, push, and request another round.
+3. The automated Robin review has gone over the PR for a few rounds: call `request_pr_review`, wait for the `Robin Review` check on the head commit to complete, read its findings on the PR, fix the clear and valid ones, push, and request another round.
    Stop once a round raises nothing obvious left to fix, or after three rounds.
    Leave findings that need the person's judgment unfixed and list them.
    Drafts can be reviewed in this mode, and the review's own completion post is not sent to the thread.

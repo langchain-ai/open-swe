@@ -89,7 +89,7 @@ async def api_set_project_member(
 ) -> Project:
     member = await User.for_handle(body.person)
     if member is None:
-        raise HTTPException(404, f"no Open SWE user {body.person!r}")
+        raise HTTPException(404, f"no Robin user {body.person!r}")
     try:
         return await PROJECTS.set_member(project_id, viewer, member, body.role)
     except ProjectError as exc:

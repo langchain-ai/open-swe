@@ -267,7 +267,7 @@ async def github_webhook(
             "Ignoring GitHub comment from an unregistered sender",
             extra={"github_event": event_type, "sender_login": sender_login},
         )
-        return {"status": "ignored", "reason": "Sender is not a registered Open SWE user"}
+        return {"status": "ignored", "reason": "Sender is not a registered Robin user"}
 
     if (
         event_type == "pull_request_review_comment"

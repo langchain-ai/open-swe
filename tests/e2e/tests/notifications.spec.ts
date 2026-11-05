@@ -289,11 +289,11 @@ for (const review of [false, true]) {
       .poll(async () =>
         (await new Notifications(page).dms())
           .slice(beforeDms)
-          .filter((n) => n.text.includes("alice mentioned you in Open SWE")),
+          .filter((n) => n.text.includes("alice mentioned you in Robin")),
       )
       .toHaveLength(1);
     expect(await desktop.titles()).not.toContain(
-      "alice mentioned you in Open SWE",
+      "alice mentioned you in Robin",
     );
     await recipient.close();
   });

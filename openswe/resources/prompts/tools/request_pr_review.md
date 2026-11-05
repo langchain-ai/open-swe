@@ -1,4 +1,4 @@
-Start the standard Open SWE automated reviewer for a GitHub pull request URL.
+Start the standard Robin automated reviewer for a GitHub pull request URL.
 Do not use it when the request invokes an available skill (`/skill-name`); follow that skill instead.
 The tool refuses draft PRs.
 Never undraft a PR yourself to bypass that refusal; give the author the PR link and ask them to review it carefully before clicking the readiness button.

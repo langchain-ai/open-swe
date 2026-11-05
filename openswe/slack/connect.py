@@ -169,7 +169,7 @@ async def _link_slack_identity(
             "Slack identity not linked: no user for this GitHub login",
             extra={"github_login": github_login},
         )
-        raise HTTPException(409, "no Open SWE account for your GitHub login — sign in again")
+        raise HTTPException(409, "no Robin account for your GitHub login — sign in again")
     await user.link("slack", slack_user_id, email=email, team_id=team_id)
 
 

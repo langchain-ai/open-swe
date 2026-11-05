@@ -71,7 +71,7 @@ test.describe("HTML artifacts", () => {
     await expect(loggedOut).toHaveURL(
       new RegExp(`/login\\?redirect=.*${threadId}.*plan`),
     );
-    await expect(loggedOut.getByText("Sign in to Open SWE")).toBeVisible({
+    await expect(loggedOut.getByText("Sign in to Robin")).toBeVisible({
       timeout: 30_000,
     });
     await loggedOut
@@ -80,7 +80,7 @@ test.describe("HTML artifacts", () => {
     await expect(loggedOut).toHaveURL(/\/fake-gh\/login\/oauth\/authorize/);
     await expect(loggedOut.getByTestId("fake-github-login")).toBeVisible();
     await loggedOut.getByLabel("GitHub user").selectOption(OWNER.login);
-    await loggedOut.getByRole("button", { name: "Authorize Open SWE" }).click();
+    await loggedOut.getByRole("button", { name: "Authorize Robin" }).click();
     await expect(loggedOut).toHaveURL(new RegExp(`/agents/${threadId}/plan$`));
     await expect(loggedOut.getByTestId("plan-review")).toBeVisible({
       timeout: 30_000,

@@ -138,7 +138,7 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     const task = tasks.find((thread) => thread.id === taskThreadId);
     expect(task?.managedTaskFolder).toBe(true);
     expect(task?.cwd).toContain(taskThreadId);
-    await expect(page).toHaveTitle(/Open SWE/);
+    await expect(page).toHaveTitle(/Robin/);
 
     await expect(
       page.getByRole("button", { name: /Cloud threads, \d+/ }),

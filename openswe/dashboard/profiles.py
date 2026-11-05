@@ -422,7 +422,7 @@ async def put_my_profile(
         or update.experimental_conditional_approval
         or update.experimental_classify
     ):
-        raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
+        raise HTTPException(status_code=409, detail="No Robin user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)
     return {
         **normalize_profile_for_response(profile),

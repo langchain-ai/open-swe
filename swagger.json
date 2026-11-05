@@ -10226,7 +10226,7 @@
     }
   },
   "info": {
-    "title": "FastAPI",
+    "title": "Robin",
     "version": "0.1.0"
   },
   "openapi": "3.1.0",
@@ -15501,7 +15501,7 @@
     },
     "/dashboard/api/repos": {
       "get": {
-        "description": "List repos where Open SWE is installed and the user has access.\n\nServed from the per-login cache (stale-while-revalidate) unless\n``refresh=true``, because the fan-out over every installation takes 10s+\nfor users with hundreds of accessible repos.",
+        "description": "List repos where Robin is installed and the user has access.\n\nServed from the per-login cache (stale-while-revalidate) unless\n``refresh=true``, because the fan-out over every installation takes 10s+\nfor users with hundreds of accessible repos.",
         "operationId": "list_repos_dashboard_api_repos_get",
         "parameters": [
           {
@@ -24212,7 +24212,7 @@
     },
     "/github/channel/events": {
       "post": {
-        "description": "The run an @openswe mention on an issue starts on the channel's thread, or ``None``.\n\nWhile the thread waits on an interrupt nothing starts: a non-null answer only\ntells the channel Open SWE would act, so it points the issue to the decision.",
+        "description": "The run an @openswe mention on an issue starts on the channel's thread, or ``None``.\n\nWhile the thread waits on an interrupt nothing starts: a non-null answer only\ntells the channel Robin would act, so it points the issue to the decision.",
         "operationId": "github_channel_event_github_channel_events_post",
         "requestBody": {
           "content": {
@@ -24331,7 +24331,7 @@
     },
     "/mda/resolve-user": {
       "post": {
-        "description": "The Open SWE user a channel's verified sender is, or ``None`` for MDA's default.",
+        "description": "The Robin user a channel's verified sender is, or ``None`` for MDA's default.",
         "operationId": "resolve_user_mda_resolve_user_post",
         "requestBody": {
           "content": {
@@ -24564,7 +24564,7 @@
     },
     "/webhooks/slack/commands": {
       "post": {
-        "description": "Answer a single `/oswe` question, ephemerally and without a Slack thread.",
+        "description": "Answer `/robin` and legacy `/oswe` questions without a Slack thread.",
         "operationId": "slack_command_webhooks_slack_commands_post",
         "responses": {
           "200": {

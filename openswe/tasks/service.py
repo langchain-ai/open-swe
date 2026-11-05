@@ -95,7 +95,7 @@ class Actor:
         user = await user_for_login(self.login)
         if user is None:
             raise PermissionError(
-                "Task operations require the thread owner to have an Open SWE account"
+                "Task operations require the thread owner to have a Robin account"
             )
         owner = await metadata.owner()
         is_owner = owner.id == user.id

@@ -22,7 +22,7 @@ async def list_repos(
     refresh: bool = False,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
-    """List repos where Open SWE is installed and the user has access.
+    """List repos where Robin is installed and the user has access.
 
     Served from the per-login cache (stale-while-revalidate) unless
     ``refresh=true``, because the fan-out over every installation takes 10s+

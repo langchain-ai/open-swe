@@ -1026,7 +1026,7 @@ class ReviewPicks:
             await self._close(
                 reviewer,
                 f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
-                "Open SWE removed you as a reviewer.",
+                "Robin removed you as a reviewer.",
             )
         return await HumanReviewRequest.get(request.id) or current
 

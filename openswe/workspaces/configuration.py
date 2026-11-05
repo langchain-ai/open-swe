@@ -16,7 +16,7 @@ async def require_kitchen_eligible(channel_ids: list[str]) -> None:
         if channel is None or not channel.can_be_kitchen:
             raise ValueError(
                 f"Slack channel {channel_id} cannot be a kitchen channel: choose an internal "
-                "Slack channel that Open SWE has joined."
+                "Slack channel that Robin has joined."
             )
 
 

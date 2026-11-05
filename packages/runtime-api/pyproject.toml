@@ -1,7 +1,7 @@
 [project]
 name = "open-swe-runtime-api"
 version = "0.0.0"
-description = "The typed contract between Open SWE's backend and its Managed Deep Agents runtime (mda/): every call MDA makes and what it answers."
+description = "The typed contract between Robin's backend and its Managed Deep Agents runtime (mda/): every call MDA makes and what it answers."
 requires-python = ">=3.14"
 dependencies = [
     "pydantic>=2.11",

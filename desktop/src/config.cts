@@ -2,8 +2,8 @@ const path = require("node:path");
 
 const APP_ORIGIN = "open-swe://app";
 const APP_URL = `${APP_ORIGIN}/`;
-const APP_NAME = "Open SWE";
-const DEVELOPMENT_APP_NAME = "Open SWE Development";
+const APP_NAME = "Robin";
+const DEVELOPMENT_APP_NAME = "Robin Development";
 const APP_USER_MODEL_ID = "com.langchain.openswe";
 const DEVELOPMENT_APP_USER_MODEL_ID = "com.langchain.openswe.dev";
 const DEVELOPMENT_USER_DATA_DIRECTORY = "Open SWE Development";

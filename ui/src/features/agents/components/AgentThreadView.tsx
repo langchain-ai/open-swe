@@ -799,7 +799,7 @@ export function AgentThreadView({
             >
               {bridgeError
                 ? `This thread's checkout on This Mac can't be served: ${bridgeError}`
-                : `This thread runs in a checkout on another Mac that isn't serving it right now. Open it in the Open SWE app there to continue it${canMove ? ", or move it to Cloud" : ""}.`}
+                : `This thread runs in a checkout on another Mac that isn't serving it right now. Open it in the Robin app there to continue it${canMove ? ", or move it to Cloud" : ""}.`}
             </Banner>
           </div>
         )}
