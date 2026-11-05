@@ -54,4 +54,4 @@ const [person] = await host.people.get(["ada"])
 
 React bindings live in `@openswe/plugin-sdk/react` (`PluginHostProvider`, `useHostContext`, `useDashboardTheme`), and a Yjs provider for live rooms in `@openswe/plugin-sdk/yjs` (`RoomProvider`).
 
-The [plugin guide](https://github.com/langchain-ai/open-swe/blob/main/docs/PLUGINS.md) covers the whole API, the sandbox and building a bundle; `plugins/starter` in the Open SWE repository is a small app to start from.
+The [plugin guide](https://github.com/langchain-ai/open-swe/blob/main/docs/PLUGINS.md) covers the whole API, the sandbox and building a bundle; `plugins/starter` in the Open SWE repository is a small app to start from, and `plugins/docs` a complete one.
