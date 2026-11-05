@@ -32,7 +32,7 @@ from openswe.users import User, UserIdentity
 from tests.conftest import FakeUserRecords
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
-_UNREGISTERED = "its author is not an Open SWE user or an allowed GitHub bot"
+_UNREGISTERED = "its author is not a Robin user or an allowed GitHub bot"
 
 
 async def test_review_backlink_survives_card_reposts_without_duplicate_comments() -> None:
