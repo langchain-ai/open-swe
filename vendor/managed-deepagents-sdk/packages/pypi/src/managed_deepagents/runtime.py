@@ -194,7 +194,7 @@ if TYPE_CHECKING:
     from managed_deepagents.identity import (
         IdentityDefinitionLike,
     )
-    from managed_deepagents.sandbox import SandboxDefinition, SandboxReplacement
+    from managed_deepagents.sandbox import SandboxDefinition
 
 
 class ManagedRunConfig(RunnableConfig, total=False):
@@ -2258,26 +2258,6 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             return (await self._abackend()).id
         return name
 
-    async def areplace(
-        self, sandbox: SandboxDefinition | None = None, *, missing_only: bool = False
-    ) -> SandboxReplacement:
-        """Replace this run's box with a fresh one under its name, from ``sandbox``'s options."""
-        source = self._source
-        current = self._sandbox()
-        backend, replacement = await asyncio.to_thread(
-            _replace_managed_sandbox,
-            current,
-            sandbox if sandbox is not None else current,
-            self._config(),
-            source.connectors,
-            source.identity,
-            source.selection,
-            missing_only=missing_only,
-        )
-        source.proxy_config_sync.invalidate(replacement.new_name)
-        self._keep(backend)
-        return replacement
-
     def _config(self) -> ManagedRunConfig | None:
         return _effective_sandbox_run_config(
             self._source.run_config, bound_configurable=self._bound_configurable
@@ -2671,77 +2651,6 @@ def _recover_managed_sandbox(
         with _managed_sandbox_lock:
             _managed_sandboxes[key] = replacement
         return backend
-
-
-def _replace_managed_sandbox(
-    sandbox: SandboxDefinition,
-    replacement: SandboxDefinition,
-    config: ManagedRunConfig | None,
-    connectors: list[Connector] | None = None,
-    identity: IdentityDefinitionLike | None = None,
-    selection: _SandboxSelection | None = None,
-    *,
-    missing_only: bool = False,
-) -> tuple[SandboxBackendProtocol, SandboxReplacement]:
-    """Create a fresh box under the thread's box name; keep the old one, stopped and renamed.
-
-    Renaming frees the name for the fresh box, while the old box stays until its
-    lifecycle deletes it, under a name that keeps the deployment prefix.
-    """
-    from managed_deepagents.sandbox import SandboxReplacement  # noqa: PLC0415
-
-    key = _sandbox_scope_key(sandbox, config, selection)
-    with _sandbox_key_lock(key):
-        with _managed_sandbox_lock:
-            entry = _managed_sandboxes.get(key)
-        name = _string_option(sandbox.options.get("_openswe_sandbox_id"))
-        if name is None and entry is not None:
-            name = entry.host_name
-        if name is None:
-            deployment = _managed_deployment_name()
-            if deployment:
-                name = _managed_sandbox_name(deployment, key)
-        if name is None:
-            raise RuntimeError("This run's sandbox has no name to replace it under")
-        client = _sandbox_client_for(replacement)
-        existing = _fetch_sandbox(client, name, preserve_existing=True)
-        if missing_only and existing is not None:
-            raise RuntimeError(f"Sandbox {name!r} exists; refusing automatic replacement")
-        retired = name
-        fresh_selection = _sandbox_selection(replacement)
-        stop_error: str | None = None
-        if existing is not None:
-            suffix = f"-old-{secrets.token_hex(2)}"
-            retired = f"{name[: _MAX_SANDBOX_NAME_LENGTH - len(suffix)]}{suffix}"
-            _await_if_needed(client.update_sandbox(name, new_name=retired))
-            try:
-                _await_if_needed(client.stop_sandbox(retired))
-            except Exception as error:  # noqa: BLE001 - the fresh box stands either way; report it
-                stop_error = str(error) or type(error).__name__
-        backend, host_name, sandbox_id = _create_langsmith_sandbox(
-            replacement,
-            config=config,
-            connectors=connectors,
-            identity=identity,
-            scope_key=key,
-            selection=fresh_selection,
-            recovery_name=name,
-        )
-        fresh = _ManagedSandboxEntry(
-            backend,
-            host_name=host_name,
-            sandbox_id=sandbox_id,
-            selection_fingerprint=fresh_selection.fingerprint,
-        )
-        fresh.synced_threads.add(_thread_sync_key(config))
-        with _managed_sandbox_lock:
-            _managed_sandboxes[key] = fresh
-    return backend, SandboxReplacement(
-        old_name=retired,
-        new_name=host_name or name,
-        old_stopped=stop_error is None,
-        stop_error=stop_error,
-    )
 
 
 def _managed_sandbox_of(backend: object) -> _LazyManagedSandboxBackend:
@@ -3400,7 +3309,6 @@ def _claim_langsmith_sandbox(
 ) -> _SandboxClaim:
     """Adopt this scope's LangSmith sandbox or create it; without ``wait``, before it boots."""
     from managed_deepagents.sandbox import (  # noqa: PLC0415
-        BoundSandboxMissingError,
         declared_create_fields,
         is_per_thread,
         owning_thread,
@@ -3434,9 +3342,7 @@ def _claim_langsmith_sandbox(
     elif bound_name := _string_option(sandbox.options.get("_openswe_sandbox_id")):
         bound = _adopt_sandbox(client, bound_name, preserve_existing=True)
         if bound is None:
-            raise BoundSandboxMissingError(
-                f"The thread's bound sandbox {bound_name!r} no longer exists"
-            )
+            raise RuntimeError(f"The thread's bound sandbox {bound_name!r} no longer exists")
         if _sandbox_name_blocked(bound_name):
             raise RuntimeError(f"The thread's bound sandbox {bound_name!r} was invalidated")
         langsmith_sandbox, adopted = bound, True

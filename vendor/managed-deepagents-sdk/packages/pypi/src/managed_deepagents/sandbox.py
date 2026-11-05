@@ -159,20 +159,6 @@ _RESERVED_CREATE_FIELDS = frozenset(
 )
 
 
-class BoundSandboxMissingError(RuntimeError):
-    """The provider confirmed that the thread's bound workspace no longer exists."""
-
-
-@dataclass(frozen=True)
-class SandboxReplacement:
-    """A thread's box replaced by a fresh one under its name; the old box is kept, renamed."""
-
-    old_name: str
-    new_name: str
-    old_stopped: bool
-    stop_error: str | None = None
-
-
 async def open_sandbox(backend: object, *, wait: bool = True) -> str:
     """Adopt or create the run's managed sandbox now and return its name.
 
@@ -183,20 +169,6 @@ async def open_sandbox(backend: object, *, wait: bool = True) -> str:
     from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
 
     return await _managed_sandbox_of(backend).aopen(wait=wait)
-
-
-async def replace_sandbox(
-    backend: object, sandbox: SandboxDefinition | None = None, *, missing_only: bool = False
-) -> SandboxReplacement:
-    """Give the run's thread a fresh managed sandbox under the same name.
-
-    The fresh box is created from ``sandbox``'s options, the run's own by default.
-    The old box is stopped and kept, renamed, until its lifecycle deletes it.
-    ``backend`` is ``runtime.backend``.
-    """
-    from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
-
-    return await _managed_sandbox_of(backend).areplace(sandbox, missing_only=missing_only)
 
 
 def is_per_thread(options: Mapping[str, object]) -> bool:
@@ -263,10 +235,8 @@ __all__ = [
     "ProxyHeader",
     "ProxyRule",
     "SandboxDefinition",
-    "SandboxReplacement",
     "basic",
     "bearer",
     "normalize_sandbox_options",
     "open_sandbox",
-    "replace_sandbox",
 ]

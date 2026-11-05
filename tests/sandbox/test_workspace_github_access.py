@@ -275,43 +275,6 @@ async def test_a_reconnecting_reviewer_without_a_known_pr_gets_no_repository_at_
 
 
 @pytest.mark.parametrize("kind", ["reviewer", "review-scout", "agent"])
-@pytest.mark.parametrize("known_repo", [True, False])
-async def test_a_replaced_sandbox_reconnects_on_the_authenticated_run_scope(
-    monkeypatch: pytest.MonkeyPatch,
-    github: list[dict[str, object]],
-    kind: str,
-    known_repo: bool,
-) -> None:
-    monkeypatch.setattr(lifecycle, "thread_token_repositories", AsyncMock(return_value=None))
-    monkeypatch.setattr(
-        lifecycle,
-        "get_sandbox_metadata",
-        AsyncMock(return_value={"sandbox_id": "sandbox", "sandbox_owner": "mda"}),
-    )
-    parts = run_kinds()[kind]
-    run = RemoteRun(
-        thread_id="thread",
-        assistant_id=kind,
-        configurable={"repo": {"owner": "acme", "name": "api"}} if known_repo else {},
-    )
-
-    await TokenRun.answer(parts, run, "sandbox_replaced", {})
-    assert await proxy.maybe_refresh_proxy_token(
-        "thread", now=datetime.now(UTC) + timedelta(hours=1)
-    )
-
-    expected = (
-        "x-access-token:repos:11;actions=read,checks=read,contents=read,issues=read,"
-        "metadata=read,pull_requests=read,statuses=read"
-        if known_repo
-        else ""
-    )
-    if kind == "agent":
-        expected = "x-access-token:repos:11,22"
-    assert injected_auth(github) == [expected, expected]
-
-
-@pytest.mark.parametrize("kind", ["reviewer", "review-scout", "agent"])
 async def test_mda_alone_writes_the_proxy_of_its_sandbox_where_the_token_reaches_everything(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
@@ -334,7 +297,13 @@ async def test_mda_alone_writes_the_proxy_of_its_sandbox_where_the_token_reaches
     )
 
     managed = await RunSandbox(run_config(run), reviews=parts.reviews).managed()
-    await TokenRun.answer(parts, run, "sandbox_replaced", {})
+    await lifecycle.ensure_sandbox_for_thread(
+        "thread",
+        github_proxy_repositories=["acme/api"] if parts.reviews else None,
+        github_proxy_permissions=sandbox_access.READ_ONLY_REVIEW_PERMISSIONS
+        if parts.reviews
+        else None,
+    )
     refreshed = await TokenRun.answer(parts, run, "refresh_github_proxy", {})
 
     assert managed is not None

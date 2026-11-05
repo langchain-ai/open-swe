@@ -1,18 +1,18 @@
-# `open_sandbox` and `replace_sandbox`
+# `open_sandbox`
 
-**Verdict: upstream as-is.** Generic operations on the run's managed sandbox.
+**Verdict: upstream as-is.**
+Open the run's managed sandbox before its first tool call.
 
-**Changed:** `managed_deepagents/sandbox.py` (`open_sandbox`, `replace_sandbox`, `SandboxReplacement`), `runtime.py` (`_LazyManagedSandboxBackend.aopen` / `areplace`, `_replace_managed_sandbox`, `_managed_sandbox_of`), `__init__.py` (exports).
+**Changed:** `managed_deepagents/sandbox.py` (`open_sandbox`), `runtime.py` (`_LazyManagedSandboxBackend.aopen`, `_managed_sandbox_of`), `__init__.py` (exports).
 
 ## What
 
-- `open_sandbox(runtime.backend)` adopts or creates the run's sandbox now, as its first use would, and returns its name.
-- `replace_sandbox(runtime.backend, definition)` gives the thread a fresh sandbox under the same name, created from `definition`'s options. The old sandbox is renamed (keeping the deployment prefix) and stopped, not deleted.
+`open_sandbox(runtime.backend)` adopts or creates the run's sandbox now, as its first use would, and returns its name.
 
 ## Why
 
-Open SWE's backend works in the same sandbox as MDA, so it needs the sandbox's name before the run prepares, and its `recreate_sandbox` tool gives a thread a fresh sandbox.
+Open SWE's backend works in the same sandbox as MDA, so it needs the sandbox's name before the run prepares.
 
 ## Upstream
 
-Both as they stand, unchanged.
+As it stands, unchanged.

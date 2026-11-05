@@ -1,4 +1,4 @@
-"""The thread's sandbox as MDA's own sandbox: declared, opened as the run starts, replaced on request.
+"""The thread's sandbox as MDA's own sandbox: declared and opened as the run starts.
 
 The graph declares one sandbox (``sandbox``) for every run; each run's catalog says which
 sandbox it uses and the options MDA creates it with (``SandboxSpec``), or that it has
@@ -9,9 +9,6 @@ asked for and its name reported, so the backend binds the thread to it; it boots
 the run prepares and calls the model, and the first call that needs it waits for it.
 Opening and booting are retried while the sandbox service fails transiently; otherwise
 the backend hears why, from preparing or from the call that needed the sandbox.
-``recreate_sandbox`` on such a sandbox comes back from the backend as what to replace it
-with; MDA replaces it, the backend reconnects, and the call answers as it does
-in-process.
 
 The backend writes the sandbox's proxy config, unless the catalog names the connection
 the sandbox's GitHub rules carry (``SandboxSpec.github_proxy``). Then MDA writes all of
@@ -21,13 +18,11 @@ once the sandbox is open (``runtime_api.sandbox_proxy``). It writes it before th
 prepares too, retrying for as long as the host takes to suspend an idle sandbox, while
 the sandbox API takes no proxy config, and then a failure ends the run, since the
 backend writes none of it. It writes it again every few minutes before a model or
-tool call, for the commands the backend runs in the sandbox, and after a replacement,
-which keeps the config it was created with until then. A backend that refuses the
+tool call, for the commands the backend runs in the sandbox. A backend that refuses the
 call writes it itself.
 """
 
 import asyncio
-import json
 import logging
 import random
 import re
@@ -55,17 +50,13 @@ from langsmith.sandbox import (
 )
 from managed_deepagents import ConnectionNotFoundError, basic, bearer, connections, define_sandbox
 from managed_deepagents.sandbox import (
-    BoundSandboxMissingError,
     SandboxDefinition,
     open_sandbox,
-    replace_sandbox,
 )
-from pydantic import JsonValue, TypeAdapter, ValidationError
+from pydantic import JsonValue
 from runtime_api.catalog import SandboxCreate, SandboxSpec
 from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import call
-from runtime_api.loop import SANDBOX_REPLACED
-from runtime_api.operations import RunRequest
 from runtime_api.sandbox_proxy import (
     GIT_TOKEN_USERNAME,
     GITHUB_PROXY_RULES,
@@ -76,19 +67,16 @@ from runtime_api.sandbox_proxy import (
 from rt.backend import (
     BackendCallError,
     BackendRefusedError,
-    OpenSweBackend,
     Run,
     RunContext,
     RunLocal,
     current_run,
 )
-from rt.sandbox_setup import sandbox_setup
 from rt.tools import run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
 
-_json_object = TypeAdapter(dict[str, JsonValue])
 # As the backend's sandbox: a command without a timeout of its own gets five minutes.
 EXECUTE_TIMEOUT_SECONDS: Final = 300
 # A partial sandbox-service outage passes within a minute or two; a run waits that long.
@@ -195,15 +183,6 @@ class SandboxProxyWriter:
             "rules": [*_github_rules(github), *(rules if isinstance(rules, list) else [])],
         }
 
-    def replaced(self) -> None:
-        """The sandbox was replaced, so the backend's part, which follows the thread's rules the
-        replacement may change, is asked for again.
-
-        Until then MDA writes none of it, and the new sandbox keeps the config it was created
-        with: never the old sandbox's workspace rules.
-        """
-        self._backend_config = None
-
     async def write(self, runtime: object, sandbox_id: str | None = None) -> None:
         """Have MDA write it on sandbox ``sandbox_id`` (the run's) now; raises when it could not.
 
@@ -308,7 +287,6 @@ class OpenedSandbox:
 
     sandbox_id: str | None = None
     error: str | None = None
-    workspace_lost: bool = False
 
 
 def _transient(exc: BaseException) -> bool:
@@ -399,22 +377,11 @@ async def _first_write(proxy: SandboxProxyWriter, runtime: Runtime, sandbox_id: 
 
 
 async def _opening(backend: object, *, wait: bool) -> OpenedSandbox:
-    """``backend``'s sandbox, retried while the sandbox service fails transiently.
-
-    A bound sandbox that is gone is replaced, and the run told its workspace was lost.
-    """
+    """``backend``'s sandbox, retried while the sandbox service fails transiently."""
     deadline = time.monotonic() + OPEN_MAX_ELAPSED_SECONDS
     for backoff in OPEN_BACKOFF_SECONDS:
         try:
             return OpenedSandbox(sandbox_id=await open_sandbox(backend, wait=wait))
-        except BoundSandboxMissingError:
-            try:
-                await replace_sandbox(backend, missing_only=True)
-                return OpenedSandbox(
-                    sandbox_id=await open_sandbox(backend, wait=wait), workspace_lost=True
-                )
-            except Exception as exc:
-                return _not_opened(exc)
         except Exception as exc:
             delay = backoff * random.uniform(0.8, 1.2)
             if not _transient(exc) or time.monotonic() + delay > deadline:
@@ -432,13 +399,9 @@ async def _opening(backend: object, *, wait: bool) -> OpenedSandbox:
 
 
 class ManagedSandboxMiddleware(AgentMiddleware):
-    """Carry out ``recreate_sandbox`` for the sandbox MDA owns, and keep the proxy config
-    MDA writes there fresh."""
+    """Keep the proxy config MDA writes on the sandbox fresh."""
 
     trace_policy = MIDDLEWARE_TRACE_POLICY
-
-    def __init__(self, backend: OpenSweBackend) -> None:
-        self._backend = backend
 
     async def awrap_model_call(
         self,
@@ -459,47 +422,4 @@ class ManagedSandboxMiddleware(AgentMiddleware):
             # A resumed run reaches a tool call before any model call, and its sandbox may
             # hold a token that expired while it waited.
             await proxy.keep_fresh(request.runtime)
-        result = await handler(request)
-        if request.tool_call["name"] != "recreate_sandbox" or not isinstance(result, ToolMessage):
-            return result
-        spec = self._backend.run.planned.sandbox
-        if spec is None:
-            return result
-        try:
-            reply = _json_object.validate_json(result.text)
-            create = SandboxCreate.model_validate(reply.get("replace"))
-        except ValidationError:
-            return result
-        files = getattr(request.runtime, "backend", None)
-        try:
-            # Created with the proxy config the backend chose for it, never the one MDA
-            # last wrote: a cloud identity rule applies only at create.
-            replacement = await replace_sandbox(files, definition(create, spec.thread_id))
-            await call(self._backend, SANDBOX_REPLACED, RunRequest(run_id=run_id()))
-        except Exception as exc:
-            logger.warning("Could not replace the thread's sandbox", exc_info=True)
-            answer: dict[str, JsonValue] = {"success": False, "error": str(exc)}
-        else:
-            if proxy is not None:
-                proxy.replaced()
-                try:
-                    await proxy.write(request.runtime, replacement.new_name)
-                except GraphBubbleUp:
-                    raise
-                except Exception:
-                    logger.warning(
-                        "Could not write the replaced sandbox's proxy config", exc_info=True
-                    )
-            # Readied through a handle that writes the new sandbox's own proxy config, never
-            # the one this hook's handle resolved for the old sandbox.
-            sandbox_setup(self._backend.run).start(
-                _rebound(request.runtime) if proxy is not None else files
-            )
-            answer = {
-                "success": True,
-                "old_sandbox_id": replacement.old_name,
-                "new_sandbox_id": replacement.new_name,
-                "old_sandbox_stopped": replacement.old_stopped,
-                "old_sandbox_stop_error": replacement.stop_error,
-            }
-        return result.model_copy(update={"content": json.dumps(answer)})
+        return await handler(request)
