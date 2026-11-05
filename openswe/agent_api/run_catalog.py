@@ -177,14 +177,21 @@ class RunCatalog:
             raise RuntimeError("Starting the run picked no models")
 
         def spec(choice: ModelChoice) -> ModelSpec:
-            return model_spec(choice.model_id, choice.kwargs)
+            result = model_spec(choice.model_id, choice.kwargs)
+            return (
+                result.model_copy(update={"fallback": None})
+                if self.surface.loop.pinned_model
+                else result
+            )
 
         return RunModels(
             model=spec(models.main),
             subagent_model=spec(models.subagent),
             use_gateway=models.use_gateway,
             routes={route: spec(choice) for route, choice in models.routes.items()},
-            vision=None if models.vision is None else spec(models.vision),
+            vision=None
+            if self.surface.loop.pinned_model or models.vision is None
+            else spec(models.vision),
         )
 
     def build(self) -> Catalog:

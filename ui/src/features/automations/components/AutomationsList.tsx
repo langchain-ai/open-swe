@@ -57,7 +57,8 @@ export function AutomationsList({
   onTabChange: (tab: AutomationsTab) => void
 }) {
   const schedulesQuery = useAgentSchedules()
-  const canManage = useSession().data?.is_admin === true
+  const session = useSession().data
+  const canManage = Boolean(session)
   const schedules = schedulesQuery.data ?? []
 
   const total = schedules.length
@@ -73,14 +74,14 @@ export function AutomationsList({
         </Text>
         <p className="mt-space-1 text-xs text-secondary">
           Run Open SWE on a schedule or on GitHub, Slack, and Linear events.
-          Each run starts a fresh agent thread.{" "}
-          {!canManage && "Workspace admins manage automation setup."}
+          Each run starts a fresh agent thread. Each user can own up to 3
+          automations. Non-admin automations use Fast and stop at 30M tokens per
+          UTC day.
         </p>
         {canManage && (
           <Banner intent="neutral" className="mt-space-3">
             Automations can also be listed and managed through Open SWE. Start a
-            new thread, turn on Admin next to the model picker, then ask the
-            agent to make the change.
+            private thread and ask the agent to make the change.
           </Banner>
         )}
         <GroupedTabs
@@ -134,7 +135,11 @@ export function AutomationsList({
                     <AutomationRow
                       key={schedule.id}
                       schedule={schedule}
-                      canManage={canManage}
+                      canManage={
+                        session?.is_admin === true ||
+                        (!!session?.user_id &&
+                          schedule.ownerId === session.user_id)
+                      }
                     />
                   ))}
                 </div>

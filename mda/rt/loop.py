@@ -503,6 +503,8 @@ class RunLoop:
 
     async def _model_for(self, held: Mapping[str, object]) -> ModelSpec | None:
         """The run's own model, a route's, or the one a person asked for."""
+        if self.rules.pinned_model:
+            return self._models.model if self._models else None
         requested = held.get("requested_model")
         if isinstance(requested, str) and requested:
             return await self._chosen_model(requested, held.get("requested_effort"))
