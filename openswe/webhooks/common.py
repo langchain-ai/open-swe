@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -1394,11 +1395,19 @@ async def fetch_open_pr_for_branch(
         ).open_pull_for_branch(head_ref)
 
 
-def _normalized_diff_hash(diff_text: str) -> str:
-    normalized = "\n".join(
-        line.rstrip() for line in diff_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    ).strip()
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+def _normalized_diff_hash(diff_text: str) -> str | None:
+    lines: list[str] = []
+    for section in re.split(r"(?=^diff --git )", diff_text, flags=re.MULTILINE):
+        binary = "\nBinary files " in section or "\nGIT binary patch" in section
+        if binary and not re.search(
+            r"^index [0-9a-f]{40}\.\.[0-9a-f]{40}(?: |$)", section, re.MULTILINE
+        ):
+            return None
+        for line in section.split("\n"):
+            if not binary and line.startswith("index "):
+                continue
+            lines.append(re.sub(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@", "@@", line))
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
 async def _fetch_compare_diff(
@@ -1440,14 +1449,19 @@ async def is_pr_diff_unchanged_since_last_review(
     last_reviewed_sha: str,
     head_sha: str,
     token: str,
+    last_reviewed_base_sha: str = "",
+    base_sha: str = "",
 ) -> bool:
     previous_diff, current_diff = await asyncio.gather(
-        _fetch_compare_diff(repo_config, base_ref, last_reviewed_sha, token=token),
-        _fetch_compare_diff(repo_config, base_ref, head_sha, token=token),
+        _fetch_compare_diff(
+            repo_config, last_reviewed_base_sha or base_ref, last_reviewed_sha, token=token
+        ),
+        _fetch_compare_diff(repo_config, base_sha or base_ref, head_sha, token=token),
     )
     if previous_diff is None or current_diff is None:
         return False
-    return _normalized_diff_hash(previous_diff) == _normalized_diff_hash(current_diff)
+    previous_hash = _normalized_diff_hash(previous_diff)
+    return previous_hash is not None and previous_hash == _normalized_diff_hash(current_diff)
 
 
 async def get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:

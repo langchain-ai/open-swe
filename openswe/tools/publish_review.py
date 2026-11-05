@@ -140,6 +140,7 @@ async def publish_review(
         try:
             return await _publish_review_eval_dry_run_async(
                 head_sha=head_sha,
+                base_sha=cfg.base_sha or "",
                 severity_threshold=severity_threshold,
             )
         except ReviewerThreadMissingError as exc:
@@ -156,6 +157,7 @@ async def publish_review(
             pr_number=pr_number,
             head_sha=head_sha,
             token=token,
+            base_sha=cfg.base_sha or "",
             severity_threshold=severity_threshold,
             is_re_review=is_re_review,
             langgraph_run_id=_current_run_id(config),
@@ -261,6 +263,7 @@ async def _publish_review_eval_dry_run_async(
     *,
     head_sha: str,
     severity_threshold: Severity,
+    base_sha: str = "",
 ) -> dict[str, Any]:
     """Simulate publish_review for benchmark runs without posting to GitHub."""
     thread_id = get_thread_id_from_runtime()
@@ -287,6 +290,7 @@ async def _publish_review_eval_dry_run_async(
     await set_reviewer_thread_metadata(
         thread_id,
         last_reviewed_sha=head_sha,
+        last_reviewed_base_sha=base_sha,
         extra={REVIEWER_EVAL_PUBLICATION_KEY: publication},
     )
 
@@ -313,6 +317,7 @@ async def _publish_review_async(
     trace_link_config_override: bool | None = None,
     state: dict[str, Any] | None = None,
     assessment: ReviewAssessment | None = None,
+    base_sha: str = "",
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
     dry_run = True
@@ -359,8 +364,13 @@ async def _publish_review_async(
     # mid-run updated the live head in thread metadata. Prefer that so the
     # review anchors to (and last_reviewed_sha advances to) the commit actually
     # reviewed, not the stale one this run was created for.
-    head_sha = await resolve_review_head_sha(thread_id, RunConfig(head_sha=head_sha))
-    goal_review = GoalReview.of(await get_thread_metadata(thread_id))
+    reviewed_head_sha = await resolve_review_head_sha(thread_id, RunConfig(head_sha=head_sha))
+    metadata = await get_thread_metadata(thread_id)
+    if reviewed_head_sha != head_sha:
+        live_base_sha = metadata.get("review_base_sha")
+        base_sha = live_base_sha if isinstance(live_base_sha, str) else ""
+    head_sha = reviewed_head_sha
+    goal_review = GoalReview.of(metadata)
     if goal_review is not None:
         return await goal_review.publish(
             reviewer_thread_id=thread_id,
@@ -368,6 +378,7 @@ async def _publish_review_async(
             repo=repo,
             pr_number=pr_number,
             head_sha=head_sha,
+            base_sha=base_sha,
             token=token,
             severity_threshold=severity_threshold,
         )
@@ -456,7 +467,9 @@ async def _publish_review_async(
         await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
             reviewer_thread_id=thread_id, head_sha=head_sha, finding_count=0
         )
-        await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+        await set_reviewer_thread_metadata(
+            thread_id, last_reviewed_sha=head_sha, last_reviewed_base_sha=base_sha
+        )
         await _record_reviewer_usage(
             thread_id=thread_id,
             owner=owner,
@@ -745,7 +758,9 @@ async def _publish_review_async(
             surfaced_count=len(inline_comments),
         )
 
-    await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+    await set_reviewer_thread_metadata(
+        thread_id, last_reviewed_sha=head_sha, last_reviewed_base_sha=base_sha
+    )
     await _record_reviewer_usage(
         thread_id=thread_id,
         owner=owner,

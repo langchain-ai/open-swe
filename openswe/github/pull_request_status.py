@@ -70,6 +70,21 @@ query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $
   }
 }
 """
+_REVIEW_THREAD_ROOTS_QUERY = """
+query PullRequestReviewThreadRoots($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id isResolved isOutdated
+          comments(first: 1) { nodes { fullDatabaseId } }
+        }
+      }
+    }
+  }
+}
+"""
 _ALL_REVIEW_THREADS_QUERY = """
 query PullRequestAllReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -576,16 +591,15 @@ class PullRequestClient:
     async def delete_review(self, review_id: int) -> None:
         await self.repo.delete(f"pulls/{self.number}/reviews/{review_id}")
 
-    async def review_threads(self) -> list[dict[str, Any]]:
-        """Every review thread with its position and comments, pending ones included."""
+    async def review_threads(self, *, roots_only: bool = False) -> list[dict[str, Any]]:
+        """Every review thread, optionally with only its root comment's identity."""
+        query = _REVIEW_THREAD_ROOTS_QUERY if roots_only else _ALL_REVIEW_THREADS_QUERY
         threads: list[dict[str, Any]] = []
         cursor: str | None = None
         seen: set[str] = set()
         while True:
             pull = _graphql_pull(
-                await self.repo.graphql(
-                    _ALL_REVIEW_THREADS_QUERY, {"number": self.number, "cursor": cursor}
-                )
+                await self.repo.graphql(query, {"number": self.number, "cursor": cursor})
             )
             connection = pull.get("reviewThreads") if pull is not None else None
             if not isinstance(connection, Mapping) or not isinstance(connection.get("nodes"), list):

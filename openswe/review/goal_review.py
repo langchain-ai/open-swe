@@ -86,6 +86,7 @@ class GoalReview(BaseModel):
         repo: str,
         pr_number: int,
         head_sha: str,
+        base_sha: str,
         token: str,
         severity_threshold: Severity,
     ) -> dict[str, JsonValue]:
@@ -110,7 +111,9 @@ class GoalReview(BaseModel):
                 head_sha=head_sha,
                 finding_count=0,
             )
-        await set_reviewer_thread_metadata(reviewer_thread_id, last_reviewed_sha=head_sha)
+        await set_reviewer_thread_metadata(
+            reviewer_thread_id, last_reviewed_sha=head_sha, last_reviewed_base_sha=base_sha
+        )
         handed_off = not open_findings and self.handoff
         if handed_off:
             await self._end(reviewer_thread_id)
