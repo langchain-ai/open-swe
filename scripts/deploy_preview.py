@@ -48,12 +48,13 @@ class SupersededDeploy(Exception):
 
 
 async def preview_sha() -> str:
+    ref = f"refs/heads/{os.environ.get('PREVIEW_BRANCH') or 'preview'}"
     process = await asyncio.create_subprocess_exec(
         "git",
         "ls-remote",
         "--exit-code",
         "origin",
-        f"refs/heads/{os.environ.get('PREVIEW_BRANCH') or 'preview'}",
+        ref,
         cwd=Path(__file__).resolve().parent.parent,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -69,7 +70,7 @@ async def preview_sha() -> str:
     fields = stdout.decode().split()
     if (
         len(fields) != 2
-        or fields[1] != "refs/heads/preview"
+        or fields[1] != ref
         or len(fields[0]) != 40
         or any(character not in "0123456789abcdef" for character in fields[0])
     ):
