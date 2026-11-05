@@ -7,12 +7,12 @@ dependencies = [
     "managed-deepagents>=0.10.1",
     "deepagents==0.7.32",
     # Remove this explicit dependency after upgrading to deepagents 0.7.33 once released.
-    "langchain-core>=1.7.4,<2",
-    "langchain[mcp]>=1.4.8",
-    "langchain-anthropic>=1.7.9",
+    "langchain-core>=1.7.6,<2",
+    "langchain[mcp]>=1.4.9",
+    "langchain-anthropic>=1.7.10",
     # Fireworks models the dashboard offers, such as Kimi.
-    "langchain-fireworks>=1.7.1,<2.0.0",
-    "langchain-openai>=1.7.3,<2.0.0",
+    "langchain-fireworks>=1.7.2,<2.0.0",
+    "langchain-openai>=1.7.4,<2.0.0",
     "langchain-quickjs>=0.3.11,<0.4.0",
     "langsmith>=0.14.17",
     "httpx2>=2.12.0",
