@@ -1,5 +1,7 @@
 """Report stale workspace images to operators without interrupting users."""
 
+from datetime import timedelta
+
 from openswe.slack.alerts import alerts
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.workspaces.refresh import is_snapshot_stale
@@ -14,13 +16,13 @@ class StaleWorkspaceReporter:
         await alerts.warning(
             "Run booted a stale workspace image",
             details={
-                "workspace": workspace.slug,
-                "agent_thread_id": thread_id,
-                "thread_url": dashboard_thread_url(thread_id),
-                "captured_at": workspace.last_captured_at,
-                "refresh_status": workspace.refresh_status,
-                "refresh_run_id": workspace.refresh_run_id,
-                "refresh_started_at": workspace.refresh_started_at,
-                "refresh_finished_at": workspace.refresh_finished_at,
+                "Workspace": workspace.slug,
+                "Run": dashboard_thread_url(thread_id) or thread_id,
+                "Image captured": workspace.last_captured_at,
+                "Refresh status": workspace.refresh_status,
+                "Refresh run": workspace.refresh_run_id,
+                "Refresh started": workspace.refresh_started_at,
+                "Refresh finished": workspace.refresh_finished_at,
             },
+            cooldown=timedelta(hours=8),
         )

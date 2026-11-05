@@ -104,8 +104,26 @@ async def test_stale_workspace_alerts_skip_fresh_images(
     assert not slack_api.calls
     assert "Run booted a stale workspace image" in caplog.text
     monkeypatch.setenv("SLACK_ALERTS_CHANNEL_ID", "C_DEPLOYMENT_ALERTS")
-    await StaleWorkspaceReporter.report("thread-1", workspace)
+    claim = AsyncMock(wraps=event_claims.claim)
+    monkeypatch.setattr(event_claims, "claim", claim)
+    await asyncio.gather(
+        *(StaleWorkspaceReporter.report(f"thread-{i}", workspace) for i in range(5))
+    )
     [(_, params)] = slack_api.calls
     assert params["channel"] == "C_DEPLOYMENT_ALERTS"
-    assert "workspace: default" in params["text"]
-    assert "agent_thread_id: thread-1" in params["text"]
+    assert "⚠️ *Run booted a stale workspace image*" in params["text"]
+    assert "Workspace" not in params["text"]
+    details = params["blocks"][1]
+    assert details["type"] == "context"
+    detail_text = details["elements"][0]["text"]
+    assert "*Workspace:* default" in detail_text
+    assert "*Run:*" in detail_text
+    assert "thread-0" in detail_text
+    assert "None" not in detail_text
+    claim.assert_awaited_with("slack-alert", "C_DEPLOYMENT_ALERTS", ttl=timedelta(hours=8))
+    workspace.slug = "another-workspace"
+    await StaleWorkspaceReporter.report("thread-other", workspace)
+    assert len(slack_api.calls) == 1
+    memory_event_claims.held.clear()
+    await StaleWorkspaceReporter.report("thread-later", workspace)
+    assert len(slack_api.calls) == 2
