@@ -113,6 +113,7 @@ async def _prepare_run(
             **common.AGENT_VERSION_METADATA,
             CHANNEL_METADATA_KEY: mda_forwarding.CHANNEL,
             "slack_trigger_ts": prepared.trigger_ts,
+            "slack_concierge_message_ts": prepared.concierge_message_ts,
         },
         source="slack",
     )

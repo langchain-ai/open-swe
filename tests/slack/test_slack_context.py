@@ -1304,6 +1304,8 @@ async def test_performance_directive_switches_unless_quoted(
     monkeypatch.setattr(slack_webhooks, "create_langsmith_feedback", feedback)
     notice = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_utils, "post_slack_ephemeral_message", notice)
+    receipt = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_utils, "add_slack_reaction", receipt)
     dispatch = AsyncMock(return_value={"run_id": "run-perf"})
     monkeypatch.setattr(slack_webhooks, "_dispatch_or_queue_slack_run", dispatch)
     await slack_webhooks.process_slack_mention(
@@ -1316,8 +1318,20 @@ async def test_performance_directive_switches_unless_quoted(
             text=text,
             bot_user_id="UBOT",
             concierge_mode=concierge,
+            original_message_ts="1700000000.000100" if concierge else "",
         ),
         repo=None,
+    )
+    if concierge:
+        receipt.assert_awaited_once_with(
+            "C123",
+            "1700000000.000100",
+            "hourglass_flowing_sand",
+        )
+    else:
+        receipt.assert_not_awaited()
+    assert dispatch.call_args.kwargs["concierge_message_ts"] == (
+        "1700000000.000100" if concierge else ""
     )
     configurable = dispatch.call_args.args[3]
     if not switches:

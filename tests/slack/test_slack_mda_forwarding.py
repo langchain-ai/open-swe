@@ -556,8 +556,9 @@ async def test_the_endpoint_logs_why_it_answers_no_run(
     assert record.no_run_reason == "no run prepared"
 
 
+@pytest.mark.parametrize("concierge", [False, True])
 async def test_mda_starts_the_run_a_handed_over_message_prepares(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, concierge: bool
 ) -> None:
     monkeypatch.setenv("MDA_SERVICE_SECRET", _SERVICE_SECRET)
     monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-signing-key-0123456789abcdef")
@@ -565,8 +566,16 @@ async def test_mda_starts_the_run_a_handed_over_message_prepares(
     monkeypatch.setattr(mda_forwarding, "recall", AsyncMock(return_value=(request, None)))
     prepared = slack_service.SlackChannelRun(
         input={"messages": [{"role": "user", "content": "help"}]},
-        configurable={"source": "slack", "github_login": "ada"},
+        configurable={
+            "source": "slack",
+            "github_login": "ada",
+            "slack_thread": {
+                "channel_id": "D1" if concierge else "C1",
+                "thread_ts": "0" if concierge else "1.2",
+            },
+        },
         trigger_ts="1.2",
+        concierge_message_ts="1.1" if concierge else "",
     )
     monkeypatch.setattr(
         slack_service, "prepare_slack_channel_run", AsyncMock(return_value=prepared)
@@ -601,6 +610,7 @@ async def test_mda_starts_the_run_a_handed_over_message_prepares(
     assert metadata == answer["metadata"]
     assert metadata["channel"] == "slack"
     assert metadata["slack_trigger_ts"] == "1.2"
+    assert metadata["slack_concierge_message_ts"] == ("1.1" if concierge else "")
     assert not {"user_id", "ls_repo_provider", "ls_attribution_identifier"} & metadata.keys()
 
 

@@ -42,6 +42,7 @@ from openswe.slack.client import (
     SANDBOX_UNREACHABLE_NOTICE,
     SlackNotice,
     post_slack_thread_reply,
+    remove_slack_reaction,
 )
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
 from openswe.slack.routed_work import RoutedWork
@@ -552,6 +553,11 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             )
             raise
     payload_metadata = payload.get("metadata")
+    if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
+        channel_id = payload_metadata.get("slack_channel_id")
+        message_ts = payload_metadata.get("slack_concierge_message_ts")
+        if isinstance(channel_id, str) and isinstance(message_ts, str) and message_ts:
+            await remove_slack_reaction(channel_id, message_ts, "hourglass_flowing_sand")
     channel = channel_of(payload_metadata if isinstance(payload_metadata, dict) else None)
     if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
         if pull_request := RunMetadata.model_validate(payload_metadata).pull_request:
