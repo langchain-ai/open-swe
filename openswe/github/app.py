@@ -29,13 +29,14 @@ GITHUB_APP_INSTALLATION_ID = ENV.GITHUB_APP_INSTALLATION_ID.get()
 # within this window of expiring so chat/review requests don't pay a fresh
 # JWT-sign + GitHub round-trip every message. The margin stays above the proxy's
 # 5-minute refresh window (``github_proxy.PROXY_TOKEN_REFRESH_WINDOW``) so a
-# near-expiry proxy refresh still mints a genuinely fresh token.
+# near-expiry proxy refresh still mints a genuinely fresh token. A caller that
+# keeps the token for longer asks for more with ``min_lifetime``.
 _TOKEN_CACHE_MARGIN = timedelta(minutes=10)
 PermissionMap = Mapping[str, str]
 PermissionKey = tuple[tuple[str, str], ...]
 ScopeKey = tuple[str, tuple[int, ...], tuple[str, ...], PermissionKey]
 
-# scope key -> (token, expires_at, good_until). In-process only; never persisted.
+# scope key -> (token, expires_at, parsed expiry). In-process only; never persisted.
 _TOKEN_CACHE: dict[ScopeKey, tuple[str, str | None, datetime]] = {}
 
 
@@ -74,14 +75,17 @@ def _parse_expiry(expires_at: object) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def _cached_token(key: ScopeKey, *, now: datetime) -> tuple[str, str | None] | None:
+def _cached_token(
+    key: ScopeKey, *, now: datetime, min_lifetime: timedelta
+) -> tuple[str, str | None] | None:
     cached = _TOKEN_CACHE.get(key)
     if cached is None:
         return None
-    token, expires_at, good_until = cached
-    if now < good_until:
+    token, expires_at, expires = cached
+    if now + min_lifetime < expires:
         return token, expires_at
-    _TOKEN_CACHE.pop(key, None)
+    if now + _TOKEN_CACHE_MARGIN >= expires:
+        _TOKEN_CACHE.pop(key, None)
     return None
 
 
@@ -168,8 +172,13 @@ async def get_github_app_installation_token_with_expiry(
     permissions: PermissionMap | None = None,
     log_errors: bool = True,
     raise_errors: bool = False,
+    min_lifetime: timedelta = _TOKEN_CACHE_MARGIN,
+    force_refresh: bool = False,
 ) -> tuple[str | None, str | None]:
-    """Exchange the GitHub App JWT for an installation access token and its expiry."""
+    """Exchange the GitHub App JWT for an installation access token and its expiry.
+
+    A cached token is returned only while it has more than ``min_lifetime`` left.
+    """
     try:
         cfg = RunConfig.from_runtime()
     except RuntimeError:
@@ -196,9 +205,11 @@ async def get_github_app_installation_token_with_expiry(
 
     key = _scope_key(resolved_installation_id, repository_ids, repositories, permissions)
     now = datetime.now(UTC)
-    cached = _cached_token(key, now=now)
-    if cached is not None:
-        return cached
+    previous = _TOKEN_CACHE.get(key)
+    if not force_refresh:
+        cached = _cached_token(key, now=now, min_lifetime=min_lifetime)
+        if cached is not None:
+            return cached
 
     body: AppInstallationsInstallationIdAccessTokensPostBodyType = {}
     if repository_ids:
@@ -218,8 +229,12 @@ async def get_github_app_installation_token_with_expiry(
             data = response.json()
             token, expires_at = data.get("token"), data.get("expires_at")
             parsed = _parse_expiry(expires_at)
+            if _TOKEN_CACHE.get(key) is not previous:
+                newer = _cached_token(key, now=datetime.now(UTC), min_lifetime=min_lifetime)
+                if newer is not None:
+                    return newer
             if isinstance(token, str) and token and parsed is not None:
-                _TOKEN_CACHE[key] = (token, expires_at, parsed - _TOKEN_CACHE_MARGIN)
+                _TOKEN_CACHE[key] = (token, expires_at, parsed)
             return token, expires_at
     except Exception as exc:
         if log_errors:

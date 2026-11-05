@@ -84,6 +84,7 @@ from runtime_api.loop import (
     ModelResult,
     Prepare,
     Prepared,
+    RefreshGitHubProxy,
     ReplyOnBehalf,
     Report,
     Route,
@@ -145,7 +146,6 @@ from openswe.agent_api.server import RefusedCallError
 from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun
 from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError
-from openswe.config import ENV
 from openswe.github.proxy import proxy_token_set_since
 from openswe.incidents.runtime import IncidentSession
 from openswe.input_messages import run_context
@@ -590,15 +590,11 @@ class TokenRun:
             {**self.config, "run_name": "task_context"}, lambda _runtime: read()
         )
 
-    async def refresh_github_proxy(self, _request: RunRequest) -> GitHubProxyRefreshed:
+    async def refresh_github_proxy(self, request: RefreshGitHubProxy) -> GitHubProxyRefreshed:
         cfg = RunConfig.from_config(self.config)
         if cfg.auth_provider == "langsmith":
             return GitHubProxyRefreshed()
-        # Where MDA may write the sandbox's proxy, a review's narrowing decides that it does
-        # not, as it does for the catalog. Otherwise it keeps the thread's own scope.
-        expires_at = await self._sandbox.refresh_github_proxy(
-            narrowed=ENV.MDA_GITHUB_PROXY_CONNECTION.is_set()
-        )
+        expires_at = await self._sandbox.refresh_github_proxy(force_refresh=request.force_refresh)
         return GitHubProxyRefreshed(expires_at=expires_at)
 
     async def sandbox_proxy(self, request: SandboxProxyRequest) -> SandboxProxy:

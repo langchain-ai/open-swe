@@ -60,6 +60,10 @@ class PhaseResult(BaseModel):
     events: list[JsonValue] = []
 
 
+class RefreshGitHubProxy(RunRequest):
+    force_refresh: bool = False
+
+
 class GitHubProxyRefreshed(BaseModel):
     """The sandbox's GitHub proxy was given a fresh token."""
 
@@ -311,7 +315,7 @@ INCIDENT_CONTEXT = Endpoint(
 # Mints a token and sets it on the sandbox, so sending it again only mints another.
 REFRESH_GITHUB_PROXY = Endpoint(
     "refresh_github_proxy",
-    RunRequest,
+    RefreshGitHubProxy,
     GitHubProxyRefreshed,
     seconds=LOOP_CALL_SECONDS,
     delivery="idempotent",
