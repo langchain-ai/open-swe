@@ -3,6 +3,12 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 _TOOL_MODULES = {
+    "list_projects": ".projects",
+    "create_project": ".projects",
+    "update_project": ".projects",
+    "share_project": ".projects",
+    "unshare_project": ".projects",
+    "move_thread_to_project": ".projects",
     "add_finding": ".add_finding",
     "assign_human_reviewer": ".request_human_review",
     "auto_assign_human_reviewer": ".request_human_review",
@@ -38,6 +44,8 @@ _TOOL_MODULES = {
     "manage_code_channel": "openswe.slack.tools.manage_code_channel",
     "manage_incident": "openswe.incidents.tools",
     "manage_thread": ".threads",
+    "reorder_thread_pins": ".threads",
+    "reorder_sidebar_threads": ".threads",
     "merge_expedited_pr": ".merge_expedited_pr",
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
@@ -131,6 +139,8 @@ __all__ = [
     "manage_code_channel",
     "manage_incident",
     "manage_thread",
+    "reorder_thread_pins",
+    "reorder_sidebar_threads",
     "merge_expedited_pr",
     "open_pull_request",
     "output_iframe",
@@ -160,6 +170,12 @@ __all__ = [
     "decide_memory",
     "publish_workspace_prompt",
     "save_user_settings",
+    "list_projects",
+    "create_project",
+    "update_project",
+    "share_project",
+    "unshare_project",
+    "move_thread_to_project",
     "save_user_skill",
     "delete_user_skill",
     "report_work_state",
@@ -241,6 +257,14 @@ if TYPE_CHECKING:
     from openswe.tools.open_pull_request import link_pull_request, open_pull_request
     from openswe.tools.organization_skills import delete_organization_skill, save_organization_skill
     from openswe.tools.output_iframe import output_iframe
+    from openswe.tools.projects import (
+        create_project,
+        list_projects,
+        move_thread_to_project,
+        share_project,
+        unshare_project,
+        update_project,
+    )
     from openswe.tools.publish_artifact import publish_artifact
     from openswe.tools.publish_review import publish_review
     from openswe.tools.read_only_sql import read_only_sql
@@ -268,7 +292,14 @@ if TYPE_CHECKING:
     from openswe.tools.submit_thread_feedback import submit_thread_feedback
     from openswe.tools.suggest_task import suggest_task
     from openswe.tools.switch_to_performance_model import switch_to_performance_model
-    from openswe.tools.threads import get_thread, list_threads, manage_thread, start_thread
+    from openswe.tools.threads import (
+        get_thread,
+        list_threads,
+        manage_thread,
+        reorder_sidebar_threads,
+        reorder_thread_pins,
+        start_thread,
+    )
     from openswe.tools.update_finding import update_finding
     from openswe.tools.user_skills import delete_user_skill, save_user_skill
     from openswe.tools.web_search import web_search

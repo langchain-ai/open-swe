@@ -1,8 +1,8 @@
 {
   "name": "open-swe-desktop",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "private": true,
-  "description": "Experimental Open SWE desktop client",
+  "description": "Experimental Robin desktop client",
   "main": "build/main.cjs",
   "scripts": {
     "build": "node scripts/build-main.cts",
@@ -19,7 +19,7 @@
   },
   "build": {
     "appId": "com.langchain.openswe",
-    "productName": "Open SWE",
+    "productName": "Robin",
     "publish": {
       "provider": "github",
       "owner": "langchain-ai",
@@ -49,13 +49,17 @@
         "to": "icon.png"
       },
       {
+        "from": "../cli/dist/robin",
+        "to": "bin/robin"
+      },
+      {
         "from": "../cli/dist/oswe",
         "to": "bin/oswe"
       }
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
-      "artifactName": "Open-SWE-${version}-${arch}-mac.${ext}",
+      "artifactName": "Robin-${version}-${arch}-mac.${ext}",
       "icon": "resources/icon.icns",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,

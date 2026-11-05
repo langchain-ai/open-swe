@@ -1,11 +1,15 @@
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
 import pytest
+from fastapi import FastAPI, HTTPException
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
+from openswe.api.github_errors import add_github_error_handlers
+from openswe.dashboard.oauth import require_session
 from openswe.database import postgres
 from openswe.github import app as github_app
 from openswe.github import http as github_http
@@ -15,6 +19,7 @@ from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.review import findings as findings_store
 from openswe.review import reviews as review_api
+from openswe.review import routes as review_routes
 from openswe.review.findings import REVIEWER_THREAD_KIND, new_finding
 from openswe.thread_ids import reviewer_thread_id
 from openswe.ui_invalidations import Topic
@@ -22,6 +27,51 @@ from openswe.webhooks import common as webhook_common
 from tests.conftest import post_signed_github_webhook
 
 pytestmark = pytest.mark.usefixtures("findings_from_metadata")
+
+
+@pytest.mark.parametrize(
+    "denied, github_status, expected_status",
+    [(False, 200, 204), (True, 200, 403), (False, 422, 422), (False, 503, 502)],
+)
+async def test_description_update_uses_viewer_permissions(
+    monkeypatch, denied: bool, github_status: int, expected_status: int
+) -> None:
+    app = FastAPI()
+    add_github_error_handlers(app)
+    app.include_router(review_routes.router)
+    app.dependency_overrides[require_session] = lambda: {"sub": "alice"}
+    access = AsyncMock(side_effect=HTTPException(403, "No repository access") if denied else None)
+    monkeypatch.setattr(review_routes, "require_repo_access_for_user", access)
+    request = AsyncMock(
+        return_value=httpx2.Response(
+            github_status,
+            json={"body": "Updated description", "message": "GitHub rejected this description"},
+            request=httpx2.Request("PATCH", "https://api.github.com"),
+        )
+    )
+    monkeypatch.setattr(github_http, "github_request", request)
+    github = github_http.GitHubClient(MagicMock())
+    viewer = MagicMock()
+    viewer.return_value.__aenter__ = AsyncMock(return_value=github)
+    viewer.return_value.__aexit__ = AsyncMock(return_value=False)
+    monkeypatch.setattr(review_routes.GitHubClient, "as_user", viewer)
+    async with AsyncClient(transport=ASGITransport(app), base_url="http://test") as client:
+        response = await client.patch(
+            "/reviews/acme/app/7/description", json={"body": "Updated description"}
+        )
+    assert response.status_code == expected_status
+    if github_status >= 400:
+        assert response.json() == {"detail": "GitHub rejected this description"}
+    if denied:
+        viewer.assert_not_called()
+        request.assert_not_awaited()
+    else:
+        viewer.assert_called_once_with("alice")
+        assert request.await_args.args[1:] == (
+            "PATCH",
+            "https://api.github.com/repos/acme/app/pulls/7",
+        )
+        assert request.await_args.kwargs["json"] == {"body": "Updated description"}
 
 
 @pytest.fixture(autouse=True)

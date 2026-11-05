@@ -49,7 +49,7 @@ def _supplementary_note(result: RequestResult, supplementary_review: str) -> str
         return f" The supplementary review was not requested: {result.supplementary_refusal}"
     return (
         f" The `{supplementary_review.strip()}` supplementary review is requested; "
-        "Open SWE rotates and notifies its reviewer."
+        "Robin rotates and notifies its reviewer."
     )
 
 
@@ -181,7 +181,7 @@ async def _request_for_mcp_caller(
     """Request review as a person calling over MCP, who has no thread to point at the card."""
     requester = await User.for_login("github", login)
     if requester is None:
-        return _failure("Sign in to the Open SWE dashboard before requesting a review")
+        return _failure("Sign in to the Robin dashboard before requesting a review")
     result = await request_review(
         pr_ref,
         Origin(requester=requester),
@@ -227,7 +227,7 @@ async def _request_for_mcp_caller(
         "request_id": result.request_id,
         "permalink": result.permalink,
         "next": f"{posted} People sign up from the card. {merge_note} "
-        "If nobody signs up, Open SWE picks a reviewer. Do not poll."
+        "If nobody signs up, Robin picks a reviewer. Do not poll."
         + _supplementary_note(result, supplementary_review),
     }
 
@@ -245,7 +245,7 @@ async def dismiss_human_review_request(pr_url: str, reason: str = "") -> dict[st
     cfg = RunConfig.from_config(get_config())
     if refusal := await _repository_refusal(pr_ref, cfg):
         return _failure(refusal)
-    by = "Open SWE"
+    by = "Robin"
     if caller := cfg.mcp_caller:
         person = await User.for_login("github", caller)
         by = mention(person) if person is not None else f"@{caller}"
@@ -364,10 +364,10 @@ async def auto_assign_human_reviewer(pr_url: str) -> dict[str, Any]:
         return _failure(refusal)
     started = await start_auto_assign(request, asked=True)
     if started.status == "failed":
-        return _failure("Open SWE could not start picking a reviewer for this pull request.")
+        return _failure("Robin could not start picking a reviewer for this pull request.")
     if started.status == "picked":
         next_step = (
-            f"Open SWE picked @{started.reviewer}; they are tagged in the review's Slack thread "
+            f"Robin picked @{started.reviewer}; they are tagged in the review's Slack thread "
             "and messaged directly."
         )
     elif started.status == "claimed":
@@ -376,13 +376,13 @@ async def auto_assign_human_reviewer(pr_url: str) -> dict[str, Any]:
         )
     elif started.status == "waiting" and started.at is not None:
         next_step = (
-            "Nobody who owns or recently changed this code is in their work hours, so Open SWE "
+            "Nobody who owns or recently changed this code is in their work hours, so Robin "
             f"will pick a reviewer at {started.at.isoformat()}, when @{started.reviewer}'s "
             "work day starts."
         )
     else:
         next_step = (
-            "Open SWE is picking a reviewer; whoever it picks is tagged in the review's Slack "
+            "Robin is picking a reviewer; whoever it picks is tagged in the review's Slack "
             "thread and messaged directly."
         )
     return {

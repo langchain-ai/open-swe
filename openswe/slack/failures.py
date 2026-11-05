@@ -18,7 +18,7 @@ from openswe.utils.user_messages import warning
 logger = logging.getLogger(__name__)
 
 _UNEXPECTED_FAILURE = (
-    "Open SWE hit an unexpected error and cannot respond to this message. Send it again to retry."
+    "Robin hit an unexpected error and cannot respond to this message. Send it again to retry."
 )
 
 
@@ -74,7 +74,7 @@ async def report_slack_failure(target: SlackRequestTarget, exc: BaseException) -
     blocks = None
     if not isinstance(exc, SlackRequestError) and (target.message_ts or target.agent_thread_id):
         retry_text = warning(
-            f"Open SWE hit an unexpected error and cannot respond to this message. "
+            f"Robin hit an unexpected error and cannot respond to this message. "
             f"Click Retry to try again.\nError ID: `{error_id}`"
         )
         blocks = retry.blocks(retry_text)

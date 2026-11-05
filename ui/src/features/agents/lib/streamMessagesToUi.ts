@@ -15,7 +15,7 @@ import type { Chunk, ImageChunk, Message, ToolExecutionChunk } from "./types"
 
 function senderNote(entity: StructuredEntity | undefined): string | undefined {
   if (entity?.senderType === "bot") return undefined
-  if (entity?.openSweAccount === "unlinked") return "not an Open SWE user"
+  if (entity?.openSweAccount === "unlinked") return "not a Robin user"
   return undefined
 }
 

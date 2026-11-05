@@ -61,7 +61,7 @@ from openswe.slack.responses import (
 )
 from openswe.slack.run_feedback import FEEDBACK_ACTION, process_feedback
 from openswe.slack.solo_threads import allow_solo_thread_followup, track_explicit_mention
-from openswe.slack.summon import SUMMON_REACTION, process_slack_summon_reaction
+from openswe.slack.summon import SUMMON_REACTIONS, process_slack_summon_reaction
 from openswe.slack.thread_mentions import SlackThreadMention
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
@@ -91,9 +91,9 @@ _MEMBERSHIP_SUBTYPES = frozenset(
         "channel_unarchive",
     }
 )
-_EXTERNAL_CHANNEL_REFUSAL = "Open SWE does not operate in channels with external participants."
+_EXTERNAL_CHANNEL_REFUSAL = "Robin does not operate in channels with external participants."
 _THREAD_CONFLICT = (
-    "Open SWE found conflicting state for this Slack thread and will not guess "
+    "Robin found conflicting state for this Slack thread and will not guess "
     "which agent thread to use."
 )
 _OPTION_ACTION_ID = "open_swe_option_select"
@@ -448,7 +448,7 @@ async def slack_webhook(
         return ignored("Event does not need agent handling")
     if event.type in {"reaction_added", "reaction_removed"} and event.reaction not in {
         *common.FEEDBACK_REACTIONS,
-        *({"x", SUMMON_REACTION} if event.type == "reaction_added" else set()),
+        *({"x", *SUMMON_REACTIONS} if event.type == "reaction_added" else set()),
     }:
         return ignored("Reaction not tracked for feedback")
 
@@ -571,7 +571,7 @@ async def slack_webhook(
         if event.reaction in common.FEEDBACK_REACTIONS:
             background_tasks.add_task(common.process_slack_reaction_added, raw_event, event_id)
             return accepted("Reaction feedback queued")
-        if event.reaction == SUMMON_REACTION and channel_context is not None:
+        if event.reaction in SUMMON_REACTIONS and channel_context is not None:
             background_tasks.add_task(
                 process_slack_summon_reaction,
                 event,
@@ -1000,7 +1000,7 @@ async def slack_webhook(
 async def slack_command(
     request: common.Request, background_tasks: common.BackgroundTasks
 ) -> SlashCommandResponse | Response:
-    """Answer a single `/oswe` question, ephemerally and without a Slack thread."""
+    """Answer `/robin` and legacy `/oswe` questions without a Slack thread."""
     body = await request.body()
     _verify_signature(request, body, "commands")
 
@@ -1027,12 +1027,12 @@ async def slack_command(
     if len(question) > MAX_QUESTION_CHARS:
         return ephemeral(
             f"That question is too long for `{command or ASK_COMMAND}`. "
-            "Tag Open SWE in a message instead."
+            "Tag Robin in a message instead."
         )
 
     invocation = value("trigger_id") or hashlib.sha256(body).hexdigest()
     if not await common.claim_slack_event(f"slack-ask:{invocation}"):
-        return ephemeral("Open SWE is already working on that question.")
+        return ephemeral("Robin is already working on that question.")
     thread_id = ask_thread_id(channel_id, user_id, invocation)
     background_tasks.add_task(
         process_slack_ask,
@@ -1092,7 +1092,7 @@ async def slack_code_channel_command(
         team_id=team_id,
     )
     if result["status"] != "accepted":
-        return ephemeral("Open SWE could not route that command to this code channel.")
+        return ephemeral("Robin could not route that command to this code channel.")
     return ephemeral(f"Working on /{command}…")
 
 
@@ -1207,7 +1207,7 @@ async def slack_interactivity(
 
     action = _first_option_action(interaction.actions)
     if action is None:
-        return ignored("No Open SWE action")
+        return ignored("No Robin action")
 
     button = SlackButtonValue.parse(parse_json_object((action.value or "{}").encode("utf-8")))
     if button is None:
@@ -1221,7 +1221,7 @@ async def slack_interactivity(
             interaction.user.id,
             "This plan approval button is no longer active. Plan mode and approval gates "
             "have been removed. Open the artifact linked in the original message to review it, "
-            "or reply in this thread and mention Open SWE with what you'd like to do next. "
+            "or reply in this thread and mention Robin with what you'd like to do next. "
             "No action was taken.",
             thread_ts=interaction.message.thread_ts or interaction.container.thread_ts or None,
         )

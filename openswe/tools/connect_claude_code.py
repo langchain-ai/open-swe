@@ -22,7 +22,7 @@ async def connect_claude_code(machine_name: str) -> dict[str, object]:
     login = configurable().github_login
     user = await User.for_login("github", login) if login else None
     if login is None or user is None:
-        return {"ok": False, "error": "Could not resolve the caller's Open SWE user"}
+        return {"ok": False, "error": "Could not resolve the caller's Robin user"}
     try:
         name = SyncTokenCreate(name=machine_name).name
     except ValidationError as exc:

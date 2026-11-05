@@ -26,7 +26,7 @@ key callers address a PR by.
 """
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import Literal, Self, TypedDict
 from uuid import UUID, uuid7
@@ -221,6 +221,28 @@ class PullRequest(Base):
                 .join(cls.repository)
                 .where(Repository.key == f"{owner}/{repo}".lower())
                 .order_by(cls.number)
+            )
+            return list(rows)
+
+    @classmethod
+    async def review_candidates(
+        cls, repositories: Collection[str], user_id: UUID, *, limit: int
+    ) -> list[Self]:
+        """Recently updated open PRs by others that Open SWE reviewed, in ``repositories``."""
+        if not repositories:
+            return []
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(cls)
+                .join(cls.repository)
+                .where(
+                    Repository.key.in_([name.lower() for name in repositories]),
+                    cls.state == "open",
+                    cls.author_user_id.is_distinct_from(user_id),
+                    cls.reviews.any(),
+                )
+                .order_by(cls.updated_at.desc(), cls.id.desc())
+                .limit(limit)
             )
             return list(rows)
 

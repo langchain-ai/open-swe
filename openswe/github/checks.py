@@ -1,6 +1,6 @@
 """GitHub Checks API helpers for the reviewer's PR check run.
 
-A check run named ``Open SWE Review`` is created on the PR head SHA when an
+A check run named ``Robin Review`` is created on the PR head SHA when an
 auto-review is dispatched, so the PR's checks section shows the review as
 in-progress. ``publish_review`` (or the after-agent fallback) completes it.
 
@@ -26,7 +26,7 @@ __all__ = ["github_headers"]
 
 logger = logging.getLogger(__name__)
 
-REVIEW_CHECK_RUN_NAME = "Open SWE Review"
+REVIEW_CHECK_RUN_NAME = "Robin Review"
 
 _GITHUB_API_BASE = GITHUB_API_BASE
 
@@ -45,7 +45,7 @@ async def create_review_check_run(
     token: str,
     details_url: str | None = None,
 ) -> int | None:
-    """Create an in-progress ``Open SWE Review`` check run on ``head_sha``.
+    """Create an in-progress ``Robin Review`` check run on ``head_sha``.
 
     Returns the check run id, or ``None`` on any failure (most commonly the
     App lacking the Checks permission).
@@ -57,7 +57,7 @@ async def create_review_check_run(
         "started_at": _utc_now_iso(),
         "output": {
             "title": "Review in progress",
-            "summary": "Open SWE is reviewing this pull request…",
+            "summary": "Robin is reviewing this pull request…",
         },
     }
     if details_url:
@@ -124,10 +124,10 @@ def review_check_conclusion(surfaced_count: int) -> tuple[CheckConclusion, str, 
         return (
             "success",
             f"Found {surfaced_count} potential {issue_word}",
-            f"Open SWE surfaced {surfaced_count} potential {issue_word} on this pull request.",
+            f"Robin surfaced {surfaced_count} potential {issue_word} on this pull request.",
         )
     return (
         "success",
         "No issues found",
-        "Open SWE reviewed this pull request and found no issues.",
+        "Robin reviewed this pull request and found no issues.",
     )

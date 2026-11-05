@@ -1,10 +1,10 @@
 # Workspaces architecture
 
-This document records the architecture, routing, settings hierarchy, migration behavior, and known gaps of Open SWE workspaces.
+This document records the architecture, routing, settings hierarchy, migration behavior, and known gaps of Robin workspaces.
 
 ## Summary
 
-A **workspace** in Open SWE lists zero or more **preferred repositories**, and a repository is preferred by at most one workspace.
+A **workspace** in Robin lists zero or more **preferred repositories**, and a repository is preferred by at most one workspace.
 Preference decides where a repository's events run and what the workspace's sandbox image preloads; it does not limit access: every workspace's threads can use every repository the GitHub App installation can reach.
 The workspace absorbs the former environment (prompt, snapshot, setup and update scripts, sandbox sizing, nightly refresh) and additionally owns the Slack channels that route to it, its MCP connections, and workspace-scoped settings.
 Inbound work is routed to a workspace by its thread, then a tag, then its Slack channel, then its repository's preferred workspace, then the user's default, and otherwise to the `default` workspace.
@@ -12,7 +12,7 @@ Every signed-in user sees every workspace, and every admin administers every wor
 
 ## Motivation
 
-The OSS team wants Open SWE to handle issues on public repositories.
+The OSS team wants Robin to handle issues on public repositories.
 Before workspaces, one deployment was one scope: the same settings, MCP connections such as Datadog, and installation-wide GitHub access served every run.
 Trigger gates keep outsiders from starting runs, but extending the same scope to public repositories means public content meets internal access.
 Deploying a second instance avoids that but is heavyweight for what will be a common split.
@@ -81,7 +81,7 @@ Resolution for new work, in order, and the first match wins:
 
 1. An existing thread's recorded workspace.
    Follow-ups on issues, PRs, Linear issues, and Slack threads land here; none of them recompute the workspace from the repository.
-1. A `/workspace:<slug>` command on the message that opens the thread, e.g. `@Open SWE /workspace:infra fix the flaky test`.
+1. A `/workspace:<slug>` command on the message that opens the thread, e.g. `@Robin /workspace:infra fix the flaky test`.
    The older `workspace:<slug>` and `env:<slug>` tags still work anywhere in the message.
 1. The Slack channel's bound workspace.
    A message in a workspace's channel runs there even when it names a repository another workspace prefers, since every workspace can use every repository.
@@ -100,7 +100,7 @@ Reviewer and review-scout sandboxes explicitly scope their tokens to the reposit
 Coding threads that members start from Slack, the dashboard, or Linear normally get the installation-wide token, as do workspace image builds.
 
 A workspace's preferred repositories are what its image preloads: the setup and update scripts receive them in `OPENSWE_WORKSPACE_REPOS`, clone each to `/workspace/<repo>`, and changing them rebuilds the image.
-Before an update script runs, Open SWE clones any missing preferred repository into `/workspace/<repo>`, so an older image can catch up with the current repository list.
+Before an update script runs, Robin clones any missing preferred repository into `/workspace/<repo>`, so an older image can catch up with the current repository list.
 Existing paths are left untouched for the script to validate; a clone failure fails the update and preserves the previous image.
 Any other repository is cloned on demand to the same place by the run that needs it.
 A refresh writes only snapshot and refresh state and an edit writes only the definition, so neither reverts the other.
@@ -114,11 +114,11 @@ The JSON editor and the admin workspace API/tools edit the same configuration; n
 Existing non-federated cloud rules keep their JSON contract, subject to the existing secret restrictions; federation-only validation does not require those rules to be enabled.
 
 Every federated rule, and any federated mount auth, must use a governed tag scope, `tag:<tag value UUID>`.
-Every Open SWE workspace creates sandboxes in the same LangSmith workspace, so a `workspace` scope would let all of them use the role; Open SWE rejects it.
+Every Robin workspace creates sandboxes in the same LangSmith workspace, so a `workspace` scope would let all of them use the role; Robin rejects it.
 Add the existing tag value UUID to **Governed Tag Value IDs** and use the same UUID in the rule's subject scope.
 Before enabling a profile, configure cloud trust for the LangSmith deployment's OIDC issuer and the exact subject `ws:<LangSmith workspace UUID>:sandbox:tag:<tag value UUID>`.
-The LangSmith workspace UUID is **not** the Open SWE workspace UUID or slug.
-Open SWE validates UUIDs and scope membership; LangSmith validates tag ownership and the deployment API key's assignment permissions when creating the sandbox, and rechecks tag scope on credential refresh.
+The LangSmith workspace UUID is **not** the Robin workspace UUID or slug.
+Robin validates UUIDs and scope membership; LangSmith validates tag ownership and the deployment API key's assignment permissions when creating the sandbox, and rechecks tag scope on credential refresh.
 Saving a profile does not verify that the cloud will accept it; invalid cloud trust fails sandbox creation.
 
 Cloud permissions apply to every matching guest request, not just filesystem mounts.
@@ -140,8 +140,8 @@ Recreation discards the old sandbox's filesystem, so preserve work first; removi
 ### Sandbox LangSmith access
 
 **LangSmith Access** in the same section lists LangSmith permissions (for example `projects:read, datasets:read`) that code in new sandboxes may use against the LangSmith API.
-Open SWE saves them as an explicit `access_delegation` grant; the sandbox proxy injects a short-lived credential, so no key enters the sandbox.
-The delegator is Open SWE's own sandbox-creating LangSmith key, not the person running the thread, so every thread in the workspace gets the same access, capped by what that key holds.
+Robin saves them as an explicit `access_delegation` grant; the sandbox proxy injects a short-lived credential, so no key enters the sandbox.
+The delegator is Robin's own sandbox-creating LangSmith key, not the person running the thread, so every thread in the workspace gets the same access, capped by what that key holds.
 `INHERIT` grants and tenant administration (`workspaces:manage*`, `organization:manage*`, `organization:pats:*`) are refused.
 Like cloud identity, the grant is fixed when a sandbox is created.
 
@@ -167,7 +167,7 @@ Existing threads without a workspace read as `default`.
 The `environment` key in thread metadata and run configuration is read as an alias for `workspace` so in-flight threads keep working.
 
 Workspaces live only in PostgreSQL.
-Open SWE no longer reads the LangGraph Store; a deployment still holding records there must move them with an earlier release first (see [Upgrading from the LangGraph Store](../INSTALLATION.md#upgrading-from-the-langgraph-store)).
+Robin no longer reads the LangGraph Store; a deployment still holding records there must move them with an earlier release first (see [Upgrading from the LangGraph Store](../INSTALLATION.md#upgrading-from-the-langgraph-store)).
 A migration seeds the `default` workspace, so pickers always offer it.
 
 ### Non-goals

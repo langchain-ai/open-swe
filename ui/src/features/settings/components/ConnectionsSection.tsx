@@ -42,7 +42,7 @@ function SlackRow({ user }: { user: SessionUser }) {
       description={
         connected
           ? `Linked to Slack member ${slackUserId}${workEmail ? ` · ${workEmail}` : ""}.`
-          : "Sign in with Slack so Open SWE resolves your GitHub account when you tag it — the verified email also resolves Linear mentions."
+          : "Sign in with Slack so Robin resolves your GitHub account when you tag it — the verified email also resolves Linear mentions."
       }
       control={
         <div className="flex items-center gap-space-2">
@@ -147,7 +147,7 @@ function LangSmithRow({ user }: { user: SessionUser }) {
   return (
     <SettingsRow
       label="LangSmith"
-      description={`Your sign-in account${user.email ? `: ${user.email}` : ""}. Open SWE calls LangSmith as you with it. Sign out to change accounts.`}
+      description={`Your sign-in account${user.email ? `: ${user.email}` : ""}. Robin calls LangSmith as you with it. Sign out to change accounts.`}
       control={<StatusPill connected />}
     />
   )

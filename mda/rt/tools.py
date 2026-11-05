@@ -52,16 +52,17 @@ from rt.backend import (
     reported_call,
 )
 from rt.git_evidence import turn_git
+from rt.session_handoff import HeldSessions
 
 logger = logging.getLogger(__name__)
 
 STATE_KEY: Final = "open_swe_state"
 _TIMED_OUT: Final = (
-    "Error: Open SWE did not answer this tool call in time. Whatever it started may "
+    "Error: Robin did not answer this tool call in time. Whatever it started may "
     "still be running in the sandbox; check before running it again."
 )
 _UNREACHABLE: Final = (
-    "Error: The Open SWE backend could not be reached for this tool call. "
+    "Error: The Robin backend could not be reached for this tool call. "
     "It may or may not have run; check state before retrying."
 )
 _NO_CONNECTION: Final = (
@@ -258,6 +259,8 @@ async def _operate(
     for event in answer.events:
         runtime.stream_writer(event)
     turn_git(backend.run).found_pull_requests(answer.pull_requests, started)
+    if answer.sessions and (held := HeldSessions.of(backend)) is not None:
+        held.update(answer.sessions)
     return _result(answer, tool_call_id, spec.name)
 
 

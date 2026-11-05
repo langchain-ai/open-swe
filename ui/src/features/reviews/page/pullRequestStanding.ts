@@ -64,12 +64,12 @@ export function pullRequestStanding(
   const { bugs, flags } = openFindingCounts(detail.findings)
   if (bugs > 0)
     details.push({
-      text: `Open SWE flagged ${plural(bugs, "bug")}`,
+      text: `Robin flagged ${plural(bugs, "bug")}`,
       opens: "findings",
     })
   else if (flags > 0)
     details.push({
-      text: `Open SWE flagged ${plural(flags, "thing")} to look into`,
+      text: `Robin flagged ${plural(flags, "thing")} to look into`,
       opens: "findings",
     })
   if (!status)

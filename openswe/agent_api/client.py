@@ -59,7 +59,7 @@ def mda_runtime_url() -> str:
     url = ENV.MDA_RUNTIME_URL.optional()
     if url is None:
         raise RemoteRuntimeConfigurationError(
-            "MDA_RUNTIME_URL is required: Open SWE's graphs run on Managed Deep Agents"
+            "MDA_RUNTIME_URL is required: Robin's graphs run on Managed Deep Agents"
         )
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:

@@ -227,7 +227,7 @@ def github_reauth_message(login: str | None = None) -> str:
     person = f" for {login}" if login else ""
     url = f"{dashboard_base_url() or dashboard_api_base_url()}/my-settings/connections"
     return (
-        f"GitHub token unavailable{person}. Link GitHub again in Open SWE's connections "
+        f"GitHub token unavailable{person}. Link GitHub again in Robin's connections "
         f"settings: {url}. Then retry the action."
     )
 
@@ -592,6 +592,28 @@ class RepoClient:
                     found[path] = blob["text"]
         return found
 
+    async def read_dir(self, path: str, ref: str | None) -> dict[str, str | None]:
+        """Text of each file directly in ``path`` at ``ref`` (the default branch when ``None``).
+
+        A file GitHub returns no text for (binary or too large) maps to ``None``.
+        """
+        data = await self.graphql(
+            "query($owner:String!,$repo:String!,$expression:String!)"
+            "{repository(owner:$owner,name:$repo){object(expression:$expression)"
+            "{...on Tree{entries{path type object{...on Blob{text}}}}}}}",
+            {"expression": f"{ref or 'HEAD'}:{path}"},
+        )
+        tree = (data.get("repository") or {}).get("object")
+        entries = tree.get("entries") if isinstance(tree, Mapping) else None
+        found: dict[str, str | None] = {}
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, Mapping) or entry.get("type") != "blob":
+                continue
+            blob = entry.get("object")
+            text = blob.get("text") if isinstance(blob, Mapping) else None
+            found[entry["path"]] = text if isinstance(text, str) else None
+        return found
+
     async def can_write(self, login: str) -> bool:
         """Whether ``login`` has write, maintain or admin here; any failure denies."""
         if not login:
@@ -716,12 +738,17 @@ class RepoClient:
     async def delete_review_comment(self, comment_id: int) -> None:
         await self.delete(f"pulls/comments/{comment_id}")
 
-    async def check_runs(self, sha: str) -> list[dict[str, Any]]:
-        """Latest checks on ``sha``, excluding superseded Actions cancellations."""
+    async def check_runs(
+        self, sha: str, *, include_superseded: bool = False
+    ) -> list[dict[str, Any]]:
+        """Current checks on ``sha``, or their history with ``include_superseded``."""
         runs = await self.pages(
-            f"commits/{sha}/check-runs", key="check_runs", params={"filter": "latest"}
+            f"commits/{sha}/check-runs",
+            key="check_runs",
+            params={"filter": "all" if include_superseded else "latest"},
         )
-        if not any(run.get("conclusion") in {"cancelled", "stale"} for run in runs):
+        names = [run["name"] for run in runs if isinstance(run.get("name"), str)]
+        if include_superseded or len(names) == len(set(names)):
             return runs
         try:
             payloads = await self.pages(
@@ -746,25 +773,23 @@ class RepoClient:
             if not isinstance(app, dict) or not isinstance(suite, dict):
                 continue
             app_id, suite_id = app.get("id"), suite.get("id")
-            name = run.get("name")
+            name, order = run.get("name"), run.get("id")
             if (
                 app.get("slug") != "github-actions"
                 or not isinstance(app_id, int)
                 or not isinstance(suite_id, int)
                 or not isinstance(name, str)
+                or not isinstance(order, int)
                 or (workflow := workflows.get(suite_id)) is None
             ):
                 continue
             identity = (app_id, workflow.workflow_id, workflow.event, name)
-            order = workflow.id
             identities[index], orders[index] = identity, order
             latest[identity] = max(latest.get(identity, order), order)
         return [
             run
             for index, run in enumerate(runs)
-            if run.get("conclusion") not in {"cancelled", "stale"}
-            or index not in identities
-            or orders[index] == latest[identities[index]]
+            if index not in identities or orders[index] == latest[identities[index]]
         ]
 
     async def workflow_for_suite(self, suite_id: int) -> WorkflowRun:
@@ -986,7 +1011,6 @@ def _json_or_none(response: httpx2.Response) -> object:
 
 
 class _WorkflowRun(BaseModel):
-    id: int
     workflow_id: int
     check_suite_id: int
     event: str

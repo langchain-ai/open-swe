@@ -69,7 +69,7 @@ export function AllowedGitHubBotsSection() {
           </h3>
           <p className="text-xs/relaxed text-secondary">
             Treat pull requests opened by trusted GitHub bots like those opened
-            by Open SWE users, so people can request reviews of them.
+            by Robin users, so people can request reviews of them.
           </p>
         </div>
         <Popover

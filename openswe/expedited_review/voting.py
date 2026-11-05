@@ -14,7 +14,7 @@ from fastapi import HTTPException
 
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.expedited_review.channels import sendable_channel, still_internal
-from openswe.expedited_review.eligibility import ChangedFile, fingerprint_matches
+from openswe.expedited_review.eligibility import FILE_PAGES, ChangedFile, fingerprint_matches
 from openswe.expedited_review.reviews import github_token_hint, submit_approval
 from openswe.github.http import (
     GitHubAppUnavailable,
@@ -77,7 +77,7 @@ async def handle_vote(
         return Outcome("You already approved this revision.")
     if not await get_valid_access_token(voter.github_login):
         return Outcome(
-            f"Open SWE has no GitHub token for @{voter.github_login}, so it cannot submit "
+            f"Robin has no GitHub token for @{voter.github_login}, so it cannot submit "
             f"your review. {github_token_hint()}"
         )
 
@@ -103,7 +103,7 @@ async def handle_vote(
         ),
         title=f"Merge {current.pull_request.repo}#{current.pull_request.number}",
     ):
-        woken = "Open SWE could not be woken to merge it; tag it in the thread to try again."
+        woken = "Robin could not be woken to merge it; tag it in the thread to try again."
         return Outcome(f"{problem} {woken}" if problem else woken)
     return Outcome(problem or "")
 
@@ -115,12 +115,12 @@ async def _submit_review(approval: HumanReviewRequest, voter_user_id: UUID) -> s
     runs under the card's row lock, which the merge also holds, so one of them submits.
     """
     pr = approval.pull_request
-    unavailable = "GitHub was unavailable, so Open SWE will submit your review when it merges."
+    unavailable = "GitHub was unavailable, so Robin will submit your review when it merges."
     try:
         async with GitHubClient.as_app(pr.owner, pr.repo) as github:
             pull = github.repo(pr.owner, pr.repo).pull_request(pr.number)
             head_sha = await or_none(pull.head_sha())
-            files = await ChangedFile.of_pull(pull)
+            files = await ChangedFile.of_pull(pull, max_pages=FILE_PAGES)
     except GitHubAppUnavailable:
         return unavailable
     if head_sha is None or files is None:
@@ -137,7 +137,7 @@ async def _submit_review(approval: HumanReviewRequest, voter_user_id: UUID) -> s
             return None
         failed = await submit_approval(row, vote, head_sha)
     if failed is not None:
-        return f"{failed} Open SWE will try again when it merges."
+        return f"{failed} Robin will try again when it merges."
     return None
 
 
@@ -154,7 +154,7 @@ async def _mark_ready(approval: HumanReviewRequest, *, voter: Participant) -> Ou
             )
     except GitHubSignInRequired:
         return Outcome(
-            f"Open SWE has no GitHub token for @{voter.github_login}, so it cannot mark the "
+            f"Robin has no GitHub token for @{voter.github_login}, so it cannot mark the "
             f"pull request ready. {github_token_hint()}"
         )
     except HTTPException as exc:
@@ -181,7 +181,7 @@ async def request_broadcast(approval: HumanReviewRequest) -> Outcome:
     if len(choices) == 1 and choices[0]["id"] != approval.slack_channel_id:
         return await request_copy(approval, choices[0]["id"], None, configured=True)
     if not await ReviewCard(approval).broadcast():
-        return Outcome("Open SWE could not send this expedited review to the channel.")
+        return Outcome("Robin could not send this expedited review to the channel.")
     return Outcome("Sent to the channel.")
 
 
@@ -205,13 +205,11 @@ async def request_copy(
     channel = await sendable_channel(channel_id)
     if channel is None:
         return Outcome(
-            "Open SWE only sends expedited reviews to public channels that are not shared "
+            "Robin only sends expedited reviews to public channels that are not shared "
             "outside the workspace."
         )
     if (problem := await ReviewCard(approval).copy_to(channel)) is not None:
-        return Outcome(
-            f"Open SWE could not send this expedited review to <#{channel.id}>. {problem}"
-        )
+        return Outcome(f"Robin could not send this expedited review to <#{channel.id}>. {problem}")
     return Outcome(f"Sent to <#{channel.id}>.")
 
 

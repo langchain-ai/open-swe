@@ -27,7 +27,7 @@ async def list_repos(
     refresh: bool = False,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
-    """List repos where Open SWE is installed and the user has access.
+    """List repos where Robin is installed and the user has access.
 
     Served from the per-login cache (stale-while-revalidate) unless
     ``refresh=true``, because the fan-out over every installation takes 10s+
@@ -67,7 +67,7 @@ async def api_allow_github_bot(
 ) -> AllowedGitHubBot:
     login = body.bot_login()
     if login in OPEN_SWE_GITHUB_LOGINS:
-        raise HTTPException(400, "Open SWE's own bots are always allowed.")
+        raise HTTPException(400, "Robin's own bots are always allowed.")
     actor = session_user_id(admin) or user_id_for_login(admin["sub"])
     if not await AllowedGitHubBot.add(login, actor):
         raise HTTPException(409, "This bot is already allowed.")

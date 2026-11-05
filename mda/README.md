@@ -1,6 +1,6 @@
-# Open SWE on Managed Deep Agents
+# Robin on Managed Deep Agents
 
-Open SWE's coding agent, pull request reviewer and review scout, packaged as one [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) project with a single graph, `open-swe`.
+Robin's coding agent, pull request reviewer and review scout, packaged as one [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) project with a single graph, `open-swe`.
 Each run's context names the kind of run it is (`agent`, `reviewer` or `review-scout`); the factory in `agent.py` builds the deep agent for that kind from it.
 
 The model loop, its checkpoints, every tool call and the middleware around them run here.
@@ -29,7 +29,7 @@ Every call is authenticated with the run token.
   Threads the backend gave a sandbox keep it; bridged threads run on the user's machine; a task worker works in its coordinator's MDA sandbox once the backend has attached it there.
 - **Browser:** the coding agent (`agent`) also gets Stagehand's `browser_run`, `browser_snapshot` and `browser_screenshot` tools on one LangSmith browser per thread (`managed_deepagents.browser`), which shares the thread's sandbox's `localhost`.
   The deployment's workspace needs the LangSmith browser beta.
-  It has no `browser_handoff`: MDA's watcher run would start the run that wakes the agent when the user hands the browser back, and Open SWE runs only what its backend signs (`rt/browser.py`).
+  It has no `browser_handoff`: MDA's watcher run would start the run that wakes the agent when the user hands the browser back, and Robin runs only what its backend signs (`rt/browser.py`).
 - **`catalog`:** the run's operations, subagents, models, sandbox and loop rules (`runtime_api.catalog.Catalog`), in every run's context: dispatch does not start a run it cannot plan.
   The context names the tools and carries none of their specs, since the Agent Server copies the context into every checkpoint; the run reads their specs and grants from the backend as it starts (`tool_specs`).
   The graph holds none of it: each model call is offered the run's own operations as tools under their in-process names, and LangGraph's tool node runs each call through the tool the run made for it (`rt/run_tools.py`, `rt/tools.py`), so the prompts, the transcript and the dashboard see what an in-process run shows.
@@ -44,10 +44,10 @@ Every call is authenticated with the run token.
   The backend keeps every tool the run started with in PostgreSQL by digest (`run_tool_sets`), which the run token signs.
   `search_tools` searches them there, and the run calls one by the name a search gave it: `tools.<name>` in code mode for a tool it has none for, or a direct call by a name its tools don't have, asks `resolve_tool` which tool that is, with the run's grant of it (`BackendTools` in `rt/run_tools.py`, through the vendored code mode's `resolve_tool`).
   A name that is none throws `TypeError` in code mode.
-- **MCP servers:** the backend serves its MCP servers' tools as operations, with credentials it keeps, except a server whose credential is an MDA connection (`connection` on its Open SWE record).
+- **MCP servers:** the backend serves its MCP servers' tools as operations, with credentials it keeps, except a server whose credential is an MDA connection (`connection` on its Robin record).
   The catalog names those (`mcp_servers`), and `rt/mcp.py` connects to them before the run's first model call, in a node of its own: it reads each credential with `managed_deepagents.connections`, the deployment's for an instance or workspace server and the person's own for a personal one, lists the server's tools, and offers those the catalog allows under the backend's names to each model call, since `search_tools` finds only the backend's tools.
   Each call reads the credential again and sends it only to the server's HTTPS origin, at a public address.
-  Only `open-swe-mcp-<server>` connections qualify, so no server gets a credential Open SWE or a channel reads for itself, such as `mda/github-token`.
+  Only `open-swe-mcp-<server>` connections qualify, so no server gets a credential Robin or a channel reads for itself, such as `mda/github-token`.
   A person who has not granted a connection is asked to (MDA's credential interrupt); a run that acts for no one, or whose agent connection is missing, goes without that server.
   The backend names a personal server only to a run that acts for its owner, never to one for no person, such as a background task's completion.
 - **File and shell tools:** this runtime's own (`ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`), run by `FileToolsMiddleware` (`rt/file_tools.py`).
@@ -145,7 +145,7 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 
 | Variable | Purpose |
 |---|---|
-| `OPEN_SWE_BACKEND_URL` | Public HTTPS origin of the Open SWE backend |
+| `OPEN_SWE_BACKEND_URL` | Public HTTPS origin of the Robin backend |
 | `LANGSMITH_API_KEY` | Authenticates the LLM Gateway and tracing |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls |
 | `LANGSMITH_GATEWAY_API_KEY` | Gateway key, the backend's; falls back to `LANGSMITH_API_KEY` |
@@ -163,7 +163,7 @@ The backend:
 | `MDA_SERVICE_SECRET` | The same value as this deployment's; `/linear/channel/*` and `/github/channel/*` answer only calls signed with it |
 | `MDA_GITHUB_PROXY_CONNECTION` | `mda/github-token`: MDA writes the proxy config of the sandboxes it owns whose thread reaches the whole App installation, their GitHub rules filled from that connection. Set it only once this deployment runs a build that writes it: an older one leaves those sandboxes without one. Unset: the backend writes every sandbox's |
 | `MDA_EXA_CONNECTION` | The deployment's agent connection holding the Exa key (`open-swe-exa`), which `web_search` then uses. Unset: the backend's `EXA_API_KEY` |
-| `MDA_GITHUB_USER_CONNECTION` | The deployment's user GitHub OAuth connection (`open-swe-github-<env>`): `open_pull_request` opens the requester's own PR with their grant there when it is the account Open SWE knows them by. Unset, or for another participant: their dashboard GitHub sign-in |
+| `MDA_GITHUB_USER_CONNECTION` | The deployment's user GitHub OAuth connection (`open-swe-github-<env>`): `open_pull_request` opens the requester's own PR with their grant there when it is the account Robin knows them by. Unset, or for another participant: their dashboard GitHub sign-in |
 
 ## Run locally
 
@@ -171,14 +171,14 @@ The backend:
 1. In `mda/.env`, set `OPEN_SWE_BACKEND_URL=http://localhost:2024`, `LANGSMITH_API_KEY`, and the model keys from the table above.
    Then run `make dev-mda` from the repository root.
    Unset `ANTHROPIC_BASE_URL` in that shell if a tool such as Claude Code set it.
-1. Use Open SWE as usual: your dashboard, Slack and GitHub threads run here.
+1. Use Robin as usual: your dashboard, Slack and GitHub threads run here.
    `uv run python -m evals.reviewer.run_eval --limit 3` runs reviews here without publishing to GitHub.
 
 The browser E2E suite runs this project the same way, with a scripted model: `tests/e2e/mda-dev.sh`.
 
 ## Build and deploy
 
-Each Open SWE backend calls its own MDA deployment, created with `mda deploy`:
+Each Robin backend calls its own MDA deployment, created with `mda deploy`:
 
 | Deployment | Backend it calls |
 |---|---|
@@ -186,10 +186,15 @@ Each Open SWE backend calls its own MDA deployment, created with `mda deploy`:
 | `open-swe-mda-preview` | `open-swe-preview` |
 | `open-swe-mda-prod` | `open-swe-v3` |
 
-Each deployment's configuration is `OPEN_SWE_BACKEND_URL`, `LANGSMITH_GATEWAY_API_KEY` and `MDA_SERVICE_SECRET` (repository secret `MDA_SERVICE_SECRET_<ENVIRONMENT>`), in the project `.env` that `mda deploy` forwards as secrets, replacing any set before.
+Each deployment's configuration is `OPEN_SWE_BACKEND_URL`, `LANGSMITH_GATEWAY_API_KEY` and `MDA_SERVICE_SECRET`, in the project `.env` that `mda deploy` forwards as secrets, replacing any set before.
+LangChain's deploy workflow, in its internal monorepo, takes each value from that environment's backend.
 The gateway key is its backend's, so model calls count against that key's gateway spend cap; without it they fall back to the deployment's own LangSmith key and the workspace's cap.
-`deploy_mda.yml` reads it from the `LANGSMITH_GATEWAY_API_KEY_PROD` or `LANGSMITH_GATEWAY_API_KEY_STAGING` repository secret; `build_preview_branch.yml` reads `LANGSMITH_GATEWAY_API_KEY_PREVIEW`.
 Deploys fail if their gateway key is missing.
+For `open-swe-mda-prod`, the deploy also takes the backend's `LANGSMITH_RUNS_ENDPOINTS`, a JSON array of tracing destinations, each with `api_url`, `api_key` and `workspace_id`.
+The workflow requires both `https://dev.api.smith.langchain.com` (workspace `d6684905-655c-429b-bd14-ba302d94c03b`) and `https://api.smith.langchain.com` (workspace `ebbaf2eb-769b-4505-aca2-d11de10372a4`), and forwards the compact JSON as `LANGSMITH_RUNS_ENDPOINTS` in `mda/.env`.
+Missing or invalid configuration fails the prod deploy without printing credentials; staging and preview do not receive these replicas.
+Updating only the backend's `LANGSMITH_RUNS_ENDPOINTS` in Terraform does not configure MDA tracing.
+For a manual prod deploy, include the same `LANGSMITH_RUNS_ENDPOINTS` in the project `.env` alongside its other deployment secrets.
 The backends' `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET` live in their Terraform.
 To deploy one by hand from the repository root, with `mda/.env` holding that deployment's backend URL, gateway key and `MDA_SERVICE_SECRET`:
 
@@ -199,7 +204,7 @@ cd mda
 uv run --locked mda deploy --name open-swe-mda-staging --deployment-type prod
 ```
 
-`deploy_mda.yml` and `build_preview_branch.yml` write the deployed commit (`git rev-parse HEAD`) into `mda/.env` as `LANGSMITH_REVISION_ID`; a manual deploy sets it there too.
+The deploy workflow writes the deployed commit (`git rev-parse HEAD`) into `mda/.env` as `LANGSMITH_REVISION_ID`; a manual deploy sets it there too.
 Each turn's root trace carries that commit as `revision_id`, an `environment` derived from the CLI-injected `MDA_DEPLOYMENT_NAME` (`open-swe-mda-prod` reports `production`), and the backend's current `LANGCHAIN_REVISION_ID` as `LANGSMITH_AGENT_VERSION` from the run's catalog, overriding whatever metadata queued work saved.
 
 CI and manual deploys run the CLI from this project's locked environment.
@@ -218,7 +223,7 @@ MDA's dev server also refuses loopback webhooks, so the completion webhook (`COM
 
 Before every run a channel starts, MDA asks the backend who its verified sender is (`resolve_user` in `identity.py`, the backend's `POST /mda/resolve-user`, signed with `MDA_SERVICE_SECRET` as the channel endpoints are).
 The backend maps the sender as every other ingress does (`User.for_person`): a Slack account linked in the sender's own workspace (a link that names no workspace matches no one), a GitHub user by their numeric id, or a Linear user by email.
-A match runs as that Open SWE user (`{"type": "user", "id": <users.id>}`), the principal a trusted-backend call for that id gets, so one person is one principal on every channel.
+A match runs as that Robin user (`{"type": "user", "id": <users.id>}`), the principal a trusted-backend call for that id gets, so one person is one principal on every channel.
 Anyone else is answered `null`, as is every sender while the backend can't read its users: MDA runs a verified person as their own GitHub, Linear or Slack principal, which owns no user connections, and a bot, an app or a sender the channel couldn't verify as the channel.
 The channel endpoints still gate the run and ask the person to connect their account.
 
@@ -230,7 +235,7 @@ User-owned connections depend on it: any other id there is a person to MDA, so o
 
 ## Linear
 
-The deployment's Linear channel (`channels/linear.py`) is how Open SWE works in Linear.
+The deployment's Linear channel (`channels/linear.py`) is how Robin works in Linear.
 Mentioning the app on an issue, or delegating the issue to it, opens an agent session.
 Each session is its own conversation: the channel starts its runs on the session's own thread, so the answer, Stop, interrupt notices and errors reach the session.
 A reply in the session is the next run there; a new mention on the same issue opens a new session and thread.
@@ -253,11 +258,11 @@ The channel reports failures in the session itself.
 
 ## GitHub
 
-The deployment's GitHub channel (`channels/github.py`) handles `@openswe` mentions on issues: `issues.opened`, `edited` and `reopened` with the handle in the title or body, and `issue_comment.created` and `edited` with it in the comment, on issues only.
+The deployment's GitHub channel (`channels/github.py`) handles `@robin-agent` mentions on issues (legacy mention aliases remain supported): `issues.opened`, `edited` and `reopened` with the handle in the title or body, and `issue_comment.created` and `edited` with it in the comment, on issues only.
 One issue is one conversation, on the channel's own thread, and a new mention interrupts the run in progress, as before.
 Pull requests, reviews, CI, the reviewer and automations stay on the backend.
 
-The channel uses Open SWE's own GitHub App: `mda deploy` brings it (App ID, private key, installation ID and webhook secret), and its webhook stays at the backend's `/webhooks/github`.
+The channel uses Robin's own GitHub App: `mda deploy` brings it (App ID, private key, installation ID and webhook secret), and its webhook stays at the backend's `/webhooks/github`.
 The backend forwards the issue events that would start a run to `<deployment>/channels/github/events` exactly as GitHub sent them, instead of starting the run itself.
 Deploy remembers that the webhook stays at the backend once you answer "No" to moving it; without a terminal, `MDA_GITHUB_WEBHOOK_ELSEWHERE` names the backend's URL.
 
@@ -272,17 +277,17 @@ Under `mda dev` the token comes from `MDA_DEV_MDA__GITHUB_TOKEN`.
 
 The channel's `on_event` names the backend's endpoint, `POST /github/channel/events`, which it asks what each event starts: MDA posts `{event: {key, deliveryId, payload}, thread}`.
 The backend applies the same gates as its own intake, reacts to the comment, builds the prompt, writes and indexes the thread, and answers with the input, the run context with a run token signed for the channel's thread, the run metadata and the run-complete webhook, or `null` to start nothing.
-While the thread waits on an interrupt it only answers whether Open SWE would act, so the channel points the issue to the decision.
-Its threads are the channel's, as Linear sessions' are: the dashboard continues them through MDA's trusted-backend ingress, and they're completed through `/webhooks/run-complete`, which also posts Open SWE's failure reply on the issue, as before.
+While the thread waits on an interrupt it only answers whether Robin would act, so the channel points the issue to the decision.
+Its threads are the channel's, as Linear sessions' are: the dashboard continues them through MDA's trusted-backend ingress, and they're completed through `/webhooks/run-complete`, which also posts Robin's failure reply on the issue, as before.
 
 ## Slack
 
 The deployment's Slack channel (`channels/slack.py`) takes the Slack conversations it can start; every other conversation stays on the backend's own Slack intake.
-Open SWE's Slack app keeps its URLs at the backend's `/webhooks/slack`.
+Robin's Slack app keeps its URLs at the backend's `/webhooks/slack`.
 When the first message of a new conversation is one MDA's channel can start, the backend first gates it as it gates its own Slack runs (a person without a usable GitHub account gets the prompt to connect one, and nothing is handed over), then binds the Slack thread to the thread MDA's channel keys it by (`uuid5` of Trigger Server's `slack:v1:{app}:{team}:{channel}:{root_ts}`), indexes it as the channel's (private until its first metadata write, by the run or by the backend taking it back, says who sees it), remembers the request it gated, and forwards Slack's request to LangSmith Trigger Server unchanged: same bytes, same Slack signature, without Slack's retry headers.
 Later messages in that Slack thread, and Slack's Stop, go the same way.
 Trigger Server verifies the request as if Slack had sent it and hands the message to the channel, which asks the backend's `/slack/channel/events` what it starts; the backend builds the run from the request it remembered, as for its own Slack runs.
-The agent replies with Open SWE's Slack tools (`reply="none"`), and the channel shows the run's status and Stop.
+The agent replies with Robin's Slack tools (`reply="none"`), and the channel shows the run's status and Stop.
 It adds no reaction to the message that starts a run (`reactions=False`).
 
 The backend forwards to Trigger Server's Slack events URL (`TRIGGER_EVENTS_URL` in `openswe/slack/mda_forwarding.py`), the same on US LangSmith for every environment: Trigger Server routes each request by its Slack app.
@@ -301,8 +306,8 @@ Which conversations go where (`mda_can_start` in `openswe/slack/mda_forwarding.p
 
 | Goes to MDA | Stays on the backend, and why |
 |---|---|
-| A person's @mention of Open SWE in a channel, as a new message or in a thread Open SWE isn't in yet | Code channels (one session per channel) and concierge DMs (one per DM): MDA keys a conversation by its Slack thread |
-| A person's DM to Open SWE (a thread per message) | Kitchen channels' untagged messages, routed to a workspace |
+| A person's @mention of Robin in a channel, as a new message or in a thread Robin isn't in yet | Code channels (one session per channel) and concierge DMs (one per DM): MDA keys a conversation by its Slack thread |
+| A person's DM to Robin (a thread per message) | Kitchen channels' untagged messages, routed to a workspace |
 | Every later message in those threads, and Slack's Stop | Bots' messages, breakouts, `/btw`, slash commands |
 | | Every conversation the backend already holds: one never moves |
 | | Reactions (`:x:` stop, feedback), edits, `thread_broadcast` replies and button clicks: Trigger Server doesn't take them. In MDA's conversations these do nothing yet; Slack's Stop works |

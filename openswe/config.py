@@ -271,13 +271,13 @@ ENV.var(
 ENV.var(
     "LANGCHAIN_API_KEY",
     "Legacy SDK alias.",
-    deprecated="Open SWE reads LANGSMITH_API_KEY; this legacy alias is ignored.",
+    deprecated="Robin reads LANGSMITH_API_KEY; this legacy alias is ignored.",
     replaced_by="LANGSMITH_API_KEY",
 )
 ENV.var(
     "LANGCHAIN_TRACING_V2",
     "Legacy SDK alias.",
-    deprecated="set LANGSMITH_TRACING=true instead; this legacy alias is ignored by Open SWE.",
+    deprecated="set LANGSMITH_TRACING=true instead; this legacy alias is ignored by Robin.",
     replaced_by="LANGSMITH_TRACING",
 )
 # --- GitHub ------------------------------------------------------------------------------
@@ -321,6 +321,10 @@ ENV.var("SLACK_REPO_NAME", "Slack-specific default repository name.")
 
 # --- Slack and Linear ----------------------------------------------------------------------
 ENV.var("SLACK_BOT_TOKEN", "Slack bot user OAuth token (xoxb-...).", secret=True)
+ENV.var(
+    "SLACK_ALERTS_CHANNEL_ID",
+    "Slack channel for rate-limited operational alerts; unset disables Slack delivery, not local logging.",
+)
 ENV.var("SLACK_SIGNING_SECRET", "HMAC secret for Slack webhook deliveries.", secret=True)
 ENV.var("SLACK_BOT_USER_ID", "Slack user id of the bot, for mention detection.")
 ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for readable conversation context.")
@@ -385,11 +389,6 @@ ENV.var(
     "LANGSMITH_OAUTH_CLIENT_SECRET",
     "Client secret of the LANGSMITH_OAUTH_CLIENT_ID application. Unset hides the connection.",
     secret=True,
-)
-ENV.var(
-    "LANGSMITH_LOGIN_ORG_ID",
-    "Organization allowed to sign in to Agent Workspace with LangSmith. Unset disables "
-    "LangSmith login without affecting personal LangSmith connections.",
 )
 ENV.var(
     "LMT_TENANT_ID",

@@ -336,9 +336,8 @@ async def test_expired_user_token_is_never_replaced_with_a_bot_token(
 
 
 @pytest.mark.parametrize("expired", [False, True])
-@pytest.mark.parametrize("experience", ["coding", "agent_workspace"])
 async def test_langsmith_run_cannot_read_or_refresh_a_cached_bot_token(
-    monkeypatch: pytest.MonkeyPatch, expired: bool, experience: str
+    monkeypatch: pytest.MonkeyPatch, expired: bool
 ) -> None:
     expiry = datetime.now(UTC) + timedelta(hours=-1 if expired else 1)
     github_token.cache_github_token_for_thread(
@@ -350,7 +349,6 @@ async def test_langsmith_run_cannot_read_or_refresh_a_cached_bot_token(
         "configurable": {
             "thread_id": "tid",
             "auth_provider": "langsmith",
-            "experience": experience,
             "user_id": "019abcde-0000-7000-8000-000000000001",
         }
     }

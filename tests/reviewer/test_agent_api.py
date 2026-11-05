@@ -205,9 +205,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     monkeypatch.setattr(run_sandbox, "bind_mda_sandbox", bound)
     # Binding the sandbox found its workspace image stale.
     monkeypatch.setattr(run_calls, "take_stale_boot", lambda thread_id: object())
-    monkeypatch.setattr(
-        run_calls, "stale_workspace_notice", lambda thread_id, stale: {"workspace": "w"}
-    )
+    monkeypatch.setattr(run_calls, "StaleWorkspaceReporter", MagicMock(report=AsyncMock()))
     monkeypatch.setattr(agent, "load_thread_settings", AsyncMock(return_value={}))
     monkeypatch.setattr(server, "get_or_create_sandbox_backend_proxy", never_reached)
     monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value={}))
@@ -256,8 +254,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     bound.assert_awaited_once_with("thread-1", "sandbox-1", open_error=None, workspace_slug=None)
     updated.assert_not_awaited()
     usage.assert_not_awaited()
-    # The transcript turn may open on another replica, so its notices go with the run.
-    assert prepared["notices"] == [{"kind": "workspace_stale", "data": {"workspace": "w"}}]
+    assert prepared["notices"] == []
     queued = MagicMock()
     monkeypatch.setattr(run_calls, "queue_run_notice", queued)
 
@@ -276,7 +273,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
         },
     )
 
-    queued.assert_called_once_with("thread-1", "workspace_stale", {"workspace": "w"})
+    queued.assert_not_called()
     [metadata] = [call.kwargs["metadata"] for call in updated.await_args_list]
     assert metadata["model"] == "openai:gpt-6.1-sol"
     assert metadata["model_route"] == "default"

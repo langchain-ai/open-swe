@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 CHANNEL: Final = "github"
 # What the channel starts with while the thread waits: nothing, it only notes Open SWE acts.
-_ACTS_WHILE_INTERRUPTED: Final = "Open SWE was mentioned while the thread waits."
+_ACTS_WHILE_INTERRUPTED: Final = "Robin was mentioned while the thread waits."
 
 IssueEventKey = Literal[
     "issues.opened",
@@ -73,7 +73,7 @@ async def trigger_rejection(payload: dict[str, JsonValue], event_type: str) -> s
     if not isinstance(issue, dict):
         return "The event names no issue"
     if issue.get("pull_request"):
-        return "Pull request comments stay on Open SWE's own intake"
+        return "Pull request comments stay on Robin's own intake"
     repository = _fields(payload.get("repository"))
     repo_config = {
         "owner": str(_fields(repository.get("owner")).get("login") or ""),
@@ -95,7 +95,7 @@ async def trigger_rejection(payload: dict[str, JsonValue], event_type: str) -> s
             return "Unsupported GitHub issue_comment action"
         sender_login = str(_fields(payload.get("sender")).get("login") or "")
         if not await service.is_accepted_commenter(sender_login):
-            return "Sender is not a registered Open SWE user"
+            return "Sender is not a registered Robin user"
         text = str(_fields(payload.get("comment")).get("body") or "")
     if not common.mentions_open_swe(text):
         return f"Does not mention {common.describe_open_swe_tags()}"
@@ -152,7 +152,7 @@ async def github_channel_event(
     """The run an @openswe mention on an issue starts on the channel's thread, or ``None``.
 
     While the thread waits on an interrupt nothing starts: a non-null answer only
-    tells the channel Open SWE would act, so it points the issue to the decision.
+    tells the channel Robin would act, so it points the issue to the decision.
     """
     event, thread = call["event"], call["thread"]
     key, payload, delivery_id = event["key"], event["payload"], event["deliveryId"]

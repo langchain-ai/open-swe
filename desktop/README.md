@@ -1,8 +1,8 @@
-# Open SWE Desktop
+# Robin Desktop
 
 > [!IMPORTANT]
 > This desktop client is experimental.
-> The web UI is the recommended way to use Open SWE.
+> The web UI is the recommended way to use Robin.
 
 The Electron app downloads a standalone UI release selected by the connected backend.
 It keeps the last complete UI on disk, including lazy routes, for offline use.
@@ -12,7 +12,7 @@ First launch requires connectivity to download the UI; failure shows a retry scr
 Desktop users can choose **This Mac** in the new-task composer to run an agent over a selected local project.
 The thread is an ordinary cloud thread on the connected backend — same transcript, models, settings, MCPs and skills — whose sandbox is the project on this Mac instead of a hosted sandbox.
 The app serves it through a sandbox bridge: it long-polls the backend for the agent's `execute`, `upload_files` and `download_files` requests, runs them in the checkout, and posts the results back.
-This is the same bridge `oswe run` uses, from the shared `bridge-client` package.
+This is the same bridge `robin run` uses, from the shared `bridge-client` package.
 
 Commands run with your login shell's environment, minus anything secret-shaped except `GITHUB_TOKEN` and `GH_TOKEN`, so `git` and `gh` use your own identity and credentials.
 A thread runs only while the app that started it is open: quitting closes its bridge, and a run started meanwhile reports the Mac as unreachable.
@@ -27,13 +27,8 @@ Closing, archiving, or deleting a chat does not delete its automatic task files.
 These folders are starting locations, not filesystem security sandboxes.
 Git branch and worktree controls appear only for Git folders.
 
-The desktop header switches between **Home** (Work mode) and **Code** (Coding mode).
-Home is selected by default; the app remembers each account’s last selection on this device.
-Each experience has its own thread lists, pins and search results; switching never converts an existing thread.
-
-The general-purpose experience is saved on new threads before their first run and inherited by later runs and task workers.
-Existing conversations retain their coding experience.
-Testing requires this branch’s desktop shell and backend; a local UI against an older backend cannot enable the new prompting.
+Every chat lives in one list, whatever it works on.
+A chat started without a repository gets the general-purpose prompt; branch and worktree controls appear once a Git folder is chosen.
 
 The composer's workspace selector chooses where a local thread runs.
 **Current checkout** (the default) runs the agent in the project directory itself, on whichever branch the branch picker selects.
@@ -65,15 +60,15 @@ Native navigation opens the selected provider in your browser with a fresh PKCE 
 
 Packaged builds ask for the organization's backend URL on first launch and store it in the app's local user data.
 They have no maintainer-hosted default.
-Use **Open SWE → Backend URL…** to switch deployments; switching clears the previous deployment's local session data.
+Use **Robin → Backend URL…** to switch deployments; switching clears the previous deployment's local session data.
 
-When the backend the app is connected to sets `OPENSWE_ALTERNATIVE_ENVS="preview:https://...,staging:https://..."`, **Open SWE → Environment** lists those backends next to it.
+When the backend the app is connected to sets `OPENSWE_ALTERNATIVE_ENVS="preview:https://...,staging:https://..."`, **Robin → Environment** lists those backends next to it.
 Choosing one switches only until the app restarts; the stored backend URL stays the same.
 Nothing is configured on the desktop side.
 
 On macOS, Universal Links open agent and review pages in the app only when the URL's origin matches the configured backend.
 Links for other deployments open in the default browser instead.
-Associated domains are fixed in the signed app, so macOS may still launch Open SWE before it hands a mismatched link back to the browser.
+Associated domains are fixed in the signed app, so macOS may still launch Robin before it hands a mismatched link back to the browser.
 
 The shared backend's GitHub App must allow `<backend-url>/dashboard/api/auth/callback` as a callback URL.
 Set `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` on that backend to control which GitHub users can create dashboard sessions, including the ones "This Mac" threads run under.
@@ -86,7 +81,8 @@ On Apple Silicon Macs running macOS Ventura or later, you can install with Homeb
 brew install --cask langchain-ai/tap/open-swe-desktop
 ```
 
-This installs the desktop app and links `oswe` onto your `PATH`.
+This installs the desktop app and links the legacy `oswe` command onto your `PATH`.
+The app also bundles `robin`; both commands share configuration and credentials.
 The CLI updates with the app.
 If you installed the cask before it linked `oswe`, run `brew reinstall --cask open-swe-desktop` once to get the link (a plain `brew upgrade` skips auto-updating casks).
 
@@ -96,7 +92,7 @@ To build and install from source, install Git, Node.js 26, and [Bun](https://bun
 make install-desktop
 ```
 
-The command fast-forwards to the latest `main`, builds Open SWE, and installs it in `/Applications` (or `~/Applications` when needed).
+The command fast-forwards to the latest `main`, builds Robin, and installs it in `/Applications` (or `~/Applications` when needed).
 Run it again to update and replace the app; saved backend settings, login sessions, and projects are preserved.
 
 ## Local development
@@ -119,10 +115,13 @@ make web
 `pnpm run dev:desktop` is equivalent to `make desktop`.
 The desktop app connects to the backend at `http://localhost:2024`, which runs "This Mac" threads too; the bridge needs that backend's PostgreSQL.
 
-The app keeps the original `com.langchain.openswe` bundle ID and `Open SWE` production Electron profile, preserving installed users’ sessions, projects, task folders, caches, and instance locks.
-Packaged apps continue to share backend configuration and sessions with `oswe` through `~/.open-swe/config.json`.
+The app keeps the original `com.langchain.openswe` bundle ID and `Open SWE` production Electron profile for existing sessions, projects, task folders, caches, and instance locks.
+At startup, Electron uses the legacy profile name until `app.whenReady()` resolves, then switches its display name to Robin.
+Electron 44.9.1 initializes the macOS Keychain service and account names before that callback, so the app continues using the original Safe Storage key rather than creating a Robin key.
+A signed macOS upgrade pilot must verify cookie decryption and session continuity; Linux tests cannot establish that behavior.
+Packaged apps continue to share backend configuration and sessions with `robin` and `oswe` through `~/.open-swe/config.json`.
 Source launches retain the isolated `Open SWE Development` profile and do not share CLI configuration.
-The dev window is labeled **Open SWE Development**; existing development sessions and projects are preserved.
+The dev window is labeled **Robin Development**; existing development sessions and projects are preserved.
 
 Development defaults to `http://localhost:2024`.
 Point to another backend with:
@@ -143,8 +142,11 @@ pnpm --dir desktop run dist # installer for the current platform
 ```
 
 Neither command builds or embeds the dashboard.
-Build outputs are written to `desktop/dist/`; the bundle is `Open SWE.app`.
-Release assets retain the `Open-SWE-*` names, `desktop-v*` tags, original stable update feed and `open-swe-desktop` Homebrew cask for compatibility.
+Build outputs are written to `desktop/dist/`; the bundle is `Robin.app`.
+The source installer replaces a verified `Open SWE.app` in the same Applications directory after installing Robin; it does not remove profile or CLI data.
+If an older copy remains in a different Applications directory, remove that app bundle manually after quitting it.
+Release assets use `Robin-*` names, with `Open-SWE-*` aliases for compatibility.
+The `desktop-v*` tags, original stable update feed, and `open-swe-desktop` Homebrew cask stay unchanged.
 There is one desktop product and version, not separate coding and general-purpose distributions.
 An update from an installed Open SWE app and a Homebrew reinstall still need macOS smoke tests to verify bundle replacement, preserved sessions/projects, and the CLI link.
 
@@ -176,7 +178,7 @@ Local packaging remains available without those credentials; signing and notariz
 
 The backend URL is public configuration, not a credential.
 Dashboard routes require an `osw_session` cookie issued after LangSmith login, the only sign-in.
-`LANGSMITH_LOGIN_ORG_ID` controls LangSmith organization authorization; `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` controls which GitHub accounts may be linked.
+The backend's `LANGSMITH_API_KEY` determines the authorized LangSmith organization; `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` controls which GitHub accounts may be linked.
 CORS alone is not access control.
 
 Raw LangGraph routes are a separate boundary.
@@ -187,13 +189,14 @@ An external user does not need the deployment's server-side `LANGSMITH_API_KEY` 
 
 Register a confidential OAuth client (dynamic registration only permits MCP access) with callback `<DASHBOARD_API_BASE_URL>/dashboard/api/langsmith/callback`; existing clients already register it, so sign-in needs no new client or allowlist entry.
 Configure `LANGSMITH_CONNECTION_URL` (normally `https://api.smith.langchain.com`), `LANGSMITH_OAUTH_CLIENT_ID`, and `LANGSMITH_OAUTH_CLIENT_SECRET` on the backend, alongside its existing dashboard URLs, JWT/encryption secrets and PostgreSQL configuration.
-Set `LANGSMITH_LOGIN_ORG_ID=f5c798a2-2155-4999-ad27-6d466bd26e1c` for the production Agent Workspace organization.
-LangSmith login is disabled when this setting is unset, even if personal LangSmith connections are configured.
+The backend derives the allowed login organization from its server-side `LANGSMITH_API_KEY` using `GET <LANGSMITH_ENDPOINT>/auth/public`.
+The key must belong to the intended login organization and cannot be a tracing-only key; missing keys or failed lookups deny login.
+Before deploying, verify the deployment key resolves to the intended organization.
 Apply migrations through `0089_1850da6129ee`.
 Never ship the client secret in the app.
 
 Login discovers OIDC endpoints on the issuer origin and requests `openid profile email offline_access` for the API resource.
-Users must select the organization configured by `LANGSMITH_LOGIN_ORG_ID`.
+Users must select the organization discovered from the backend's API key.
 Membership requires both `/userinfo`'s acting-org claim and current `/orgs?skip_create=true` membership; the claim alone does not prove membership.
 The organization list is unpaginated.
 
@@ -203,7 +206,7 @@ The backend returns a short-lived handoff code to `127.0.0.1`; `/auth/desktop/ex
 No browser session is created, and the handoff cannot itself authenticate as a cookie.
 A LangSmith sign-in starts as its own internal UUID account, never linked by email.
 Coding features need a linked GitHub account: **Link GitHub** runs the GitHub App's OAuth through `/dashboard/api/github/login`.
-When that GitHub account already belongs to an Open SWE person, the LangSmith identity and login grant move to that person, so their threads and settings return; otherwise the GitHub account joins the LangSmith account.
+When that GitHub account already belongs to a Robin person, the LangSmith identity and login grant move to that person, so their threads and settings return; otherwise the GitHub account joins the LangSmith account.
 A GitHub account already linked to another LangSmith account is refused.
 Once linked, the session acts as the GitHub login while every request still checks the LangSmith grant.
 

@@ -170,7 +170,7 @@ describe("WorkspaceSettingsPanel", () => {
   it("preserves saved effort while a subagent uses the parent model", () => {
     const onChange = vi.fn()
     const props = {
-      label: "Open SWE Agent subagents",
+      label: "Robin Agent subagents",
       models: [
         {
           id: "openai:gpt-6.1-sol",
@@ -190,7 +190,7 @@ describe("WorkspaceSettingsPanel", () => {
     )
     const effort = () =>
       screen.getByRole("combobox", {
-        name: "Open SWE Agent subagents reasoning effort",
+        name: "Robin Agent subagents reasoning effort",
       }) as HTMLButtonElement
     expect(effort().disabled).toBe(true)
     expect(effort().textContent).toContain("Parent run")
@@ -836,8 +836,9 @@ describe("WorkspaceSettingsPanel", () => {
       name: /acme\/api\s*Private/,
     })
     expect(option.closest("section")).toBeNull()
-    expect(screen.getAllByText("acme/oss").length).toBeGreaterThan(1)
-    expect(screen.queryByText("acme/legacy")).toBeNull()
+    const picker = within(screen.getByRole("dialog"))
+    expect(picker.getByText("oss")).toBeTruthy()
+    expect(picker.queryByText("legacy")).toBeNull()
     fireEvent.click(screen.getByRole("checkbox", { name: "Show archived" }))
     expect(
       screen.getByRole("button", { name: /acme\/legacy\s*Public\s*archive/ })

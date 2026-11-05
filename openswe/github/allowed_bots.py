@@ -1,4 +1,4 @@
-"""Admin-allowed GitHub bots whose pull requests are treated like an Open SWE user's."""
+"""Admin-allowed GitHub bots whose pull requests are treated like a Robin user's."""
 
 import re
 from datetime import datetime
@@ -67,7 +67,7 @@ class AllowedGitHubBot(BaseModel):
 
     @classmethod
     async def allows(cls, login: str) -> bool:
-        """Whether PRs ``login`` opens are treated like an Open SWE user's."""
+        """Whether PRs ``login`` opens are treated like a Robin user's."""
         if not login:
             return False
         async with postgres.session() as session:
@@ -79,7 +79,7 @@ class AllowedGitHubBot(BaseModel):
 
     @classmethod
     async def author_allowed(cls, login: str) -> bool:
-        """Whether ``login``'s pull requests are treated like an Open SWE user's."""
+        """Whether ``login``'s pull requests are treated like a Robin user's."""
         return (
             login.lower() in OPEN_SWE_GITHUB_LOGINS
             or await User.for_login("github", login) is not None

@@ -892,12 +892,42 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
             raise GitHubError(_response(404))
         return {}
 
+    from openswe.github.pull_request_status import OpenPullRequest, OpenPullRequests
+    from openswe.github.pull_requests import ReviewLink
+
+    for number in [30, 31]:
+        await PullRequest(
+            owner="o",
+            repo="r",
+            number=number,
+            author="grace",
+            reviews=[ReviewLink(reviewer_thread_id=str(number))],
+        ).save()
+
+    async def search(github, login, repo, *, scope, **kwargs):
+        listed = {"review-requested": [(20, "grace", False), (21, "grace", True)]}
+        rows = listed.get(scope, [(22, "ada", True)])
+        return OpenPullRequests(
+            pull_requests=[
+                OpenPullRequest(repo="o/r", number=n, title=str(n), author=a, draft=d)
+                for n, a, d in rows
+            ],
+            next_page=None,
+            incomplete=False,
+            updated_at="",
+        )
+
     async def pull(self) -> dict[str, object]:
         author = "ada" if self.number == 10 else "grace"
-        return {"state": "open", "user": {"login": author}, "title": f"PR {self.number}"}
+        return {
+            "state": "open",
+            "user": {"login": author},
+            "title": f"PR {self.number}",
+            "draft": self.number == 31,
+        }
 
     async def states(pull, author):
-        return {"ada": "APPROVED"} if pull.number == 5 else {}
+        return {5: {"ada": "APPROVED"}, 20: {"ada": "CHANGES_REQUESTED"}}.get(pull.number, {})
 
     async def tentative(self) -> frozenset[UUID]:
         return frozenset({ada.id} if self.request.pull_request.number in {7, 14} else {grace.id})
@@ -912,12 +942,16 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
             AsyncMock(return_value=frozenset({"o/r"})),
         ),
         patch("openswe.human_review.review_queue.latest_review_states", states),
+        patch("openswe.human_review.review_queue.list_open_pull_requests", search),
     ):
         result = await api_review_assignments(page=1, session={"sub": "ada"})
     assert [(row.number, row.assignment) for row in result.pull_requests] == [
         (1, "assigned"),
+        (20, "requested"),
         (7, "tentative"),
         (12, "mentioned"),
+        (22, "draft"),
+        (30, "speculative"),
     ]
 
 

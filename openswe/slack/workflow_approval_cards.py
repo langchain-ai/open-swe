@@ -42,11 +42,11 @@ def workflow_approval_message(thread_id: str, record: Mapping[str, object]) -> s
         headline = "*Confirm workflow changes inherited from the base branch*"
         source = (
             f"This branch now includes {len(paths)} GitHub Actions files from merging "
-            f"`{escape(str(inherited))}`. Open SWE did not author these workflow changes."
+            f"`{escape(str(inherited))}`. Robin did not author these workflow changes."
         )
     else:
         headline = "*Confirm GitHub Actions workflow changes*"
-        source = "Open SWE is ready to push GitHub Actions workflow changes."
+        source = "Robin is ready to push GitHub Actions workflow changes."
     return (
         f"{headline}\n{source}\n"
         f"*Repository:* `{escape(str(record.get('repo') or ''))}`\n"

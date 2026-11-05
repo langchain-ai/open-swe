@@ -11,8 +11,9 @@ Supported profile fields:
   Omit a workspace from the map to restore its global fallback; an empty map clears all workspace overrides.
 - `auto_fix_ci`: boolean preference.
 - `auto_human_review_enabled`: allow automatic review picks (default true); false opts out, but people can still explicitly name the user as a reviewer.
-- Server-backed personal flags exposed by `read_user_settings` may also be toggled by name; flags on the user account require an existing Open SWE user record.
+- Server-backed personal flags exposed by `read_user_settings` may also be toggled by name; flags on the user account require an existing Robin user record.
   Browser-local Feature Flags tab visibility cannot be changed here.
+- `experimental_conditional_approval`: opt the requester’s authored PRs into conditional approval (default false); never enables it for other authors.
 - `review_draft_prs`: boolean overrides; null inherits the shared default.
 - `draft_prs`: whether newly opened PRs are drafts; use true or false (null keeps the existing preference).
 
@@ -22,7 +23,7 @@ Supported dashboard preferences:
 - `follow_up_behavior`: `queue` or `steer`.
   What a message sent while a run is live does: wait for the run to end, or steer the running agent.
 
-`concierge_mode` (the user's Slack DM with Open SWE as one conversation) is read-only through agent tools.
+`concierge_mode` (the user's Slack DM with Robin as one conversation) is read-only through agent tools.
 Direct the user to the dashboard settings to enable or disable it; including it rejects the entire patch without saving any fields.
 
 Only save explicitly requested personal changes.

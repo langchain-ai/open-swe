@@ -505,7 +505,7 @@ function ChecksRow({
                       `Why is the \`${check.name}\` check failing on this pull request?`
                     )
                   }
-                  className="ml-auto h-auto border-0 px-0 text-secondary opacity-0 group-hover:opacity-100 hover:text-primary focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                  className="ml-auto h-auto border-0 text-secondary opacity-0 group-hover:opacity-100 hover:text-primary focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                 >
                   Ask why
                 </Button>
@@ -760,7 +760,7 @@ function OpenSweRow({
   const expanded = chosen ?? bugs + flags > 0
   const reReview = useMutation({
     mutationFn: () => api.reReview(pr.owner, pr.repo, pr.number),
-    meta: { errorTitle: "Couldn't start the Open SWE review" },
+    meta: { errorTitle: "Couldn't start the Robin review" },
     onSuccess: () => {
       queryClient.setQueryData(reviewQueries.detail(pr).queryKey, (old) =>
         old ? { ...old, status: "running" as const } : old
@@ -788,7 +788,9 @@ function OpenSweRow({
                 ? "approved"
                 : verdict.decision === "would_approve"
                   ? "would approve"
-                  : "needs human review"
+                  : verdict.decision === "would_approve_conditionally"
+                    ? "would approve subject to human approval"
+                    : "needs human review"
               : null,
             bugs || flags
               ? [bugs && plural(bugs, "bug"), flags && plural(flags, "flag")]
@@ -805,7 +807,7 @@ function OpenSweRow({
         icon={
           running ? <Spinner size="xs" /> : <AgentMark className="size-4" />
         }
-        label="Open SWE"
+        label="Robin"
         expandable={canExpand}
         expanded={expanded}
         onToggle={() => setChosen(!expanded)}
@@ -938,7 +940,7 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                   size="xs"
                   variant="plain"
                   color="secondary"
-                  aria-label={`Ask Open SWE about: ${finding.title}`}
+                  aria-label={`Ask Robin about: ${finding.title}`}
                   onClick={() => askInChat(askAboutFinding(finding))}
                 >
                   Ask
@@ -948,7 +950,7 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                     size="xs"
                     variant="plain"
                     color="secondary"
-                    aria-label={`Ask Open SWE to fix: ${finding.title}`}
+                    aria-label={`Ask Robin to fix: ${finding.title}`}
                     onClick={() => askInChat(fixFinding(finding))}
                   >
                     Fix it

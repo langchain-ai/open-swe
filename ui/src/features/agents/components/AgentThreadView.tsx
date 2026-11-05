@@ -23,7 +23,6 @@ import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
-import { formatRelativeTime } from "@/lib/utils"
 
 import type {
   AgentPullRequest,
@@ -86,7 +85,6 @@ import { reportError } from "@/lib/errorReporting"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
-import { useWorkThreadRead } from "@/features/agents/lib/useWorkThreadRead"
 import { useConnectionStatus } from "@/features/agents/lib/stream/useReconnectStatus"
 import { runTranscriptCommitted } from "@/lib/perf/streaming"
 import { ReplyOptionContext } from "@/features/agents/components/chat/ReplyCard"
@@ -142,12 +140,6 @@ export function AgentThreadView({
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const source = useThreadSource()
-  useWorkThreadRead(thread, source)
-  const [dismissedWarning, setDismissedWarning] = useState("")
-  const workspaceWarningKey = JSON.stringify([
-    thread.id,
-    source.kind === "transcript" ? source.workspaceStale : null,
-  ])
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
@@ -807,7 +799,7 @@ export function AgentThreadView({
             >
               {bridgeError
                 ? `This thread's checkout on This Mac can't be served: ${bridgeError}`
-                : `This thread runs in a checkout on another Mac that isn't serving it right now. Open it in the Open SWE app there to continue it${canMove ? ", or move it to Cloud" : ""}.`}
+                : `This thread runs in a checkout on another Mac that isn't serving it right now. Open it in the Robin app there to continue it${canMove ? ", or move it to Cloud" : ""}.`}
             </Banner>
           </div>
         )}
@@ -836,25 +828,6 @@ export function AgentThreadView({
             >
               The last run hit an error before it could finish. Send another
               message to retry.
-            </Banner>
-          </div>
-        )}
-        {source.kind === "transcript" && source.workspaceStale && (
-          <div
-            hidden={dismissedWarning === workspaceWarningKey}
-            className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3"
-          >
-            <Banner
-              key={workspaceWarningKey}
-              intent="warning"
-              dismissible
-              onDismiss={() => setDismissedWarning(workspaceWarningKey)}
-            >
-              {`The ${source.workspaceStale.workspaceName} workspace image this sandbox started from ${
-                source.workspaceStale.capturedAt
-                  ? `was captured ${formatRelativeTime(Date.parse(source.workspaceStale.capturedAt))}`
-                  : "has never been refreshed"
-              }, so its repositories may be out of date. Open SWE continued anyway and is refreshing the image in the background.`}
             </Banner>
           </div>
         )}
@@ -1044,7 +1017,10 @@ export function AgentThreadView({
                 {...(localThread
                   ? {
                       runTarget: "local" as const,
-                      selectedLocalRepoPath: localThread.cwd,
+                      // A task folder is the thread's own, not a project.
+                      selectedLocalRepoPath: localThread.managedTaskFolder
+                        ? null
+                        : localThread.cwd,
                       localRepoBranches: localRepoRefs,
                       selectedLocalRepoBranch: localBranch,
                       onRefreshLocalRepoBranch: () =>

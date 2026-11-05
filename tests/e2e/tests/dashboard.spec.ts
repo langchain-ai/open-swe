@@ -531,7 +531,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
           (element) =>
             visible(element) &&
             element.getAttribute("aria-placeholder") ===
-              "Ask Open SWE to build, fix bugs, explore",
+              "Ask Robin to build, fix bugs, explore",
         );
 
         if (/^\/agents\/[^/]+$/.test(window.location.pathname)) {

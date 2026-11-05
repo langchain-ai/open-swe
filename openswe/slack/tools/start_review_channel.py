@@ -83,7 +83,7 @@ async def _mcp_caller_origin(login: str) -> GuideOrigin:
     user = await User.for_login("github", login)
     if user is None or not user.slack_user_id:
         raise GuideStartError(
-            "Your Slack account is not linked to Open SWE. "
+            "Your Slack account is not linked to Robin. "
             + settings_hint("Connect Slack under Connections", "/my-settings/connections")
         )
     return GuideOrigin(

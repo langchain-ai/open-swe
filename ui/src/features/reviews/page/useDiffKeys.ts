@@ -219,7 +219,7 @@ export function useDiffKeys(askAboutSelection: () => void) {
     () => [
       {
         id: "review-ask-selection",
-        label: "Ask Open SWE about the selected code",
+        label: "Ask Robin about the selected code",
         group: GROUP,
         shortcuts: [ASK_SELECTION_SHORTCUT],
         run: askAboutSelection,

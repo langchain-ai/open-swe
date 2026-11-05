@@ -124,7 +124,7 @@ function ChatStarters({ pr }: { pr: PullRequestRef }) {
       ? "Why are the checks failing, and what would fix them?"
       : null,
     bugs > 0
-      ? "Which of Open SWE's findings matter most, and are any false alarms?"
+      ? "Which of Robin's findings matter most, and are any false alarms?"
       : null,
     open > 0
       ? "Summarize the unresolved review comments and what each one asks for."

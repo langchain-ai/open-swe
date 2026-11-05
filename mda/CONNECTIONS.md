@@ -10,7 +10,7 @@ Each backend setting is off until set, and unset keeps that credential on the ba
 | `mda/github-token` | agent | The GitHub proxy of the sandboxes MDA owns whose thread reaches the whole App installation | `MDA_GITHUB_PROXY_CONNECTION=mda/github-token` |
 | `open-swe-exa` | agent | `web_search` | `MDA_EXA_CONNECTION=open-swe-exa` |
 | `open-swe-github-<env>` | user | `open_pull_request`, for the requester's own PR | `MDA_GITHUB_USER_CONNECTION=open-swe-github-<env>` |
-| `open-swe-mcp-<server>` | agent or user | An MCP server whose Open SWE record names the connection | `connection` on the server's record |
+| `open-swe-mcp-<server>` | agent or user | An MCP server whose Robin record names the connection | `connection` on the server's record |
 
 ## 0. Prepare the shell
 
@@ -47,7 +47,8 @@ The key needs permission to manage the workspace's integrations or to create dep
 
 The GitHub channel's `mda deploy` keeps the GitHub App's installation token under this reserved slug, and Agent Auth renews it.
 Deploy this change first: `mda/channels/github.py` now asks for the App's repository permissions, and deploy renews the token with them.
-Check the deploy report lists contents, pull requests, issues, checks and workflows as write, and statuses, security events and actions as read; an installation that has not granted all of them keeps the old token.
+Set the GitHub App's **Code scanning alerts** permission to **Read & write**, and have an organization admin approve the expanded permission for existing installations before deploying.
+Check the deploy report lists contents, pull requests, issues, checks, security events and workflows as write, and statuses and actions as read; an installation that has not granted all of them keeps the old token.
 Then check Agent Auth holds the deployment's App, which it stores as `mda/github-app/<deployment id>`:
 
 ```bash
@@ -67,11 +68,11 @@ uv run --project mda --locked mda connections create open-swe-exa \
 ```
 
 Then set `MDA_EXA_CONNECTION=open-swe-exa` on the backend.
-The backend keeps `EXA_API_KEY` for Open SWE's own MCP server.
+The backend keeps `EXA_API_KEY` for Robin's own MCP server.
 
 ## 4. `open-swe-github-<env>`: each person's GitHub, for the PRs they open
 
-The environment's GitHub App is the OAuth client, so a person grants Open SWE's own App.
+The environment's GitHub App is the OAuth client, so a person grants Robin's own App.
 With the App's `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` in the shell or `mda/.env`:
 
 ```bash
@@ -87,7 +88,7 @@ Set `MDA_GITHUB_USER_CONNECTION=open-swe-github-$ENV` on the backend only once t
 
 ## 5. `open-swe-mcp-<server>`: MCP servers on connections
 
-Do this for each MCP server whose credential should leave Open SWE's database.
+Do this for each MCP server whose credential should leave Robin's database.
 A server with a fixed key (instance or workspace tier, `"owner": "agent"`):
 
 ```bash

@@ -72,13 +72,13 @@ export function AutomationsList({
           Automations
         </Text>
         <p className="mt-space-1 text-xs text-secondary">
-          Run Open SWE on a schedule or on GitHub, Slack, and Linear events.
-          Each run starts a fresh agent thread.{" "}
+          Run Robin on a schedule or on GitHub, Slack, and Linear events. Each
+          run starts a fresh agent thread.{" "}
           {!canManage && "Workspace admins manage automation setup."}
         </p>
         {canManage && (
           <Banner intent="neutral" className="mt-space-3">
-            Automations can also be listed and managed through Open SWE. Start a
+            Automations can also be listed and managed through Robin. Start a
             new thread, turn on Admin next to the model picker, then ask the
             agent to make the change.
           </Banner>
@@ -125,7 +125,7 @@ export function AutomationsList({
                   className="rounded-xl border border-dashed border-default bg-surface-level-1"
                   icon={LightningIcon}
                   title="No automations yet"
-                  description="Run Open SWE on a schedule or on GitHub, Slack, and Linear events — review code, triage new issues, or investigate an alert."
+                  description="Run Robin on a schedule or on GitHub, Slack, and Linear events — review code, triage new issues, or investigate an alert."
                   action={canManage && <NewAutomationButton />}
                 />
               ) : (

@@ -16,9 +16,6 @@ import {
 } from "@langchain/macaw-components/HoverCard"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { Input } from "@langchain/macaw-components/Input"
-import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
-import { ContextMenuItem } from "@/components/MenuItem"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 import { ArchiveIcon } from "@phosphor-icons/react/dist/ssr/Archive"
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
@@ -45,12 +42,12 @@ import type { SVGProps } from "react"
 import type { PullRequestSnapshot } from "@/features/agents/lib/api"
 import type {
   AgentSource,
-  AgentStatus,
   AgentSubagentSummary,
   AgentThread,
 } from "@/features/agents/lib/types"
 import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
+import { RenameThreadDialog } from "@/features/agents/components/RenameThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
@@ -58,7 +55,6 @@ import {
   markAgentThreadViewed,
   markReviewViewed,
   useDeleteAgentThread,
-  useRenameAgentThread,
 } from "@/features/agents/lib/queries"
 import {
   noteReviewOpenedFromSidebar,
@@ -234,208 +230,33 @@ function SidebarRowTitle({
   )
 }
 
-function sidebarRowClassName({
-  compact,
-  active,
-  paddingLeft,
-  archived,
-}: {
-  compact: boolean
-  active: boolean
-  paddingLeft: string
-  archived: boolean
-}): string {
-  return cn(
-    "relative flex items-center gap-space-2 rounded-lg pr-space-2 transition-colors",
-    paddingLeft,
-    // Only ever on screen while "Show archived" is on; without this an
-    // archived row is indistinguishable from a live one.
-    archived && "opacity-55",
-    compact ? "h-7 gap-space-2" : "h-8",
-    "text-primary",
-    active
-      ? "bg-selected group-hover/row:bg-selected-hover"
-      : "group-hover/row:bg-surface-level-2-hover"
-  )
-}
+const TREE_STEP = 20
 
-export function SidebarConversationRow({
-  title,
-  threadId,
-  status,
-  viewed,
+/** Props for a row `depth` levels below a top-level thread. */
+function sidebarRowProps({
   active,
-  compact,
-  onNavigate,
-  pinned,
   archived,
-  pending,
-  onPin,
-  onArchive,
+  indent,
+  depth,
 }: {
-  title: string
-  threadId: string
-  status: AgentStatus
-  viewed: boolean
   active: boolean
-  compact: boolean
-  onNavigate: () => void
-  pinned: boolean
   archived: boolean
-  pending: boolean
-  onPin: () => void
-  onArchive: () => void
-}) {
-  const marquee = useTitleMarquee()
-  const renameThread = useRenameAgentThread()
-  const [draft, setDraft] = useState<string | null>(null)
-  const editing = useRef(false)
-  const titleInput = useRef<HTMLInputElement>(null)
-  const isEditing = draft !== null
-  useEffect(() => {
-    if (!isEditing) return
-    const frame = requestAnimationFrame(() => titleInput.current?.focus())
-    return () => cancelAnimationFrame(frame)
-  }, [isEditing])
-  const busy = pending || renameThread.isPending
-  const saveTitle = () => {
-    if (!editing.current || draft === null) return
-    editing.current = false
-    setDraft(null)
-    const next = draft.trim()
-    if (next && next !== title) {
-      renameThread.mutate({ threadId, title: next })
-    }
+  indent: boolean
+  depth: number
+}): { className: string; style: React.CSSProperties } {
+  return {
+    className: cn(
+      "relative flex h-8 items-center gap-space-2 rounded-lg pr-space-2 transition-colors",
+      // Only ever on screen while "Show archived" is on; without this an
+      // archived row is indistinguishable from a live one.
+      archived && "opacity-55",
+      "text-primary",
+      active
+        ? "bg-selected group-hover/row:bg-selected-hover"
+        : "group-hover/row:bg-surface-level-2-hover"
+    ),
+    style: { paddingLeft: (indent ? 16 : 8) + depth * TREE_STEP },
   }
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild disabled={draft !== null}>
-        <div
-          className="group/row relative mb-0.5"
-          onMouseEnter={marquee.measure}
-          onMouseLeave={marquee.reset}
-        >
-          {draft !== null ? (
-            <Input
-              ref={titleInput}
-              size="sm"
-              debounceMs={0}
-              autoFocus
-              aria-label="Thread title"
-              value={draft}
-              onChange={setDraft}
-              onFocus={(event) => event.currentTarget.select()}
-              onBlur={saveTitle}
-              onKeyDown={(event) => {
-                if (event.nativeEvent.isComposing) return
-                if (event.key === "Enter") {
-                  event.preventDefault()
-                  saveTitle()
-                } else if (event.key === "Escape") {
-                  event.preventDefault()
-                  editing.current = false
-                  setDraft(null)
-                }
-              }}
-            />
-          ) : (
-            <Link
-              to="/agents/$threadId"
-              params={{ threadId }}
-              onKeyDown={openContextMenuFromKeyboard}
-              aria-current={active ? "page" : undefined}
-              onClick={onNavigate}
-              className={cn(
-                "flex items-center rounded-xl py-0 pr-7 pl-space-2 text-secondary transition-colors group-focus-within/row:bg-surface-level-3 group-focus-within/row:pr-20 group-hover/row:bg-surface-level-3 group-hover/row:pr-20 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
-                compact ? "h-7" : "h-8",
-                active && "bg-surface-level-3"
-              )}
-            >
-              <SidebarRowTitle title={title} marquee={marquee} />
-              <span className="absolute inset-y-0 right-2 flex w-3.5 shrink-0 items-center justify-center">
-                {status === "running" ? (
-                  <RunningIndicator label="Chat running" />
-                ) : !viewed ? (
-                  <span
-                    role="img"
-                    aria-label="Unread chat"
-                    className="size-2 rounded-full bg-brand"
-                  />
-                ) : status === "error" ? (
-                  <ErrorIndicator label="Chat error" />
-                ) : null}
-              </span>
-            </Link>
-          )}
-          {draft === null && (
-            <span className="pointer-events-none absolute inset-y-0 right-7 flex items-center gap-0.5 rounded-xl bg-surface-level-3 opacity-0 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100">
-              <IconButton
-                icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
-                label={pinned ? "Unpin chat" : "Pin chat"}
-                className="text-tertiary hover:text-secondary"
-                size="xs"
-                color="secondary"
-                variant="plain"
-                disabled={busy}
-                onClick={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  onPin()
-                }}
-              />
-              <IconButton
-                icon={archived ? ArrowCounterClockwiseIcon : ArchiveIcon}
-                label={archived ? "Unarchive chat" : "Archive chat"}
-                className="text-tertiary hover:text-secondary"
-                size="xs"
-                color="secondary"
-                variant="plain"
-                disabled={busy}
-                onClick={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  onArchive()
-                }}
-              />
-            </span>
-          )}
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent
-        className="min-w-40"
-        onCloseAutoFocus={(event) => {
-          if (editing.current) event.preventDefault()
-        }}
-      >
-        <ContextMenuItem
-          disabled={busy}
-          onSelect={() => {
-            editing.current = true
-            setDraft(title)
-          }}
-        >
-          <PencilSimpleIcon size={14} weight="regular" />
-          Rename
-        </ContextMenuItem>
-        <ContextMenuItem disabled={busy} onSelect={onPin}>
-          {pinned ? (
-            <PushPinSlashIcon size={14} weight="regular" />
-          ) : (
-            <PushPinRegularIcon size={14} />
-          )}
-          {pinned ? "Unpin" : "Pin"}
-        </ContextMenuItem>
-        <ContextMenuItem disabled={busy} onSelect={onArchive}>
-          {archived ? (
-            <ArrowCounterClockwiseIcon size={14} weight="regular" />
-          ) : (
-            <ArchiveIcon size={14} weight="regular" />
-          )}
-          {archived ? "Unarchive" : "Archive"}
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
-  )
 }
 
 function RunningIndicator({ label }: { label: string }) {
@@ -491,6 +312,81 @@ function PullRequestIcon({
   )
 }
 
+function DisclosureCaret({
+  expanded,
+  label,
+  onToggle,
+}: {
+  expanded: boolean
+  label: string
+  onToggle: () => void
+}) {
+  const Caret = expanded ? CaretDownIcon : CaretRightIcon
+  const toggle = (event: React.SyntheticEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onToggle()
+  }
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      aria-expanded={expanded}
+      aria-label={label}
+      title={label}
+      onClick={toggle}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") toggle(event)
+      }}
+      className="-mx-space-1 flex size-4 shrink-0 items-center justify-center text-tertiary transition-colors hover:text-primary"
+    >
+      <Caret size={10} weight="fill" />
+    </span>
+  )
+}
+
+/**
+ * Children of a sidebar row, joined to their parent by a guide line that
+ * runs down from under the parent's title and curves into each child.
+ */
+function SidebarTree({
+  label,
+  indent,
+  depth,
+  children,
+}: {
+  label: string
+  indent: boolean
+  depth: number
+  children: React.ReactNode
+}) {
+  const guide = (indent ? 16 : 8) + (depth - 1) * TREE_STEP + 6
+  return (
+    <ul
+      aria-label={label}
+      style={{ "--tree-x": `${guide}px` } as React.CSSProperties}
+    >
+      {children}
+    </ul>
+  )
+}
+
+/** The guide line for one `SidebarTree` child; render it last in the `li`. */
+function TreeBranch() {
+  return (
+    <>
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -top-0.5 left-(--tree-x) h-4.5 w-2.5 rounded-bl-md border-b border-l border-subtle"
+      />
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -top-0.5 -bottom-0.5 left-(--tree-x) border-l border-subtle [:last-child>&]:hidden"
+      />
+    </>
+  )
+}
+
 export function SidebarThreadRow({
   item,
   isActive,
@@ -498,7 +394,6 @@ export function SidebarThreadRow({
   pinned,
   archived,
   live,
-  compact = false,
   indent = false,
   onNavigate,
   onTogglePin,
@@ -510,7 +405,6 @@ export function SidebarThreadRow({
   pinned: boolean
   archived: boolean
   live?: PullRequestSnapshot
-  compact?: boolean
   /** Nested under a repository: indent the content, not the highlight box. */
   indent?: boolean
   onNavigate?: () => void
@@ -521,6 +415,7 @@ export function SidebarThreadRow({
   const deleteThread = useDeleteAgentThread()
   const worktreeThread = useLocalThread(item.id)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [renameOpen, setRenameOpen] = useState(false)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const marquee = useTitleMarquee()
   const { prefs, toggleSubagentsCollapsed } = useSidebarPrefs()
@@ -604,71 +499,23 @@ export function SidebarThreadRow({
     onNavigate?.()
   }
 
-  const onToggleSubagents = (event: React.SyntheticEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-    toggleSubagentsCollapsed(item.key)
-  }
-  const SubagentCaret = subagentsCollapsed ? CaretRightIcon : CaretDownIcon
-
   const rowContent = (
     <>
-      <span
-        className={cn(
-          "absolute inset-y-0 flex -translate-x-full flex-col justify-center",
-          indent ? "left-space-5" : "left-space-2"
-        )}
-      >
-        {hasSubagents && (
-          <span
-            role="button"
-            tabIndex={0}
-            aria-expanded={!subagentsCollapsed}
-            aria-label={
-              subagentsCollapsed ? "Show subagents" : "Hide subagents"
-            }
-            title={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
-            onClick={onToggleSubagents}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ")
-                onToggleSubagents(event)
-            }}
-            className="flex max-h-5 min-h-0 w-4 flex-1 items-center justify-center text-tertiary transition-colors hover:text-primary"
-          >
-            <SubagentCaret size={12} weight="bold" />
-          </span>
-        )}
-        {workers.length > 0 && (
-          <span
-            role="button"
-            tabIndex={0}
-            aria-expanded={workersExpanded}
-            aria-label={
-              workersExpanded ? "Hide task workers" : "Show task workers"
-            }
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              setWorkersExpanded((expanded) => !expanded)
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault()
-                event.stopPropagation()
-                setWorkersExpanded((expanded) => !expanded)
-              }
-            }}
-            className="flex max-h-5 min-h-0 w-4 flex-1 items-center justify-center text-tertiary transition-colors hover:text-primary"
-          >
-            {workersExpanded ? (
-              <CaretDownIcon size={12} weight="bold" />
-            ) : (
-              <CaretRightIcon size={12} weight="bold" />
-            )}
-          </span>
-        )}
-      </span>
       <SidebarRowTitle marquee={marquee} title={item.title} />
+      {hasSubagents && (
+        <DisclosureCaret
+          expanded={!subagentsCollapsed}
+          label={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
+          onToggle={() => toggleSubagentsCollapsed(item.key)}
+        />
+      )}
+      {workers.length > 0 && (
+        <DisclosureCaret
+          expanded={workersExpanded}
+          label={workersExpanded ? "Hide task workers" : "Show task workers"}
+          onToggle={() => setWorkersExpanded((expanded) => !expanded)}
+        />
+      )}
 
       <span className="flex shrink-0 items-center gap-space-2 group-hover/row:hidden">
         {item.status === "error" && <ErrorIndicator label="Thread error" />}
@@ -738,11 +585,11 @@ export function SidebarThreadRow({
     </>
   )
 
-  const rowClassName = sidebarRowClassName({
-    compact,
+  const rowProps = sidebarRowProps({
     active: rowIsActive,
-    paddingLeft: indent ? "pl-space-5" : "pl-space-2",
     archived,
+    indent,
+    depth: 0,
   })
 
   const review = item.reviewPage
@@ -754,7 +601,7 @@ export function SidebarThreadRow({
         handleNavigate(event)
       }}
       onKeyDown={openContextMenuFromKeyboard}
-      className={rowClassName}
+      {...rowProps}
     >
       {rowContent}
     </Link>
@@ -764,7 +611,7 @@ export function SidebarThreadRow({
       params={{ threadId: item.id }}
       onClick={handleNavigate}
       onKeyDown={openContextMenuFromKeyboard}
-      className={rowClassName}
+      {...rowProps}
     >
       {rowContent}
     </Link>
@@ -795,6 +642,7 @@ export function SidebarThreadRow({
             pinned={pinned}
             archived={archived}
             isDeleting={isDeleting}
+            onRename={() => setRenameOpen(true)}
             onTogglePin={onTogglePin}
             onToggleArchived={onToggleArchived}
             onDelete={() => setDeleteOpen(true)}
@@ -802,34 +650,47 @@ export function SidebarThreadRow({
         </ContextMenuContent>
       </ContextMenu>
       {hasSubagents && !subagentsCollapsed && (
-        <ul aria-label={`Subagents of ${item.title}`}>
+        <SidebarTree
+          label={`Subagents of ${item.title}`}
+          indent={indent}
+          depth={1}
+        >
           {subagents.map((subagent) => (
             <SidebarSubagentRow
               key={subagent.toolCallId}
               threadId={item.id}
               subagent={subagent}
               isActive={activeSubagent === subagent.toolCallId}
-              compact={compact}
               indent={indent}
+              depth={1}
               onNavigate={onNavigate}
             />
           ))}
-        </ul>
+        </SidebarTree>
       )}
       {workers.length > 0 && workersExpanded && (
-        <ul aria-label={`Task workers of ${item.title}`}>
+        <SidebarTree
+          label={`Task workers of ${item.title}`}
+          indent={indent}
+          depth={1}
+        >
           {workers.map((worker) => (
             <SidebarTaskWorkerRow
               key={worker.id}
               worker={worker}
               activeSubagentId={activeSubagentId}
               isActive={worker.id === activeThreadId}
-              compact={compact}
               indent={indent}
               onNavigate={onNavigate}
             />
           ))}
-        </ul>
+        </SidebarTree>
+      )}
+      {renameOpen && (
+        <RenameThreadDialog
+          thread={thread}
+          onClose={() => setRenameOpen(false)}
+        />
       )}
       <DeleteThreadDialog
         open={deleteOpen}
@@ -843,7 +704,7 @@ export function SidebarThreadRow({
             : worktreeThread.managedTaskFolder
               ? `This deletes the conversation. Its task files are kept at ${worktreeThread.cwd}.`
               : worktreeThread.ownedWorktrees.length
-                ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
+                ? "This deletes the worktree Robin created for it, including any uncommitted changes in it. Its branch and commits are kept."
                 : "This removes its history but does not revert changes made to your repository."
         }
       />
@@ -860,17 +721,15 @@ function SidebarSubagentRow({
   threadId,
   subagent,
   isActive,
-  nested = false,
-  compact,
   indent,
+  depth,
   onNavigate,
 }: {
   threadId: string
   subagent: AgentSubagentSummary
   isActive: boolean
-  nested?: boolean
-  compact: boolean
   indent: boolean
+  depth: number
   onNavigate?: () => void
 }) {
   const marquee = useTitleMarquee()
@@ -881,17 +740,11 @@ function SidebarSubagentRow({
       params={{ threadId }}
       search={{ subagent: subagent.toolCallId }}
       onClick={() => onNavigate?.()}
-      className={sidebarRowClassName({
-        compact,
+      {...sidebarRowProps({
         active: isActive,
-        paddingLeft: nested
-          ? indent
-            ? "pl-18"
-            : "pl-space-9"
-          : indent
-            ? "pl-13.5"
-            : "pl-11.5",
         archived: false,
+        indent,
+        depth,
       })}
     >
       <SidebarRowTitle marquee={marquee} title={subagent.title} />
@@ -916,6 +769,7 @@ function SidebarSubagentRow({
         trigger={link}
         card={<SubagentHoverCard subagent={subagent} />}
       />
+      <TreeBranch />
     </li>
   )
 }
@@ -1041,14 +895,12 @@ function SidebarTaskWorkerRow({
   worker,
   activeSubagentId,
   isActive,
-  compact,
   indent,
   onNavigate,
 }: {
   worker: AgentThread
   activeSubagentId: string | null
   isActive: boolean
-  compact: boolean
   indent: boolean
   onNavigate?: () => void
 }) {
@@ -1065,7 +917,6 @@ function SidebarTaskWorkerRow({
     `cloud:${worker.id}`
   )
   const rowIsActive = isActive && (!activeSubagent || subagentsCollapsed)
-  const SubagentCaret = subagentsCollapsed ? CaretRightIcon : CaretDownIcon
   const status =
     worker.status === "finished"
       ? "Completed"
@@ -1092,47 +943,25 @@ function SidebarTaskWorkerRow({
           markAgentThreadViewed(queryClient, worker.id)
           onNavigate?.()
         }}
-        className={sidebarRowClassName({
-          compact,
+        {...sidebarRowProps({
           active: rowIsActive,
-          paddingLeft: indent ? "pl-13.5" : "pl-11.5",
           archived: worker.resolved === true,
+          indent,
+          depth: 1,
         })}
       >
+        <SidebarRowTitle marquee={marquee} title={worker.title} />
         {subagents.length > 0 && (
-          <span
-            role="button"
-            tabIndex={0}
-            aria-expanded={!subagentsCollapsed}
-            aria-label={
+          <DisclosureCaret
+            expanded={!subagentsCollapsed}
+            label={
               subagentsCollapsed
                 ? "Show worker subagents"
                 : "Hide worker subagents"
             }
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              toggleSubagentsCollapsed(`cloud:${worker.id}`)
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault()
-                event.stopPropagation()
-                toggleSubagentsCollapsed(`cloud:${worker.id}`)
-              }
-            }}
-            className="absolute top-1/2 flex h-5 w-4 -translate-x-full -translate-y-1/2 items-center justify-center text-tertiary transition-colors hover:text-primary"
-          >
-            <SubagentCaret size={12} weight="bold" />
-          </span>
+            onToggle={() => toggleSubagentsCollapsed(`cloud:${worker.id}`)}
+          />
         )}
-        <RobotIcon
-          size={ICON_SIZE}
-          weight="regular"
-          className="shrink-0 text-icon-secondary"
-          aria-label="Asynchronous task worker"
-        />
-        <SidebarRowTitle marquee={marquee} title={worker.title} />
         <span className="flex shrink-0 items-center gap-space-1 text-xxs text-secondary">
           {worker.status === "running" && (
             <RunningIndicator label="Worker running" />
@@ -1144,21 +973,25 @@ function SidebarTaskWorkerRow({
         </span>
       </Link>
       {subagents.length > 0 && !subagentsCollapsed && (
-        <ul aria-label={`Subagents of ${worker.title}`}>
+        <SidebarTree
+          label={`Subagents of ${worker.title}`}
+          indent={indent}
+          depth={2}
+        >
           {subagents.map((subagent) => (
             <SidebarSubagentRow
               key={subagent.toolCallId}
               threadId={worker.id}
               subagent={subagent}
               isActive={isActive && activeSubagentId === subagent.toolCallId}
-              compact={compact}
               indent={indent}
-              nested
+              depth={2}
               onNavigate={onNavigate}
             />
           ))}
-        </ul>
+        </SidebarTree>
       )}
+      <TreeBranch />
     </li>
   )
 }

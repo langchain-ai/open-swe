@@ -237,10 +237,10 @@ async def test_breakout_distinguishes_unavailable_channel_verification(
     if retry_after is not None:
         assert "temporarily unavailable" in error
         assert f"Try again in {retry_after} seconds" in error
-        assert "make sure Open SWE has access" not in error
+        assert "make sure Robin has access" not in error
     else:
         assert "Could not find or access" in error
-        assert "make sure Open SWE has access" in error
+        assert "make sure Robin has access" in error
         assert "Try again" not in error
 
 

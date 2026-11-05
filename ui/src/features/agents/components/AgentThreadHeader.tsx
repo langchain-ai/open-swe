@@ -19,7 +19,6 @@ import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { TerminalIcon } from "@phosphor-icons/react/dist/ssr/Terminal"
 
 import { useLocalThread } from "@/features/agents/lib/desktopLocal"
-import { useAgentWorkspace } from "@/features/agents/lib/agentWorkspace"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
@@ -56,7 +55,9 @@ function ThreadRepoIndicator({ thread }: { thread: AgentThread }) {
   const repo = thread.repoFullName.trim()
   const repoName =
     cloudRepos.data?.find(
-      (candidate) => candidate.repoFullName.toLowerCase() === repo.toLowerCase()
+      (candidate) =>
+        !candidate.projectId &&
+        candidate.repoFullName?.toLowerCase() === repo.toLowerCase()
     )?.name ?? (repo ? thread.repo || repo : undefined)
   if (!repoName) return null
 
@@ -108,7 +109,6 @@ export function AgentThreadHeader({
   visibility?: ThreadVisibility
   onVisibilityChange?: (next: ThreadVisibility) => void
 }) {
-  const agentWorkspace = useAgentWorkspace()
   const worktreeThread = useLocalThread(thread?.id ?? "")
   const sidebarCollapsed = useSidebarCollapsed()
   const TargetIcon = TARGET_ICONS[target]
@@ -199,6 +199,14 @@ export function AgentThreadHeader({
       pinned={pinned}
       archived={archived}
       isDeleting={isDeleting}
+      onRename={
+        onRename && savingTitle === null
+          ? () => {
+              editingRef.current = true
+              requestAnimationFrame(startRename)
+            }
+          : undefined
+      }
       onTogglePin={() => {
         if (!pinThread.isPending) {
           pinThread.mutate({ threadId: current.id, pinned: !pinned })
@@ -216,15 +224,12 @@ export function AgentThreadHeader({
   const header = (
     <header
       data-desktop-drag-region=""
-      className={cn(
-        "relative z-pane-header h-11 shrink-0 border-b border-subtle bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent",
-        agentWorkspace && "border-b-0 bg-transparent after:hidden"
-      )}
+      className="relative z-pane-header h-11 shrink-0 border-b border-muted bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent"
     >
       <div
         className={cn(
           "flex h-full w-full items-center gap-space-3 px-space-4",
-          sidebarCollapsed && (isDesktop ? "pl-32" : "pl-space-8"),
+          sidebarCollapsed && (isDesktop ? "pl-48" : "pl-space-8"),
           panelCollapsed && "pr-space-8"
         )}
       >
@@ -306,28 +311,26 @@ export function AgentThreadHeader({
           </div>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-space-3">
-          {agentWorkspace &&
-            worktreeThread &&
-            window.openSweDesktop?.openTaskFolder && (
-              <IconButton
-                icon={FolderIcon}
-                label="Open task folder"
-                size="sm"
-                color="secondary"
-                variant="plain"
-                data-no-drag=""
-                onClick={() => {
-                  void window.openSweDesktop
-                    ?.openTaskFolder?.(worktreeThread.id)
-                    .catch((error: unknown) =>
-                      reportError({
-                        title: "Couldn't open the task folder",
-                        error,
-                      })
-                    )
-                }}
-              />
-            )}
+          {worktreeThread && window.openSweDesktop?.openTaskFolder && (
+            <IconButton
+              icon={FolderIcon}
+              label="Open task folder"
+              size="sm"
+              color="secondary"
+              variant="plain"
+              data-no-drag=""
+              onClick={() => {
+                void window.openSweDesktop
+                  ?.openTaskFolder?.(worktreeThread.id)
+                  .catch((error: unknown) =>
+                    reportError({
+                      title: "Couldn't open the task folder",
+                      error,
+                    })
+                  )
+              }}
+            />
+          )}
           <span
             role="img"
             aria-label={`Runs on ${target}`}
@@ -378,7 +381,7 @@ export function AgentThreadHeader({
             ? worktreeThread.managedTaskFolder
               ? `This deletes the conversation. Its task files are kept at ${worktreeThread.cwd}.`
               : worktreeThread.ownedWorktrees.length
-                ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
+                ? "This deletes the worktree Robin created for it, including any uncommitted changes in it. Its branch and commits are kept."
                 : "This removes its history but does not revert changes made to your repository."
             : undefined
         }

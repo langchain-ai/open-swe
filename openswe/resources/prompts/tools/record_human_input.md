@@ -1,4 +1,4 @@
-Record a summary of what people asked Open SWE for in this pull request, based on every human message.
+Record a summary of what people asked Robin for in this pull request, based on every human message.
 
 Call this once, after you have read the code.
 A later call replaces the earlier one.
