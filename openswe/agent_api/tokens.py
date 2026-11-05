@@ -108,6 +108,8 @@ class RunSettings(BaseModel):
     tools: str | None = None
     # Where an incident run answers: its incident's Slack thread, not the run's own.
     slack_thread: dict[str, JsonValue] | None = None
+    # Tools the run's catalog offers the model but never grants (``Catalog.disabled``).
+    disabled_tools: list[str] = []
 
     def configurable(self) -> dict[str, JsonValue]:
         """The run config keys these settings fill."""
@@ -138,14 +140,21 @@ class RemoteRun(BaseModel):
     expires_at: int | None = None
 
     def grant(self, operation: str) -> str | None:
-        """The grant of ``operation`` to this run, which its calls of it must carry."""
+        """The grant of ``operation`` to this run, which its calls of it must carry; None
+        for one the run's catalog offers but disables."""
         keys = _signing_keys()
-        return _grant(keys[0], self, operation) if keys else None
+        if not keys or operation in self.settings.disabled_tools:
+            return None
+        return _grant(keys[0], self, operation)
 
     def granted(self, operation: str, grant: str | None) -> bool:
         """Whether this run may call ``operation``: its catalog granted it, under any live key."""
-        return grant is not None and any(
-            hmac.compare_digest(_grant(key, self, operation), grant) for key in _signing_keys()
+        return (
+            grant is not None
+            and operation not in self.settings.disabled_tools
+            and any(
+                hmac.compare_digest(_grant(key, self, operation), grant) for key in _signing_keys()
+            )
         )
 
 

@@ -119,6 +119,7 @@ async def _dispatch_or_queue_slack_run(
     *,
     interrupt_active_run: bool,
     trigger_ts: str,
+    concierge_message_ts: str = "",
 ) -> dict[str, Any]:
     """Dispatch Slack turns using their channel's interruption policy."""
     if isinstance(run_input, list):
@@ -134,6 +135,7 @@ async def _dispatch_or_queue_slack_run(
             metadata={
                 **common.AGENT_VERSION_METADATA,
                 **({} if configurable.get("source") == "web" else {"slack_trigger_ts": trigger_ts}),
+                "slack_concierge_message_ts": concierge_message_ts,
             },
             client=client,
             multitask_strategy="interrupt" if interrupt_active_run else "enqueue",
@@ -551,6 +553,11 @@ async def notify_slack_processing_error(
     request: SlackRequest, repo: Repo | None, exc: BaseException
 ) -> None:
     """Mark the agent thread errored when one exists, then always tell the Slack thread."""
+    if request.concierge_mode:
+        receipt_ts = request.original_message_ts or request.event_ts
+        await slack_utils.remove_slack_reaction(
+            request.channel_id, receipt_ts, "hourglass_flowing_sand"
+        )
     thread_id = request.thread_id
     if request.channel_id and request.thread_ts and not thread_id:
         try:
@@ -762,6 +769,7 @@ class SlackChannelRun:
     input: RunInput
     configurable: dict[str, JsonValue]
     trigger_ts: str
+    concierge_message_ts: str = ""
 
 
 @dataclass
@@ -1385,11 +1393,15 @@ async def _process_slack_mention_impl(
                 ),
             )
             await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)
+    receipt_ts = original_message_ts if concierge_mode and not message_update else ""
+    if receipt_ts:
+        await slack_utils.add_slack_reaction(channel_id, receipt_ts, "hourglass_flowing_sand")
     if channel_run is not None:
         channel_run.run = SlackChannelRun(
             input=run_input,
             configurable=configurable,
             trigger_ts=event_ts,
+            concierge_message_ts=receipt_ts,
         )
         return True
     if status_shown is not None:
@@ -1402,6 +1414,7 @@ async def _process_slack_mention_impl(
             configurable,
             interrupt_active_run=interrupt_active_run,
             trigger_ts=event_ts,
+            concierge_message_ts=receipt_ts,
         )
     except Exception:
         # No run means no completion webhook, so nothing else would ever clear

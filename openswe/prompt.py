@@ -138,6 +138,11 @@ def construct_system_prompt(
             environment=ENV.OPENSWE_ENV.optional(),
             dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
         ),
+        self_awareness_section=prompt(
+            "system/self-awareness",
+            source_repo=ENV.OPENSWE_SOURCE_REPO.get(),
+            source_path=ENV.OPENSWE_SOURCE_PATH.get().strip("/"),
+        ),
         default_prompt_section=_load_default_prompt(),
         collaboration_section=_render_collaboration_section(),
         external_untrusted_comments_section=EXTERNAL_UNTRUSTED_COMMENTS_SECTION,

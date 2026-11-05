@@ -13,6 +13,7 @@ import type { ReactNode } from "react"
 import { FileCodeIcon } from "@phosphor-icons/react/dist/ssr/FileCode"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import {
   chatDiffAction,
   isChatDiffActionTool,
@@ -41,6 +42,9 @@ interface ReviewChatActionsValue {
   /** A question to send as soon as the chat can. */
   question?: string
   clearQuestion?: () => void
+  /** The next reply to a passage of the page, for the composer to take. */
+  reply?: PassageReply
+  takeReply?: (reply: PassageReply) => boolean
 }
 
 export const ReviewChatActionsContext =

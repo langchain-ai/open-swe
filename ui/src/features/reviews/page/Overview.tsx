@@ -97,7 +97,7 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
               className="ml-auto size-3 -rotate-90 group-open/requested:rotate-0"
             />
           </summary>
-          <div className="mt-space-1">
+          <div className="mt-space-1" data-reply-part="requested behavior">
             <HumanInputText summary={detail.walkthrough.human_input} />
           </div>
         </details>
@@ -290,6 +290,7 @@ function Description({
       <div
         hidden={draft !== null}
         ref={ref}
+        data-reply-part="description"
         className={cn(
           "relative flow-root max-w-[100ch] text-xs leading-[1.65]",
           clamped && "overflow-hidden"

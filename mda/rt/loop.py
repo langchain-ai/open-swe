@@ -115,6 +115,8 @@ _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 _ROLE: Final = "task-role:"
 # Starts the id of the message holding what the backend worked out for this run.
 _RUN_CONTEXT: Final = "run-context:"
+# Starts the id of the message holding an incident run's instructions for its next call.
+_INCIDENT: Final = "incident-context:"
 
 
 def content_text(content: object) -> str:
@@ -177,7 +179,7 @@ def _messages(state: Mapping[str, object]) -> list[AnyMessage]:
     return list(messages) if isinstance(messages, list) else []
 
 
-def _visible(state: Mapping[str, object]) -> list[AnyMessage]:
+def visible_messages(state: Mapping[str, object]) -> list[AnyMessage]:
     """The messages the model still sees: summarization drops those before its cutoff."""
     listed = _messages(state)
     event = state.get(_SUMMARIZATION_EVENT)
@@ -185,7 +187,7 @@ def _visible(state: Mapping[str, object]) -> list[AnyMessage]:
     return listed[cutoff:] if isinstance(cutoff, int) and cutoff >= 0 else listed
 
 
-def _latest(messages: Sequence[BaseMessage], prefix: str) -> str | None:
+def latest_with_id(messages: Sequence[BaseMessage], prefix: str) -> str | None:
     """The text of the last of ``messages`` whose id starts with ``prefix``."""
     for message in reversed(messages):
         if isinstance(message.id, str) and message.id.startswith(prefix):
@@ -389,7 +391,7 @@ class RunLoop:
         if stopped:
             return BeforeModel(update=update, jump_to="end")
         messages = _messages(state)
-        visible = _visible(state)
+        visible = visible_messages(state)
         guidance = self._guidance.get(self._backend.run)
         visible_guidance = guidance.latest(visible)
         added: list[BaseMessage] = [
@@ -407,15 +409,15 @@ class RunLoop:
                     HumanMessage(content=objective, id=f"goal:{uuid.uuid4()}"), source="goal"
                 )
             )
-        if context.instructions and context.instructions != _latest(visible, _ROLE):
+        if context.instructions and context.instructions != latest_with_id(visible, _ROLE):
             added.append(
                 add_notification_metadata(
                     HumanMessage(content=context.instructions, id=f"{_ROLE}{uuid.uuid4()}"),
                     source="task_context",
                 )
             )
-        run_context = _latest(messages, _RUN_CONTEXT)
-        if run_context is not None and run_context != _latest(visible, _RUN_CONTEXT):
+        run_context = latest_with_id(messages, _RUN_CONTEXT)
+        if run_context is not None and run_context != latest_with_id(visible, _RUN_CONTEXT):
             added.append(
                 add_notification_metadata(
                     HumanMessage(content=run_context, id=f"{_RUN_CONTEXT}{uuid.uuid4()}"),
@@ -431,6 +433,25 @@ class RunLoop:
                     source="task_context",
                 )
             )
+        if self.rules.incident:
+            # In a message, not the system prompt: they change from call to call, and a
+            # changed system prompt misses the provider's cache for the whole conversation.
+            incident = await call(
+                self._backend,
+                INCIDENT_CONTEXT,
+                Routed(run_id=run_id(), humans=human_messages(messages)),
+            )
+            if incident.instructions and incident.instructions != latest_with_id(
+                visible, _INCIDENT
+            ):
+                added.append(
+                    add_notification_metadata(
+                        HumanMessage(
+                            content=incident.instructions, id=f"{_INCIDENT}{uuid.uuid4()}"
+                        ),
+                        source="incident_context",
+                    )
+                )
         route = await self._route(held, [*visible, *added])
         if route is not None:
             if route.persist:
@@ -440,13 +461,6 @@ class RunLoop:
         current = {**held, **update}
         model = await self._model_for(current)
         system_prompt, workspace_prompt, thread_prompt = self._system_prompt(current)
-        if self.rules.incident:
-            incident = await call(
-                self._backend,
-                INCIDENT_CONTEXT,
-                Routed(run_id=run_id(), humans=human_messages(messages)),
-            )
-            system_prompt = f"{system_prompt}\n\n{incident.instructions}"
         return BeforeModel(
             update=update,
             messages=_json_dicts.validate_python(messages_to_dict(added)),
@@ -625,7 +639,7 @@ class RunLoop:
     def _nudge(
         self, texts: Sequence[str], state: Mapping[str, object]
     ) -> list[dict[str, JsonValue]]:
-        seen = {content_text(message.content) for message in _visible(state)}
+        seen = {content_text(message.content) for message in visible_messages(state)}
         added = [
             add_notification_metadata(
                 HumanMessage(content=text, id=str(uuid.uuid4())), source="run_nudge"

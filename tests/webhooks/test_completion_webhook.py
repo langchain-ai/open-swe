@@ -44,6 +44,30 @@ def _slack_metadata() -> dict[str, Any]:
     }
 
 
+@pytest.mark.parametrize("status", ["success", "error", "timeout", "interrupted"])
+async def test_concierge_receipt_is_cleared_when_its_run_ends(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    client = _FakeClient({})
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    remove = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "remove_slack_reaction", remove)
+
+    await completion.handle_run_completion(
+        {
+            "thread_id": "t1",
+            "run_id": "run-1",
+            "status": status,
+            "metadata": {
+                "slack_channel_id": "D1",
+                "slack_concierge_message_ts": "123.45",
+            },
+        }
+    )
+
+    remove.assert_awaited_once_with("D1", "123.45", "hourglass_flowing_sand")
+
+
 async def test_failed_run_offers_a_requester_scoped_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     import json
 

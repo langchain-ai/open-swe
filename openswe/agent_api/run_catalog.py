@@ -145,13 +145,20 @@ class RunCatalog:
         return _ASYNC_TASK_TOOLS
 
     def _excluded(self) -> frozenset[str]:
-        return frozenset(
-            ((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS)
-            | self._unoffered_delegation_tools()
+        return (
+            frozenset(
+                ((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS)
+                | self._unoffered_delegation_tools()
+            )
+            - self.surface.disabled()
         )
 
     def _specs(self) -> list[ToolSpec]:
-        tools = self._backend_tools()
+        surface = self.surface
+        tools = {
+            **{name: surface.always_offered[name] for name in surface.disabled()},
+            **self._backend_tools(),
+        }
         return [
             ToolSpec(
                 name=described.name,
@@ -189,7 +196,8 @@ class RunCatalog:
 
     def build(self) -> Catalog:
         surface = self.surface
-        tools = self._backend_tools()
+        disabled = surface.disabled()
+        tools = {**dict.fromkeys(disabled), **self._backend_tools()}
         excluded = self._excluded()
         # Called from MDA's code mode, never offered to the model as schemas.
         from_code_only = {
@@ -224,6 +232,7 @@ class RunCatalog:
             code_only=sorted(from_code_only - withheld),
             # Offered to the model, and callable from MDA's code mode too.
             also_from_code=sorted(name for name in from_code if direct_and_from_code(name)),
+            disabled=sorted(disabled),
             described={name: prompt("tools/display-description") for name in _DESCRIBED_TOOLS},
             files=FilesSpec(
                 backend_paths=list(surface.backend_paths),
@@ -234,7 +243,12 @@ class RunCatalog:
             worker_webhook=COMPLETION_WEBHOOK_URL if surface.delegates else None,
             skill_sources=list(surface.skill_sources),
             inbox=surface.inbox,
-            loop=surface.loop.model_copy(update={"deployment_prompt": common_prompt()}),
+            loop=surface.loop.model_copy(
+                update={
+                    "deployment_prompt": common_prompt(),
+                    "hidden_tools": sorted(set(surface.loop.hidden_tools) - disabled),
+                }
+            ),
             search_tools=searches,
             search_tools_description=prompt(f"tools/{SEARCH_TOOLS}") if searches else None,
             model_call_limit=surface.model_call_limit,
@@ -253,7 +267,13 @@ class RunCatalog:
                 "trace_metadata": {**trace_actor(self.config), **agent_version_metadata()},
                 "sandbox": spec,
                 "operations": [
-                    operation.model_copy(update={"grant": self.run.grant(operation.name)})
+                    operation.model_copy(
+                        update={
+                            "grant": None
+                            if operation.name in catalog.disabled
+                            else self.run.grant(operation.name)
+                        }
+                    )
                     for operation in catalog.operations
                 ],
             }
@@ -274,4 +294,5 @@ class RunCatalog:
             slack_thread=_json_object.validate_python(slack_thread)
             if cfg.source == INCIDENT_SOURCE and isinstance(slack_thread, Mapping)
             else None,
+            disabled_tools=sorted(self.surface.disabled()),
         )

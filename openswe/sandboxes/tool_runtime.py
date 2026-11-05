@@ -127,6 +127,18 @@ class ToolSurface:
     model_call_limit: int | None = None
     # Whether the thread coordinates a task through workers rather than synchronous subagents.
     delegates: bool = False
+    # Tools offered to the model in every run of its kind, so its tool list stays the same
+    # from run to run; a run that may not use one is offered it disabled.
+    always_offered: Mapping[str, BaseTool] = field(default_factory=dict)
+
+    def disabled(self) -> frozenset[str]:
+        """The tools offered to the model that this run may not use."""
+        return frozenset(self.always_offered.keys() - self.tools.keys())
+
+    def catalog(self) -> list[ToolDescription]:
+        """Every tool the run offers, the disabled ones too, by name."""
+        offered = {**{name: self.always_offered[name] for name in self.disabled()}, **self.tools}
+        return [describe_tool(name, tool) for name, tool in sorted(offered.items())]
 
     async def prepare(self) -> None:
         tools = {
@@ -143,9 +155,6 @@ class ToolSurface:
             tools.update({tool.name: tool for tool in integrations})
         excluded = self.excluded | EXCLUDED_TOOLS
         self.tools = {name: tool for name, tool in tools.items() if name not in excluded}
-
-    def catalog(self) -> list[ToolDescription]:
-        return [describe_tool(name, tool) for name, tool in sorted(self.tools.items())]
 
 
 @dataclass(frozen=True)

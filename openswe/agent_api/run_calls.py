@@ -697,7 +697,10 @@ class TokenRun:
 
         async def read() -> IncidentContext:
             incident = await self._incident()
-            return IncidentContext(instructions=await incident.context(humans))
+            instructions = await incident.context(humans)
+            return IncidentContext(
+                instructions=run_context("incident", instructions) if instructions.strip() else ""
+            )
 
         return await in_graph_context(
             {**self.config, "run_name": "incident_context"}, lambda _runtime: read()
