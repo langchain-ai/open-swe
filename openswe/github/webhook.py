@@ -40,6 +40,7 @@ from openswe.review.approvals import (
     approval_mode_for,
     approval_policy_for_review,
 )
+from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.findings import (
     FindingInteraction,
     ReviewerPRMeta,
@@ -490,7 +491,9 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     ):
         return
 
-    await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
+    await common.set_reviewer_thread_metadata(
+        thread_id, pr=pr_meta, watch=True, head_sha=head_sha, extra={"review_base_sha": base_sha}
+    )
 
     check_run_id = await common.create_review_check_run(
         owner=repo_config.get("owner", ""),
@@ -903,18 +906,28 @@ async def _process_github_head_update(
             "Push to %s ignored: head_sha unchanged from last_reviewed_sha", head_ref
         )
         return
+    previous_assessment = (
+        await PublishedAssessment.latest(context.owner, context.name, pr_number)
+        if postgres.configured()
+        else None
+    )
+    previous_base_sha = metadata.get("last_reviewed_base_sha")
     if (
         isinstance(last_reviewed_sha, str)
         and last_reviewed_sha
         and await common.is_pr_diff_unchanged_since_last_review(
             repo_config,
             base_ref=base_ref,
+            base_sha=base_sha,
+            last_reviewed_base_sha=previous_base_sha if isinstance(previous_base_sha, str) else "",
             last_reviewed_sha=last_reviewed_sha,
             head_sha=head_sha,
             token=app_token,
         )
         and not (
-            await approval_mode_for(context.owner, context.name) == "approve"
+            previous_assessment is not None
+            and previous_assessment.approved
+            and await approval_mode_for(context.owner, context.name) == "approve"
             and (
                 await approval_policy_for_review(
                     context.owner, context.name, pr_number, token=app_token
@@ -926,7 +939,11 @@ async def _process_github_head_update(
         await PullRequest(
             owner=repo_config["owner"], repo=repo_config["name"], number=pr_number
         ).link_review(reviewer_thread_id=thread_id, head_sha=head_sha)
-        await common.set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+        if previous_assessment is not None and previous_assessment.head_sha == last_reviewed_sha:
+            await previous_assessment.model_copy(update={"head_sha": head_sha}).save()
+        await common.set_reviewer_thread_metadata(
+            thread_id, last_reviewed_sha=head_sha, last_reviewed_base_sha=base_sha
+        )
         if postgres.configured():
             try:
                 await Walkthrough.carry_forward(
@@ -1005,7 +1022,9 @@ async def _process_github_head_update(
         "base_ref": base_ref,
         "author": pull_request.author,
     }
-    await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
+    await common.set_reviewer_thread_metadata(
+        thread_id, pr=pr_meta, watch=True, head_sha=head_sha, extra={"review_base_sha": base_sha}
+    )
 
     # GitHub only shows check runs on a PR's current head commit, so the check
     # created on the previous head disappears after a follow-up push. Create a

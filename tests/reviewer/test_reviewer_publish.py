@@ -244,13 +244,17 @@ async def test_eval_run_publishes_the_findings_it_recorded_without_postgres() ->
         "eval-tid", _f(id="f_one", severity="high", file="a.py", start_line=1, end_line=1)
     )
     with (
-        patch("openswe.tools.publish_review.get_config", return_value=_eval_config()),
+        patch(
+            "openswe.tools.publish_review.get_config",
+            return_value=_eval_config(base_sha="base-commit"),
+        ),
         patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="eval-tid"),
         patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
     ):
         result = await publish_review(ranking=["f_one"])
 
     assert result["surfaced_count"] == 1
+    assert set_meta.await_args.kwargs["last_reviewed_base_sha"] == "base-commit"
     publication = set_meta.await_args.kwargs["extra"][REVIEWER_EVAL_PUBLICATION_KEY]
     assert [finding["id"] for finding in publication["findings"]] == ["f_one"]
 
@@ -424,7 +428,9 @@ async def test_published_review_registry_failure_does_not_complete_or_invite_dup
         assert result["success"] is True
         assert result["skipped_empty_re_review"] is True
         post.assert_awaited_once()
-        metadata.assert_awaited_once_with("tid", last_reviewed_sha="a" * 40)
+        metadata.assert_awaited_once_with(
+            "tid", last_reviewed_sha="a" * 40, last_reviewed_base_sha=""
+        )
         settle.assert_awaited_once()
 
 
@@ -1352,7 +1358,7 @@ async def test_approval_publication_handles_github_rejections(
         assert saved.approved is False
         assert saved.decision == "would_approve"
         assert saved.head_sha == "a" * 40
-        metadata.assert_any_await("tid", last_reviewed_sha="a" * 40)
+        metadata.assert_any_await("tid", last_reviewed_sha="a" * 40, last_reviewed_base_sha="")
         settle_check.assert_awaited_once()
     else:
         assert saved is None
