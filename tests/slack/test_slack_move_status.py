@@ -11,7 +11,12 @@ from openswe.slack import move as slack_move
 from openswe.slack import routed_work
 from openswe.slack import thinking as slack_thinking
 from openswe.slack.channels import SlackChannel
-from openswe.slack.records import lookup_slack_thread_id
+from openswe.slack.records import (
+    lookup_slack_run_mapping,
+    lookup_slack_thread_id,
+    resolve_slack_thread_id,
+    store_slack_run_mapping,
+)
 from openswe.slack.tools import move_thread
 from openswe.source_context import SlackThreadRef
 
@@ -289,3 +294,30 @@ async def test_move_tool_uses_current_or_explicit_channel_without_moving_twice(
     repeated = await move_thread.slack_move_thread("Breakout", "C4")
     assert repeated["channel_id"] == target
     root.assert_awaited_once()
+
+
+async def test_code_channel_creation_keeps_the_consumed_source(
+    monkeypatch: pytest.MonkeyPatch, statuses: list[StatusCall]
+) -> None:
+    from importlib import import_module
+
+    tool = import_module("openswe.slack.tools.manage_code_channel")
+    source = {"channel_id": "C1", "thread_ts": "1.0", "triggering_bot_id": "B123"}
+    client = _LangGraph(source)
+    await slack_move.bind_slack_thread_id("C1", "1.0", "thread-1")
+    await store_slack_run_mapping(
+        "C1", "1.0", "run-1", message_ts="1.0", agent_thread_id="thread-1"
+    )
+    monkeypatch.setattr(tool, "create_code_channel", AsyncMock(return_value="C-code"))
+    monkeypatch.setattr(tool, "set_session_status_result", AsyncMock())
+    monkeypatch.setattr(tool, "set_context_bar", AsyncMock())
+    monkeypatch.setattr(tool, "set_commands", AsyncMock())
+
+    result = await tool._create(client, "thread-1", source, "Fix the code", None, invite=[])
+
+    assert result["success"] is True
+    assert await lookup_slack_thread_id("C-code", "0") == "thread-1"
+    assert await lookup_slack_thread_id("C1", "1.0") == "thread-1"
+    assert await resolve_slack_thread_id(cast(LangGraphClient, client), "C1", "1.0") == "thread-1"
+    consumed = await lookup_slack_run_mapping("C1", "1.0")
+    assert consumed is not None and consumed.agent_thread_id == "thread-1"

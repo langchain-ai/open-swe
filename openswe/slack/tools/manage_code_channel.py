@@ -334,7 +334,7 @@ async def _create(
         if exc.moved:
             return {
                 "success": False,
-                "error": f"Code channel created but the source thread was not detached: {exc}",
+                "error": f"Code channel created but move cleanup failed: {exc}",
                 "channel_id": channel_id,
                 "retryable": True,
             }

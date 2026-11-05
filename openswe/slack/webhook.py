@@ -887,6 +887,13 @@ async def _process_slack_mention_impl(
         sender_profile,
     )
     user_email, user_name, user_timezone = sender.email, sender.name, sender.timezone
+    active_slack = SourceContext.from_metadata(thread_record.metadata).slack_thread
+    if (
+        not request.web_only
+        and active_slack is not None
+        and active_slack.location != (channel_id, thread_ts)
+    ):
+        return False
     thread_metadata = thread_record.authorize(mapped_login or "")
     # A new thread's metadata links back to Slack. Looking that link up here keeps
     # it off the metadata write, which would otherwise wait on it before dispatch.

@@ -47,6 +47,7 @@ from openswe.slack.payloads import (
     parse_json_object,
 )
 from openswe.slack.pr_links import SlackPullRequestLink
+from openswe.slack.records import SlackThread
 from openswe.slack.request import SlackRequest
 from openswe.slack.responses import (
     BlockSuggestionResponse,
@@ -247,6 +248,8 @@ async def _lookup_delivered_message_update(
                 or delivered_message.triggering_user_id != user_id
                 or delivered_message.agent_thread_id != thread_id
             ):
+                return None
+            if await SlackThread.moved_from(thread_id, channel_id, thread_ts):
                 return None
             if await common.thread_exists(thread_id):
                 return thread_id
@@ -911,6 +914,8 @@ async def slack_webhook(
             )
         except common.SlackThreadMappingError as exc:
             raise SlackRequestError(_THREAD_CONFLICT) from exc
+        if await SlackThread.moved_from(thread_id, channel_id, thread_ts):
+            return ignored("Slack conversation moved to another location")
         repo = await common.get_slack_repo_config(
             channel_id,
             thread_ts,
