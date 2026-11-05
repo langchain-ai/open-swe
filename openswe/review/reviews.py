@@ -694,25 +694,41 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     """
     async with GitHubClient.as_app(owner, repo) as github:
         repository = github.repo(owner, repo)
-        pr_payload = await repository.pull_request(pr_number).pull(rendered_body=True)
+        pr_payload, thread = await asyncio.gather(
+            repository.pull_request(pr_number).pull(rendered_body=True),
+            _reviewer_thread_for(owner, repo, pr_number),
+        )
         details = _serialize_pr_details(pr_payload)
         details["description_pull_requests"] = DescriptionReferences(
             pr_payload.get("body_html") or ""
         ).pull_request_numbers(owner, repo)
 
-        thread = await _reviewer_thread_for(owner, repo, pr_number)
-        stored = (await _thread_findings([thread])).get(thread["thread_id"], []) if thread else []
-        if thread:
-            stored = await reconcile_linked_findings(
-                thread["thread_id"], repository.pull_request(pr_number), findings=stored
-            )
+        stored_by_thread, target = await asyncio.gather(
+            _thread_findings([thread] if thread else []),
+            _scout_target(owner, repo, pr_number, pr_payload),
+        )
+        stored = stored_by_thread.get(thread["thread_id"], []) if thread else []
         summary = _thread_review_summary(thread, stored) if thread else None
         metadata = thread_metadata(thread) if thread else {}
         if not summary:
             summary = _unreviewed_summary(owner, repo, pr_number, pr_payload)
 
         head_sha = details["head_sha"] or summary["head_sha"]
-        runs = await or_none(repository.check_runs(head_sha)) if head_sha else None
+        if thread and head_sha:
+            stored, runs = await asyncio.gather(
+                reconcile_linked_findings(
+                    thread["thread_id"], repository.pull_request(pr_number), findings=stored
+                ),
+                or_none(repository.check_runs(head_sha)),
+            )
+        else:
+            if thread:
+                stored = await reconcile_linked_findings(
+                    thread["thread_id"], repository.pull_request(pr_number), findings=stored
+                )
+            runs = await or_none(repository.check_runs(head_sha)) if head_sha else None
+        if thread:
+            summary = _thread_review_summary(thread, stored) or summary
     checks = _check_run_views(runs or [])
 
     findings = [_serialize_finding(finding, head_sha) for finding in stored]
@@ -727,7 +743,6 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     for finding in findings:
         finding["group"] = classify_finding(finding)
 
-    target = await _scout_target(owner, repo, pr_number, pr_payload)
     walkthrough = await target.walkthrough() if target else None
     walkthrough_running = walkthrough is None and target is not None and await _scouting(target)
     walkthrough_error = (
