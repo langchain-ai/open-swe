@@ -122,10 +122,8 @@ class _Request:
 
 
 @pytest.fixture(autouse=True)
-def _clear_backend_cache() -> Any:
-    guard.SANDBOX_BACKENDS.clear()
-    yield
-    guard.SANDBOX_BACKENDS.clear()
+def _thread_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(state, "get_sandbox_metadata", AsyncMock(return_value={}))
 
 
 def test_parse_git_push_supports_git_c_and_cd() -> None:
@@ -385,7 +383,7 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
     monkeypatch: pytest.MonkeyPatch, tool_name: str, command: str
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
-    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
+    state.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
         cast(SandboxBackendProtocol, _Backend()), thread_id="thread-1"
     )
     posted: dict[str, Any] = {}
@@ -472,7 +470,7 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
 async def test_approved_workflow_push_runs_fixed_command(
     monkeypatch: pytest.MonkeyPatch, lease: str, refspec: str
 ) -> None:
-    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
+    state.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
         cast(SandboxBackendProtocol, _Backend()), thread_id="thread-1"
     )
 
@@ -510,7 +508,7 @@ async def test_non_workflow_push_runs_without_approval(
     monkeypatch: pytest.MonkeyPatch, option: str, refspec: str
 ) -> None:
     command = f"git -C /repo push {option} origin {refspec}"
-    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
+    state.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
         cast(SandboxBackendProtocol, _Backend(workflow_files="")), thread_id="thread-1"
     )
     called = False
@@ -540,7 +538,7 @@ async def test_non_workflow_push_runs_without_approval(
     [("evil:feature", True), ("feature:other", True), ("feature", False)],
 )
 async def test_uninspectable_lease_push_is_blocked(refspec: str, inspectable: bool) -> None:
-    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
+    state.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
         cast(SandboxBackendProtocol, _Backend(inspectable=inspectable)),
         thread_id="thread-1",
     )
@@ -586,7 +584,7 @@ async def test_chained_push_runs_only_without_workflow_changes(
 ) -> None:
     # The guard can only inspect a push that is the whole command; one chained after
     # a commit would otherwise carry workflow changes past approval.
-    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
+    state.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
         cast(SandboxBackendProtocol, _Backend(**backend)),
         thread_id="thread-1",
     )
@@ -635,7 +633,7 @@ async def test_approved_force_push_is_leased_to_the_previewed_remote_tip(
         git commit -qam workflow
     """)
     assert setup.exit_code == 0, setup.output
-    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(backend, thread_id="thread-1")
+    state.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(backend, thread_id="thread-1")
 
     async def fake_approved(thread_id: str, fingerprint: str) -> bool:
         return True
@@ -668,7 +666,7 @@ async def test_approved_force_push_is_leased_to_the_previewed_remote_tip(
 @pytest.mark.parametrize(
     ("chained", "connection", "inspectable", "approved", "lease", "error"),
     [
-        (True, "missing", True, False, "", "WorkflowPushMustStandAlone"),
+        (True, "missing", True, False, "", "SandboxUnreachableError"),
         (True, "registered", True, False, "", "WorkflowPushMustStandAlone"),
         (True, "reconnect", True, False, "", "WorkflowPushMustStandAlone"),
         (False, "reconnect", True, False, "", "WorkflowPushApprovalRequired"),
@@ -676,9 +674,9 @@ async def test_approved_force_push_is_leased_to_the_previewed_remote_tip(
         (False, "reconnect", True, True, "", None),
         (False, "registered", True, False, "--verbose ", "WorkflowPushUnsupportedFlags"),
         (False, "reconnect", True, False, "--verbose ", "WorkflowPushUnsupportedFlags"),
-        (False, "missing", True, False, "--verbose ", "WorkflowPushUnsupportedFlags"),
-        (False, "missing", True, False, "", "WorkflowPushInspectionError"),
-        (False, "missing", True, False, "--force-with-lease ", "WorkflowPushInspectionError"),
+        (False, "missing", True, False, "--verbose ", "SandboxUnreachableError"),
+        (False, "missing", True, False, "", "SandboxUnreachableError"),
+        (False, "missing", True, False, "--force-with-lease ", "SandboxUnreachableError"),
         (False, "registered", False, False, "", "WorkflowPushInspectionError"),
         (False, "registered", False, False, "--force-with-lease ", "WorkflowPushInspectionError"),
     ],

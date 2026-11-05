@@ -474,6 +474,11 @@ async def get_sandbox_id_from_metadata(thread_id: str) -> str | None:
 
 async def get_sandbox_backend(thread_id: str) -> SandboxBackendProxy:
     """Get sandbox backend from cache, or connect using thread metadata."""
+    metadata = await get_sandbox_metadata(thread_id)
+    if metadata.get("task_id") is not None:
+        from openswe.sandboxes.lifecycle import ensure_sandbox_for_thread
+
+        await ensure_sandbox_for_thread(thread_id)
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
     if sandbox_backend is None:
         sandbox_backend = get_or_create_sandbox_backend_proxy(thread_id)
