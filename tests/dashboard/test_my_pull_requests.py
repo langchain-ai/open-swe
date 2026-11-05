@@ -165,7 +165,7 @@ async def test_blocked_merge_names_required_checks_the_head_never_reported(
         (None, "pending", [], 0, False),
     ],
 )
-async def test_review_and_thread_status_agree_on_check_outcomes(
+async def test_review_and_thread_status_agree_on_current_check_outcomes(
     monkeypatch, conclusion, ci, failures, inconclusive, required_passing
 ):
     pull = {
@@ -181,13 +181,29 @@ async def test_review_and_thread_status_agree_on_check_outcomes(
     )
     runs = [
         {
+            "id": suite * 10,
             "name": "unit",
-            "status": "completed" if conclusion else "queued",
-            "conclusion": conclusion,
+            "status": "completed" if result else "queued",
+            "conclusion": result,
+            "app": {"id": 15368, "slug": "github-actions"},
+            "check_suite": {"id": suite},
         }
+        for suite, result in [(10, "failure"), (20, "success"), (30, conclusion)]
+    ]
+    workflows = [
+        {
+            "id": run_id,
+            "check_suite_id": suite,
+            "workflow_id": 100,
+            "event": "pull_request",
+            "run_attempt": 2 if suite == 30 else 1,
+        }
+        for suite, run_id in [(10, 10), (20, 20), (30, 5)]
     ]
     monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
-    monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=runs))
+    monkeypatch.setattr(
+        github_http.RepoClient, "pages", AsyncMock(side_effect=[runs, workflows] * 2)
+    )
     monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
     monkeypatch.setattr(prs.PullRequestClient, "reviewers", AsyncMock(return_value=[]))
     monkeypatch.setattr(

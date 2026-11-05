@@ -14,7 +14,7 @@ export const DEFAULT_SIDEBAR_FILTERS: SidebarFilters = {
   sources: [],
   includeAutomations: false,
   includeResolved: false,
-  ownedOnly: false,
+  ownedOnly: true,
   includeSlack: true,
   includeClaudeCode: true,
 }
@@ -65,7 +65,7 @@ export function filterThreads<T extends FilterableThread>(
   })
 }
 
-/** True when any filter dimension differs from the defaults. */
+/** True when the empty sidebar should mention its filters. */
 export function hasActiveFilters(filters: SidebarFilters): boolean {
   return (
     filters.sources.length > 0 ||

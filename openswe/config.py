@@ -321,6 +321,10 @@ ENV.var("SLACK_REPO_NAME", "Slack-specific default repository name.")
 
 # --- Slack and Linear ----------------------------------------------------------------------
 ENV.var("SLACK_BOT_TOKEN", "Slack bot user OAuth token (xoxb-...).", secret=True)
+ENV.var(
+    "SLACK_ALERTS_CHANNEL_ID",
+    "Slack channel for rate-limited operational alerts; unset disables Slack delivery, not local logging.",
+)
 ENV.var("SLACK_SIGNING_SECRET", "HMAC secret for Slack webhook deliveries.", secret=True)
 ENV.var("SLACK_BOT_USER_ID", "Slack user id of the bot, for mention detection.")
 ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for readable conversation context.")

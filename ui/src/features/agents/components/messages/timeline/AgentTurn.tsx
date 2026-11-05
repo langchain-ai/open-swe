@@ -507,7 +507,10 @@ export function AgentTurn({
   }
 
   return (
-    <div className="group/turn my-space-2 min-w-0 space-y-space-2">
+    <div
+      className="group/turn my-space-2 min-w-0 space-y-space-2"
+      data-message-id={message.id}
+    >
       {segments.map((segment, index) =>
         segment.type === "reply"
           ? renderItem(segment.item)

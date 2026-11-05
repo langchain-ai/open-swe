@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
-import { TextEditor } from "@/components/TextEditor"
+import { Textarea } from "@langchain/macaw-components/Textarea"
 import { api, reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
 import { cn, INHERITED_LINK } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
@@ -251,26 +251,23 @@ function Description({
       </header>
       {draft !== null && (
         <div className="flex flex-col gap-space-2">
-          <div
-            className="flex h-64 min-h-0 flex-col overflow-hidden rounded-md border border-default"
-            onKeyDownCapture={(event) => {
+          <Textarea
+            size="md"
+            aria-label="PR description"
+            autoFocus
+            rows={12}
+            inputClassName="font-mono text-xs"
+            value={draft}
+            onChange={setDraft}
+            onKeyDown={(event) => {
               if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
                 event.preventDefault()
                 event.stopPropagation()
                 save()
               }
-            }}
-            onKeyDown={(event) => {
               if (event.key === "Escape") event.stopPropagation()
             }}
-          >
-            <TextEditor
-              ariaLabel="PR description"
-              autoFocus
-              value={draft}
-              onChange={setDraft}
-            />
-          </div>
+          />
           <div className="flex justify-end gap-space-2">
             <Button
               size="sm"

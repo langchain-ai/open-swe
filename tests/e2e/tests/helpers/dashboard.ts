@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 // Shared fixtures for the specs that drive the REAL built ui/ app (served
 // same-origin from the harness). Only the LLM/GitHub/Slack/token boundaries
@@ -75,11 +75,21 @@ export function composerFor(page: Page, placeholder: RegExp) {
   };
 }
 
+// The dashboard is server-rendered, so the composer is visible before Lexical
+// takes it over. Keys typed before then land in the static markup, which Lexical
+// replaces with its own empty state: the text, and any @ trigger, are lost.
+// Lexical marks the element with data-lexical-editor once it owns it.
+export async function readyComposerEditor(page: Page): Promise<Locator> {
+  const editor = page.getByTestId("composer-editor");
+  await expect(editor).toHaveAttribute("data-lexical-editor", "true");
+  return editor;
+}
+
 // Typing goes through real key events rather than `fill()`: the editor builds
 // its state from beforeinput/keydown, and `fill()`'s single bulk insert leaves
 // it out of sync with the DOM.
 export async function typeIntoComposer(page: Page, text: string) {
-  const editor = page.getByTestId("composer-editor");
+  const editor = await readyComposerEditor(page);
   await editor.click();
   await editor.pressSequentially(text);
   await editor.press("Enter");

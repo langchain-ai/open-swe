@@ -229,9 +229,12 @@ def sanitize_redirect_to(redirect_to: str | None) -> str:
         return fallback
     trimmed = redirect_to.strip()
     parsed = urlparse(trimmed)
+    # Browsers read a backslash in a URL as a slash, so /\evil.example is a
+    # protocol-relative URL to them even though urlparse sees a path.
     if (
         trimmed.startswith("/")
         and not trimmed.startswith("//")
+        and "\\" not in trimmed
         and not parsed.scheme
         and not parsed.netloc
         and not _is_blocked_redirect_path(parsed.path)

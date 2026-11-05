@@ -78,6 +78,7 @@ const {
   desktopEnvironmentsUrl,
   desktopExchangeUrl,
   desktopLoginUrl,
+  desktopDeepLinkUrl,
   resolveAppRuntime,
   resolveBackendUrl,
   connectExchangeUrl,
@@ -884,9 +885,26 @@ function configureDesktopIpc() {
         throw error;
       }
     }
-    const cwd = await projectForRepo(input.repo);
-    if (!cwd)
-      throw new Error(`Add a checkout of ${input?.repo} to Open SWE first`);
+    let cwd = await projectForRepo(input.repo);
+    if (!cwd) {
+      const options = {
+        title: `Choose your checkout of ${input.repo}`,
+        properties: ["openDirectory"],
+      };
+      const result = mainWindow
+        ? await dialog.showOpenDialog(mainWindow, options)
+        : await dialog.showOpenDialog(options);
+      const picked = result.canceled ? null : result.filePaths[0];
+      if (!picked)
+        throw new Error(
+          `Choose a checkout of ${input.repo} to move this thread`,
+        );
+      const origin = await originRepo(picked);
+      if (origin?.toLowerCase() !== input.repo.toLowerCase())
+        throw new Error(`${picked} is not a checkout of ${input.repo}`);
+      cwd = addProject(projectsPath(), picked).cwd;
+      void sendProjectsChanged();
+    }
     let thread = localThreadStore.create({ id: input?.threadId, cwd });
     try {
       thread = await createThreadWorktree(thread, null);
@@ -1672,10 +1690,12 @@ function handleNavigation(window, event, url) {
     void startExternalLogin(url);
     return;
   }
-  const callback = backendUrl ? localCallbackUrl(url, backendUrl) : null;
-  if (callback) {
+  const targetUrl = backendUrl
+    ? localCallbackUrl(url, backendUrl) || desktopDeepLinkUrl(url, backendUrl)
+    : null;
+  if (targetUrl) {
     event.preventDefault();
-    void window.loadURL(callback);
+    void window.loadURL(targetUrl);
     return;
   }
   if (isAppUrl(url)) return;
@@ -1717,20 +1737,15 @@ function createWindow(initialUrl = APP_URL) {
     if (mainWindow === window) mainWindow = null;
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
-    const scheme = new URL(url).protocol;
-    if (isAppLoginUrl(url)) {
-      void startExternalLogin(url);
-    } else if (["http:", "https:", "mailto:"].includes(scheme)) {
-      void shell.openExternal(url);
-    }
+    handleNavigation(window, { preventDefault() {} }, url);
     return { action: "deny" };
   });
   window.webContents.on("will-navigate", (event, url) =>
     handleNavigation(window, event, url),
   );
-  window.webContents.on("will-redirect", (event, url) =>
-    handleNavigation(window, event, url),
-  );
+  window.webContents.on("will-redirect", (event) => {
+    if (event.isMainFrame) handleNavigation(window, event, event.url);
+  });
   window.webContents.on("will-attach-webview", (event) =>
     event.preventDefault(),
   );

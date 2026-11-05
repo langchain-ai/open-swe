@@ -38,7 +38,12 @@ from openswe.threads.handlers import (
     resolve_dashboard_thread,
 )
 from openswe.threads.identity import ThreadIdentity
-from openswe.threads.listing import list_dashboard_threads_page
+from openswe.threads.listing import (
+    SIDEBAR_ORDERS,
+    SidebarThreadOrderBody,
+    list_dashboard_threads_page,
+)
+from openswe.threads.pins import THREAD_PINS
 from openswe.threads.plan_store import get_plan_content, list_plan_comments
 from openswe.threads.proxy import proxy_dashboard_thread_commands
 from openswe.threads.runs import start_dashboard_thread
@@ -1199,6 +1204,46 @@ def _unexpected_action_arguments(
     if content_format != "html":
         provided.add("content_format")
     return sorted(provided - allowed)
+
+
+@expose_mcp()
+@audit_tool()
+async def reorder_sidebar_threads(
+    thread_ids: list[str],
+    project: str | None = None,
+    repo: str | None = None,
+    ownerless: bool = False,
+    state: Annotated[dict[str, object] | None, InjectedState] = None,
+) -> dict[str, object]:
+    """Reorder the requester's threads within one personal sidebar folder."""
+    actor = await _actor(state)
+    if actor is None:
+        return {"ok": False, "error": _NO_WRITER}
+    try:
+        body = SidebarThreadOrderBody(
+            thread_ids=thread_ids, project=project, repo=repo, ownerless=ownerless
+        )
+        await SIDEBAR_ORDERS.reorder(actor.login, body, email=actor.email)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True}
+
+
+@expose_mcp()
+@audit_tool()
+async def reorder_thread_pins(
+    thread_ids: list[str],
+    state: Annotated[dict[str, object] | None, InjectedState] = None,
+) -> dict[str, object]:
+    """Reorder the verified requester's already pinned sidebar threads."""
+    actor = await _actor(state)
+    if actor is None:
+        return {"ok": False, "error": _NO_WRITER}
+    try:
+        await THREAD_PINS.reorder(actor.login, thread_ids)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True}
 
 
 @expose_mcp()

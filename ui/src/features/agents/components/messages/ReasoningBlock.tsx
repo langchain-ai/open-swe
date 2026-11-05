@@ -1,10 +1,9 @@
 import { Button } from "@langchain/macaw-components/Button"
-import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import { BrainIcon } from "@phosphor-icons/react/dist/ssr/Brain"
 import { useEffect, useRef, useState } from "react"
 
 import { Markdown } from "@/features/agents/components/chat/Markdown"
-import { cn, formatElapsed } from "@/lib/utils"
+import { formatElapsed } from "@/lib/utils"
 import { ElapsedSeconds } from "./ElapsedSeconds"
 import { Thought } from "./thought"
 
@@ -78,18 +77,10 @@ export function ReasoningBlock({
           </>
         ) : (
           <>
-            <CaretRightIcon
-              size={12}
-              weight="bold"
-              className={cn(
-                "shrink-0 text-icon-tertiary transition-transform duration-fast",
-                expanded && "rotate-90"
-              )}
-              aria-hidden
-            />
             <BrainIcon
-              size={12}
-              className="shrink-0 text-icon-tertiary"
+              size={14}
+              weight="regular"
+              className="block shrink-0 text-icon-tertiary"
               aria-hidden
             />
             <span className="min-w-0 truncate text-secondary transition-colors duration-normal group-hover/reasoning:text-primary">

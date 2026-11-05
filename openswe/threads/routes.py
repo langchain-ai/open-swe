@@ -54,7 +54,9 @@ from openswe.threads.handlers import (
     share_thread_with_workspace,
 )
 from openswe.threads.listing import (
+    SIDEBAR_ORDERS,
     DashboardThreadScope,
+    SidebarThreadOrderBody,
     list_dashboard_pinned_threads,
     list_dashboard_thread_repos,
     list_dashboard_threads,
@@ -63,6 +65,7 @@ from openswe.threads.listing import (
     unpin_dashboard_thread,
 )
 from openswe.threads.machine_reads import machine_thread, machine_threads
+from openswe.threads.pins import THREAD_PINS
 from openswe.threads.principals import PrincipalDep
 from openswe.threads.proxy import (
     proxy_dashboard_thread_commands,
@@ -184,11 +187,41 @@ async def api_list_thread_repos(
     )
 
 
+@router.put("/threads/order")
+@audit_endpoint
+async def api_reorder_sidebar_threads(
+    body: SidebarThreadOrderBody,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, bool]:
+    try:
+        await SIDEBAR_ORDERS.reorder(session["sub"], body, email=session.get("email"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True}
+
+
 @router.get("/threads/pinned")
 async def api_list_pinned_threads(
     session: dict[str, Any] = SESSION_DEP,
 ) -> list[dict[str, Any]]:
     return await list_dashboard_pinned_threads(session["sub"], email=session.get("email"))
+
+
+class PinnedThreadOrderBody(BaseModel):
+    thread_ids: list[str] = Field(max_length=1000)
+
+
+@router.put("/threads/pinned/order")
+@audit_endpoint
+async def api_reorder_pinned_threads(
+    body: PinnedThreadOrderBody,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, bool]:
+    try:
+        await THREAD_PINS.reorder(session["sub"], body.thread_ids)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True}
 
 
 @router.post("/threads/{thread_id}/pin", status_code=204)

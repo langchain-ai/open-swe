@@ -6,7 +6,6 @@ import secrets
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from hashlib import sha256
 from time import monotonic
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode, urlparse
@@ -64,7 +63,9 @@ class LangSmithOrgDiscovery:
         if not key:
             raise HTTPException(503, "LangSmith login is not configured")
         endpoint = ENV.LANGSMITH_ENDPOINT.get().rstrip("/")
-        identity = (endpoint, sha256(key.encode()).hexdigest())
+        # The key itself, not a digest: it already lives in this process's environment,
+        # and a rotated key must re-run discovery.
+        identity = (endpoint, key)
         async with self.lock:
             if self.identity == identity and monotonic() < self.expires_at:
                 if not self.org_id:

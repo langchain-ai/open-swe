@@ -192,7 +192,7 @@ export interface SidebarAgeGroup {
   threads: Array<SidebarThreadItem>
 }
 
-/** Buckets threads into Today, Yesterday and Older by when they were last updated, each ordered by creation. */
+/** Buckets threads into Today, Yesterday and Older by creation date, newest first. */
 export function groupSidebarThreadsByAge(
   threads: ReadonlyArray<SidebarThreadItem>,
   now: Date = new Date()
@@ -205,7 +205,7 @@ export function groupSidebarThreadsByAge(
     older: [],
   }
   for (const thread of threads) {
-    const day = new Date(thread.updatedAt).setHours(0, 0, 0, 0)
+    const day = new Date(thread.createdAt).setHours(0, 0, 0, 0)
     buckets[
       day >= today ? "today" : day >= yesterday ? "yesterday" : "older"
     ].push(thread)

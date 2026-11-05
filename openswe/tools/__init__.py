@@ -44,6 +44,8 @@ _TOOL_MODULES = {
     "manage_code_channel": "openswe.slack.tools.manage_code_channel",
     "manage_incident": "openswe.incidents.tools",
     "manage_thread": ".threads",
+    "reorder_thread_pins": ".threads",
+    "reorder_sidebar_threads": ".threads",
     "merge_expedited_pr": ".merge_expedited_pr",
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
@@ -139,6 +141,8 @@ __all__ = [
     "manage_code_channel",
     "manage_incident",
     "manage_thread",
+    "reorder_thread_pins",
+    "reorder_sidebar_threads",
     "merge_expedited_pr",
     "open_pull_request",
     "output_iframe",
@@ -293,7 +297,14 @@ if TYPE_CHECKING:
     from openswe.tools.submit_thread_feedback import submit_thread_feedback
     from openswe.tools.suggest_task import suggest_task
     from openswe.tools.switch_to_performance_model import switch_to_performance_model
-    from openswe.tools.threads import get_thread, list_threads, manage_thread, start_thread
+    from openswe.tools.threads import (
+        get_thread,
+        list_threads,
+        manage_thread,
+        reorder_sidebar_threads,
+        reorder_thread_pins,
+        start_thread,
+    )
     from openswe.tools.update_finding import update_finding
     from openswe.tools.user_skills import delete_user_skill, save_user_skill
     from openswe.tools.web_search import web_search

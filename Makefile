@@ -26,6 +26,9 @@ dev-mda: mda-cli
 # The `mda` CLI, built from the vendored SDK (vendor/README.md) into the runtime
 # package mda/ installs, where its `mda` command runs it from. Rebuilt only when its
 # sources change: the vendored build script, missing its .git, always reruns.
+# The binary is replaced by renaming a fresh copy over it: overwriting it in place
+# leaves macOS its old cached code signature, and the kernel kills the new build
+# on launch (exit 137).
 MDA_SDK := vendor/managed-deepagents-sdk
 MDA_CLI := $(MDA_SDK)/packages/pypi/src/managed_deepagents/_binaries/mda
 mda-cli: $(MDA_CLI)
@@ -33,7 +36,8 @@ $(MDA_CLI): $(MDA_SDK)/Cargo.toml $(MDA_SDK)/Cargo.lock $(MDA_SDK)/UPSTREAM $(sh
 	MDA_GIT_SHA=$$(cut -d' ' -f1 $(MDA_SDK)/UPSTREAM) MDA_GIT_DATE=$$(cut -d' ' -f2 $(MDA_SDK)/UPSTREAM) \
 		cargo build --locked --release --manifest-path $(MDA_SDK)/Cargo.toml
 	mkdir -p $(@D)
-	cp $(MDA_SDK)/target/release/mda $@
+	cp $(MDA_SDK)/target/release/mda $@.tmp
+	mv -f $@.tmp $@
 
 postgres:
 	docker compose up -d --wait postgres

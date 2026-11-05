@@ -331,6 +331,10 @@ SLACK_BOT_USER_ID=""      # the bot's member id (open the bot's profile in Slack
 SLACK_BOT_USERNAME=""     # the bot's handle, e.g. open-swe
 ```
 
+Set `SLACK_ALERTS_CHANNEL_ID` to the channel ID for operational alerts and invite the bot to that channel.
+If unset, alerts stay in server logs and are not sent to Slack.
+Slack delivery is limited to one operational alert per minute per channel across replicas.
+
 `/oswe <request or question>` answers or carries out a request without starting a Slack thread: replies are ephemeral, visible only to whoever asked, and the immediate acknowledgement links to the thread in the web dashboard.
 Each person's commands in a channel share one private scratch thread, kept out of everyone's thread list; continuing it on the web makes it an ordinary thread.
 Substantial work belongs in a thread of its own, which Open SWE starts in the channel.

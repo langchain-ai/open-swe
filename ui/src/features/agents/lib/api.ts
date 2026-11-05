@@ -396,6 +396,21 @@ export const agentsApi = {
       `/threads/repos${buildReposQuery(params)}`
     ),
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
+  reorderSidebarThreads: (body: {
+    thread_ids: Array<string>
+    project?: string
+    repo?: string
+    ownerless?: boolean
+  }) =>
+    agentsRequest<{ ok: boolean }>("/threads/order", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  reorderPinnedThreads: (threadIds: Array<string>) =>
+    agentsRequest<{ ok: boolean }>("/threads/pinned/order", {
+      method: "PUT",
+      body: JSON.stringify({ thread_ids: threadIds }),
+    }),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
   shareThreadWithWorkspace: (threadId: string) =>

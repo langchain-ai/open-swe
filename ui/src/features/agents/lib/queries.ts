@@ -1573,6 +1573,96 @@ export function usePinAgentThread() {
   })
 }
 
+export function useReorderPinnedThreads() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (threadIds: Array<string>) =>
+      agentsApi.reorderPinnedThreads(threadIds),
+    meta: { errorTitle: "Couldn't reorder pinned threads" },
+    onMutate: async (threadIds) => ({
+      undo: await optimisticUpdate<Array<AgentThread>>(
+        queryClient,
+        agentThreadKeys.pinned,
+        (threads) => {
+          const positions = new Map(threadIds.map((id, index) => [id, index]))
+          return [...threads].sort(
+            (left, right) =>
+              (positions.get(left.id) ?? threadIds.length) -
+              (positions.get(right.id) ?? threadIds.length)
+          )
+        }
+      ),
+    }),
+    onError: (_error, _vars, context) => context?.undo(),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: agentThreadKeys.pinned }),
+  })
+}
+
+export function useReorderSidebarThreads(scope: {
+  project?: string
+  repo?: string
+  ownerless?: boolean
+}) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (threadIds: Array<string>) =>
+      agentsApi.reorderSidebarThreads({ ...scope, thread_ids: threadIds }),
+    meta: { errorTitle: "Couldn't reorder chats" },
+    onMutate: async (threadIds) => {
+      const undo = await Promise.all(
+        queryClient
+          .getQueriesData<InfiniteData<ThreadsPage>>({
+            queryKey: ["agent-threads", "lists", "infinite-pages"],
+            predicate: (query) => {
+              const params = query.queryKey[3] as ThreadsPageParams | undefined
+              return Boolean(
+                params &&
+                params.project === scope.project &&
+                params.repo === scope.repo &&
+                Boolean(params.ownerless) === Boolean(scope.ownerless)
+              )
+            },
+          })
+          .map(([key]) =>
+            optimisticUpdate<InfiniteData<ThreadsPage>>(
+              queryClient,
+              key,
+              (data) => {
+                const positions = new Map(
+                  threadIds.map((id, index) => [id, index])
+                )
+                const items = data.pages
+                  .flatMap((page) => page.items)
+                  .sort(
+                    (a, b) =>
+                      (positions.get(a.id) ?? threadIds.length) -
+                      (positions.get(b.id) ?? threadIds.length)
+                  )
+                let offset = 0
+                return {
+                  ...data,
+                  pages: data.pages.map((page) => {
+                    const next = {
+                      ...page,
+                      items: items.slice(offset, offset + page.items.length),
+                    }
+                    offset += page.items.length
+                    return next
+                  }),
+                }
+              }
+            )
+          )
+      )
+      return { undo: () => undo.forEach((restore) => restore()) }
+    },
+    onError: (_error, _vars, context) => context?.undo(),
+    onSettled: () => invalidateAgentThreadLists(queryClient),
+  })
+}
+
 export function useRenameAgentThread() {
   const queryClient = useQueryClient()
 

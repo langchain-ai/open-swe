@@ -74,7 +74,7 @@ describe("sortSidebarThreads", () => {
 })
 
 describe("groupSidebarThreadsByAge", () => {
-  it("buckets by last-updated age and orders each bucket by creation", () => {
+  it("buckets and sorts by creation even when an older thread is active today", () => {
     const now = new Date(2026, 5, 10, 15)
     const at = (day: number, hour: number) =>
       new Date(2026, 5, day, hour).getTime()
@@ -95,9 +95,9 @@ describe("groupSidebarThreadsByAge", () => {
     expect(
       groups.map((group) => [group.label, group.threads.map((item) => item.id)])
     ).toEqual([
-      ["Today", ["fresh", "busy"]],
+      ["Today", ["fresh"]],
       ["Yesterday", ["yesterday"]],
-      ["Older", ["old", "older"]],
+      ["Older", ["old", "older", "busy"]],
     ])
   })
 })

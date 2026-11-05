@@ -108,6 +108,16 @@ def test_sanitize_redirect_to_rejects_unsafe_targets(monkeypatch) -> None:
         assert sanitize_redirect_to(target) == "https://dashboard.example"
 
 
+@pytest.mark.parametrize("target", ["/\\evil.example/agents", "/agents\\..\\\\evil.example"])
+def test_sanitize_redirect_to_rejects_backslash_paths_without_a_dashboard_url(
+    monkeypatch, target: str
+) -> None:
+    monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
+    monkeypatch.delenv("DASHBOARD_ALLOWED_ORIGINS", raising=False)
+
+    assert sanitize_redirect_to(target) == ""
+
+
 def test_login_hands_every_sign_in_to_langsmith(monkeypatch) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret")
 
