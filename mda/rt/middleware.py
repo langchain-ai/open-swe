@@ -100,7 +100,11 @@ from rt.backend import (
 from rt.git_evidence import turn_git
 from rt.loop import RunLoop
 from rt.managed_sandbox import OpenedSandbox
-from rt.model_calls import MODEL_CALL_TIMEOUT_SECONDS, ModelCallTimeoutMiddleware
+from rt.model_calls import (
+    MODEL_CALL_TIMEOUT_SECONDS,
+    PRIMARY_FIRST_TOKEN_SECONDS,
+    ModelCallTimeoutMiddleware,
+)
 from rt.model_retries import ModelOutput
 from rt.models import build_model
 from rt.offload import OFFLOADING_KEY, RequestedOffload
@@ -308,7 +312,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     ) -> None:
         self._backend = backend
         self._model_timeout = ModelCallTimeoutMiddleware(model_timeout_seconds)
-        self._primary_timeout = ModelCallTimeoutMiddleware(model_timeout_seconds * 2 / 3)
+        self._primary_timeout = ModelCallTimeoutMiddleware(PRIMARY_FIRST_TOKEN_SECONDS)
         self._run_loop = RunLoop(backend)
         # Each run's own model, built from its catalog.
         self._models = RunLocal(self._build_model)

@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from copy import deepcopy
 from typing import Protocol, cast
@@ -233,6 +234,7 @@ async def test_primary_and_fallback_share_one_elapsed_budget(
         messages=messages,
         state=cast(AgentState, {"messages": messages, "open_swe_call": call.model_dump()}),
     )
+    started = asyncio.get_running_loop().time()
     attempted: list[BaseChatModel | str] = []
     cancelled: list[BaseChatModel | str] = []
 
@@ -240,15 +242,18 @@ async def test_primary_and_fallback_share_one_elapsed_budget(
         attempted.append(request.model)
         try:
             if request.model is _ANTHROPIC:
-                await asyncio.sleep(60 if primary_stalls else 0.03)
+                await asyncio.sleep(60 if primary_stalls else 0.005)
                 raise TimeoutError("provider timeout")
+            if primary_stalls:
+                assert asyncio.get_running_loop().time() - started < 0.15
             await asyncio.sleep(60 if fallback_stalls else 0)
             return ModelResponse(result=[AIMessage(content="too late")])
         except asyncio.CancelledError:
             cancelled.append(request.model)
             raise
 
-    middleware = BackendRunMiddleware(run.backend, model_timeout_seconds=0.05)
+    monkeypatch.setattr("rt.middleware.PRIMARY_FIRST_TOKEN_SECONDS", 0.02)
+    middleware = BackendRunMiddleware(run.backend, model_timeout_seconds=0.3)
     if fallback_stalls:
         with pytest.raises(ModelCallTimeoutError):
             await middleware.awrap_model_call(request, handler)
@@ -481,6 +486,7 @@ async def test_provider_http_retries_are_owned_by_model_middleware(
         assert model.max_retries is not None
         model = model.model_copy(
             update={
+                "streaming": False,
                 "use_responses_api": False,
                 "include": None,
                 "async_client": openai.AsyncOpenAI(
@@ -573,6 +579,7 @@ async def test_streamed_partial_output_is_superseded_on_retry_or_fallback(
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     run = Run(RunContext.model_validate({"__catalog": Catalog().model_dump(mode="json")}))
     model = ChatOpenAI(model="test", api_key="test", max_retries=0)
+    monkeypatch.setattr("rt.middleware.PRIMARY_FIRST_TOKEN_SECONDS", 0.03)
     backend_middleware = BackendRunMiddleware(
         run.backend, model_timeout_seconds=2.0 if outcome == "exhausted" else 0.15
     )
@@ -674,3 +681,93 @@ async def test_cancelling_retry_backoff_does_not_start_another_model_attempt(
     with pytest.raises(asyncio.CancelledError):
         await task
     assert handler.await_count == 1
+
+
+class TestModelStreaming:
+    @pytest.mark.parametrize("provider", ["openai", "anthropic"])
+    @pytest.mark.parametrize("streaming", [None, False])
+    async def test_construction_preserves_streaming_overrides(
+        self, provider: str, streaming: bool | None
+    ) -> None:
+        kwargs: dict[str, str | bool] = {"api_key": "test"}
+        if streaming is not None:
+            kwargs["streaming"] = streaming
+        model = build_model(
+            ModelSpec(model_id=f"{provider}:test", kwargs=kwargs), use_gateway=False
+        )
+        assert isinstance(model, ChatOpenAI | ChatAnthropic)
+        assert model.streaming is (True if streaming is None else streaming)
+        assert model.max_retries == 0
+        if isinstance(model, ChatOpenAI):
+            assert model.use_responses_api is True
+            assert model.store is False
+            assert model.include == ["reasoning.encrypted_content"]
+            assert model.output_version == "responses/v1"
+
+    async def test_responses_stream_retains_usage_and_replayable_reasoning(self) -> None:
+        reasoning = {
+            "type": "reasoning",
+            "id": "rs_kept",
+            "summary": [],
+            "encrypted_content": "enc",
+        }
+        events = [
+            {
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {**reasoning, "encrypted_content": None},
+            },
+            {"type": "response.output_item.done", "output_index": 0, "item": reasoning},
+            {
+                "type": "response.output_text.delta",
+                "output_index": 1,
+                "content_index": 0,
+                "delta": "ok",
+            },
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_test",
+                    "object": "response",
+                    "created_at": 1,
+                    "status": "completed",
+                    "model": "test",
+                    "output": [reasoning],
+                    "usage": {
+                        "input_tokens": 10,
+                        "output_tokens": 3,
+                        "total_tokens": 13,
+                        "input_tokens_details": {"cached_tokens": 4},
+                        "output_tokens_details": {"reasoning_tokens": 2},
+                    },
+                },
+            },
+        ]
+        body = "".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events)
+        transport = httpx2.MockTransport(
+            lambda request: httpx2.Response(
+                200, headers={"content-type": "text/event-stream"}, content=body
+            )
+        )
+        async with httpx2.AsyncClient(transport=transport) as client:
+            sdk = openai.AsyncOpenAI(api_key="test", http_client=client)
+            model = build_model(
+                ModelSpec(model_id="openai:test", kwargs={"api_key": "test"}),
+                use_gateway=False,
+            ).model_copy(update={"root_async_client": sdk})
+            graph = create_agent(model=model, middleware=[ReplayableHistoryMiddleware()])
+            result = await graph.ainvoke({"messages": [HumanMessage("go")]})
+        reply = result["messages"][-1]
+        assert isinstance(reply, AIMessage)
+        assert reply.usage_metadata == {
+            "input_tokens": 10,
+            "output_tokens": 3,
+            "total_tokens": 13,
+            "input_token_details": {"cache_read": 4},
+            "output_token_details": {"reasoning": 2},
+        }
+        forwarded = await _forwarded(ReplayableHistoryMiddleware(), [reply], model)
+        assert isinstance(model, ChatOpenAI)
+        payload = model._get_request_payload(forwarded.messages)
+        assert reasoning in payload["input"]
+        assert "ok" in str(reply.content)
