@@ -223,6 +223,8 @@ from openswe.tools import (
     read_workspace_prompt,
     recreate_sandbox,
     remember,
+    reorder_sidebar_threads,
+    reorder_thread_pins,
     report_platform_issue,
     report_work_state,
     request_human_review,
@@ -273,6 +275,7 @@ from openswe.tools.note_on_diff import note_on_diff
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
 from openswe.tools.review_walkthrough import walkthrough_tools
+from openswe.tools.slack_bots import allow_slack_bot, list_slack_bots, remove_slack_bot
 from openswe.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from openswe.tools.task_threads import (
     control_worker,
@@ -598,6 +601,8 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "listen_events",
         "request_rollout_check",
         "manage_thread",
+        "reorder_thread_pins",
+        "reorder_sidebar_threads",
         "start_thread",
         "link_pull_request",
         "open_pull_request",
@@ -650,6 +655,8 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "listen_events",
         "request_rollout_check",
         "manage_thread",
+        "reorder_thread_pins",
+        "reorder_sidebar_threads",
         "read_incident",
         "read_only_sql",
         "execute_database_sql",
@@ -732,6 +739,8 @@ AGENT_TOOLS: Final = (
     search_pull_requests,
     get_thread,
     manage_thread,
+    reorder_sidebar_threads,
+    reorder_thread_pins,
     task_status,
     message_task_thread,
     control_worker,
@@ -793,6 +802,9 @@ AGENT_TOOLS: Final = (
     manage_review_approval_mode,
     manage_review_shadow,
     manage_review_repos,
+    list_slack_bots,
+    allow_slack_bot,
+    remove_slack_bot,
 )
 
 

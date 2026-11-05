@@ -36,13 +36,15 @@ async function recordedSidebarUrl({
   includeResolved = false,
   includeClaudeCode = true,
   includeSlack = true,
+  owned = true,
   repoMode = false,
-  sort = "updated",
+  sort = "created",
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
   includeClaudeCode?: boolean
   includeSlack?: boolean
+  owned?: boolean
   repoMode?: boolean
   sort?: ChatSort
 } = {}): Promise<string> {
@@ -50,6 +52,7 @@ async function recordedSidebarUrl({
   await agentsApi
     .listThreadsPage({
       ...sidebarRecentsParams({
+        owned,
         repoMode,
         includeAutomations,
         includeResolved,
@@ -148,6 +151,16 @@ describe("apiWarmupScript", () => {
   it.each([
     { name: "defaults", expected: {}, prefs: undefined },
     {
+      name: "date mode pages by creation",
+      expected: { sort: "created" as ChatSort },
+      prefs: { organize: "date" },
+    },
+    {
+      name: "all owners explicitly selected",
+      expected: { owned: false },
+      prefs: { filters: { ownedOnly: false } },
+    },
+    {
       name: "automations included",
       expected: { includeAutomations: true },
       prefs: { filters: { includeAutomations: true } },
@@ -159,7 +172,7 @@ describe("apiWarmupScript", () => {
     },
     {
       name: "repo mode",
-      expected: { repoMode: true, sort: "created" as ChatSort },
+      expected: { repoMode: true },
       prefs: { organize: "repo" },
     },
     {
@@ -173,8 +186,8 @@ describe("apiWarmupScript", () => {
       prefs: { filters: { includeClaudeCode: false } },
     },
     {
-      name: "repo mode sorted by last update",
-      expected: { repoMode: true, sort: "updated" as ChatSort },
+      name: "repo mode ignores the legacy last-update sort preference",
+      expected: { repoMode: true, sort: "created" as ChatSort },
       prefs: { organize: "repo", sortChats: "updated" },
     },
     {

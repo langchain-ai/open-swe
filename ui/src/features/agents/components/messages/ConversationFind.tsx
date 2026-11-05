@@ -1,0 +1,323 @@
+import { Input } from "@langchain/macaw-components/Input"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import {
+  CaretDownIcon,
+  CaretUpIcon,
+  XIcon,
+} from "@langchain/macaw-components/icons"
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react"
+import { useAppCommand, useRegisterAppCommands } from "@/lib/appCommands"
+import { eventMatchesShortcut } from "@/lib/hotkeys"
+
+class ConversationSearch {
+  ranges: Range[] = []
+  index = 0
+  clips = new Map<Element, DOMRect | null>()
+
+  constructor(readonly root: HTMLElement) {}
+
+  find(query: string) {
+    const active = this.ranges[this.index]
+    this.clips.clear()
+    this.ranges = []
+    if (!query) return this.ranges
+    const blocks: Text[][] = []
+    let previousBlock: Element | null = null
+    const walker = document.createTreeWalker(this.root, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const parent = node.parentElement
+      if (
+        !(node instanceof Text) ||
+        !parent ||
+        parent.closest('button, time, svg, [hidden], [aria-hidden="true"]')
+      )
+        continue
+      if (!parent.checkVisibility()) continue
+      const block =
+        parent.closest(
+          "p, pre, li, td, th, div, h1, h2, h3, h4, h5, h6, blockquote, summary, dt, dd"
+        ) ?? parent
+      if (block !== previousBlock) blocks.push([])
+      blocks.at(-1)?.push(node)
+      previousBlock = block
+    }
+    const pattern = new RegExp(
+      query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      "giu"
+    )
+    for (const nodes of blocks) {
+      const text = nodes.map((node) => node.data).join("")
+      for (const match of text.matchAll(pattern)) {
+        const at = match.index
+        const length = match[0].length
+        const range = new Range()
+        let offset = 0
+        for (const node of nodes) {
+          const end = offset + node.length
+          if (at >= offset && at < end) range.setStart(node, at - offset)
+          if (at + length > offset && at + length <= end)
+            range.setEnd(node, at + length - offset)
+          offset = end
+        }
+        if (this.isUnclipped(range)) this.ranges.push(range)
+      }
+    }
+    this.ranges.sort((left, right) =>
+      left.compareBoundaryPoints(Range.START_TO_START, right)
+    )
+    if (active?.startContainer.isConnected) {
+      const index = this.ranges.findIndex(
+        (range) =>
+          range.compareBoundaryPoints(Range.START_TO_START, active) >= 0
+      )
+      this.index = index < 0 ? Math.max(0, this.ranges.length - 1) : index
+    }
+    return this.ranges
+  }
+
+  isUnclipped(range: Range) {
+    let rect: DOMRect | undefined
+    let parent = range.startContainer.parentElement
+    while (parent && parent !== this.root) {
+      if (!this.clips.has(parent)) {
+        this.clips.set(
+          parent,
+          getComputedStyle(parent).overflowY === "hidden"
+            ? parent.getBoundingClientRect()
+            : null
+        )
+      }
+      const bounds = this.clips.get(parent)
+      if (bounds) {
+        rect ??= range.getBoundingClientRect()
+        if (rect.top < bounds.top || rect.bottom > bounds.bottom) return false
+      }
+      parent = parent.parentElement
+    }
+    return true
+  }
+
+  paint(index: number) {
+    this.index = index
+    if (!CSS.highlights) return
+    CSS.highlights.set("conversation-find", new Highlight(...this.ranges))
+    CSS.highlights.set(
+      "conversation-find-active",
+      new Highlight(...this.ranges.slice(index, index + 1))
+    )
+  }
+
+  clear() {
+    CSS.highlights?.delete("conversation-find")
+    CSS.highlights?.delete("conversation-find-active")
+  }
+
+  reveal(index: number) {
+    const range = this.ranges[index]
+    if (!range) return
+    const scroller = this.root.closest<HTMLElement>("[data-transcript-scroll]")
+    if (!scroller) return
+    const rect = range.getBoundingClientRect()
+    const viewport = scroller.getBoundingClientRect()
+    scroller.scrollTop += rect.top - viewport.top - viewport.height / 2
+  }
+}
+
+export function ConversationFind({
+  root,
+  hasEarlier,
+}: {
+  root: RefObject<HTMLDivElement | null>
+  hasEarlier: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const [index, setIndex] = useState(0)
+  const [count, setCount] = useState(0)
+  const input = useRef<HTMLInputElement>(null)
+  const search = useRef<ConversationSearch | null>(null)
+  const previousFocus = useRef<HTMLElement | null>(null)
+  const toggle = useRef<HTMLButtonElement>(null)
+
+  const show = useCallback(() => {
+    if (!open)
+      previousFocus.current =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null
+    setOpen(true)
+    requestAnimationFrame(() => {
+      input.current?.focus()
+      input.current?.select()
+    })
+  }, [open])
+  const close = () => {
+    setOpen(false)
+    requestAnimationFrame(() => {
+      const target = previousFocus.current?.isConnected
+        ? previousFocus.current
+        : toggle.current
+      target?.focus({ preventScroll: true })
+    })
+  }
+  const step = (delta: number) => {
+    if (!count) return
+    const next = (index + delta + count) % count
+    setIndex(next)
+    search.current?.paint(next)
+    search.current?.reveal(next)
+  }
+
+  const reviewFind = Boolean(useAppCommand("review-find"))
+  const commands = useMemo(
+    () => [
+      {
+        id: "conversation-find",
+        label: "Find in conversation",
+        group: "Conversation",
+        shortcuts: reviewFind ? [] : ["mod+f"],
+        enableInFormFields: true,
+        run: show,
+      },
+    ],
+    [reviewFind, show]
+  )
+  useRegisterAppCommands(commands)
+
+  useEffect(() => {
+    if (!open || !root.current) return
+    const finder = new ConversationSearch(root.current)
+    search.current = finder
+    const refresh = () => {
+      const ranges = finder.find(query)
+      setCount(ranges.length)
+      const next = Math.min(finder.index, Math.max(0, ranges.length - 1))
+      finder.paint(next)
+      setIndex(next)
+    }
+    refresh()
+    finder.reveal(0)
+    let frame = 0
+    const observer = new MutationObserver(() => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(refresh)
+    })
+    observer.observe(root.current, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["hidden", "class", "style", "open"],
+    })
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(frame)
+      finder.clear()
+      search.current = null
+    }
+  }, [open, query, root])
+
+  return (
+    <>
+      <style>{`::highlight(conversation-find){background-color:var(--bg-warning-subtle);color:var(--text-warning-primary)}::highlight(conversation-find-active){background-color:var(--bg-warning-strong);color:var(--text-primary)}`}</style>
+      {open ? (
+        <div
+          role="search"
+          aria-label="Find in conversation"
+          className="absolute top-2 right-3 z-floating-bar max-w-[calc(100%-1.5rem)] rounded-lg border border-default bg-popover p-space-2 shadow-md dark:shadow-none"
+        >
+          <div
+            className="flex items-center gap-space-1"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault()
+                event.stopPropagation()
+                close()
+              } else if (
+                event.key === "Enter" ||
+                eventMatchesShortcut(event.nativeEvent, "mod+g") ||
+                eventMatchesShortcut(event.nativeEvent, "mod+shift+g")
+              ) {
+                event.preventDefault()
+                step(event.shiftKey ? -1 : 1)
+              }
+            }}
+          >
+            <Input
+              ref={input}
+              size="sm"
+              debounceMs={0}
+              value={query}
+              onChange={(value) => {
+                setQuery(value)
+                setIndex(0)
+              }}
+              placeholder="Find in conversation"
+              aria-label="Find in conversation"
+              spellCheck={false}
+              autoComplete="off"
+              className="w-48 min-w-0 max-sm:w-32"
+            />
+            <span
+              aria-live="polite"
+              className="min-w-16 text-right text-xxs text-secondary tabular-nums"
+            >
+              {query ? (count ? `${index + 1} of ${count}` : "No results") : ""}
+            </span>
+            <IconButton
+              icon={CaretUpIcon}
+              label="Previous match"
+              size="xs"
+              variant="plain"
+              color="secondary"
+              disabled={!count}
+              onClick={() => step(-1)}
+            />
+            <IconButton
+              icon={CaretDownIcon}
+              label="Next match"
+              size="xs"
+              variant="plain"
+              color="secondary"
+              disabled={!count}
+              onClick={() => step(1)}
+            />
+            <IconButton
+              icon={XIcon}
+              label="Close find"
+              size="xs"
+              variant="plain"
+              color="secondary"
+              onClick={close}
+            />
+          </div>
+          {hasEarlier && (
+            <p className="mt-space-1 text-xxs text-secondary">
+              Searching loaded messages only
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="absolute top-2 right-3 z-floating-bar">
+          <IconButton
+            ref={toggle}
+            icon={MagnifyingGlassIcon}
+            label="Find in conversation (⌘F / Ctrl+F)"
+            size="xs"
+            variant="plain"
+            color="secondary"
+            onClick={show}
+          />
+        </div>
+      )}
+    </>
+  )
+}

@@ -207,7 +207,7 @@ function desktopDeepLinkUrl(value, backendUrl) {
     const target = new URL(value);
     const backend = new URL(backendUrl);
     if (
-      target.protocol !== "https:" ||
+      !["http:", "https:"].includes(target.protocol) ||
       target.origin !== backend.origin ||
       !/^\/(?:agents(?:\/|$)|review(?:\/|$))/.test(target.pathname)
     )

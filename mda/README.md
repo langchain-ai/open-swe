@@ -187,14 +187,13 @@ Each Open SWE backend calls its own MDA deployment, created with `mda deploy`:
 | `open-swe-mda-preview` | `open-swe-preview` |
 | `open-swe-mda-prod` | `open-swe-v3` |
 
-Each deployment's configuration is `OPEN_SWE_BACKEND_URL`, `LANGSMITH_GATEWAY_API_KEY` and `MDA_SERVICE_SECRET` (repository secret `MDA_SERVICE_SECRET_<ENVIRONMENT>`), in the project `.env` that `mda deploy` forwards as secrets, replacing any set before.
+Each deployment's configuration is `OPEN_SWE_BACKEND_URL`, `LANGSMITH_GATEWAY_API_KEY` and `MDA_SERVICE_SECRET`, in the project `.env` that `mda deploy` forwards as secrets, replacing any set before.
+LangChain's deploy workflow, in its internal monorepo, takes each value from that environment's backend.
 The gateway key is its backend's, so model calls count against that key's gateway spend cap; without it they fall back to the deployment's own LangSmith key and the workspace's cap.
-`deploy_mda.yml` reads it from the `LANGSMITH_GATEWAY_API_KEY_PROD` or `LANGSMITH_GATEWAY_API_KEY_STAGING` repository secret; `build_preview_branch.yml` reads `LANGSMITH_GATEWAY_API_KEY_PREVIEW`.
 Deploys fail if their gateway key is missing.
-For `open-swe-mda-prod`, set the Open SWE repository's Actions secret `LANGSMITH_RUNS_ENDPOINTS_PROD` to a JSON array of tracing destinations, each with `api_url`, `api_key` and `workspace_id`.
+For `open-swe-mda-prod`, the deploy also takes the backend's `LANGSMITH_RUNS_ENDPOINTS`, a JSON array of tracing destinations, each with `api_url`, `api_key` and `workspace_id`.
 The workflow requires both `https://dev.api.smith.langchain.com` (workspace `d6684905-655c-429b-bd14-ba302d94c03b`) and `https://api.smith.langchain.com` (workspace `ebbaf2eb-769b-4505-aca2-d11de10372a4`), and forwards the compact JSON as `LANGSMITH_RUNS_ENDPOINTS` in `mda/.env`.
 Missing or invalid configuration fails the prod deploy without printing credentials; staging and preview do not receive these replicas.
-Add the secret before deploying this workflow, then run **Deploy Managed Deep Agents** from `main` with environment **prod** after the change merges.
 Updating only the backend's `LANGSMITH_RUNS_ENDPOINTS` in Terraform does not configure MDA tracing.
 For a manual prod deploy, include the same `LANGSMITH_RUNS_ENDPOINTS` in the project `.env` alongside its other deployment secrets.
 The backends' `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET` live in their Terraform.
@@ -206,7 +205,7 @@ cd mda
 uv run --locked mda deploy --name open-swe-mda-staging --deployment-type prod
 ```
 
-`deploy_mda.yml` and `build_preview_branch.yml` write the deployed commit (`git rev-parse HEAD`) into `mda/.env` as `LANGSMITH_REVISION_ID`; a manual deploy sets it there too.
+The deploy workflow writes the deployed commit (`git rev-parse HEAD`) into `mda/.env` as `LANGSMITH_REVISION_ID`; a manual deploy sets it there too.
 Each turn's root trace carries that commit as `revision_id`, an `environment` derived from the CLI-injected `MDA_DEPLOYMENT_NAME` (`open-swe-mda-prod` reports `production`), and the backend's current `LANGCHAIN_REVISION_ID` as `LANGSMITH_AGENT_VERSION` from the run's catalog, overriding whatever metadata queued work saved.
 
 CI and manual deploys run the CLI from this project's locked environment.

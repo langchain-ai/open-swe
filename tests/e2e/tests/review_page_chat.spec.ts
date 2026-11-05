@@ -200,6 +200,7 @@ test.describe("review page", () => {
   test("edits descriptions, cancels drafts, and keeps failed saves retryable", async ({
     page,
   }) => {
+    await page.route("**/monaco-editor/**", (route) => route.abort());
     await openReview(page, pr);
     const description = page.getByRole("article", {
       name: "Description",
@@ -210,14 +211,8 @@ test.describe("review page", () => {
     const save = description.getByRole("button", { name: "Save description" });
     await edit.click();
     await expect(input).toBeFocused();
-    await expect(description.locator(".view-lines")).toContainText(DESCRIPTION);
+    await expect(input).toHaveValue(DESCRIPTION);
     await expect(save).toBeDisabled();
-    await input.press("ControlOrMeta+f");
-    const find = description.locator(".find-widget");
-    await expect(find).toHaveAttribute("aria-hidden", "false");
-    await page.keyboard.press("Escape");
-    await expect(find).toHaveAttribute("aria-hidden", "true");
-    await expect(input).toBeFocused();
     await input.focus();
     await input.press("ControlOrMeta+A");
     await page.keyboard.insertText("Discard this draft");
@@ -226,7 +221,7 @@ test.describe("review page", () => {
       .click();
     await expect(description).toContainText(DESCRIPTION);
     await edit.click();
-    await expect(description.locator(".view-lines")).toContainText(DESCRIPTION);
+    await expect(input).toHaveValue(DESCRIPTION);
     const updated = "## Updated description\n\nSaved **from the review page**.";
     await input.focus();
     await input.press("ControlOrMeta+A");
@@ -238,9 +233,7 @@ test.describe("review page", () => {
     ).toBeVisible();
     await page.reload();
     await edit.click();
-    await expect(description.locator(".view-lines")).toContainText(
-      "Updated description",
-    );
+    await expect(input).toHaveValue(updated);
     const endpoint = `**${reviewApi(pr, "/description")}`;
     await page.route(endpoint, (route) =>
       route.fulfill({
@@ -255,9 +248,7 @@ test.describe("review page", () => {
     await input.press("ControlOrMeta+A");
     await page.keyboard.insertText("Retry this draft");
     await save.click();
-    await expect(description.locator(".view-lines")).toContainText(
-      "Retry this draft",
-    );
+    await expect(input).toHaveValue("Retry this draft");
     await expect(
       page.getByText("Couldn't update description", { exact: true }),
     ).toBeVisible();

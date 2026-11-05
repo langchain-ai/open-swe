@@ -3048,6 +3048,11 @@ def _managed_deployment_name(env: Mapping[str, str] | None = None) -> str | None
     )
 
 
+# The dev server's project directory, read once at import: runs ask for it on the
+# event loop, where ``os.getcwd()`` is a blocking call ``langgraph dev`` fails the run for.
+_PROJECT_DIRECTORY = Path.cwd()
+
+
 def _local_dev_deployment_name() -> str | None:
     """A stable name for ``mda dev`` boxes, so a restarted dev server finds its threads' boxes.
 
@@ -3055,7 +3060,7 @@ def _local_dev_deployment_name() -> str | None:
     """
     if os.environ.get("MDA_LOCAL_DEV") != "1":
         return None
-    machine = f"{socket.gethostname()}\0{Path.cwd()}"
+    machine = f"{socket.gethostname()}\0{_PROJECT_DIRECTORY}"
     return f"mda-dev-{hashlib.sha256(machine.encode()).hexdigest()[:8]}"
 
 
