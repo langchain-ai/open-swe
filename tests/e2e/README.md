@@ -74,6 +74,7 @@ Requires `pnpm`.
 pnpm install --frozen-lockfile
 pnpm run test:e2e:install
 pnpm run test:e2e            # browser suite
+pnpm --filter open-swe-e2e run test:auth # account recovery; no MDA runtime needed
 pnpm run test:e2e:desktop    # Electron + pinned uv dcode ACP
 ```
 

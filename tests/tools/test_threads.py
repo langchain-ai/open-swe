@@ -861,7 +861,7 @@ async def test_get_thread_rejects_untrusted_dashboard_url_before_access(
     assert result == {
         "success": False,
         "error": (
-            "thread_id must be an exact thread ID, Open SWE dashboard URL, Slack link, or LangSmith trace URL"
+            "thread_id must be an exact thread ID, Robin dashboard URL, Slack link, or LangSmith trace URL"
         ),
     }
     get_dashboard_thread.assert_not_awaited()

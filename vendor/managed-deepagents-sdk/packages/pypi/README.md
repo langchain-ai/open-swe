@@ -926,6 +926,8 @@ Supported keys:
   `workflow_run.completed`. `push` and `status` have no action, so their key is
   the event name. A CI event continues a pull request's conversation when it
   ran for exactly one pull request.
+- Merge queue: `merge_group.checks_requested`, `merge_group.destroyed`. A
+  merge group belongs to no conversation, so each delivery gets its own thread.
 
 GitHub sends no event for a mention, so each event lists the handles the
 text it wrote mentions in `event.mentions`: the body of a new or edited

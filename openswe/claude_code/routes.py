@@ -133,7 +133,7 @@ async def _session_user(session: dict[str, Any]) -> User:
     _require_database()
     user = await User.for_session(session_user_id(session), session["sub"])
     if user is None:
-        raise HTTPException(403, "Claude Code sync requires a signed-in Open SWE user")
+        raise HTTPException(403, "Claude Code sync requires a signed-in Robin user")
     return user
 
 

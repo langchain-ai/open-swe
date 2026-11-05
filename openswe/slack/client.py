@@ -486,7 +486,7 @@ def format_slack_messages_for_prompt(
         text = text or ("[forwarded message]" if forwarded else "[non-text message]")
         user_id = message.get("user")
         if is_own_slack_message(message, bot_user_id):
-            author = f"@{bot_username or 'Open SWE'}(self)"
+            author = f"@{bot_username or 'Robin'}(self)"
         elif slack_message_bot_id(message):
             author = f"@{slack_message_bot_name(message)}(bot)"
         else:
@@ -573,7 +573,6 @@ async def _post_slack_message_with_ts(
 
     # A code channel is one flowing session: replies belong in the channel.
     reply_ts = None if is_code_channel_session(thread_ts) else thread_ts
-    broadcast = {"reply_broadcast": True} if reply_broadcast and reply_ts else {}
     text, blocks = await pr_review_links(text, blocks)
 
     try:
@@ -585,7 +584,7 @@ async def _post_slack_message_with_ts(
                 unfurl_links=unfurl_links,
                 unfurl_media=unfurl_media,
                 blocks=blocks or None,
-                **broadcast,
+                reply_broadcast=True if reply_broadcast and reply_ts else None,
             )
         message_ts = data.get("ts")
         if isinstance(message_ts, str) and message_ts:

@@ -78,7 +78,7 @@ async def _start(cfg: RunConfig, policy: IncidentPolicy, channel_id: str) -> dic
         return {
             "success": False,
             "error": (
-                "Starting an incident needs a connected Open SWE account "
+                "Starting an incident needs a connected Robin account "
                 "(Sign in with Slack in the dashboard)"
             ),
         }

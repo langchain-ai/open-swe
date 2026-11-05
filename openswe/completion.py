@@ -115,14 +115,14 @@ _REASON_TEXT = {
     "context_too_long": "the conversation outgrew the model's context window",
     "model_unavailable": "the selected model isn't available to this workspace",
     "sandbox_unreachable": "the run lost its sandbox",
-    "backend_interrupted": "the connection to the Open SWE backend was interrupted",
+    "backend_interrupted": "the connection to the Robin backend was interrupted",
     "step_limit": "the run hit its step limit",
     "run_stalled": "the run stopped responding",
 }
 _DEFAULT_FOLLOW_UP = "Send another message and it will pick this back up."
 _REASON_FOLLOW_UP = {
     "context_too_long": "Start a new thread to continue.",
-    "model_unavailable": "Pick a different model in Open SWE Web, then retry.",
+    "model_unavailable": "Pick a different model in Robin Web, then retry.",
     "backend_interrupted": "Re-trigger the run to try again.",
     "run_stalled": "Send your message again to retry.",
 }
@@ -142,7 +142,7 @@ def _failure_reason(status: str, reason_code: str | None) -> str:
 def _failure_text(status: str, trace_url: str | None = None, reason_code: str | None = None) -> str:
     reason = _failure_reason(status, reason_code)
     follow_up = _REASON_FOLLOW_UP.get(reason_code or "", _DEFAULT_FOLLOW_UP)
-    text = warning(f"Open SWE wasn't able to finish that — {reason}. {follow_up}")
+    text = warning(f"Robin wasn't able to finish that — {reason}. {follow_up}")
     if trace_url:
         text += f" View the error in <{trace_url}|LangSmith>."
     return text
@@ -194,7 +194,7 @@ async def _post_failure_reply(
                 and reason_code not in {"context_too_long", "model_unavailable"}
             ):
                 retry_text = warning(
-                    f"Open SWE wasn't able to finish that — {_failure_reason(status, reason_code)}. "
+                    f"Robin wasn't able to finish that — {_failure_reason(status, reason_code)}. "
                     "Click Retry to pick this back up."
                 )
                 if trace_url:

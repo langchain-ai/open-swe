@@ -85,7 +85,7 @@ async def _add(
         return AddReviewCommentResult(added=False, error=str(exc.detail))
     except GitHubSignInRequired:
         return AddReviewCommentResult(
-            added=False, error=f"{login} must sign in to Open SWE with GitHub again"
+            added=False, error=f"{login} must sign in to Robin with GitHub again"
         )
     except (GitHubError, GraphQLError) as exc:
         return AddReviewCommentResult(added=False, error=exc.message)

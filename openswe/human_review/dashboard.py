@@ -80,6 +80,6 @@ class DashboardReviewRequest:
             except GitHubAppUnavailable:
                 return RequestResult(
                     success=False,
-                    error="Open SWE cannot reach this repository's GitHub App installation.",
+                    error="Robin cannot reach this repository's GitHub App installation.",
                 )
         return await request_review(pr, self.origin, channel=channel, inline_summary=inline_summary)

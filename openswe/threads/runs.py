@@ -52,6 +52,7 @@ from openswe.input_messages import (
 )
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
+from openswe.projects.store import PROJECT_ID_KEY, PROJECTS, ProjectError
 from openswe.prompts import prompt
 from openswe.slack.client import (
     SlackNotice,
@@ -265,7 +266,6 @@ async def create_dashboard_thread_record(
     email: str | None = None,
     repo_config: dict[str, str],
     repo_explicitly_none: bool = False,
-    experience: Literal["coding", "agent_workspace"] = "coding",
     prompt: str,
     images: list[DashboardImageBody] | None = None,
     title: str | None = None,
@@ -326,7 +326,6 @@ async def create_dashboard_thread_record(
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
-    metadata["experience"] = experience
     if visibility == "private" and ThreadIdentity(login).is_admin(email):
         metadata["admin_thread"] = True
     if workspace:
@@ -404,7 +403,6 @@ async def _build_dashboard_configurable(
         "user_email": await resolve_run_email(login, profile),
         "background_task_completion": False,
     }
-    configurable["experience"] = metadata.get("experience", "coding")
     repo_config = repo_config_from_metadata(metadata)
     if repo_config:
         configurable["repo"] = repo_config
@@ -478,7 +476,6 @@ async def create_dashboard_session(
         if identity.user_id is not None
         else await _requested_visibility({"visibility": body.visibility}, login=login),
         repo_explicitly_none=identity.user_id is not None,
-        experience="agent_workspace" if identity.user_id is not None else "coding",
         workspace=workspace,
     )
     return str(thread["thread_id"])
@@ -516,7 +513,6 @@ async def start_dashboard_thread(
         title=title,
         visibility="private" if identity.user_id is not None else visibility,
         repo_explicitly_none=identity.user_id is not None,
-        experience="agent_workspace" if identity.user_id is not None else "coding",
         workspace=await _resolve_requested_workspace(None, primary, login=login),
         extra_metadata={"unlisted": True} if unlisted else None,
     )
@@ -981,20 +977,25 @@ async def _enrich_run_start_command(
             if sandbox_bridge is not None:
                 # Whoever can prompt a thread runs commands on its machine.
                 visibility = "private"
-            requested_experience = client_configurable.get("experience", "coding")
-            if requested_experience not in ("coding", "agent_workspace"):
-                raise HTTPException(422, "Unknown agent experience")
-            experience: Literal["coding", "agent_workspace"] = (
-                "agent_workspace" if requested_experience == "agent_workspace" else "coding"
-            )
             identity = ThreadIdentity(login)
             if identity.user_id is not None:
                 visibility = "private"
                 if client_configurable.get("repo"):
-                    raise HTTPException(403, "Agent Workspace has no GitHub repository access")
+                    raise HTTPException(403, "This account has no GitHub repository access")
             repo_config = _parse_repo(client_configurable.get("repo")) or {}
+            project_id = client_configurable.get("project_id")
+            try:
+                project = (
+                    await PROJECTS.for_run(project_id, await User.for_login("github", login))
+                    if isinstance(project_id, str) and project_id
+                    else None
+                )
+            except ProjectError as exc:
+                raise HTTPException(exc.status_code, str(exc)) from exc
             workspace = await _resolve_requested_workspace(
-                client_configurable.get("workspace") or client_configurable.get("environment"),
+                client_configurable.get("workspace")
+                or client_configurable.get("environment")
+                or (project.workspace if project is not None else None),
                 repo_config,
                 login=login,
             )
@@ -1004,9 +1005,7 @@ async def _enrich_run_start_command(
                 email=email,
                 repo_config=repo_config,
                 repo_explicitly_none=identity.user_id is not None
-                or client_configurable.get("repo_explicitly_none") is True
-                or (experience == "agent_workspace" and not repo_config),
-                experience=experience,
+                or client_configurable.get("repo_explicitly_none") is True,
                 visibility=visibility,
                 prompt=_command_prompt_text(content),
                 images=command_images,
@@ -1014,6 +1013,7 @@ async def _enrich_run_start_command(
                 effort=client_configurable.get("agent_effort"),
                 model_selection=model_selection or "auto",
                 workspace=workspace,
+                extra_metadata={PROJECT_ID_KEY: str(project.id)} if project is not None else None,
                 profile=await profile_read or {},
             )
             metadata = thread_metadata(thread)

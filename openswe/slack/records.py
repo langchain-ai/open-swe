@@ -502,7 +502,7 @@ async def bind_slack_thread_id(
     channel, timestamp = normalize_slack_location(channel_id, thread_ts)
     normalized_thread_id = thread_id.strip() if isinstance(thread_id, str) else ""
     if not normalized_thread_id:
-        raise SlackThreadMappingError("Open SWE thread ID is required")
+        raise SlackThreadMappingError("Robin thread ID is required")
     upsert = insert(SlackThread).values(
         id=uuid7(), channel_id=channel, thread_ts=timestamp, thread_id=normalized_thread_id
     )
@@ -579,7 +579,7 @@ async def resolve_slack_thread_id(
         and candidate
     }
     if len(matching_ids) > 1:
-        raise SlackThreadMappingError("Multiple Open SWE threads match this Slack location")
+        raise SlackThreadMappingError("Multiple Robin threads match this Slack location")
 
     candidate = next(
         iter(matching_ids),

@@ -40,7 +40,7 @@ __all__ = [
     "verify_github_signature",
 ]
 
-_DEFAULT_OPEN_SWE_TAGS = ("@openswe", "@open-swe", "@openswe-dev")
+_DEFAULT_OPEN_SWE_TAGS = ("@robin-agent", "@openswe", "@open-swe", "@openswe-dev")
 
 
 def _load_open_swe_tags() -> tuple[str, ...]:
@@ -57,7 +57,7 @@ PrState = Literal["open", "draft", "merged", "closed"]
 # Deployments sharing a workspace each own a distinct handle, so a tag must not
 # match when it is only a prefix of a longer one (@openswe vs @openswe-preview).
 _OPEN_SWE_TAG_RE = re.compile(
-    "(?:"
+    r"(?<![\w.@-])(?:"
     + "|".join(re.escape(tag) for tag in sorted(OPEN_SWE_TAGS, key=len, reverse=True))
     + r")(?![\w-])",
     re.IGNORECASE,

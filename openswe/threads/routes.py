@@ -54,8 +54,9 @@ from openswe.threads.handlers import (
     share_thread_with_workspace,
 )
 from openswe.threads.listing import (
-    DashboardThreadExperience,
+    SIDEBAR_ORDERS,
     DashboardThreadScope,
+    SidebarThreadOrderBody,
     list_dashboard_pinned_threads,
     list_dashboard_thread_repos,
     list_dashboard_threads,
@@ -64,6 +65,7 @@ from openswe.threads.listing import (
     unpin_dashboard_thread,
 )
 from openswe.threads.machine_reads import machine_thread, machine_threads
+from openswe.threads.pins import THREAD_PINS
 from openswe.threads.principals import PrincipalDep
 from openswe.threads.proxy import (
     proxy_dashboard_thread_commands,
@@ -80,9 +82,6 @@ from openswe.threads.runs import (
     create_dashboard_session,
 )
 from openswe.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
-from openswe.threads.status import WorkRunState, WorkRunView
-from openswe.threads.store import THREADS
-from openswe.threads.summary import assert_thread_readable
 from openswe.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
@@ -95,17 +94,12 @@ async def api_list_threads(
     principal: PrincipalDep,
     all: bool = False,
     limit: int = 25,
-    experience: DashboardThreadExperience | None = None,
 ) -> list[dict[str, Any]]:
     if principal.machine:
-        if experience is not None:
-            raise HTTPException(422, "experience filtering is only supported for people")
         return await machine_threads(principal, limit=limit)
     if all and not principal.admin:
         raise HTTPException(403, "admin only")
-    return await list_dashboard_threads(
-        principal.person, email=principal.email, include_all=all, experience=experience
-    )
+    return await list_dashboard_threads(principal.person, email=principal.email, include_all=all)
 
 
 @router.post("/threads", status_code=201)
@@ -178,7 +172,6 @@ async def api_list_thread_repos(
     owned: bool = False,
     all: bool = False,
     exclude_source: Annotated[list[str] | None, Query()] = None,
-    experience: DashboardThreadExperience | None = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> list[dict[str, Any]]:
     if all and not session_is_admin(session):
@@ -191,18 +184,44 @@ async def api_list_thread_repos(
         owned=owned,
         include_all=all,
         exclude_sources=frozenset(exclude_source or ()),
-        experience=experience,
     )
+
+
+@router.put("/threads/order")
+@audit_endpoint
+async def api_reorder_sidebar_threads(
+    body: SidebarThreadOrderBody,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, bool]:
+    try:
+        await SIDEBAR_ORDERS.reorder(session["sub"], body, email=session.get("email"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True}
 
 
 @router.get("/threads/pinned")
 async def api_list_pinned_threads(
-    experience: DashboardThreadExperience | None = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> list[dict[str, Any]]:
-    return await list_dashboard_pinned_threads(
-        session["sub"], email=session.get("email"), experience=experience
-    )
+    return await list_dashboard_pinned_threads(session["sub"], email=session.get("email"))
+
+
+class PinnedThreadOrderBody(BaseModel):
+    thread_ids: list[str] = Field(max_length=1000)
+
+
+@router.put("/threads/pinned/order")
+@audit_endpoint
+async def api_reorder_pinned_threads(
+    body: PinnedThreadOrderBody,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, bool]:
+    try:
+        await THREAD_PINS.reorder(session["sub"], body.thread_ids)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True}
 
 
 @router.post("/threads/{thread_id}/pin", status_code=204)
@@ -242,9 +261,9 @@ async def api_list_threads_page(
     ownerless: bool = False,
     owned: bool = False,
     exclude_source: Annotated[list[str] | None, Query()] = None,
-    experience: DashboardThreadExperience | None = None,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     hierarchy: bool = False,
+    project: Annotated[str | None, Query(max_length=64)] = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not session_is_admin(session):
@@ -274,9 +293,9 @@ async def api_list_threads_page(
         ownerless=ownerless,
         owned=owned,
         exclude_sources=frozenset(exclude_source or ()),
-        experience=experience,
         sort_by=sort_by,
         hierarchy=hierarchy,
+        project=project,
     )
 
 
@@ -336,33 +355,6 @@ async def api_get_thread_pull_request_context(
         scope=scope,
         email=session.get("email"),
     )
-
-
-class ThreadViewedBody(BaseModel):
-    run_id: str = Field(min_length=1)
-
-
-@router.post("/threads/{thread_id}/viewed")
-async def api_mark_thread_viewed(
-    thread_id: str,
-    body: ThreadViewedBody,
-    session: dict[str, str] = SESSION_DEP,
-) -> WorkRunView:
-    thread = await THREADS.get(thread_id)
-    if thread is None:
-        raise HTTPException(404, "thread not found")
-    assert_thread_readable(thread.metadata, session["sub"], session.get("email"))
-    if thread.metadata.get("experience") != "agent_workspace":
-        raise HTTPException(409, "explicit read receipts are only supported for Work threads")
-    state = WorkRunState(thread)
-    try:
-        await state.refresh(viewed_run_id=body.run_id)
-    except Exception as exc:
-        logger.warning(
-            "Could not acknowledge Work run", extra={"thread_id": thread_id}, exc_info=True
-        )
-        raise HTTPException(503, "could not refresh the latest run") from exc
-    return await state.receipt()
 
 
 @router.get("/threads/{thread_id}")

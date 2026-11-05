@@ -102,7 +102,7 @@ async def handle_button(
     verdict = "approved" if approved else "rejected"
     await _close_card(interaction, verdict)
     confirmation = f"Workflow push {verdict}. " + (
-        "Open SWE will retry the blocked push." if approved else "No workflow files will be pushed."
+        "Robin will retry the blocked push." if approved else "No workflow files will be pushed."
     )
     await post_slack_ephemeral_message(
         channel_id,

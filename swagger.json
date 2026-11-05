@@ -2195,11 +2195,15 @@
       },
       "ExcludedHunk": {
         "additionalProperties": false,
-        "description": "A hunk left off the card.",
+        "description": "A hunk left off the card; an empty ``header`` stands for a whole file without a text diff.",
         "properties": {
           "additions": {
             "title": "Additions",
             "type": "integer"
+          },
+          "approval_condition": {
+            "title": "Approval Condition",
+            "type": "boolean"
           },
           "deletions": {
             "title": "Deletions",
@@ -2239,7 +2243,7 @@
         "type": "object"
       },
       "Exclusion": {
-        "description": "Changes the agent judged to qualify under the target repository's APPROVALS.md.",
+        "description": "Changes the agent judged to qualify under the target repository's auto-approve rules.",
         "properties": {
           "guideline": {
             "title": "Guideline",
@@ -2272,7 +2276,7 @@
       },
       "ExpeditedExclusions": {
         "additionalProperties": false,
-        "description": "What an expedited card left off as qualifying under the target repo's APPROVALS.md.",
+        "description": "What an expedited card left off as qualifying under the target repo's auto-approve rules.",
         "properties": {
           "approvals_md_sha256": {
             "title": "Approvals Md Sha256",
@@ -3534,6 +3538,29 @@
         ],
         "type": "string"
       },
+      "MemberSet": {
+        "properties": {
+          "person": {
+            "minLength": 1,
+            "title": "Person",
+            "type": "string"
+          },
+          "role": {
+            "default": "member",
+            "enum": [
+              "owner",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "person"
+        ],
+        "title": "MemberSet",
+        "type": "object"
+      },
       "MergeAction": {
         "properties": {
           "action": {
@@ -4157,8 +4184,11 @@
               {
                 "enum": [
                   "assigned",
+                  "requested",
                   "tentative",
-                  "mentioned"
+                  "mentioned",
+                  "draft",
+                  "speculative"
                 ],
                 "type": "string"
               },
@@ -4167,6 +4197,17 @@
               }
             ],
             "title": "Assignment"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
           },
           "autoMerge": {
             "default": false,
@@ -4289,6 +4330,17 @@
           "repo": {
             "title": "Repo",
             "type": "string"
+          },
+          "requiredChecksPassing": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requiredcheckspassing"
           },
           "reviewDecision": {
             "anyOf": [
@@ -4704,6 +4756,23 @@
         "title": "PendingReviewDiscarded",
         "type": "object"
       },
+      "PinnedThreadOrderBody": {
+        "properties": {
+          "thread_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Thread Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "thread_ids"
+        ],
+        "title": "PinnedThreadOrderBody",
+        "type": "object"
+      },
       "PlanUpdate": {
         "properties": {
           "dismissed": {
@@ -5052,6 +5121,17 @@
             ],
             "title": "Experimental Classify"
           },
+          "experimental_conditional_approval": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Conditional Approval"
+          },
           "experimental_memory": {
             "anyOf": [
               {
@@ -5112,6 +5192,189 @@
         "title": "ProfileUpdate",
         "type": "object"
       },
+      "Project": {
+        "description": "A project as one of its members sees it.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectMember"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "repo_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Full Name"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "workspace": {
+            "title": "Workspace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "workspace",
+          "repo_full_name",
+          "role",
+          "members",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "Project",
+        "type": "object"
+      },
+      "ProjectChanges": {
+        "description": "What an owner may change; an omitted field stays as it is.",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "repo_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Full Name"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace"
+          }
+        },
+        "title": "ProjectChanges",
+        "type": "object"
+      },
+      "ProjectCreate": {
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "repo_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Full Name"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ProjectCreate",
+        "type": "object"
+      },
+      "ProjectMember": {
+        "properties": {
+          "avatar_url": {
+            "title": "Avatar Url",
+            "type": "string"
+          },
+          "login": {
+            "title": "Login",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "name",
+          "login",
+          "avatar_url",
+          "role"
+        ],
+        "title": "ProjectMember",
+        "type": "object"
+      },
       "PullRequestActionResult": {
         "properties": {
           "action": {
@@ -5168,6 +5431,20 @@
           }
         },
         "title": "PullRequestChecksRequest",
+        "type": "object"
+      },
+      "PullRequestDescriptionUpdate": {
+        "properties": {
+          "body": {
+            "maxLength": 65536,
+            "title": "Body",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "title": "PullRequestDescriptionUpdate",
         "type": "object"
       },
       "PullRequestFixContext": {
@@ -7494,6 +7771,54 @@
         "title": "SessionCreateBody",
         "type": "object"
       },
+      "SidebarThreadOrderBody": {
+        "properties": {
+          "ownerless": {
+            "default": false,
+            "title": "Ownerless",
+            "type": "boolean"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project"
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo"
+          },
+          "thread_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Thread Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "thread_ids"
+        ],
+        "title": "SidebarThreadOrderBody",
+        "type": "object"
+      },
       "SkillCreate": {
         "properties": {
           "description": {
@@ -8160,20 +8485,6 @@
         "title": "ThreadResolveBody",
         "type": "object"
       },
-      "ThreadViewedBody": {
-        "properties": {
-          "run_id": {
-            "minLength": 1,
-            "title": "Run Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "run_id"
-        ],
-        "title": "ThreadViewedBody",
-        "type": "object"
-      },
       "ToolCallView": {
         "additionalProperties": false,
         "properties": {
@@ -8652,43 +8963,6 @@
           "status"
         ],
         "title": "WebhookResponse",
-        "type": "object"
-      },
-      "WorkRunView": {
-        "properties": {
-          "runId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Runid"
-          },
-          "viewed": {
-            "title": "Viewed",
-            "type": "boolean"
-          },
-          "viewedAt": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Viewedat"
-          }
-        },
-        "required": [
-          "runId",
-          "viewed",
-          "viewedAt"
-        ],
-        "title": "WorkRunView",
         "type": "object"
       },
       "WorkerActivity": {
@@ -9952,7 +10226,7 @@
     }
   },
   "info": {
-    "title": "FastAPI",
+    "title": "Robin",
     "version": "0.1.0"
   },
   "openapi": "3.1.0",
@@ -14640,6 +14914,407 @@
         ]
       }
     },
+    "/dashboard/api/projects": {
+      "get": {
+        "operationId": "api_list_projects_dashboard_api_projects_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "items": {
+                      "$ref": "#/components/schemas/Project"
+                    },
+                    "type": "array"
+                  },
+                  "title": "Response Api List Projects Dashboard Api Projects Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Projects",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      },
+      "post": {
+        "operationId": "api_create_project_dashboard_api_projects_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Create Project",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      }
+    },
+    "/dashboard/api/projects/threads/{thread_id}": {
+      "delete": {
+        "operationId": "api_unfile_thread_dashboard_api_projects_threads__thread_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Unfile Thread",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      }
+    },
+    "/dashboard/api/projects/{project_id}": {
+      "delete": {
+        "operationId": "api_delete_project_dashboard_api_projects__project_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete Project",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      },
+      "patch": {
+        "operationId": "api_update_project_dashboard_api_projects__project_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectChanges"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Update Project",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      }
+    },
+    "/dashboard/api/projects/{project_id}/members": {
+      "put": {
+        "operationId": "api_set_project_member_dashboard_api_projects__project_id__members_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Set Project Member",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      }
+    },
+    "/dashboard/api/projects/{project_id}/members/{user_id}": {
+      "delete": {
+        "operationId": "api_remove_project_member_dashboard_api_projects__project_id__members__user_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Remove Project Member",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      }
+    },
+    "/dashboard/api/projects/{project_id}/threads/{thread_id}": {
+      "put": {
+        "operationId": "api_file_thread_dashboard_api_projects__project_id__threads__thread_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api File Thread",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      }
+    },
     "/dashboard/api/pull-requests": {
       "get": {
         "operationId": "api_list_pull_requests_dashboard_api_pull_requests_get",
@@ -14826,7 +15501,7 @@
     },
     "/dashboard/api/repos": {
       "get": {
-        "description": "List repos where Open SWE is installed and the user has access.\n\nServed from the per-login cache (stale-while-revalidate) unless\n``refresh=true``, because the fan-out over every installation takes 10s+\nfor users with hundreds of accessible repos.",
+        "description": "List repos where Robin is installed and the user has access.\n\nServed from the per-login cache (stale-while-revalidate) unless\n``refresh=true``, because the fan-out over every installation takes 10s+\nfor users with hundreds of accessible repos.",
         "operationId": "list_repos_dashboard_api_repos_get",
         "parameters": [
           {
@@ -16748,6 +17423,75 @@
           }
         ],
         "summary": "Api Post Review Conversation Comment",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/description": {
+      "patch": {
+        "operationId": "api_update_pull_request_description_dashboard_api_reviews__owner___repo___pr_number__description_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PullRequestDescriptionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Update Pull Request Description",
         "tags": [
           "dashboard",
           "review"
@@ -19634,26 +20378,6 @@
               "title": "Limit",
               "type": "integer"
             }
-          },
-          {
-            "in": "query",
-            "name": "experience",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "coding",
-                    "agent_workspace"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Experience"
-            }
           }
         ],
         "responses": {
@@ -19733,6 +20457,57 @@
           }
         ],
         "summary": "Api Create Session",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/order": {
+      "put": {
+        "operationId": "api_reorder_sidebar_threads_dashboard_api_threads_order_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SidebarThreadOrderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Api Reorder Sidebar Threads Dashboard Api Threads Order Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Reorder Sidebar Threads",
         "tags": [
           "dashboard",
           "threads"
@@ -19959,26 +20734,6 @@
           },
           {
             "in": "query",
-            "name": "experience",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "coding",
-                    "agent_workspace"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Experience"
-            }
-          },
-          {
-            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
@@ -19999,6 +20754,23 @@
               "default": false,
               "title": "Hierarchy",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project"
             }
           }
         ],
@@ -20041,28 +20813,6 @@
     "/dashboard/api/threads/pinned": {
       "get": {
         "operationId": "api_list_pinned_threads_dashboard_api_threads_pinned_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "experience",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "coding",
-                    "agent_workspace"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Experience"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -20074,6 +20824,47 @@
                   },
                   "title": "Response Api List Pinned Threads Dashboard Api Threads Pinned Get",
                   "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Pinned Threads",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/pinned/order": {
+      "put": {
+        "operationId": "api_reorder_pinned_threads_dashboard_api_threads_pinned_order_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PinnedThreadOrderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Api Reorder Pinned Threads Dashboard Api Threads Pinned Order Put",
+                  "type": "object"
                 }
               }
             },
@@ -20095,7 +20886,7 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api List Pinned Threads",
+        "summary": "Api Reorder Pinned Threads",
         "tags": [
           "dashboard",
           "threads"
@@ -20214,26 +21005,6 @@
                 }
               ],
               "title": "Exclude Source"
-            }
-          },
-          {
-            "in": "query",
-            "name": "experience",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "coding",
-                    "agent_workspace"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Experience"
             }
           }
         ],
@@ -22234,64 +23005,6 @@
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/viewed": {
-      "post": {
-        "operationId": "api_mark_thread_viewed_dashboard_api_threads__thread_id__viewed_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ThreadViewedBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkRunView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Mark Thread Viewed",
-        "tags": [
-          "dashboard",
-          "threads"
-        ]
-      }
-    },
     "/dashboard/api/threads/{thread_id}/workers": {
       "get": {
         "description": "The thread's workers, and its runs created after the run ``after``.",
@@ -23499,7 +24212,7 @@
     },
     "/github/channel/events": {
       "post": {
-        "description": "The run an @openswe mention on an issue starts on the channel's thread, or ``None``.\n\nWhile the thread waits on an interrupt nothing starts: a non-null answer only\ntells the channel Open SWE would act, so it points the issue to the decision.",
+        "description": "The run an @openswe mention on an issue starts on the channel's thread, or ``None``.\n\nWhile the thread waits on an interrupt nothing starts: a non-null answer only\ntells the channel Robin would act, so it points the issue to the decision.",
         "operationId": "github_channel_event_github_channel_events_post",
         "requestBody": {
           "content": {
@@ -23618,7 +24331,7 @@
     },
     "/mda/resolve-user": {
       "post": {
-        "description": "The Open SWE user a channel's verified sender is, or ``None`` for MDA's default.",
+        "description": "The Robin user a channel's verified sender is, or ``None`` for MDA's default.",
         "operationId": "resolve_user_mda_resolve_user_post",
         "requestBody": {
           "content": {
@@ -23851,7 +24564,7 @@
     },
     "/webhooks/slack/commands": {
       "post": {
-        "description": "Answer a single `/oswe` question, ephemerally and without a Slack thread.",
+        "description": "Answer `/robin` and legacy `/oswe` questions without a Slack thread.",
         "operationId": "slack_command_webhooks_slack_commands_post",
         "responses": {
           "200": {

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Open SWE is an asynchronous coding agent and software factory.
+Robin is an asynchronous coding agent and software factory.
 Graphs and the FastAPI app are registered in `langgraph.json`.
 JS packages form a pnpm/turbo workspace (`pnpm-workspace.yaml`); use pnpm for them.
 
@@ -23,7 +23,7 @@ Shape new behavior to fit:
 - Data fixed for a run is worked out once when the backend starts it and sent in the run context (`Catalog`, `openswe/agent_api/client.py`); a call that needs a fact derives it from the token.
 - State kept between calls lives in MDA's run state or PostgreSQL, never in backend memory.
 
-Open SWE starts three kinds of run (`agent`, `reviewer`, `review-scout`), each a `RunKind` (`openswe/agent_api/run_kinds.py`); MDA plays all of them with its one graph.
+Robin starts three kinds of run (`agent`, `reviewer`, `review-scout`), each a `RunKind` (`openswe/agent_api/run_kinds.py`); MDA plays all of them with its one graph.
 As a run starts, its kind resolves the run's catalog from what only the backend holds, such as thread settings, workspace defaults, the sender's access and credentialed integrations (`agent_catalog`, `reviewer_catalog`, `review_scout_catalog`, `openswe/agent_api/run_catalog.py`); after that, every call is answered from the token (`openswe/agent_api/run_calls.py`).
 The backend never runs middleware around a model call; the only middleware objects it keeps are the preparation and the reporters a named endpoint calls.
 
@@ -41,6 +41,8 @@ The backend never runs middleware around a model call; the only middleware objec
   The only new module-level functions are framework entrypoints: routes, graph nodes, tools and job handlers.
   A private helper (`_person()`, `_workspace_id(cfg)`) is a missing method on the class whose data it reads, and a value functions keep passing around (a request, a client, a `(backend, repo_dir)` pair) is a missing class.
   A new class must own real state, never be a bag of arguments.
+  Do not construct an object just to immediately call a method, such as `Reporter(args).report()`.
+  Use a classmethod or staticmethod instead when no instance lifecycle or reusable state is needed.
 - Identify people by `users.id` everywhere in our code: comparisons, caches, stored state and the values passed between functions.
   Resolve a provider handle (GitHub login, Slack user id, email) to a `User` where it enters from that provider, and turn it back into a handle only to call that provider or to match its own data (a CODEOWNERS entry, a review's author).
 - Call GitHub through named `RepoClient`/`PullRequestClient` methods (e.g. `pull.comment(body)`); outside `openswe/github/http.py` and `openswe/github/pull_request_status.py`, never pass a REST path or GraphQL query to the transport (`get`, `post`, `patch`, `delete`, `pages`, `graphql`, `request`).
@@ -56,7 +58,7 @@ The backend never runs middleware around a model call; the only middleware objec
   Preserve structured messages through delivery instead of wrapping their envelopes again.
   For model-only context, use the structured sender to exclude it from pending previews and the transcript; do not suppress ordinary human follow-ups or user-facing events.
 - Keep comments minimal and only explain non-obvious reasons.
-- Before asking a clarifying question about Open SWE's behavior or guidance, read where it lives (prompts in `openswe/resources/prompts/`, tools in `openswe/tools/`, graph wiring) to check the question makes sense.
+- Before asking a clarifying question about Robin's behavior or guidance, read where it lives (prompts in `openswe/resources/prompts/`, tools in `openswe/tools/`, graph wiring) to check the question makes sense.
   Before asking whether a change should be personal or shared, confirm from that code which scopes the behavior actually supports; never offer a scope it cannot have.
 - Slack: prefer @mentions with plain-language requests and buttons for explicit actions.
   Typed and slash commands are optional shortcuts, never the only way.

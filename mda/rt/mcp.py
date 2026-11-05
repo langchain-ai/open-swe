@@ -26,6 +26,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command
+from langsmith import tracing_context
 from managed_deepagents import (
     ConnectionNotFoundError,
     CredentialAuthorizationRequiredError,
@@ -35,9 +36,11 @@ from managed_deepagents import (
 from mcp.types import Tool
 from pydantic import JsonValue
 from runtime_api.catalog import McpServerSpec
+from runtime_api.mcp_secrets import McpResult, Sessions
 
 from rt.backend import OpenSweBackend
-from rt.tools import called
+from rt.session_handoff import HeldSessions
+from rt.tools import _content, called
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +229,7 @@ class McpServer:
         if isinstance(error, ConnectionNotFoundError):
             return (
                 f"MCP server {self.spec.name}'s connection {slug} is not set; create it with "
-                f"`mda connections create {slug}` from Open SWE's MDA project"
+                f"`mda connections create {slug}` from Robin's MDA project"
             )
         if isinstance(error, CredentialAuthorizationRequiredError):
             return f"MCP server {self.spec.name} needs {slug}, which was not connected"
@@ -236,7 +239,12 @@ class McpServer:
         return f"MCP server {self.spec.name} cannot read {slug} ({type(error).__name__})"
 
     async def call(
-        self, definition: Tool, arguments: Mapping[str, JsonValue], tool_call_id: str
+        self,
+        definition: Tool,
+        arguments: Mapping[str, JsonValue],
+        tool_call_id: str,
+        *,
+        held: Sessions | None = None,
     ) -> ToolMessage:
         name = self.spec.tools[definition.name]
 
@@ -256,12 +264,14 @@ class McpServer:
             if not isinstance(tool, StructuredTool) or tool.coroutine is None:
                 raise ToolException("MCP tool has no async implementation")
             # Called directly so arguments LangChain reserves for itself reach the server.
-            content, artifact = await asyncio.wait_for(
-                tool.coroutine(**arguments), timeout=_TIMEOUT_SECONDS
-            )
+            with tracing_context(enabled=False):
+                content, artifact = await asyncio.wait_for(
+                    tool.coroutine(**arguments), timeout=_TIMEOUT_SECONDS
+                )
+                content, artifact = McpResult(content, artifact).withheld(held)
         except ToolException as exc:
             # The server ran the tool and says it failed.
-            return failed(str(exc))
+            return failed(McpResult.scrub(str(exc)))
         except Exception as exc:
             # What the request raised can quote what it carried, the credential included.
             logger.warning(
@@ -269,7 +279,11 @@ class McpServer:
                 extra={"mcp_name": self.spec.name, "error_type": type(exc).__name__},
             )
             return failed("MCP call failed; check its connection and credentials")
-        return ToolMessage(content=content, artifact=artifact, tool_call_id=tool_call_id, name=name)
+        if not isinstance(content, str | list):
+            return failed("Invalid MCP content")
+        return ToolMessage(
+            content=_content(content), artifact=artifact, tool_call_id=tool_call_id, name=name
+        )
 
     def tool(
         self, definition: Tool, backend: OpenSweBackend, *, cites_evidence: bool
@@ -283,7 +297,7 @@ class McpServer:
                 name,
                 arguments,
                 runtime,
-                partial(self.call, definition, arguments),
+                partial(self.call, definition, arguments, held=HeldSessions.of(backend)),
                 cites_evidence=cites_evidence,
             )
 

@@ -28,6 +28,8 @@ import { InvalidationStream } from "@/lib/invalidations/InvalidationStream"
 import { THEME_COLOR } from "@/lib/theme"
 import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
 import { isPerfHudEnabled } from "@/lib/perf/trace"
+import { useSession } from "@/lib/session"
+import { GitHubLinkPrompt } from "@/features/agents/components/GitHubLinkPrompt"
 
 const PerfHud = lazy(() => import("@/lib/perf/PerfHud"))
 
@@ -59,7 +61,7 @@ export const Route = createRootRouteWithContext<{
         content: "width=device-width, initial-scale=1, maximum-scale=1",
       },
       { name: "theme-color", content: THEME_COLOR.light },
-      { title: "Open SWE" },
+      { title: "Robin" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
@@ -83,6 +85,25 @@ export const Route = createRootRouteWithContext<{
   ),
   shellComponent: RootDocument,
 })
+
+function AccountGate({ children }: { children: React.ReactNode }) {
+  const session = useSession()
+  if (session.data?.requires_github_link) {
+    return (
+      <main className="flex min-h-svh bg-surface-level-1 text-primary">
+        <GitHubLinkPrompt user={session.data} />
+      </main>
+    )
+  }
+  return (
+    <>
+      <InvalidationStream />
+      <AppNotifications />
+      <VersionMismatchBanner />
+      <AppCommandProvider>{children}</AppCommandProvider>
+    </>
+  )
+}
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   const { queryClient } = useRouter().options.context
@@ -111,10 +132,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           <Favicon />
           <TooltipProvider>
             <AnalyticsIdentity />
-            <InvalidationStream />
-            <AppNotifications />
-            <VersionMismatchBanner />
-            <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
+            <AccountGate>{children ?? <Outlet />}</AccountGate>
             <PerfHudMount />
             {import.meta.env.VITE_DEVTOOLS !== "false" && (
               <>
@@ -132,6 +150,14 @@ function RootDocument({ children }: { children: React.ReactNode }) {
             )}
           </TooltipProvider>
         </QueryClientProvider>
+        {typeof window !== "undefined" &&
+          window.openSweDesktop && (
+            // The title-bar buttons portal here. Electron applies app regions
+            // in DOM order, so they must follow every draggable header; a
+            // portal into <body> lands wherever mount timing puts it, while
+            // React keeps this, its last child, after the app on every remount.
+            <div data-desktop-window-controls="" />
+          )}
         <Scripts />
       </body>
     </html>

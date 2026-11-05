@@ -1,6 +1,6 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { CaretDownIcon, CheckIcon } from "@langchain/macaw-components/icons"
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Checkbox } from "@langchain/macaw-components/Checkbox"
 import { IconButton } from "@langchain/macaw-components/IconButton"
@@ -14,6 +14,7 @@ import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowsClockw
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 
 import { useRefreshRepos } from "@/lib/profile"
+import { RepositoryLabels } from "@/lib/repo"
 import { cn } from "@/lib/utils"
 
 type RepoOption = { full_name: string; private?: boolean; archived?: boolean }
@@ -56,14 +57,20 @@ export function RepoSelector({
   const [showArchived, setShowArchived] = useState(false)
   const refresh = useRefreshRepos()
 
-  const filteredRepos = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return (repos ?? []).filter(
-      (repo) =>
-        ((allowArchived && showArchived) || !repo.archived) &&
-        repo.full_name.toLowerCase().includes(q)
-    )
-  }, [repos, query, showArchived, allowArchived])
+  const labels = new RepositoryLabels([
+    ...(repos ?? []).map((repo) => repo.full_name),
+    ...(selectedRepo ? [selectedRepo] : []),
+  ])
+  const selectionLabel =
+    selectedRepo === undefined
+      ? placeholder
+      : (selectedLabel ??
+        (selectedRepo ? labels.label(selectedRepo) : emptySelectionLabel))
+  const filteredRepos = (repos ?? []).filter(
+    (repo) =>
+      ((allowArchived && showArchived) || !repo.archived) &&
+      labels.matches(repo.full_name, query)
+  )
 
   return (
     <Popover
@@ -79,11 +86,7 @@ export function RepoSelector({
             color="secondary"
             variant="plain"
             size="sm"
-            aria-label={
-              selectedRepo === undefined
-                ? placeholder
-                : (selectedLabel ?? selectedRepo ?? emptySelectionLabel)
-            }
+            aria-label={selectionLabel}
             type="button"
             disabled={disabled}
             title={selectedRepo ?? undefined}
@@ -93,11 +96,7 @@ export function RepoSelector({
             )}
           >
             <FolderIcon size={14} weight="regular" className="shrink-0" />
-            <span className="flex-1 truncate text-left">
-              {selectedRepo === undefined
-                ? placeholder
-                : (selectedLabel ?? selectedRepo ?? emptySelectionLabel)}
-            </span>
+            <span className="flex-1 truncate text-left">{selectionLabel}</span>
             <CaretDownIcon
               size={12}
               weight="regular"
@@ -204,7 +203,7 @@ export function RepoSelector({
                     )}
                   >
                     <span className="min-w-0 flex-1 break-words">
-                      {repo.full_name}
+                      {labels.label(repo.full_name)}
                     </span>
                     {repo.private !== undefined && (
                       <Badge

@@ -13,7 +13,7 @@ test("macOS waits for native staging and clears installation errors", () => {
   const context = {
     autoUpdater,
     nativeAutoUpdater,
-    appRuntime: { name: "Open SWE" },
+    appRuntime: { name: "Robin" },
     distribution: { isAgentWorkspace: false },
     process: { platform: "darwin" },
     app: Object.assign(new EventEmitter(), { isPackaged: true }),

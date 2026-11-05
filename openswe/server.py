@@ -117,7 +117,7 @@ from openswe.middleware.require_user_reply import (
     work_state_nudge,
 )
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from openswe.middleware.stale_workspace import queue_stale_workspace_notice
+from openswe.middleware.stale_workspace import StaleWorkspaceReporter
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.model_request import (
     ModelSelectionDecision,
@@ -181,6 +181,7 @@ from openswe.tools import (
     configure_workspace,
     connect_managed_tools,
     create_automation,
+    create_project,
     create_sandbox_file_download_url,
     decide_memory,
     delete_automation,
@@ -201,6 +202,7 @@ from openswe.tools import (
     list_automations,
     list_event_types,
     list_memories,
+    list_projects,
     list_threads,
     list_workspaces,
     listen_events,
@@ -210,6 +212,7 @@ from openswe.tools import (
     manage_thread,
     merge_expedited_pr,
     monitor,
+    move_thread_to_project,
     open_pull_request,
     output_iframe,
     plan_walkthrough,
@@ -221,6 +224,8 @@ from openswe.tools import (
     read_workspace_prompt,
     recreate_sandbox,
     remember,
+    reorder_sidebar_threads,
+    reorder_thread_pins,
     report_platform_issue,
     report_work_state,
     request_human_review,
@@ -232,6 +237,7 @@ from openswe.tools import (
     schedule_thread_wakeup,
     search_pull_requests,
     send_announcement,
+    share_project,
     slack_add_reaction,
     slack_attach_html,
     slack_breakout_thread,
@@ -250,7 +256,9 @@ from openswe.tools import (
     suggest_task,
     switch_to_performance_model,
     trigger_automation,
+    unshare_project,
     update_automation,
+    update_project,
     web_search,
     write_database_rows,
 )
@@ -268,6 +276,7 @@ from openswe.tools.note_on_diff import note_on_diff
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
 from openswe.tools.review_walkthrough import walkthrough_tools
+from openswe.tools.slack_bots import allow_slack_bot, list_slack_bots, remove_slack_bot
 from openswe.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from openswe.tools.task_threads import (
     control_worker,
@@ -386,7 +395,7 @@ async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
     if cfg.repo:
         return {"owner": cfg.repo.owner, "name": cfg.repo.name}
 
-    if cfg.repo_explicitly_none is True or cfg.experience == "agent_workspace":
+    if cfg.repo_explicitly_none is True:
         return None
 
     try:
@@ -600,6 +609,8 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "listen_events",
         "request_rollout_check",
         "manage_thread",
+        "reorder_thread_pins",
+        "reorder_sidebar_threads",
         "start_thread",
         "link_pull_request",
         "open_pull_request",
@@ -652,6 +663,8 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "listen_events",
         "request_rollout_check",
         "manage_thread",
+        "reorder_thread_pins",
+        "reorder_sidebar_threads",
         "read_incident",
         "read_only_sql",
         "execute_database_sql",
@@ -659,6 +672,12 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "connect_managed_tools",
         "discover_managed_tools",
         "save_user_settings",
+        "list_projects",
+        "create_project",
+        "update_project",
+        "share_project",
+        "unshare_project",
+        "move_thread_to_project",
         "remember",
         "forget",
         "list_memories",
@@ -729,12 +748,20 @@ AGENT_TOOLS: Final = (
     decide_memory,
     publish_workspace_prompt,
     save_user_settings,
+    list_projects,
+    create_project,
+    update_project,
+    share_project,
+    unshare_project,
+    move_thread_to_project,
     save_user_skill,
     delete_user_skill,
     list_threads,
     search_pull_requests,
     get_thread,
     manage_thread,
+    reorder_sidebar_threads,
+    reorder_thread_pins,
     task_status,
     message_task_thread,
     control_worker,
@@ -796,6 +823,9 @@ AGENT_TOOLS: Final = (
     manage_review_approval_mode,
     manage_review_shadow,
     manage_review_repos,
+    list_slack_bots,
+    allow_slack_bot,
+    remove_slack_bot,
 )
 
 
@@ -1487,7 +1517,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 )
         del github_token
         if stale_workspace := take_stale_boot(self._thread_id):
-            queue_stale_workspace_notice(self._thread_id, stale_workspace)
+            await StaleWorkspaceReporter.report(self._thread_id, stale_workspace)
         rendered_prompt = (
             asyncio.create_task(self._render_system_prompt(cfg)) if render_prompt else None
         )
@@ -1548,7 +1578,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 sender_messages = self._participants_messages(state, participants)
         turn = TurnContext(
             working_dir=work_dir,
-            agent_workspace=cfg.experience == "agent_workspace",
+            agent_workspace=cfg.repo_explicitly_none is True,
             source="background_task" if cfg.background_task_completion else self._source,
             slack_context=cfg.slack_context,
             slack_ask=cfg.slack_ask_mode,
@@ -1612,7 +1642,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 else ""
             )
         return construct_system_prompt(
-            agent_workspace=cfg.experience == "agent_workspace",
+            agent_workspace=cfg.repo_explicitly_none is True,
             dashboard_base_url=dashboard_base_url(),
             artifact_url=dashboard_plan_url(self._thread_id),
             default_repo=default_repo,
@@ -1786,7 +1816,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     # stay off the critical path during worker load and retry storms.
     settings: WorkspaceSettings | None = None
     routing_defaults: dict[str, tuple[str, str | None]]
-    (settings, profile), admin_thread, tool_access = await asyncio.gather(
+    (settings, profile), admin_thread, tool_access, sender_preferences = await asyncio.gather(
         _timed(
             thread_id,
             "factory.settings_defaults",
@@ -1801,6 +1831,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         ),
         _timed(thread_id, "factory.admin_thread", _admin_thread(config, profile_login)),
         _timed(thread_id, "factory.tool_access", resolve_access(cfg, login=profile_login)),
+        User.preferences_for_login(profile_login or ""),
     )
     model_defaults = settings.default_model_pair("agent")
     routing_defaults = dict(settings.agent_routing_models)
@@ -1888,7 +1919,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
-    sender_preferences = await User.preferences_for_login(profile_login or "")
     goal_mode = sender_preferences.goal_mode
     work_state_tool = _registered_tool_name(report_work_state)
     configurable["draft_prs"] = sender_draft_prs

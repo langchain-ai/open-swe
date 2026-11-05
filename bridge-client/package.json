@@ -2,7 +2,7 @@
   "name": "open-swe-bridge-client",
   "version": "0.1.0",
   "private": true,
-  "description": "The machine side of an Open SWE sandbox bridge, shared by the oswe CLI and the desktop app",
+  "description": "The machine side of a Robin sandbox bridge, shared by the robin CLI and the desktop app",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {

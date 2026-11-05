@@ -11,7 +11,7 @@ Args:
   Order by your own judgment of what the author most needs to fix first; severity is an input, not the rule.
   Pass ``[]`` when there are none.
   A ranking with missing, unknown, or repeated IDs publishes nothing and returns ``expected_finding_ids`` so you can rank that exact set.
-- assessment: Optional structured advisory approval assessment with the full ``head_sha`` inspected, integer ``risk_score`` (1 = low, 5 = high), ``decision`` (``would_approve`` or ``needs_human_review``), and a short ``explanation`` (up to 1500 characters).
+- assessment: Optional structured advisory approval assessment with the full ``head_sha`` inspected, integer ``risk_score`` (1 = low, 5 = high), ``decision`` (``would_approve``, ``would_approve_conditionally`` or ``needs_human_review``), a short ``explanation`` (up to 1500 characters), and, only with ``would_approve_conditionally``, the ``approval_condition`` a person must approve (up to 200 characters) and ``auto_approved``, the rest of the change the approval criteria already cover (up to 500 characters).
   Include it after completing a review only when the reviewer instructions include an approval policy, and assess against that policy.
   The commit must match the live reviewed head.
   Unresolved findings force ``needs_human_review``.

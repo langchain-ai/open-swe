@@ -54,7 +54,7 @@ export function AnnouncementsSection() {
   return (
     <SettingsSection
       title="Announcements"
-      description="DM a message from the Open SWE bot to everyone with a connected Slack account, such as news of a feature that just shipped. Admins can also ask Open SWE to do this from a Slack DM."
+      description="DM a message from the Robin bot to everyone with a connected Slack account, such as news of a feature that just shipped. Admins can also ask Robin to do this from a Slack DM."
     >
       <div className="flex flex-col gap-space-2 p-space-4">
         <Textarea
@@ -108,7 +108,7 @@ export function AnnouncementsSection() {
         open={confirming}
         onOpenChange={setConfirming}
         title={`DM ${pluralize(recipients)}?`}
-        description="Everyone with a connected Slack account gets this message from the Open SWE bot. A sent announcement cannot be recalled."
+        description="Everyone with a connected Slack account gets this message from the Robin bot. A sent announcement cannot be recalled."
         confirmLabel="Send announcement"
         pendingLabel="Starting…"
         pending={send.isPending}

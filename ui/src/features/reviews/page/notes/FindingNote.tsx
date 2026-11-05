@@ -127,7 +127,7 @@ export function FindingNote({
                 variant="outlined"
                 onClick={() => askInChat(askAboutFinding(finding))}
               >
-                Ask Open SWE
+                Ask Robin
               </Button>
               {!settled && (
                 <Button

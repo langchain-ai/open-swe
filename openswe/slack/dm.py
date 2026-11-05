@@ -43,7 +43,7 @@ def dm_thread_title(name: str) -> str:
     An empty title leaves the thread unnamed rather than naming it after one
     request, so the next message can still name it for the person.
     """
-    return f"DMs between Open SWE and {name.strip()}" if name.strip() else ""
+    return f"DMs between Robin and {name.strip()}" if name.strip() else ""
 
 
 async def note_for_concierge(slack_user_id: str, dm_channel_id: str, note: str) -> None:

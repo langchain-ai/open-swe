@@ -50,7 +50,7 @@ def sandbox_unreachable_message(
     which = f" ({', '.join(identifiers)})" if identifiers else ""
     if reason:
         return warning(
-            f"Open SWE could not open this thread's sandbox{which}: `{reason.replace('`', "'")}`. "
+            f"Robin could not open this thread's sandbox{which}: `{reason.replace('`', "'")}`. "
             "Retrigger this thread to try again."
         )
     if handed_to_mda:
@@ -60,8 +60,8 @@ def sandbox_unreachable_message(
             "anything that was not pushed. Retrigger this thread to continue."
         )
     return warning(
-        f"This thread's sandbox{which} stopped responding, and Open SWE can't tell "
-        "whether it will come back. Open SWE will not start a replacement on its "
+        f"This thread's sandbox{which} stopped responding, and Robin can't tell "
+        "whether it will come back. Robin will not start a replacement on its "
         "own: a new sandbox is empty, so swapping one in would throw away anything "
         "not yet committed and pushed while still looking like a recovery. "
         "Retrigger this thread to try the same sandbox again, or start a new thread "

@@ -360,7 +360,7 @@ export function SelectionReply({
           debounceMs={0}
           ref={inputRef}
           aria-label="Your reply"
-          placeholder="Reply to Open SWE"
+          placeholder="Reply to Robin"
           maxLength={SELECTION_LIMIT}
           value={comment}
           onChange={setComment}

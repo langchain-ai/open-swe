@@ -14,7 +14,7 @@ from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.github.checks import review_check_conclusion
 from openswe.github.http import GitHubClient
-from openswe.github.pull_requests import PullRequest
+from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.thread_token import (
     GitHubAuthError,
     invalidate_cached_github_token,
@@ -72,6 +72,7 @@ from openswe.review.reconcile import reconcile_findings_with_review_threads
 from openswe.review.shadow import ReviewShadow
 from openswe.run_config import RunConfig
 from openswe.slack.client import post_slack_thread_reply
+from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_review_url
 from openswe.utils.langsmith import get_langsmith_trace_url
 
@@ -314,6 +315,10 @@ async def _publish_review_async(
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
     dry_run = True
+    approval_errors = _state_errors(state, "review_approval_errors")
+    config_errors = _state_errors(state, "review_config_errors")
+    if config_errors:
+        assessment = None
     if assessment is not None:
         # The policy was read at the base commit when the run started; the mode is
         # read now so an admin switching a repository off or to dry run wins mid-review.
@@ -322,6 +327,33 @@ async def _publish_review_async(
         if not policy or mode == "off":
             assessment = None
         dry_run = mode != "approve"
+    if assessment is not None and assessment.decision == "would_approve_conditionally":
+        try:
+            async with GitHubClient.connect(token=token) as github:
+                payload = PullRequestPayload.model_validate(
+                    await github.repo(owner, repo).pull_request(pr_number).pull()
+                )
+            opted_in: bool | None = (
+                await User.preferences_for_login(payload.author)
+            ).experimental_conditional_approval
+        except Exception:
+            logger.warning(
+                "Could not confirm the author opted in to conditional approval",
+                extra={"repository": f"{owner}/{repo}", "pr_number": pr_number},
+                exc_info=True,
+            )
+            opted_in = None
+        if not opted_in:
+            assessment = assessment.model_copy(
+                update={
+                    "decision": "needs_human_review",
+                    "approval_condition": None,
+                    "auto_approved": None,
+                    "explanation": "Conditional approval is not enabled for this PR's author."
+                    if opted_in is False
+                    else "Could not confirm that this PR's author enabled conditional approval.",
+                }
+            )
     # The run config's head_sha is frozen at run creation; a push that arrived
     # mid-run updated the live head in thread metadata. Prefer that so the
     # review anchors to (and last_reviewed_sha advances to) the commit actually
@@ -391,6 +423,8 @@ async def _publish_review_async(
     if (
         assessment is None
         and not inline_comments
+        and not approval_errors
+        and not config_errors
         and await _open_swe_already_reviewed(
             thread_id=thread_id,
             owner=owner,
@@ -422,6 +456,9 @@ async def _publish_review_async(
         await _withdraw_open_swe_approvals(
             owner=owner, repo=repo, pr_number=pr_number, token=token, keep_commit=head_sha
         )
+        await _withdraw_open_swe_change_requests(
+            owner=owner, repo=repo, pr_number=pr_number, token=token
+        )
         await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
         conclusion, check_title, check_summary = review_check_conclusion(0)
         await settle_review_check_run(
@@ -450,7 +487,8 @@ async def _publish_review_async(
             owner=owner, repo=repo, pr_number=pr_number, head_sha=head_sha, token=token
         )
     )
-    # GitHub forbids self-approval; publish the assessment as an advisory comment instead.
+    request_changes = bool(config_errors)
+    # GitHub forbids approving or requesting changes on your own pull request; comment instead.
     for _ in range(2):
         review_body = render_review_body(
             pr_number=pr_number,
@@ -461,6 +499,8 @@ async def _publish_review_async(
             assessment=assessment,
             approved=approved,
             dry_run=dry_run,
+            approval_errors=approval_errors,
+            config_errors=config_errors,
         )
 
         review_response = await post_pull_request_review(
@@ -471,14 +511,14 @@ async def _publish_review_async(
             body=review_body,
             inline_comments=inline_comments,
             token=token,
-            event="APPROVE" if approved else "COMMENT",
+            event="APPROVE" if approved else "REQUEST_CHANGES" if request_changes else "COMMENT",
         )
         if (
-            approved
+            (approved or request_changes)
             and isinstance(review_response, dict)
-            and review_response.get("_error_kind") == "self_approval"
+            and review_response.get("_error_kind") == "self_review"
         ):
-            approved = False
+            approved = request_changes = False
         else:
             break
     # If GitHub rejected the batch because one or more inline comments anchor
@@ -506,6 +546,8 @@ async def _publish_review_async(
                 trace_url=review_trace_url,
                 ui_url=review_ui_url,
                 additional_findings_count=additional_findings_count,
+                approval_errors=approval_errors,
+                config_errors=config_errors,
             )
             retry_response = await post_pull_request_review(
                 owner=owner,
@@ -515,6 +557,7 @@ async def _publish_review_async(
                 body=retry_body,
                 inline_comments=retry_inline,
                 token=token,
+                event="REQUEST_CHANGES" if request_changes else "COMMENT",
             )
             if isinstance(retry_response, dict) and "_error" not in retry_response:
                 review_response = retry_response
@@ -575,6 +618,10 @@ async def _publish_review_async(
         keep_review_id=approval_id,
         scope_to_review_id=review_id,
     )
+    if not config_errors:
+        await _withdraw_open_swe_change_requests(
+            owner=owner, repo=repo, pr_number=pr_number, token=token
+        )
 
     if assessment is not None and isinstance(review_id, int) and not unresolvable_findings:
         # GitHub already accepted the review; a storage failure must not prompt a duplicate post.
@@ -735,11 +782,11 @@ async def _withdraw_open_swe_approvals(
 ) -> None:
     """Leave standing only this publish's own approval, if it posted one."""
     if keep_review_id is not None:
-        reason = "Superseded by Open SWE's approval of the current head."
+        reason = "Superseded by Robin's approval of the current head."
     elif keep_commit is not None:
-        reason = "New commits were pushed after Open SWE approved this pull request."
+        reason = "New commits were pushed after Robin approved this pull request."
     else:
-        reason = "Open SWE's latest review of this pull request does not approve it."
+        reason = "Robin's latest review of this pull request does not approve it."
     try:
         async with GitHubClient.connect(token=token) as github:
             refused = await (
@@ -770,6 +817,43 @@ async def _withdraw_open_swe_approvals(
         )
 
 
+async def _withdraw_open_swe_change_requests(
+    *, owner: str, repo: str, pr_number: int, token: str
+) -> None:
+    """Dismiss Robin's change requests once the configuration they flagged is valid."""
+    try:
+        async with GitHubClient.connect(token=token) as github:
+            refused = await (
+                github.repo(owner, repo)
+                .pull_request(pr_number)
+                .withdraw_open_swe_approvals(
+                    reason="The Robin configuration in this pull request is valid now.",
+                    state="changes_requested",
+                )
+            )
+    except httpx2.HTTPError, ValueError:
+        logger.warning(
+            "Could not list Open SWE change requests to withdraw",
+            extra={"repository": f"{owner}/{repo}", "pr_number": pr_number},
+            exc_info=True,
+        )
+        return
+    if refused:
+        logger.error(
+            "Open SWE change requests for valid configuration are still standing",
+            extra={
+                "repository": f"{owner}/{repo}",
+                "pr_number": pr_number,
+                "github_review_ids": refused,
+            },
+        )
+
+
+def _state_errors(state: dict[str, Any] | None, key: str) -> list[str]:
+    errors = state.get(key) if state else None
+    return [error for error in errors if isinstance(error, str)] if isinstance(errors, list) else []
+
+
 async def _open_swe_already_reviewed(
     *,
     thread_id: str,
@@ -781,7 +865,7 @@ async def _open_swe_already_reviewed(
 ) -> bool:
     """Decide whether to suppress a duplicate empty "no issues found" summary.
 
-    Suppress only when we are *certain* a prior Open SWE review exists, so a
+    Suppress only when we are *certain* a prior Robin review exists, so a
     transient GitHub failure never causes a double-post:
 
     - ``is_re_review`` is a durable signal (the dispatching webhook set it from
@@ -886,7 +970,7 @@ def _comment_id_by_finding_id(
 ) -> dict[str, int]:
     """Map each surfaced finding id to its GitHub comment id via the marker.
 
-    The embedded Open SWE marker is the *only* source of truth. Every comment
+    The embedded Robin marker is the *only* source of truth. Every comment
     this reviewer posts carries a ``<!-- open-swe-review-comment {...} -->``
     marker keyed by finding id (see ``render_inline_comment_body``), so the
     match is exact. The old ``(path, line, body)`` fallback collided whenever
@@ -1056,10 +1140,10 @@ async def _maybe_post_slack_completion_reply(
         return
 
     if surfaced_count == 0:
-        headline = "*Open SWE Review*: No issues found."
+        headline = "*Robin Review*: No issues found."
     else:
         issue_word = "issue" if surfaced_count == 1 else "issues"
-        headline = f"*Open SWE Review* found {surfaced_count} potential {issue_word}."
+        headline = f"*Robin Review* found {surfaced_count} potential {issue_word}."
 
     review_url = f"https://github.com/{owner}/{repo}/pull/{pr_number}"
     if isinstance(review_id, int):

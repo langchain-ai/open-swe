@@ -192,6 +192,26 @@ class User(Base):
                 .limit(1)
             )
 
+    async def requires_github_link(self) -> bool:
+        """Require proof of GitHub when a LangSmith email matches an existing person."""
+        email = self._identity_field("langsmith", "email").strip().lower()
+        if self.github_login or not email:
+            return False
+        github_people = select(UserIdentity.user_id).where(UserIdentity.provider == "github")
+        async with postgres.session() as session:
+            return bool(
+                await session.scalar(
+                    select(UserIdentity.user_id)
+                    .where(
+                        UserIdentity.user_id != self.id,
+                        UserIdentity.user_id.in_(github_people),
+                        UserIdentity.provider != "langsmith",
+                        func.lower(UserIdentity.email) == email,
+                    )
+                    .limit(1)
+                )
+            )
+
     @classmethod
     async def for_person(cls, person: PersonIdentity) -> Self | None:
         """The person an ingress named, or ``None``.
@@ -422,6 +442,16 @@ class User(Base):
                 .options(selectinload(cls.identities))
             )
             return {external_id: user for user, external_id in rows.tuples()}
+
+    @classmethod
+    async def for_handle(cls, handle: str) -> Self | None:
+        """The person someone named by GitHub login or email address, as when sharing."""
+        handle = handle.strip().removeprefix("@")
+        if not handle:
+            return None
+        if "@" in handle:
+            return await cls.for_email(handle)
+        return await cls.for_login("github", handle)
 
     @classmethod
     async def for_login(cls, provider: Provider, login: str) -> Self | None:
@@ -665,7 +695,9 @@ class User(Base):
         if provider == "langsmith":
             if authorization is None or authorization.sub != external_id:
                 raise UnauthorizedUser("LangSmith sign in requires an authorized account")
-            authorization.require_allowed_org()
+            from openswe.dashboard.langsmith_login import LangSmithLogin
+
+            authorization.require_allowed_org(await LangSmithLogin().allowed_org())
         owner = await session.scalar(
             select(UserIdentity.user_id).where(
                 UserIdentity.provider == provider,
@@ -735,4 +767,4 @@ async def _authorize(provider: Provider, login: str) -> None:
             "Refused to create a user for an unauthorized GitHub login",
             extra={"github_login": login},
         )
-        raise UnauthorizedUser(f"{login or '(no login)'} is not authorized to use Open SWE")
+        raise UnauthorizedUser(f"{login or '(no login)'} is not authorized to use Robin")

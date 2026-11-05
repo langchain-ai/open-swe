@@ -438,9 +438,12 @@ def test_plan_reference_survives_source_reference_failure(
     assert client.post_calls
 
 
+@pytest.mark.parametrize("footer_name", ["Robin", "Open SWE"])
 def test_public_repo_appends_plan_and_slack_reference(
     monkeypatch: pytest.MonkeyPatch,
+    footer_name: str,
 ) -> None:
+    stamp_footer = opr._stamp_attribution_footer
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     _set_config(
         monkeypatch,
@@ -468,11 +471,18 @@ def test_public_repo_appends_plan_and_slack_reference(
     )
     _install_client(monkeypatch, client)
 
-    _open_with_body("body")
+    monkeypatch.setattr(opr, "_stamp_attribution_footer", stamp_footer)
+    _open_with_body(
+        f"body\n\nMade by [{footer_name}](https://example.com/old)",
+        state={"selected_model_id": "test-model"},
+    )
 
     sent_body = client.post_calls[0]["json"]["body"]
     assert "- [Plan](https://dashboard.example/agents/thread-1/plan)" in sent_body
     assert "- [Slack thread](https://slack.example/p1)" in sent_body
+    assert sent_body.count("Made by [") == 1
+    assert sent_body.splitlines()[-1].startswith("Made by [Robin]")
+    assert "https://example.com/old" not in sent_body
 
 
 @pytest.mark.parametrize("source", ["linear", "github_issue"])

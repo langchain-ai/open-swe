@@ -428,9 +428,9 @@ async function captureCheckpoint(repo, ref) {
       ],
       {
         ...process.env,
-        GIT_AUTHOR_NAME: "Open SWE",
+        GIT_AUTHOR_NAME: "Robin",
         GIT_AUTHOR_EMAIL: "open-swe@users.noreply.github.com",
-        GIT_COMMITTER_NAME: "Open SWE",
+        GIT_COMMITTER_NAME: "Robin",
         GIT_COMMITTER_EMAIL: "open-swe@users.noreply.github.com",
       },
     ),
@@ -582,14 +582,12 @@ function decode(blob: Buffer | false | null) {
 async function readDiff(repo, base, headish = null) {
   const head = headish ?? (await writeWorktreeTree(repo));
   const range = ["--no-renames", "--no-ext-diff", "--no-textconv", base, head];
-  const numstat = (
-    await git(repo, ["diff", "--numstat", "-z", ...range])
-  ).toString("utf8");
-  const nameStatus = (
-    await git(repo, ["diff", "--name-status", "-z", ...range])
-  ).toString("utf8");
-  const stats = parseNumstat(numstat);
-  const statuses = parseNameStatus(nameStatus);
+  const [numstat, nameStatus] = await Promise.all([
+    git(repo, ["diff", "--numstat", "-z", ...range]),
+    git(repo, ["diff", "--name-status", "-z", ...range]),
+  ]);
+  const stats = parseNumstat(numstat.toString("utf8"));
+  const statuses = parseNameStatus(nameStatus.toString("utf8"));
   const shown = stats.slice(0, MAX_FILES);
   const blobs = shown.length
     ? await readBlobs(

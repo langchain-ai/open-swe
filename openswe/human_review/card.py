@@ -36,7 +36,7 @@ def _label(request: HumanReviewRequest) -> str:
 def _reviewer_line(reviewer: HumanReviewParticipant, states: dict[str, str]) -> str:
     state = states.get(reviewer.github_login, "")
     status = _STATE_LABELS.get(state, ":eyes: reviewing")
-    assigned = " _(picked by Open SWE)_" if reviewer.assigned_by_agent else ""
+    assigned = " _(picked by Robin)_" if reviewer.assigned_by_agent else ""
     return f"• {reviewer.slack_mention}{assigned} — {status}"
 
 
@@ -50,7 +50,7 @@ def _reviewers(request: HumanReviewRequest, states: dict[str, str]) -> list[Bloc
             f"• {pick.slack_mention} — :hourglass_flowing_sand: waiting for them to accept"
             for pick in picks
         )
-        blocks.append(section(f"*Picked by Open SWE*\n{lines}"))
+        blocks.append(section(f"*Picked by Robin*\n{lines}"))
     return blocks
 
 

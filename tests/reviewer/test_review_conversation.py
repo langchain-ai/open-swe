@@ -114,7 +114,11 @@ async def test_timeline_merges_sorts_and_drops_pending_reviews(
             "in_reply_to_id": reply_to,
             "user": _user("carol"),
             "created_at": f"2025-12-31T00:00:{comment_id:02d}Z",
-            "body": f"note {comment_id} <!-- open-swe-review-comment {{}} -->",
+            "body": (
+                f"note {comment_id} <!-- open-swe-review-comment {{}} -->\n\n---\n"
+                f"*Your feedback helps {'Robin' if comment_id % 2 else 'Open SWE'} learn. "
+                "React with 👍 or 👎 to tell us if this review comment was useful.*"
+            ),
             "html_url": f"https://github.com/acme/app/pull/7#discussion_r{comment_id}",
             "path": "src/app.py",
             "line": line,

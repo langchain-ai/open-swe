@@ -142,7 +142,7 @@ async def _conflict(_request: Request, exc: Exception) -> JSONResponse:
 
 def create_app() -> FastAPI:
     configure_datadog_environment()
-    app = FastAPI(lifespan=lifespan)
+    app = FastAPI(title="Robin", lifespan=lifespan)
     allowed_origins = [
         origin.strip()
         for origin in ENV.DASHBOARD_ALLOWED_ORIGINS.get().split(",")

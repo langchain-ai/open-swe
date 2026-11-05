@@ -279,7 +279,7 @@ export function WorkspaceProxySection({
                       label={
                         <FieldLabel
                           label="Rule name"
-                          description="Required name identifying this proxy rule. Use a descriptive name such as custom-service; avoid Open SWE’s built-in rule names such as github and github-api."
+                          description="Required name identifying this proxy rule. Use a descriptive name such as custom-service; avoid Robin’s built-in rule names such as github and github-api."
                         />
                       }
                       value={typeof rule.name === "string" ? rule.name : ""}
@@ -339,7 +339,7 @@ export function WorkspaceProxySection({
                             label={
                               <FieldLabel
                                 label="Header name"
-                                description="HTTP header injected into outbound requests matching this rule’s hosts, for example X-Custom-Header. Open SWE workspace settings reject authentication headers such as Authorization and X-Api-Key."
+                                description="HTTP header injected into outbound requests matching this rule’s hosts, for example X-Custom-Header. Robin workspace settings reject authentication headers such as Authorization and X-Api-Key."
                               />
                             }
                             value={
@@ -354,7 +354,7 @@ export function WorkspaceProxySection({
                             label={
                               <FieldLabel
                                 label="Header value"
-                                description="Value the proxy injects for this header on matching outbound requests. Only non-secret values may be saved in Open SWE workspace settings."
+                                description="Value the proxy injects for this header on matching outbound requests. Only non-secret values may be saved in Robin workspace settings."
                               />
                             }
                             value={
@@ -367,7 +367,7 @@ export function WorkspaceProxySection({
                           <div className="space-y-space-1">
                             <FieldLabel
                               label="Type"
-                              description="Plaintext values are stored and returned as-is by the sandbox API. Opaque values are encrypted and write-only there, but Open SWE still persists this workspace configuration: opaque is not a way to store secrets here."
+                              description="Plaintext values are stored and returned as-is by the sandbox API. Opaque values are encrypted and write-only there, but Robin still persists this workspace configuration: opaque is not a way to store secrets here."
                             />
                             <Select
                               aria-label="Type"
@@ -433,7 +433,7 @@ export function WorkspaceProxySection({
                           label={
                             <FieldLabel
                               label="Variable name"
-                              description="Name of an environment variable set for every sandbox command while this rule is enabled, not just requests to matching hosts. Token-like names are rejected by Open SWE workspace settings."
+                              description="Name of an environment variable set for every sandbox command while this rule is enabled, not just requests to matching hosts. Token-like names are rejected by Robin workspace settings."
                             />
                           }
                           value={name}
@@ -553,7 +553,7 @@ export function WorkspaceProxySection({
           label="Governed Tag Value IDs"
           size="sm"
           placeholder="Comma-separated LangSmith tag value UUIDs"
-          hintText="Assign existing governed tags from the LangSmith workspace used by this deployment. These are not Open SWE workspace IDs. LangSmith checks ownership and assignment permissions at sandbox creation."
+          hintText="Assign existing governed tags from the LangSmith workspace used by this deployment. These are not Robin workspace IDs. LangSmith checks ownership and assignment permissions at sandbox creation."
           value={tags}
           onChange={setTags}
           disabled={!canEdit || save.isPending}
@@ -562,7 +562,7 @@ export function WorkspaceProxySection({
           label="LangSmith Access"
           size="sm"
           placeholder="Comma-separated LangSmith permissions, e.g. projects:read, datasets:read"
-          hintText="Lets code in the sandbox call the LangSmith API with these permissions, delegated from Open SWE's own LangSmith key (not the person running the thread). The credential is injected by the sandbox proxy and never enters the sandbox. Leave empty for no LangSmith access."
+          hintText="Lets code in the sandbox call the LangSmith API with these permissions, delegated from Robin's own LangSmith key (not the person running the thread). The credential is injected by the sandbox proxy and never enters the sandbox. Leave empty for no LangSmith access."
           value={permissions}
           onChange={setPermissions}
           disabled={!canEdit || save.isPending}

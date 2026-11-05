@@ -15,7 +15,7 @@ from openswe.webhooks import common
 logger = logging.getLogger(__name__)
 _BACKGROUND_EVENT: SystemIdentity = {
     "id": "system:background-event",
-    "display_name": "Open SWE background event",
+    "display_name": "Robin background event",
     "platform": "open-swe",
 }
 

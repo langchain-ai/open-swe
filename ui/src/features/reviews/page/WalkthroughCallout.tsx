@@ -72,8 +72,8 @@ export function WalkthroughCallout({
         </p>
         <p className="mt-0.5 text-secondary">
           {running
-            ? "Open SWE is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
-            : "Open SWE orders the changes into narrated steps and moves mechanical edits to the end."}
+            ? "Robin is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
+            : "Robin orders the changes into narrated steps and moves mechanical edits to the end."}
         </p>
         {running && detail.walkthrough_progress && (
           <ScoutProgressPreview progress={detail.walkthrough_progress} />

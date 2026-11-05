@@ -89,7 +89,6 @@ from runtime_api.loop import (
     Route,
     Routed,
     RunEnded,
-    RunNotice,
     RunStarted,
     SandboxGone,
     ScoutPlanEnd,
@@ -154,7 +153,7 @@ from openswe.middleware.model_selection import classify_route
 from openswe.middleware.notify_step_limit import notify_step_limit
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.settle_review_check import settle_review_check
-from openswe.middleware.stale_workspace import stale_workspace_notice
+from openswe.middleware.stale_workspace import StaleWorkspaceReporter
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, queue_run_notice, within_namespace
 from openswe.review_scout.graph import finish_scout_plan
@@ -403,7 +402,7 @@ class TokenRun:
         if request.in_sandbox:
             # MDA opened the sandbox before preparing; the thread is bound to it from here on.
             await self._sandbox.bind(request)
-        notices = self._turn_notices()
+        await self._report_stale_workspace()
         if events := _carried_events(self.config):
             # The events this run was started to carry are its input: it holds them now.
             await ThreadInbox(self.run.thread_id).receive(events=events)
@@ -419,7 +418,7 @@ class TokenRun:
                 github_proxy=None
                 if expires_at is None
                 else GitHubProxyRefreshed(expires_at=expires_at),
-                notices=notices,
+                notices=[],
                 sender=self.kind.sender(self.config, self.run.settings),
             )
 
@@ -429,11 +428,9 @@ class TokenRun:
         )
         return result.model_copy(update={"events": [jsonable(e) for e in emitted]})
 
-    def _turn_notices(self) -> list[RunNotice]:
-        """What the turn's transcript shows from binding its sandbox: a stale workspace image."""
-        stale = take_stale_boot(self.run.thread_id)
-        data = None if stale is None else stale_workspace_notice(self.run.thread_id, stale)
-        return [] if data is None else [RunNotice(kind="workspace_stale", data=data)]
+    async def _report_stale_workspace(self) -> None:
+        if stale := take_stale_boot(self.run.thread_id):
+            await StaleWorkspaceReporter.report(self.run.thread_id, stale)
 
     def _as_invocation(self, invocation_id: str | None) -> None:
         """Record as the invocation a report names, which need not be this token's."""

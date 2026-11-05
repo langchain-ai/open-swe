@@ -24,10 +24,10 @@ it("keeps the favicon and logos in sync when runtime branding arrives and change
   render(
     <QueryClientProvider client={client}>
       <Favicon />
-      <LogoMark alt="Open SWE" className="size-14 grayscale" />
+      <LogoMark alt="Robin" className="size-14 grayscale" />
     </QueryClientProvider>
   )
-  const logo = screen.getByRole("img", { name: "Open SWE" })
+  const logo = screen.getByRole("img", { name: "Robin" })
   const favicon = () => document.head.querySelector('link[rel="icon"]')
   expect(logo.getAttribute("src")).toBe("/logo-mark.png")
   expect(favicon()?.getAttribute("href")).toBe("/favicon.png")

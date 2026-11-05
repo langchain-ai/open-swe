@@ -2,6 +2,7 @@ import { PushPinRegularIcon } from "@langchain/macaw-components/icons"
 import { ArchiveIcon } from "@phosphor-icons/react/dist/ssr/Archive"
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
+import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
 import { Link } from "@tanstack/react-router"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
@@ -28,6 +29,7 @@ export function ThreadMenuItems({
   pinned,
   archived,
   isDeleting,
+  onRename,
   onTogglePin,
   onToggleArchived,
   onDelete,
@@ -37,6 +39,7 @@ export function ThreadMenuItems({
   pinned: boolean
   archived: boolean
   isDeleting: boolean
+  onRename?: () => void
   onTogglePin: () => void
   onToggleArchived: () => void
   onDelete: () => void
@@ -73,6 +76,12 @@ export function ThreadMenuItems({
             <LightningIcon size={ICON_SIZE} weight="regular" />
             Open automation
           </Link>
+        </Item>
+      )}
+      {onRename && (
+        <Item onSelect={onRename}>
+          <PencilSimpleIcon size={ICON_SIZE} weight="regular" />
+          Rename thread
         </Item>
       )}
       <Item onSelect={onTogglePin}>

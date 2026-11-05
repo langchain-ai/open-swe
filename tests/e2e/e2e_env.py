@@ -29,7 +29,7 @@ SECOND_PR_TITLE = "Add companion integration"
 # Fixed Slack identifiers so the mock UI and assertions are deterministic.
 BOT_USER_ID = "U0BOT"
 BOT_USERNAME = "open-swe"
-DEMO_CHANNEL = "C_DEMO"
+DEMO_CHANNEL = "CDEMO01"
 # Shaped like a real channel id, so a repository's `reviewChannel` resolves without a name search.
 REVIEW_CHANNEL = "CREVIEWS01"
 HUMAN_USER = "U_HUMAN"

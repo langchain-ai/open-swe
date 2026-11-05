@@ -5,11 +5,16 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react"
 import { createPortal } from "react-dom"
 import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Kbd } from "@langchain/macaw-components/Kbd"
+import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
+import { ArrowRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowRight"
 import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/ssr/SidebarSimple"
 
+import { shortcutPlatform, useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
 
 const STORAGE_WIDTH = "open-swe.sidebar.width"
@@ -127,11 +132,22 @@ export function SidebarFrame({
 }: SidebarFrameProps) {
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  // Rendered by the root layout in the same commit, so it exists once mounted.
+  const [controlsHost, setControlsHost] = useState<Element | null>(null)
+  useEffect(() => {
+    if (!isDesktop) return
+    // oxlint-disable-next-line react/set-state-in-effect
+    setControlsHost(document.querySelector("[data-desktop-window-controls]"))
+  }, [isDesktop])
+  const windowControls =
+    controlsHost &&
+    createPortal(
+      <WindowControls collapsed={collapsed} toggle={toggle} />,
+      controlsHost
+    )
 
   if (collapsed) {
-    // Electron resolves window drag regions in DOM order, ignoring z-index, so
-    // a page header marked draggable would swallow clicks on this floating
-    // toggle if it came earlier. Portal it after all content to keep it last.
+    if (isDesktop) return windowControls
     return createPortal(
       <IconButton
         icon={SidebarSimpleIcon}
@@ -139,12 +155,8 @@ export function SidebarFrame({
         color="secondary"
         variant="plain"
         size="sm"
-        data-sidebar-expand=""
         onClick={toggle}
-        className={cn(
-          "fixed top-2 left-2 z-sidebar size-7",
-          isDesktop && "left-[90px]"
-        )}
+        className="fixed top-2 left-2 z-sidebar size-7"
       />,
       document.body
     )
@@ -155,7 +167,8 @@ export function SidebarFrame({
       data-sidebar-frame=""
       style={{ width }}
       className={cn(
-        "relative flex h-svh shrink-0 flex-col",
+        // Navigation chrome: rows and labels are clicked, never selected.
+        "relative flex h-svh shrink-0 flex-col select-none",
         "max-md:fixed max-md:inset-0 max-md:z-pane max-md:!w-full",
         "max-md:duration-normal max-md:ease-out max-md:animate-in max-md:fade-in-0 max-md:slide-in-from-left-4",
         className
@@ -165,7 +178,105 @@ export function SidebarFrame({
       <div className="max-md:hidden">
         <ResizeHandle width={width} onResize={setWidth} />
       </div>
+      {windowControls}
     </aside>
+  )
+}
+
+/**
+ * The desktop title bar's buttons beside the traffic lights: the sidebar
+ * toggle, then back and forward, which the app needs without browser chrome.
+ * One no-drag cluster in the root layout's controls host, so no draggable
+ * header can come after it and swallow its clicks. ⌘[ and ⌘] stay the
+ * browser's on the web.
+ */
+function WindowControls({
+  collapsed,
+  toggle,
+}: {
+  collapsed: boolean
+  toggle: () => void
+}) {
+  const subscribe = (onChange: () => void) => {
+    window.navigation?.addEventListener("currententrychange", onChange)
+    return () =>
+      window.navigation?.removeEventListener("currententrychange", onChange)
+  }
+  const canGoBack = useSyncExternalStore(
+    subscribe,
+    () => window.navigation?.canGoBack ?? true,
+    () => false
+  )
+  const canGoForward = useSyncExternalStore(
+    subscribe,
+    () => window.navigation?.canGoForward ?? true,
+    () => false
+  )
+  const backShortcut = useShortcutLabel("mod+[")
+  const forwardShortcut = useShortcutLabel("mod+]")
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const mod = shortcutPlatform() === "mac" ? event.metaKey : event.ctrlKey
+      if (!mod || event.altKey || event.shiftKey) return
+      if (event.key === "[") window.history.back()
+      else if (event.key === "]") window.history.forward()
+      else return
+      event.preventDefault()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [])
+
+  return (
+    <div
+      data-no-drag=""
+      className="fixed top-2 left-[90px] z-sidebar flex items-center gap-0.5 [.desktop-fullscreen_&]:left-[12px]"
+    >
+      <IconButton
+        icon={SidebarSimpleIcon}
+        label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        color="secondary"
+        variant="plain"
+        size="sm"
+        onClick={toggle}
+        className="size-7"
+      />
+      <IconButton
+        icon={ArrowLeftIcon}
+        label="Back"
+        tooltipProps={{
+          title: (
+            <span className="flex items-center gap-space-2">
+              Back <Kbd>{backShortcut}</Kbd>
+            </span>
+          ),
+        }}
+        color="secondary"
+        variant="plain"
+        size="sm"
+        disabled={!canGoBack}
+        onClick={() => window.history.back()}
+        className="size-7 disabled:bg-transparent"
+      />
+      <IconButton
+        icon={ArrowRightIcon}
+        label="Forward"
+        tooltipProps={{
+          title: (
+            <span className="flex items-center gap-space-2">
+              Forward <Kbd>{forwardShortcut}</Kbd>
+            </span>
+          ),
+        }}
+        color="secondary"
+        variant="plain"
+        size="sm"
+        disabled={!canGoForward}
+        onClick={() => window.history.forward()}
+        className="size-7 disabled:bg-transparent"
+      />
+    </div>
   )
 }
 
@@ -236,9 +347,8 @@ export function SidebarCollapseButton({
   onToggle,
   className,
 }: SidebarCollapseButtonProps) {
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
-
+  // On desktop the title bar's WindowControls own the toggle.
+  if (typeof window !== "undefined" && window.openSweDesktop) return null
   return (
     <IconButton
       icon={SidebarSimpleIcon}
@@ -246,13 +356,8 @@ export function SidebarCollapseButton({
       color="secondary"
       variant="plain"
       size="sm"
-      data-sidebar-collapse=""
       onClick={onToggle}
-      className={cn(
-        "shrink-0",
-        isDesktop && "fixed top-2 left-[90px] z-sidebar size-7",
-        className
-      )}
+      className={cn("shrink-0", className)}
     />
   )
 }

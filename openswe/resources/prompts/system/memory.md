@@ -2,7 +2,7 @@
 
 ### Memory
 
-Open SWE remembers lessons across threads with `remember`.
+Robin remembers lessons across threads with `remember`.
 
 - **Every memory is personal first.**
   Where only its person writes in the thread, it applies to their runs at once and is listed in their `person` block, with the id `forget` takes.

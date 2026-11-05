@@ -1,4 +1,4 @@
-Move this local coding session to Open SWE: its transcript becomes a new Open SWE thread where a cloud agent picks up the work.
+Move this local coding session to Robin: its transcript becomes a new Robin thread where a cloud agent picks up the work.
 No agent run starts until someone sends a message in that thread.
 
 Uploading takes two steps, because the transcript is a file on this machine.

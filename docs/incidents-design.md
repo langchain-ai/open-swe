@@ -1,6 +1,6 @@
 # Incidents architecture
 
-Incidents runs each enrolled Slack channel as one ordinary system-owned Open SWE thread, driven by the same webhook path that serves code channels.
+Incidents runs each enrolled Slack channel as one ordinary system-owned Robin thread, driven by the same webhook path that serves code channels.
 There is no incident-specific worker, queue, or scheduler.
 
 ## Flow
@@ -40,8 +40,8 @@ Generic dashboard thread routes hide these threads; the Incidents dashboard is t
 Every channel message, including bot alerts, is queued for the thread as a context block with a citable `slack:<ts>` header, its permalink, and redacted text; the run takes it from the thread's inbox before its next model call.
 A plain message schedules one automatic turn with `after_seconds=15` unless a run is already pending or running, so a burst becomes one turn.
 A mention by any channel member can be a control word (`pause`, `resume`, `complete`, `reopen`); a question can ask for the same in plain words, and the agent's `manage_incident` tool applies the control and posts the notice without cancelling its own run.
-On a regular Slack run in a channel that is not enrolled, `manage_incident start` enrolls that channel for a connected Open SWE account.
-A question dispatches an explicit turn with `multitask_strategy="interrupt"`, answered in the mention's thread when it has one, and unlocks the agent's tools, so it requires the sender to have a connected Open SWE account, like any other Open SWE mention; unlinked senders get the standard account-link prompt.
+On a regular Slack run in a channel that is not enrolled, `manage_incident start` enrolls that channel for a connected Robin account.
+A question dispatches an explicit turn with `multitask_strategy="interrupt"`, answered in the mention's thread when it has one, and unlocks the agent's tools, so it requires the sender to have a connected Robin account, like any other Robin mention; unlinked senders get the standard account-link prompt.
 Paused and completed channels still accumulate context but schedule nothing; a resume with waiting context schedules a turn.
 
 ## Records

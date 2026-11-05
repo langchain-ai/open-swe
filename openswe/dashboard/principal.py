@@ -66,6 +66,7 @@ class DashboardPrincipal:
             "my-managed-tools",
             "my-credentials/langsmith",
             "threads",
+            "projects",
             "bridges",
             "skills",
             "github/login",
@@ -118,10 +119,21 @@ class DashboardPrincipal:
             raise HTTPException(401, "Your linked GitHub account changed — sign in again")
         return user
 
-    async def authorize(self) -> None:
+    async def authorize(self, *, path: str | None = None) -> None:
         if self.provider == "github":
             return
         from openswe.dashboard.langsmith_login import LangSmithLogin
 
-        await self.user()
+        user = await self.user()
         await LangSmithLogin().authorize_session(self)
+        if user is not None and await user.requires_github_link():
+            relative = (path or "").removeprefix("/dashboard/api/").rstrip("/")
+            if relative not in {
+                "me",
+                "github/login",
+                "github/desktop/exchange",
+                "auth/callback",
+                "auth/desktop/exchange",
+                "auth/logout",
+            }:
+                raise HTTPException(403, "Link GitHub to return to your existing Robin account")

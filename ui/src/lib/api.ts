@@ -243,6 +243,7 @@ export interface SessionUser {
   login: string
   auth_provider?: "github" | "langsmith"
   github_login?: string | null
+  requires_github_link?: boolean
   /** How the server labels this user's messages; empty until they have a name. */
   display_name?: string
   email: string | null
@@ -324,7 +325,6 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
-  agent_workspace_tasks_supported?: boolean
   experimental_background_callbacks?: boolean | null
   login?: string
   email?: string
@@ -337,6 +337,7 @@ export interface Profile {
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
   goal_mode?: boolean
+  experimental_conditional_approval?: boolean
   experimental_memory?: boolean
   experimental_classify?: boolean
   draft_prs?: boolean
@@ -356,6 +357,7 @@ export interface ProfileUpdate {
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
   goal_mode?: boolean
+  experimental_conditional_approval?: boolean
   experimental_memory?: boolean
   experimental_classify?: boolean
   draft_prs?: boolean
@@ -1059,6 +1061,7 @@ export interface ReviewListPayload {
 }
 
 export interface OpenPullRequest {
+  author?: string | null
   detailsLoading?: boolean
   detailsError?: boolean
   repo: string
@@ -1082,6 +1085,7 @@ export interface OpenPullRequest {
   createdAt: string | null
   updatedAt: string | null
   ci: "passing" | "failing" | "pending" | "unknown" | "none"
+  requiredChecksPassing: boolean | null
   failingChecks: string[]
   pendingChecks: string[]
   // Required by the base branch but never reported on the head, so GitHub
@@ -1092,7 +1096,14 @@ export interface OpenPullRequest {
   unresolvedThreads: number | null
   // Why it is on the To Review list: Open SWE assigned it, may assign it once
   // its review goes unclaimed, or it was linked in a Slack thread naming you.
-  assignment?: "assigned" | "tentative" | "mentioned" | null
+  assignment?:
+    | "assigned"
+    | "requested"
+    | "tentative"
+    | "mentioned"
+    | "draft"
+    | "speculative"
+    | null
 }
 
 export interface PullRequestReviewer {
@@ -1276,8 +1287,13 @@ export interface PublishedReviewAssessment {
   review_id: number
   head_sha: string
   risk_score: number
-  decision: "would_approve" | "needs_human_review"
+  decision:
+    | "would_approve"
+    | "would_approve_conditionally"
+    | "needs_human_review"
   explanation: string
+  approval_condition?: string | null
+  auto_approved?: string | null
 }
 
 export interface ReviewAssessmentFeedbackInput {
@@ -1963,6 +1979,16 @@ export const api = {
   getReview: (owner: string, repo: string, number: number) =>
     request<ReviewDetail>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`
+    ),
+  updatePullRequestDescription: (
+    owner: string,
+    repo: string,
+    number: number,
+    body: string
+  ) =>
+    request<void>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/description`,
+      { method: "PATCH", body: JSON.stringify({ body }) }
     ),
   getAssessmentFeedback: (
     owner: string,

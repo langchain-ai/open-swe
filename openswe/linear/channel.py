@@ -37,7 +37,7 @@ LinearEventKey = Literal[
 _EVENT_KEYS: frozenset[str] = frozenset(get_args(LinearEventKey))
 _AUTOMATION_KEYS = frozenset({"Issue.create", "Issue.update"})
 # What the channel starts with while the thread waits: nothing, it only notes Open SWE acts.
-_ACTS_WHILE_INTERRUPTED: Final = "Open SWE was asked while the session waits."
+_ACTS_WHILE_INTERRUPTED: Final = "Robin was asked while the session waits."
 
 router = APIRouter(prefix="/linear/channel", dependencies=[Depends(require_mda_channel)])
 

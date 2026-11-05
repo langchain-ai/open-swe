@@ -1,6 +1,6 @@
 Leave a note on diff lines of the pull request the user is looking at, for their eyes only.
 
-The note appears on its lines in the user's review page and in the chat, signed as Open SWE; it never goes to GitHub and nobody else sees it.
+The note appears on its lines in the user's review page and in the chat, signed as Robin; it never goes to GitHub and nobody else sees it.
 Use it to point the user at code while explaining it, or when they ask you to mark, flag or note something in the diff.
 For a comment the user wants on GitHub, use `add_review_comment` instead.
 

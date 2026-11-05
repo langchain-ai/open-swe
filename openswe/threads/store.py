@@ -132,6 +132,9 @@ class ThreadStore:
     def __init__(self) -> None:
         self.copies = _MetadataCopies()
 
+    async def search(self, query: index.ThreadSearch) -> list[IndexedThread]:
+        return await query.run()
+
     async def get(self, thread_id: str) -> IndexedThread | None:
         """The indexed thread; one only the Agent Server knows is indexed on first use."""
         indexed = await index.get(thread_id)

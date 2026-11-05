@@ -36,7 +36,7 @@ async def _unavailable_reason(subject: str) -> str | None:
                 return "This review suggestion is no longer available."
             stored = await PullRequest.get(pr_ref.owner, pr_ref.repo, pr_ref.number)
             if stored and any(review.head_sha == details.head_sha for review in stored.reviews):
-                return f"Open SWE has already reviewed the current changes in {subject}."
+                return f"Robin has already reviewed the current changes in {subject}."
             for review in await pull.reviews():
                 user = review.get("user")
                 if (
@@ -45,7 +45,7 @@ async def _unavailable_reason(subject: str) -> str | None:
                     and review.get("state") in {"APPROVED", "CHANGES_REQUESTED", "COMMENTED"}
                     and review.get("commit_id") == details.head_sha
                 ):
-                    return f"Open SWE has already reviewed the current changes in {subject}."
+                    return f"Robin has already reviewed the current changes in {subject}."
     except GitHubAppUnavailable:
         logger.info("GitHub access unavailable for a review suggestion", exc_info=True)
         return "This review suggestion is no longer available: GitHub access is unavailable."
@@ -65,9 +65,9 @@ async def _unavailable_reason(subject: str) -> str | None:
 GET_REVIEWED = register(
     SuggestedAction(
         kind="review",
-        question="Want Open SWE to get {subject} reviewed?",
+        question="Want Robin to get {subject} reviewed?",
         accept_label="Get it reviewed",
-        accepted="Asked Open SWE to get {subject} reviewed.",
+        accepted="Asked Robin to get {subject} reviewed.",
         request="Get {subject} reviewed.",
         prompt_name="runs/suggested-review",
         unavailable_reason=_unavailable_reason,

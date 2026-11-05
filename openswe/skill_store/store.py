@@ -80,7 +80,7 @@ type Owner = UUID | None
 async def _person(login: str) -> UUID:
     user = await User.for_login("github", login)
     if user is None:
-        raise HTTPException(409, "No Open SWE user record for this login yet")
+        raise HTTPException(409, "No Robin user record for this login yet")
     return user.id
 
 

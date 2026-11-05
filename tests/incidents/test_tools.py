@@ -68,7 +68,7 @@ async def configured(registry_db, monkeypatch):
 async def test_start_needs_a_connected_account_and_an_eligible_channel(configured, monkeypatch):
     use_config(monkeypatch, github_login=None)
     denied = await tools.manage_incident("start")
-    assert denied["success"] is False and "connected Open SWE account" in denied["error"]
+    assert denied["success"] is False and "connected Robin account" in denied["error"]
 
     use_config(monkeypatch)
     SlackChannel.fetch.return_value = {**CHANNEL, "is_private": True}

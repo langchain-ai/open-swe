@@ -71,7 +71,7 @@ EOF
 """.strip()
 
 # The expedited-review change is too big to qualify until the agent excludes what
-# the spec's seeded APPROVALS.md covers: CHANGELOG.md and config.py's trailing
+# the spec's seeded auto-approve rule covers: CHANGELOG.md and config.py's trailing
 # generated block, whose hunk starts at new line 28.
 EXPEDITE_MARKER = "E2E_EXPEDITE"
 EXPEDITE_PR_TITLE = "Fix the greeting punctuation"
@@ -101,7 +101,9 @@ HUMAN_REVIEW_PICK = "bob"
 _UNCLAIMED_MARKER = "Nobody has signed up to review"
 _DECLINED_MARKER = "declined the review of"
 _PICK_REQUEST = "reviewer for it"
-_SUGGESTED_REVIEWER = re.compile(r"Open SWE suggests @(\S+): (.+?) Unless this Slack thread")
+_SUGGESTED_REVIEWER = re.compile(
+    r"(?:Robin|Open SWE) suggests @(\S+): (.+?) Unless this Slack thread"
+)
 
 # The spec seeds config.py (VALUE_1..VALUE_30) and CHANGELOG.md on main. Drawn:
 # greet.py and config.py's VALUE_2 hunk, four lines. Excluded: 40 more.
@@ -1570,6 +1572,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "slack_breakout_thread",
             {
                 "title": "Add greet() helper",
+                "destination": DEMO_CHANNEL,
                 "instructions": "Please add a greet() helper and open a draft PR in the default repository. Use the current Slack request as context, and report progress in this new thread.",
             },
             "call-breakout",
@@ -1590,7 +1593,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "slack_move_thread",
             {
                 "message": "Continue the existing Open SWE task in this channel.",
-                "channel_id": "C_TARGET",
+                "destination": "CTARGET01",
             },
             "call-move",
         ),
