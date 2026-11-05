@@ -113,6 +113,8 @@ make web
 ```
 
 `pnpm run dev:desktop` is equivalent to `make desktop`.
+Both build `ui/` first and run the app on that build through `OPEN_SWE_DESKTOP_UI_ARCHIVE`, so the window shows this checkout's UI rather than the one the backend publishes.
+After changing `ui/`, rerun `make desktop`, or rebuild the UI and use View → Reload.
 The desktop app connects to the backend at `http://localhost:2024`, which runs "This Mac" threads too; the bridge needs that backend's PostgreSQL.
 
 The app keeps the original `com.langchain.openswe` bundle ID and `Open SWE` production Electron profile for existing sessions, projects, task folders, caches, and instance locks.
