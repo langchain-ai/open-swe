@@ -604,7 +604,7 @@ test.describe("Human review in Slack", () => {
     );
   });
 
-  test("approved pull requests still offer Slack review requests", async ({
+  test("approved pull requests do not offer Slack review requests", async ({
     page,
     request,
   }) => {
@@ -622,9 +622,13 @@ test.describe("Human review in Slack", () => {
       .getByRole("listitem")
       .filter({ hasText: `Already approved` });
     await expect(row).toBeVisible();
+    await expect(row.getByText("Approved", { exact: true })).toBeVisible();
     await expect(
       row.getByRole("button", { name: "Request review in Slack" }),
-    ).toBeEnabled();
+    ).toHaveCount(0);
+    await expect(
+      row.getByRole("combobox", { name: "Review channel" }),
+    ).toHaveCount(0);
   });
 
   test("conflicted pull requests can request a review from the dashboard", async ({

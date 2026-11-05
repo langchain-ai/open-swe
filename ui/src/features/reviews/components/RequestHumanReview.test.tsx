@@ -205,14 +205,13 @@ it.each([
   }
 )
 
-it.each(["loading", "error", "blocked", "approved"])(
+it.each(["loading", "error", "blocked", "additional approval required"])(
   "requires a known default or selected channel when availability is %s",
   async (state) => {
-    const current = {
-      ...pr,
-      reviewDecision:
-        state === "approved" ? ("approved" as const) : pr.reviewDecision,
-    }
+    const current: OpenPullRequest =
+      state === "additional approval required"
+        ? { ...pr, reviewDecision: "approved", reviewRequired: true }
+        : pr
     const availability = vi.spyOn(api, "humanReviewAvailability")
     if (state === "loading") availability.mockReturnValue(new Promise(() => {}))
     else if (state === "error")
@@ -366,13 +365,41 @@ it("can request a selected channel without recovering availability", async () =>
   await waitFor(() => expect(request).toHaveBeenCalledWith(pr, "C0123456789"))
 })
 
-it("does not offer a review request for a draft", () => {
-  vi.spyOn(api, "humanReviewAvailability").mockReturnValue(
-    new Promise(() => {})
-  )
+it.each<Partial<OpenPullRequest>>([
+  { draft: true },
+  { reviewDecision: "approved" },
+])("does not offer a review request for %j", (status) => {
+  const availability = vi.spyOn(api, "humanReviewAvailability")
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <RequestHumanReview pr={{ ...pr, draft: true }} />
+      <RequestHumanReview pr={{ ...pr, ...status }} />
+    </QueryClientProvider>
+  )
+  expect(screen.queryByRole("button")).toBeNull()
+  expect(availability).not.toHaveBeenCalled()
+})
+
+it("removes the channel picker when the PR becomes approved", async () => {
+  vi.spyOn(api, "humanReviewAvailability").mockResolvedValue({
+    available: false,
+    active: false,
+    permalink: "",
+    blockers: [],
+  })
+  const client = new QueryClient()
+  const view = render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <RequestHumanReview pr={pr} />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  await screen.findByRole("button", { name: "Choose channel" })
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <RequestHumanReview pr={{ ...pr, reviewDecision: "approved" }} />
+      </TooltipProvider>
     </QueryClientProvider>
   )
   expect(screen.queryByRole("button")).toBeNull()
