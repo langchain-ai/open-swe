@@ -10,7 +10,7 @@ from openswe.dashboard import profiles
 from openswe.github import http as github_http
 from openswe.github.checks import github_headers
 from openswe.github.http import GitHubError
-from openswe.review import conversation
+from openswe.review import conversation, history
 from openswe.review.conversation import (
     ConversationComment,
     ConversationCommentCreate,
@@ -19,6 +19,7 @@ from openswe.review.conversation import (
     api_get_review_conversation,
     api_post_review_conversation_comment,
 )
+from openswe.review.history import HistoryForcePush, HistoryStateChange, api_get_review_history
 
 Handler = Callable[[httpx2.Request], httpx2.Response]
 SESSION = {"sub": "octocat"}
@@ -37,6 +38,7 @@ def github(monkeypatch: pytest.MonkeyPatch) -> Callable[[Handler], list[httpx2.R
         return "viewer-token"
 
     monkeypatch.setattr(conversation, "require_repo_access_for_user", allow)
+    monkeypatch.setattr(history, "require_repo_access_for_user", allow)
     monkeypatch.setattr(profiles, "get_valid_access_token", token)
 
     def install(handler: Handler) -> list[httpx2.Request]:
@@ -276,3 +278,77 @@ async def test_post_comment_surfaces_github_client_errors(
 
     assert exc.value.response.status_code == 403
     assert exc.value.message == "Resource not accessible by integration"
+
+
+async def test_history_reads_every_timeline_page_and_folds_a_merges_close(
+    github: Callable[[Handler], list[httpx2.Request]],
+) -> None:
+    bot = {"__typename": "Bot", "login": "open-swe", "avatarUrl": "https://avatars.example/b"}
+    pages = [
+        [
+            {
+                "__typename": "PullRequestCommit",
+                "commit": {
+                    "oid": "abc123",
+                    "message": "Add app",
+                    "committedDate": "2026-01-01T00:00:00Z",
+                    "url": "https://github.com/acme/app/commit/abc123",
+                    "author": {
+                        "name": "dependabot[bot]",
+                        "avatarUrl": "https://avatars.example/d",
+                        "user": None,
+                    },
+                },
+            },
+            {
+                "__typename": "HeadRefForcePushedEvent",
+                "createdAt": "2026-01-02T00:00:00Z",
+                "actor": bot,
+                "beforeCommit": {"oid": "abc123"},
+                "afterCommit": None,
+            },
+        ],
+        [
+            {"__typename": "MergedEvent", "createdAt": "2026-01-03T00:00:00Z", "actor": bot},
+            {"__typename": "ClosedEvent", "createdAt": "2026-01-03T00:00:00Z", "actor": bot},
+        ],
+    ]
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        cursor = json.loads(request.content)["variables"]["cursor"]
+        page = 0 if cursor is None else 1
+        return httpx2.Response(
+            200,
+            json={
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "timelineItems": {
+                                "pageInfo": {"hasNextPage": page == 0, "endCursor": "c1"},
+                                "nodes": pages[page],
+                            }
+                        }
+                    }
+                }
+            },
+        )
+
+    github(handler)
+
+    commit, push, merged = (await api_get_review_history("acme", "app", 7, SESSION)).events
+    assert isinstance(commit, ConversationCommit)
+    assert commit.author is not None
+    assert (commit.sha, commit.author.login, commit.author.bot) == (
+        "abc123",
+        "dependabot[bot]",
+        True,
+    )
+    assert isinstance(push, HistoryForcePush)
+    assert (push.ref, push.before, push.after, push.author and push.author.bot) == (
+        "head",
+        "abc123",
+        None,
+        True,
+    )
+    assert isinstance(merged, HistoryStateChange)
+    assert merged.state == "merged"
