@@ -325,8 +325,8 @@ def agent(inputs: GraphInputs) -> DeepAgentDefinition:
         context_schema=RunContext,
         # The thread's sandbox, for the file and shell tools run in it and for MDA's own use
         # of it, such as the browser's screenshots; the backend's operations work in the
-        # same sandbox. Which sandbox, and whether a run has one, is the run's catalog's: a
-        # worker's catalog is its coordinator's, so it shares the coordinator's sandbox.
+        # same sandbox. Whether a run has one, and its options, are the run's catalog's; a
+        # worker, MDA's async subagent of its coordinator, shares the coordinator's sandbox.
         sandbox=parts.sandbox,
         # `mda build` reads `worker`'s literal name to build its graph.
         subagents=[*sync_subagents, worker],

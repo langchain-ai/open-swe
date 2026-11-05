@@ -108,8 +108,6 @@ class SandboxSpec(BaseModel):
 
     create: SandboxCreate
     sandbox_id: str | None = None
-    # The thread whose sandbox this one works in, a task worker's coordinator; None for its own.
-    thread_id: str | None = None
     # The connection the sandbox's GitHub rules carry, where MDA writes its proxy config
     # (``runtime_api.sandbox_proxy``); None leaves the proxy config to the backend.
     github_proxy: ConnectionRef | None = None

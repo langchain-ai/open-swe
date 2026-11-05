@@ -2094,7 +2094,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if self._resolved_backend is not None:
             return self._resolved_backend
         try:
-            key = _sandbox_scope_key(self._sandbox(), self._config(), self._source.selection)
+            key = _thread_scope_key(self._config(), self._source.selection)
         except Exception:  # noqa: BLE001 — no thread, so no sandbox, as in ``id``
             return None
         with _managed_sandbox_lock:
@@ -2112,7 +2112,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if resolved:
             return str(resolved)
         try:
-            scope = _sandbox_scope_key(self._sandbox(), self._config(), self._source.selection)
+            scope = _thread_scope_key(self._config(), self._source.selection)
             return f"pending:{scope}"
         except Exception:  # noqa: BLE001 — match TS pending:sandbox fallback
             return "pending:sandbox"
@@ -2290,7 +2290,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if not manages_proxy(sandbox.options):
             return
         config = self._config()
-        key = _sandbox_scope_key(sandbox, config, self._source.selection)
+        key = _thread_scope_key(config, self._source.selection)
         await self._source.proxy_config_sync.sync(
             sandbox,
             _peek_managed_host_name(key),
@@ -2339,9 +2339,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             and _parent_sandbox_scope(config, source.selection) is not None
         ):
             return
-        previous_name = _peek_managed_host_name(
-            _sandbox_scope_key(sandbox, config, source.selection)
-        )
+        previous_name = _peek_managed_host_name(_thread_scope_key(config, source.selection))
         try:
             recovered = _recover_managed_sandbox(
                 sandbox,
@@ -2488,7 +2486,7 @@ def _resolve_managed_sandbox(
     CLI wiring can refresh without re-cloning. Provisioning (``setup.sh``)
     happens at deploy bake, not here.
     """
-    key = _sandbox_scope_key(sandbox, config, selection)
+    key = _thread_scope_key(config, selection)
     thread_key = _thread_sync_key(config)
     has_sandbox = has_sandbox_connectors(connectors)
 
@@ -2578,7 +2576,7 @@ def _claim_managed_sandbox(
     The box boots while the run does other work; ``_resolve_managed_sandbox`` waits for
     it, and runs the connectors' hooks, on its first use.
     """
-    key = _sandbox_scope_key(sandbox, config, selection)
+    key = _thread_scope_key(config, selection)
     bound_name = _string_option(sandbox.options.get("_openswe_sandbox_id"))
     with _managed_sandbox_lock:
         entry = _bound(_managed_sandboxes.get(key), bound_name)
@@ -2629,7 +2627,7 @@ def _recover_managed_sandbox(
 
     from managed_deepagents.sandbox import is_per_thread  # noqa: PLC0415
 
-    key = _sandbox_scope_key(sandbox, config, selection)
+    key = _thread_scope_key(config, selection)
     with _sandbox_key_lock(key):
         with _managed_sandbox_lock:
             entry = _managed_sandboxes.get(key)
@@ -2690,7 +2688,7 @@ def _replace_managed_sandbox(
     """
     from managed_deepagents.sandbox import SandboxReplacement  # noqa: PLC0415
 
-    key = _sandbox_scope_key(sandbox, config, selection)
+    key = _thread_scope_key(config, selection)
     with _sandbox_key_lock(key):
         with _managed_sandbox_lock:
             entry = _managed_sandboxes.get(key)
@@ -2889,21 +2887,6 @@ def _canonical_sandbox_value(  # noqa: C901, PLR0911, PLR0912 - exhaustive type 
         finally:
             ancestors.remove(identity)
     raise TypeError("sandbox options contain an unsupported value")
-
-
-def _sandbox_scope_key(
-    sandbox: SandboxDefinition,
-    config: ManagedRunConfig | None,
-    selection: _SandboxSelection | None = None,
-) -> str:
-    """The process-level reuse key: the owning thread's when the box names one."""
-    from managed_deepagents.sandbox import owning_thread  # noqa: PLC0415
-
-    thread_id = owning_thread(sandbox.options)
-    scope_config: ManagedRunConfig | None = (
-        {"configurable": {"thread_id": thread_id}} if thread_id else config
-    )
-    return _thread_scope_key(scope_config, selection)
 
 
 def _thread_scope_key(
@@ -3403,7 +3386,6 @@ def _claim_langsmith_sandbox(
         BoundSandboxMissingError,
         declared_create_fields,
         is_per_thread,
-        owning_thread,
     )
 
     create_kwargs = _sandbox_create_kwargs(sandbox, selection)
@@ -3414,9 +3396,6 @@ def _claim_langsmith_sandbox(
     deployment = _managed_deployment_name()
     if not deployment:
         lookup_names = []
-    elif owning_thread(sandbox.options):
-        # Names from before this option never named a box kept this way.
-        lookup_names = [_managed_sandbox_name(deployment, scope_key)]
     else:
         lookup_names = _managed_sandbox_lookup_names(
             deployment, scope_key, sandbox, config, selection
