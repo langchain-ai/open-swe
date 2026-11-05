@@ -769,9 +769,15 @@ def test_the_channel_takes_every_event_the_app_sends() -> None:
     from channels.github import channel
 
     events = set(cast(list[str], channel.provider_config["events"]))
-    assert {"issues.closed", "check_run.created", "installation.created"} <= events
+    assert {
+        "issues.closed",
+        "check_run.created",
+        "installation.created",
+        "pull_request_review_thread.resolved",
+    } <= events
     assert events == set(get_args(SupportedEventKey)) | set(get_args(GitHubInstallationEventKey))
-    # Every action of the events it already took: the App subscribes to nothing new.
+    # A review thread resolved or unresolved, which the backend's reviewer follows,
+    # is the only subscription the backend's own webhook had beyond these.
     assert channel.provider_config["webhookEvents"] == [
         "check_run",
         "check_suite",
@@ -781,10 +787,23 @@ def test_the_channel_takes_every_event_the_app_sends() -> None:
         "pull_request",
         "pull_request_review",
         "pull_request_review_comment",
+        "pull_request_review_thread",
         "push",
         "status",
         "workflow_run",
     ]
+
+
+@pytest.mark.parametrize("action", ["resolved", "unresolved"])
+async def test_a_review_thread_reaches_the_backend(backend: _Backend, action: str) -> None:
+    """The backend's reviewer follows a review thread's resolution, as it picks its own
+    work when the delivery is recorded; it starts no agent run."""
+    payload = {"action": action, "pull_request": {"number": 7}, "repository": _REPOSITORY}
+
+    assert await github.on_event(_event("pull_request_review_thread", payload), _THREAD) is None
+    [delivery] = backend.called(RECORD_GITHUB_DELIVERY)
+    assert (delivery.event, delivery.payload["action"]) == ("pull_request_review_thread", action)
+    assert [name for name, *_ in backend.calls] == [RECORD_GITHUB_DELIVERY.name]
 
 
 async def test_a_delivery_that_starts_nothing_is_only_logged(backend: _Backend) -> None:

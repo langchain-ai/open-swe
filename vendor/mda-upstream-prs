@@ -11,3 +11,4 @@
 1231 18d52b25093c2b00e0a1461112f49a784453cb51 feat(slack): let a handler read its thread's state and the workspace
 1239 66fd4a2f21e666af83f0380e48f715e531549859 feat(channels): set a Slack app's look in app, as GitHub and Linear do
 1245 5dcc41e9ca1a5fa78a56d7b6c78eab077f5120d6 refactor(channels): share one set of types across GitHub, Linear and Slack
+1252 f2e0954fd8fd8e7854b2551c418ff246ae844484 feat(channels): handle GitHub pull_request_review_thread resolved and unresolved

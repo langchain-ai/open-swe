@@ -73,6 +73,14 @@ class GitHubReview(TypedDict):
 
 
 @with_config(ConfigDict(extra="allow", strict=True))
+class GitHubReviewThread(TypedDict):
+    """A pull request review thread and its review comments."""
+
+    node_id: Nonblank
+    comments: list[GitHubComment]
+
+
+@with_config(ConfigDict(extra="allow", strict=True))
 class GitHubWorkflowRun(TypedDict):
     id: _PositiveId
     conclusion: str | None
@@ -180,6 +188,10 @@ class _ReviewCommentPayload(_PullRequestPayload):
     comment: GitHubComment
 
 
+class _ReviewThreadPayload(_PullRequestPayload):
+    thread: GitHubReviewThread
+
+
 class _WorkflowPayload(_DispatchPayload):
     workflow_run: GitHubWorkflowRun
 
@@ -268,6 +280,7 @@ GitHubPayload = (
     | _UnlabeledPullRequestPayload
     | _ReviewPayload
     | _ReviewCommentPayload
+    | _ReviewThreadPayload
     | _WorkflowPayload
     | _CheckRunPayload
     | _CheckSuitePayload
@@ -325,6 +338,8 @@ SupportedEventKey = Literal[
     "pull_request_review_comment.created",
     "pull_request_review_comment.edited",
     "pull_request_review_comment.deleted",
+    "pull_request_review_thread.resolved",
+    "pull_request_review_thread.unresolved",
     "push",
     "status",
     "check_run.completed",
@@ -347,6 +362,7 @@ _comment_adapter: TypeAdapter[GitHubPayload] = TypeAdapter(_IssueCommentPayload)
 _pr_adapter: TypeAdapter[GitHubPayload] = TypeAdapter(_PullRequestPayload)
 _review_adapter: TypeAdapter[GitHubPayload] = TypeAdapter(_ReviewPayload)
 _review_comment_adapter: TypeAdapter[GitHubPayload] = TypeAdapter(_ReviewCommentPayload)
+_review_thread_adapter: TypeAdapter[GitHubPayload] = TypeAdapter(_ReviewThreadPayload)
 _PAYLOAD_ADAPTERS: dict[SupportedEventKey, TypeAdapter[GitHubPayload]] = {
     "issues.opened": _issue_adapter,
     "issues.edited": _issue_adapter,
@@ -396,6 +412,8 @@ _PAYLOAD_ADAPTERS: dict[SupportedEventKey, TypeAdapter[GitHubPayload]] = {
     "pull_request_review_comment.created": _review_comment_adapter,
     "pull_request_review_comment.edited": _review_comment_adapter,
     "pull_request_review_comment.deleted": _review_comment_adapter,
+    "pull_request_review_thread.resolved": _review_thread_adapter,
+    "pull_request_review_thread.unresolved": _review_thread_adapter,
     "push": TypeAdapter(_PushPayload),
     "status": TypeAdapter(_StatusPayload),
     "check_run.completed": TypeAdapter(_CheckRunPayload),

@@ -29,6 +29,7 @@ from managed_deepagents._channels.github_schema import (
     _PushPayload,
     _ReviewCommentPayload,
     _ReviewPayload,
+    _ReviewThreadPayload,
     _StatusPayload,
     _UnlabeledIssuePayload,
     _UnlabeledPullRequestPayload,
@@ -348,6 +349,15 @@ GitHubEndpointRequest = (
             _ReviewCommentPayload,
         ]
     ]
+    | EndpointRequest[
+        GitHubEndpointEvent[
+            Literal[
+                "pull_request_review_thread.resolved",
+                "pull_request_review_thread.unresolved",
+            ],
+            _ReviewThreadPayload,
+        ]
+    ]
     | EndpointRequest[GitHubEndpointEvent[Literal["push"], _PushPayload]]
     | EndpointRequest[GitHubEndpointEvent[Literal["status"], _StatusPayload]]
     | EndpointRequest[
@@ -446,6 +456,7 @@ __all__ = [
     "GitHubRepository",
     "GitHubReviewCommentPayload",
     "GitHubReviewPayload",
+    "GitHubReviewThreadPayload",
     "GitHubSender",
     "GitHubStatusPayload",
     "GitHubWorkflowPayload",
@@ -508,6 +519,10 @@ GitHubHandlers = TypedDict(
         | EventEndpoint,
         "pull_request_review_comment.deleted": GitHubEventCallback[_ReviewCommentPayload]
         | EventEndpoint,
+        "pull_request_review_thread.resolved": GitHubEventCallback[_ReviewThreadPayload]
+        | EventEndpoint,
+        "pull_request_review_thread.unresolved": GitHubEventCallback[_ReviewThreadPayload]
+        | EventEndpoint,
         "push": GitHubEventCallback[_PushPayload] | EventEndpoint,
         "status": GitHubEventCallback[_StatusPayload] | EventEndpoint,
         "check_run.completed": GitHubEventCallback[_CheckRunPayload] | EventEndpoint,
@@ -564,6 +579,7 @@ GitHubPullRequestPayload = _PullRequestPayload
 GitHubLabeledPullRequestPayload = _LabeledPullRequestPayload
 GitHubReviewPayload = _ReviewPayload
 GitHubReviewCommentPayload = _ReviewCommentPayload
+GitHubReviewThreadPayload = _ReviewThreadPayload
 GitHubWorkflowPayload = _WorkflowPayload
 GitHubCheckRunPayload = _CheckRunPayload
 GitHubCheckSuitePayload = _CheckSuitePayload

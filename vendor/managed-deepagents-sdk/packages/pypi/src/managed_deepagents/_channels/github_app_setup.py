@@ -62,6 +62,8 @@ EVENT_PERMISSIONS: dict[str, tuple[str, PermissionLevel]] = {
     "pull_request_review_comment.created": ("pull_requests", "write"),
     "pull_request_review_comment.edited": ("pull_requests", "write"),
     "pull_request_review_comment.deleted": ("pull_requests", "write"),
+    "pull_request_review_thread.resolved": ("pull_requests", "read"),
+    "pull_request_review_thread.unresolved": ("pull_requests", "read"),
     "check_run.completed": ("checks", "read"),
     "check_run.created": ("checks", "read"),
     "check_run.rerequested": ("checks", "read"),

@@ -1048,6 +1048,9 @@ events:
   `auto_merge_enabled`, `auto_merge_disabled`.
 - `pull_request_review`: `submitted`, `edited`, `dismissed`.
 - `pull_request_review_comment`: `created`, `edited`, `deleted`.
+- `pull_request_review_thread`: `resolved`, `unresolved`. The payload's `thread`
+  has the thread's `node_id` and its review `comments`. These need only
+  `pull_requests: read`.
 - Code and CI: `push` and `status`, which have no action, so their key is the
   event name; `check_run`: `created`, `completed`, `rerequested`,
   `requested_action`; `check_suite`: `requested`, `rerequested`, `completed`;
