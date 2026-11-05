@@ -256,6 +256,9 @@ class Catalog(BaseModel):
     code_only: list[str] = []
     # Tools the model calls both directly and from code mode.
     also_from_code: list[str] = []
+    # Tools offered to the model that this run refuses when called, so the tools offered
+    # stay the same from run to run and the provider's prompt cache still holds.
+    disabled: list[str] = []
     # Tools the model labels each call of, with what the label argument tells it.
     described: dict[str, str] = {}
     # The thread's sandbox; None runs the file and shell tools through the files API alone.

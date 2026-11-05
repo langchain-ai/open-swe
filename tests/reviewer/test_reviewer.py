@@ -14,15 +14,19 @@ from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 
 def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
     prompt = reviewer._reviewer_system_prompt(
-        repo_owner="acme",
-        repo_name="repo",
-        pr_number=42,
         org_guidelines="Org rule text.",
         repo_style_prompt="Repo rule text.",
-    )
+    ).workspace
     assert prompt.index("Organization-wide review guidelines") < prompt.index(
         "Repository-specific review style"
     )
+
+
+def test_reviewer_approval_policy_stays_in_system_prompt_after_shared_parts() -> None:
+    prompt = reviewer._reviewer_system_prompt(approval_policy="Docs-only changes may merge.")
+    assert "Docs-only changes may merge." in prompt.thread
+    assert "Docs-only changes may merge." not in prompt.shared + prompt.workspace
+    assert "# Approval assessment" in prompt.shared
 
 
 def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
@@ -416,6 +420,7 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
         rendered = result.update["rendered_system_prompt"]
         assert isinstance(rendered, str)
         assert head not in rendered
+        assert "acme/repo#42" not in rendered
         if not repo_ready:
             assert f"git checkout --force {head}" in context.text
         assert state["messages"] == [*previous, context]

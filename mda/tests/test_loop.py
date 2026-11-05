@@ -144,17 +144,25 @@ async def test_an_incident_run_asks_for_its_incident_before_each_model_call(
         LoopRules(incident=True),
     )
 
-    planned = await RunLoop(backend).before_model(
-        _state(HumanMessage(content="What broke?", id="human-1"))
-    )
+    loop = RunLoop(backend)
+    human = HumanMessage(content="What broke?", id="human-1")
+
+    planned = await loop.before_model(_state(human))
 
     assert planned.call is not None
-    assert planned.call.system_prompt.endswith("Investigate the incident.")
-    [(name, body)] = calls
+    assert "Investigate the incident." not in planned.call.system_prompt
+    [instructions] = messages_from_dict(planned.messages)
+    assert instructions.content == "Investigate the incident."
+    (name, body), *_ = calls
     assert name == "incident_context"
     assert [m.content for m in messages_from_dict(Routed.model_validate(body).humans)] == [
         "What broke?"
     ]
+
+    again = await loop.before_model(_state(human, instructions))
+    assert again.call is not None
+    assert again.call.system_prompt == planned.call.system_prompt
+    assert messages_from_dict(again.messages) == []
 
 
 async def test_failed_task_context_preserves_error_and_cleans_up_refresh(

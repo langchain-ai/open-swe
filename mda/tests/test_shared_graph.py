@@ -21,7 +21,14 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolCall, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolCall,
+    ToolMessage,
+)
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import BaseTool, tool
@@ -1032,6 +1039,45 @@ async def test_code_mode_calls_tools_its_catalog_leaves_out(
     ]
 
 
+async def test_a_disabled_tool_is_offered_but_refused_without_calling_the_backend(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    offered: list[set[str]] = []
+    seen: list[BaseMessage] = []
+
+    def bind(
+        model: GenericFakeChatModel, tools: list[BaseTool], **kwargs: object
+    ) -> GenericFakeChatModel:
+        offered.append({tool.name for tool in tools})
+        return model
+
+    generate = GenericFakeChatModel._agenerate
+
+    async def answering(
+        model: GenericFakeChatModel,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        seen[:] = messages
+        return await generate(model, messages, stop, run_manager)
+
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", bind)
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", answering)
+    monkeypatch.setattr(
+        agent, "_DEFAULT_MODEL", _calling(ToolCall(name="lookup", args={}, id="disabled"))
+    )
+    catalog = _catalog("lookup", "grant").model_copy(update={"disabled": ["lookup"]})
+
+    await _run(InMemoryStore(), "disabled", _context("agent", "token", catalog))
+
+    assert offered and all("lookup" in names for names in offered)
+    [refused] = [m for m in seen if isinstance(m, ToolMessage) and m.tool_call_id == "disabled"]
+    assert refused.status == "error" and "not available" in refused.text
+    assert not [hook for hook, _, _ in backend_calls if hook == "operation"]
+
+
 async def test_concurrent_runs_offer_and_call_only_their_own_operations(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
 ) -> None:
@@ -1113,16 +1159,26 @@ async def test_failed_code_run_releases_its_interpreter(
     assert not interpreter._ptc_tools_by_slot
 
 
-async def test_code_prompt_uses_each_runs_schema_even_when_names_match(
+async def test_code_tools_list_each_runs_schema_in_a_message_not_the_system_prompt(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
 ) -> None:
     prompts: list[str] = []
+    systems: list[str] = []
 
     async def generate(
         model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
     ) -> ChatResult:
-        prompts.append(
+        systems.append(
             "\n".join(message.text for message in messages if isinstance(message, SystemMessage))
+        )
+        prompts.append(
+            "\n".join(
+                message.text
+                for message in messages
+                if isinstance(message, HumanMessage)
+                and isinstance(message.id, str)
+                and message.id.startswith("code-tools:")
+            )
         )
         return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
 
@@ -1151,6 +1207,7 @@ async def test_code_prompt_uses_each_runs_schema_even_when_names_match(
 
     assert "first_parameter" in prompts[0] and "second_parameter" not in prompts[0]
     assert "second_parameter" in prompts[1] and "first_parameter" not in prompts[1]
+    assert systems[0] == systems[1]
 
 
 async def test_sync_subagent_uses_its_runs_prompt_model_and_tools(

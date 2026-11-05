@@ -494,13 +494,21 @@ async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
     regranted = await TokenRun.answer(
         parts, run, "operation", {**call, "grant": another_run.grant("draft_preference")}
     )
+    # A tool the run's catalog offers disabled is granted to no call of it.
+    disabled_run = run.model_copy(
+        update={"settings": RunSettings(draft_prs=False, disabled_tools=["draft_preference"])}
+    )
+    disabled = await TokenRun.answer(
+        parts, disabled_run, "operation", {**call, "grant": run.grant("draft_preference")}
+    )
     verdict = await TokenRun.answer(
         parts, run, "check_shell", {"run_id": "run-1", "tool": "execute", "command": "ls"}
     )
 
     assert isinstance(result, dict) and result["content"] == "drafts: False"
     assert verdict == {"allowed": True, "command": None, "refusal": None}
-    for refused in (ungranted, regranted):
+    assert disabled_run.grant("draft_preference") is None
+    for refused in (ungranted, regranted, disabled):
         assert isinstance(refused, dict) and refused["status"] == "error"
         assert "not one of this run's operations" in str(refused["content"])
 

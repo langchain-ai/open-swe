@@ -52,6 +52,7 @@ from openswe.middleware import (
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.require_user_reply import WEB_REPLY_SURFACE
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from openswe.prompt import SystemPrompt
 from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.review.approvals import (
     ApprovalPolicy,
@@ -136,9 +137,6 @@ def _repo_checkout_note(
 
 def _reviewer_system_prompt(
     *,
-    repo_owner: str,
-    repo_name: str,
-    pr_number: int | str,
     reviewer_eval: bool = False,
     org_guidelines: str | None = None,
     approval_policy: str | None = None,
@@ -146,22 +144,47 @@ def _reviewer_system_prompt(
     agents_md_content: str | None = None,
     scoped_agents_md: dict[str, str] | None = None,
     api_standards_skill: str | None = None,
-) -> str:
-    return prompt(
-        "reviewer/main",
-        repo_owner=repo_owner or "<owner>",
-        repo_name=repo_name or "<repo>",
-        pr_number=pr_number if pr_number != "" else "<pr_number>",
-        reviewer_eval=reviewer_eval,
-        approval_policy=approval_policy or "",
-        org_guidelines=org_guidelines or "",
-        repo_style_prompt=repo_style_prompt or "",
-        agents_md_content=agents_md_content or "",
-        scoped_agents_md=[
-            (path, posixpath.dirname(path), content)
-            for path, content in (scoped_agents_md or {}).items()
-        ],
-        api_standards_skill=api_standards_skill or "",
+    skills_prompt: str | None = None,
+) -> SystemPrompt:
+    """The reviewer's system prompt: what every review shares, then what its repository's
+    do, then what depends on the pull request's changed files and checkout, such as the
+    approval policy, which stays out of the run context beside author-controlled text.
+
+    The pull request itself is named in the run context, so a review's first model call
+    reads the parts ahead of its own from the cache other reviews wrote.
+    """
+    return SystemPrompt(
+        shared=prompt(
+            "reviewer/main",
+            reviewer_eval=reviewer_eval,
+            approval_assessment=bool(approval_policy),
+        ),
+        workspace=prompt(
+            "reviewer/repository",
+            org_guidelines=org_guidelines or "",
+            repo_style_prompt=repo_style_prompt or "",
+            agents_md_content=agents_md_content or "",
+            api_standards_skill=api_standards_skill or "",
+        ),
+        thread="\n\n".join(
+            part
+            for part in (
+                prompt("reviewer/approval-policy-section", approval_policy=approval_policy)
+                if approval_policy and not reviewer_eval
+                else "",
+                prompt(
+                    "reviewer/scoped-conventions",
+                    scoped_agents_md=[
+                        (path, posixpath.dirname(path), content)
+                        for path, content in scoped_agents_md.items()
+                    ],
+                )
+                if scoped_agents_md
+                else "",
+                skills_prompt or "",
+            )
+            if part
+        ),
     )
 
 
@@ -887,9 +910,6 @@ async def prepare_reviewer_run(
             )
 
     system_prompt = _reviewer_system_prompt(
-        repo_owner=repo_owner,
-        repo_name=repo_name,
-        pr_number=pr_number if isinstance(pr_number, int) else "",
         reviewer_eval=reviewer_eval,
         org_guidelines=org_guidelines,
         approval_policy=approval_policy,
@@ -897,6 +917,7 @@ async def prepare_reviewer_run(
         agents_md_content=agents_md_content,
         scoped_agents_md=scoped_agents_md,
         api_standards_skill=api_standards_skill,
+        skills_prompt=checkout.skills_prompt,
     )
     run_context = prompt(
         "reviewer/run-context",
@@ -916,12 +937,10 @@ async def prepare_reviewer_run(
             if block
         ],
     )
-    if checkout.skills_prompt:
-        system_prompt = f"{system_prompt}\n\n{checkout.skills_prompt}"
 
     prepared: dict[str, Any] = {
         "work_dir": work_dir,
-        "rendered_system_prompt": system_prompt,
+        **system_prompt.state(),
         "messages": [HumanMessage(content=run_context, id=f"run-context:{uuid.uuid4()}")],
         "review_approval_policy": approval_policy,
         "review_approval_errors": policy.errors if policy is not None else [],

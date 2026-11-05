@@ -207,6 +207,7 @@ def _code_mode(
         subagents=False,
         mode="turn",
         backend_tools=backend_tools,
+        listed_in_messages=True,
     )
 
 

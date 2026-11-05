@@ -148,6 +148,7 @@ from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError
 from openswe.config import ENV
 from openswe.github.proxy import proxy_token_set_since
 from openswe.incidents.runtime import IncidentSession
+from openswe.input_messages import run_context
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.model_selection import classify_route
 from openswe.middleware.notify_step_limit import notify_step_limit
@@ -668,7 +669,10 @@ class TokenRun:
 
         async def read() -> IncidentContext:
             incident = await self._incident()
-            return IncidentContext(instructions=await incident.context(humans))
+            instructions = await incident.context(humans)
+            return IncidentContext(
+                instructions=run_context("incident", instructions) if instructions.strip() else ""
+            )
 
         return await in_graph_context(
             {**self.config, "run_name": "incident_context"}, lambda _runtime: read()

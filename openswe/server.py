@@ -828,6 +828,19 @@ AGENT_TOOLS: Final = (
     remove_slack_bot,
 )
 
+# Offered to the model in every agent run, whether or not the run may use them, so the
+# tools offered stay the same from run to run; a run that may not use one refuses it.
+ALWAYS_OFFERED_TOOLS: Final = (
+    background_execute,
+    connect_managed_tools,
+    control_worker,
+    message_task_thread,
+    monitor,
+    slack_no_reply_needed,
+    slack_reply,
+    switch_to_performance_model,
+)
+
 
 def workspace_slug(cfg: RunConfig) -> str | None:
     """The workspace this thread selected, if any."""
@@ -1049,17 +1062,10 @@ _NOT_FROM_CODE = (
         }
     )
 )
-# Everyday tools code mode still offers the model directly.
-_DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {
-    SEARCH_TOOLS,
-    "monitor",
-    "open_pull_request",
-    "web_search",
-    "fetch_url",
-    # A lesson is worth keeping the moment it is learned, not after a search for the tool.
-    "remember",
-    "forget",
-}
+# Everyday tools code mode still offers the model directly. Every other tool it calls
+# from code, where the run's tools can differ from person to person and run to run without
+# changing the tools offered to the model, which the provider's prompt cache keys on.
+_DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {SEARCH_TOOLS, "monitor", "web_search", "fetch_url"}
 
 
 def callable_from_code(name: str) -> bool:
@@ -2269,6 +2275,10 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         route for route in files.routes if route not in skill_stores.sources
     )
     surface.code_mode = True
+    surface.always_offered = {
+        _registered_tool_name(tool): tool
+        for tool in apply_tool_descriptions(ALWAYS_OFFERED_TOOLS, _tool_description_values())
+    }
     surface.excluded = (
         _slack_ask_excluded_tools(cfg)
         if slack_ask_mode
