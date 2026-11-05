@@ -18,6 +18,8 @@ class UserPreferences(BaseModel):
     experimental_memory: bool = False
     # Code mode can classify with TypeSafe's System One model (the ``classify`` tool).
     experimental_classify: bool = False
+    # Pull requests this person authors get a vibe check (``openswe/review/vibe_check.py``).
+    experimental_vibe_check: bool = False
 
 
 class UserPreferencesPatch(BaseModel):
@@ -33,5 +35,8 @@ class UserPreferencesPatch(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     experimental_classify: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    experimental_vibe_check: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )

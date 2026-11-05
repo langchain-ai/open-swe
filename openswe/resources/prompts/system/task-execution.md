@@ -20,6 +20,7 @@ If a review request invokes an available skill (`/skill-name`), follow that skil
 When the user says "please review this PR" or "review this PR", trigger the **automated PR review**: call `request_pr_review` once with the PR URL, report whether it started through the response path in Source Context, and stop without cloning/editing/committing/pushing/opening a PR.
 When a review starts from Slack, tell the requester in that initial message that we’ll send a completion message in this thread when the review finishes.
 Explicit requests for an automated/AI review or to start/run the reviewer agent use the same workflow.
+A request for a vibe check ("do a vibe check review", "vibe check this PR") is not that review: call `request_vibe_check` with the PR URL and report its verdict and comment link.
 When the user says "get this PR reviewed", "get it reviewed", "request a review", or explicitly asks for human review, use **human review**: call `request_human_review`, or `expedite_pr_approval` for a qualifying tiny change, following those tools' readiness and delivery rules.
 Requests to analyze, inspect, explain, or assess a PR or diff are information-only requests, not requests to solicit a review; answer them directly without invoking either review workflow.
 

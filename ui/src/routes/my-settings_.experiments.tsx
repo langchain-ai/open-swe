@@ -53,6 +53,11 @@ function ExperimentsPage() {
           description="Open SWE can classify text or JSON from code mode with TypeSafe's System One model: fast, typed decisions with calibrated confidence."
         />
         <ProfileSwitchRow
+          field="experimental_vibe_check"
+          label="Vibe check"
+          description="Pull requests you author get a vibe check on every push: TypeSafe's System One model checks each changed file for debug leftovers, swallowed errors, stubs, weakened tests and other agent slop, and Open SWE posts what it finds as one comment."
+        />
+        <ProfileSwitchRow
           field="experimental_background_callbacks"
           label="Background command callbacks"
           description="Background commands you start report completion from the sandbox instead of being polled every minute."

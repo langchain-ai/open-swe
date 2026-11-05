@@ -47,6 +47,8 @@ from openswe.notifications.service import AppNotification
 
 __all__ = ["WORKER"]
 from openswe.reconcile import reconcile_stale_runs
+from openswe.review.vibe_check import JOB_KIND as VIBE_CHECK
+from openswe.review.vibe_check import run_vibe_check
 from openswe.review_guide.sessions import ARCHIVE_JOB as REVIEW_GUIDE_ARCHIVE
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.sandboxes.retry import (
@@ -78,6 +80,7 @@ _FIRE_CLAIM_TTL: Final = timedelta(days=2)
 
 WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
 WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
+WORKER.register(VIBE_CHECK)(run_vibe_check)
 
 
 def _text(job: Job, key: str) -> str | None:

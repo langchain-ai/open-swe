@@ -340,6 +340,7 @@ export interface Profile {
   experimental_conditional_approval?: boolean
   experimental_memory?: boolean
   experimental_classify?: boolean
+  experimental_vibe_check?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -360,6 +361,7 @@ export interface ProfileUpdate {
   experimental_conditional_approval?: boolean
   experimental_memory?: boolean
   experimental_classify?: boolean
+  experimental_vibe_check?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean

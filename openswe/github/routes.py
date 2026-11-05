@@ -7,6 +7,7 @@ from openswe.github import webhook as service
 from openswe.github.repo_cache import forget_cached_repos
 from openswe.human_review.completed_reviews import CompletedReview
 from openswe.merge_queue.controller import wake_native_queue
+from openswe.review.vibe_check import VibeCheck
 from openswe.review_guide.launch import notify_pr_updated
 from openswe.schedules import store as schedules
 from openswe.ui_invalidations import Topic
@@ -152,6 +153,7 @@ async def github_webhook(
             if gate_rejection is not None:
                 return gate_rejection
             background_tasks.add_task(service.process_github_pr_walkthrough, payload)
+            background_tasks.add_task(VibeCheck.on_pull_request_event, payload)
         if action in {"opened", "closed"}:
             background_tasks.add_task(_launch_automations, event_type, payload, delivery_id)
         if action in {"opened", "edited"} or action in common.GH_PR_AGENT_STATE_ACTIONS:
