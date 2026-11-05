@@ -23,7 +23,6 @@ import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
-import { formatRelativeTime } from "@/lib/utils"
 
 import type {
   AgentPullRequest,
@@ -141,11 +140,6 @@ export function AgentThreadView({
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const source = useThreadSource()
-  const [dismissedWarning, setDismissedWarning] = useState("")
-  const workspaceWarningKey = JSON.stringify([
-    thread.id,
-    source.kind === "transcript" ? source.workspaceStale : null,
-  ])
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
@@ -834,25 +828,6 @@ export function AgentThreadView({
             >
               The last run hit an error before it could finish. Send another
               message to retry.
-            </Banner>
-          </div>
-        )}
-        {source.kind === "transcript" && source.workspaceStale && (
-          <div
-            hidden={dismissedWarning === workspaceWarningKey}
-            className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3"
-          >
-            <Banner
-              key={workspaceWarningKey}
-              intent="warning"
-              dismissible
-              onDismiss={() => setDismissedWarning(workspaceWarningKey)}
-            >
-              {`The ${source.workspaceStale.workspaceName} workspace image this sandbox started from ${
-                source.workspaceStale.capturedAt
-                  ? `was captured ${formatRelativeTime(Date.parse(source.workspaceStale.capturedAt))}`
-                  : "has never been refreshed"
-              }, so its repositories may be out of date. Open SWE continued anyway and is refreshing the image in the background.`}
             </Banner>
           </div>
         )}
