@@ -112,7 +112,7 @@ export function FindingNote({
         </Button>
         {open && (
           <div
-            data-reply-part={`Open SWE finding at ${findingLocation(finding)}: ${finding.title}`}
+            data-reply-part={`Robin finding at ${findingLocation(finding)}: ${finding.title}`}
             className="border-t border-subtle px-space-3 pt-space-2 pb-space-2"
           >
             <div className="text-xs leading-[1.6]">

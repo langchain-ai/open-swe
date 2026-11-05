@@ -59,7 +59,7 @@ export function ApprovalDialog({
           <>
             <DialogTitle>Open this link?</DialogTitle>
             <DialogDescription>
-              {name} wants to open a page outside Open SWE in a new tab.
+              {name} wants to open a page outside Robin in a new tab.
             </DialogDescription>
             <code className="rounded-md border border-default bg-surface-level-1 p-space-2 text-xs break-all text-primary">
               {approval.url}
