@@ -134,7 +134,10 @@ export function StepIntro({ id }: { id: string }) {
   const { step } = group
   return (
     // Pulled down over the step item's hidden placeholder line, so the files follow closely.
-    <div className="-mb-5 pt-space-1 font-sans max-sm:px-space-4">
+    <div
+      data-reply-part={`walkthrough step ${step.index}: ${step.title}`}
+      className="-mb-5 pt-space-1 font-sans max-sm:px-space-4"
+    >
       <h3 className="text-sm leading-6 font-semibold text-primary">
         <InlineCode text={step.title} />
       </h3>

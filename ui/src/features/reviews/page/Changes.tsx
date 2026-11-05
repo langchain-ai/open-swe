@@ -31,6 +31,10 @@ import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
 import { toPierreSide } from "@/features/reviews/lib/lineRange"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import {
+  SelectionReply,
+  pullRequestPassage,
+} from "@/features/agents/components/SelectionReply"
 import { useAskAboutLines } from "./askAboutLines"
 import { ChangesToolbar } from "./ChangesToolbar"
 import {
@@ -148,6 +152,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   const setComposer = useReviewPage((state) => state.setComposer)
   const setActive = useReviewPage((state) => state.setActive)
   const setEntryOrder = useReviewPage((state) => state.setEntryOrder)
+  const replyInChat = useReviewPage((state) => state.replyInChat)
   const theme = useResolvedTheme()
   const [storedOverflow] = useDiffOverflow()
   const files = diff.data?.files ?? []
@@ -528,6 +533,11 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
                 renderCustomHeader={renderCustomHeader}
                 renderAnnotation={renderAnnotation}
                 onScroll={onScroll}
+              />
+              <SelectionReply
+                containerRef={containerRef}
+                readPassage={pullRequestPassage}
+                onReply={replyInChat}
               />
               <ReadNudge groups={stepGroups} />
               <FindBar />

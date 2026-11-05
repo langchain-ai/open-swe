@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { beforeEach, describe, expect, it } from "vitest"
 
 import type { ReviewDiffFile, ReviewWalkthrough } from "@/lib/api"
@@ -136,6 +138,29 @@ describe("the page's lifetimes", () => {
     expect(state.replyDrafts.get(42)).toBe("a reply")
     expect(state.expandedFinding).toBe("finding-1")
     expect(state.threadsOpen.get(42)).toBe(true)
+  })
+
+  it("hands passage replies to chat in order and only once", () => {
+    const firstReply = {
+      source: "pull_request" as const,
+      part: "description",
+      before: "",
+      selection: "Opening a PR.",
+      after: "",
+      comment: "Draft?",
+    }
+    const secondReply = { ...firstReply, comment: "Which repository?" }
+
+    page().setRailTab("discussion")
+    page().replyInChat(firstReply)
+    page().replyInChat(secondReply)
+
+    expect(page().railTab).toBe("chat")
+    expect(page().takeChatReply(secondReply)).toBe(false)
+    expect(page().takeChatReply(firstReply)).toBe(true)
+    expect(page().takeChatReply(firstReply)).toBe(false)
+    expect(page().takeChatReply(secondReply)).toBe(true)
+    expect(page().chatReplies).toEqual([])
   })
 
   it("drops drafts on another pull request, and folds on a new head", () => {
