@@ -413,6 +413,15 @@ ENV.var(
     "`preview` also lets startup drop superseded migration revisions and turns off reviewer auto-assignment.",
 )
 ENV.var(
+    "OPENSWE_SOURCE_REPO",
+    "GitHub repository (owner/name) the agent changes when asked to change Open SWE itself.",
+    default="langchain-ai/open-swe",
+)
+ENV.var(
+    "OPENSWE_SOURCE_PATH",
+    "Directory of OPENSWE_SOURCE_REPO that holds Open SWE, when it is not the repository root.",
+)
+ENV.var(
     "POSTHOG_API_KEY",
     "Optional PostHog project API key; public by design, it is also served to the dashboard "
     "for browser capture.",
