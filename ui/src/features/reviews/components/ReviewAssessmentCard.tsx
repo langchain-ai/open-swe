@@ -158,7 +158,10 @@ function AssessmentCard({
       )}
       <details className="mt-space-2 text-xs text-secondary">
         <summary className="cursor-pointer">Why this assessment?</summary>
-        <p className="mt-space-2 text-sm whitespace-pre-wrap text-primary">
+        <p
+          data-reply-part="Open SWE's risk assessment"
+          className="mt-space-2 text-sm whitespace-pre-wrap text-primary"
+        >
           {assessment.explanation}
         </p>
         <p className="mt-space-2">

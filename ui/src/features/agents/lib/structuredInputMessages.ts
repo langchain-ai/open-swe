@@ -185,7 +185,12 @@ function splitContent(
 }
 
 const REPLY_ELEMENT_PATTERN = /(?:^|\n)<reply>\n([\s\S]*?)\n<\/reply>/g
-const PASSAGE_SOURCES = new Set<string>(["conversation", "terminal", "file"])
+const PASSAGE_SOURCES = new Set<string>([
+  "conversation",
+  "terminal",
+  "file",
+  "pull_request",
+])
 
 function isPassageSource(value: string | undefined): value is PassageSource {
   return value !== undefined && PASSAGE_SOURCES.has(value)
@@ -198,11 +203,13 @@ function replyElements(data: string): Array<PassageReply> {
     const source = fields.get("source")
     const selection = fields.get("selection")
     if (!isPassageSource(source) || !selection) return []
+    const part = fields.get("part")
     const file = fields.get("file")
     const lines = fields.get("lines")
     return [
       {
         source,
+        ...(part ? { part } : {}),
         ...(file ? { file } : {}),
         ...(lines ? { lines } : {}),
         before: fields.get("before") ?? "",

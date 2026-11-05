@@ -65,6 +65,7 @@ export function AgentNoteCard({
         )}
       </div>
       <div
+        data-reply-part={`Open SWE's note on ${location}`}
         className={
           closed
             ? "line-clamp-2 px-space-3 pt-space-1 pb-space-2 leading-[1.6] text-secondary"
