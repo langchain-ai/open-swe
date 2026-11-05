@@ -132,6 +132,53 @@ async def test_read_thread_tool_paginates_and_resolves_authors(slack_api, grant_
     ]
 
 
+@pytest.mark.parametrize("code", ["not_in_channel", "channel_not_found", "thread_not_found"])
+async def test_read_thread_tool_reports_source_access_failure(
+    slack_api: SlackAPI, grant_tool_access, code: str
+) -> None:
+    from openswe.slack.tools.read_thread_messages import slack_read_thread_messages
+
+    grant_tool_access(slack_context=True)
+    slack_api.respond({"ok": False, "error": code})
+
+    result = await slack_read_thread_messages("C1", "1.0")
+
+    assert result["success"] is False
+    assert result["slack_error"] == code
+    assert code in result["error"]
+    if code == "not_in_channel":
+        assert "Forwarding a message does not grant access" in result["error"]
+        assert "invite Robin" in result["error"]
+        assert "upload" in result["error"]
+    else:
+        assert "invite Robin" not in result["error"]
+    if code == "channel_not_found":
+        assert "could not be found or accessed" in result["error"]
+        assert "Upload" in result["error"]
+
+
+async def test_read_thread_tool_does_not_report_partial_history_as_success(
+    slack_api: SlackAPI, grant_tool_access
+) -> None:
+    from openswe.slack.tools.read_thread_messages import slack_read_thread_messages
+
+    grant_tool_access(slack_context=True)
+    slack_api.respond(
+        {
+            "ok": True,
+            "messages": [{"ts": "1.0", "user": "U1", "text": "First message"}],
+            "response_metadata": {"next_cursor": "page2"},
+        }
+    )
+    slack_api.respond({"ok": False, "error": "ratelimited"})
+
+    result = await slack_read_thread_messages("C1", "1.0")
+
+    assert result["success"] is False
+    assert result["slack_error"] == "rate_limited"
+    assert "invite Robin" not in result["error"]
+
+
 _PUBLIC_CHANNEL = {
     "ok": True,
     "channel": {
