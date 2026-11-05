@@ -41,7 +41,6 @@ import {
   replyBody,
 } from "@/features/agents/components/chat/ReplyCard"
 import { ManagedToolsConnectionCard } from "@/features/agents/components/chat/ManagedToolsConnectionCard"
-import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
 
@@ -443,9 +442,6 @@ export function AgentTurn({
         )
       }
 
-      case "sql-item":
-        return <SqlResultItem key={item.key} chunk={item.chunk} />
-
       case "routed-message-item":
       case "tool-item":
         return (
@@ -553,45 +549,4 @@ function elapsedMs(start?: string, end?: string): number | null {
   if (!start || !end) return null
   const delta = Date.parse(end) - Date.parse(start)
   return Number.isFinite(delta) && delta > 0 ? delta : null
-}
-
-/**
- * A SQL result table parses the whole output, so a chunk that carries only the
- * transcript's preview has to fetch the rest before it can show anything
- * faithful.
- */
-function SqlResultItem({ chunk }: { chunk: ToolExecutionChunk }) {
-  const { loadOutput, output } = chunk
-  const [loaded, setLoaded] = useState<{
-    load: typeof loadOutput
-    text: string
-  } | null>(null)
-
-  useEffect(() => {
-    if (!loadOutput) return
-    let active = true
-    void loadOutput().then(
-      (text) => {
-        if (active) setLoaded({ load: loadOutput, text })
-      },
-      () => {
-        // The preview stays up; the row's expand path reports load failures.
-      }
-    )
-    return () => {
-      active = false
-    }
-  }, [loadOutput])
-
-  const query =
-    typeof chunk.input?.query === "string" ? chunk.input.query.trim() : ""
-
-  return (
-    <div>
-      {query && <CodeBlock text={query} language="sql" />}
-      <SqlResultTable
-        output={loaded && loaded.load === loadOutput ? loaded.text : output}
-      />
-    </div>
-  )
 }
