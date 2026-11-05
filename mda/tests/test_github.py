@@ -393,6 +393,7 @@ class _Backend:
             conversation_started=False, sender_email_known=True, trusted=["ada"]
         )
         self.rules = GitHubAutomationRules(automations=[])
+        self.rules_error: Exception | None = None
         self.planned = PlannedGitHubIssueRun(
             starts=True,
             run=GitHubIssueRun(
@@ -416,6 +417,8 @@ class _Backend:
             trusted = [login for login in self.issue_facts.trusted if login in asked]
             return self.issue_facts.model_copy(update={"trusted": trusted})
         if endpoint is GITHUB_AUTOMATION_RULES:
+            if self.rules_error is not None:
+                raise self.rules_error
             return self.rules
         assert endpoint is ACT_ON_GITHUB_DELIVERY
         act = cast(ActOnGitHubDelivery, request)
@@ -685,8 +688,41 @@ async def test_a_pull_request_opened_starts_only_its_automations(backend: _Backe
     started = _runs(await github.on_event(_event("pull_request", {"action": "opened"}), _THREAD))
 
     assert len(started) == 1
-    [act] = backend.called(ACT_ON_GITHUB_DELIVERY)
+    # The backend's own work first, in a call of its own; then the automations.
+    work, act = backend.called(ACT_ON_GITHUB_DELIVERY)
+    assert work.work and not work.automations
+    assert not act.work
     assert ([fired.automation_id for fired in act.automations], act.issue_run) == (["a-0"], None)
+
+
+async def test_an_automation_that_fails_keeps_the_backends_work(backend: _Backend) -> None:
+    """Automations used to run in the backend's background, where one that failed
+    stopped nothing else: a review still started."""
+    backend.rules_error = RuntimeError("the rules could not be read")
+
+    started = await github.on_event(_event("pull_request", {"action": "opened"}), _THREAD)
+
+    assert started is None
+    [work] = backend.called(ACT_ON_GITHUB_DELIVERY)
+    assert work.work and not work.automations
+    assert [msg_id for *_, msg_id in backend.calls] == [
+        "msg_delivery-1_record",
+        "msg_delivery-1_work",
+        "msg_delivery-1_automations",
+    ]
+
+
+async def test_an_automation_that_fails_keeps_the_mentions_run(
+    backend: _Backend, gh: _GitHub
+) -> None:
+    backend.rules_error = RuntimeError("the rules could not be read")
+
+    started = _runs(await github.on_event(_event("issues", _issue()), _THREAD))
+
+    # The mention's run on the issue's conversation still starts.
+    assert len(started) == 1
+    [act] = [act for act in backend.called(ACT_ON_GITHUB_DELIVERY) if act.issue_run]
+    assert act.automations == []
 
 
 async def test_a_delivery_no_automation_matches_asks_nothing_more(backend: _Backend) -> None:

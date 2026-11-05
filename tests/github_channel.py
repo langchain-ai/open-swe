@@ -152,6 +152,15 @@ async def deliver_as_mda(
             client, RECORD_GITHUB_DELIVERY, delivery, f"msg_{delivery_id}_record", secret
         )
         routed = MDA_ROUTES.route(event_type, delivery.payload, facts, from_app=from_app)
+        if routed.work:
+            # The backend's own work first, in a call of its own, as the channel sends it.
+            await _call(
+                client,
+                ACT_ON_GITHUB_DELIVERY,
+                ActOnGitHubDelivery(**delivery.model_dump(), work=list(routed.work)),
+                f"msg_{delivery_id}_work",
+                secret,
+            )
         fired = (
             await _fired(client, event_type, delivery.payload, delivery_id, secret)
             if routed.automations
@@ -167,13 +176,12 @@ async def deliver_as_mda(
         planned = None
         automation_runs: list[GitHubThreadRun] = []
         comment_run = None
-        if routed.work or routed.comment or fired or issue_run:
+        if routed.comment or fired or issue_run:
             acted = await _call(
                 client,
                 ACT_ON_GITHUB_DELIVERY,
                 ActOnGitHubDelivery(
                     **delivery.model_dump(),
-                    work=list(routed.work),
                     comment=routed.comment,
                     mentioned=routed.mentioned,
                     automations=fired,

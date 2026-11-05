@@ -2,11 +2,13 @@
 
 Every delivery goes to the backend's event log (``record_github_delivery``), which
 answers what Open SWE knows about its repository. This side decides what the
-delivery starts (``rt.github_routes``), and tells the backend in one call
-(``act_on_github_delivery``): the backend's work, such as a review or a CI wakeup,
-which the backend runs once per delivery; the automations it fires; a pull
-request comment to route; and for an ``@openswe`` mention on an issue, the coding
-agent's run on the issue's conversation. This side writes the runs' prompts: each
+delivery starts (``rt.github_routes``), and tells the backend
+(``act_on_github_delivery``): first, in a call of its own, the backend's work,
+such as a review or a CI wakeup, which the backend runs once per delivery; then
+the automations it fires, a pull request comment to route, and for an
+``@openswe`` mention on an issue, the coding agent's run on the issue's
+conversation. An automation that fails fires nothing and stops nothing else, as
+when the backend ran them in the background. This side writes the runs' prompts: each
 automation's (``rt.github_automations``, from the repository's rules,
 ``github_automation_rules``) and the issue's (``rt.github_issues``, from who is an
 Open SWE user, ``github_issue_facts``). The backend checks and signs the runs, and
@@ -14,8 +16,8 @@ this side starts them: each automation's on a thread of its own, a comment's on 
 pull request's own thread, the issue's on its conversation. A comment's run on the
 agent's own thread the backend still writes and starts itself: it reads the pull
 request's comments as the person and filters a private thread's to its owner's. So
-a delivery takes two calls, and one that fires automations or mentions Open SWE on
-an issue a call or two more. An installation event, sent when the App is
+a delivery takes a call or two, and one that fires automations or mentions Open
+SWE on an issue a call or two more. An installation event, sent when the App is
 installed, removed or suspended or its repositories change, is logged the same way
 and drops the backend's cached repository listings.
 """
@@ -80,6 +82,14 @@ async def on_event[Payload: GitHubPayload](
         RECORD_GITHUB_DELIVERY, delivery, msg_id=f"msg_{event.delivery_id}_record"
     )
     routed = route(event.name, delivery.payload, facts, from_app=event.from_app)
+    if routed.work:
+        # The backend's own work goes first, in a call of its own: nothing planned
+        # after it, such as an automation that fails, keeps a review from running.
+        await ask_backend(
+            ACT_ON_GITHUB_DELIVERY,
+            ActOnGitHubDelivery(**delivery.model_dump(), work=list(routed.work)),
+            msg_id=f"msg_{event.delivery_id}_work",
+        )
     mention = IssueMention.of(event.name, delivery.payload) if routed.issue_run else None
     issue_run, automations = await asyncio.gather(
         _issue_run_request(event.delivery_id, mention, thread),
@@ -87,13 +97,12 @@ async def on_event[Payload: GitHubPayload](
         if routed.automations
         else _none(),
     )
-    if not (routed.work or routed.comment or automations or issue_run):
+    if not (routed.comment or automations or issue_run):
         return None
     acted = await ask_backend(
         ACT_ON_GITHUB_DELIVERY,
         ActOnGitHubDelivery(
             **delivery.model_dump(),
-            work=list(routed.work),
             comment=routed.comment,
             mentioned=routed.mentioned,
             automations=automations,
@@ -116,16 +125,27 @@ async def _none() -> list[FiredGitHubAutomation]:
 
 
 async def _automations(delivery: GitHubDelivery, repository: str) -> list[FiredGitHubAutomation]:
-    """The repository's automations the delivery fires, each with its run's prompt."""
+    """The repository's automations the delivery fires, each with its run's prompt.
+
+    One that can't be worked out fires nothing, with a log line saying so: the
+    delivery's other work, such as a mention's run, goes on without it.
+    """
     subject = SubjectEvent.of(delivery.event, delivery.payload)
     if subject is None or not _REPOSITORY.fullmatch(repository):
         return []
-    rules = await ask_backend(
-        GITHUB_AUTOMATION_RULES,
-        GitHubAutomationRulesRequest(repository=repository, author=subject.author[:64]),
-        msg_id=f"msg_{delivery.delivery_id}_automations",
-    )
-    return subject.fired(rules)
+    try:
+        rules = await ask_backend(
+            GITHUB_AUTOMATION_RULES,
+            GitHubAutomationRulesRequest(repository=repository, author=subject.author[:64]),
+            msg_id=f"msg_{delivery.delivery_id}_automations",
+        )
+        return subject.fired(rules)
+    except Exception:
+        logger.exception(
+            "GitHub automations failed; the delivery's other work goes on",
+            extra={"github_delivery": delivery.delivery_id, "github_event": delivery.event},
+        )
+        return []
 
 
 async def _issue_run_request(

@@ -225,6 +225,38 @@ async def test_one_piece_of_work_failing_runs_the_rest(
     settled.assert_awaited_once()
 
 
+async def test_automations_that_fail_to_plan_start_nothing_and_stop_nothing(
+    app: FastAPI, prepared: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Automations used to run in the background, where one that failed stopped
+    nothing else; planning them here keeps that."""
+    monkeypatch.setattr(
+        channel.schedules,
+        "plan_github_automations",
+        AsyncMock(side_effect=RuntimeError("the automations could not be planned")),
+    )
+    act = ActOnGitHubDelivery(
+        event="issues",
+        delivery_id="delivery-1",
+        payload=_issue_payload(),
+        automations=[
+            {
+                "automation_id": "a-0",
+                "event": "issues.opened",
+                "prompt": "Triage it",
+            }
+        ],
+        issue_run=GitHubIssueRunRequest(thread_id=THREAD, input=ISSUE_RUN_INPUT),
+    )
+
+    acted = await call_as_mda(app, ACT_ON_GITHUB_DELIVERY, act, secret=SERVICE_SECRET)
+
+    assert acted.automations == []
+    # The mention's run is still planned.
+    assert acted.issue_run is not None and acted.issue_run.starts
+    prepared.assert_awaited_once()
+
+
 async def test_work_runs_once_per_delivery(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:

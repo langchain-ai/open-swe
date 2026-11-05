@@ -390,18 +390,27 @@ async def act_on_github_delivery(
     """Take the work the channel chose for a delivery, and plan the runs it starts."""
     if act.work:
         await _accept_work(call, act)
-    automations = (
-        await schedules.plan_github_automations(
-            act.event, cast(_Payload, act.payload), act.delivery_id, act.automations
-        )
-        if act.automations
-        else []
-    )
+    automations = await _plan_automations(act) if act.automations else []
     comment_run = await _route_comment(act) if act.comment else None
     issue_run = None if act.issue_run is None else await _plan_issue_run(act, act.issue_run)
     return GitHubDeliveryActed(
         issue_run=issue_run, automations=automations, comment_run=comment_run
     )
+
+
+async def _plan_automations(act: ActOnGitHubDelivery) -> list[GitHubThreadRun]:
+    """The runs of the automations the delivery fires; none when planning them fails,
+    with a log line, so the delivery's comment and issue runs still start."""
+    try:
+        return await schedules.plan_github_automations(
+            act.event, cast(_Payload, act.payload), act.delivery_id, act.automations
+        )
+    except Exception:
+        logger.exception(
+            "Planning GitHub automations failed; the delivery's other work goes on",
+            extra={"github_delivery": act.delivery_id, "github_event": act.event},
+        )
+        return []
 
 
 def _no_run(reason: str, **fields: str) -> PlannedGitHubIssueRun:
