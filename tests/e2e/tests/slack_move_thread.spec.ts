@@ -62,7 +62,7 @@ async function movedRoot(
 }
 
 test.describe("Slack thread moves", () => {
-  test("cross-channel move preserves destination state and detaches the source", async ({
+  test("cross-channel move preserves destination state and ignores the source", async ({
     request,
   }) => {
     await request.post("/control/reset");
@@ -93,17 +93,24 @@ test.describe("Slack thread moves", () => {
     const sourceRetag = await send(request, {
       channel: "C_SOURCE",
       thread_ts: source.thread_ts,
-      text: "<@U0BOT> E2E_SOURCE_RETAG start a fresh Open SWE thread",
+      text: "<@U0BOT> E2E_SOURCE_RETAG revisit the moved Open SWE thread",
       mention_bot: true,
     });
-    expect(sourceRetag.thread_id).not.toBe(source.thread_id);
-    await expect
-      .poll(() => stateText(request, sourceRetag.thread_id), {
-        timeout: 60_000,
-      })
-      .toContain("E2E_MOVE_THREAD");
-    expect(await stateText(request, sourceRetag.thread_id)).toContain(
+    expect(sourceRetag.webhook.status).toBe("ignored");
+    expect(sourceRetag.thread_id).toBe(source.thread_id);
+    expect(await stateText(request, source.thread_id)).not.toContain(
       "E2E_SOURCE_RETAG",
     );
+
+    const fresh = await send(request, {
+      channel: "C_SOURCE",
+      text: "<@U0BOT> E2E_FRESH_REQUEST start a separate task",
+      mention_bot: true,
+    });
+    expect(fresh.webhook.status).toBe("accepted");
+    expect(fresh.thread_id).not.toBe(source.thread_id);
+    await expect
+      .poll(() => stateText(request, fresh.thread_id), { timeout: 60_000 })
+      .toContain("E2E_FRESH_REQUEST");
   });
 });
