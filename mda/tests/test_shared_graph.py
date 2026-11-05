@@ -62,11 +62,13 @@ from runtime_api.catalog import (
     Catalog,
     LoopRules,
     ModelSpec,
+    ReplyRules,
     RunModels,
     SandboxCreate,
     SandboxSpec,
     SubagentSpec,
     ToolSpec,
+    WorkStateRules,
 )
 from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import Endpoint
@@ -980,6 +982,77 @@ async def test_finished_runs_release_their_tools_and_interpreters(
     )
     assert not interpreter._registry._slots
     assert not interpreter._ptc_tools_by_slot
+
+
+@pytest.mark.parametrize("invocation", ["direct", "return", "log", "discard", "throw"])
+@pytest.mark.parametrize("work_state", ["blocked", "complete", "wait"])
+async def test_goal_mode_recognizes_executed_tools_inside_eval(
+    monkeypatch: pytest.MonkeyPatch,
+    backend_calls: BackendCalls,
+    operation_contents: dict[str, str],
+    invocation: str,
+    work_state: str,
+) -> None:
+    name = "schedule_thread_wakeup" if work_state == "wait" else "report_work_state"
+    args: dict[str, JsonValue] = {"state": work_state, "message": "Finished"}
+    expression = f"await tools.{('scheduleThreadWakeup' if work_state == 'wait' else 'reportWorkState')}({json.dumps(args)})"
+    code = {
+        "return": expression,
+        "log": f"console.log({expression})",
+        "discard": f"{expression}; void 0",
+        "throw": f"{expression}; throw new Error('after execution')",
+    }.get(invocation, "")
+    call = ToolCall(
+        name=name if invocation == "direct" else "eval",
+        args=args if invocation == "direct" else {"code": code},
+        id="work",
+    )
+    replies = [AIMessage(content="", tool_calls=[call])]
+    if work_state != "wait":
+        replies.append(
+            AIMessage(
+                content="",
+                tool_calls=[ToolCall(name="slack_no_reply_needed", args={}, id="silence")],
+            )
+        )
+    replies.append(AIMessage(content="done"))
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=iter(replies)))
+    catalog = _catalog(name, "grant")
+    catalog.operations.append(
+        ToolSpec(name="slack_no_reply_needed", description="No reply", parameters={})
+    )
+    catalog = catalog.model_copy(
+        update={
+            "code_only": [name] if invocation != "direct" else [],
+            "loop": LoopRules(
+                work_state=WorkStateRules(
+                    tool="report_work_state",
+                    waits=["schedule_thread_wakeup"],
+                    nudge=["Keep working"],
+                ),
+                reply=None
+                if work_state == "wait"
+                else ReplyRules(
+                    tool="slack_reply",
+                    no_reply_tool="slack_no_reply_needed",
+                    replies=["report_work_state"],
+                    surface="slack",
+                    nudge=["Reply"],
+                ),
+            ),
+        }
+    )
+    operation_contents[name] = json.dumps({"success": True, "work_state": work_state})
+    operation_contents["slack_no_reply_needed"] = '{"success": true}'
+
+    await _run(InMemoryStore(), "goal", _context("agent", "token", catalog))
+
+    assert [
+        detail
+        for hook, _, detail in backend_calls
+        if hook == "operation" and detail and detail.startswith(name + ":")
+    ] == [f"{name}:grant"]
+    assert not [hook for hook, _, _ in backend_calls if hook == "reply_on_behalf"]
 
 
 async def test_code_mode_calls_tools_its_catalog_leaves_out(

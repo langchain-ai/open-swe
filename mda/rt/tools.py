@@ -11,7 +11,9 @@ result and its state updates. The file and shell tools are this runtime's own
 
 import logging
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import partial
 from typing import Final
 from uuid import uuid4
@@ -28,7 +30,7 @@ from managed_deepagents import (
     CredentialStoreError,
     connections,
 )
-from pydantic import JsonValue, TypeAdapter
+from pydantic import BaseModel, JsonValue, TypeAdapter
 from runtime_api.catalog import ToolSpec
 from runtime_api.endpoint import LONG_CALL_SECONDS, call
 from runtime_api.loop import ToolCallReport
@@ -77,6 +79,46 @@ _json = TypeAdapter(JsonValue)
 _json_list = TypeAdapter(list[dict[str, JsonValue]])
 _json_object = TypeAdapter(dict[str, JsonValue])
 _json_content = TypeAdapter(str | list[JsonValue])
+
+
+class ExecutedTool(BaseModel):
+    name: str
+    arguments: dict[str, JsonValue]
+    message: ToolMessage
+
+
+class ToolExecutions:
+    """Actual nested tool results carried on their enclosing call's checkpointed artifact."""
+
+    key: Final = "open_swe_executed_tools"
+    current: ContextVar[ToolExecutions | None] = ContextVar("tool_executions", default=None)
+
+    def __init__(self) -> None:
+        self.executed: list[ExecutedTool] = []
+
+    @contextmanager
+    def collecting(self) -> Iterator[None]:
+        token = self.current.set(self)
+        try:
+            yield
+        finally:
+            self.current.reset(token)
+
+    def record(self, name: str, arguments: Mapping[str, JsonValue], message: ToolMessage) -> None:
+        self.executed.append(ExecutedTool(name=name, arguments=dict(arguments), message=message))
+
+    def attach(self, message: ToolMessage) -> ToolMessage:
+        if not self.executed:
+            return message
+        artifact = message.artifact if isinstance(message.artifact, dict) else {}
+        return message.model_copy(
+            update={
+                "artifact": {
+                    **artifact,
+                    self.key: [e.model_dump(mode="json") for e in self.executed],
+                }
+            }
+        )
 
 
 class SandboxGoneError(RuntimeError):
@@ -273,12 +315,7 @@ async def called(
     *,
     cites_evidence: bool = False,
 ) -> ToolMessage | Command:
-    """Make one call of tool ``name`` with ``arguments``: ``make``, given the call's id.
-
-    Code mode calls tools directly, past the agent's tool-call chain that reports each
-    call and cites it as incident evidence, so a call it makes does both itself, under
-    the code mode call that ran it.
-    """
+    """Execute a tool, reporting nested code-mode calls and preserving their outcomes."""
     outer = reported_call()
     if outer is None or outer == runtime.tool_call_id:
         return await make(runtime.tool_call_id or "")
@@ -294,6 +331,13 @@ async def called(
         backend.outbox.finished(report, failure)
         raise
     message = result if isinstance(result, ToolMessage) else _answer(result, tool_call_id)
+    work = backend.run.catalog.loop.work_state
+    if (
+        work is not None
+        and name in {work.tool, *work.waits}
+        and (executions := ToolExecutions.current.get()) is not None
+    ):
+        executions.record(name, arguments, message)
     if cites_evidence:
         message = await cited(backend, name, arguments, message)
     backend.outbox.finished(report, message)

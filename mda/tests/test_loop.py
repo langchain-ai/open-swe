@@ -16,7 +16,7 @@ from pydantic import BaseModel, JsonValue
 from rt.backend import BackendCallError, OpenSweBackend, Run, RunContext
 from rt.loop import RunLoop
 from rt.middleware import BackendRunMiddleware
-from rt.tools import STATE_KEY
+from rt.tools import STATE_KEY, ToolExecutions
 from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
     Catalog,
@@ -509,6 +509,66 @@ async def test_goal_mode_work_is_sent_back_until_it_reports_its_state_or_waits(
     assert reported.jump_to is None and reported.update == {"work_state_nudges": 0}
     assert waiting.jump_to is None
     assert gave_up.jump_to is None and gave_up.update == {"work_state_nudges": 0}
+
+
+@pytest.mark.parametrize("tool", ["report_work_state", "schedule_thread_wakeup"])
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("outcome", ["success", "failure", "error", "new_request", "fabricated"])
+async def test_goal_mode_uses_only_this_turns_actual_successful_reports(
+    monkeypatch: pytest.MonkeyPatch, tool: str, nested: bool, outcome: str
+) -> None:
+    import json
+
+    backend, calls = _backend(
+        monkeypatch,
+        {},
+        LoopRules(
+            work_state=WorkStateRules(
+                tool="report_work_state", waits=["schedule_thread_wakeup"], nudge=["Keep working"]
+            ),
+            reply=_REPLY.model_copy(update={"replies": ["report_work_state"]}),
+        ),
+    )
+    loop = RunLoop(backend)
+    report = ToolMessage(
+        content=json.dumps({"success": outcome != "failure", "work_state": "complete"}),
+        tool_call_id="report",
+        status="error" if outcome == "error" else "success",
+    )
+    call = AIMessage(content="", tool_calls=[{"id": "report", "name": tool, "args": {}}])
+    if nested or outcome == "fabricated":
+        call = AIMessage(content="", tool_calls=[{"id": "eval", "name": "eval", "args": {}}])
+        executions = ToolExecutions()
+        if outcome != "fabricated":
+            executions.record(tool, {}, report)
+        report = executions.attach(ToolMessage(content=report.content, tool_call_id="eval"))
+    messages: list[BaseMessage] = [HumanMessage(content="Fix it"), call, report]
+    if outcome == "new_request":
+        messages.append(HumanMessage(content="Now fix the next problem"))
+    messages.append(AIMessage(content="Done"))
+
+    ended = await loop.after_model(
+        _state(*messages, reply_surface="slack" if tool == "report_work_state" else "web")
+    )
+
+    assert (ended.jump_to is None) is (outcome == "success")
+    assert not calls
+    if outcome == "success":
+        messages.extend(
+            [
+                AIMessage(
+                    content="",
+                    tool_calls=[{"id": "silence", "name": "slack_no_reply_needed", "args": {}}],
+                ),
+                ToolMessage(content='{"success": true}', tool_call_id="silence"),
+                AIMessage(content=""),
+            ]
+        )
+        assert (
+            await loop.after_model(
+                _state(*messages, reply_surface="slack" if tool == "report_work_state" else "web")
+            )
+        ).jump_to is None
 
 
 @pytest.mark.parametrize(

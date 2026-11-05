@@ -74,7 +74,7 @@ from rt.backend import (
     human_messages,
     run_call,
 )
-from rt.tools import STATE_KEY, run_id
+from rt.tools import STATE_KEY, ExecutedTool, ToolExecutions, run_id
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +246,28 @@ class _Turn:
             ):
                 self.messages = self.messages[index + 1 :]
                 break
+        nested: list[AnyMessage] = []
+        for message in self.messages:
+            if not isinstance(message, ToolMessage) or not isinstance(message.artifact, dict):
+                continue
+            for entry in message.artifact.get(ToolExecutions.key, []):
+                executed = ExecutedTool.model_validate(entry)
+                nested.extend(
+                    [
+                        AIMessage(
+                            content="",
+                            tool_calls=[
+                                {
+                                    "id": executed.message.tool_call_id,
+                                    "name": executed.name,
+                                    "args": executed.arguments,
+                                }
+                            ],
+                        ),
+                        executed.message,
+                    ]
+                )
+        self.messages.extend(nested)
 
     def calls(self) -> list[Mapping[str, object]]:
         return [

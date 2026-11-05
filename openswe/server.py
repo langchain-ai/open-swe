@@ -1052,6 +1052,8 @@ _NOT_FROM_CODE = (
 # Everyday tools code mode still offers the model directly.
 _DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {
     SEARCH_TOOLS,
+    "report_work_state",
+    "schedule_thread_wakeup",
     "monitor",
     "open_pull_request",
     "web_search",
