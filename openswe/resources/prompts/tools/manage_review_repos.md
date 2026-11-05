@@ -1,6 +1,6 @@
 Read or set automatic Robin reviews for one repository.
 Requires a currently authorized workspace admin and access to that repository.
-`read` requires a private dashboard thread or authenticated Slack DM; `set` also works in a verified sole-writer shared thread, returning only an acknowledgement.
+`read` requires a private dashboard thread or authenticated Slack DM; `set` also works in a verified sole-writer or admin-only shared thread, returning only an acknowledgement.
 Authorization is rechecked on every call.
 
 - `action`: `read` or `set`.

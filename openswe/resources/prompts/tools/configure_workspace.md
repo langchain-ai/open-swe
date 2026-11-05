@@ -1,7 +1,7 @@
 Update an existing workspace's definition without capturing or rebuilding the calling sandbox.
 
 Requires a currently authorized workspace admin.
-In a verified sole-writer shared thread, only an acknowledgement is returned; read existing values from a private admin surface.
+In a verified sole-writer or admin-only shared thread, only an acknowledgement is returned; read existing values from a private admin surface.
 
 - `workspace`: name or slug from `list_workspaces`.
 - `changes`: workspace definition fields to change, using the same schema and validation as the dashboard.

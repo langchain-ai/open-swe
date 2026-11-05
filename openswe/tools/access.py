@@ -2,7 +2,7 @@
 
 A tool declares where it may run with ``@access(Policy(...))``. The factory binds
 only the tools the run's access permits, and every call is rechecked so a thread
-that gains a second writer mid-run loses the tools that relied on it having one.
+that gains an unauthorized writer mid-run loses its shared-write permissions.
 """
 
 import functools
@@ -20,7 +20,12 @@ from openswe.memories.store import CURATOR_SOURCE
 from openswe.run_config import RunConfig
 from openswe.slack.client import SLACK_THREAD_MAX_MESSAGES, fetch_slack_thread_messages
 from openswe.source_context import SourceContext
-from openswe.tools.admin_gate import actor_is_admin, configurable, is_private_admin_surface
+from openswe.tools.admin_gate import (
+    actor_is_admin,
+    configurable,
+    is_private_admin_surface,
+    participant_is_admin,
+)
 from openswe.users import User
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_participants import (
@@ -104,7 +109,8 @@ class Policy:
 
     ``sole`` is ``None`` when the tool stays unavailable in shared threads even if
     only the actor has written there; otherwise it projects the result, because
-    everyone who can read the thread reads it.
+    everyone who can read the thread reads it. Admin writes also allow verified
+    admin-only participants, without granting access to personal tools.
     """
 
     trusted: Place
@@ -123,6 +129,7 @@ class Access:
     admin_thread: bool = False
     admin_surface: bool = False
     sole: bool = False
+    admin_participants: bool = False
     direct: bool = False
     slack_bot_channel: str | None = None
     # The run was started from a Slack thread; the bot's own reach applies there.
@@ -149,7 +156,8 @@ class Access:
         }[policy.trusted]
         if trusted and self._actor(policy.actor, sole=False):
             return "full"
-        if policy.sole is not None and self.sole and self._actor(policy.actor, sole=True):
+        shared_write = self.sole or (policy.actor == "admin" and self.admin_participants)
+        if policy.sole is not None and shared_write and self._actor(policy.actor, sole=True):
             return "sole"
         return None
 
@@ -181,56 +189,79 @@ async def _metadata(thread_id: str | None) -> dict[str, object]:
         return {}
 
 
-async def _slack_writers_are(context: SourceContext, login: str) -> bool:
-    slack = context.slack_thread
-    if slack is None:
+@dataclass(frozen=True)
+class _SharedWriters:
+    cfg: RunConfig
+    metadata: Mapping[str, object]
+    login: str | None
+
+    async def logins(self) -> set[str] | None:
+        if not self.login or not direct_user_run(self.cfg):
+            return None
+        if (
+            self.metadata.get("visibility", "public") != "public"
+            or self.metadata.get("owner_type") != "user"
+        ):
+            return None
+        context = SourceContext.from_metadata(self.metadata)
+        if self.cfg.slack_thread is not None:
+            context.slack_thread = self.cfg.slack_thread
+        if context.linear_issue is not None or context.github_issue is not None:
+            return None
+        logins = set(participant_logins(self.metadata.get(PARTICIPANT_LOGINS_KEY)))
+        if self.login.lower() not in logins:
+            return None
+        for email in participant_logins(self.metadata.get(PARTICIPANT_EMAILS_KEY)):
+            if email == (self.cfg.user_email or "").strip().lower():
+                continue
+            mapped = await User.login_for_email(email)
+            if not mapped:
+                return None
+            logins.add(mapped.lower())
+        slack_logins = await self.slack_logins(context)
+        return logins | slack_logins if slack_logins is not None else None
+
+    async def slack_logins(self, context: SourceContext) -> set[str] | None:
+        slack = context.slack_thread
+        if slack is None:
+            return set()
+        if not slack.channel_id or not slack.thread_ts:
+            return None
+        bot_user_id = ENV.SLACK_BOT_USER_ID.get()
+        try:
+            messages = await fetch_slack_thread_messages(
+                slack.channel_id, slack.thread_ts, complete=True
+            )
+        except Exception:
+            logger.warning("Could not read the whole Slack thread for access", exc_info=True)
+            return None
+        if not bot_user_id or not messages or len(messages) >= SLACK_THREAD_MAX_MESSAGES:
+            return None
+        user_ids: set[str] = set()
+        for message in messages:
+            user_id = message.get("user")
+            if user_id == bot_user_id:
+                continue
+            if message.get("subtype") in _IGNORED_SLACK_SUBTYPES:
+                continue
+            if message.get("bot_id") or message.get("bot_profile") or not isinstance(user_id, str):
+                return None
+            user_ids.add(user_id)
+        logins: set[str] = set()
+        for user_id in user_ids:
+            mapped = await User.login_for_slack(user_id)
+            if not mapped:
+                return None
+            logins.add(mapped.lower())
+        return logins
+
+    async def admins(self, logins: set[str] | None) -> bool:
+        if not logins:
+            return False
+        for login in logins:
+            if not await participant_is_admin(login):
+                return False
         return True
-    if not slack.channel_id or not slack.thread_ts:
-        return False
-    bot_user_id = ENV.SLACK_BOT_USER_ID.get()
-    try:
-        messages = await fetch_slack_thread_messages(
-            slack.channel_id, slack.thread_ts, complete=True
-        )
-    except Exception:
-        logger.warning("Could not read the whole Slack thread for access", exc_info=True)
-        return False
-    if not bot_user_id or not messages or len(messages) >= SLACK_THREAD_MAX_MESSAGES:
-        return False
-    user_ids: set[str] = set()
-    for message in messages:
-        user_id = message.get("user")
-        if user_id == bot_user_id:
-            continue
-        if message.get("subtype") in _IGNORED_SLACK_SUBTYPES:
-            continue
-        if message.get("bot_id") or message.get("bot_profile") or not isinstance(user_id, str):
-            return False
-        user_ids.add(user_id)
-    for user_id in user_ids:
-        mapped = await User.login_for_slack(user_id)
-        if not mapped or mapped.lower() != login.lower():
-            return False
-    return True
-
-
-async def sole_writer(cfg: RunConfig, metadata: Mapping[str, object], login: str | None) -> bool:
-    """Whether ``login`` is the only person or bot that has written in this shared thread."""
-    if not login or not direct_user_run(cfg):
-        return False
-    if metadata.get("visibility", "public") != "public" or metadata.get("owner_type") != "user":
-        return False
-    context = SourceContext.from_metadata(metadata)
-    if cfg.slack_thread is not None:
-        context.slack_thread = cfg.slack_thread
-    if context.linear_issue is not None or context.github_issue is not None:
-        return False
-    if participant_logins(metadata.get(PARTICIPANT_LOGINS_KEY)) != [login.lower()]:
-        return False
-    emails = set(participant_logins(metadata.get(PARTICIPANT_EMAILS_KEY)))
-    if emails - {(cfg.user_email or "").strip().lower()}:
-        return False
-    return await _slack_writers_are(context, login)
 
 
 class _ThreadScope(BaseModel):
@@ -289,13 +320,23 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
         )
         else None
     )
+    writers = _SharedWriters(cfg, metadata, login)
+    logins = await writers.logins()
     return Access(
         private=private,
         owner=private_owner_login(cfg, metadata) is not None,
         admin=admin,
         admin_thread=admin and cfg.admin_thread is True and (private or scope.admin_thread is True),
         admin_surface=admin and private and is_private_admin_surface(cfg),
-        sole=await sole_writer(cfg, metadata, login),
+        sole=(
+            bool(login)
+            and logins == {login.lower()}
+            and not (
+                set(participant_logins(metadata.get(PARTICIPANT_EMAILS_KEY)))
+                - {(cfg.user_email or "").strip().lower()}
+            )
+        ),
+        admin_participants=admin and await writers.admins(logins),
         direct=direct_user_run(cfg),
         slack_bot_channel=slack_bot_channel,
         slack_context=cfg.slack_context,

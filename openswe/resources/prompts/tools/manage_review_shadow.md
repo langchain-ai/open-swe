@@ -1,6 +1,6 @@
 Read or set the shadow review experiment at the instance level or for a workspace.
 Requires a currently authorized workspace admin.
-`read` requires a private admin surface; `set` also works in a verified sole-writer shared thread, returning only an acknowledgement.
+`read` requires a private admin surface; `set` also works in a verified sole-writer or admin-only shared thread, returning only an acknowledgement.
 Authorization is rechecked on every call.
 Use only for an explicit request to change the experiment.
 

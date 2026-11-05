@@ -1,11 +1,11 @@
 Read or set server-backed feature flags at the instance level or for a workspace.
 Requires a currently authorized workspace admin.
-`read` requires a private admin surface; `set` also works in a verified sole-writer shared thread, returning only an acknowledgement.
+`read` requires a private admin surface; `set` also works in a verified sole-writer or admin-only shared thread, returning only an acknowledgement.
 Authorization is rechecked on every call.
 Use only for an explicit request to change shared flags; if personal versus shared scope is unclear, ask first.
 
 - `action`: `read` or `set`.
-  In a sole-writer shared thread, set known flags directly without reading private settings first.
+  In a sole-writer or admin-only shared thread, set known flags directly without reading private settings first.
   If existing values are necessary, use a private dashboard thread or authenticated Slack DM.
 - `flags`: for `set`, a nonempty mapping of requested names to true, false, or null.
   Omit to read.

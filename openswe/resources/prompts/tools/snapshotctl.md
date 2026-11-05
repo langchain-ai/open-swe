@@ -1,6 +1,6 @@
 Inspect and repair a workspace's sandbox image (its snapshot) without a live sandbox: read its state, rebuild it, stop a rebuild, edit the scripts and create params it is built from, and see who changed it.
 Workspace admins only.
-`status` and `history` require a private admin surface (a private dashboard thread, an authenticated Slack DM, or MCP); the writes also work in an admin thread or a verified sole-writer shared thread, returning only an acknowledgement there.
+`status` and `history` require a private admin surface (a private dashboard thread, an authenticated Slack DM, or MCP); the writes also work in an admin thread or a verified sole-writer or admin-only shared thread, returning only an acknowledgement there.
 Every write is recorded in the audit log under the acting admin.
 
 - `action`:

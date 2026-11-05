@@ -151,13 +151,65 @@ async def test_calls_are_rechecked_and_projected(monkeypatch: pytest.MonkeyPatch
     assert (await tool())["ok"] is False
 
 
+async def test_admin_only_shared_writes_recheck_every_participant(
+    metadata: dict[str, object], slack: list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice,bob")
+    metadata["participant_logins"] = ["alice", "bob"]
+    cfg = _cfg(source="slack", slack_thread=_SLACK)
+    monkeypatch.setattr(tool_access, "configurable", lambda: cfg)
+    slack.append({"user": "UB"})
+
+    @tool_access.access(Policy(trusted="admin_thread", actor="admin", sole=ack("id")))
+    async def tool() -> dict[str, object]:
+        return {"id": "x", "prompt": "secret"}
+
+    assert await tool() == {"ok": True, "id": "x"}
+    resolved = await resolve_access(cfg)
+    assert not resolved.sole
+    assert resolved.mode(_OWN) is None
+    assert resolved.mode(Policy(trusted="admin_thread", actor="admin")) is None
+    assert resolved.mode(Policy(trusted="admin_surface", actor="admin")) is None
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
+    assert (await tool())["ok"] is False
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice,bob")
+    slack.append({"user": "UNKNOWN"})
+    assert (await tool())["ok"] is False
+
+
+@pytest.mark.parametrize(
+    "change, run",
+    [
+        ({"participant_logins": ["alice", "carol"]}, {}),
+        ({"participant_emails": ["unknown@example.com"]}, {}),
+        ({"owner_type": "system"}, {}),
+        ({}, {"schedule_id": "s-1"}),
+    ],
+)
+async def test_admin_shared_writes_fail_closed(
+    metadata: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    change: dict[str, object],
+    run: dict[str, object],
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice,bob")
+    monkeypatch.setattr(tool_access.User, "login_for_email", AsyncMock(return_value=None))
+    metadata.update(participant_logins=["alice", "bob"])
+    metadata.update(change)
+    resolved = await resolve_access(_cfg(**run))
+    assert resolved.mode(Policy(trusted="admin_thread", actor="admin", sole=ack())) is None
+
+
 async def test_unreadable_slack_history_is_not_sole(
     metadata: dict, slack: list, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fetch = AsyncMock(side_effect=RuntimeError("page 2 failed"))
     monkeypatch.setattr(tool_access, "fetch_slack_thread_messages", fetch)
     cfg = _cfg(source="slack", slack_thread=_SLACK)
-    assert (await resolve_access(cfg)).mode(_OWN) is None
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice,bob")
+    resolved = await resolve_access(cfg)
+    assert resolved.mode(_OWN) is None
+    assert resolved.mode(Policy(trusted="admin_thread", actor="admin", sole=ack())) is None
     assert fetch.await_args is not None
     assert fetch.await_args.kwargs == {"complete": True}
 

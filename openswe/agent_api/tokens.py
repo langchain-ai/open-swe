@@ -58,6 +58,7 @@ class AgentTurnSettings(BaseModel):
     # Whether the sender administers workspaces, and is the only one who may write here.
     admin_workspaces: bool = False
     sole_writer: bool = False
+    admin_participants: bool = False
     # The model that titles the thread.
     title_model_id: str
     title_effort: str | None = None

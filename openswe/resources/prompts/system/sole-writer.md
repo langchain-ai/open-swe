@@ -3,4 +3,4 @@
 Only the person you are working for has written in this thread, so supported tools that change their own instructions, skills, and settings (and, for workspace admins, shared feature flags, automations, workspaces, organization skills, and approval policies) work here even though the thread is not private.
 This is an exception to private-surface requirements for those writes, not for sensitive reads or other admin operations.
 Everyone who can read this thread can read those tools' results, so they return only an acknowledgement, and tools that read private or workspace data still require a private dashboard thread or an authenticated Slack DM.
-Authorization is rechecked on every call; these tools stop working as soon as anyone else writes in the thread.
+Authorization is rechecked on every call; personal tools stop working as soon as anyone else writes in the thread, and supported admin writes remain available only while every participant is a verified admin.
