@@ -3,13 +3,13 @@
 import logging
 import re
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from langgraph_sdk import get_client
 
 from openswe.github.app import get_github_app_installation_token
-from openswe.github.comments import post_github_comment
-from openswe.github.thread_token import resolve_thread_github_token
+from openswe.github.comments import AGENT_NOTICE_MARKER, post_github_comment
 from openswe.linear.notifications import post_linear_notification
 from openswe.run_config import RunConfig
 from openswe.slack.client import (
@@ -19,9 +19,12 @@ from openswe.slack.client import (
     get_active_slack_thread,
     post_slack_thread_reply,
 )
+from openswe.threads.store import THREADS
 from openswe.utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
+
+_GITHUB_NOTICE_TTL = timedelta(minutes=15)
 
 
 def sandbox_unreachable_message(
@@ -150,14 +153,39 @@ async def post_sandbox_unreachable_notification(
 
     github_target = _get_github_target(cfg)
     if github_target is not None:
-        token = (
-            await resolve_thread_github_token(config) or await get_github_app_installation_token()
-        )
+        thread = await THREADS.get(cfg.thread_id) if cfg.thread_id else None
+        previous = thread.metadata.get("github_sandbox_unreachable_notice") if thread else None
+        now = datetime.now(UTC)
+        if isinstance(previous, dict):
+            sent_at = previous.get("sent_at")
+            if (
+                previous.get("sandbox_id") == sandbox_id
+                and previous.get("sandbox_name") == sandbox_name
+                and isinstance(sent_at, (int, float))
+                and now.timestamp() - sent_at < _GITHUB_NOTICE_TTL.total_seconds()
+            ):
+                return
+        token = await get_github_app_installation_token()
         if not token:
             logger.info("No GitHub token available for sandbox unreachable notification")
             return
         repo, issue_number = github_target
-        await post_github_comment(repo, issue_number, message, token=token)
+        posted = await post_github_comment(
+            repo, issue_number, f"{message}\n\n{AGENT_NOTICE_MARKER}", token=token
+        )
+        if not posted:
+            return
+        if thread is not None:
+            await THREADS.update(
+                thread.thread_id,
+                {
+                    "github_sandbox_unreachable_notice": {
+                        "sandbox_id": sandbox_id,
+                        "sandbox_name": sandbox_name,
+                        "sent_at": now.timestamp(),
+                    }
+                },
+            )
         logger.info("Sent sandbox unreachable notification to GitHub item #%s", issue_number)
         return
 

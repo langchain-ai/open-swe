@@ -4,6 +4,8 @@ from fastapi import APIRouter, Response
 
 from openswe.github import forwarding
 from openswe.github import webhook as service
+from openswe.github.comments import AGENT_NOTICE_MARKER
+from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.repo_cache import forget_cached_repos
 from openswe.human_review.completed_reviews import CompletedReview
 from openswe.merge_queue.controller import wake_native_queue
@@ -262,6 +264,8 @@ async def github_webhook(
     comment_body = (comment.get("body") or "") if comment else ""
 
     sender_login = str((payload.get("sender") or {}).get("login") or "")
+    if sender_login.lower() in OPEN_SWE_GITHUB_LOGINS:
+        return {"status": "ignored", "reason": "Comment from Robin App"}
     if not await service.is_accepted_commenter(sender_login):
         common.logger.debug(
             "Ignoring GitHub comment from an unregistered sender",
@@ -280,6 +284,8 @@ async def github_webhook(
         return {"status": "accepted", "message": "Processing review finding reply"}
 
     if not common.mentions_open_swe(comment_body):
+        if AGENT_NOTICE_MARKER in comment_body:
+            return {"status": "ignored", "reason": "Agent notification"}
         if is_pull_request_comment and comment_body.lstrip().startswith("!"):
             common.logger.debug(
                 "Ignoring untagged GitHub workflow command",

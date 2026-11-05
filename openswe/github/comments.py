@@ -19,6 +19,7 @@ from openswe.utils.http_pool import pooled_transport
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "AGENT_NOTICE_MARKER",
     "GitHubAuthError",
     "OPEN_SWE_TAGS",
     "PrState",
@@ -51,6 +52,8 @@ def _load_open_swe_tags() -> tuple[str, ...]:
 
 
 OPEN_SWE_TAGS = _load_open_swe_tags()
+
+AGENT_NOTICE_MARKER = "<!-- robin-agent-notice -->"
 
 PrState = Literal["open", "draft", "merged", "closed"]
 
