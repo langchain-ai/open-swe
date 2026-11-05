@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from copy import deepcopy
 from typing import Protocol, cast
@@ -19,6 +20,7 @@ from langchain.agents.middleware.types import (
 )
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import (
     AIMessage,
     AnyMessage,
@@ -28,6 +30,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.tools import tool
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
@@ -674,3 +677,108 @@ async def test_cancelling_retry_backoff_does_not_start_another_model_attempt(
     with pytest.raises(asyncio.CancelledError):
         await task
     assert handler.await_count == 1
+
+
+class TestRequiredToolArguments:
+    @tool
+    async def read_file(file_path: str, encoding: str) -> str:
+        """Read a file."""
+        return f"{file_path}:{encoding}"
+
+    @tool
+    async def optional(query: str = "default") -> str:
+        """Use optional arguments."""
+        return query
+
+    @pytest.mark.parametrize("args,nested_metadata", [({}, False), ({"file_path": "/a"}, True)])
+    async def test_malformed_parallel_response_never_reaches_tools(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        args: dict[str, str],
+        nested_metadata: bool,
+    ) -> None:
+        monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *a, **kw: self)
+        metadata = {"lc_gateway_metadata": {"request_id": "gateway-123"}}
+        malformed = AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "read_file", "args": args, "id": call_id} for call_id in ("bad-a", "bad-b")
+            ],
+            response_metadata={"generation_info": metadata} if nested_metadata else metadata,
+        )
+        recovered = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "read_file",
+                    "args": {"file_path": path, "encoding": "utf-8"},
+                    "id": call_id,
+                }
+                for path, call_id in (("/a", "good-a"), ("/b", "good-b"))
+            ],
+        )
+        graph = create_agent(
+            model=GenericFakeChatModel(
+                messages=iter([malformed, recovered, AIMessage(content="done")])
+            ),
+            tools=[self.read_file],
+            middleware=model_call_guards(),
+        )
+        with caplog.at_level(logging.WARNING, logger="rt.model_calls"):
+            result = await graph.ainvoke({"messages": [HumanMessage(content="read files")]})
+
+        messages = result["messages"]
+        assert messages[1] == recovered
+        results = [message for message in messages if isinstance(message, ToolMessage)]
+        assert {message.tool_call_id: message.content for message in results} == {
+            "good-a": "/a:utf-8",
+            "good-b": "/b:utf-8",
+        }
+        warning = next(record for record in caplog.records if record.name == "rt.model_calls")
+        assert warning.__dict__["tool_names"] == ["read_file", "read_file"]
+        assert warning.__dict__["tool_call_ids"] == ["bad-a", "bad-b"]
+        assert warning.__dict__["gateway_request_id"] == "gateway-123"
+
+    async def test_second_malformed_response_is_returned_unchanged(self) -> None:
+        first = ModelResponse(
+            result=[
+                AIMessage(content="", tool_calls=[{"name": "read_file", "args": {}, "id": "first"}])
+            ]
+        )
+        second = ModelResponse(
+            result=[
+                AIMessage(
+                    content="", tool_calls=[{"name": "read_file", "args": {}, "id": "second"}]
+                )
+            ]
+        )
+        handler = AsyncMock(side_effect=[first, second])
+        request = ModelRequest(model=_OPENAI, messages=[], tools=[self.read_file])
+
+        response = await ReplayableHistoryMiddleware().awrap_model_call(request, handler)
+
+        assert response is second
+        assert handler.await_count == 2
+        assert all(call.args[0] is request for call in handler.await_args_list)
+
+    @pytest.mark.parametrize("as_dict", [False, True])
+    async def test_empty_optional_arguments_are_accepted(self, as_dict: bool) -> None:
+        response = ModelResponse(
+            result=[
+                AIMessage(
+                    content="", tool_calls=[{"name": "optional", "args": {}, "id": "optional"}]
+                )
+            ]
+        )
+        handler = AsyncMock(return_value=response)
+        request = ModelRequest(
+            model=_OPENAI,
+            messages=[],
+            tools=[convert_to_openai_tool(self.optional) if as_dict else self.optional],
+        )
+
+        result = await ReplayableHistoryMiddleware().awrap_model_call(request, handler)
+
+        assert result is response
+        assert handler.await_count == 1

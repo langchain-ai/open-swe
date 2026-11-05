@@ -18,10 +18,11 @@ from langchain.agents.middleware.types import ModelCallResult, ModelRequest, Mod
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 
-from rt.model_retries import ModelRetriesMiddleware
+from rt.model_retries import ModelOutput, ModelRetriesMiddleware
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
@@ -125,7 +126,7 @@ class _ModelCallGuard(AgentMiddleware):
 
 
 class ReplayableHistoryMiddleware(_ModelCallGuard):
-    """Send each call a history the provider it goes to accepts, in a stable order."""
+    """Keep history replayable and retry responses missing required tool arguments once."""
 
     async def awrap_model_call(
         self,
@@ -136,7 +137,49 @@ class ReplayableHistoryMiddleware(_ModelCallGuard):
         messages = [_for_provider(message, model) for message in _in_call_order(request.messages)]
         if any(a is not b for a, b in zip(messages, request.messages, strict=True)):
             request = request.override(messages=messages)
-        return await handler(request)
+        required_by_tool: dict[str, set[str]] = {}
+        for tool in request.tools:
+            schema = convert_to_openai_tool(tool)
+            function = schema.get("function")
+            if not isinstance(function, dict):
+                continue
+            parameters = function.get("parameters", {})
+            if isinstance(parameters, dict):
+                required_by_tool[function["name"]] = set(parameters.get("required", []))
+        output = ModelOutput()
+        with output.tracking():
+            response = await handler(request)
+        malformed = False
+        for message in response.result:
+            if not isinstance(message, AIMessage):
+                continue
+            calls = [
+                call
+                for call in message.tool_calls
+                if required_by_tool.get(call["name"], set()) - call["args"].keys()
+            ]
+            if not calls:
+                continue
+            malformed = True
+            metadata = message.response_metadata
+            generation_info = metadata.get("generation_info")
+            if isinstance(generation_info, dict):
+                metadata = generation_info
+            gateway = metadata.get("lc_gateway_metadata")
+            logger.warning(
+                "Retrying model response with missing required tool arguments",
+                extra={
+                    "tool_names": [call["name"] for call in calls],
+                    "tool_call_ids": [call["id"] for call in calls],
+                    "gateway_request_id": gateway.get("request_id")
+                    if isinstance(gateway, dict)
+                    else None,
+                },
+            )
+        if malformed:
+            output.supersede()
+            return await handler(request)
+        return response
 
 
 class ModelCallTimeoutMiddleware(_ModelCallGuard):
