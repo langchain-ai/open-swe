@@ -79,6 +79,7 @@ Local execution does not provide cloud sandbox isolation.
 
 - [Robin rollout checklist](docs/ROBIN_ROLLOUT.md) — External integration updates, desktop upgrade checks, and compatibility boundaries
 - [Customization guide](docs/CUSTOMIZATION.md) — Models, sandboxes, tools, skills, prompts, triggers, and middleware
+- [Plugin guide](docs/PLUGINS.md) — Build web apps: sandboxed single-file plugins people add to their sidebar
 - [Workspaces reference](docs/reference/workspaces.md) — Routing, settings, images, and access
 - [Human review in Slack](docs/reference/human-review.md) — Review requests in a repository's Slack channel, merged once reviewers approve
 - [Expedited Slack review](docs/reference/expedited-slack-review.md) — Human approval for small pull requests

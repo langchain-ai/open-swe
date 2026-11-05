@@ -67,6 +67,8 @@ _TOOL_MODULES = {
     "delete_organization_skill": ".organization_skills",
     "publish_workspace": ".workspaces",
     "save_organization_skill": ".organization_skills",
+    "preview_app": ".apps",
+    "publish_app": ".apps",
     "publish_artifact": ".publish_artifact",
     "remember": ".remember",
     "forget": ".remember",
@@ -162,6 +164,8 @@ __all__ = [
     "publish_workspace",
     "save_organization_skill",
     "delete_organization_skill",
+    "preview_app",
+    "publish_app",
     "publish_artifact",
     "remember",
     "forget",
@@ -223,6 +227,7 @@ if TYPE_CHECKING:
     from openswe.slack.tools.start_new_thread import slack_breakout_thread
     from openswe.slack.tools.start_review_channel import slack_start_review_channel
     from openswe.tools.add_finding import add_finding
+    from openswe.tools.apps import preview_app, publish_app
     from openswe.tools.automations import (
         create_automation,
         delete_automation,

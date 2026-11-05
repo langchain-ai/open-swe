@@ -39,6 +39,7 @@ from openswe.users.authorization import (
     is_authorized_github_login,
 )
 from openswe.users.preferences import UserPreferences, UserPreferencesPatch
+from openswe.utils import ttl_cache
 from openswe.utils.json_types import JsonObject
 
 if TYPE_CHECKING:
@@ -298,6 +299,42 @@ class User(Base):
         user = await cls.for_login("github", login.strip())
         return (user.email or None) if user is not None else None
 
+    async def can_read_repository(self, repository: str) -> bool:
+        """Whether this person can read ``repository`` (``owner/repo``) on GitHub.
+
+        A yes is trusted as long as ``accessible_repo_full_names`` trusts its
+        listing, so access lost on GitHub shows within that window and callers
+        that check on every keystroke spend no rate limit; a no is never kept, so
+        access granted there shows at once. An expired sign-in raises.
+        """
+        from openswe.github.repos import ACCESS_FRESH_MS
+
+        if not self.github_login:
+            return False
+        key = f"github-repository-read:{self.id}:{repository.lower()}"
+        readable = await ttl_cache.cached(
+            key,
+            ACCESS_FRESH_MS / 1000,
+            lambda: self._reads_repository(repository),
+            serve_stale=False,
+        )
+        if not readable:
+            ttl_cache.invalidate(key)
+        return readable
+
+    async def _reads_repository(self, repository: str) -> bool:
+        from fastapi import HTTPException
+
+        from openswe.dashboard.repo_access import require_repo_access_for_user
+
+        try:
+            await require_repo_access_for_user(self.github_login, repository)
+        except HTTPException as exc:
+            if exc.status_code in {403, 404}:
+                return False
+            raise
+        return True
+
     async def default_repo(
         self, workspace: str | None = None, *, fallback_global: bool = True
     ) -> dict[str, str] | None:
@@ -442,6 +479,24 @@ class User(Base):
                 .options(selectinload(cls.identities))
             )
             return {external_id: user for user, external_id in rows.tuples()}
+
+    @classmethod
+    async def for_github_logins(cls, logins: Collection[str]) -> dict[str, Self]:
+        """The people behind GitHub ``logins``, keyed by the lowercased login asked for."""
+        wanted = {login.lower() for login in logins}
+        if not wanted or not postgres.configured():
+            return {}
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(cls, func.lower(UserIdentity.login))
+                .join(cls.identities)
+                .where(
+                    UserIdentity.provider == "github",
+                    func.lower(UserIdentity.login).in_(wanted),
+                )
+                .order_by(UserIdentity.last_seen_at)
+            )
+            return {login: user for user, login in rows.tuples()}
 
     @classmethod
     async def for_handle(cls, handle: str) -> Self | None:

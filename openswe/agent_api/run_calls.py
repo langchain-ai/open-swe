@@ -149,9 +149,9 @@ from openswe.config import ENV
 from openswe.github.proxy import proxy_token_set_since
 from openswe.incidents.runtime import IncidentSession
 from openswe.input_messages import run_context
-from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.model_selection import classify_route
 from openswe.middleware.notify_step_limit import notify_step_limit
+from openswe.middleware.plugin_chat import PluginChatTools
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.settle_review_check import settle_review_check
 from openswe.middleware.stale_workspace import StaleWorkspaceReporter
@@ -492,7 +492,7 @@ class TokenRun:
                 content=f"{request.name} is not one of this run's operations", status="error"
             )
         cfg = RunConfig.from_config(self.config)
-        client = ClientToolsMiddleware(cfg.client_tools) if cfg.client_tools else None
+        client = PluginChatTools.of_run(cfg, self.run.thread_id)
         offered = (
             next((t for t in client.tools if t.name == request.name), None) if client else None
         )

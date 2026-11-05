@@ -38,3 +38,13 @@ class ClientToolSpec(BaseModel):
     def result_message_id(call_id: str) -> str:
         """The id of a call's placeholder result, which the client's real result replaces."""
         return f"client-tool-result-{call_id}"
+
+    @classmethod
+    def result_message(cls, call_id: str, content: str) -> dict[str, str]:
+        """The client's result of a call, as the message that replaces its placeholder."""
+        return {
+            "type": "tool",
+            "id": cls.result_message_id(call_id),
+            "tool_call_id": call_id,
+            "content": content,
+        }

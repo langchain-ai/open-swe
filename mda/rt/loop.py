@@ -418,6 +418,8 @@ class RunLoop:
         current = {**held, **update}
         model = await self._model_for(current)
         system_prompt, workspace_prompt, thread_prompt = self._system_prompt(current)
+        if self.rules.client_prompt:
+            system_prompt = f"{system_prompt}\n\n{self.rules.client_prompt}"
         return BeforeModel(
             update=update,
             messages=_json_dicts.validate_python(messages_to_dict(added)),

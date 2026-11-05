@@ -224,6 +224,9 @@ class LoopRules(BaseModel):
     task_coordination: bool = False
     # Whether the run may wait on a call its client runs itself.
     client_tools: bool = False
+    # Open SWE's own framing of the tools the client runs, after every call's system prompt;
+    # never words the client wrote, which reach the model only in the conversation.
+    client_prompt: str = ""
     # Whether the backend gives the sandbox's GitHub proxy a fresh token before each model call.
     refresh_github_proxy: bool = False
     # Whether the run investigates an incident: before each model call the backend checks the
