@@ -296,9 +296,7 @@ async def test_a_replaced_sandbox_reconnects_on_the_authenticated_run_scope(
     )
 
     await TokenRun.answer(parts, run, "sandbox_replaced", {})
-    assert await proxy.maybe_refresh_proxy_token(
-        "thread", now=datetime.now(UTC) + timedelta(hours=1)
-    )
+    await TokenRun.answer(parts, run, "refresh_github_proxy", {"force_refresh": True})
 
     expected = (
         "x-access-token:repos:11;actions=read,checks=read,contents=read,issues=read,"

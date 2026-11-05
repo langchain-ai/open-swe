@@ -96,6 +96,7 @@ from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import Delivery, Endpoint, call
 from runtime_api.loop import (
     PREPARE,
+    GitHubProxyRefreshed,
     Inbox,
     InboxItems,
     InboxRead,
@@ -1588,6 +1589,83 @@ async def test_a_goal_mode_execute_that_waits_by_sleeping_is_refused(
     else:
         assert screened is request
     post.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("command", "output", "refreshed"),
+    [
+        (
+            "git push origin HEAD",
+            "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+            True,
+        ),
+        ("gh pr view", "HTTP 401: Bad credentials (https://api.github.com/graphql)", True),
+        ("git push", "Everything up-to-date", False),
+        ("grep -rn 'Bad credentials' .", "file:1:HTTP 401: Bad credentials", False),
+        ("git grep 'Bad credentials'", "file:1:HTTP 401: Bad credentials", False),
+        (
+            "pytest -v mda/tests/test_backend_calls.py",
+            "HTTP 401: Bad credentials (https://api.github.com/graphql)",
+            False,
+        ),
+        ("tail app.log", "HTTP 401: Bad credentials (https://api.github.com/graphql)", False),
+        ("curl https://example.com", '{"message":"Bad credentials"}', False),
+        ("curl https://api.github.com/user", '{"message":"Bad credentials"}', True),
+    ],
+)
+async def test_a_command_github_refused_gets_the_sandbox_a_fresh_token(
+    monkeypatch: pytest.MonkeyPatch, command: str, output: str, refreshed: bool
+) -> None:
+    """The sandbox's token is replaced and the model told to retry; the command runs once."""
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    backend = _run_backend(
+        catalog=Catalog(loop=LoopRules(refresh_github_proxy=True), sandbox=_IN_SANDBOX)
+    )
+    calls: list[str] = []
+
+    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        calls.append(name)
+        if name == "check_shell":
+            return ShellVerdict(allowed=True)
+        if name == "refresh_github_proxy":
+            assert body["force_refresh"] is True
+        return GitHubProxyRefreshed(expires_at=datetime.now(UTC) + timedelta(hours=1))
+
+    _answering(monkeypatch, backend, answer)
+    monkeypatch.setattr(backend.outbox, "started", MagicMock())
+    monkeypatch.setattr(backend.outbox, "finished", MagicMock())
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    request = ToolCallRequest(
+        tool_call={
+            "name": "execute",
+            "args": {"command": command},
+            "id": "call-1",
+            "type": "tool_call",
+        },
+        tool=None,
+        state={"messages": []},
+        runtime=runtime,
+    )
+    in_sandbox = AsyncMock(return_value=ToolMessage(content=output, tool_call_id="call-1"))
+    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
+
+    result = await files.awrap_tool_call(request, in_sandbox)
+    await backend.outbox.drain()
+
+    in_sandbox.assert_awaited_once()
+    assert calls.count("refresh_github_proxy") == int(refreshed)
+    assert isinstance(result, ToolMessage)
+    assert result.text.startswith(output)
+    assert ("fresh GitHub token" in result.text) is refreshed
 
 
 @pytest.mark.parametrize("excluded", [[], ["grep", "glob"]])

@@ -177,6 +177,7 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
         workspace_slug=None,
         github_proxy_repositories=None,
         github_proxy_permissions=None,
+        force_refresh=False,
     )
 
 

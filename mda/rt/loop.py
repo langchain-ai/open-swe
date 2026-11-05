@@ -65,6 +65,7 @@ from runtime_api.loop import (
     ModelCall,
     PhaseResult,
     Prepared,
+    RefreshGitHubProxy,
     ReplyOnBehalf,
     Route,
     Routed,
@@ -506,7 +507,9 @@ class RunLoop:
         if due is not None and now < due:
             return {}
         try:
-            refreshed = await call(self._backend, REFRESH_GITHUB_PROXY, RunRequest(run_id=run_id()))
+            refreshed = await call(
+                self._backend, REFRESH_GITHUB_PROXY, RefreshGitHubProxy(run_id=run_id())
+            )
         except Exception:
             logger.warning("Could not refresh the sandbox's GitHub token", exc_info=True)
             return {_GITHUB_PROXY_DUE: (now + _GITHUB_PROXY_RETRY).isoformat()}
