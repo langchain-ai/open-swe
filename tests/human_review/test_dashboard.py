@@ -30,6 +30,7 @@ from openswe.users import User
         "disabled",
         "draft",
         "active",
+        "active_without_permalink",
         "reviews_unavailable",
         "codeowners_unreadable",
         "already_reviewed",
@@ -42,7 +43,11 @@ async def test_dashboard_selects_review_workflow(
     requester = User()
     pr = PullRequest(owner="lc", repo="repo", number=7)
     approval = HumanReviewRequest(
-        pull_request_id=pr.id, head_sha="abc", kind="expedited", slack_channel_id="C1"
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="expedited",
+        slack_channel_id="C1",
+        slack_message_ts="1.0",
     )
     target = SlackChannel(id="C1", name="reviews")
     github = GitHubClient.connect(token="token")
@@ -67,7 +72,7 @@ async def test_dashboard_selects_review_workflow(
         patch.object(
             HumanReviewRequest,
             "active_for",
-            AsyncMock(return_value=approval if case == "active" else None),
+            AsyncMock(return_value=approval if case.startswith("active") else None),
         ),
         patch.object(GitHubClient, "connect", return_value=github),
         patch.object(GitHubClient, "as_app", return_value=app_github),
@@ -127,8 +132,10 @@ async def test_dashboard_selects_review_workflow(
         patch.object(HumanReviewRequest, "get", AsyncMock(return_value=approval)),
         patch.object(ReviewCard, "post_expedited", AsyncMock(return_value="1.0")) as post,
         patch(
-            "openswe.human_review.dashboard.get_slack_permalink",
-            AsyncMock(return_value="https://slack/card"),
+            "openswe.slack.client.get_slack_permalink",
+            AsyncMock(
+                return_value=None if case == "active_without_permalink" else "https://slack/card"
+            ),
         ),
     ):
         result = await DashboardReviewRequest(pr_ref, Origin(requester=requester), "token").request(
@@ -150,6 +157,16 @@ async def test_dashboard_selects_review_workflow(
         assert saved.requested_by_user_id == requester.id
         assert saved.thread_id == ""
         assert saved.run_config == {}
+    elif case.startswith("active"):
+        assert result.reused
+        assert result.request_id == str(approval.id)
+        assert result.permalink == (
+            "slack://channel?id=C1&message=1.0"
+            if case == "active_without_permalink"
+            else "https://slack/card"
+        )
+        post.assert_not_awaited()
+        standard.assert_not_awaited()
     else:
         assert result.request_id == "standard"
         post.assert_not_awaited()

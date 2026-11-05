@@ -16,7 +16,7 @@ from openswe.human_review.standard import (
     review_blockers,
     target_channel,
 )
-from openswe.slack.client import GitHubPrRef, get_slack_permalink
+from openswe.slack.client import GitHubPrRef
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,15 @@ class DashboardReviewRequest:
     ) -> RequestResult:
         pr = self.pr_ref
         active = await HumanReviewRequest.active_for(pr.owner, pr.repo, pr.number)
+        if active is not None and active.kind == "expedited":
+            return RequestResult(
+                success=True,
+                reused=True,
+                request_id=str(active.id),
+                channel=active.slack_channel_id,
+                permalink=await active.slack_permalink(),
+                auto_merge=False,
+            )
         if active is None and (await get_workspace_settings()).expedited_review_enabled:
             try:
                 async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
@@ -69,12 +78,7 @@ class DashboardReviewRequest:
                                 channel=target.id,
                                 channel_name=target.name,
                                 permalink=(
-                                    await get_slack_permalink(
-                                        approval.slack_channel_id, approval.slack_message_ts
-                                    )
-                                    or ""
-                                    if approval is not None
-                                    else ""
+                                    await approval.slack_permalink() if approval is not None else ""
                                 ),
                             )
             except GitHubAppUnavailable:

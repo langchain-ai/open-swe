@@ -5,8 +5,10 @@ from pytest import MonkeyPatch
 
 from openswe.github.http import RepoClient
 from openswe.github.pull_request_status import PullRequestClient
+from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review import routes
+from openswe.human_review.requests import HumanReviewRequest
 
 
 def test_review_channel_most_files_and_ties(monkeypatch: MonkeyPatch) -> None:
@@ -38,8 +40,9 @@ def test_review_channel_most_files_and_ties(monkeypatch: MonkeyPatch) -> None:
 
 @pytest.mark.parametrize("routed", [False, True])
 @pytest.mark.parametrize("filename", ["ui/button.tsx", "README.md"])
+@pytest.mark.parametrize("active", [False, True])
 async def test_review_availability_uses_cached_settings(
-    routed: bool, filename: str, github_app: AsyncMock
+    routed: bool, filename: str, active: bool, github_app: AsyncMock
 ) -> None:
     settings = RepoSettings.model_validate(
         {
@@ -55,9 +58,25 @@ async def test_review_availability_uses_cached_settings(
         ),
         patch.object(PullRequestClient, "head_sha", AsyncMock(return_value="abc")),
         patch.object(PullRequestClient, "files", AsyncMock(return_value=[{"filename": filename}])),
-        patch.object(routes.HumanReviewRequest, "active_for", AsyncMock(return_value=None)),
+        patch.object(
+            routes.HumanReviewRequest,
+            "active_for",
+            AsyncMock(
+                return_value=HumanReviewRequest(
+                    pull_request_id=PullRequest(owner="lc", repo="repo", number=7).id,
+                    head_sha="abc",
+                    kind="expedited",
+                    slack_channel_id="C1",
+                    slack_message_ts="1.0",
+                )
+                if active
+                else None
+            ),
+        ),
+        patch("openswe.slack.client.get_slack_permalink", AsyncMock(return_value=None)),
         patch.object(routes, "review_blockers", AsyncMock(return_value=[])),
     ):
         result = await routes.api_human_review_availability("lc", "repo", 7, session={"sub": "ada"})
     assert result.available is (not routed or filename.startswith("ui/"))
-    assert result.active is False
+    assert result.active is active
+    assert result.permalink == ("slack://channel?id=C1&message=1.0" if active else "")

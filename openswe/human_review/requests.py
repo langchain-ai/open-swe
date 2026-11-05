@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Literal, Self, TypedDict
+from urllib.parse import urlencode
 from uuid import UUID, uuid7
 
 from pydantic import JsonValue
@@ -161,6 +162,18 @@ class HumanReviewRequest(Base):
     requested_by: Mapped[User | None] = relationship(
         init=False, foreign_keys=[requested_by_user_id]
     )
+
+    async def slack_permalink(self) -> str:
+        """Link to the card, falling back to Slack's native message link."""
+        from openswe.slack.client import get_slack_permalink
+
+        channel = self.slack_channel_id
+        message = self.slack_message_ts
+        if not channel or not message:
+            return ""
+        return await get_slack_permalink(channel, message) or (
+            f"slack://channel?{urlencode({'id': channel, 'message': message})}"
+        )
 
     @property
     def active(self) -> bool:

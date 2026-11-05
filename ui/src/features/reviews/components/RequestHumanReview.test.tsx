@@ -130,10 +130,11 @@ it.each([
       name: "Review requested",
     })
     await waitFor(() => expect(requested.hasAttribute("disabled")).toBe(false))
-    if (permalink) fireEvent.click(requested)
     expect(open.mock.calls).toEqual(
       permalink ? [[permalink, "_blank", "noopener,noreferrer"]] : []
     )
+    if (permalink) fireEvent.click(requested)
+    expect(open).toHaveBeenCalledTimes(permalink ? 2 : 0)
     expect(request).toHaveBeenCalledTimes(1)
     expect(successToast).not.toHaveBeenCalled()
     expect(screen.queryByRole("button", { name: "Choose channel" })).toBeNull()
