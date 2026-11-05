@@ -30,6 +30,28 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
   const permalink = availability.data?.permalink ?? ""
   const needsChannel =
     availability.isSuccess && !availability.data.available && !active
+  const disableAutoMerge = useMutation({
+    mutationFn: () => api.disableHumanReviewAutoMerge(pr),
+    meta: { errorTitle: "Could not turn off Open SWE auto-merge" },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey })
+      const previous = queryClient.getQueryData(queryKey)
+      queryClient.setQueryData<
+        Awaited<ReturnType<typeof api.humanReviewAvailability>>
+      >(queryKey, (data) => data && { ...data, auto_merge: false })
+      return { previous }
+    },
+    onError: (_error, _variables, context) => {
+      queryClient.setQueryData(queryKey, context?.previous)
+    },
+    onSuccess: () => {
+      toast.success(
+        "Open SWE auto-merge is off. The review request stays active."
+      )
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey }),
+    retry: false,
+  })
   const requestReview = useMutation({
     mutationFn: () => api.requestHumanReview(pr, channel ?? ""),
     meta: {
@@ -44,6 +66,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
         active: true,
         permalink: result.permalink,
         blockers: [],
+        auto_merge: result.auto_merge,
       }))
       if (result.reused) return
       toast.success(
@@ -85,7 +108,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
         : "Request review in Slack"
   return (
     <span
-      className="inline-flex items-center gap-space-2"
+      className="inline-flex flex-wrap items-center gap-space-2"
       onClick={(event) => event.stopPropagation()}
       title={channelHint ?? undefined}
     >
@@ -115,6 +138,19 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
           }
         }}
       />
+      {active && availability.data?.auto_merge === true && (
+        <PullRequestActionButton
+          label="Turn off auto-merge"
+          disabled={disableAutoMerge.isPending}
+          loading={disableAutoMerge.isPending}
+          onClick={() => disableAutoMerge.mutate()}
+        />
+      )}
+      {active && availability.data?.auto_merge === false && (
+        <Text as="span" variant="xs" className="text-secondary" role="status">
+          Auto-merge off · merge manually
+        </Text>
+      )}
       {availability.isError && (
         <PullRequestActionButton
           label="Retry review status"

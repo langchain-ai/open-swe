@@ -1466,6 +1466,7 @@ export interface ReviewerEvalStatus {
 }
 
 export interface HumanReviewRequestResult {
+  auto_merge?: boolean | null
   success: boolean
   error: string
   request_id: string
@@ -1959,8 +1960,14 @@ export const api = {
       active: boolean
       permalink: string
       blockers: string[]
+      auto_merge?: boolean | null
     }>(
       `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`
+    ),
+  disableHumanReviewAutoMerge: (pr: OpenPullRequest) =>
+    request<{ request_id: string }>(
+      `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review/disable-auto-merge`,
+      { method: "POST" }
     ),
   requestHumanReview: (pr: OpenPullRequest, channel = "") =>
     request<HumanReviewRequestResult>(

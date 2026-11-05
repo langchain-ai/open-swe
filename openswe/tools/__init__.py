@@ -21,6 +21,7 @@ _TOOL_MODULES = {
     "delete_automation": ".automations",
     "delete_workspace": ".workspaces",
     "discover_managed_tools": ".discover_managed_tools",
+    "disable_human_review_auto_merge": ".request_human_review",
     "dismiss_human_review_request": ".request_human_review",
     "expedite_pr_approval": ".expedite_pr_approval",
     "expose_port": ".expose_port",
@@ -116,6 +117,7 @@ __all__ = [
     "delete_automation",
     "delete_workspace",
     "discover_managed_tools",
+    "disable_human_review_auto_merge",
     "dismiss_human_review_request",
     "expedite_pr_approval",
     "expose_port",
@@ -279,6 +281,7 @@ if TYPE_CHECKING:
     from openswe.tools.request_human_review import (
         assign_human_reviewer,
         auto_assign_human_reviewer,
+        disable_human_review_auto_merge,
         dismiss_human_review_request,
         get_human_review_status,
         request_human_review,

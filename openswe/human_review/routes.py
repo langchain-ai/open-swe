@@ -89,6 +89,7 @@ class HumanReviewAvailability(BaseModel):
     active: bool
     permalink: str = ""
     blockers: list[str] = []
+    auto_merge: bool | None = None
 
 
 @router.get("/repos/{owner}/{repo}/pulls/{number}/human-review")
@@ -114,6 +115,7 @@ async def api_human_review_availability(
             if active is not None
             else ""
         ),
+        auto_merge=active.auto_merge if active is not None and active.kind == "standard" else None,
         blockers=blockers or [],
     )
 
@@ -166,4 +168,25 @@ async def api_dismiss_human_review_request(
     by = mention(person) if person is not None else f"@{login}"
     if not await ReviewCard(request).dismiss_by(by, (body or HumanReviewDismissBody()).reason):
         raise HTTPException(409, "This review request is already closed")
+    return HumanReviewDismissResult(request_id=str(request.id))
+
+
+@router.post("/repos/{owner}/{repo}/pulls/{number}/human-review/disable-auto-merge")
+@audit_endpoint
+async def api_disable_human_review_auto_merge(
+    owner: str,
+    repo: str,
+    number: int,
+    session: dict[str, str] = SESSION_DEP,
+) -> HumanReviewDismissResult:
+    """Disable Open SWE auto-merge without dismissing the review request."""
+    _pr_ref(owner, repo, number)
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    request = await HumanReviewRequest.active_for(owner, repo, number)
+    if request is None:
+        raise HTTPException(404, "This pull request has no open review request")
+    try:
+        await ReviewCard(request).disable_auto_merge()
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     return HumanReviewDismissResult(request_id=str(request.id))

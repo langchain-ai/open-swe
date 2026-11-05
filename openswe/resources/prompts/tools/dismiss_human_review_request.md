@@ -3,3 +3,5 @@ Pass the pull request URL and, optionally, `reason`: a few words shown on the ca
 
 Use it when someone asks you to take a review request down, or when the card is wrong and a fresh request is better than correcting its summary with `request_human_review`.
 It does not close the pull request.
+
+To keep standard human review active but stop automatic merging, use `disable_human_review_auto_merge` instead.

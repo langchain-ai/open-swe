@@ -27,5 +27,6 @@ Shadow reviews (experimental) run a second reviewer on another model over a samp
 - **Settings → Connections** (`/my-settings/connections`): GitHub (linked after LangSmith sign-in; required for coding features), Slack and LangSmith accounts, managed tools, and personal MCP servers.
 - **Settings → Experiments** (`/my-settings/experiments`): experimental interface and agent features (including goal mode, per-author Conditional approval (off by default), LangSmith Agent Workspace for Robin chats, and Memory, which adds the workspace curator's prompt to the threads a person starts, in place of the person's own memories it superseded, and the Classify tool, which lets code mode classify with TypeSafe's System One model), recent-work context, and Slack behavior such as concierge mode and failing-check reactions.
 - **Code review** (`/review`): configure auto-review repositories.
+  On a PR review page, **Turn off auto-merge** keeps its standard human review request active but requires manual merging; `disable_human_review_auto_merge` does the same.
   **Review styles** (`/review/styles`) and **Repository instructions** (`/agents/instructions`) manage per-repository review and agent guidance.
 - **Usage** (`/usage`): view agent usage and reviewer statistics.

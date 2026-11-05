@@ -377,3 +377,58 @@ it("does not offer a review request for a draft", () => {
   )
   expect(screen.queryByRole("button")).toBeNull()
 })
+
+it.each([false, true])(
+  "opts out optimistically and restores the button on failure (%s)",
+  async (fails) => {
+    vi.spyOn(api, "humanReviewAvailability").mockResolvedValue({
+      available: true,
+      active: true,
+      permalink: "https://slack.example/review",
+      blockers: [],
+      auto_merge: true,
+    })
+    const result = Promise.withResolvers<{ request_id: string }>()
+    vi.spyOn(api, "disableHumanReviewAutoMerge").mockReturnValue(result.promise)
+    const success = vi.spyOn(toast, "success")
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <TooltipProvider>
+          <RequestHumanReview pr={pr} />
+        </TooltipProvider>
+      </QueryClientProvider>
+    )
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Turn off auto-merge" })
+    )
+    expect(
+      await screen.findByText("Auto-merge off · merge manually")
+    ).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: "Review requested" })
+    ).toBeTruthy()
+    if (fails) {
+      await act(async () => result.reject(new Error("Forbidden")))
+      await screen.findByRole("button", { name: "Turn off auto-merge" })
+    } else {
+      vi.mocked(api.humanReviewAvailability).mockResolvedValue({
+        available: true,
+        active: true,
+        permalink: "https://slack.example/review",
+        blockers: [],
+        auto_merge: false,
+      })
+      await act(async () => result.resolve({ request_id: "request" }))
+    }
+    expect(Boolean(screen.queryByText("Auto-merge off · merge manually"))).toBe(
+      !fails
+    )
+    expect(success).toHaveBeenCalledTimes(fails ? 0 : 1)
+    expect(
+      screen.getByRole("button", { name: "Review requested" })
+    ).toBeTruthy()
+  }
+)

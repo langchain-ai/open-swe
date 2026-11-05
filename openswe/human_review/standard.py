@@ -167,7 +167,7 @@ class RequestResult(BaseModel):
     requested_channel: str = ""
     summary_updated: bool = False
     claimed: bool = False
-    auto_merge: bool = True
+    auto_merge: bool | None = True
     supplementary_refusal: str = ""
 
 
