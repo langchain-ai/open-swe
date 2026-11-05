@@ -421,7 +421,7 @@ export function OpenPullRequests({
                   : latest
                     ? `Refreshed ${dateLabel(latest.updatedAt)}`
                     : scope === "review-assigned"
-                      ? "Open SWE review assignments"
+                      ? "Robin review assignments"
                       : "Live open pull requests from GitHub"}
               </span>
             )}

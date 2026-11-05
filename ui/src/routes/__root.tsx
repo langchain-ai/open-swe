@@ -61,7 +61,7 @@ export const Route = createRootRouteWithContext<{
         content: "width=device-width, initial-scale=1, maximum-scale=1",
       },
       { name: "theme-color", content: THEME_COLOR.light },
-      { title: "Open SWE" },
+      { title: "Robin" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },

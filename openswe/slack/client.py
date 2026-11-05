@@ -486,7 +486,7 @@ def format_slack_messages_for_prompt(
         text = text or ("[forwarded message]" if forwarded else "[non-text message]")
         user_id = message.get("user")
         if is_own_slack_message(message, bot_user_id):
-            author = f"@{bot_username or 'Open SWE'}(self)"
+            author = f"@{bot_username or 'Robin'}(self)"
         elif slack_message_bot_id(message):
             author = f"@{slack_message_bot_name(message)}(bot)"
         else:

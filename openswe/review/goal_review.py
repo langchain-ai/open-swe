@@ -3,7 +3,7 @@
 In Goal mode the person hears nothing until the work is ready, so the review an
 implementing agent asks for on its draft posts nothing to GitHub or Slack. Its
 findings go to that agent's thread to address; once a round leaves none open,
-the PR's ``Open SWE Review`` check passes, marking the draft reviewed.
+the PR's ``Robin Review`` check passes, marking the draft reviewed.
 """
 
 import logging
@@ -31,7 +31,7 @@ GOAL_REVIEW_KEY: Final = "goal_review"
 
 _SENDER: Final[SystemIdentity] = {
     "id": "system:open-swe-review",
-    "display_name": "Open SWE Review",
+    "display_name": "Robin Review",
     "platform": "open-swe",
 }
 _CONTEXT: Final[InputMessageContext] = {
@@ -103,7 +103,7 @@ class GoalReview(BaseModel):
             conclusion: CheckConclusion = "neutral"
             title = f"{len(open_findings)} open findings sent to the implementing agent"
         else:
-            conclusion, title = "success", "Open SWE reviewed"
+            conclusion, title = "success", "Robin reviewed"
             await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
                 reviewer_thread_id=reviewer_thread_id,
                 github_review_id=None,

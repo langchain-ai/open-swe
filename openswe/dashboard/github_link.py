@@ -69,7 +69,7 @@ class GitHubLink:
             raise HTTPException(403, "Sign in with LangSmith to link a GitHub account")
         user = await principal.user()
         if user is None:
-            raise HTTPException(401, "Open SWE account not found — sign in again")
+            raise HTTPException(401, "Robin account not found — sign in again")
         joined = await user.join_github(
             str(self.account.id), login=self.account.login, email=self.email
         )

@@ -251,7 +251,7 @@ async def test_mda_starts_the_run_a_session_turn_prepares(
     ("signed_in", "decline"),
     [
         (None, "using the same email as your Linear account"),
-        (False, "Your GitHub sign-in to Open SWE is no longer valid"),
+        (False, "Your GitHub sign-in to Robin is no longer valid"),
     ],
     ids=["unknown-author", "revoked-authorization"],
 )

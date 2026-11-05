@@ -68,7 +68,7 @@
             <button class="send" id="send">Send</button>
             <button class="reset" id="reset">Reset</button>
           </div>
-          <label class="hint"><input type="checkbox" id="mention" checked /> <span id="mention-label">Mention Open SWE</span></label>
+          <label class="hint"><input type="checkbox" id="mention" checked /> <span id="mention-label">Mention Robin</span></label>
         </div>
       </main>
     </div>
@@ -123,7 +123,7 @@
           const body = document.createElement("div");
           const who = document.createElement("div");
           who.className = "who";
-          who.textContent = message.is_bot ? "Open SWE" : userNames[message.user] || message.user;
+          who.textContent = message.is_bot ? "Robin" : userNames[message.user] || message.user;
           const text = document.createElement("div");
           text.className = "text";
           const linkPattern = /<(https?:\/\/[^|>]+)\|([^>]+)>/g;
@@ -208,10 +208,10 @@
         pickedChannel = true;
         selectedIsCodeChannel = Boolean(channel.code_channel);
         $("channel-title").textContent = `# ${channel.name}`;
-        $("channel-subtitle").textContent = selectedIsCodeChannel ? "Open SWE code channel · one task, one session" : "Team channel";
+        $("channel-subtitle").textContent = selectedIsCodeChannel ? "Robin code channel · one task, one session" : "Team channel";
         $("mention").checked = !selectedIsCodeChannel;
         $("mention").disabled = selectedIsCodeChannel;
-        $("mention-label").textContent = selectedIsCodeChannel ? "Every message goes to Open SWE — no @mention needed" : "Mention Open SWE";
+        $("mention-label").textContent = selectedIsCodeChannel ? "Every message goes to Robin — no @mention needed" : "Mention Robin";
         if (selectedIsCodeChannel && $("text").value.includes("E2E_CODE_CHANNEL")) $("text").value = "What is the current status? E2E_CODE_CHANNEL_FOLLOWUP";
         await pollMessages();
       }
@@ -236,13 +236,13 @@
           return button;
         }));
         $("channel-title").textContent = `# ${active.name}`;
-        $("channel-subtitle").textContent = active.code_channel ? "Open SWE code channel · one task, one session" : "Team channel";
+        $("channel-subtitle").textContent = active.code_channel ? "Robin code channel · one task, one session" : "Team channel";
         $("status").hidden = !active.code_channel;
         $("status").className = `status ${active.status || "active"}`;
         $("status-text").textContent = active.status || "active";
         $("mention").checked = !active.code_channel;
         $("mention").disabled = Boolean(active.code_channel);
-        $("mention-label").textContent = active.code_channel ? "Every message goes to Open SWE — no @mention needed" : "Mention Open SWE";
+        $("mention-label").textContent = active.code_channel ? "Every message goes to Robin — no @mention needed" : "Mention Robin";
         if (active.code_channel && $("text").value.includes("E2E_CODE_CHANNEL")) $("text").value = "What is the current status? E2E_CODE_CHANNEL_FOLLOWUP";
         renderChrome(active);
       }

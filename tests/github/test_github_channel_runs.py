@@ -207,7 +207,7 @@ async def test_an_unregistered_commenter_starts_nothing(
     prepared.assert_not_awaited()
     # One line says why the channel was told nothing starts.
     [record] = [r for r in caplog.records if hasattr(r, "no_run_reason")]
-    assert record.no_run_reason == "Sender is not a registered Open SWE user"
+    assert record.no_run_reason == "Sender is not a registered Robin user"
     assert record.endpoint == "github"
 
 
@@ -230,7 +230,7 @@ async def test_a_waiting_thread_is_only_asked_whether_open_swe_acts(prepared: As
     response = await _post(_event("issue_comment.created", _comment_payload(), interrupted=True))
 
     # Open SWE would act, so the channel points the issue to the decision; nothing starts.
-    assert response.json() == {"input": "Open SWE was mentioned while the thread waits."}
+    assert response.json() == {"input": "Robin was mentioned while the thread waits."}
     # No reaction, metadata or run token while the thread waits.
     prepared.assert_not_awaited()
     channel.adopt_channel_run.assert_not_awaited()  # type: ignore[attr-defined]

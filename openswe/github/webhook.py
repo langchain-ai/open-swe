@@ -724,19 +724,19 @@ async def withdraw_superseded_approvals(payload: dict[str, Any]) -> None:
     try:
         async with PullRequestClient.as_app(*identity) as pull:
             refused = await pull.withdraw_open_swe_approvals(
-                reason="New commits were pushed after Open SWE approved this pull request.",
+                reason="New commits were pushed after Robin approved this pull request.",
                 keep_commit=event.pull_request.head_sha,
             )
     except Exception:
         # Later background tasks of this delivery must still run.
         common.logger.exception(
-            "Could not withdraw Open SWE approvals of superseded commits",
+            "Could not withdraw Robin approvals of superseded commits",
             extra={"repository": event.repo_full_name, "pr_number": identity[2]},
         )
         return
     if refused:
         common.logger.error(
-            "Open SWE approvals of superseded commits are still standing",
+            "Robin approvals of superseded commits are still standing",
             extra={
                 "repository": event.repo_full_name,
                 "pr_number": identity[2],
@@ -951,7 +951,7 @@ async def _process_github_head_update(
     if metadata is None or metadata.get("kind") != common.REVIEWER_THREAD_KIND:
         common.logger.info(
             "Push to %s/%s#%s ignored: no reviewer thread for this PR. "
-            "Trigger a first review (Slack `@open-swe review <url>` or request "
+            "Trigger a first review (Slack `@Robin review <url>` or request "
             "open-swe[bot] as a GitHub reviewer) to start watching.",
             repo_config["owner"],
             repo_config["name"],

@@ -767,4 +767,4 @@ async def _authorize(provider: Provider, login: str) -> None:
             "Refused to create a user for an unauthorized GitHub login",
             extra={"github_login": login},
         )
-        raise UnauthorizedUser(f"{login or '(no login)'} is not authorized to use Open SWE")
+        raise UnauthorizedUser(f"{login or '(no login)'} is not authorized to use Robin")

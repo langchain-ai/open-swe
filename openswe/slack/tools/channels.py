@@ -67,7 +67,7 @@ class SlackMessageReceipt(TypedDict):
 
 
 async def slack_list_channels(cursor: str | None = None) -> SlackChannelList | SlackChannelError:
-    """List a page of public and private channels the Open SWE bot belongs to."""
+    """List a page of public and private channels the Robin bot belongs to."""
     try:
         async with SlackClient.bot() as client:
             response = await client.users_conversations(
@@ -214,7 +214,7 @@ async def _dm_automation_creator(
 async def slack_post_message(
     channel_id: str, message: str
 ) -> SlackMessageReceipt | SlackChannelError:
-    """Post a standalone message to a channel the Open SWE bot belongs to."""
+    """Post a standalone message to a channel the Robin bot belongs to."""
     channel_id = channel_id.strip()
     if SLACK_USER_ID_RE.fullmatch(channel_id):
         return await _dm_automation_creator(channel_id, message)

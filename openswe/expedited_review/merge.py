@@ -72,7 +72,7 @@ async def merge_approved(
                 keep_approval_reason,
             )
     except GitHubAppUnavailable:
-        return MergeResult("error", "Open SWE cannot reach this repository's GitHub App.")
+        return MergeResult("error", "Robin cannot reach this repository's GitHub App.")
 
 
 async def _merge_approved(

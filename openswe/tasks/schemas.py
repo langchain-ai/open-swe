@@ -78,7 +78,7 @@ class ThreadMetadata(BaseModel):
         else:
             user = await user_for_login(self.owner_login or "")
         if user is None:
-            raise PermissionError("The thread owner needs an Open SWE account")
+            raise PermissionError("The thread owner needs a Robin account")
         return user
 
 

@@ -785,7 +785,7 @@ test.describe("Human review in Slack", () => {
     expect((await latestRequest(request)).picks).toEqual([]);
     await expect
       .poll(async () => cardText(await reviewCard(request, posted)))
-      .toContain("picked by Open SWE");
+      .toContain("picked by Robin");
     await shootCard(page, "assigned");
 
     await loginAs(page, BOB);
@@ -1129,7 +1129,7 @@ test.describe("Human review in Slack", () => {
         cardText(await reviewCard(request, await latestRequest(request))),
       )
       .toContain(
-        "Review request: dismissed by Open SWE: posted with the wrong summary",
+        "Review request: dismissed by Robin: posted with the wrong summary",
       );
   });
 

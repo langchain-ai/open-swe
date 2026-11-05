@@ -64,13 +64,13 @@ class LinearDecline(TypedDict):
 NO_REPOSITORY: LinearDecline = {
     "decline": (
         "Which repository should I work in? Mention it as `repo:owner/name` or link it on "
-        "GitHub, or set a default repository in Open SWE settings."
+        "GitHub, or set a default repository in Robin settings."
     )
 }
 UNREADABLE_SESSION: LinearDecline = {
     "decline": (
         "I couldn't read this Linear session, so I didn't start. Mention me on the issue "
-        "again; if it keeps happening, let your Open SWE admin know."
+        "again; if it keeps happening, let your Robin admin know."
     )
 }
 
@@ -82,17 +82,17 @@ def _sign_in(reason: common.AccountLinkReason) -> LinearDecline:
     of linking it, since the session must still be told why nothing started.
     """
     settings_url = build_settings_url()
-    settings = f"[your Open SWE settings]({settings_url})" if settings_url else "Open SWE"
+    settings = f"[your Robin settings]({settings_url})" if settings_url else "Robin"
     if reason == "revoked":
         return {
             "decline": (
-                "Your GitHub sign-in to Open SWE is no longer valid, so I can't work as you. "
+                "Your GitHub sign-in to Robin is no longer valid, so I can't work as you. "
                 f"Sign in with GitHub again in {settings}, then mention me again."
             )
         }
     return {
         "decline": (
-            "I don't know who you are in Open SWE yet, so I can't work as you. Sign in "
+            "I don't know who you are in Robin yet, so I can't work as you. Sign in "
             f"with GitHub in {settings}, using the same email as your Linear account, "
             "then mention me again."
         )
@@ -103,7 +103,7 @@ def _not_allowed(repo: Mapping[str, str]) -> LinearDecline:
     return {
         "decline": (
             f"I'm not allowed to work in `{repo['owner']}/{repo['name']}`. Name a repository "
-            "Open SWE may work in, or ask your Open SWE admin to allow this one."
+            "Robin may work in, or ask your Robin admin to allow this one."
         )
     }
 

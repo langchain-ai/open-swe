@@ -40,7 +40,7 @@ from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
-ASK_COMMAND = "/oswe"
+ASK_COMMAND = "/robin"
 BY_THE_WAY_COMMAND = SlackAction.BY_THE_WAY.value
 _CONTEXT_FENCE_RE = re.compile(r"<(\s*/?\s*untrusted_slack_context)", re.IGNORECASE)
 MAX_QUESTION_CHARS = 2000
@@ -51,13 +51,13 @@ CHANNEL_CONTEXT_MAX_TOKENS = 5000
 _CHANNEL_CONTEXT_MAX_CHARS = CHANNEL_CONTEXT_MAX_TOKENS * 4
 _CHANNEL_CONTEXT_TRIMMED = "[earlier messages omitted to stay inside the context budget]"
 _NO_CHANNEL_CONTEXT = "(unavailable — this is not a public channel, or it has no messages)"
-_CHANNEL_REFUSAL = "Open SWE cannot answer questions in this channel."
-_START_FAILURE = "Open SWE could not start that request. Try again in a moment."
+_CHANNEL_REFUSAL = "Robin cannot answer questions in this channel."
+_START_FAILURE = "Robin could not start that request. Try again in a moment."
 _SHORTCUT_ACKNOWLEDGEMENT = "Working on it — I’ll send a separate reply, visible only to you."
 _ACKNOWLEDGEMENT = "Working on it — the answer will replace this message, visible only to you."
-_BY_THE_WAY_USAGE = "Ask a question after it: `@Open SWE /btw how does thread routing work?`"
+_BY_THE_WAY_USAGE = "Ask a question after it: `@Robin /btw how does thread routing work?`"
 _BY_THE_WAY_TOO_LONG = (
-    "That question is too long for `/btw`. Tag Open SWE without `/btw` to start a thread instead."
+    "That question is too long for `/btw`. Tag Robin without `/btw` to start a thread instead."
 )
 
 

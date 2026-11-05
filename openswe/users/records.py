@@ -22,7 +22,7 @@ class UnknownUser(ValueError):
     """No Open SWE user signed in with this GitHub login."""
 
     def __init__(self, login: str) -> None:
-        super().__init__(f"No Open SWE user record for {login!r} yet; sign in first")
+        super().__init__(f"No Robin user record for {login!r} yet; sign in first")
 
 
 class UserRecord(Base):

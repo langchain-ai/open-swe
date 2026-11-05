@@ -1,4 +1,4 @@
-Start a separate, top-level Open SWE thread that works on a task in the background, owned by the person you are talking to.
+Start a separate, top-level Robin thread that works on a task in the background, owned by the person you are talking to.
 It is its own session in their thread list, not a worker under this conversation.
 
 When the person asks for a "new session", "new thread", "new chat" or "separate task", this is the tool, not `start_async_task`: a worker is part of this conversation's task and reports back here.

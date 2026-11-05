@@ -30,7 +30,7 @@ class BreakoutDestination:
             if channel is None:
                 return (
                     f"Could not find or access <#{channel_id}>. "
-                    "Check the channel and make sure Open SWE has access."
+                    "Check the channel and make sure Robin has access."
                 )
             if self.channel_id != source_channel and not channel.public:
                 return "Breakouts between channels require a public source channel and destination."

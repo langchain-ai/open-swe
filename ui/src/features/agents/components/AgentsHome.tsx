@@ -537,7 +537,7 @@ export function AgentsHome({
       return
     }
     if (localRun && !localCheckout && !taskWorkspaces) {
-      setLocalError("Update Open SWE Desktop to start without a project.")
+      setLocalError("Update Robin Desktop to start without a project.")
       return
     }
     // Minted here so the seeded thread, the graph's HumanMessage and the
@@ -641,7 +641,7 @@ export function AgentsHome({
           setLocalError(
             error instanceof Error
               ? error.message
-              : "Could not start the Open SWE agent"
+              : "Could not start the Robin agent"
           )
         }
         return

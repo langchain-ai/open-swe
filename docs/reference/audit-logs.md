@@ -1,8 +1,8 @@
 # Audit logs
 
-Open SWE stores metadata-only audit records in PostgreSQL's `open_swe.audit_logs` table.
+Robin stores metadata-only audit records in PostgreSQL's `open_swe.audit_logs` table.
 The envelope follows LangSmith's current audit schema: `id`, `request_time`, `operation_name`, nullable `operation_succeeded`, `user_id`, `api_key_id`, `workspace_id`, and JSONB `enrichments`.
-Open SWE has no organization or second LangSmith user identity, so those columns are omitted; API-key IDs retain Open SWE's text representation.
+Robin has no organization or second LangSmith user identity, so those columns are omitted; API-key IDs retain Robin's text representation.
 
 Records have no cascading foreign keys: deleting an account, key, or workspace must not erase its history.
 Application writes are insert-only and duplicate event IDs are ignored.

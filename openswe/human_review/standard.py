@@ -244,7 +244,7 @@ async def review_blockers(pull: PullRequestClient) -> list[str] | None:
     if author_allowed is None:
         return None
     if not author_allowed:
-        blockers.append("its author is not an Open SWE user or in reviewAllowedAuthors")
+        blockers.append("its author is not a Robin user or in reviewAllowedAuthors")
     return blockers
 
 
@@ -429,7 +429,7 @@ async def request_review(
                 supplementary_review_area=supplementary_review_area,
             )
     except GitHubAppUnavailable:
-        result = _failure("Open SWE cannot reach this repository's GitHub App installation.")
+        result = _failure("Robin cannot reach this repository's GitHub App installation.")
     await EventLog.append(
         "human_review",
         {
@@ -568,7 +568,7 @@ async def _request_review(
         scheduled = await _schedule(request, "auto_merge", timedelta(hours=AUTO_MERGE_AFTER_HOURS))
     if not scheduled:
         await _discard(request.id)
-        return _failure("Open SWE could not schedule the review request's deadlines. Try again.")
+        return _failure("Robin could not schedule the review request's deadlines. Try again.")
     try:
         message_ts = await ReviewCard(request).post_standard()
     except SlackRequestError as exc:
@@ -716,7 +716,7 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
         await ReviewPicks(added).drop(
             others,
             f"{mention(reviewer.user)} is reviewing {label} *{escape(pr.title)}*, so you no "
-            "longer need to. Open SWE removed you as a reviewer.",
+            "longer need to. Robin removed you as a reviewer.",
         )
     merge_note = (
         "It merges once every reviewer approves on GitHub."
@@ -733,7 +733,7 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
 async def snooze(request: HumanReviewRequest, user: User | None, length: str) -> Outcome:
     """Hold ``user``'s pending pick for ``length``, one of ``SNOOZE_DURATIONS``, then remind them."""
     if user is None:
-        return Outcome("Link your Open SWE account before snoozing a review.")
+        return Outcome("Link your Robin account before snoozing a review.")
     duration = SNOOZE_DURATIONS[length]
     until = datetime.now(UTC) + duration
     async with HumanReviewRequest.locked(request.id) as (_, row):
@@ -757,7 +757,7 @@ async def snooze(request: HumanReviewRequest, user: User | None, length: str) ->
 
 async def decline(request: HumanReviewRequest, user: User | None, reason: str) -> Outcome:
     if user is None:
-        return Outcome("Link your Open SWE account before declining a review.")
+        return Outcome("Link your Robin account before declining a review.")
     if request.state != "open":
         return Outcome("This review request is no longer open.")
     dropped = await ReviewPicks(request).drop({user.id}, None, expired=True)
@@ -770,7 +770,7 @@ async def decline(request: HumanReviewRequest, user: User | None, reason: str) -
     )
     trigger = PickTrigger("declined", tuple(p.github_login for p in dropped), reason)
     await start_auto_assign(request, asked=True, trigger=trigger)
-    return Outcome("Review declined; Open SWE will find another reviewer.")
+    return Outcome("Review declined; Robin will find another reviewer.")
 
 
 async def _github_approvers(request: HumanReviewRequest) -> list[str]:
@@ -809,7 +809,7 @@ async def assign(
         )
     user = await User.for_login("github", github_login)
     if user is None:
-        return _failure(f"@{github_login} is not an Open SWE user; pick someone who is.")
+        return _failure(f"@{github_login} is not a Robin user; pick someone who is.")
     if not replace:
         if not await PROFILES.allows_auto_human_review(user.github_login or github_login):
             return _failure(
@@ -843,7 +843,7 @@ async def assign(
     ):
         await ReviewPicks(request).drop(
             others,
-            f"Open SWE asked @{github_login} to review {label} *{escape(pr.title)}* instead, "
+            f"Robin asked @{github_login} to review {label} *{escape(pr.title)}* instead, "
             "so you no longer need to.",
         )
         request = await HumanReviewRequest.get(request.id) or request
@@ -886,15 +886,13 @@ async def assign(
             extra={"request_id": str(added.id), "github_login": github_login},
         )
     why = f" {escape(reason.strip())}" if reason.strip() else ""
-    deadline = f" Accept within {minutes} minutes, or Open SWE will ask someone else."
+    deadline = f" Accept within {minutes} minutes, or Robin will ask someone else."
     accept = actions(accept_button(added), decline_button(added), snooze_button(added))
     permalink = await _permalink(added)
     if user.slack_user_id:
         where = "review card" if added.has_card else "Slack post"
         card = f" (<{permalink}|{where}>)" if permalink else ""
-        dm_text = (
-            f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
-        )
+        dm_text = f"Robin picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
         if not replace and (base := dashboard_base_url()):
             dm_text += f" <{base}/my-settings/agent|Turn off automatic review picks>."
         origin = added.dm_origin
@@ -1528,7 +1526,7 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
         )
         sent = await send_dm(
             participant.user.slack_user_id,
-            f"Reminder: Open SWE picked you to review <{pr.url}|{pr.label}> "
+            f"Reminder: Robin picked you to review <{pr.url}|{pr.label}> "
             f"*{escape(pr.title)}*. {mention(request.requested_by) if request.requested_by else 'The author'} "
             f"has been waiting {waited} since the review request was opened. "
             "Please submit your review on GitHub.",
@@ -1616,7 +1614,7 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     await ReviewPicks(request).drop(
         {p.user_id for p in idle},
         f"You didn't accept the review of {label} *{escape(pr.title)}* within "
-        f"{minutes} minutes, so Open SWE released you from it.",
+        f"{minutes} minutes, so Robin released you from it.",
         expired=True,
     )
     current = await HumanReviewRequest.get(request.id)
@@ -1676,7 +1674,7 @@ async def _auto_assign_hold(request: HumanReviewRequest, step: str) -> str | Non
     await ReviewPicks(request).drop(
         {pick.user_id for pick in request.picks},
         f"You no longer need to review <{pr.url}|{pr.label}> "
-        f"*{escape(pr.title)}*: nobody asked Open SWE to find a reviewer for it.",
+        f"*{escape(pr.title)}*: nobody asked Robin to find a reviewer for it.",
     )
     return "not_asked"
 

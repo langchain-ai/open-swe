@@ -271,13 +271,13 @@ ENV.var(
 ENV.var(
     "LANGCHAIN_API_KEY",
     "Legacy SDK alias.",
-    deprecated="Open SWE reads LANGSMITH_API_KEY; this legacy alias is ignored.",
+    deprecated="Robin reads LANGSMITH_API_KEY; this legacy alias is ignored.",
     replaced_by="LANGSMITH_API_KEY",
 )
 ENV.var(
     "LANGCHAIN_TRACING_V2",
     "Legacy SDK alias.",
-    deprecated="set LANGSMITH_TRACING=true instead; this legacy alias is ignored by Open SWE.",
+    deprecated="set LANGSMITH_TRACING=true instead; this legacy alias is ignored by Robin.",
     replaced_by="LANGSMITH_TRACING",
 )
 # --- GitHub ------------------------------------------------------------------------------

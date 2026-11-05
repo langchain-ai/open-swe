@@ -1025,12 +1025,12 @@ async def post_account_link_prompt(
     if reason == "revoked":
         text = (
             "🔐 Your GitHub sign-in is no longer valid, so I can't resolve your GitHub "
-            f"account. Re-connect it in <{settings_url}|your Open SWE settings>, then tag me again."
+            f"account. Re-connect it in <{settings_url}|your Robin settings>, then tag me again."
         )
     else:
         text = (
             "👋 I couldn't resolve your GitHub account from Slack. Sign in with GitHub and "
-            f"connect your Slack account in <{settings_url}|your Open SWE settings>, then tag me "
+            f"connect your Slack account in <{settings_url}|your Robin settings>, then tag me "
             "again."
         )
     try:
@@ -1305,7 +1305,7 @@ async def track_review_check_run(
             token=token,
             conclusion="neutral",
             title="Superseded by a newer review",
-            summary="A newer Open SWE review run replaced this one.",
+            summary="A newer Robin review run replaced this one.",
         )
     ]
     await set_reviewer_thread_metadata(

@@ -195,7 +195,7 @@ def _discovery_slots() -> asyncio.Semaphore:
 async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
     if record.connection is not None:
         raise MCPDiscoveryError(
-            "Only an MDA run reads this server's connection, so Open SWE cannot list its "
+            "Only an MDA run reads this server's connection, so Robin cannot list its "
             "tools; enter the names of the tools to allow"
         )
 

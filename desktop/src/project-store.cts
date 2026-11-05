@@ -9,7 +9,7 @@ function projectName(cwd) {
   return path.basename(cwd) || cwd;
 }
 
-/** The Open SWE project a folder belongs to; the path itself never leaves this Mac. */
+/** The Robin project a folder belongs to; the path itself never leaves this Mac. */
 function projectIdOf(value) {
   return typeof value === "string" && PROJECT_ID.test(value) ? value : null;
 }

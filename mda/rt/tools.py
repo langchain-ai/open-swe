@@ -58,11 +58,11 @@ logger = logging.getLogger(__name__)
 
 STATE_KEY: Final = "open_swe_state"
 _TIMED_OUT: Final = (
-    "Error: Open SWE did not answer this tool call in time. Whatever it started may "
+    "Error: Robin did not answer this tool call in time. Whatever it started may "
     "still be running in the sandbox; check before running it again."
 )
 _UNREACHABLE: Final = (
-    "Error: The Open SWE backend could not be reached for this tool call. "
+    "Error: The Robin backend could not be reached for this tool call. "
     "It may or may not have run; check state before retrying."
 )
 _NO_CONNECTION: Final = (

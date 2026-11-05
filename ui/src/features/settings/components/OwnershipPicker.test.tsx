@@ -36,7 +36,7 @@ const ITEMS: Array<PickerItem> = [
   {
     id: "C4",
     label: "#community-announce",
-    warning: "Open SWE is not in this channel",
+    warning: "Robin is not in this channel",
   },
 ]
 
@@ -222,7 +222,7 @@ describe("OwnershipPicker", () => {
     const revealed = screen.getByRole("checkbox", {
       name: "#community-announce",
     })
-    expect(screen.getByText("Open SWE is not in this channel")).toBeTruthy()
+    expect(screen.getByText("Robin is not in this channel")).toBeTruthy()
     fireEvent.click(revealed)
     fireEvent.click(screen.getByRole("checkbox", { name: "#oss-maintainers" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "#oss-help" }))

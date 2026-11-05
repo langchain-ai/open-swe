@@ -249,7 +249,7 @@ async def test_aliases_and_pr_only_members_preserve_privacy(usage_db):
     assert ordinary["rows"][0]["invocations"] == 2
     assert ordinary["rows"][0]["prs_opened"] == 1
     assert ordinary["rows"][1]["user"] == {
-        "name": "Open SWE user",
+        "name": "Robin user",
         "github_login": None,
         "email": None,
         "avatar_url": None,

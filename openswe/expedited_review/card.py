@@ -122,7 +122,7 @@ def _condition_summary(diff: ExpeditedDiff) -> list[Block]:
     deleted = sum(counts[1] for counts in stats.values())
     heading = (
         f"*Covered by the condition above (not shown):* {len(stats)} "
-        f"{'file' if len(stats) == 1 else 'files'} +{added} −{deleted}. Open SWE's review "
+        f"{'file' if len(stats) == 1 else 'files'} +{added} −{deleted}. Robin's review "
         "would approve these subject to human approval of the stated condition.\n"
     )
     budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
@@ -148,7 +148,9 @@ def _excluded_summary(diff: ExpeditedDiff) -> list[Block]:
         counts[0] += 1
         counts[1] += entry["additions"]
         counts[2] += entry["deletions"]
-    heading = "*Open SWE judged these auto-approvable under `.open-swe/auto-approve-rules/` (not shown)*\n"
+    heading = (
+        "*Robin judged these auto-approvable under `.open-swe/auto-approve-rules/` (not shown)*\n"
+    )
     budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
     lines: list[str] = []
     for guideline, paths in stats.items():

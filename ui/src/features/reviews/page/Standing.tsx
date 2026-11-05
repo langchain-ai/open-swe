@@ -760,7 +760,7 @@ function OpenSweRow({
   const expanded = chosen ?? bugs + flags > 0
   const reReview = useMutation({
     mutationFn: () => api.reReview(pr.owner, pr.repo, pr.number),
-    meta: { errorTitle: "Couldn't start the Open SWE review" },
+    meta: { errorTitle: "Couldn't start the Robin review" },
     onSuccess: () => {
       queryClient.setQueryData(reviewQueries.detail(pr).queryKey, (old) =>
         old ? { ...old, status: "running" as const } : old
@@ -807,7 +807,7 @@ function OpenSweRow({
         icon={
           running ? <Spinner size="xs" /> : <AgentMark className="size-4" />
         }
-        label="Open SWE"
+        label="Robin"
         expandable={canExpand}
         expanded={expanded}
         onToggle={() => setChosen(!expanded)}
@@ -940,7 +940,7 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                   size="xs"
                   variant="plain"
                   color="secondary"
-                  aria-label={`Ask Open SWE about: ${finding.title}`}
+                  aria-label={`Ask Robin about: ${finding.title}`}
                   onClick={() => askInChat(askAboutFinding(finding))}
                 >
                   Ask
@@ -950,7 +950,7 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                     size="xs"
                     variant="plain"
                     color="secondary"
-                    aria-label={`Ask Open SWE to fix: ${finding.title}`}
+                    aria-label={`Ask Robin to fix: ${finding.title}`}
                     onClick={() => askInChat(fixFinding(finding))}
                   >
                     Fix it

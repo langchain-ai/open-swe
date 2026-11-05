@@ -864,14 +864,14 @@ async def _authorized_locator(
     if langsmith_locator:
         thread_id = await get_open_swe_thread_id_from_langsmith(locator) or ""
         if not thread_id:
-            return _failure("Could not resolve LangSmith trace to an Open SWE thread")
+            return _failure("Could not resolve LangSmith trace to a Robin thread")
     elif slack_locator:
         thread_id = await lookup_slack_link_thread_id(locator) or ""
         if not thread_id:
-            return _failure("Could not resolve Slack link to an Open SWE thread")
+            return _failure("Could not resolve Slack link to a Robin thread")
     if not thread_id:
         return _failure(
-            "thread_id must be an exact thread ID, Open SWE dashboard URL, Slack link, "
+            "thread_id must be an exact thread ID, Robin dashboard URL, Slack link, "
             "or LangSmith trace URL"
         )
     try:

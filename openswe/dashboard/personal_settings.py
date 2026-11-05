@@ -93,7 +93,7 @@ async def patch_personal_settings(
     if sql_update is not None:
         saved_sql = await User.update_preferences(login, sql_update)
         if saved_sql is None:
-            raise ValueError("No Open SWE user record for this login yet")
+            raise ValueError("No Robin user record for this login yet")
         result.update({key: getattr(saved_sql, key) for key in sql_patch})
     if profile is not None:
         await PROFILES.put(

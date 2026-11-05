@@ -24,7 +24,7 @@ export function ReadingOrderTabs({
         {
           value: "guide",
           display: `Walkthrough · ${steps}`,
-          tooltip: "Open SWE's reading order",
+          tooltip: "Robin's reading order",
         },
         {
           value: "files",

@@ -236,7 +236,7 @@ async def allow_slack_bot(body: AllowSlackBot, admin: dict[str, Any]) -> Allowed
             raise HTTPException(400, "That Slack bot is unavailable.")
         user_id = bot.get("user_id") or ""
         if bot_id == auth.get("bot_id") or (user_id and user_id == auth.get("user_id")):
-            raise HTTPException(400, "Open SWE cannot trigger itself.")
+            raise HTTPException(400, "Robin cannot trigger itself.")
         if user_id and user is None:
             user = (await client.users_info(user=user_id)).get("user")
         if (user_id or user is not None) and (

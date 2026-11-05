@@ -101,11 +101,11 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
     user = await User.for_identity("slack", origin.requester_slack_id)
     login = user.github_login if user else ""
     if user is None or not login:
-        raise GuideStartError("the requester has no GitHub account linked to Open SWE")
+        raise GuideStartError("the requester has no GitHub account linked to Robin")
     # The channel shows the PR's code, so only someone who can read it may open one.
     user_token = await get_valid_access_token(login)
     if not user_token:
-        raise GuideStartError(f"Open SWE has no GitHub token for @{login}. {github_token_hint()}")
+        raise GuideStartError(f"Robin has no GitHub token for @{login}. {github_token_hint()}")
     head = await fetch_head(start.owner, start.repo, start.number, token=user_token)
     if head is None:
         raise GuideStartError(f"@{login} cannot read that pull request on GitHub")

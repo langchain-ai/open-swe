@@ -60,7 +60,7 @@ async def approve(
     """Submit ``login``'s ``APPROVE`` review on ``head_sha``; why it failed, or ``None``."""
     token = await get_valid_access_token(login)
     if not token:
-        return f"Open SWE has no GitHub token for @{login}. {github_token_hint()}"
+        return f"Robin has no GitHub token for @{login}. {github_token_hint()}"
     url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}/reviews"
     payload = {"commit_id": head_sha, "event": "APPROVE", "body": body}
     try:
@@ -79,7 +79,7 @@ async def mark_ready(*, login: str, owner: str, repo: str, number: int) -> str |
     """Take the PR out of draft as ``login``; why it failed, or ``None``."""
     token = await get_valid_access_token(login)
     if not token:
-        return f"Open SWE has no GitHub token for @{login}. {github_token_hint()}"
+        return f"Robin has no GitHub token for @{login}. {github_token_hint()}"
     try:
         async with github_client(token=token) as client:
             await MarkReadyAction(action="mark-ready").perform(client, owner, repo, number)

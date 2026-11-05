@@ -131,7 +131,7 @@ async def api_request_human_review(
     login = str(session["sub"])
     requester = await User.for_login("github", login)
     if requester is None:
-        raise HTTPException(403, "No Open SWE user record for this login")
+        raise HTTPException(403, "No Robin user record for this login")
     token = await require_repo_access_for_user(login, f"{owner}/{repo}")
     options = body or HumanReviewRequestBody()
     inline_summary = options.inline_summary

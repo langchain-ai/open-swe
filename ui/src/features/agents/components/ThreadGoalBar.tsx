@@ -28,7 +28,7 @@ function waitLabel(wait: AgentGoalWait): string {
     case "event":
       return wait.detail ? `events (${wait.detail})` : "events"
     case "review":
-      return "the Open SWE review"
+      return "the Robin review"
   }
 }
 

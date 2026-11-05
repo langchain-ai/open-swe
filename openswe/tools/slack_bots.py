@@ -35,7 +35,7 @@ async def list_slack_bots() -> dict[str, object]:
 @audit_tool()
 @access(_WRITE)
 async def allow_slack_bot(bot_id: str) -> dict[str, object]:
-    """Allow one active Slack bot to trigger Open SWE."""
+    """Allow one active Slack bot to trigger Robin."""
     login = configurable().github_login
     if not login:
         return {"ok": False, "error": "A signed-in admin is required."}
@@ -52,6 +52,6 @@ async def allow_slack_bot(bot_id: str) -> dict[str, object]:
 @audit_tool()
 @access(_WRITE)
 async def remove_slack_bot(team_id: str, bot_id: str) -> dict[str, object]:
-    """Revoke one Slack bot's permission to trigger Open SWE."""
+    """Revoke one Slack bot's permission to trigger Robin."""
     await AllowedSlackBot.remove(team_id, bot_id)
     return {"ok": True}

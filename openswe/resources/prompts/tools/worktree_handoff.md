@@ -2,8 +2,8 @@ Move this thread out of the user's own checkout into a new git worktree on a new
 The desktop app creates the worktree and branch, and every later command, file read, and file write in this thread runs there.
 The user's checkout is left exactly as it was; uncommitted changes in it are not carried over, so call this before editing any file.
 
-- `branch`: the new branch, such as `open-swe/<short-task-slug>`.
-  If it is already checked out in the user's own checkout or in a worktree Open SWE manages, the thread moves there instead and nothing is created; use this to bring the thread back to the user's checkout.
+- `branch`: the new branch, such as `robin/<short-task-slug>`.
+  If it is already checked out in the user's own checkout or in a worktree Robin manages, the thread moves there instead and nothing is created; use this to bring the thread back to the user's checkout.
   Never move the thread by running `git worktree` or `cd` yourself: the app would not follow.
 - `base_ref`: the branch the new one starts from.
   Defaults to the repository's default branch.

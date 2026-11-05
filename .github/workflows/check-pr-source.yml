@@ -1,6 +1,6 @@
 name: Check PR source
 
-# Open SWE is developed in LangChain's internal monorepo, and Copybara pushes
+# Robin is developed in LangChain's internal monorepo, and Copybara pushes
 # it straight to this repo's main, so nothing reaches main through a pull
 # request here. Anything merged by another route is missing from the monorepo,
 # and the next export reverts it.
@@ -32,5 +32,5 @@ jobs:
             echo "::warning::skip-pr-source-check label present. After merging, make the same change in the monorepo so the next export does not revert it."
             exit 0
           fi
-          echo "::error::Open SWE is developed in LangChain's internal monorepo, and Copybara exports it to this repo's main. Make the change there. For an urgent production fix, add the skip-pr-source-check label."
+          echo "::error::Robin is developed in LangChain's internal monorepo, and Copybara exports it to this repo's main. Make the change there. For an urgent production fix, add the skip-pr-source-check label."
           exit 1

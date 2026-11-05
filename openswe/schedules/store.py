@@ -644,7 +644,7 @@ async def _require_watchable_slack_channel(channel_id: str) -> None:
         raise HTTPException(422, "externally shared Slack channels can't trigger automations")
     if channel.payload.get("is_member") is not True:
         raise HTTPException(
-            422, f"invite Open SWE to #{channel.name or channel_id} so it sees its messages"
+            422, f"invite Robin to #{channel.name or channel_id} so it sees its messages"
         )
 
 

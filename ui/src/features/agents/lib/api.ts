@@ -318,7 +318,7 @@ async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
     blob: await res.blob(),
     filename:
       filenameFromContentDisposition(res.headers.get("content-disposition")) ??
-      "open-swe-recovery.patch",
+      "robin-recovery.patch",
   }
 }
 

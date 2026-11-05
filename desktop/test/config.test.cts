@@ -65,7 +65,7 @@ test("renamed app retains original production and isolated development profiles"
   const appDataPath = path.join("/tmp", "open-swe-app-data");
   const expected = {
     isDevelopment: true,
-    name: "Open SWE Development",
+    name: "Robin Development",
     appUserModelId: "com.langchain.openswe.dev",
     userDataPath: path.join(appDataPath, "Open SWE Development"),
   };
@@ -81,7 +81,7 @@ test("renamed app retains original production and isolated development profiles"
     resolveAppRuntime({ argv: [], isPackaged: true, appDataPath }),
     {
       isDevelopment: false,
-      name: "Open SWE",
+      name: "Robin",
       appUserModelId: "com.langchain.openswe",
       userDataPath: path.join(appDataPath, "Open SWE"),
     },

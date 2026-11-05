@@ -106,10 +106,10 @@ function AssessmentCard({
             className="text-xs text-secondary"
             title={
               assessment.approved
-                ? "Open SWE approved this pull request on GitHub."
+                ? "Robin approved this pull request on GitHub."
                 : assessment.dry_run
-                  ? "Auto-approval is in dry run for this repository: Open SWE scores the risk but never approves on GitHub."
-                  : "Open SWE only advises here; it doesn't approve on GitHub."
+                  ? "Auto-approval is in dry run for this repository: Robin scores the risk but never approves on GitHub."
+                  : "Robin only advises here; it doesn't approve on GitHub."
             }
           >
             {assessment.approved
@@ -227,7 +227,7 @@ function AssessmentCard({
               placeholder="What was right, or what did we miss?"
             />
             <p className="text-xs text-secondary">
-              Saved in Open SWE. Your comment is not posted to GitHub.
+              Saved in Robin. Your comment is not posted to GitHub.
             </p>
             <div className="flex gap-space-2">
               <Button type="submit" size="xs" disabled={!value?.rating}>

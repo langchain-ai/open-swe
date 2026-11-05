@@ -32,12 +32,12 @@ const assignmentLabels: Partial<
 > = {
   tentative: [
     "May be assigned",
-    "Open SWE may assign you this review if nobody claims it in time",
+    "Robin may assign you this review if nobody claims it in time",
   ],
   requested: ["Requested", "GitHub asks you to review this"],
   mentioned: ["Mentioned", "Linked in a Slack thread that mentions you"],
   draft: ["Your draft", "Review it, then mark it ready"],
-  speculative: ["Speculative", "Open SWE reviewed this; nobody asked you yet"],
+  speculative: ["Speculative", "Robin reviewed this; nobody asked you yet"],
 }
 
 function AssignmentBadge({ pr }: { pr: OpenPullRequest }) {
