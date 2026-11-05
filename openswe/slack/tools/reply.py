@@ -26,6 +26,7 @@ from openswe.slack.blocks import (
 )
 from openswe.slack.client import (
     get_active_slack_thread,
+    get_slack_permalink,
     post_slack_ephemeral_reply,
     post_slack_thread_reply_with_ts,
     remove_slack_reaction,
@@ -249,12 +250,9 @@ async def send_slack_reply(
     return {
         "success": True,
         "message_ts": message_ts,
-        "message_url": (
-            f"https://slack.com/archives/{channel_id}/p{message_ts.replace('.', '')}"
-            f"?thread_ts={post_thread_ts}&cid={channel_id}"
-            if message_ts
-            else None
-        ),
+        "message_url": await get_slack_permalink(str(channel_id), message_ts)
+        if message_ts
+        else None,
     }
 
 
