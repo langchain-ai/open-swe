@@ -42,6 +42,14 @@ class OnScreen(BaseModel):
             self.message_text.removesuffix(self.code).rstrip() if self.code else self.message_text
         )
 
+    @property
+    def markdown(self) -> str:
+        """The message in standard Markdown, for the dashboard; Slack bolds its header with one ``*``."""
+        header, _, rest = self.message_text.partition("\n")
+        if len(header) > 2 and header.startswith("*") and header.endswith("*"):
+            header = f"**{header[1:-1]}**"
+        return f"{header}\n\n{rest}" if rest else header
+
     def diff_files(self) -> list[ChangedFile]:
         """Adapt the sandbox's fenced snippets to the shared diff renderer."""
         files: list[ChangedFile] = []

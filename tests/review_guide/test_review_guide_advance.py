@@ -6,7 +6,7 @@ from uuid import uuid7
 import pytest
 
 from openswe.review_guide import advance as advance_module
-from openswe.review_guide import messages
+from openswe.review_guide import messages, sessions
 from openswe.review_guide.buttons import NEXT
 from openswe.review_guide.github import PullRequestHead
 from openswe.review_guide.sessions import ReviewGuideSession
@@ -14,6 +14,7 @@ from openswe.review_guide.walk import Reader, Walk
 from openswe.sandbox_scripts.walkthrough import parse_index
 from openswe.slack import diff_image
 from openswe.slack.http import SlackRequestError
+from openswe.source_context import SlackThreadRef
 from openswe.walkthrough.diff import DiffIndex
 from openswe.walkthrough.lines import LineSet
 from openswe.walkthrough.plan import Plan, PlanChunk
@@ -46,6 +47,10 @@ class _Session:
     pull_request: SimpleNamespace = field(
         default_factory=lambda: SimpleNamespace(id=uuid7(), owner="o", repo="r", number=1)
     )
+
+    @property
+    def slack_location(self) -> SlackThreadRef | None:
+        return SlackThreadRef(channel_id="C1", thread_ts="0") if self.slack_channel_id else None
 
     async def save_walk(self, walk: Walk) -> None:
         self.walk = walk
@@ -80,9 +85,6 @@ def _session(monkeypatch: pytest.MonkeyPatch, plan: Plan, *, complete: bool) -> 
         complete=complete,
     )
     head = PullRequestHead.model_validate({"head": {"sha": "head-1"}, "base": {"sha": "base"}})
-    monkeypatch.setattr(
-        advance_module.ReviewGuideSession, "for_channel", AsyncMock(return_value=session)
-    )
     monkeypatch.setattr(advance_module.Walkthrough, "get", AsyncMock(return_value=stored))
     monkeypatch.setattr(advance_module, "fetch_head", AsyncMock(return_value=head))
     monkeypatch.setattr(advance_module, "retire", AsyncMock())
@@ -98,7 +100,7 @@ async def test_looks_good_approves_and_posts_the_next_planned_chunk_without_a_tu
 ) -> None:
     session = _session(monkeypatch, _plan(2), complete=False)
 
-    await advance_module.advance("C1", "1.0")
+    await advance_module.advance(session, "1.0")
 
     post = advance_module.post_with_buttons
     assert isinstance(post, AsyncMock) and post.await_args is not None
@@ -115,7 +117,7 @@ async def test_looks_good_ahead_of_the_planner_approves_then_hands_the_guide_a_t
 ) -> None:
     session = _session(monkeypatch, _plan(1), complete=False)
 
-    await advance_module.advance("C1", "1.0")
+    await advance_module.advance(session, "1.0")
 
     assert session.walk.on_screen is None
     assert len(session.seen) == 1
@@ -124,13 +126,17 @@ async def test_looks_good_ahead_of_the_planner_approves_then_hands_the_guide_a_t
     assert dispatch.await_args.kwargs["approve_ts"] == ""
 
 
-async def test_looks_good_during_a_turn_is_recorded_when_its_own_turn_starts(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("where", ["during a turn", "in the dashboard"])
+async def test_looks_good_is_recorded_when_its_own_turn_starts(
+    monkeypatch: pytest.MonkeyPatch, where: str
 ) -> None:
     session = _session(monkeypatch, _plan(2), complete=False)
-    monkeypatch.setattr(advance_module, "langgraph_client", lambda: _client("r1"))
+    if where == "during a turn":
+        monkeypatch.setattr(advance_module, "langgraph_client", lambda: _client("r1"))
+    else:
+        session.slack_channel_id = ""
 
-    await advance_module.advance("C1", "1.0")
+    await advance_module.advance(session, "1.0")
 
     assert session.walk.on_screen is not None and session.walk.on_screen.message_ts == "1.0"
     assert len(session.seen) == 0
@@ -146,7 +152,7 @@ async def test_unrenderable_chunk_body_is_not_posted_as_an_empty_next_button(
         thread_id="thread-1", pull_request_id=uuid7(), user_id=uuid7(), slack_channel_id="C1"
     )
     post = AsyncMock()
-    monkeypatch.setattr(messages, "post_slack_top_level_message_with_ts", post)
+    monkeypatch.setattr(sessions, "post_slack_top_level_message_with_ts", post)
     text = "x" * 160_000
     assert await messages.post_with_buttons(session, text, [NEXT]) == ""
     post.assert_not_awaited()
@@ -179,7 +185,7 @@ async def test_chunk_images_survive_retirement_and_fall_back_to_accessible_text(
     )
     post = AsyncMock(return_value="2.0")
     update = AsyncMock()
-    monkeypatch.setattr(messages, "post_slack_top_level_message_with_ts", post)
+    monkeypatch.setattr(sessions, "post_slack_top_level_message_with_ts", post)
     monkeypatch.setattr(messages, "update_slack_message", update)
 
     assert (

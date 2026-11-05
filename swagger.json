@@ -2899,6 +2899,30 @@
         "title": "InputTokensDetails",
         "type": "object"
       },
+      "InteractiveReviewNext": {
+        "properties": {
+          "message_ts": {
+            "title": "Message Ts",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_ts"
+        ],
+        "title": "InteractiveReviewNext",
+        "type": "object"
+      },
+      "InteractiveReviewNextResult": {
+        "properties": {
+          "accepted": {
+            "default": true,
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "title": "InteractiveReviewNextResult",
+        "type": "object"
+      },
       "ItemStatus": {
         "enum": [
           "in_progress",
@@ -21815,6 +21839,65 @@
         "tags": [
           "dashboard",
           "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/interactive-review/next": {
+      "post": {
+        "description": "Approve the chunk on screen as its reader, and go on to what comes next.",
+        "operationId": "api_interactive_review_next_dashboard_api_threads__thread_id__interactive_review_next_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InteractiveReviewNext"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InteractiveReviewNextResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Interactive Review Next",
+        "tags": [
+          "dashboard",
+          "interactive-review"
         ]
       }
     },

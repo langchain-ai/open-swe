@@ -94,7 +94,7 @@ _TOOL_MODULES = {
     "slack_read_thread_messages": "openswe.slack.tools.read_thread_messages",
     "slack_reply": "openswe.slack.tools.reply",
     "slack_breakout_thread": "openswe.slack.tools.start_new_thread",
-    "slack_start_review_channel": "openswe.slack.tools.start_review_channel",
+    "start_interactive_review": ".start_interactive_review",
     "submit_thread_feedback": ".submit_thread_feedback",
     "suggest_task": ".suggest_task",
     "trigger_automation": ".automations",
@@ -195,7 +195,7 @@ __all__ = [
     "slack_read_thread_messages",
     "slack_reply",
     "slack_breakout_thread",
-    "slack_start_review_channel",
+    "start_interactive_review",
     "submit_thread_feedback",
     "suggest_task",
     "trigger_automation",
@@ -221,7 +221,6 @@ if TYPE_CHECKING:
     from openswe.slack.tools.reply import slack_reply
     from openswe.slack.tools.request_pr_review import request_pr_review
     from openswe.slack.tools.start_new_thread import slack_breakout_thread
-    from openswe.slack.tools.start_review_channel import slack_start_review_channel
     from openswe.tools.add_finding import add_finding
     from openswe.tools.automations import (
         create_automation,
@@ -289,6 +288,7 @@ if TYPE_CHECKING:
     from openswe.tools.schedule_thread_wakeup import schedule_thread_wakeup
     from openswe.tools.search_pull_requests import search_pull_requests
     from openswe.tools.send_announcement import send_announcement
+    from openswe.tools.start_interactive_review import start_interactive_review
     from openswe.tools.submit_thread_feedback import submit_thread_feedback
     from openswe.tools.suggest_task import suggest_task
     from openswe.tools.switch_to_performance_model import switch_to_performance_model

@@ -1167,7 +1167,11 @@ async def _process_slack_mention_impl(
     channel_identity = await _slack_channel_identity(
         channel_id, thread_ts, channel_context, thread_id=thread_id, repo=repo
     )
-    guide = await ReviewGuideSession.get(thread_id) if code_channel else None
+    guide = await ReviewGuideSession.get(thread_id)
+    # A code channel exists for its guide, so writing in one reopens it; a closed review
+    # in an ordinary thread stays closed while the conversation goes on.
+    if guide is not None and guide.closed and not guide.in_code_channel:
+        guide = None
     review_guide = guide is not None
     # Guidance that holds for the whole thread, deduped by content so the model
     # is told once; only what this turn adds travels as a message.

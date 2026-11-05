@@ -5,6 +5,7 @@ from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.review_guide.walk import Reader, Walk
 from openswe.run_config import RunConfig
 from openswe.runtime import get_cached_sandbox_backend
+from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.users import User
 from openswe.walkthrough.checkout import CheckoutError, PinnedCheckout
 from openswe.walkthrough.lines import LineSet
@@ -17,8 +18,10 @@ class GuideUnavailableError(RuntimeError):
 
 
 async def requester_login() -> str:
-    """The GitHub login of the person whose Slack message started this turn."""
+    """The GitHub login of the person whose own message started this turn, in Slack or the dashboard."""
     cfg = RunConfig.from_runtime()
+    if cfg.source == DASHBOARD_SOURCE and cfg.github_login:
+        return cfg.github_login
     slack_user_id = cfg.slack_thread.triggering_user_id if cfg.slack_thread else ""
     if not slack_user_id:
         raise GuideUnavailableError(

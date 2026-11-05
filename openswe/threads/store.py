@@ -180,6 +180,22 @@ class ThreadStore:
         await RUNTIMES.mda.create(thread_id, for_mda(thread.metadata))
         return thread
 
+    async def copy(self, thread: IndexedThread) -> IndexedThread:
+        """Copy a thread on its runtime, checkpoints included, and index the copy as it is."""
+        made = _object.validate_python(
+            await RUNTIMES.runs_on(thread.runtime).client.http.post(
+                f"/threads/{thread.thread_id}/copy", json={}
+            )
+        )
+        copy_id = made.get("thread_id")
+        if not isinstance(copy_id, str):
+            raise RuntimeError("The runtime's thread copy returned no thread id")
+        made_metadata = made.get("metadata")
+        metadata = dict(made_metadata) if isinstance(made_metadata, dict) else dict(thread.metadata)
+        return await index.create(
+            copy_id, runtime=thread.runtime, metadata=metadata, if_exists="do_nothing"
+        )
+
     async def update(
         self, thread_id: str, metadata: Mapping[str, JsonValue]
     ) -> IndexedThread | None:

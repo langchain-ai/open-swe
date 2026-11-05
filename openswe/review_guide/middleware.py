@@ -1,7 +1,7 @@
-"""Runs a review walkthrough inside the coding agent, on a thread bound to a code channel.
+"""Runs an interactive review inside the coding agent, in whichever thread it was started.
 
 Every run first pins the pull request's base and head as refs in the shared
-sandbox, without touching its checkout, attaches the diff to the channel when
+sandbox, without touching its checkout, attaches the diff to a code channel when
 the head moved, carries the shared plan and the reader's walk over to that
 head, starts the review scout when the plan is missing lines, records a "Looks
 good" that landed while the previous turn ran, and tells the agent where the
@@ -72,41 +72,16 @@ class ReviewGuideMiddleware(OpenSWEMiddleware):
             repo_dir=checkout.repo_dir,
             author=author,
             draft=head.draft,
+            surface=session.surface,
             human_input=(await Walkthrough.human_input_for(pr.id) or "") if author else "",
         )
-        if await checkout.pin(
+        pinned = await checkout.pin(
             full_name=pr.repo_full_name,
             pr_number=pr.number,
             head_sha=head.head.sha,
-        ):
-            try:
-                await set_view(
-                    session.slack_channel_id,
-                    "diff",
-                    content=await checkout.diff(),
-                    base_branch=head.base.ref,
-                    head_branch=head.head.ref,
-                )
-            except SlackRequestError as exc:
-                logger.warning(
-                    "Could not attach the pull request diff to a review walkthrough channel",
-                    extra={"agent_thread_id": self._thread_id, "slack_error": str(exc)},
-                )
-        # Refreshed every run so channels opened before a link was added still get it.
-        try:
-            await set_context_bar(
-                session.slack_channel_id,
-                repo_context_bar_items(
-                    {"owner": pr.owner, "name": pr.repo},
-                    pr_url=pr.url,
-                    dashboard_url=dashboard_thread_url(self._thread_id) or "",
-                ),
-            )
-        except SlackRequestError as exc:
-            logger.warning(
-                "Could not set a review walkthrough channel's context bar",
-                extra={"agent_thread_id": self._thread_id, "slack_error": str(exc)},
-            )
+        )
+        if session.in_code_channel:
+            await self._dress_channel(session, checkout, head, diff=pinned)
         await resume(session)
         try:
             workspace = await PlanWorkspace.open(pr, checkout)
@@ -119,7 +94,11 @@ class ReviewGuideMiddleware(OpenSWEMiddleware):
             return {
                 "messages": [
                     *_rules_messages(state, rules),
-                    HumanMessage(content=prompt("review-guide/moved-mid-turn")),
+                    HumanMessage(
+                        content=run_context(
+                            "review-guide-turn", prompt("review-guide/moved-mid-turn")
+                        )
+                    ),
                 ]
             }
         if not workspace.complete:
@@ -166,18 +145,62 @@ class ReviewGuideMiddleware(OpenSWEMiddleware):
         return {
             "messages": [
                 *_rules_messages(state, rules),
+                # Where the reader stands is for the model; the transcript shows only the people.
                 HumanMessage(
-                    content=prompt(
-                        "review-guide/state",
-                        moved=moved,
-                        head_sha=head.head.sha,
-                        clicked=bool(self._approve_ts),
-                        approved=approved.title if approved else "",
-                        status=reader.status(workspace.unplanned, workspace.hunks).model_dump(),
+                    content=run_context(
+                        "review-guide-turn",
+                        prompt(
+                            "review-guide/state",
+                            moved=moved,
+                            head_sha=head.head.sha,
+                            clicked=bool(self._approve_ts),
+                            approved=approved.title if approved else "",
+                            status=reader.status(workspace.unplanned, workspace.hunks).model_dump(),
+                        ),
                     )
                 ),
             ],
         }
+
+    async def _dress_channel(
+        self,
+        session: ReviewGuideSession,
+        checkout: PinnedCheckout,
+        head: PullRequestHead,
+        *,
+        diff: bool,
+    ) -> None:
+        """Attach a new head's diff to the code channel, and keep its context bar current."""
+        pr = session.pull_request
+        if diff:
+            try:
+                await set_view(
+                    session.slack_channel_id,
+                    "diff",
+                    content=await checkout.diff(),
+                    base_branch=head.base.ref,
+                    head_branch=head.head.ref,
+                )
+            except SlackRequestError as exc:
+                logger.warning(
+                    "Could not attach the pull request diff to a review walkthrough channel",
+                    extra={"agent_thread_id": self._thread_id, "slack_error": str(exc)},
+                )
+        # Refreshed every run so channels opened before a link was added still get it.
+        try:
+            await set_context_bar(
+                session.slack_channel_id,
+                repo_context_bar_items(
+                    {"owner": pr.owner, "name": pr.repo},
+                    pr_url=pr.url,
+                    dashboard_url=dashboard_thread_url(self._thread_id) or "",
+                ),
+            )
+        except SlackRequestError as exc:
+            logger.warning(
+                "Could not set a review walkthrough channel's context bar",
+                extra={"agent_thread_id": self._thread_id, "slack_error": str(exc)},
+            )
 
     async def _carry_seen(
         self, session: ReviewGuideSession, checkout: PinnedCheckout, workspace: PlanWorkspace

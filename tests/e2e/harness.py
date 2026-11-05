@@ -320,7 +320,8 @@ async def control_seed_pull_request(request: Request) -> JSONResponse:
     """Seed an open pull request the PR search returns, without running the agent.
 
     Anything ``/control/pull-request-health`` accepts may be set inline, so a spec
-    can pick the draft flag, conflict state, checks and reviews up front."""
+    can pick the draft flag, conflict state, checks and reviews up front. ``real_head``
+    names the pushed branch tip as the head instead of a made-up sha."""
     body = await request.json()
     owner, name = _split_repo(body.get("repo"))
     head = str(body.get("head") or "seeded-branch")
@@ -340,6 +341,9 @@ async def control_seed_pull_request(request: Request) -> JSONResponse:
         updated_at=body.get("updated_at") if isinstance(body.get("updated_at"), str) else None,
     )
     fakes.update_pull_health(pull["number"], body)
+    # A walkthrough pins the head in a real checkout, so it needs the commit git has.
+    if body.get("real_head") and pull["branch_tip"]:
+        pull["head_sha"] = pull["branch_tip"]
     return JSONResponse(
         {
             "ok": True,
@@ -377,9 +381,25 @@ async def control_seed_walkthrough(request: Request) -> JSONResponse:
         for file in pull["files"]
     )
     index = DiffIndex.model_validate({"files": parse_index(diff.splitlines())})
+    # ``code`` shows the chunk's diff as a scout renders it; plain plans leave it out.
+    code = (
+        "\n\n".join(
+            f"`{file['filename']}`\n```diff\n{file.get('patch') or ''}\n```"
+            for file in pull["files"]
+        )
+        if body.get("code")
+        else ""
+    )
     plan = Plan(
         head_sha=pull["head_sha"],
-        chunks=[PlanChunk(title=str(body.get("title") or "Seeded chunk"), lines=index.lines)],
+        chunks=[
+            PlanChunk(
+                title=str(body.get("title") or "Seeded chunk"),
+                explanation=str(body.get("explanation") or ""),
+                lines=index.lines,
+                code=code,
+            )
+        ],
     )
     pull_request = await PullRequest(
         owner=pull["owner"], repo=pull["repo"], number=pull["number"]
