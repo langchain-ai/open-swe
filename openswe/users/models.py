@@ -422,8 +422,8 @@ class User(Base):
 
     @classmethod
     async def page(cls, *, offset: int, limit: int, search: str = "") -> tuple[list[Self], int]:
-        """One page of matching people, oldest first, with the total count."""
-        query = select(cls)
+        """One page of people with sign-in identities, oldest first, with the total count."""
+        query = select(cls).where(cls.identities.any())
         if search := search.strip():
             query = query.where(
                 or_(
