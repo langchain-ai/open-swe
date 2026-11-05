@@ -128,6 +128,11 @@ interface HydratedRepoGroup extends SidebarRepoGroup {
 
 const NAV_ROW_CLASS =
   "flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-1 text-sm font-medium text-primary transition-colors hover:bg-surface-level-2-hover"
+const GROUP_ROW_CLASS =
+  "h-auto min-w-0 flex-1 justify-start gap-space-2 border-0 px-space-2 py-space-1 text-left font-medium whitespace-normal text-tertiary hover:bg-transparent hover:text-primary dark:hover:bg-transparent"
+const GROUP_CARET_CLASS = "size-3.5 shrink-0"
+const GROUP_HEADER_CLASS =
+  "group/folder flex items-center gap-space-2 rounded-md pr-space-1 transition-colors hover:bg-surface-level-2-hover"
 
 /** Threads shown per repo before the group needs a "Show more". */
 const REPO_PREVIEW_COUNT = 5
@@ -1036,26 +1041,29 @@ function WorkspaceGroupSection({
   const Caret = collapsed ? CaretRightIcon : CaretDownIcon
   return (
     <div className="mb-space-1">
-      <Button
-        color="secondary"
-        variant="plain"
-        size="sm"
-        aria-label={workspace.name}
-        type="button"
-        onClick={onToggleCollapsed}
-        aria-expanded={!collapsed}
-        className="group/workspace h-auto w-full justify-start gap-space-2 px-space-2 py-space-1 text-left font-medium whitespace-normal text-tertiary hover:text-primary"
-      >
-        <StackRegularIcon size={14} className="shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
-        <Caret
-          weight="regular"
-          className={cn(
-            "size-3.5 shrink-0",
-            collapsed ? "block" : "hidden group-hover/workspace:block"
-          )}
-        />
-      </Button>
+      <div className={GROUP_HEADER_CLASS}>
+        <Button
+          color="secondary"
+          variant="plain"
+          size="sm"
+          aria-label={workspace.name}
+          type="button"
+          onClick={onToggleCollapsed}
+          aria-expanded={!collapsed}
+          className={GROUP_ROW_CLASS}
+        >
+          <StackRegularIcon size={16} className="shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
+          <Caret
+            weight="regular"
+            className={cn(
+              GROUP_CARET_CLASS,
+              !collapsed &&
+                "invisible group-focus-within/folder:visible group-hover/folder:visible"
+            )}
+          />
+        </Button>
+      </div>
       {!collapsed && (
         <div className="pl-space-2">{workspace.repos.map(renderRepoGroup)}</div>
       )}
@@ -1116,6 +1124,7 @@ function RepoGroup({
   ) => React.ReactNode
 }) {
   const Folder = collapsed ? FolderIcon : FolderOpenIcon
+  const Caret = collapsed ? CaretRightIcon : CaretDownIcon
   const repo = useSidebarRepoThreads({
     repoFullName: group.repoFullName,
     projectId: group.project?.id ?? null,
@@ -1172,19 +1181,27 @@ function RepoGroup({
 
   return (
     <div className="mb-space-1">
-      <div className="group/folder flex items-center gap-space-2 rounded-md pr-space-1 pl-space-2 text-sm text-primary transition-colors hover:bg-surface-level-2-hover">
+      <div className={GROUP_HEADER_CLASS}>
         <Button
           color="secondary"
           variant="plain"
-          size="md"
+          size="sm"
           aria-label={group.label}
           type="button"
           onClick={onToggleCollapsed}
           aria-expanded={!collapsed}
-          className="h-auto min-w-0 flex-1 justify-start gap-space-2 py-space-1 text-left whitespace-normal text-primary hover:bg-transparent dark:hover:bg-transparent"
+          className={GROUP_ROW_CLASS}
         >
           <Folder size={16} weight="regular" className="shrink-0" />
           <span className="min-w-0 flex-1 truncate">{group.label}</span>
+          <Caret
+            weight="regular"
+            className={cn(
+              GROUP_CARET_CLASS,
+              !collapsed &&
+                "invisible group-focus-within/folder:visible group-hover/folder:visible"
+            )}
+          />
         </Button>
         {group.project && <ProjectFolderMenu project={group.project} />}
         <IconButton
