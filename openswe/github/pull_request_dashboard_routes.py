@@ -1,6 +1,7 @@
 """Dashboard API for pull requests and the coding threads that work on them."""
 
-from typing import Any, Literal
+from datetime import datetime
+from typing import Any, Literal, Self
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -43,6 +44,33 @@ class PullRequestSearchResult(BaseModel):
     url: str
     title: str
     state: PrState
+    author: str = ""
+    head_ref: str = ""
+    base_ref: str = ""
+    additions: int | None = None
+    deletions: int | None = None
+    changed_files: int | None = None
+    review_findings: int | None = None
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_row(cls, row: PullRequest) -> Self:
+        review = row.reviews[-1] if row.reviews else None
+        return cls(
+            repo=row.repo_full_name,
+            number=row.number,
+            url=row.url,
+            title=row.title,
+            state=row.state,
+            author=row.author,
+            head_ref=row.head_ref,
+            base_ref=row.base_ref,
+            additions=row.additions,
+            deletions=row.deletions,
+            changed_files=row.changed_files,
+            review_findings=review.finding_count if review else None,
+            updated_at=row.updated_at,
+        )
 
 
 class PullRequestSearchResults(BaseModel):
@@ -52,7 +80,7 @@ class PullRequestSearchResults(BaseModel):
 
 @router.get("/pull-requests/search")
 async def api_search_pull_requests(
-    q: str = Query(min_length=1, max_length=1000),
+    q: str = Query(default="", max_length=1000),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     session: dict[str, str] = SESSION_DEP,
@@ -62,16 +90,7 @@ async def api_search_pull_requests(
         q, repositories=sorted(accessible), limit=limit + 1, offset=offset
     )
     return PullRequestSearchResults(
-        pull_requests=[
-            PullRequestSearchResult(
-                repo=row.repo_full_name,
-                number=row.number,
-                url=row.url,
-                title=row.title,
-                state=row.state,
-            )
-            for row in rows[:limit]
-        ],
+        pull_requests=[PullRequestSearchResult.from_row(row) for row in rows[:limit]],
         has_more=len(rows) > limit,
     )
 

@@ -4,7 +4,11 @@ import { useEffect, useState } from "react"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 
-export function usePullRequestSearch(query: string, enabled = true) {
+/** Searches stored pull requests; `includeRecent` lists the latest for an empty query. */
+export function usePullRequestSearch(
+  query: string,
+  { enabled = true, includeRecent = false } = {}
+) {
   const { data: session } = useSession()
   const [debounced, setDebounced] = useState(query.trim())
   useEffect(() => {
@@ -19,7 +23,10 @@ export function usePullRequestSearch(query: string, enabled = true) {
       last.has_more
         ? pages.reduce((total, page) => total + page.pull_requests.length, 0)
         : undefined,
-    enabled: enabled && Boolean(session?.login) && Boolean(debounced),
+    enabled:
+      enabled &&
+      Boolean(session?.login) &&
+      (includeRecent || Boolean(debounced)),
     staleTime: 30_000,
     retry: false,
   })
@@ -32,7 +39,7 @@ export function usePullRequestSearch(query: string, enabled = true) {
     data: debounced === query.trim() ? search.data : undefined,
     isSearching:
       enabled &&
-      Boolean(query.trim()) &&
+      (includeRecent || Boolean(query.trim())) &&
       (debounced !== query.trim() || search.isFetching),
   }
 }
