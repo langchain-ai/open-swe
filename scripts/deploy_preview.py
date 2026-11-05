@@ -53,7 +53,7 @@ async def preview_sha() -> str:
         "ls-remote",
         "--exit-code",
         "origin",
-        "refs/heads/preview",
+        f"refs/heads/{os.environ.get('PREVIEW_BRANCH') or 'preview'}",
         cwd=Path(__file__).resolve().parent.parent,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,

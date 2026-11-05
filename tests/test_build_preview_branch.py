@@ -110,3 +110,18 @@ async def test_a_main_workflow_change_still_publishes_with_the_published_workflo
     monkeypatch.setattr(preview, "typecheck", checked)
     await preview.Preview(preview.Settings.from_env()).build()
     checked.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("project_dir", "tree"), [("", "HEAD"), ("open-swe", "HEAD:open-swe")])
+async def test_typecheck_checks_the_project_tree(
+    project_dir: str, tree: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In a monorepo the typecheck gets only Open SWE's tree, at the container's root."""
+    git = AsyncMock(return_value=preview.Completed(0, "", ""))
+    monkeypatch.setattr(preview, "PROJECT_DIR", project_dir)
+    monkeypatch.setattr(preview, "git", git)
+    monkeypatch.setattr(preview, "run", AsyncMock(return_value=preview.Completed(0, "", "")))
+
+    assert await preview.typecheck() is None
+    archive = git.await_args_list[0].args
+    assert archive[:3] == ("archive", "--format=tar", "-o") and archive[-1] == tree
