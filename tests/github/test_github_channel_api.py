@@ -16,6 +16,7 @@ from runtime_api.github import (
     RECORD_GITHUB_DELIVERY,
     ActOnGitHubDelivery,
     GitHubAutomationRulesRequest,
+    GitHubDelivery,
     GitHubIssueFactsRequest,
     GitHubIssueRunRequest,
 )
@@ -223,6 +224,30 @@ async def test_one_piece_of_work_failing_runs_the_rest(
 
     assert delivered.work[0] == "wake_merge_queue"
     settled.assert_awaited_once()
+
+
+async def test_the_backend_runs_its_work_when_it_records_the_delivery(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> None:
+    process = AsyncMock()
+    monkeypatch.setattr(github_webhooks, "process_github_ci_event", process)
+    delivery = GitHubDelivery(
+        event="status",
+        delivery_id="delivery-1",
+        payload={"repository": {"name": "api", "owner": {"login": "acme"}}},
+    )
+
+    await call_as_mda(app, RECORD_GITHUB_DELIVERY, delivery, secret=SERVICE_SECRET)
+    process.assert_awaited_once()
+    # A channel deployed before the backend picked its own work still names it; it
+    # doesn't run twice.
+    await call_as_mda(
+        app,
+        ACT_ON_GITHUB_DELIVERY,
+        ActOnGitHubDelivery(**delivery.model_dump(), work=["ci_event"]),
+        secret=SERVICE_SECRET,
+    )
+    process.assert_awaited_once()
 
 
 async def test_automations_that_fail_to_plan_start_nothing_and_stop_nothing(

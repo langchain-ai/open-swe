@@ -1,9 +1,10 @@
 """Deliver a GitHub event as MDA's GitHub channel does, against the real app.
 
-MDA's handler (``mda/rt/github.py``) logs each delivery on the backend, routes it
-with ``mda/rt/github_routes.py``, asks for the repository's automations and, for
-an issue mention, who is an Open SWE user, writes the runs' prompts, and asks the
-backend to run the work it routes to and to sign the runs. This does the same,
+MDA's handler (``mda/rt/github.py``) hands each delivery to the backend, which
+picks and runs its own work, routes the delivery's agent runs with
+``mda/rt/github_routes.py``, asks for the repository's automations and, for an
+issue mention, who is an Open SWE user, writes the runs' prompts, and asks the
+backend to sign the runs. This does the same,
 each call signed with the service secret as MDA signs it, but writes a stand-in
 for each prompt (``mda/tests`` hold MDA's to the backend's). The backend runs its
 work after answering, which an in-process client waits for, so a test sees its
@@ -45,6 +46,8 @@ from runtime_api.github import (
 )
 from standardwebhooks import Webhook
 from starlette.types import ASGIApp
+
+from openswe.github.work import delivery_work
 
 if TYPE_CHECKING:
     # The E2E harness imports this module without the dev extras.
@@ -152,15 +155,6 @@ async def deliver_as_mda(
             client, RECORD_GITHUB_DELIVERY, delivery, f"msg_{delivery_id}_record", secret
         )
         routed = MDA_ROUTES.route(event_type, delivery.payload, facts, from_app=from_app)
-        if routed.work:
-            # The backend's own work first, in a call of its own, as the channel sends it.
-            await _call(
-                client,
-                ACT_ON_GITHUB_DELIVERY,
-                ActOnGitHubDelivery(**delivery.model_dump(), work=list(routed.work)),
-                f"msg_{delivery_id}_work",
-                secret,
-            )
         fired = (
             await _fired(client, event_type, delivery.payload, delivery_id, secret)
             if routed.automations
@@ -195,7 +189,8 @@ async def deliver_as_mda(
             comment_run = acted.comment_run
     return GitHubDelivered(
         facts=facts,
-        work=tuple(routed.work),
+        # The backend picked and ran it as it recorded the delivery.
+        work=delivery_work(event_type, delivery.payload, facts),
         issue_run=planned,
         automations=routed.automations,
         automation_runs=tuple(automation_runs),

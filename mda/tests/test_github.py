@@ -107,7 +107,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             {"action": "checks_requested"},
             _FACTS,
             False,
-            Route(("wake_merge_queue",)),
+            Route(),
             id="merge-group",
         ),
         pytest.param(
@@ -115,16 +115,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             {"action": "opened"},
             _FACTS,
             True,
-            Route(
-                (
-                    "wake_merge_queue",
-                    "walkthrough_pull_request",
-                    "track_pull_request_state",
-                    "track_pull_request_usage",
-                    "review_pull_request",
-                ),
-                automations=True,
-            ),
+            Route(automations=True),
             id="pr-opened-by-the-agent",
         ),
         pytest.param(
@@ -132,7 +123,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             {"action": "opened"},
             _facts(gated=True),
             False,
-            Route(("wake_merge_queue",)),
+            Route(),
             id="pr-opened-by-a-sender-the-public-repo-gate-turns-away",
         ),
         pytest.param(
@@ -140,7 +131,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             {"action": "resolved"},
             _FACTS,
             False,
-            Route(("sync_review_thread",)),
+            Route(),
             id="review-thread-resolved",
         ),
         pytest.param(
@@ -148,15 +139,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             {"action": "ready_for_review"},
             _facts(auto_review=False),
             False,
-            Route(
-                (
-                    "wake_merge_queue",
-                    "walkthrough_pull_request",
-                    "track_pull_request_state",
-                    "track_pull_request_usage",
-                    "settle_human_reviews",
-                )
-            ),
+            Route(),
             id="pr-ready-without-review",
         ),
         pytest.param(
@@ -164,18 +147,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             {"action": "synchronize"},
             _facts(auto_review=False),
             True,
-            Route(
-                (
-                    "wake_merge_queue",
-                    "walkthrough_pull_request",
-                    "track_pull_request_state",
-                    "withdraw_superseded_approvals",
-                    "notify_pr_updated",
-                    "review_fork_push",
-                    "track_pull_request_usage",
-                    "settle_human_reviews",
-                )
-            ),
+            Route(),
             id="pr-pushed",
         ),
         pytest.param(
@@ -183,16 +155,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             {"action": "closed"},
             _FACTS,
             False,
-            Route(
-                (
-                    "wake_merge_queue",
-                    "track_pull_request_state",
-                    "track_pull_request_usage",
-                    "settle_review_on_close",
-                    "update_reviewer_watch",
-                ),
-                automations=True,
-            ),
+            Route(automations=True),
             id="pr-closed",
         ),
         pytest.param(
@@ -200,18 +163,16 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             {"action": "edited"},
             _FACTS,
             False,
-            Route(("wake_merge_queue", "track_pull_request_state")),
+            Route(),
             id="pr-edited",
         ),
-        pytest.param(
-            "push", {}, _FACTS, True, Route(("wake_merge_queue", "review_push")), id="push"
-        ),
+        pytest.param("push", {}, _FACTS, True, Route(), id="push"),
         pytest.param(
             "push",
             {},
             _facts(auto_review=False),
             False,
-            Route(("wake_merge_queue",)),
+            Route(),
             id="push-without-review",
         ),
         pytest.param(
@@ -219,7 +180,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             {"action": "completed"},
             _FACTS,
             False,
-            Route(("ci_event",)),
+            Route(),
             id="ci",
         ),
         pytest.param(
@@ -230,10 +191,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             _review(),
             _FACTS,
             False,
-            Route(
-                ("wake_merge_queue", "settle_human_reviews", "record_completed_review"),
-                comment=True,
-            ),
+            Route(comment=True),
             id="review-submitted",
         ),
         pytest.param(
@@ -241,7 +199,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             _review(body="@openswe address these"),
             _FACTS,
             True,
-            Route(("wake_merge_queue", "settle_human_reviews", "record_completed_review")),
+            Route(),
             id="the-agents-own-review",
         ),
         pytest.param(
@@ -249,7 +207,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             _review("dismissed"),
             _FACTS,
             False,
-            Route(("wake_merge_queue", "settle_human_reviews")),
+            Route(),
             id="review-dismissed",
         ),
         pytest.param(
@@ -345,7 +303,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             {"action": "added", "repositories_added": [], "repositories_removed": []},
             _facts(routable=True),
             False,
-            Route(("forget_cached_repos",)),
+            Route(),
             id="installation-changed",
         ),
         pytest.param(
@@ -361,7 +319,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             {"action": "labeled"},
             _FACTS,
             False,
-            Route(("wake_merge_queue",)),
+            Route(),
             id="pr-labeled-wakes-the-queue",
         ),
         pytest.param(
@@ -688,26 +646,25 @@ async def test_a_pull_request_opened_starts_only_its_automations(backend: _Backe
     started = _runs(await github.on_event(_event("pull_request", {"action": "opened"}), _THREAD))
 
     assert len(started) == 1
-    # The backend's own work first, in a call of its own; then the automations.
-    work, act = backend.called(ACT_ON_GITHUB_DELIVERY)
-    assert work.work and not work.automations
+    # The backend runs its own work as it records the delivery; this call only signs runs.
+    [act] = backend.called(ACT_ON_GITHUB_DELIVERY)
     assert not act.work
     assert ([fired.automation_id for fired in act.automations], act.issue_run) == (["a-0"], None)
 
 
-async def test_an_automation_that_fails_keeps_the_backends_work(backend: _Backend) -> None:
+async def test_an_automation_that_fails_fires_nothing_and_fails_nothing(
+    backend: _Backend,
+) -> None:
     """Automations used to run in the backend's background, where one that failed
-    stopped nothing else: a review still started."""
+    stopped nothing else. The backend's work, such as a review, starts as it records
+    the delivery, before any automation is worked out."""
     backend.rules_error = RuntimeError("the rules could not be read")
 
     started = await github.on_event(_event("pull_request", {"action": "opened"}), _THREAD)
 
     assert started is None
-    [work] = backend.called(ACT_ON_GITHUB_DELIVERY)
-    assert work.work and not work.automations
     assert [msg_id for *_, msg_id in backend.calls] == [
         "msg_delivery-1_record",
-        "msg_delivery-1_work",
         "msg_delivery-1_automations",
     ]
 
@@ -731,10 +688,9 @@ async def test_a_delivery_no_automation_matches_asks_nothing_more(backend: _Back
     closed = {"action": "closed", "pull_request": {"merged": False}}
     started = await github.on_event(_event("pull_request", closed), _THREAD)
 
-    # A close still has the backend's work, but fires no automation.
+    # The backend's work for the close starts as it records it; no automation fires.
     assert started is None
-    [act] = backend.called(ACT_ON_GITHUB_DELIVERY)
-    assert act.automations == []
+    assert backend.called(ACT_ON_GITHUB_DELIVERY) == []
 
 
 async def test_a_mention_the_backend_refuses_starts_nothing(backend: _Backend, gh: _GitHub) -> None:
@@ -803,9 +759,10 @@ async def test_an_installation_event_drops_the_cached_repository_listings(
     )
 
     assert await github.on_installation_event(event, _THREAD) is None
-    # Logged, then the backend drops everyone's cached listing; no run starts.
-    [act] = backend.called(ACT_ON_GITHUB_DELIVERY)
-    assert (act.event, act.work, act.issue_run) == ("installation", ["forget_cached_repos"], None)
+    # Handed to the backend, which drops everyone's cached listing; no run starts.
+    [delivery] = backend.called(RECORD_GITHUB_DELIVERY)
+    assert delivery.event == "installation"
+    assert backend.called(ACT_ON_GITHUB_DELIVERY) == []
 
 
 def test_the_channel_takes_every_event_the_app_sends() -> None:

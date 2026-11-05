@@ -1,16 +1,18 @@
 """What MDA's GitHub channel calls on the backend (``runtime_api.github``).
 
 Open SWE's GitHub App delivers its webhooks to the MDA deployment's GitHub
-channel, which verifies each delivery and decides there what it starts. It asks
-here only for what needs Open SWE's data, its App or its signing key: to log each
-delivery and say what Open SWE knows about its repository
-(``record_github_delivery``); the repository's automations, which the channel
+channel, which verifies each delivery and hands every one to the backend
+(``record_github_delivery``). The backend logs it, runs its own work for it
+(reviews, walkthroughs, human review, the merge queue, CI and the pull request
+state the dashboard shows, ``openswe.github.work``), and answers what Open SWE
+knows about its repository. The channel decides only what starts an agent run,
+asking here for what needs Open SWE's data, its App or its signing key: the
+repository's automations, which the channel
 matches and writes each run's prompt for (``github_automation_rules``); for an
 ``@openswe`` mention on an issue, who among the people its prompt quotes is an
 Open SWE user, and what the issue's thread already holds
 (``github_issue_facts``), from which the channel writes the run's input; then, in
-one call (``act_on_github_delivery``), to run the work it chose, as the backend's
-own webhook ran it, and to plan the runs the channel starts: each automation's
+one call (``act_on_github_delivery``), to plan the runs the channel starts: each automation's
 the channel matched, on a thread of its own (``openswe.schedules.store``), a pull
 request comment's when it goes to the pull request's own thread, and the issue
 mention's on the channel's thread. Each run carries the backend's run-complete
@@ -21,7 +23,7 @@ with the person's token and keeps a private thread's to its owner's.
 
 import json
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import timedelta
 from typing import Any, Final, cast
 from uuid import UUID
@@ -50,6 +52,7 @@ from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepa
 from openswe.github import webhook as service
 from openswe.github.comments import OPEN_SWE_TAGS
 from openswe.github.repo_cache import forget_cached_repos
+from openswe.github.work import delivery_work
 from openswe.human_review.completed_reviews import CompletedReview
 from openswe.mda_channels.api import ChannelCall
 from openswe.merge_queue.controller import wake_native_queue
@@ -95,7 +98,8 @@ def _repo_config(payload: dict[str, JsonValue]) -> dict[str, str]:
 async def record_github_delivery(
     call: ChannelCall, delivery: GitHubDelivery
 ) -> GitHubDeliveryFacts:
-    """Log the delivery once, and what Open SWE knows about its repository.
+    """Log the delivery once, run the backend's own work for it after answering, and
+    say what Open SWE knows about its repository, for the channel's agent runs.
 
     A repository outside the allowlist is neither logged nor looked up: its delivery
     starts nothing. A workspace lookup that fails raises, so the delivery fails rather
@@ -130,13 +134,16 @@ async def record_github_delivery(
     gates = (
         delivery.event == "pull_request" and payload.get("action") in _GATED_PULL_REQUEST_ACTIONS
     )
-    return GitHubDeliveryFacts(
+    facts = GitHubDeliveryFacts(
         routable=not named or await repo_is_routable(repo["owner"], repo["name"]),
         allowed=True,
         gated=gates and not await _gated(payload, "pull_request"),
         auto_review=reviews and await common.is_repo_auto_review_enabled(repo),
         tags=list(OPEN_SWE_TAGS),
     )
+    if work := delivery_work(delivery.event, delivery.payload, facts):
+        await _accept_work(call, delivery, work)
+    return facts
 
 
 async def _gated(payload: _Payload, event: str) -> bool:
@@ -209,9 +216,11 @@ async def _route_comment(act: ActOnGitHubDelivery) -> GitHubThreadRun | None:
     return channel.run
 
 
-def _tasks(work: ActOnGitHubDelivery) -> dict[GitHubWorkName, Callable[[], Awaitable[object]]]:
-    payload = cast(_Payload, work.payload)
-    event, delivery_id = work.event, work.delivery_id
+def _tasks(
+    delivery: GitHubDelivery,
+) -> dict[GitHubWorkName, Callable[[], Awaitable[object]]]:
+    payload = cast(_Payload, delivery.payload)
+    event, delivery_id = delivery.event, delivery.delivery_id
     return {
         "wake_merge_queue": lambda: wake_native_queue(payload),
         "forget_cached_repos": forget_cached_repos,
@@ -236,7 +245,7 @@ def _tasks(work: ActOnGitHubDelivery) -> dict[GitHubWorkName, Callable[[], Await
 
 
 async def _run(
-    name: GitHubWorkName, task: Callable[[], Awaitable[object]], work: ActOnGitHubDelivery
+    name: GitHubWorkName, task: Callable[[], Awaitable[object]], delivery: GitHubDelivery
 ) -> None:
     # One piece failing doesn't keep the delivery's others from running.
     try:
@@ -246,28 +255,30 @@ async def _run(
             "GitHub work failed",
             extra={
                 "github_work": name,
-                "github_event": work.event,
-                "github_delivery": work.delivery_id,
+                "github_event": delivery.event,
+                "github_delivery": delivery.delivery_id,
             },
         )
 
 
-async def _accept_work(call: ChannelCall, work: ActOnGitHubDelivery) -> None:
+async def _accept_work(
+    call: ChannelCall, delivery: GitHubDelivery, work: Sequence[GitHubWorkName]
+) -> None:
     """Run the work after answering, in the order given, once per delivery: GitHub sends
     a delivery again when someone redelivers it."""
     if postgres.configured() and not await event_claims.claim(
-        _WORK_CLAIMS, work.delivery_id, ttl=_WORK_CLAIM_TTL
+        _WORK_CLAIMS, delivery.delivery_id, ttl=_WORK_CLAIM_TTL
     ):
         return
-    tasks = _tasks(work)
-    for name in dict.fromkeys(work.work):
-        call.background.add_task(_run, name, tasks[name], work)
+    tasks = _tasks(delivery)
+    for name in dict.fromkeys(work):
+        call.background.add_task(_run, name, tasks[name], delivery)
     logger.info(
         "Accepted GitHub work",
         extra={
-            "github_event": work.event,
-            "github_delivery": work.delivery_id,
-            "github_work": list(work.work),
+            "github_event": delivery.event,
+            "github_delivery": delivery.delivery_id,
+            "github_work": list(work),
         },
     )
 
@@ -387,9 +398,13 @@ async def github_automation_rules(
 async def act_on_github_delivery(
     call: ChannelCall, act: ActOnGitHubDelivery
 ) -> GitHubDeliveryActed:
-    """Take the work the channel chose for a delivery, and plan the runs it starts."""
+    """Plan the runs a delivery starts in the channel.
+
+    The backend picks and runs its own work when the delivery is recorded. A channel
+    deployed before that still names it here; a delivery's work runs once either way.
+    """
     if act.work:
-        await _accept_work(call, act)
+        await _accept_work(call, act, act.work)
     automations = await _plan_automations(act) if act.automations else []
     comment_run = await _route_comment(act) if act.comment else None
     issue_run = None if act.issue_run is None else await _plan_issue_run(act, act.issue_run)

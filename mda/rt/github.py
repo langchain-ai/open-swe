@@ -1,25 +1,25 @@
 """What Open SWE's GitHub channel does with each GitHub delivery, in this deployment.
 
-Every delivery goes to the backend's event log (``record_github_delivery``), which
-answers what Open SWE knows about its repository. This side decides what the
-delivery starts (``rt.github_routes``), and tells the backend
-(``act_on_github_delivery``): first, in a call of its own, the backend's work,
-such as a review or a CI wakeup, which the backend runs once per delivery; then
-the automations it fires, a pull request comment to route, and for an
-``@openswe`` mention on an issue, the coding agent's run on the issue's
-conversation. An automation that fails fires nothing and stops nothing else, as
-when the backend ran them in the background. This side writes the runs' prompts: each
+Every delivery goes to the backend (``record_github_delivery``), which logs it,
+runs its own work for it (reviews, walkthroughs, human review, the merge queue, CI
+and the pull request state the dashboard shows) and answers what Open SWE knows
+about its repository. This side decides only what starts an agent run
+(``rt.github_routes``): the automations the delivery fires, a pull request comment
+for the backend to route, and for an ``@openswe`` mention on an issue, the coding
+agent's run on the issue's conversation. It writes the runs' prompts: each
 automation's (``rt.github_automations``, from the repository's rules,
 ``github_automation_rules``) and the issue's (``rt.github_issues``, from who is an
-Open SWE user, ``github_issue_facts``). The backend checks and signs the runs, and
-this side starts them: each automation's on a thread of its own, a comment's on the
-pull request's own thread, the issue's on its conversation. A comment's run on the
-agent's own thread the backend still writes and starts itself: it reads the pull
-request's comments as the person and filters a private thread's to its owner's. So
-a delivery takes a call or two, and one that fires automations or mentions Open
-SWE on an issue a call or two more. An installation event, sent when the App is
-installed, removed or suspended or its repositories change, is logged the same way
-and drops the backend's cached repository listings.
+Open SWE user, ``github_issue_facts``). The backend checks and signs the runs in
+one call (``act_on_github_delivery``), and this side starts them: each
+automation's on a thread of its own, a comment's on the pull request's own thread,
+the issue's on its conversation. A comment's run on the agent's own thread the
+backend still writes and starts itself: it reads the pull request's comments as
+the person and filters a private thread's to its owner's. An automation that fails
+fires nothing and stops nothing else, as when the backend ran them in the
+background. So most deliveries take one call, and one that fires automations or
+mentions Open SWE a call or three more. An installation event, sent when the App
+is installed, removed or suspended or its repositories change, is handed over the
+same way, and the backend drops its cached repository listings.
 """
 
 import asyncio
@@ -71,8 +71,7 @@ ACTS_WHILE_WAITING: Final = "Open SWE was mentioned while the thread waits."
 async def on_event[Payload: GitHubPayload](
     event: GitHubEvent[Payload], thread: GitHubChannelThread
 ) -> GitHubEventResult:
-    """Log the delivery, start the backend's work it routes to, its automations and an
-    issue's run."""
+    """Hand the delivery to the backend, and start its automations and an issue's run."""
     delivery = GitHubDelivery(
         event=event.name,
         delivery_id=event.delivery_id,
@@ -82,14 +81,6 @@ async def on_event[Payload: GitHubPayload](
         RECORD_GITHUB_DELIVERY, delivery, msg_id=f"msg_{event.delivery_id}_record"
     )
     routed = route(event.name, delivery.payload, facts, from_app=event.from_app)
-    if routed.work:
-        # The backend's own work goes first, in a call of its own: nothing planned
-        # after it, such as an automation that fails, keeps a review from running.
-        await ask_backend(
-            ACT_ON_GITHUB_DELIVERY,
-            ActOnGitHubDelivery(**delivery.model_dump(), work=list(routed.work)),
-            msg_id=f"msg_{event.delivery_id}_work",
-        )
     mention = IssueMention.of(event.name, delivery.payload) if routed.issue_run else None
     issue_run, automations = await asyncio.gather(
         _issue_run_request(event.delivery_id, mention, thread),
@@ -229,22 +220,14 @@ async def _issue_runs(
 async def on_installation_event(
     event: GitHubInstallationEvent, _thread: GitHubChannelThread
 ) -> GitHubEventResult:
-    """Log the delivery, and start the backend's work it routes to; it starts no run."""
+    """Hand the delivery to the backend, which drops its cached repository listings;
+    it starts no run."""
     delivery = GitHubDelivery(
         event=event.name,
         delivery_id=event.delivery_id,
         payload=cast(dict[str, JsonValue], event.payload),
     )
-    facts = await ask_backend(
-        RECORD_GITHUB_DELIVERY, delivery, msg_id=f"msg_{event.delivery_id}_record"
-    )
-    routed = route(event.name, delivery.payload, facts, from_app=False)
-    if routed.work:
-        await ask_backend(
-            ACT_ON_GITHUB_DELIVERY,
-            ActOnGitHubDelivery(**delivery.model_dump(), work=list(routed.work)),
-            msg_id=f"msg_{event.delivery_id}_act",
-        )
+    await ask_backend(RECORD_GITHUB_DELIVERY, delivery, msg_id=f"msg_{event.delivery_id}_record")
     return None
 
 

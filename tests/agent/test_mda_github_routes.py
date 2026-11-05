@@ -13,12 +13,8 @@ from tests.github_channel import MDA_ROUTES
 
 
 def test_the_action_sets_are_the_backends() -> None:
-    assert MDA_ROUTES.CI_EVENTS == common.GITHUB_CI_EVENTS
     assert MDA_ROUTES.ISSUE_ACTIONS == common.SUPPORTED_GH_ISSUE_ACTIONS
     assert MDA_ROUTES.COMMENT_ACTIONS == common.SUPPORTED_GH_COMMENT_ACTIONS
-    assert MDA_ROUTES.PR_WATCH_TOGGLE_ACTIONS == common.GH_PR_WATCH_TOGGLE_ACTIONS
-    assert MDA_ROUTES.PR_FIRST_REVIEW_ACTIONS == common.GH_PR_FIRST_REVIEW_ACTIONS
-    assert MDA_ROUTES.PR_AGENT_STATE_ACTIONS == common.GH_PR_AGENT_STATE_ACTIONS
 
 
 @pytest.mark.parametrize(

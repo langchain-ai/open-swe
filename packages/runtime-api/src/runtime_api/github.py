@@ -1,13 +1,15 @@
 """The calls MDA's GitHub channel makes on the backend, with no run yet.
 
 The channel receives Open SWE's GitHub App deliveries in the MDA deployment and
-decides there what each one does: which of Open SWE's work it starts, from its
-event, its action and what Open SWE knows about its repository. The backend
-answers only what needs its data, its GitHub App or its signing key:
+hands every one to the backend, which runs its own work for it. The channel decides
+only what starts an agent run, and asks the backend for what needs its data, its
+GitHub App or its signing key:
 
-- ``record_github_delivery``: logs the delivery, and says whether a workspace owns
-  its repository, whether the allowlist takes it, whether automatic review is on
-  for it, and the handles that mention Open SWE.
+- ``record_github_delivery``: logs the delivery, picks and runs the backend's own
+  work for it (a review, a CI wakeup, ...), once per delivery, after it answers,
+  and says whether a workspace owns its repository, whether the allowlist takes
+  it, whether the public-repo gate turned the sender away, and the handles that
+  mention Open SWE.
 - ``github_automation_rules``: the automations with a GitHub trigger on the
   delivery's repository, and whether the issue's or pull request's author is an
   Open SWE user; the channel matches them and writes each match's prompt.
@@ -15,16 +17,15 @@ answers only what needs its data, its GitHub App or its signing key:
   people its prompt quotes are Open SWE users, whether the sender's email is known,
   whether a run already took the issue in, and the thread's workspace; the channel
   writes the run's input.
-- ``act_on_github_delivery``: runs the work the channel chose for the delivery (a
-  review, a CI wakeup, ...), once per delivery, after it answers; claims and signs
-  the runs of the automations the channel matched, each on a thread of its own;
+- ``act_on_github_delivery``: claims and signs the runs of the automations the
+  channel matched, each on a thread of its own;
   routes a pull request comment, planning its run when it goes to the pull
   request's own thread; and for an issue mention, checks the sender again, indexes
   the issue's thread and signs the run the channel wrote. The channel starts the
   planned runs.
 
-So a delivery takes two calls, and one that mentions Open SWE on an issue or fires
-automations a call or two more.
+So most deliveries take one call, and one that mentions Open SWE or fires
+automations a call or three more.
 """
 
 import json
@@ -74,13 +75,15 @@ class GitHubDeliveryFacts(BaseModel):
     # The public-repo gate turned away the sender of a pull request opened, reopened,
     # marked ready or pushed to: the delivery starts nothing but a merge queue wakeup.
     gated: bool = False
-    # Automatic review is on for the repository; only read for pull requests and pushes.
+    # Automatic review is on for the repository; only read for pull requests and pushes,
+    # and only by the backend's own work.
     auto_review: bool
     # The handles that mention Open SWE, lowercased, such as ``@openswe``.
     tags: list[str]
 
 
-# The backend's work a delivery can start, each as its webhook ran it.
+# The backend's work a delivery can start, each as its webhook ran it
+# (``openswe.github.work``).
 type GitHubWorkName = Literal[
     # The native merge queue reads the queue again.
     "wake_merge_queue",
@@ -198,6 +201,8 @@ class GitHubIssueRunRequest(BaseModel):
 class ActOnGitHubDelivery(GitHubDelivery):
     """What the channel decided a delivery starts."""
 
+    # The backend's work, as a channel deployed before the backend picked its own still
+    # names it; the backend runs a delivery's work once either way.
     work: list[GitHubWorkName] = []
     # A pull request comment, review or review comment to route: who wrote it,
     # whether it answers a review finding or wakes the agent thread that opened the
