@@ -19,10 +19,8 @@ from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddlewar
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
-    HumanMessage,
     SystemMessage,
     ToolMessage,
-    add_notification_metadata,
 )
 from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
@@ -39,9 +37,10 @@ from managed_deepagents.run_resources import on_run_exit
 from runtime_api.catalog import Catalog, SubagentSpec, ToolSpec
 from runtime_api.endpoint import call
 from runtime_api.loop import ModelCall
+from runtime_api.provenance import Provenance
 from runtime_api.tool_search import RESOLVE, ToolLookup
 
-from rt.backend import BackendCallError, OpenSweBackend, Run, RunLocal, current_run
+from rt.backend import BackendCallError, OpenSweBackend, Run, RunLocal, current_run, harness_message
 from rt.file_tools import FileToolsMiddleware
 from rt.loop import latest_with_id, visible_messages
 from rt.mcp import McpTools
@@ -435,8 +434,13 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         listing = self._listing()
         if not listing or listing == latest_with_id(visible_messages(state), _CODE_TOOLS):
             return None
-        message = HumanMessage(content=listing, id=f"{_CODE_TOOLS}{uuid.uuid4()}")
-        return {"messages": [add_notification_metadata(message, source="code_tools")]}
+        message = harness_message(
+            listing,
+            message_id=f"{_CODE_TOOLS}{uuid.uuid4()}",
+            source="code_tools",
+            provenance=Provenance(kind="context", sender="run:code-tools"),
+        )
+        return {"messages": [message]}
 
     def _listing(self) -> str:
         """The tools code mode calls, as the message that lists them."""

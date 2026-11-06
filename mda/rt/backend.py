@@ -28,6 +28,7 @@ from langchain_core.messages import (
     AIMessage,
     BaseMessage,
     HumanMessage,
+    add_notification_metadata,
     messages_to_dict,
 )
 from langgraph.runtime import get_runtime
@@ -43,6 +44,7 @@ from pydantic import (
 from runtime_api.catalog import Catalog, ToolSpec
 from runtime_api.endpoint import Delivery, call
 from runtime_api.loop import VISIBLE_FROM, RunCall
+from runtime_api.provenance import Provenance
 from runtime_api.tool_search import TOOL_SPECS, ToolNames
 from runtime_api.workers import ADOPT, Adopt
 
@@ -144,10 +146,30 @@ def namespace() -> list[str]:
     return list(_namespace.get())
 
 
+def harness_message(
+    content: str, *, message_id: str, source: str, provenance: Provenance | None = None
+) -> HumanMessage:
+    """A message the harness adds for ``source``, marked so as to the model's integrations
+    and, with ``provenance`` or as ``source``'s context, to code reading what it is."""
+    stamped = provenance or Provenance.harness(source)
+    return add_notification_metadata(
+        HumanMessage(content=content, id=message_id, additional_kwargs=stamped.stamp()),
+        source=source,
+    )
+
+
 def human_messages(messages: Sequence[object]) -> list[dict[str, JsonValue]]:
     return _json_dicts.validate_python(
         messages_to_dict([message for message in messages if isinstance(message, HumanMessage)])
     )
+
+
+def since_last_reply[T](messages: Sequence[T]) -> Sequence[T]:
+    """What the model is handed that it has not answered yet."""
+    for index in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[index], AIMessage):
+            return messages[index + 1 :]
+    return messages
 
 
 def issuing_message_id(state: Mapping[str, object], tool_call_id: str) -> str | None:

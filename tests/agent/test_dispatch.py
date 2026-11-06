@@ -272,7 +272,7 @@ async def test_dispatch_keys_a_linked_slack_sender_on_their_person(
     user = await User.sign_in("github", "2001", login="mason-gh")
     await user.link("slack", "U123", team_id="T1")
 
-    run_input = await dispatch._dispatch_input(
+    run_input = await dispatch.dispatch_input(
         "hello",
         "slack",
         {"slack_thread": {"triggering_user_id": "U123", "channel_id": "C123"}},

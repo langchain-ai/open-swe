@@ -14,6 +14,7 @@ from typing import Any, Literal, cast
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from runtime_api.provenance import Provenance
 
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.config import ENV
@@ -40,6 +41,7 @@ from openswe.dispatch import (
     _run_user_metadata,
     create_durable_run,
     dispatch_agent_run,
+    dispatch_input,
 )
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.input_messages import (
@@ -569,7 +571,11 @@ async def start_run_with_tool_results(
         thread_id, login, metadata, overrides=overrides, plugin_tools=plugin_tools
     )
     if tool_results:
-        user = [{"role": "user", "content": prompt}] if prompt else []
+        user = (
+            (await dispatch_input(prompt, DASHBOARD_SOURCE, configurable))["messages"]
+            if prompt
+            else []
+        )
         run = await create_durable_run(
             thread_id,
             _ASSISTANT_ID,
@@ -916,7 +922,7 @@ def _plugin_context(
     metadata: Mapping[str, object],
     client_configurable: Mapping[str, object],
     chat: PluginChatConfig,
-) -> tuple[list[dict[str, str]], list[MessageAttachment]]:
+) -> tuple[list[RunMessage], list[MessageAttachment]]:
     """What the plugin beside a chat says when the person writes from its dock: how it
     describes its tools, and what it has open.
 
@@ -939,6 +945,7 @@ def _plugin_context(
                 "role": "user",
                 "id": f"plugin-context:{uuid.uuid7()}",
                 "content": prompt("plugins/context", instructions=instructions, context=context),
+                "additional_kwargs": Provenance.harness("plugin_context").stamp(),
             }
         ],
         [MessageAttachment(mime_type=PLUGIN_CONTEXT_MIME, file_name=label)] if context else [],
@@ -1037,7 +1044,6 @@ async def _enrich_run_start_command(
         context_messages, context_attachments = (
             _plugin_context(metadata, client_configurable, plugin_chat) if plugin_chat else ([], [])
         )
-        held_results.extend(context_messages)
         command_images = _dashboard_images_from_content(content)
         invocation_id = new_invocation_id()
         invocation_started_at = datetime.now(UTC).isoformat()
@@ -1152,7 +1158,7 @@ async def _enrich_run_start_command(
         structured[-1]["id"] = message_id
     run_input = params.get("input")
     if isinstance(run_input, dict):
-        run_input["messages"] = [*held_results, *structured]
+        run_input["messages"] = [*held_results, *context_messages, *structured]
     metadata_update: dict[str, Any] = {
         # A relay keeps the thread answering where its person is.
         **({} if relayed_from else {"source": DASHBOARD_SOURCE}),

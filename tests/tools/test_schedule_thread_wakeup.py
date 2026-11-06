@@ -180,6 +180,7 @@ def _human_message_key(*messages: dict[str, str]) -> str:
 def _input_message(message_id: str, *, kind: str, sender: str) -> dict[str, str]:
     return {
         "id": message_id,
+        "type": "human",
         "content": (
             f'<input-message sender="{sender}" surface="automation" kind="{kind}">\n'
             f"{message_id}\n</input-message>"

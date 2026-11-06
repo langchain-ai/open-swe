@@ -157,6 +157,14 @@ LANGSMITH_TRACING=false python -m evals.model_request
 The cases cover typos, ambiguous names, quoted and forwarded requests, model mentions as task subjects, and unavailable models.
 They call Jev and are separate from the deterministic unit tests.
 
+### Reminders beside a person's message
+
+When the person who started the run has the **Memory** experiment on, each new human message in an agent run is also read by Jev for reminders, notes the model reads right after that message, like Claude Code's system reminders.
+A reminder is a `system:reminder` input message: the dashboard never shows it, and the system prompt tells the model the person cannot see it.
+Every reminder in `openswe/reminders.py` is one Jev question, all asked in one call; its prompts live in `openswe/resources/prompts/reminders/<name>/`.
+The `frustration` reminder fires when the person sounds frustrated with the agent and asks it to correct course and save the lesson with `remember`.
+A message is read once, with the same credentials, deadline and confidence cutoff as routing; a failure adds no reminder.
+
 ### Routing through the LangSmith LLM Gateway
 
 Model calls can be proxied through the [LangSmith LLM Gateway](https://docs.langchain.com/langsmith/llm-gateway) (private beta) instead of hitting providers directly.

@@ -7,11 +7,13 @@ subagents it may delegate to, the models it calls, the sandbox its file and shel
 run in, and what its middleware does around each model call.
 """
 
-from typing import Literal
+from collections.abc import Mapping
+from typing import Literal, Self
 
-from pydantic import BaseModel, JsonValue, field_validator
+from pydantic import BaseModel, JsonValue, field_validator, model_validator
 
 from runtime_api.connections import ConnectionRef
+from runtime_api.provenance import Provenance
 
 # The runtime's own tool that finds the run's operations by what they do.
 SEARCH_TOOLS = "search_tools"
@@ -154,7 +156,44 @@ class InboxSpec(BaseModel):
     image_fallback: bool = False
 
 
-class ReplyRules(BaseModel):
+class Nudge(BaseModel):
+    """A message that asks the model again, as the run's input renders it, and what it is."""
+
+    text: str
+    provenance: Provenance
+
+    @classmethod
+    def of(cls, message: Mapping[str, object]) -> Self:
+        """The nudge a built input message makes."""
+        provenance = Provenance.of(message)
+        content = message.get("content")
+        if provenance is None or not isinstance(content, str):
+            raise ValueError("A nudge is a built input message with text content")
+        return cls(text=content, provenance=provenance)
+
+
+class Nudging(BaseModel):
+    """Rules that ask the model again with ``nudges``."""
+
+    nudges: list[Nudge] = []
+    # ``nudges``' texts alone, for an MDA deployed before nudges carried their provenance.
+    nudge: list[str] = []
+
+    @property
+    def asked(self) -> list[tuple[str, Provenance | None]]:
+        """Each nudge's text and, when a backend that records it sent it, its provenance."""
+        if self.nudges:
+            return [(nudge.text, nudge.provenance) for nudge in self.nudges]
+        return [(text, None) for text in self.nudge]
+
+    @model_validator(mode="after")
+    def _texts_for_older_runtimes(self) -> Self:
+        if not self.nudge:
+            self.nudge = [nudge.text for nudge in self.nudges]
+        return self
+
+
+class ReplyRules(Nudging):
     """The run owes the person on Slack an answer through ``tool``, or says it has none
     with ``no_reply_tool``. An answer without either is asked for again, ``nudge`` up to
     ``max_nudges`` times, then posted on the model's behalf."""
@@ -165,22 +204,20 @@ class ReplyRules(BaseModel):
     surface: Literal["slack", "web"] = "web"
     # Other tools whose successful call answers the person.
     replies: list[str] = []
-    # The messages that ask again, in the run's input envelope, sent as ``nudge_sender``.
-    nudge: list[str] = []
+    # Whom ``nudges`` are sent as.
     nudge_sender: str = ""
     max_nudges: int = 2
 
 
-class CliResultRules(BaseModel):
+class CliResultRules(Nudging):
     """A bridged CLI waits on the run's ``tool`` call; a run that ends without one is asked
     again, ``nudge`` up to ``max_nudges`` times."""
 
     tool: str
-    nudge: list[str] = []
     max_nudges: int = 2
 
 
-class WorkStateRules(BaseModel):
+class WorkStateRules(Nudging):
     """The person wants the run to keep working until it calls ``tool`` to say it is blocked
     or complete. An answer that neither calls it nor starts a wait in ``waits`` is sent
     back, ``nudge`` up to ``max_nudges`` times."""
@@ -188,7 +225,6 @@ class WorkStateRules(BaseModel):
     tool: str
     # Tools whose successful call wakes the thread again later, so ending the run is fine.
     waits: list[str] = []
-    nudge: list[str] = []
     nudge_sender: str = ""
     max_nudges: int = 5
 
@@ -220,6 +256,9 @@ class LoopRules(BaseModel):
     work_state: WorkStateRules | None = None
     # Whether the thread may belong to a task, as its coordinator or a worker.
     task_coordination: bool = False
+    # Whether the backend reads each new message a person sends for the reminders it calls for
+    # (``reminders``), which the model then reads beside it.
+    reminders: bool = False
     # Whether the run may wait on a call its client runs itself.
     client_tools: bool = False
     # Open SWE's own framing of the tools the client runs, after every call's system prompt;

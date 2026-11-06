@@ -38,6 +38,7 @@ from deepagents.middleware.skills import SkillsMiddleware, SkillsState
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
+from runtime_api.provenance import Provenance
 
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.dashboard.options import gate_fable_model
@@ -941,7 +942,13 @@ async def prepare_reviewer_run(
     prepared: dict[str, Any] = {
         "work_dir": work_dir,
         **system_prompt.state(),
-        "messages": [HumanMessage(content=run_context, id=f"run-context:{uuid.uuid4()}")],
+        "messages": [
+            HumanMessage(
+                content=run_context,
+                id=f"run-context:{uuid.uuid4()}",
+                additional_kwargs=Provenance.harness("run_context").stamp(),
+            )
+        ],
         "review_approval_policy": approval_policy,
         "review_approval_errors": policy.errors if policy is not None else [],
         "review_config_errors": config_errors,

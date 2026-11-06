@@ -57,6 +57,7 @@ The backend never runs middleware around a model call; the only middleware objec
 - Internal agent notifications use `RunMessage` and the builders in `openswe/input_messages.py` (`system_input` or `build_input_messages`), not bare prose or feature-specific queue payloads.
   Preserve structured messages through delivery instead of wrapping their envelopes again.
   For model-only context, use the structured sender to exclude it from pending previews and the transcript; do not suppress ordinary human follow-ups or user-facing events.
+  Every input message records what it is (`human`, `system` or `context`) and whom it is from in its provenance (`runtime_api.provenance`); ask `Provenance.of(message)`, never the envelope text, whether a person wrote a message.
 - Keep comments minimal and only explain non-obvious reasons.
 - Before asking a clarifying question about Robin's behavior or guidance, read where it lives (prompts in `openswe/resources/prompts/`, tools in `openswe/tools/`, graph wiring) to check the question makes sense.
   Before asking whether a change should be personal or shared, confirm from that code which scopes the behavior actually supports; never offer a scope it cannot have.

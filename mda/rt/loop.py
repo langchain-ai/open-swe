@@ -1,8 +1,9 @@
 """Open SWE's middleware around each model call, run here as the catalog's ``LoopRules`` say.
 
 Before each call it ends the run where a rule says to, adds the thread's task
-context, keeps the sandbox's GitHub proxy fresh, picks the call's route and model, and
-assembles its system prompt and tool list. After an answer that calls no tool, it
+context and the reminders a person's new message calls for, keeps the sandbox's
+GitHub proxy fresh, picks the call's route and model, and assembles its system
+prompt and tool list. After an answer that calls no tool, it
 asks again for the reply or CLI result the run owes. When the run ends, it asks
 for the graph's own end-of-run work and reports the end, neither of which the run
 waits for.
@@ -27,7 +28,7 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     ToolMessage,
-    add_notification_metadata,
+    messages_from_dict,
     messages_to_dict,
 )
 from langgraph.config import get_stream_writer
@@ -37,6 +38,7 @@ from runtime_api.catalog import (
     CliResultRules,
     LoopRules,
     ModelSpec,
+    Nudging,
     ReplyRules,
     RunModels,
     WorkStateRules,
@@ -47,6 +49,7 @@ from runtime_api.loop import (
     INCIDENT_CONTEXT,
     MODEL_CHOICE,
     REFRESH_GITHUB_PROXY,
+    REMINDERS,
     REPLY_ON_BEHALF,
     ROUTE_MODEL,
     RUN_ENDED,
@@ -57,6 +60,7 @@ from runtime_api.loop import (
     ChosenModel,
     GitHubProxyRefreshed,
     ModelCall,
+    PersonMessage,
     PhaseResult,
     Prepared,
     RefreshGitHubProxy,
@@ -68,12 +72,16 @@ from runtime_api.loop import (
     TaskContext,
 )
 from runtime_api.operations import RunRequest
+from runtime_api.provenance import Provenance
 
 from rt.backend import (
     OpenSweBackend,
     RunLocal,
+    harness_message,
     human_messages,
+    namespace,
     run_call,
+    since_last_reply,
 )
 from rt.tools import STATE_KEY, run_id
 
@@ -100,6 +108,8 @@ _ROLE: Final = "task-role:"
 _RUN_CONTEXT: Final = "run-context:"
 # Starts the id of the message holding an incident run's instructions for its next call.
 _INCIDENT: Final = "incident-context:"
+# Held state: the person's message the backend last read for reminders, read once each.
+_REMINDED_FOR: Final = "reminded_for"
 
 
 def content_text(content: object) -> str:
@@ -128,19 +138,6 @@ def _root(text: str, tag: str) -> ElementTree.Element | None:
     except ElementTree.ParseError:
         return None
     return root if root.tag == tag else None
-
-
-def _dynamic_context(message: BaseMessage) -> bool:
-    """A block that introduces who or what the conversation's messages come from."""
-    return any(_root(text, "dynamic-context") is not None for text in _texts(message.content))
-
-
-def _system_sender(message: BaseMessage) -> str | None:
-    for text in _texts(message.content):
-        root = _root(text, "input-message")
-        if root is not None and root.get("kind") == "system":
-            return root.get("sender")
-    return None
 
 
 def _reported_failure(message: ToolMessage) -> bool:
@@ -242,10 +239,11 @@ class _Turn:
         self.messages = list(messages)
         for index in range(len(self.messages) - 1, -1, -1):
             message = self.messages[index]
-            if (
-                isinstance(message, HumanMessage)
-                and not _dynamic_context(message)
-                and _system_sender(message) not in guards
+            provenance = Provenance.of(message)
+            if isinstance(message, HumanMessage) and (
+                provenance is None
+                or provenance.human
+                or (provenance.kind == "system" and provenance.sender not in guards)
             ):
                 self.messages = self.messages[index + 1 :]
                 break
@@ -361,33 +359,38 @@ class RunLoop:
         guidance = self._guidance.get(self._backend.run)
         visible_guidance = guidance.latest(visible)
         added: list[BaseMessage] = [
-            add_notification_metadata(
-                HumanMessage(content=text, id=f"run-guidance:{uuid.uuid4()}"), source="run_guidance"
+            harness_message(
+                text,
+                message_id=f"run-guidance:{uuid.uuid4()}",
+                source="run_guidance",
+                provenance=Provenance(kind="context", sender=f"run:{key}"),
             )
             for key, text in guidance.latest(messages).items()
             if key != "task-role" and text != visible_guidance.get(key)
         ]
         if context.instructions and context.instructions != latest_with_id(visible, _ROLE):
             added.append(
-                add_notification_metadata(
-                    HumanMessage(content=context.instructions, id=f"{_ROLE}{uuid.uuid4()}"),
+                harness_message(
+                    context.instructions,
+                    message_id=f"{_ROLE}{uuid.uuid4()}",
                     source="task_context",
+                    provenance=Provenance(kind="context", sender="run:task-role"),
                 )
             )
         run_context = latest_with_id(messages, _RUN_CONTEXT)
         if run_context is not None and run_context != latest_with_id(visible, _RUN_CONTEXT):
             added.append(
-                add_notification_metadata(
-                    HumanMessage(content=run_context, id=f"{_RUN_CONTEXT}{uuid.uuid4()}"),
-                    source="run_context",
+                harness_message(
+                    run_context, message_id=f"{_RUN_CONTEXT}{uuid.uuid4()}", source="run_context"
                 )
             )
         if context.message is not None and not any(
             content_text(message.content) == context.message for message in visible
         ):
             added.append(
-                add_notification_metadata(
-                    HumanMessage(content=context.message, id=f"task-context:{uuid.uuid4()}"),
+                harness_message(
+                    context.message,
+                    message_id=f"task-context:{uuid.uuid4()}",
                     source="task_context",
                 )
             )
@@ -403,14 +406,18 @@ class RunLoop:
                 visible, _INCIDENT
             ):
                 added.append(
-                    add_notification_metadata(
-                        HumanMessage(
-                            content=incident.instructions, id=f"{_INCIDENT}{uuid.uuid4()}"
-                        ),
+                    harness_message(
+                        incident.instructions,
+                        message_id=f"{_INCIDENT}{uuid.uuid4()}",
                         source="incident_context",
+                        provenance=Provenance(kind="context", sender="run:incident"),
                     )
                 )
-        route = await self._route(held, [*visible, *added])
+        route, (reminded, reminders) = await asyncio.gather(
+            self._route(held, [*visible, *added]), self._reminders(held, messages)
+        )
+        update.update(reminded)
+        added.extend(reminders)
         if route is not None:
             if route.persist:
                 update["model_route"] = route.route
@@ -512,6 +519,35 @@ class RunLoop:
                 get_stream_writer()({"type": "model_routed", "route": route, "model_id": model_id})
         return Route(route=route, persist=persist)
 
+    async def _reminders(
+        self, held: Mapping[str, object], messages: Sequence[BaseMessage]
+    ) -> tuple[dict[str, JsonValue], list[BaseMessage]]:
+        """The reminders a person's message the model has not answered calls for, asked once
+        per message, and the held state that records it was asked."""
+        if not self.rules.reminders or namespace():
+            return {}, []
+        pending = since_last_reply(messages)
+        person = next(
+            (
+                message
+                for message in reversed(pending)
+                if (provenance := Provenance.of(message)) is not None and provenance.human
+            ),
+            None,
+        )
+        if person is None or (person.id is not None and held.get(_REMINDED_FOR) == person.id):
+            return {}, []
+        reminded: dict[str, JsonValue] = {_REMINDED_FOR: person.id} if person.id else {}
+        asked = PersonMessage(
+            run_id=run_id(), message=_json_dicts.validate_python(messages_to_dict([person]))[0]
+        )
+        try:
+            found = await call(self._backend, REMINDERS, asked)
+        except Exception:
+            logger.warning("Could not read a person's message for reminders", exc_info=True)
+            return reminded, []
+        return reminded, messages_from_dict(found.messages)
+
     async def _chosen_model(self, model_id: str, effort: object) -> ModelSpec:
         key = (model_id, effort if isinstance(effort, str) else None)
         chosen = self._chosen.get(self._backend.run)
@@ -597,17 +633,19 @@ class RunLoop:
             return await self._reply(self.rules.reply, state, held, update)
         return PhaseResult(update=update)
 
-    def _nudge(
-        self, texts: Sequence[str], state: Mapping[str, object]
-    ) -> list[dict[str, JsonValue]]:
+    def _nudge(self, rules: Nudging, state: Mapping[str, object]) -> list[dict[str, JsonValue]]:
         seen = {content_text(message.content) for message in visible_messages(state)}
         added = [
-            add_notification_metadata(
-                HumanMessage(content=text, id=str(uuid.uuid4())), source="run_nudge"
+            harness_message(
+                text, message_id=str(uuid.uuid4()), source="run_nudge", provenance=provenance
             )
-            for text in texts
+            for text, provenance in rules.asked
             # An introduction the model still sees is not made twice.
-            if not (text in seen and _dynamic_context(HumanMessage(content=text)))
+            if not (
+                text in seen
+                and (stamped := provenance or Provenance.of(HumanMessage(content=text)))
+                and stamped.kind == "context"
+            )
         ]
         return _json_dicts.validate_python(messages_to_dict(added))
 
@@ -638,7 +676,7 @@ class RunLoop:
             return None
         return PhaseResult(
             update={**update, "cli_result_nudges": asked + 1},
-            messages=self._nudge(rules.nudge, state),
+            messages=self._nudge(rules, state),
             jump_to="model",
         )
 
@@ -670,7 +708,7 @@ class RunLoop:
             return None
         return PhaseResult(
             update={**update, "work_state_nudges": asked + 1},
-            messages=self._nudge(rules.nudge, state),
+            messages=self._nudge(rules, state),
             jump_to="model",
         )
 
@@ -691,7 +729,7 @@ class RunLoop:
         if asked < rules.max_nudges:
             return PhaseResult(
                 update={**update, "reply_nudges": asked + 1},
-                messages=self._nudge(rules.nudge, state),
+                messages=self._nudge(rules, state),
                 jump_to="model",
             )
         # Silence is the one outcome the person cannot recover from.

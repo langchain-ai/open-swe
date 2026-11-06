@@ -21,6 +21,7 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
+from runtime_api.provenance import Provenance
 
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -208,7 +209,13 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         return {
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
-            "messages": [HumanMessage(content=run_context, id=f"run-context:{uuid.uuid4()}")],
+            "messages": [
+                HumanMessage(
+                    content=run_context,
+                    id=f"run-context:{uuid.uuid4()}",
+                    additional_kwargs=Provenance.harness("run_context").stamp(),
+                )
+            ],
             "scout_nothing_to_plan": False,
             "human_input_summary": "",
             "has_human_input": history is not None,

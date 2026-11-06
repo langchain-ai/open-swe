@@ -7,8 +7,9 @@ from langchain.agents.middleware.types import AgentState, OmitFromOutput
 from langchain_core.messages import HumanMessage
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
+from runtime_api.provenance import Provenance
 
-from openswe.input_messages import input_message_text, message_sender_id
+from openswe.input_messages import input_message_text
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.utils.jev import JevDecision, select_jev_choice
@@ -22,27 +23,16 @@ RoutingMode = Literal["auto", "fast"]
 
 
 def _latest_human_task(messages: Sequence[object]) -> str:
-    """The user's own request, skipping injected context envelopes.
-
-    Context blocks (sender metadata, dynamic context) are appended as
-    ``HumanMessage``s after the real input, so the newest ``HumanMessage`` is
-    usually machine-authored. Only ``kind="human"`` envelopes carry a request.
-    """
-    plain = ""
+    """What a person last wrote; context and system messages around it are skipped."""
     for message in reversed(messages):
-        if not isinstance(message, HumanMessage):
-            continue
-        content = message.content
-        if message_sender_id(content, kind="human") is not None:
-            if authored := input_message_text(content):
-                return authored
-            continue
-        text = message.text
-        if plain or not isinstance(text, str) or "<dynamic-context" in text:
-            continue
-        if "<input-message" not in text:
-            plain = text
-    return plain
+        if (
+            isinstance(message, HumanMessage)
+            and (provenance := Provenance.of(message)) is not None
+            and provenance.human
+            and (authored := input_message_text(message.content))
+        ):
+            return authored
+    return ""
 
 
 ROUTES: tuple[Route, ...] = ("fast", "balanced", "performance")

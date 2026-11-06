@@ -16,6 +16,8 @@ from functools import cache, cached_property, partial
 from typing import Any, Final, Self, cast
 from uuid import UUID
 
+from runtime_api.provenance import Provenance
+
 from openswe.config import ENV
 
 logger = logging.getLogger(__name__)
@@ -86,7 +88,6 @@ from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.token import resolve_github_token
 from openswe.input_messages import (
     dynamic_context_hash,
-    message_sender_id,
     person_introduction,
     visible_dynamic_context_hashes,
 )
@@ -1294,7 +1295,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 candidate_id
                 for candidate in reversed(state.get("messages") or [])
                 if isinstance(candidate, HumanMessage)
-                and (candidate_id := message_sender_id(candidate.content, kind="human")) is not None
+                and (provenance := Provenance.of(candidate)) is not None
+                and provenance.human
+                and (candidate_id := provenance.sender)
             ),
             None,
         )
@@ -2201,10 +2204,10 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
                     *((work_state_tool,) if goal_mode else ()),
                 }
             ),
-            nudge=reply_nudge(reply_tool, no_reply_tool),
+            nudges=reply_nudge(reply_tool, no_reply_tool),
             nudge_sender=REPLY_GUARD["id"],
         ),
-        cli_result=CliResultRules(tool=cli_result_tool, nudge=cli_result_nudge(cli_result_tool))
+        cli_result=CliResultRules(tool=cli_result_tool, nudges=cli_result_nudge(cli_result_tool))
         if cli_result_required
         else None,
         work_state=WorkStateRules(
@@ -2213,12 +2216,14 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
                 _registered_tool_name(tool)
                 for tool in (schedule_thread_wakeup, background_execute, monitor)
             ],
-            nudge=work_state_nudge(work_state_tool),
+            nudges=work_state_nudge(work_state_tool),
             nudge_sender=WORK_STATE_GUARD["id"],
         )
         if goal_mode
         else None,
         task_coordination=task_coordination is not None,
+        reminders=sender_preferences.experimental_memory
+        and _registered_tool_name(remember) in reserved_tool_names - excluded_tools,
         client_tools=client_tools is not None,
         client_prompt=client_tools.instructions if client_tools is not None else "",
         refresh_github_proxy=not (task_coordination and task_coordination.is_worker),

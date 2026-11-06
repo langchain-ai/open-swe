@@ -9,7 +9,7 @@ them; the backend answers the typed API both sides import (``runtime_api``):
   What the turn's start records (its transcript turn, the thread's model and usage) is
   the ``run_started`` report, off the run's path
 - the inbox and skills, and the named calls MDA's middleware makes around a model call
-  (``route_model``, ``model_choice``, ``task_context``, ``incident_context``,
+  (``route_model``, ``reminders``, ``model_choice``, ``task_context``, ``incident_context``,
   ``refresh_github_proxy``, ``reply_on_behalf``) and at the run's end (``run_ended``,
   ``step_limit_reached``, ``settle_review_check``, ``finish_scout_plan``)
 - the reports of each reply and tool call, which arrive with those notices in ordered
@@ -61,6 +61,7 @@ from runtime_api.loop import (
     MODEL_RESULT,
     PREPARE,
     REFRESH_GITHUB_PROXY,
+    REMINDERS,
     REPLY_ON_BEHALF,
     ROUTE_MODEL,
     RUN_ENDED,
@@ -82,9 +83,11 @@ from runtime_api.loop import (
     InboxReceipt,
     IncidentContext,
     ModelResult,
+    PersonMessage,
     Prepare,
     Prepared,
     RefreshGitHubProxy,
+    Reminders,
     ReplyOnBehalf,
     Report,
     Route,
@@ -157,6 +160,7 @@ from openswe.middleware.settle_review_check import settle_review_check
 from openswe.middleware.stale_workspace import StaleWorkspaceReporter
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, queue_run_notice, within_namespace
+from openswe.reminders import Reminder
 from openswe.review_scout.graph import finish_scout_plan
 from openswe.run_config import RunConfig
 from openswe.sandboxes.browsers import ThreadBrowser
@@ -571,6 +575,12 @@ class TokenRun:
         selection = await classify_route(messages_from_dict(request.humans))
         return Route(route=selection.route, persist=selection.persist)
 
+    async def reminders(self, request: PersonMessage) -> Reminders:
+        """The reminders a person's message calls for."""
+        [message] = messages_from_dict([request.message])
+        found = await Reminder.called_for(message)
+        return Reminders(messages=dump_messages(as_messages(found)))
+
     async def model_choice(self, request: ChosenModel) -> ModelSpec:
         return chosen_model(request.model_id, request.effort)
 
@@ -760,6 +770,7 @@ CALLS.serve(MODEL_RESULT, TokenRun.model_result)
 CALLS.serve(TOOL_STARTED, TokenRun.tool_started)
 CALLS.serve(TOOL_RESULT, TokenRun.tool_result)
 CALLS.serve(ROUTE_MODEL, TokenRun.route_model)
+CALLS.serve(REMINDERS, TokenRun.reminders)
 CALLS.serve(MODEL_CHOICE, TokenRun.model_choice)
 CALLS.serve(TASK_CONTEXT, TokenRun.task_context)
 CALLS.serve(INCIDENT_CONTEXT, TokenRun.incident_context)
