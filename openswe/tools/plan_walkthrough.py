@@ -12,6 +12,7 @@ from openswe.github.pull_request_key import PullRequestKey
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.runtime import get_cached_sandbox_backend
+from openswe.slack.client import parse_github_pr_url
 from openswe.ui_invalidations import Topic
 from openswe.walkthrough.checkout import CheckoutError
 from openswe.walkthrough.plan import FileHunks, FileSplits, RangeError
@@ -46,7 +47,15 @@ def _moved(
 async def _workspace(pr_url: str | None = None) -> PlanWorkspace:
     cfg = RunConfig.from_runtime()
     if pr_url is not None:
-        return await PlanWorkspace.for_implementation(cfg, pr_url)
+        ref = parse_github_pr_url(pr_url)
+        if (
+            ref is None
+            or cfg.repo is None
+            or cfg.pr_number != ref.number
+            or cfg.repo.owner.lower() != ref.owner.lower()
+            or cfg.repo.name.lower() != ref.repo.lower()
+        ):
+            return await PlanWorkspace.for_implementation(cfg, pr_url)
     if not cfg.thread_id or cfg.repo is None or cfg.pr_number is None:
         raise PlannerUnavailableError("this run is not planning a pull request")
     return await PlanWorkspace.locate(
