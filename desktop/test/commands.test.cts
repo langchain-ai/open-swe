@@ -13,6 +13,7 @@ test("desktop commands use a fixed allowlist", () => {
     "open-settings",
     "show-keyboard-shortcuts",
     "toggle-sidebar",
+    "copy-page-link",
   ]);
   for (const commandId of DESKTOP_COMMAND_IDS) {
     assert.equal(isDesktopCommandId(commandId), true);
