@@ -575,6 +575,77 @@ async def test_broadcast_to_configured_review_channel(
     assert stored.slack_broadcast is False
 
 
+@pytest.mark.parametrize(
+    ("filenames", "rules", "selected", "expected"),
+    [
+        (["open-swe/openswe/server.py"], True, None, "C_REVIEW"),
+        (["README.md"], True, None, None),
+        (None, True, None, None),
+        ([], False, None, "C_FALLBACK"),
+        (None, True, "C_REVIEW", "C_REVIEW"),
+        (None, True, "", None),
+    ],
+)
+async def test_automatic_broadcast_routes_changed_files(
+    monkeypatch: pytest.MonkeyPatch,
+    filenames: list[str] | None,
+    rules: bool,
+    selected: str | None,
+    expected: str | None,
+) -> None:
+    from openswe.github.pull_requests import PullRequest
+    from openswe.github.repo_files import RepoSettings
+    from openswe.slack.channels import SlackChannel
+
+    approval = HumanReviewRequest(
+        pull_request_id=uuid4(), head_sha="abc123", kind="expedited", slack_channel_id="C1"
+    )
+    approval.pull_request = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    if selected is not None:
+        approval.run_config = {"expedited_review_channel": selected}
+    monkeypatch.setattr(HumanReviewRequest, "save", AsyncMock())
+    settings = RepoSettings.model_validate(
+        {
+            "reviewChannel": "C_FALLBACK",
+            "reviewChannelRules": [{"paths": ["open-swe/*"], "channel": "C_REVIEW"}]
+            if rules
+            else [],
+        }
+    )
+    monkeypatch.setattr(lifecycle.RepoSettings, "cached", AsyncMock(return_value=settings))
+    monkeypatch.setattr(
+        ReviewCard,
+        "_files",
+        AsyncMock(
+            return_value=None
+            if filenames is None
+            else [
+                ChangedFile(filename=name, status="modified", additions=1, deletions=0)
+                for name in filenames
+            ]
+        ),
+    )
+    channel = SlackChannel(id=expected or "C_REVIEW", name="review")
+    monkeypatch.setattr(lifecycle.SlackChannel, "resolve", AsyncMock(return_value=channel))
+    monkeypatch.setattr(lifecycle, "still_internal", AsyncMock(return_value=True))
+    monkeypatch.setattr(lifecycle, "sendable_channel", AsyncMock(return_value=channel))
+    copy = AsyncMock(return_value=None)
+    monkeypatch.setattr(ReviewCard, "copy_to", copy)
+
+    await ReviewCard(approval).broadcast_configured()
+
+    if expected is None:
+        copy.assert_not_awaited()
+    else:
+        copy.assert_awaited_once_with(channel)
+    if approval.run_config.get("expedited_review_channel") == "":
+        approval.slack_thread_ts = "1.0"
+        monkeypatch.setattr(
+            lifecycle, "own_choices", AsyncMock(return_value=[{"id": "C1", "name": "eng"}])
+        )
+        assert await ReviewCard(approval)._channel_choices() == [{"id": "C1", "name": "eng"}]
+
+
 async def test_author_dm_success_is_quiet_only_when_the_status_card_updates(
     open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
 ) -> None:

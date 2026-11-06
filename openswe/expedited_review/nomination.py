@@ -349,7 +349,14 @@ class ExpeditedReviewNomination:
             awaiting_ready=payload.draft,
             slack_channel_id=channel_id,
             slack_thread_ts=thread_ts,
-            run_config=origin.run_config,
+            run_config={
+                **origin.run_config,
+                **(
+                    {"expedited_review_channel": broadcast_target.id if broadcast_target else ""}
+                    if not payload.draft
+                    else {}
+                ),
+            },
             requested_by_user_id=requester.id if requester is not None else None,
         ).save()
         if approval.awaiting_ready:

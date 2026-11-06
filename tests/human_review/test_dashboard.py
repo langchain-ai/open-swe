@@ -149,7 +149,7 @@ async def test_dashboard_selects_review_workflow(
         assert saved.kind == "expedited"
         assert saved.requested_by_user_id == requester.id
         assert saved.thread_id == ""
-        assert saved.run_config == {}
+        assert saved.run_config == {"expedited_review_channel": ""}
     else:
         assert result.request_id == "standard"
         post.assert_not_awaited()
