@@ -184,9 +184,38 @@ def _github_response_summary(resp: httpx2.Response | None) -> str:
     return " " + ". ".join(parts) + "."
 
 
-def _effective_draft(draft: bool) -> bool:
-    preference = _configurable().draft_prs
-    return preference if preference is not None else draft
+class DraftPreference:
+    def __init__(self, draft: bool) -> None:
+        cfg = _configurable()
+        self.fallback = cfg.draft_prs if cfg.draft_prs is not None else draft
+        self.login = cfg.github_login or ""
+        self.lookup: asyncio.Task[bool] | None = None
+
+    async def __aenter__(self) -> DraftPreference:
+        if self.login:
+            self.lookup = asyncio.create_task(self.refresh())
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        if self.lookup is not None:
+            self.lookup.cancel()
+
+    async def refresh(self) -> bool:
+        from openswe.dashboard.profiles import PROFILES
+
+        try:
+            profile = await PROFILES.get(self.login)
+            preference = profile.get("draft_prs") if profile else None
+            return preference if isinstance(preference, bool) else self.fallback
+        except Exception:
+            logger.exception("Could not refresh PR draft preference")
+            return self.fallback
+
+    @property
+    def value(self) -> bool:
+        if self.lookup is not None and self.lookup.done() and not self.lookup.cancelled():
+            return self.lookup.result()
+        return self.fallback
 
 
 def _configurable() -> RunConfig:
@@ -1101,7 +1130,10 @@ async def _open_pull_request(
             failed_step="resolve_pr_author_token",
         )
 
-    async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30.0) as client:
+    async with (
+        DraftPreference(draft) as preference,
+        httpx2.AsyncClient(transport=pooled_transport(), timeout=30.0) as client,
+    ):
         if (
             kind == "user"
             and await private_credential_login() is None
@@ -1134,7 +1166,7 @@ async def _open_pull_request(
             await _maybe_append_references(client, token, owner, repo, body),
             state,
         )
-        draft = _effective_draft(draft)
+        draft = preference.value
         payload = {
             "title": title,
             "head": head,

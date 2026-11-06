@@ -229,6 +229,58 @@ def test_profile_draft_preference_overrides_tool_argument(monkeypatch: pytest.Mo
     assert client.post_calls[0]["json"]["draft"] is False
 
 
+@pytest.mark.parametrize("stored", [True, False, None, "slow", "error"])
+def test_draft_preference_refresh_never_waits(
+    monkeypatch: pytest.MonkeyPatch, stored: bool | str | None
+) -> None:
+    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117", "draft_prs": True})
+    _stub_token(monkeypatch)
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def profile(login: str) -> dict[str, bool] | None:
+        assert login == "johannes117"
+        started.set()
+        if stored == "slow":
+            try:
+                await asyncio.Future()
+            finally:
+                cancelled.set()
+        if stored == "error":
+            raise RuntimeError("profile unavailable")
+        return {"draft_prs": stored} if isinstance(stored, bool) else None
+
+    async def preflight(**_kwargs: object) -> None:
+        await started.wait()
+
+    monkeypatch.setattr("openswe.dashboard.profiles.PROFILES.get", profile)
+    monkeypatch.setattr(opr, "_preflight_pr_access", preflight)
+    client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}))
+    _install_client(monkeypatch, client)
+
+    async def open_pr() -> dict[str, object]:
+        result = await asyncio.wait_for(
+            opr._open_pull_request(
+                owner="langchain-ai",
+                repo="open-swe",
+                head="feature",
+                base="main",
+                title="fix: x",
+                body="body",
+                draft=True,
+            ),
+            timeout=1,
+        )
+        if stored == "slow":
+            await asyncio.wait_for(cancelled.wait(), timeout=1)
+        return result
+
+    result = asyncio.run(open_pr())
+
+    assert result["success"] is True
+    assert client.post_calls[0]["json"]["draft"] is (stored is not False)
+
+
 def test_private_pr_requires_user_token(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 

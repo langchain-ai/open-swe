@@ -204,14 +204,13 @@ async def test_error_url_follows_terminal_failure(
     assert len(queries) == (
         1 if scenario == "lookup-error" else 2 if legacy or scenario == "missing" else 1
     )
-    for query_args in queries:
+    for field, query_args in zip(("invocation_id", "prepare_run_id"), queries, strict=False):
         assert query_args["project_ids"] == ["pid"]
         assert query_args["has_error"] is True
         assert query_args["min_start_time"] == start
         assert ls_utils._langsmith_metadata_filter("thread_id", "thread") in str(
             query_args["filter"]
         )
-        field = "prepare_run_id" if legacy and query_args is queries[-1] else "invocation_id"
         assert ls_utils._langsmith_metadata_filter(field, "invocation") in str(query_args["filter"])
 
 
