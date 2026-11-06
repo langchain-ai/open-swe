@@ -13,6 +13,7 @@ class SlackRequest(BaseModel):
     thread_ts: str
     event_ts: str = ""
     original_message_ts: str = ""
+    source_message_ts: str = ""
     retry_message_ts: str = ""
     event_id: str = ""
     user_id: str = ""

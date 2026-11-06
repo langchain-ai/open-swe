@@ -1069,6 +1069,9 @@ function buildHumanMessage(
           structuredSenderId: parsed.sender,
           structuredSenderKind: parsed.senderKind,
           structuredSurface: parsed.surface,
+          ...(parsed.slackMessageUrl
+            ? { slackMessageUrl: parsed.slackMessageUrl }
+            : {}),
           ...(replies ? { replies } : {}),
           structuredSenderName:
             entity?.displayName ??

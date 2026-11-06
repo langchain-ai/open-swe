@@ -322,6 +322,8 @@ def _slack_context_input(
     channel: ChannelIdentity,
     bot_user_id: str,
     event_ts: str,
+    source_message_ts: str = "",
+    context_channel_id: str = "",
     trigger_user_id: str = "",
     request_text: str,
     request_blocks: list[dict[str, Any]],
@@ -337,6 +339,9 @@ def _slack_context_input(
     web_only: bool = False,
 ) -> RunInput:
     channel_entity_id = channel["id"]
+    link_source = not context_channel_id or context_channel_id == channel_entity_id.removeprefix(
+        "slack:"
+    )
     channel_names = channel_names_by_id or {}
     already_dispatched = dispatched_timestamps or set()
     visible = set(visible_context_hashes or ())
@@ -400,6 +405,7 @@ def _slack_context_input(
             "kind": kind,
             "data": {
                 "timestamp": timestamp,
+                **({"slack_message_ts": timestamp} if link_source else {}),
                 "explicit_bot_mention": str(
                     _mentions_open_swe(message.get("text"), bot_user_id)
                 ).lower(),
@@ -422,6 +428,11 @@ def _slack_context_input(
                     "kind": "human",
                     "data": {
                         "timestamp": event_ts,
+                        **(
+                            {"slack_message_ts": source_message_ts}
+                            if source_message_ts and link_source
+                            else {}
+                        ),
                         "explicit_bot_mention": str(
                             _mentions_open_swe(prior_message_text, bot_user_id)
                         ).lower(),
@@ -484,6 +495,11 @@ def _slack_context_input(
                 "kind": trigger_kind,
                 "data": {
                     "timestamp": event_ts,
+                    **(
+                        {"slack_message_ts": source_message_ts}
+                        if source_message_ts and link_source
+                        else {}
+                    ),
                     "explicit_bot_mention": str(explicit_mention).lower(),
                 },
             },
@@ -1365,6 +1381,8 @@ async def _process_slack_mention_impl(
         channel=channel_identity,
         bot_user_id=bot_user_id,
         event_ts=event_ts,
+        source_message_ts=request.source_message_ts,
+        context_channel_id=request.context_channel_id,
         trigger_user_id=user_id,
         request_text=clean_text,
         request_blocks=content_blocks,

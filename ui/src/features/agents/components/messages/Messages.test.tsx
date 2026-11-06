@@ -94,6 +94,36 @@ describe("Messages", () => {
     expect(screen.queryByRole("status")).toBeNull()
   })
 
+  it("links Slack user messages to their original message when metadata is available", () => {
+    const messages = streamMessagesToUi([
+      new HumanMessage({
+        id: "slack-person",
+        content:
+          '<dynamic-context kind="person" id="slack:U123">\ndisplay_name: Alice\n</dynamic-context>',
+      }),
+      new HumanMessage({
+        id: "slack-message",
+        content:
+          '<input-message sender="slack:U123" channel="slack:C123" surface="slack" kind="human" timestamp="1787165499.123456" slack_message_ts="1787165487.000034">Hello</input-message>',
+      }),
+      new HumanMessage({
+        id: "legacy-slack-message",
+        content:
+          '<input-message sender="slack:U123" surface="slack" kind="human">Earlier message</input-message>',
+      }),
+    ])
+    render(<Messages messages={messages} isStreaming={false} />, { wrapper })
+
+    const link = screen.getByRole("link", {
+      name: "View message from Alice in Slack",
+    })
+    expect(link.getAttribute("href")).toBe(
+      "https://slack.com/archives/C123/p1787165487000034"
+    )
+    expect(link.getAttribute("target")).toBe("_blank")
+    expect(screen.getByRole("img", { name: "Slack" })).toBeTruthy()
+  })
+
   it("renders attributed task activity with safe expandable details", async () => {
     const source = {
       version: 1,

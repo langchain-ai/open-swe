@@ -85,6 +85,7 @@ async def test_summon_reaction_tags_open_swe_for_the_reactor(
     assert request.thread_ts == "1.000"
     assert request.thread_id == "thread-1.000"
     assert request.original_message_ts == "3.000"
+    assert request.source_message_ts == "3.000"
     assert request.trigger_system is not None
     assert request.explicit_mention
 

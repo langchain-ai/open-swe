@@ -1,4 +1,5 @@
 import { Button } from "@langchain/macaw-components/Button"
+import { Link } from "@langchain/macaw-components/Link"
 import { PaperclipIcon } from "@phosphor-icons/react/dist/ssr/Paperclip"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
@@ -209,14 +210,32 @@ function StandardUserMessage({ message }: { message: Message }) {
             isSlack ||
             message.structuredSenderIsBot) && (
             <div className="mb-space-1 flex items-center gap-space-1 px-space-1 text-xxs font-medium text-secondary">
-              {isSlack && (
-                <SlackLogoIcon
-                  size={12}
-                  weight="fill"
-                  role="img"
-                  aria-label="Slack"
-                />
-              )}
+              {isSlack &&
+                (message.slackMessageUrl ? (
+                  <Link
+                    href={message.slackMessageUrl}
+                    variant="xs"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={
+                      message.structuredSenderName
+                        ? `View message from ${message.structuredSenderName} in Slack`
+                        : "View message in Slack"
+                    }
+                    leftDecorator={SlackLogoIcon}
+                    iconWeight="fill"
+                    className="gap-space-1"
+                  >
+                    {message.structuredSenderName || "Slack"}
+                  </Link>
+                ) : (
+                  <SlackLogoIcon
+                    size={12}
+                    weight="fill"
+                    role="img"
+                    aria-label="Slack"
+                  />
+                ))}
               {message.structuredSenderIsBot && (
                 <RobotIcon
                   size={12}
@@ -226,9 +245,10 @@ function StandardUserMessage({ message }: { message: Message }) {
                   data-testid="user-message-bot-icon"
                 />
               )}
-              {message.structuredSenderName && (
-                <span>{message.structuredSenderName}</span>
-              )}
+              {message.structuredSenderName &&
+                !(isSlack && message.slackMessageUrl) && (
+                  <span>{message.structuredSenderName}</span>
+                )}
               {message.structuredSenderNote && (
                 <span className="font-normal text-tertiary">
                   {" · "}

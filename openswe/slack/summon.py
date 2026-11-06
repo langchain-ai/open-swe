@@ -67,6 +67,7 @@ async def process_slack_summon_reaction(
         thread_ts=thread_ts,
         event_ts=event.event_ts,
         original_message_ts=item.ts,
+        source_message_ts=item.ts,
         event_id=event_id,
         user_id=user_id,
         text=prompt(

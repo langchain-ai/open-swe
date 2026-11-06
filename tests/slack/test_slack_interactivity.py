@@ -397,6 +397,7 @@ async def test_retry_is_requester_scoped_and_dispatches_only_once(
     assert request.turn_context == ("" if message_ts else retry.prompt("runs/slack-retry").strip())
     assert request.event_ts != message_ts
     assert request.original_message_ts == message_ts
+    assert request.source_message_ts == message_ts
     assert request.explicit_request
     assert request.code_channel == (thread_ts == "0" and channel_id.startswith("C"))
     assert request.concierge_mode == (channel_id.startswith("D") and thread_ts == "0")

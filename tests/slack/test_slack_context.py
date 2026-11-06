@@ -919,6 +919,8 @@ def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
         channel={"id": "slack:C123", "platform": "slack"},
         bot_user_id="UBOT",
         event_ts="9.0",
+        source_message_ts=cast(str, kwargs.get("source_message_ts", "")),
+        context_channel_id=cast(str, kwargs.get("context_channel_id", "")),
         request_text="do the thing",
         request_blocks=[{"type": "text", "text": "do the thing"}],
         dispatched_timestamps=cast(set, kwargs.get("dispatched_timestamps", set())),
@@ -936,6 +938,33 @@ def test_current_slack_message_preserves_ingress_mention(explicit_mention: bool)
     trigger = ElementTree.fromstring(trigger_blocks[0]["text"])
     assert trigger.get("explicit_bot_mention") == str(explicit_mention).lower()
     assert (trigger.text or "").strip() == "do the thing"
+
+
+@pytest.mark.parametrize("source_message_ts", ["", "1.000001"])
+def test_trigger_permalink_uses_only_source_post_timestamp(source_message_ts: str) -> None:
+    contents = _context_input([], source_message_ts=source_message_ts)
+    trigger = ElementTree.fromstring(contents[-1][0]["text"])
+    assert trigger.get("timestamp") == "9.0"
+    assert trigger.get("slack_message_ts") == (source_message_ts or None)
+
+
+@pytest.mark.parametrize("context_channel_id", ["C123", "COTHER"])
+def test_cross_channel_context_does_not_link_source_timestamps_to_destination(
+    context_channel_id: str,
+) -> None:
+    contents = _context_input(
+        [{"ts": "1.000001", "user": "U123", "text": "Earlier message"}],
+        source_message_ts="2.000002",
+        context_channel_id=context_channel_id,
+    )
+    envelopes = [
+        ElementTree.fromstring(content if isinstance(content, str) else content[0]["text"])
+        for content in contents
+        if isinstance(content, list) or content.startswith("<input-message")
+    ]
+    assert [envelope.get("slack_message_ts") for envelope in envelopes] == (
+        ["1.000001", "2.000002"] if context_channel_id == "C123" else [None, None]
+    )
 
 
 def test_multiline_trigger_appends_only_forwarded_context() -> None:
