@@ -53,6 +53,7 @@ BridgeRequestStatus = Literal["pending", "claimed", "done", "failed"]
 CompleteOutcome = Literal["completed", "already_finished", "missing"]
 
 CLOSED_ERROR = "bridge closed"
+CANCELLED_ERROR = "the run stopped waiting for it"
 DISCONNECTED_ERROR = "bridge disconnected"
 
 _BRIDGE_COLUMNS = (
@@ -373,6 +374,28 @@ class BridgeStore:
                 extra={"bridge_id": bridge_id, "requeued_requests": len(rows)},
             )
         return len(rows)
+
+    @classmethod
+    async def settled(cls, bridge_id: str, request_ids: Sequence[str]) -> list[str]:
+        """Which of ``request_ids`` are answered already, so the CLI stops running them.
+
+        A request is settled without the CLI when its waiter gives up on it: the run
+        was stopped, or the command outlived its wait.
+        """
+        if not request_ids:
+            return []
+        async with postgres.read_only_transaction() as conn:
+            rows = await cls._rows(
+                conn,
+                """
+                SELECT request_id FROM sandbox_bridge_request
+                WHERE bridge_id = :bridge_id
+                  AND request_id = ANY(CAST(:request_ids AS text[]))
+                  AND status IN ('done', 'failed')
+                """,
+                {"bridge_id": bridge_id, "request_ids": list(request_ids)},
+            )
+        return [row["request_id"] for row in rows]
 
     @classmethod
     async def claim(cls, bridge_id: str, *, limit: int) -> list[ClaimedRequest]:

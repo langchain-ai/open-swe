@@ -62,6 +62,8 @@ class BridgeClaimBody(BaseModel):
 
 class BridgeRequestsResponse(BaseModel):
     requests: list[ClaimedRequest]
+    # Held requests settled without the CLI, such as by a stopped run: stop running them.
+    cancelled: list[str] = Field(default_factory=list)
 
 
 class BridgeReplyBody(BaseModel):
@@ -147,24 +149,27 @@ async def api_claim_bridge_requests(
     _require_postgres()
     await _touch(bridge_id, principal.sender_id)
     await BridgeStore.release_unheld(bridge_id, held=body.held)
-    wait, limit = body.wait, body.limit
+    wait, limit, held = body.wait, body.limit, set(body.held)
     # Subscribing before the first claim is what closes the window in which a
-    # request enqueued between the claim and the wait would go unnoticed.
+    # request enqueued or settled between the claim and the wait would go unnoticed.
     async with listener.subscribe(bridge_id) as events:
         requests = await BridgeStore.claim(bridge_id, limit=limit)
-        if requests or wait <= 0:
-            return BridgeRequestsResponse(requests=requests)
+        cancelled = await BridgeStore.settled(bridge_id, body.held)
+        if requests or cancelled or wait <= 0:
+            return BridgeRequestsResponse(requests=requests, cancelled=cancelled)
         try:
             async with asyncio.timeout(wait):
-                async for _request_id, event in events:
+                async for request_id, event in events:
                     if event == CLOSED_EVENT:
                         break
+                    if request_id in held:
+                        cancelled = await BridgeStore.settled(bridge_id, body.held)
                     requests = await BridgeStore.claim(bridge_id, limit=limit)
-                    if requests:
+                    if requests or cancelled:
                         break
         except TimeoutError:
             pass
-    return BridgeRequestsResponse(requests=requests)
+    return BridgeRequestsResponse(requests=requests, cancelled=cancelled)
 
 
 @router.post("/bridges/{bridge_id}/requests/{request_id}")

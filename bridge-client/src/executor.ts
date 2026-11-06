@@ -162,7 +162,6 @@ export interface LocalExecutorOptions {
  */
 export class LocalExecutor {
   private readonly env: Record<string, string>
-  private readonly running = new Set<() => void>()
 
   /** `root` may be a getter: a desktop thread can move between worktrees. */
   constructor(
@@ -176,16 +175,22 @@ export class LocalExecutor {
     return typeof this.root === "string" ? this.root : this.root()
   }
 
+  /** `signal` stops a running command, its abort reason saying why. */
   async dispatch(
     method: string,
-    params: Record<string, unknown>
+    params: Record<string, unknown>,
+    signal?: AbortSignal
   ): Promise<DispatchOutcome> {
     switch (method) {
       case "execute": {
         const command = stringAt(params, "command")
         if (command === null)
           return { error: "execute requires a command string" }
-        const result = await this.execute(command, numberAt(params, "timeout"))
+        const result = await this.execute(
+          command,
+          numberAt(params, "timeout"),
+          signal
+        )
         return { result: { ...result } }
       }
       case "upload_files": {
@@ -210,7 +215,8 @@ export class LocalExecutor {
 
   async execute(
     command: string,
-    timeout: number | null
+    timeout: number | null,
+    signal?: AbortSignal
   ): Promise<ExecuteResult> {
     const seconds =
       timeout !== null && timeout > 0 ? timeout : DEFAULT_TIMEOUT_SECONDS
@@ -222,10 +228,10 @@ export class LocalExecutor {
       env: this.env,
       detached: true,
     })
-    const signalGroup = (signal: NodeJS.Signals): void => {
+    const signalGroup = (kill: NodeJS.Signals): void => {
       if (proc.pid === undefined) return
       try {
-        process.kill(-proc.pid, signal)
+        process.kill(-proc.pid, kill)
       } catch (cause) {
         if (errorCode(cause) !== "ESRCH") throw cause
       }
@@ -243,7 +249,8 @@ export class LocalExecutor {
       stopped = true
       terminate()
     }
-    this.running.add(stop)
+    if (signal?.aborted) stop()
+    signal?.addEventListener("abort", stop, { once: true })
     const deadline = setTimeout(() => {
       timedOut = true
       terminate()
@@ -258,15 +265,17 @@ export class LocalExecutor {
         proc.once("close", (code) => done(code))
       })
     } finally {
-      this.running.delete(stop)
+      signal?.removeEventListener("abort", stop)
       clearTimeout(deadline)
       if (escalation !== null) clearTimeout(escalation)
     }
 
     const { output, truncated } = captured.finish()
     if (stopped) {
+      const reason =
+        typeof signal?.reason === "string" ? `: ${signal.reason}` : ""
       return {
-        output: `${output}\n[command stopped: this machine stopped serving the thread]`,
+        output: `${output}\n[command stopped${reason}]`,
         exit_code: TIMEOUT_EXIT_CODE,
         truncated,
       }
@@ -279,11 +288,6 @@ export class LocalExecutor {
       }
     }
     return { output, exit_code: exitCode, truncated }
-  }
-
-  /** Terminate every running command; each resolves once its process group exits. */
-  stopAll(): void {
-    for (const stop of this.running) stop()
   }
 
   async uploadFiles(

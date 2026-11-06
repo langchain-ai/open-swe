@@ -101,15 +101,19 @@ describe("execute", () => {
     expect(result.output).toContain("[command timed out after 1s]")
   })
 
-  test("stops a running command when the bridge closes", async () => {
+  test("stops a running command when its signal aborts", async () => {
     const executor = new LocalExecutor(await workspace())
+    const stop = new AbortController()
     const started = Date.now()
-    const running = executor.execute("sleep 30", 300)
+    const running = executor.execute("sleep 30", 300, stop.signal)
     await new Promise((done) => setTimeout(done, 200))
-    executor.stopAll()
+    stop.abort("the run stopped waiting for it")
     const result = await running
     expect(Date.now() - started).toBeLessThan(5_000)
-    expect(result.output).toContain("[command stopped")
+    expect(result.exit_code).toBe(124)
+    expect(result.output).toContain(
+      "[command stopped: the run stopped waiting for it]"
+    )
   })
 
   test("truncates output beyond the cap", async () => {

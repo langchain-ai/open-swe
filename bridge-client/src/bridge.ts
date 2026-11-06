@@ -20,6 +20,10 @@ const REPLY_ATTEMPTS = 3
  * leaving it out of a poll cannot get its command run again.
  */
 const MAX_HELD_SENT = 1_000
+/** Why a command still running when the bridge closes is stopped. */
+const CLOSED_REASON = "this machine stopped serving the thread"
+/** Why a command whose request the server settled without it is stopped. */
+const CANCELLED_REASON = "the run stopped waiting for it"
 /** How long `close` waits for stopped commands to report before releasing the bridge. */
 const CLOSE_GRACE_MS = 5_000
 /** Margin over the server's long-poll window before the request is abandoned. */
@@ -76,7 +80,8 @@ export class Bridge {
   private active = false
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
   private readonly inFlight = new Set<Promise<void>>()
-  private readonly held = new Set<string>()
+  /** Every request held until the server has its answer, stopped through its controller. */
+  private readonly held = new Map<string, AbortController>()
   private readonly pollControllers = new Set<AbortController>()
   private onFatal: ((error: Error) => void) | null = null
   private readonly executor: LocalExecutor
@@ -134,7 +139,7 @@ export class Bridge {
     // Closing is quitting: a build or test run the agent started must not hold
     // the app or the CLI open, so its process group is killed, and a reply that
     // cannot be posted is not waited on past the grace period.
-    this.executor.stopAll()
+    for (const running of this.held.values()) running.abort(CLOSED_REASON)
     let grace: ReturnType<typeof setTimeout> | undefined
     await Promise.race([
       Promise.allSettled(this.inFlight),
@@ -207,13 +212,21 @@ export class Bridge {
       const deadline = setTimeout(() => controller.abort(), POLL_TIMEOUT_MS)
       this.pollControllers.add(controller)
       try {
-        const requests = await this.api.pollRequests(this.session.bridgeId, {
-          wait: POLL_WAIT_SECONDS,
-          limit: POLL_LIMIT,
-          held: [...this.held].slice(-MAX_HELD_SENT),
-          signal: controller.signal,
-        })
+        const { requests, cancelled } = await this.api.pollRequests(
+          this.session.bridgeId,
+          {
+            wait: POLL_WAIT_SECONDS,
+            limit: POLL_LIMIT,
+            held: [...this.held.keys()].slice(-MAX_HELD_SENT),
+            signal: controller.signal,
+          }
+        )
         backoff = MIN_BACKOFF_MS
+        // Settled already, so nothing re-offers it once it is no longer held.
+        for (const requestId of cancelled) {
+          this.held.get(requestId)?.abort(CANCELLED_REASON)
+          this.held.delete(requestId)
+        }
         for (const request of requests) this.track(this.serve(request))
       } catch (cause) {
         if (!this.active) return
@@ -260,13 +273,18 @@ export class Bridge {
   private async serve(request: BridgeRequest): Promise<void> {
     // Held until the server has the answer. A result that could not be
     // delivered stays held, so the command is never run a second time.
-    this.held.add(request.requestId)
+    const running = new AbortController()
+    this.held.set(request.requestId, running)
     let reply: DispatchOutcome
     try {
       const handler = this.options.handlers?.[request.method]
       reply = handler
         ? { result: await handler(request.params) }
-        : await this.executor.dispatch(request.method, request.params)
+        : await this.executor.dispatch(
+            request.method,
+            request.params,
+            running.signal
+          )
     } catch (cause) {
       reply = { error: errorMessage(cause) }
     }

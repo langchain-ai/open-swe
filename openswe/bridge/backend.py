@@ -42,7 +42,12 @@ from openswe.bridge.protocol import (
     UploadFilesParams,
     WorktreeHandoffParams,
 )
-from openswe.bridge.store import Bridge, BridgeStore, BridgeUnavailableError
+from openswe.bridge.store import (
+    CANCELLED_ERROR,
+    Bridge,
+    BridgeStore,
+    BridgeUnavailableError,
+)
 from openswe.run_config import RunConfig
 from openswe.sandboxes.state import SandboxUnreachableError
 
@@ -200,7 +205,14 @@ class BridgeSandboxBackend(BaseSandbox):
                 request_id = await BridgeStore.enqueue(
                     self._bridge_id, method=method, params=params.dump()
                 )
-                return await self._await_result(events, request_id, wait=wait)
+                try:
+                    return await self._await_result(events, request_id, wait=wait)
+                except asyncio.CancelledError:
+                    # Settling it is what tells the machine to stop running it.
+                    await asyncio.shield(
+                        BridgeStore.complete(self._bridge_id, request_id, error=CANCELLED_ERROR)
+                    )
+                    raise
         except BridgeUnavailableError as exc:
             raise self._unreachable(str(exc)) from exc
 
