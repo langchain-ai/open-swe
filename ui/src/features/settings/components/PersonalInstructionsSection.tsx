@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
+import { toast } from "sonner"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
@@ -37,7 +38,10 @@ export function PersonalInstructionsSection() {
   const save = useMutation({
     meta: { silent: true },
     mutationFn: (next: string) => api.saveMyInstructions(next),
-    onSuccess: (record) => onSuccess(record.instructions),
+    onSuccess: (record) => {
+      onSuccess(record.instructions)
+      toast.success("Instructions saved")
+    },
     onError: (e: Error) => setError(e.message),
   })
   const clear = useMutation({
