@@ -119,6 +119,8 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
   const order = useReviewPage((state) => state.order)
   const stacked = useReviewPage((state) => state.navigatorLayout === "stacked")
   const toggleLayout = useReviewPage((state) => state.toggleNavigatorLayout)
+  const [walkthroughOpen, setWalkthroughOpen] = useState(true)
+  const [filesOpen, setFilesOpen] = useState(true)
   const viewedCount = useReviewPage(
     (state) => files?.filter((file) => state.viewed.has(file.path)).length ?? 0
   )
@@ -187,13 +189,17 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
           <NavigatorSection
             title="Walkthrough"
             count={steps}
-            className="max-h-1/2"
+            open={walkthroughOpen}
+            onToggle={() => setWalkthroughOpen((value) => !value)}
+            className={filesOpen ? "max-h-1/2" : "flex-1"}
           >
             <StepList files={files} walkthrough={walkthrough} />
           </NavigatorSection>
           <NavigatorSection
             title="Files changed"
             count={files.length}
+            open={filesOpen}
+            onToggle={() => setFilesOpen((value) => !value)}
             className="flex-1"
           >
             <FileTree files={files} markers={markers} />
@@ -211,24 +217,44 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
 function NavigatorSection({
   title,
   count,
+  open,
+  onToggle,
   className,
   children,
 }: {
   title: string
   count: number
+  open: boolean
+  onToggle: () => void
   className: string
   children: ReactNode
 }) {
   return (
     <section
       aria-label={title}
-      className={cn("flex min-h-0 flex-col border-t border-default", className)}
+      className={cn(
+        "flex min-h-0 flex-col border-t border-default",
+        open ? className : "shrink-0"
+      )}
     >
-      <h3 className="flex items-center px-space-4 py-space-1 text-xxs font-medium text-tertiary uppercase">
-        {title}
-        <span className="ml-auto tabular-nums">{count}</span>
+      <h3>
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={onToggle}
+          className="flex w-full items-center gap-space-1 px-space-3 py-space-1 text-left text-xxs font-medium text-tertiary uppercase hover:text-secondary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+        >
+          <CaretDownIcon
+            className={cn(
+              "size-3 shrink-0 transition-transform",
+              !open && "-rotate-90"
+            )}
+          />
+          {title}
+          <span className="ml-auto tabular-nums">{count}</span>
+        </button>
       </h3>
-      {children}
+      {open && children}
     </section>
   )
 }
