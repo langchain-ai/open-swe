@@ -305,6 +305,18 @@ INBOX_FOLLOW_UP = "Please also note the inbox follow-up."
 INBOX_GATE_URL = f"{BASE_URL}/control/inbox-gate"
 _INBOX_GATE_SECONDS = 90.0
 
+# Goal mode: the run keeps going until it reports, rests on a wait without being sent
+# back, and treats another reviewer's comment on its PR as more work.
+GOAL_NUDGE_MARKER = "E2E_GOAL_NUDGE"
+GOAL_WAIT_MARKER = "E2E_GOAL_WAIT"
+GOAL_STALL_MARKER = "E2E_GOAL_STALL"
+GOAL_REVIEWER_MARKER = "E2E_GOAL_REVIEWER"
+GOAL_CHECK_URL = f"{BASE_URL}/control/goal-check"
+GOAL_CHECK_PASSED = "GOAL_CHECK_PASSED"
+GOAL_REVIEWER_BOT = "devin-ai-integration[bot]"
+_WORK_STATE_GUARD_SENDER = 'sender="system:work-state-guard"'
+_NO_REPLY_CONFIRMATION = "The user cannot see anything I do not send to Slack."
+
 ToolArgs = dict[str, Any]
 StepFactory = Callable[[list[BaseMessage]], AIMessage]
 ScriptPredicate = Callable[["ScriptContext"], bool]
@@ -913,6 +925,112 @@ def _called(messages: list[BaseMessage], call_id: str) -> int | None:
     return None
 
 
+def _goal_call(content: str, name: str, args: ToolArgs, call_id: str) -> AIMessage:
+    if name == "slack_reply":
+        args = {"response_type": "final", **args}
+    return AIMessage(content=content, tool_calls=[{"name": name, "args": args, "id": call_id}])
+
+
+def _goal_report(messages: list[BaseMessage], call_id: str, outcome: str) -> AIMessage:
+    nudges = sum(
+        isinstance(m, HumanMessage) and _WORK_STATE_GUARD_SENDER in _text(m.content)
+        for m in messages
+    )
+    return _goal_call(
+        "",
+        "report_work_state",
+        {"state": "complete", "message": f"Goal complete: {outcome} Nudged {nudges} times."},
+        call_id,
+    )
+
+
+def _arrived_after(messages: list[BaseMessage], call_id: str, needle: str) -> bool:
+    start = _called(messages, call_id)
+    return start is not None and any(
+        isinstance(m, HumanMessage) and needle in _text(m.content) for m in messages[start:]
+    )
+
+
+def _goal_step(messages: list[BaseMessage]) -> AIMessage:
+    """Each Goal mode scenario routes on what its run has done, since a nudge or a wake
+    arrives as a new message and restarts the step count."""
+    request = _text(_script_humans(messages)[0].content)
+    if _called(messages, "call-goal-ack") is None:
+        return _goal_call(
+            "Starting in Goal mode.",
+            "slack_reply",
+            {"message": "Working on it in Goal mode.", "response_type": "progress"},
+            "call-goal-ack",
+        )
+    if GOAL_NUDGE_MARKER in request:
+        if _called(messages, "call-goal-report") is not None:
+            return AIMessage(content="Reported.")
+        if not any(
+            isinstance(m, HumanMessage) and _WORK_STATE_GUARD_SENDER in _text(m.content)
+            for m in messages
+        ):
+            return AIMessage(content="Looked into it; ending the turn without reporting.")
+        return _goal_report(messages, "call-goal-report", "reported after being sent back.")
+    if GOAL_STALL_MARKER in request:
+        return AIMessage(content="Still thinking; ending the turn without a wait.")
+    if GOAL_WAIT_MARKER in request:
+        if _called(messages, "call-goal-monitor") is None:
+            return _goal_call(
+                "Waiting until the check passes.",
+                "monitor",
+                {
+                    "action": "start",
+                    "command": f"curl -fsS {GOAL_CHECK_URL}",
+                    "interval": 5,
+                    "description": "the goal check",
+                    "timeout": 300,
+                },
+                "call-goal-monitor",
+            )
+        if not _arrived_after(messages, "call-goal-monitor", GOAL_CHECK_PASSED):
+            if _called(messages, "call-goal-rest") is None:
+                return _goal_call(
+                    "",
+                    "slack_no_reply_needed",
+                    {
+                        "reason": "Waiting on the check monitor.",
+                        "confirmation": _NO_REPLY_CONFIRMATION,
+                    },
+                    "call-goal-rest",
+                )
+            return AIMessage(content="Resting until the check passes.")
+        if _called(messages, "call-goal-report") is None:
+            return _goal_report(messages, "call-goal-report", "the check passed.")
+        return AIMessage(content="Reported.")
+    pr_url = _pr_url_in(request)
+    if _called(messages, "call-goal-listen") is None:
+        return _goal_call(
+            "Listening for reviews on the PR.",
+            "listen_events",
+            {
+                "action": "subscribe",
+                "pr_url": pr_url,
+                "event_types": [
+                    "pull_request_review",
+                    "pull_request_review_comment",
+                    "issue_comment",
+                ],
+            },
+            "call-goal-listen",
+        )
+    if _called(messages, "call-goal-report") is None:
+        return _goal_report(messages, "call-goal-report", f"{pr_url} is ready.")
+    if not _arrived_after(messages, "call-goal-report", GOAL_REVIEWER_BOT):
+        return AIMessage(content="Reported.")
+    if _called(messages, "call-goal-reviewer-report") is None:
+        return _goal_report(
+            messages,
+            "call-goal-reviewer-report",
+            f"fixed the bug {GOAL_REVIEWER_BOT} found on {pr_url}.",
+        )
+    return AIMessage(content="Reported again.")
+
+
 def _wait_for_inbox_gate() -> None:
     deadline = time.monotonic() + _INBOX_GATE_SECONDS
     while time.monotonic() < deadline:
@@ -1224,6 +1342,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
     ),
     "inbox": tuple(_dynamic_step(_inbox_step) for _ in range(6)),
+    "goal": tuple(_dynamic_step(_goal_step) for _ in range(20)),
     "background_work": (
         _tool_step(
             "Acknowledging the background work request.",
@@ -1679,6 +1798,18 @@ def _is_pull_request_fix(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule(
+        "goal",
+        lambda ctx: any(
+            marker in ctx.first_text
+            for marker in (
+                GOAL_NUDGE_MARKER,
+                GOAL_WAIT_MARKER,
+                GOAL_STALL_MARKER,
+                GOAL_REVIEWER_MARKER,
+            )
+        ),
+    ),
     ScriptRule("inbox", lambda ctx: INBOX_MARKER in ctx.first_text),
     ScriptRule("review_chat_comments", lambda ctx: REVIEW_CHAT_COMMENTS_MARKER in ctx.last_text),
     ScriptRule("review_chat_review", lambda ctx: REVIEW_CHAT_REVIEW_MARKER in ctx.last_text),

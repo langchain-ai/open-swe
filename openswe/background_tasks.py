@@ -92,9 +92,10 @@ def _notification(task: dict[str, Any]) -> str:
 
 
 async def completion_configurable(
-    thread_id: str, metadata: Mapping[str, object]
+    thread_id: str, metadata: Mapping[str, object], *, background_task_completion: bool = True
 ) -> dict[str, JsonValue]:
-    """The configurable of a run that reports sandbox work back to ``thread_id``."""
+    """The configurable of a run that reports work back to ``thread_id``: sandbox work, or
+    with ``background_task_completion`` off, other work done for it."""
     if metadata.get("task_id") or (
         metadata.get("visibility") == "private" and metadata.get("owner_type") == "user"
     ):
@@ -103,7 +104,8 @@ async def completion_configurable(
         configurable = await recipient_config(thread_id)
     else:
         configurable = follow_up_configurable(metadata, thread_id)
-    configurable["background_task_completion"] = True
+    if background_task_completion:
+        configurable["background_task_completion"] = True
     return configurable
 
 

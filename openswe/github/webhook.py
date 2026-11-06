@@ -12,6 +12,7 @@ from langgraph_sdk.errors import NotFoundError
 from pydantic import AliasChoices, AliasPath, BaseModel, Field, JsonValue, ValidationError
 
 from openswe.baby_sit import handle_ci_webhook
+from openswe.bridge.worktree_branch import BRANCH_PREFIX
 from openswe.database import postgres
 from openswe.dispatch import channel_of
 from openswe.expedited_review.reviews import REVIEW_BODY_PREFIX
@@ -47,6 +48,7 @@ from openswe.review.findings import (
     ReviewerSlackThread,
     reviewer_thread_title,
 )
+from openswe.review.goal_review import GOAL_REVIEW_KEY, GoalReview
 from openswe.review.reconcile import reconcile_linked_findings
 from openswe.review.shadow import ReviewShadow
 from openswe.run_config import Repo, RunConfig
@@ -281,8 +283,12 @@ async def trigger_pr_review_from_ref(
     slack_channel_id: str = "",
     slack_thread_ts: str = "",
     allow_draft: bool = False,
+    goal_review: GoalReview | None = None,
 ) -> dict[str, Any]:
+    """Review a PR on request. A ``goal_review`` reviews a Goal mode agent's draft and
+    sends the findings back to it instead of publishing them."""
     repo_config = {"owner": pr_ref.owner, "name": pr_ref.repo}
+    allow_draft = allow_draft or goal_review is not None
     if not common.is_repo_allowed(repo_config):
         return {
             "success": False,
@@ -355,16 +361,50 @@ async def trigger_pr_review_from_ref(
             "channel_id": slack_channel_id,
             "thread_ts": slack_thread_ts,
         }
+    last_reviewed_sha = ""
+    if goal_review is not None:
+        metadata = await common.get_thread_metadata_safe(thread_id) or {}
+        kept = GoalReview.of(metadata)
+        if not pr_metadata.get("draft") and (kept is None or not kept.handoff):
+            goal_review = None
+        elif kept is not None:
+            goal_review = kept.model_copy(update={"thread_id": goal_review.thread_id})
+            if isinstance(reviewed := metadata.get("last_reviewed_sha"), str):
+                last_reviewed_sha = reviewed
     await common.set_reviewer_thread_metadata(
-        thread_id, pr=pr_meta, watch=True, slack_thread=slack_thread_meta, head_sha=head_sha
+        thread_id,
+        pr=pr_meta,
+        watch=True,
+        slack_thread=slack_thread_meta,
+        head_sha=head_sha,
+        extra={
+            GOAL_REVIEW_KEY: None if goal_review is None else goal_review.model_dump(mode="json")
+        },
     )
-    await common.post_review_started_comment(
-        thread_id=thread_id,
-        owner=pr_ref.owner,
-        repo=pr_ref.repo,
-        pr_number=pr_ref.number,
-        token=app_token,
-    )
+    if goal_review is None:
+        await common.post_review_started_comment(
+            thread_id=thread_id,
+            owner=pr_ref.owner,
+            repo=pr_ref.repo,
+            pr_number=pr_ref.number,
+            token=app_token,
+        )
+    else:
+        check_run_id = await common.create_review_check_run(
+            owner=pr_ref.owner,
+            repo=pr_ref.repo,
+            head_sha=head_sha,
+            token=app_token,
+            details_url=common.dashboard_thread_url(thread_id),
+        )
+        if check_run_id is not None:
+            await common.track_review_check_run(
+                thread_id,
+                owner=pr_ref.owner,
+                repo=pr_ref.repo,
+                token=app_token,
+                check_run_id=check_run_id,
+            )
 
     review_prompt = build_github_pr_review_prompt(
         repo_config, pr_ref.number, pr_url, base_sha, head_sha
@@ -380,6 +420,8 @@ async def trigger_pr_review_from_ref(
         head_sha=head_sha,
         branch_name=branch_name,
         repo_private=repo_private,
+        re_review=bool(last_reviewed_sha),
+        last_reviewed_sha=last_reviewed_sha,
         slack_channel_id=slack_channel_id,
         slack_thread_ts=slack_thread_ts,
     )
@@ -414,7 +456,13 @@ async def trigger_pr_review_from_ref(
     await ReviewShadow.follow(
         RunConfig.parse(configurable), kickoff=review_prompt, pr_title=pr_title
     )
-    return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}
+    return {
+        "success": True,
+        "queued": False,
+        "thread_id": thread_id,
+        "pr_url": pr_url,
+        "goal_review": goal_review is not None,
+    }
 
 
 async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, source: str) -> None:
@@ -459,9 +507,19 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     if payload.get("action") == "ready_for_review":
         metadata = await common.get_thread_metadata_safe(thread_id)
         if metadata is not None and metadata.get("kind") == common.REVIEWER_THREAD_KIND:
+            goal_review = GoalReview.of(metadata)
+            if goal_review is not None and await goal_review.ready(
+                reviewer_thread_id=thread_id,
+                owner=repo_config.get("owner", ""),
+                repo=repo_config.get("name", ""),
+                pr_number=pr_number,
+                head_sha=head_sha,
+            ):
+                await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True)
+                return
             existing_last_reviewed_sha = metadata.get("last_reviewed_sha")
             if isinstance(existing_last_reviewed_sha, str) and existing_last_reviewed_sha:
-                if existing_last_reviewed_sha == head_sha:
+                if existing_last_reviewed_sha == head_sha and goal_review is None:
                     await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True)
                     common.logger.info(
                         "Skipping ready_for_review auto-review for %s/%s#%s: "
@@ -627,6 +685,17 @@ async def process_github_pr_ready(payload: dict[str, Any]) -> None:
             common.logger.info(
                 "Skipping auto-review of draft PR by %s: review_draft_prs is disabled",
                 author_login or "<unknown>",
+            )
+            return
+        head_ref = (pull_request.get("head") or {}).get("ref", "")
+        if (
+            author_login
+            and head_ref.startswith(f"{BRANCH_PREFIX}/")
+            and (await User.preferences_for_login(author_login)).goal_mode
+        ):
+            common.logger.info(
+                "Skipping auto-review of draft PR by %s: Goal mode reviews it on request",
+                author_login,
             )
             return
     # Use source="github" so the reviewer resolver can use the GitHub App token;
@@ -894,6 +963,8 @@ async def _process_github_head_update(
         return
 
     if pull_request.state == "closed":
+        return
+    if GoalReview.of(metadata) is not None:
         return
     if pull_request.draft and not await common.draft_review_enabled_for_author(
         pull_request.author, repo_config

@@ -110,6 +110,13 @@ class Topic(BaseTopic):
     THREAD_BACKGROUND_WORK: ClassVar[KeyedTopic[str]]
     """Keyed by thread id: the sandbox commands and monitors running for that thread."""
 
+    THREAD_GOALS: ClassVar[KeyedTopic[str]]
+    """Keyed by thread id: where that thread's Goal mode work stands."""
+
+    TASK_WORKERS: ClassVar[KeyedTopic[str]]
+    """Keyed by coordinator thread id: the workers its task delegated to, as the
+    sidebar nests them beneath it."""
+
     ANNOUNCEMENTS: ClassVar[Topic]
     """Admin announcements and their delivery progress; admins only."""
 
@@ -280,6 +287,8 @@ Topic.THREAD_BROWSERS = KeyedTopic("thread-browsers", authorize_keys=_readable_t
 Topic.THREAD_BACKGROUND_WORK = KeyedTopic(
     "thread-background-work", authorize_keys=_readable_threads
 )
+Topic.THREAD_GOALS = KeyedTopic("thread-goals", authorize_keys=_readable_threads)
+Topic.TASK_WORKERS = KeyedTopic("task-workers", authorize_keys=_readable_threads)
 Topic.ANNOUNCEMENTS = AdminTopic("announcements")
 Topic.SLACK_CHANNELS = Topic("slack-channels")
 Topic.PLUGIN_DOCUMENTS = KeyedTopic("plugin-documents", authorize_keys=_readable_plugin_documents)

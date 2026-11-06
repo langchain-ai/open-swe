@@ -436,7 +436,7 @@ async def test_background_execute_schedules_a_cron_only_without_callbacks(callba
             "openswe.background_tasks.ensure_background_task_polling", AsyncMock()
         ) as ensure_cron,
     ):
-        result = await background_execute("sleep 10")
+        result = await background_execute("make test")
 
     assert result == {"success": True, "task_id": "cmd-1", "status": "running"}
     assert ensure_cron.await_count == int(not callback)
@@ -464,7 +464,7 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
             AsyncMock(side_effect=RuntimeError("invalid assistant ID")),
         ),
     ):
-        result = await background_execute("sleep 10")
+        result = await background_execute("make test")
 
     assert result == {
         "success": False,
@@ -735,10 +735,15 @@ async def test_monitor_deletes_crons_for_missing_thread(monkeypatch: pytest.Monk
     delete_crons.assert_awaited_once_with("thread-1")
 
 
-@pytest.mark.parametrize("launch_fails", [False, True])
-async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
-    launch_fails: bool,
+@pytest.mark.parametrize(
+    ("launch_fails", "status_after_launch"),
+    [(False, "running"), (False, "completed"), (True, "running")],
+)
+async def test_a_callback_launch_is_tracked_exactly_while_it_runs(
+    launch_fails: bool, status_after_launch: str
 ) -> None:
+    """A reconcile during launch untracks the unknown task; a fast task's callback may
+    untrack it before launch returns. Either way it is tracked only while it runs."""
     tracked: set[str] = set()
 
     async def update(
@@ -751,11 +756,13 @@ async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
         tracked.update(running)
         tracked.difference_update(finished)
 
-    async def launch(backend: object, action: str, **fields: object) -> dict[str, str]:
-        assert len(tracked) == 1, "the runner starts inside this call"
+    async def launch(backend: object, action: str, **fields: object) -> dict[str, object]:
+        if action == "status":
+            return {"task_id": fields["task_id"], "status": status_after_launch}
+        await update(None, "thread-1", finished=list(tracked))
         if launch_fails:
             raise RuntimeError("active task limit reached")
-        return {"task_id": next(iter(tracked)), "status": "running"}
+        return {"task_id": fields["task_id"], "status": "running"}
 
     with (
         patch(
@@ -769,10 +776,10 @@ async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
         patch("openswe.tools.background_execute.update_background_task_state", side_effect=update),
         patch("openswe.tools.background_execute.langgraph_client"),
     ):
-        result = await background_execute("true")
+        result = await background_execute("make test")
 
     assert result["success"] is not launch_fails
-    assert bool(tracked) is not launch_fails
+    assert bool(tracked) is (not launch_fails and status_after_launch == "running")
 
 
 async def test_reattach_reconciles_tracked_tasks() -> None:

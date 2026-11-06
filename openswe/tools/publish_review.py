@@ -50,6 +50,7 @@ from openswe.review.findings import (
 from openswe.review.findings import (
     list_findings as list_findings_async,
 )
+from openswe.review.goal_review import GoalReview
 from openswe.review.publish import (
     PublishSelection,
     ReviewAssessment,
@@ -164,6 +165,16 @@ async def publish_review(
             state=state,
             assessment=assessment,
         )
+        if result.get("success") and not result.get("goal_review"):
+            reviewer_thread_id = get_thread_id_from_runtime()
+            await GoalReview.published(
+                reviewer_thread_id,
+                await get_thread_metadata(reviewer_thread_id),
+                owner=cfg.repo.owner,
+                repo=cfg.repo.name,
+                pr_number=pr_number,
+                severity_threshold=severity_threshold,
+            )
         events = ReviewEvents.from_config(cfg)
         if events is not None:
             await events.append(
@@ -364,6 +375,19 @@ async def _publish_review_async(
     # review anchors to (and last_reviewed_sha advances to) the commit actually
     # reviewed, not the stale one this run was created for.
     reviewed_head_sha = await resolve_review_head_sha(thread_id, RunConfig(head_sha=head_sha))
+    goal_review = GoalReview.of(await get_thread_metadata(thread_id))
+    if goal_review is not None and (
+        goal_result := await goal_review.publish(
+            reviewer_thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            head_sha=reviewed_head_sha,
+            token=token,
+            severity_threshold=severity_threshold,
+        )
+    ):
+        return goal_result
     if assessment is not None and assessment.head_sha != reviewed_head_sha:
         return {
             "success": False,

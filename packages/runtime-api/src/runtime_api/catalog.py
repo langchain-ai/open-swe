@@ -218,15 +218,18 @@ class CliResultRules(Nudging):
 
 
 class WorkStateRules(Nudging):
-    """The person wants the run to keep working until it calls ``tool`` to say it is blocked
-    or complete. An answer that neither calls it nor starts a wait in ``waits`` is sent
-    back, ``nudge`` up to ``max_nudges`` times."""
+    """Goal mode: the person wants the run to keep working until it calls ``tool`` to say
+    it is blocked or complete. A turn that ends while the thread's goal neither says so
+    nor waits on anything is sent back with ``nudge``; as Codex blocks a goal, three such
+    turns in a row that do nothing, or that run only failing commands, pause it. Its
+    commands wait with the thread's wait tools, never ``sleep``."""
 
     tool: str
-    # Tools whose successful call wakes the thread again later, so ending the run is fine.
     waits: list[str] = []
     nudge_sender: str = ""
-    max_nudges: int = 5
+    max_nudges: int = 3
+    reminder: str = ""
+    sleep_refusal: str = ""
 
 
 class RoutingRules(BaseModel):

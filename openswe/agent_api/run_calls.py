@@ -54,6 +54,7 @@ from runtime_api.endpoint import Handlers
 from runtime_api.loop import (
     BROWSER,
     FINISH_SCOUT_PLAN,
+    GOAL,
     INBOX,
     INBOX_RECEIVED,
     INCIDENT_CONTEXT,
@@ -68,6 +69,7 @@ from runtime_api.loop import (
     RUN_STARTED,
     SANDBOX_REPLACED,
     SANDBOX_UNREACHABLE,
+    SET_GOAL,
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
     TASK_CONTEXT,
@@ -77,6 +79,9 @@ from runtime_api.loop import (
     ChosenModel,
     Done,
     GitHubProxyRefreshed,
+    Goal,
+    GoalChange,
+    GoalRead,
     Inbox,
     InboxItems,
     InboxRead,
@@ -166,6 +171,7 @@ from openswe.run_config import RunConfig
 from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.sandboxes.lifecycle import mda_proxy_config, take_stale_boot
 from openswe.slack.tools.reply import send_slack_reply
+from openswe.threads.goal import ThreadGoals
 from openswe.threads.inbox import ThreadInbox
 from openswe.utils.thread_reads import shared_thread_reads
 
@@ -635,6 +641,28 @@ class TokenRun:
         await self.in_run("reply_on_behalf", post)
         return Done()
 
+    async def goal(self, request: GoalRead) -> Goal:
+        """The thread's goal, with what will wake the thread again when asked."""
+        kept = await ThreadGoals.current(self.run.thread_id)
+        if kept is None:
+            return Goal()
+        return Goal(
+            state=kept.state,
+            reason=kept.reason,
+            objective=None if kept.objective is None else run_context("goal", kept.objective),
+            ask=kept.ask,
+            updated_at_ms=kept.updated_at_ms,
+            waits=[wait.kind for wait in await ThreadGoals.waits(self.run.thread_id)]
+            if request.waits
+            else [],
+        )
+
+    async def set_goal(self, request: GoalChange) -> Done:
+        await ThreadGoals.change(
+            self.run.thread_id, request.state, request.reason, request=request.request
+        )
+        return Done()
+
     async def run_ended(self, request: RunEnded) -> Done:
         """Record the run's end: its transcript turn and its usage."""
         self._as_invocation(request.invocation_id)
@@ -777,6 +805,8 @@ CALLS.serve(INCIDENT_CONTEXT, TokenRun.incident_context)
 CALLS.serve(REFRESH_GITHUB_PROXY, TokenRun.refresh_github_proxy)
 CALLS.serve(SANDBOX_PROXY, TokenRun.sandbox_proxy)
 CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)
+CALLS.serve(GOAL, TokenRun.goal)
+CALLS.serve(SET_GOAL, TokenRun.set_goal)
 CALLS.serve(RUN_STARTED, TokenRun.run_started)
 CALLS.serve(RUN_ENDED, TokenRun.run_ended)
 CALLS.serve(STEP_LIMIT_REACHED, TokenRun.step_limit_reached)

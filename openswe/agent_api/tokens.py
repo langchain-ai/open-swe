@@ -54,6 +54,7 @@ class AgentTurnSettings(BaseModel):
 
     # Whoever sent the message that started the run, and whose private credentials it may use.
     profile_login: str | None = None
+    goal_mode: bool = False
     credential_login: str | None = None
     # Whether the sender administers workspaces, and is the only one who may write here.
     admin_workspaces: bool = False

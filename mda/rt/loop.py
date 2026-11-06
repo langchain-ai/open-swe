@@ -18,6 +18,7 @@ import json
 import logging
 import uuid
 from collections.abc import Awaitable, Collection, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Final
 from xml.etree import ElementTree
@@ -46,6 +47,7 @@ from runtime_api.catalog import (
 from runtime_api.endpoint import call
 from runtime_api.loop import (
     FINISH_SCOUT_PLAN,
+    GOAL,
     INCIDENT_CONTEXT,
     MODEL_CHOICE,
     REFRESH_GITHUB_PROXY,
@@ -53,12 +55,16 @@ from runtime_api.loop import (
     REPLY_ON_BEHALF,
     ROUTE_MODEL,
     RUN_ENDED,
+    SET_GOAL,
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
     TASK_CONTEXT,
     BeforeModel,
     ChosenModel,
     GitHubProxyRefreshed,
+    Goal,
+    GoalChange,
+    GoalRead,
     ModelCall,
     PersonMessage,
     PhaseResult,
@@ -75,6 +81,7 @@ from runtime_api.operations import RunRequest
 from runtime_api.provenance import Provenance
 
 from rt.backend import (
+    BackendCallError,
     OpenSweBackend,
     RunLocal,
     harness_message,
@@ -90,6 +97,12 @@ logger = logging.getLogger(__name__)
 # What ``ModelCallLimitMiddleware`` ends a run with once it reaches its limit.
 _LIMIT_MARKER: Final = "Model call limits exceeded"
 _SUMMARIZATION_EVENT: Final = "_summarization_event"
+_GOAL_SEEN: Final = "goal_seen_ms"
+_GOAL: Final = "goal"
+_STALLED_TURNS: Final = 3
+_EMPTY_TURNS: Final = "goal_empty_turns"
+_FAILING_TURNS: Final = "goal_failing_turns"
+_FAILED_COMMAND: Final = "[Command failed with exit code"
 # Held state: when the sandbox's GitHub token next needs replacing. It lives in the thread's
 # checkpoint, so it holds for the next run on whichever backend replica serves it.
 _GITHUB_PROXY_DUE: Final = "github_proxy_refresh_at"
@@ -173,6 +186,15 @@ def latest_with_id(messages: Sequence[BaseMessage], prefix: str) -> str | None:
         if isinstance(message.id, str) and message.id.startswith(prefix):
             return content_text(message.content)
     return None
+
+
+@dataclass(frozen=True)
+class _GoalTurn:
+    """What a Goal mode turn did, as Codex counts it toward blocking the goal."""
+
+    empty: bool
+    active: bool
+    failing: bool
 
 
 class _RunGuidance:
@@ -354,6 +376,9 @@ class RunLoop:
             context, update = await asked.answers()
         finally:
             await asked.close()
+        stopped, reminder, objective = await self._goal(state, held, update)
+        if stopped:
+            return BeforeModel(update=update, jump_to="end")
         messages = _messages(state)
         visible = visible_messages(state)
         guidance = self._guidance.get(self._backend.run)
@@ -366,8 +391,17 @@ class RunLoop:
                 provenance=Provenance(kind="context", sender=f"run:{key}"),
             )
             for key, text in guidance.latest(messages).items()
-            if key != "task-role" and text != visible_guidance.get(key)
+            if key not in {"task-role", _GOAL} and text != visible_guidance.get(key)
         ]
+        if objective is not None and objective != visible_guidance.get(_GOAL):
+            added.append(
+                harness_message(
+                    objective,
+                    message_id=f"goal:{uuid.uuid4()}",
+                    source="goal",
+                    provenance=Provenance(kind="context", sender="run:goal"),
+                )
+            )
         if context.instructions and context.instructions != latest_with_id(visible, _ROLE):
             added.append(
                 harness_message(
@@ -442,6 +476,7 @@ class RunLoop:
                 else self._models.vision,
                 fallback=None if model is None else model.fallback,
                 use_gateway=self._models is not None and self._models.use_gateway,
+                reminder=reminder,
             ),
         )
 
@@ -626,7 +661,7 @@ class RunLoop:
             if asked is not None:
                 return asked
         if self.rules.work_state is not None:
-            asked = self._work_state(self.rules.work_state, state, held, update)
+            asked = await self._work_state(self.rules.work_state, state, held, update)
             if asked is not None:
                 return asked
         if self.rules.reply is not None:
@@ -680,37 +715,183 @@ class RunLoop:
             jump_to="model",
         )
 
-    def _work_state(
+    async def _goal(
+        self, state: Mapping[str, object], held: Mapping[str, object], update: dict[str, JsonValue]
+    ) -> tuple[bool, str | None, str | None]:
+        """Move the thread's goal for what this model call answers: whether the run stops
+        here, what to remind the model of, and the goal's objective to keep in view.
+
+        A person's message puts the goal back to work, starting it from their request;
+        so does a wait waking the thread, unless the person stopped it, when the run
+        ends without a model call. While the goal waits on its person, each input after
+        the one that reported it carries a reminder of what for.
+        """
+        rules = self.rules.work_state
+        if rules is None:
+            return False, None, None
+        goal = await self._read_goal(GoalRead(run_id=run_id()))
+        if goal is None:
+            return False, None, None
+        inputs = self._inputs(_messages(state))
+        requests = [text for message in inputs if (text := self._request(message)) is not None]
+        woken = not requests and any(
+            isinstance(message, HumanMessage) and self._wakes(message) for message in inputs
+        )
+        if woken and goal.state == "paused" and goal.reason in {"stopped", "requested"}:
+            return True, None, goal.objective
+        if (
+            goal.state is None
+            or (requests and goal.state != "working")
+            or (woken and goal.state in {"waiting", "paused"})
+        ):
+            started = goal.state is None
+            await self._set_goal(
+                GoalChange(
+                    run_id=run_id(),
+                    state="working",
+                    request="\n\n".join(requests) if started and requests else None,
+                )
+            )
+            if started:
+                goal = await self._read_goal(GoalRead(run_id=run_id())) or goal
+            return False, None, goal.objective
+        if goal.state != "waiting_on_user":
+            return False, None, goal.objective
+        seen = held.get(_GOAL_SEEN)
+        update[_GOAL_SEEN] = goal.updated_at_ms
+        if seen != goal.updated_at_ms:
+            return False, None, goal.objective
+        return (
+            False,
+            "\n\n".join(text for text in (rules.reminder, goal.ask) if text),
+            goal.objective,
+        )
+
+    async def _work_state(
         self,
         rules: WorkStateRules,
         state: Mapping[str, object],
         held: Mapping[str, object],
         update: dict[str, JsonValue],
     ) -> PhaseResult | None:
-        """Send the model back to work until it says it is blocked or complete, or waits."""
-        turn = _Turn(_messages(state), self._guards)
-        call_ids = {
-            str(tool_call.get("id"))
-            for tool_call in turn.calls()
-            if tool_call.get("name") in {rules.tool, *rules.waits}
-        }
-        if turn.succeeded(call_ids):
-            update["work_state_nudges"] = 0
+        """Send the model back to work until the thread's goal rests: waiting on its person,
+        paused, or on something that wakes the thread again.
+
+        The backend reads what will wake the thread from where each wait lives, so a wait
+        counts however the model started it, code mode included, and whenever. As Codex
+        blocks a goal, three turns in a row the model was sent back for that did nothing,
+        or three in a row that ran only failing commands, pause it instead.
+        """
+        goal = await self._read_goal(GoalRead(run_id=run_id(), waits=True))
+        if goal is None or goal.state in {None, "waiting_on_user", "paused"} or goal.waits:
+            update.update({_EMPTY_TURNS: 0, _FAILING_TURNS: 0})
+            if goal is not None and goal.waits and goal.state in {"working", "waiting"}:
+                await self._set_goal(GoalChange(run_id=run_id(), state="waiting"))
             return None
-        nudges = held.get("work_state_nudges")
-        asked = nudges if isinstance(nudges, int) else 0
-        if asked >= rules.max_nudges:
-            logger.warning(
-                "Run ended without a work state after every nudge",
-                extra={"work_state_tool": rules.tool, "work_state_attempts": asked},
-            )
-            update["work_state_nudges"] = 0
+        turn = self._last_turn(_messages(state))
+        empty = self._counted(held, _EMPTY_TURNS, turn.empty, reset=turn.active)
+        failing = self._counted(held, _FAILING_TURNS, turn.failing, reset=not turn.failing)
+        update.update({_EMPTY_TURNS: empty, _FAILING_TURNS: failing})
+        if empty >= _STALLED_TURNS or failing >= _STALLED_TURNS:
+            reason = "no_progress" if empty >= _STALLED_TURNS else "failing_commands"
+            await self._set_goal(GoalChange(run_id=run_id(), state="paused", reason=reason))
+            update.update({_EMPTY_TURNS: 0, _FAILING_TURNS: 0})
             return None
         return PhaseResult(
-            update={**update, "work_state_nudges": asked + 1},
+            update=update,
             messages=self._nudge(rules, state),
             jump_to="model",
         )
+
+    @staticmethod
+    def _counted(held: Mapping[str, object], key: str, counts: bool, *, reset: bool) -> int:
+        """A run of turns: one more when this turn ``counts``, none after one that ``reset``s."""
+        if reset:
+            return 0
+        so_far = held.get(key)
+        so_far = so_far if isinstance(so_far, int) else 0
+        return so_far + 1 if counts else so_far
+
+    def _last_turn(self, messages: Sequence[AnyMessage]) -> _GoalTurn:
+        """What the model did since it was last prompted, by a person, an event or a nudge."""
+        start = 0
+        for index in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[index], HumanMessage):
+                start = index
+                break
+        prompt = messages[start] if messages else None
+        provenance = Provenance.of(prompt) if isinstance(prompt, HumanMessage) else None
+        nudged = provenance is not None and provenance.sender == (
+            self.rules.work_state.nudge_sender if self.rules.work_state else None
+        )
+        after = messages[start + 1 :]
+        calls = [
+            call
+            for message in after
+            if isinstance(message, AIMessage)
+            for call in message.tool_calls
+        ]
+        results = [message for message in after if isinstance(message, ToolMessage)]
+        failed = [message for message in results if self._failed_command(message)]
+        succeeded = any(
+            not _reported_failure(message) and message not in failed for message in results
+        )
+        active = bool(calls)
+        return _GoalTurn(
+            empty=nudged and not active,
+            active=active,
+            failing=bool(failed) and not succeeded,
+        )
+
+    @staticmethod
+    def _failed_command(message: ToolMessage) -> bool:
+        """An ``execute`` that ran its command and exited non-zero."""
+        return message.name == "execute" and _FAILED_COMMAND in content_text(message.content)
+
+    @staticmethod
+    def _inputs(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
+        """What came in since the model last answered."""
+        for index in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[index], AIMessage):
+                return list(messages[index + 1 :])
+        return list(messages)
+
+    def _wakes(self, message: HumanMessage) -> bool:
+        """An event that woke the thread: not a person, the harness's context, or a guard."""
+        provenance = Provenance.of(message)
+        return provenance is None or (
+            provenance.kind == "system" and provenance.sender not in self._guards
+        )
+
+    @staticmethod
+    def _request(message: BaseMessage) -> str | None:
+        """What a person asked in ``message``; None for any other input."""
+        if not isinstance(message, HumanMessage):
+            return None
+        for text in _texts(message.content):
+            root = _root(text, "input-message")
+            if root is not None and root.get("kind") == "human":
+                body = (root.text or "").strip() or (root.findtext("content") or "").strip()
+                return body or None
+        return None
+
+    async def _read_goal(self, request: GoalRead) -> Goal | None:
+        """The thread's goal; None when the backend cannot say, which never holds the run."""
+        try:
+            return await call(self._backend, GOAL, request)
+        except BackendCallError:
+            logger.warning("Could not read the thread's goal", exc_info=True)
+            return None
+
+    async def _set_goal(self, change: GoalChange) -> None:
+        try:
+            await call(self._backend, SET_GOAL, change)
+        except BackendCallError:
+            logger.warning(
+                "Could not move the thread's goal",
+                extra={"goal_state": change.state},
+                exc_info=True,
+            )
 
     async def _reply(
         self,
