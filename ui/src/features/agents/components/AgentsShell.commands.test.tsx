@@ -193,9 +193,7 @@ it("renames an unopened thread from its context menu and discards cancelled draf
   )
   const row = screen.getByRole("link", { name: /Thread/ })
   fireEvent.contextMenu(row)
-  fireEvent.click(
-    await screen.findByRole("menuitem", { name: "Rename thread" })
-  )
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }))
   const input = (await screen.findByRole("textbox", {
     name: "Thread title",
   })) as HTMLInputElement
@@ -206,9 +204,7 @@ it("renames an unopened thread from its context menu and discards cancelled draf
   fireEvent.keyDown(input, { key: "Escape" })
   expect(stub.rename.mutate).not.toHaveBeenCalled()
   fireEvent.contextMenu(row)
-  fireEvent.click(
-    await screen.findByRole("menuitem", { name: "Rename thread" })
-  )
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }))
   const reopened = (await screen.findByRole("textbox", {
     name: "Thread title",
   })) as HTMLInputElement

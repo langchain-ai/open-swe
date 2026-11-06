@@ -35,11 +35,13 @@ from openswe.threads.listing import (
 from openswe.threads.machine_reads import machine_thread
 from openswe.threads.moves import SandboxMove
 from openswe.threads.principals import Principal
+from openswe.threads.read_state import THREAD_READ_STATES
 from openswe.threads.runs import (
     _ASSISTANT_ID,
     QUEUED_BY_KEY,
     dispatch_pending_follow_ups,
 )
+from openswe.threads.store import THREADS
 from openswe.threads.summary import (
     _SANDBOX_CREATING_SENTINEL,
     DASHBOARD_SOURCE,
@@ -51,7 +53,6 @@ from openswe.threads.summary import (
     _thread_run_id,
     _thread_summary,
     assert_thread_readable,
-    run_status_to_agent_status,
     thread_is_bot_triggered,
     thread_is_owner,
     thread_source,
@@ -73,26 +74,6 @@ from openswe.utils.timing import phase
 logger = logging.getLogger(__name__)
 
 
-async def _mark_thread_viewed(
-    client: Any,
-    thread_id: str,
-    metadata: dict[str, Any],
-    *,
-    latest_run_id: str | None,
-) -> dict[str, Any]:
-    now_ms = _now_ms()
-    metadata_update: dict[str, Any] = {"last_viewed_at_ms": now_ms}
-    run_id = _thread_run_id(metadata, latest_run_id)
-    if run_id:
-        metadata_update["last_viewed_run_id"] = run_id
-    try:
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not mark thread %s viewed", thread_id, exc_info=True)
-        return metadata
-    return {**metadata, **metadata_update}
-
-
 async def mark_review_session_viewed(review: ReviewSession) -> None:
     """Clear the review's unread dot; a no-op when the user has not listed this review."""
     client = langgraph_client()
@@ -107,8 +88,12 @@ async def mark_review_session_viewed(review: ReviewSession) -> None:
     # Settled first so a walkthrough the user is looking at is not recorded as newer than the view.
     thread = await settle_review_walkthrough(client, thread)
     thread, _, latest_run_id = await _refresh_latest_run_metadata(client, thread)
-    await _mark_thread_viewed(
-        client, review.thread_id, thread_metadata(thread), latest_run_id=latest_run_id
+    await THREAD_READ_STATES.set(
+        review.login,
+        review.thread_id,
+        viewed=True,
+        run_id=_thread_run_id(thread_metadata(thread), latest_run_id),
+        viewed_at_ms=_now_ms(),
     )
 
 
@@ -150,7 +135,6 @@ async def get_dashboard_thread(
     login: str,
     *,
     email: str | None = None,
-    mark_viewed: bool = True,
     timings: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     record = timings if timings is not None else {}
@@ -171,31 +155,12 @@ async def get_dashboard_thread(
     thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(
         client, thread, timings=record
     )
-    metadata = thread_metadata(thread)
-    status = run_status_to_agent_status(
-        thread.get("status") if isinstance(thread.get("status"), str) else "idle",
-        latest_run_status
-        or (
-            metadata.get("latest_run_status")
-            if isinstance(metadata.get("latest_run_status"), str)
-            else None
-        ),
-    )
-    if mark_viewed and status != "running":
-        with phase(record, "mark_viewed"):
-            metadata = await _mark_thread_viewed(
-                client,
-                thread_id,
-                metadata,
-                latest_run_id=latest_run_id,
-            )
-        thread = {**as_thread_dict(thread), "metadata": metadata}
-
     with phase(record, "summary"):
         summary = await _thread_summary(
             thread,
             latest_run_status=latest_run_status,
             latest_run_id=latest_run_id,
+            viewer_login=login,
         )
     with phase(record, "subagents"):
         await asyncio.gather(
@@ -335,7 +300,7 @@ async def cancel_dashboard_thread(
         metadata_update.update(latest_run_status="pending", latest_run_id=run_id)
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     thread = await client.threads.get(thread_id)
-    return await _thread_summary(thread)
+    return await _thread_summary(thread, viewer_login=login)
 
 
 async def cancel_machine_thread(thread_id: str, principal: Principal) -> JsonObject:
@@ -389,7 +354,7 @@ async def admin_cancel_dashboard_thread(
         metadata=_stopped_metadata(),
     )
     updated_thread = await client.threads.get(thread_id)
-    return await _thread_summary(updated_thread)
+    return await _thread_summary(updated_thread, viewer_login=login)
 
 
 async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | None = None) -> None:
@@ -438,7 +403,7 @@ async def rename_dashboard_thread(
         **as_thread_dict(thread),
         "metadata": {**thread_metadata(thread), **metadata_update},
     }
-    return await _thread_summary(thread)
+    return await _thread_summary(thread, viewer_login=login)
 
 
 # Thread settings that carry over into a private continuation. Source linkage
@@ -515,7 +480,8 @@ async def share_thread_with_workspace(
     if browser is not None:
         await Topic.THREAD_BROWSERS.invalidate(key=thread_id)
     return await _thread_summary(
-        {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
+        {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}},
+        viewer_login=requester_login,
     )
 
 
@@ -545,7 +511,10 @@ async def move_thread(
         await move.carry_out()
     except Exception as exc:
         raise HTTPException(502, f"could not move this thread: {exc}") from exc
-    return await _thread_summary(await langgraph_client().threads.get(thread_id))
+    updated = await THREADS.get(thread_id)
+    if updated is None:
+        raise HTTPException(404, "thread not found")
+    return await _thread_summary(updated.as_langgraph(), viewer_login=login)
 
 
 async def continue_thread_privately(
@@ -625,7 +594,7 @@ async def continue_thread_privately(
                 await client.threads.delete(new_thread_id)
             finally:
                 raise HTTPException(502, "failed to copy the thread transcript") from exc
-    return await _thread_summary(await client.threads.get(new_thread_id))
+    return await _thread_summary(await client.threads.get(new_thread_id), viewer_login=login)
 
 
 async def resolve_all_dashboard_threads(login: str, *, email: str | None = None) -> int:
@@ -678,7 +647,7 @@ async def resolve_dashboard_thread(
         logger.debug("Could not update resolved state for thread %s", thread_id, exc_info=True)
         raise HTTPException(502, "failed to update thread") from exc
     thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
-    return await _thread_summary(thread)
+    return await _thread_summary(thread, viewer_login=login)
 
 
 def _tracked_pull_requests(metadata: Mapping[str, Any]) -> list[object]:

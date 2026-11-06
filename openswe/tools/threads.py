@@ -32,6 +32,7 @@ from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.records import lookup_slack_link_thread_id
 from openswe.slack.workflow_approval_cards import share_workflow_approval
 from openswe.threads import plan_api
+from openswe.threads import routes as thread_routes
 from openswe.threads.handlers import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
@@ -82,6 +83,8 @@ ThreadAction = Literal[
     "admin_cancel",
     "resolve",
     "unresolve",
+    "mark_read",
+    "mark_unread",
     "add_plan_comment",
     "delete_plan_comment",
     "update_plan",
@@ -144,9 +147,7 @@ class _Actor:
             return None
         thread_id = mirror_thread_id(owner.id, session_id)
         try:
-            summary = await get_dashboard_thread(
-                thread_id, self.login, email=self.email, mark_viewed=False
-            )
+            summary = await get_dashboard_thread(thread_id, self.login, email=self.email)
         except HTTPException as exc:
             if exc.status_code == 404:
                 return None
@@ -862,7 +863,6 @@ async def _authorized_locator(
             thread_id,
             actor.login,
             email=actor.email,
-            mark_viewed=False,
         )
     except HTTPException as exc:
         if exc.status_code != 404 or langsmith_locator or not _looks_uuid(locator):
@@ -878,7 +878,6 @@ async def _authorized_locator(
                 thread_id,
                 actor.login,
                 email=actor.email,
-                mark_viewed=False,
             )
     if (
         summary.get("visibility") == "private"
@@ -935,6 +934,7 @@ def _available_actions(
         actions.append("add_plan_comment")
     if can_delete_plan_comment:
         actions.append("delete_plan_comment")
+    actions.extend(["mark_read", "mark_unread"])
     actions.append("unresolve" if resolved else "resolve")
     if running:
         actions.append("cancel")
@@ -1166,6 +1166,8 @@ def _unexpected_action_arguments(
         "admin_cancel": set(),
         "resolve": set(),
         "unresolve": set(),
+        "mark_read": set(),
+        "mark_unread": set(),
         "add_plan_comment": {"comment"},
         "delete_plan_comment": {"comment_id"},
         "update_plan": {"content", "content_format"},
@@ -1312,6 +1314,13 @@ async def manage_thread(
                     "thread": {"id": thread_id, "status": thread.get("status")},
                 }
             return {"success": True, "thread": _list_item(thread)}
+        if action in {"mark_read", "mark_unread"}:
+            result = await thread_routes.api_set_thread_read_state(
+                thread_id,
+                thread_routes.ThreadReadState(viewed=action == "mark_read"),
+                session=actor.session,
+            )
+            return {"success": True, "thread_id": thread_id, "viewed": result.viewed}
         if action in {"resolve", "unresolve"}:
             thread = await resolve_dashboard_thread(
                 thread_id,

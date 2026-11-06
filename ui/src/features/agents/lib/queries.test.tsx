@@ -12,6 +12,7 @@ import {
   agentScheduleKeys,
   agentThreadKeys,
   markAgentThreadViewed,
+  useSetAgentThreadViewed,
   optimisticThread,
   setAgentThreadStatus,
   setAgentThreadResolved,
@@ -781,7 +782,7 @@ describe("sidebar queries", () => {
     )
 
     await waitFor(() => expect(result.current).toEqual(opened))
-    expect(getThread).toHaveBeenCalledWith(opened.id, { markViewed: false })
+    expect(getThread).toHaveBeenCalledWith(opened.id)
 
     const cached = { ...opened, title: "Updated title" }
     rerender({ loadedThreads: [cached] })
@@ -1181,7 +1182,7 @@ describe("useWorkflowApprovalDecision", () => {
 describe("markAgentThreadViewed", () => {
   const unread = { id: "thread-1", viewed: false } as AgentThread
 
-  it("clears the unread flag across the caches, leaving the detail stale", () => {
+  it("clears the unread flag across the caches", () => {
     const client = testClient()
     const pagesKey = agentThreadKeys.infinitePages({ limit: 10 })
     client.setQueryData<Array<AgentThread>>(agentThreadKeys.pinned, [unread])
@@ -1207,15 +1208,123 @@ describe("markAgentThreadViewed", () => {
         agentThreadKeys.sidebarActive("thread-1")
       )?.viewed
     ).toBe(true)
-    // A fresh detail entry would suppress the refetch that marks the thread
-    // viewed server-side, and the dot would come back on the next list refetch.
     expect(
       client.getQueryData<AgentThread>(agentThreadKeys.detail("thread-1"))
         ?.viewed
     ).toBe(true)
-    expect(
-      client.getQueryState(agentThreadKeys.detail("thread-1"))?.dataUpdatedAt
-    ).toBe(0)
+  })
+})
+
+describe("thread read state", () => {
+  it("does not clear manual unread on a detail refetch", async () => {
+    const thread = {
+      ...optimisticThread("thread-1", { prompt: "Read me" }),
+      status: "finished" as const,
+      latestRunId: "run-1",
+      viewed: false,
+    }
+    vi.spyOn(agentsApi, "getThread").mockResolvedValue(thread)
+    const save = vi
+      .spyOn(agentsApi, "setThreadViewed")
+      .mockResolvedValue({ viewed: true })
+    const client = testClient()
+    const { result } = renderHook(() => useAgentThread(thread.id), {
+      wrapper: wrapperFor(client),
+    })
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(client.isMutating()).toBe(0))
+    act(() => client.setQueryData(agentThreadKeys.detail(thread.id), thread))
+    await act(() => result.current.refetch())
+    expect(save).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(result.current.data?.viewed).toBe(false))
+  })
+
+  it("keeps inactive plugin chats unread until they become active", async () => {
+    const thread = {
+      ...optimisticThread("thread-1", { prompt: "Plugin chat" }),
+      status: "finished" as const,
+      latestRunId: "run-1",
+      viewed: false,
+    }
+    vi.spyOn(agentsApi, "getThread").mockResolvedValue(thread)
+    const save = vi
+      .spyOn(agentsApi, "setThreadViewed")
+      .mockResolvedValue({ viewed: true })
+    const client = testClient()
+    const { result, rerender } = renderHook(
+      ({ active }) => useAgentThread(thread.id, active),
+      {
+        wrapper: wrapperFor(client),
+        initialProps: { active: false },
+      }
+    )
+    await waitFor(() => expect(result.current.data?.latestRunId).toBe("run-1"))
+    expect(save).not.toHaveBeenCalled()
+    rerender({ active: true })
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(client.isMutating()).toBe(0))
+    rerender({ active: false })
+    act(() =>
+      client.setQueryData(agentThreadKeys.detail(thread.id), {
+        ...thread,
+        latestRunId: "run-2",
+      })
+    )
+    expect(save).toHaveBeenCalledTimes(1)
+    rerender({ active: true })
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2))
+  })
+
+  it("marks an externally completed run read without observing it running", async () => {
+    const thread = {
+      ...optimisticThread("thread-1", { prompt: "Read me" }),
+      status: "finished" as const,
+      latestRunId: "run-1",
+      viewed: true,
+    }
+    const get = vi.spyOn(agentsApi, "getThread").mockResolvedValue(thread)
+    const save = vi
+      .spyOn(agentsApi, "setThreadViewed")
+      .mockResolvedValue({ viewed: true })
+    const client = testClient()
+    const { result } = renderHook(() => useAgentThread(thread.id), {
+      wrapper: wrapperFor(client),
+    })
+    await waitFor(() => expect(result.current.data?.latestRunId).toBe("run-1"))
+    expect(save).not.toHaveBeenCalled()
+    get.mockResolvedValue({ ...thread, latestRunId: "run-2", viewed: false })
+    await act(() => result.current.refetch())
+    await waitFor(() => expect(save).toHaveBeenCalledWith(thread.id, true))
+    await waitFor(() => expect(client.isMutating()).toBe(0))
+    await waitFor(() => expect(result.current.data?.viewed).toBe(true))
+  })
+
+  it("rolls back an optimistic unread action when saving fails", async () => {
+    const thread = {
+      ...optimisticThread("thread-1", { prompt: "Read me" }),
+      viewed: true,
+    }
+    const request = Promise.withResolvers<{ viewed: boolean }>()
+    vi.spyOn(agentsApi, "setThreadViewed").mockReturnValue(request.promise)
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.detail(thread.id), thread)
+    const { result } = renderHook(() => useSetAgentThreadViewed(), {
+      wrapper: wrapperFor(client),
+    })
+    act(() => result.current.mutate({ threadId: thread.id, viewed: false }))
+    await waitFor(() =>
+      expect(
+        client.getQueryData<AgentThread>(agentThreadKeys.detail(thread.id))
+          ?.viewed
+      ).toBe(false)
+    )
+    act(() => request.reject(new Error("Save failed")))
+    await waitFor(() =>
+      expect(
+        client.getQueryData<AgentThread>(agentThreadKeys.detail(thread.id))
+          ?.viewed
+      ).toBe(true)
+    )
   })
 })
 

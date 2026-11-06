@@ -820,7 +820,7 @@ async def test_list_threads_resolves_slack_reply_link(
     }
     lookup.assert_awaited_once_with(locator)
     get_dashboard_thread.assert_awaited_once_with(
-        "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
+        "thread-1", "octocat", email="octocat@example.com"
     )
 
 

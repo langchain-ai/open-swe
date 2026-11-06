@@ -70,6 +70,7 @@ describe("Copy thread ID", () => {
             archived={false}
             isDeleting={false}
             onTogglePin={vi.fn()}
+            onToggleViewed={vi.fn()}
             onToggleArchived={vi.fn()}
             onDelete={vi.fn()}
           />
@@ -81,9 +82,57 @@ describe("Copy thread ID", () => {
       key: "Enter",
     })
     fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Diagnostics" })
+    )
+    fireEvent.click(
       await screen.findByRole("menuitem", { name: "Copy thread ID" })
     )
 
     expect(writeText).toHaveBeenCalledWith(expectedId)
   })
+})
+
+describe("read state actions", () => {
+  it.each([true, false])(
+    "offers the opposite read state when viewed=%s",
+    async (viewed) => {
+      const toggle = vi.fn()
+      render(
+        <DropdownMenu>
+          <DropdownMenuTrigger>Thread actions</DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <ThreadMenuItems
+              thread={{
+                ...thread,
+                viewed,
+                traceUrl: "https://example.com/trace",
+              }}
+              pinned={false}
+              archived={false}
+              isDeleting={false}
+              onRename={vi.fn()}
+              onTogglePin={vi.fn()}
+              onToggleViewed={toggle}
+              onToggleArchived={vi.fn()}
+              onDelete={vi.fn()}
+            />
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )
+      fireEvent.keyDown(
+        screen.getByRole("button", { name: "Thread actions" }),
+        { key: "Enter" }
+      )
+      expect(screen.queryByRole("menuitem", { name: "Open trace" })).toBeNull()
+      expect(
+        screen.queryByRole("menuitem", { name: "Copy thread ID" })
+      ).toBeNull()
+      fireEvent.click(
+        await screen.findByRole("menuitem", {
+          name: viewed ? "Mark unread" : "Mark read",
+        })
+      )
+      expect(toggle).toHaveBeenCalledOnce()
+    }
+  )
 })

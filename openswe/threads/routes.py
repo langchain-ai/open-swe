@@ -75,13 +75,17 @@ from openswe.threads.proxy import (
     proxy_dashboard_thread_runs_list,
     proxy_dashboard_thread_stream_events,
 )
+from openswe.threads.read_state import THREAD_READ_STATES
 from openswe.threads.runs import (
     SessionCreateBody,
     ThreadRenameBody,
     ThreadResolveBody,
     create_dashboard_session,
 )
+from openswe.threads.runtimes import RUNTIMES
 from openswe.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
+from openswe.threads.store import THREADS
+from openswe.threads.summary import _now_ms, _thread_run_id, assert_thread_readable
 from openswe.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
@@ -357,11 +361,42 @@ async def api_get_thread_pull_request_context(
     )
 
 
+class ThreadReadState(BaseModel):
+    viewed: bool
+
+
+@router.put("/threads/{thread_id}/read-state", response_model=ThreadReadState)
+async def api_set_thread_read_state(
+    thread_id: str,
+    body: ThreadReadState,
+    session: dict[str, str] = SESSION_DEP,
+) -> ThreadReadState:
+    thread = await THREADS.get(thread_id)
+    if thread is None:
+        raise HTTPException(404, "thread not found")
+    assert_thread_readable(thread.metadata, session["sub"], session.get("email"))
+    latest = await RUNTIMES.runs_on(thread.runtime).latest_run(thread_id) if body.viewed else None
+    if latest is not None and (
+        latest.run_id != thread.metadata.get("latest_run_id")
+        or latest.status != thread.metadata.get("latest_run_status")
+    ):
+        await THREADS.update(
+            thread_id, {"latest_run_id": latest.run_id, "latest_run_status": latest.status}
+        )
+    await THREAD_READ_STATES.set(
+        session["sub"],
+        thread_id,
+        viewed=body.viewed,
+        run_id=_thread_run_id(thread.metadata, latest.run_id if latest else None),
+        viewed_at_ms=_now_ms(),
+    )
+    return body
+
+
 @router.get("/threads/{thread_id}")
 async def api_get_thread(
     thread_id: str,
     principal: PrincipalDep,
-    mark_viewed: bool = True,
 ) -> Response:
     if principal.machine:
         return JSONResponse(await machine_thread(thread_id, principal))
@@ -371,7 +406,6 @@ async def api_get_thread(
         thread_id,
         principal.person,
         email=principal.email,
-        mark_viewed=mark_viewed,
         timings=timings,
     )
     timings["total"] = (perf_counter() - started) * 1000

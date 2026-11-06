@@ -23,6 +23,7 @@ vi.mock("@/features/agents/lib/sidebarPrefs", () => ({
 vi.mock("@/features/agents/lib/queries", () => ({
   useSidebarPinnedThreads: () => ({ data: [] }),
   useSidebarRepos: () => ({ data: [] }),
+  useSetAgentThreadViewed: () => ({ isPending: false, mutate: vi.fn() }),
   usePinAgentThread: () => ({ isPending: false, mutate: vi.fn() }),
   useResolveAgentThread: () => ({ isPending: false, mutate: vi.fn() }),
   useDeleteAgentThread: () => ({ isPending: false, mutate: vi.fn() }),
@@ -97,9 +98,7 @@ describe("AgentThreadHeader", () => {
     fireEvent.keyDown(screen.getByRole("button", { name: "Thread actions" }), {
       key: "Enter",
     })
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Rename thread" })
-    )
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }))
     await waitFor(() =>
       expect(document.activeElement).toBe(
         screen.getByRole("textbox", { name: "Thread title" })
@@ -110,8 +109,8 @@ describe("AgentThreadHeader", () => {
     fireEvent.keyDown(input, { key: "Enter" })
     const actions = screen.getByRole("button", { name: "Thread actions" })
     fireEvent.keyDown(actions, { key: "Enter" })
-    const pin = await screen.findByRole("menuitem", { name: "Pin thread" })
-    expect(screen.queryByRole("menuitem", { name: "Rename thread" })).toBeNull()
+    const pin = await screen.findByRole("menuitem", { name: "Pin" })
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull()
     fireEvent.keyDown(pin, { key: "Escape" })
     await waitFor(() => expect(document.activeElement).toBe(actions))
     finishRename()

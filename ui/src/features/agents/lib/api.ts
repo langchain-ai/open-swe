@@ -472,11 +472,12 @@ export const agentsApi = {
     agentsRequest<void>(`/schedules/${encodeURIComponent(scheduleId)}`, {
       method: "DELETE",
     }),
-  getThread: (threadId: string, options?: { markViewed?: boolean }) =>
-    agentsRequest<AgentThread>(
-      `/threads/${encodeURIComponent(threadId)}${
-        options?.markViewed === false ? "?mark_viewed=false" : ""
-      }`
+  getThread: (threadId: string) =>
+    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`),
+  setThreadViewed: (threadId: string, viewed: boolean) =>
+    agentsRequest<{ viewed: boolean }>(
+      `/threads/${encodeURIComponent(threadId)}/read-state`,
+      { method: "PUT", body: JSON.stringify({ viewed }) }
     ),
   getPullRequestChecks: (
     pullRequests: Array<{ repoFullName: string; number: number }>

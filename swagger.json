@@ -9683,6 +9683,19 @@
         "title": "ThreadMoveRequest",
         "type": "object"
       },
+      "ThreadReadState": {
+        "properties": {
+          "viewed": {
+            "title": "Viewed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "viewed"
+        ],
+        "title": "ThreadReadState",
+        "type": "object"
+      },
       "ThreadRenameBody": {
         "properties": {
           "title": {
@@ -25011,16 +25024,6 @@
               "title": "Thread Id",
               "type": "string"
             }
-          },
-          {
-            "in": "query",
-            "name": "mark_viewed",
-            "required": false,
-            "schema": {
-              "default": true,
-              "title": "Mark Viewed",
-              "type": "boolean"
-            }
           }
         ],
         "responses": {
@@ -26089,6 +26092,64 @@
           }
         ],
         "summary": "Api Get Thread Queued Messages",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/read-state": {
+      "put": {
+        "operationId": "api_set_thread_read_state_dashboard_api_threads__thread_id__read_state_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThreadReadState"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadReadState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Set Thread Read State",
         "tags": [
           "dashboard",
           "threads"

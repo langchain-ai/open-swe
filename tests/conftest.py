@@ -25,6 +25,7 @@ from openswe.threads.store import CommandReply, ThreadStore
 from openswe.tools import access as tool_access
 from openswe.users.records import UserRecords
 from openswe.utils import ttl_cache
+from openswe.utils.json_types import JsonObject
 from openswe.utils.thread_ops import langgraph_url
 from openswe.webhooks import common as webhook_common
 from tests.support.postgres import MigratedTemplate, isolated_database
@@ -129,6 +130,13 @@ def user_records(monkeypatch: pytest.MonkeyPatch) -> FakeUserRecords:
         value = fake.items.get((self.kind, login.strip().lower(), key))
         return None if value is None else dict(value)
 
+    async def for_keys(self: UserRecords, login: str, keys: list[str]) -> dict[str, JsonObject]:
+        return {
+            key: dict(value)
+            for (kind, person, key), value in fake.items.items()
+            if kind == self.kind and person == login.strip().lower() and key in keys
+        }
+
     async def put(self: UserRecords, login: str, value: dict[str, Any], key: str = "") -> None:
         fake.seed(self.kind, login, value, key)
 
@@ -136,6 +144,7 @@ def user_records(monkeypatch: pytest.MonkeyPatch) -> FakeUserRecords:
         return fake.pop(self.kind, login, key)
 
     monkeypatch.setattr(UserRecords, "get", get)
+    monkeypatch.setattr(UserRecords, "for_keys", for_keys)
     monkeypatch.setattr(UserRecords, "put", put)
     monkeypatch.setattr(UserRecords, "delete", pop)
     monkeypatch.setattr(UserRecords, "pop", pop)

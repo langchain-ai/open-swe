@@ -630,6 +630,7 @@ export interface AgentThread {
   automationActionPosted?: boolean
   status: AgentStatus
   viewed: boolean
+  latestRunId?: string | null
   viewedAt?: number | null
   resolved?: boolean
   resolvedAt?: number | null
