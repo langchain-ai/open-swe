@@ -42,6 +42,7 @@ class PersonIdentity(TypedDict):
     new_prs: NotRequired[Literal["as drafts", "ready for review"]]
     standing_instructions: NotRequired[str]
     personal_memories: NotRequired[str]
+    memory_triggers: NotRequired[str]
 
 
 class ChannelIdentity(TypedDict):
@@ -115,6 +116,7 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
         "workspace_admin",
         "new_prs",
         "standing_instructions",
+        "memory_triggers",
     ),
     "channel": (
         "platform",

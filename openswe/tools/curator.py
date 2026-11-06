@@ -1,10 +1,18 @@
-"""Tools only a workspace's curator thread has: read memories, decide them, publish a prompt."""
+"""Tools only a workspace's curator thread has: read memories, decide them, publish a prompt,
+and name the triggers that recall memories in place of their bodies."""
 
 from uuid import UUID
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.memories.curator import WorkspaceCurator
-from openswe.memories.store import MAX_WORKSPACE_PROMPT_CHARS, MEMORIES, Decision, Status
+from openswe.memories.store import (
+    MAX_TRIGGER_SUMMARY_CHARS,
+    MAX_WORKSPACE_PROMPT_CHARS,
+    MEMORIES,
+    Decision,
+    MemoryTrigger,
+    Status,
+)
 from openswe.tools.access import Policy, access
 
 _CURATOR = Policy(trusted="curator")
@@ -49,3 +57,53 @@ async def publish_workspace_prompt(prompt: str) -> dict[str, object]:
         return {"ok": True, "published": False, "reason": "unchanged"}
     version = await MEMORIES.publish(workspace, text)
     return {"ok": True, "published": True, "version_id": str(version.id)}
+
+
+@access(_CURATOR)
+async def list_memory_triggers() -> dict[str, object]:
+    """Implement the `list_memory_triggers` tool."""
+    triggers = await MEMORIES.triggers_for_curator(WorkspaceCurator.for_run().slug)
+    return {"ok": True, "triggers": [trigger.model_dump(mode="json") for trigger in triggers]}
+
+
+@audit_tool()
+@access(_CURATOR)
+async def set_memory_trigger(slug: str, summary: str) -> dict[str, object]:
+    """Implement the `set_memory_trigger` tool."""
+    try:
+        parsed = MemoryTrigger.slug_of(slug)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    text = " ".join(summary.split())
+    if not text:
+        return {"ok": False, "error": "summary is empty"}
+    if len(text) > MAX_TRIGGER_SUMMARY_CHARS:
+        return {"ok": False, "error": f"summary exceeds {MAX_TRIGGER_SUMMARY_CHARS} characters"}
+    await MEMORIES.set_trigger(WorkspaceCurator.for_run().slug, parsed, text)
+    return {"ok": True, "slug": parsed, "summary": text}
+
+
+@audit_tool()
+@access(_CURATOR)
+async def delete_memory_trigger(slug: str) -> dict[str, object]:
+    """Implement the `delete_memory_trigger` tool."""
+    if not await MEMORIES.delete_trigger(WorkspaceCurator.for_run().slug, slug.strip().lower()):
+        return {"ok": False, "error": "This workspace has no trigger with that slug."}
+    return {"ok": True, "slug": slug}
+
+
+@audit_tool()
+@access(_CURATOR)
+async def link_memory_trigger(slug: str, memory_id: str, linked: bool = True) -> dict[str, object]:
+    """Implement the `link_memory_trigger` tool."""
+    try:
+        parsed = UUID(memory_id)
+    except ValueError:
+        return {"ok": False, "error": "memory_id is not a memory id"}
+    workspace = WorkspaceCurator.for_run().slug
+    if not await MEMORIES.link_trigger(workspace, slug.strip().lower(), parsed, linked=linked):
+        return {
+            "ok": False,
+            "error": "This workspace has no such trigger, or no memory with that id you may decide.",
+        }
+    return {"ok": True, "slug": slug, "memory_id": memory_id, "linked": linked}
