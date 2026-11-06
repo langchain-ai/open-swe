@@ -43,7 +43,7 @@ it("moves a focused pin past its visible neighbor without dropping hidden pins",
   expect(screen.getByText("second moved to position 1 of 4.")).toBeTruthy()
 })
 
-it("drops a dragged pin before a target and ignores unrelated drops", () => {
+it("drops a dragged pin only while its destination is still hovered", () => {
   const onReorder = vi.fn()
   const { container } = render(
     <SortableThreadList
@@ -60,6 +60,29 @@ it("drops a dragged pin before a target and ignores unrelated drops", () => {
   expect(onReorder).not.toHaveBeenCalled()
   fireEvent.dragStart(third, { dataTransfer: { setData: vi.fn() } })
   fireEvent.dragOver(first, { clientY: -1, dataTransfer: {} })
+  fireEvent.dragLeave(first, { relatedTarget: document.body })
+  fireEvent.drop(first)
+  expect(onReorder).not.toHaveBeenCalled()
+  fireEvent.dragOver(first, { clientY: -1, dataTransfer: {} })
+  fireEvent(
+    first,
+    new MouseEvent("dragleave", {
+      bubbles: true,
+      relatedTarget: first.firstElementChild,
+    })
+  )
+  vi.spyOn(first, "getBoundingClientRect").mockReturnValue(
+    new DOMRect(0, 0, 200, 32)
+  )
+  fireEvent(
+    screen.getByRole("link", { name: "first" }),
+    new MouseEvent("dragleave", {
+      bubbles: true,
+      relatedTarget: null,
+      clientX: 20,
+      clientY: 10,
+    })
+  )
   fireEvent.drop(first)
   expect(onReorder).toHaveBeenCalledWith(["third", "first", "second"])
   expect(container.querySelectorAll('[draggable="true"]')).toHaveLength(3)
