@@ -6,6 +6,7 @@ import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
 import { Textarea } from "@langchain/macaw-components/Textarea"
+import { SubmitShortcut } from "@/components/SubmitShortcut"
 import { api, reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
 import { cn, INHERITED_LINK } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
@@ -280,9 +281,12 @@ function Description({
             <Button
               size="sm"
               disabled={draft === body || update.isPending}
+              aria-label="Save description"
+              aria-keyshortcuts="Meta+Enter Control+Enter"
               onClick={save}
             >
               Save description
+              <SubmitShortcut />
             </Button>
           </div>
         </div>
