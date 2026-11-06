@@ -31,6 +31,7 @@ import {
   $setSelection,
   COMMAND_PRIORITY_HIGH,
   DecoratorNode,
+  TextNode,
   KEY_ARROW_DOWN_COMMAND,
   KEY_ARROW_UP_COMMAND,
   KEY_ENTER_COMMAND,
@@ -39,15 +40,16 @@ import {
 } from "lexical"
 
 import { SlackUserMention } from "../messages/SlackMrkdwn"
-import { SkillBadge } from "../SkillBadge"
 import { splitPromptIntoSegments } from "./composerMentions"
 import { basenameOfPath, serializeComposerFileLink } from "./composerTrigger"
 import type { InitialConfigType } from "@lexical/react/LexicalComposer"
 import type {
+  EditorConfig,
   EditorState,
   LexicalNode,
   NodeKey,
   SerializedLexicalNode,
+  SerializedTextNode,
   Spread,
 } from "lexical"
 import { cn } from "@/lib/utils"
@@ -76,8 +78,8 @@ type SerializedComposerMentionNode = Spread<
 >
 
 type SerializedComposerSkillNode = Spread<
-  { name: string; source: string; type: "composer-skill"; version: 1 },
-  SerializedLexicalNode
+  { type: "composer-skill"; version: 1 },
+  SerializedTextNode
 >
 
 function ComposerMentionChip({ path }: { path: string }) {
@@ -177,71 +179,35 @@ function $createComposerMentionNode(
   return $applyNodeReplacement(new ComposerMentionNode(path, source))
 }
 
-class ComposerSkillNode extends DecoratorNode<React.ReactElement> {
-  __name: string
-  __source: string
-
+class ComposerSkillNode extends TextNode {
   static override getType(): string {
     return "composer-skill"
   }
 
   static override clone(node: ComposerSkillNode): ComposerSkillNode {
-    return new ComposerSkillNode(node.__name, node.__source, node.__key)
+    return new ComposerSkillNode(node.__text, node.__key)
   }
 
   static override importJSON(
     serialized: SerializedComposerSkillNode
   ): ComposerSkillNode {
-    return $createComposerSkillNode(
-      serialized.name,
-      serialized.source
-    ).updateFromJSON(serialized)
-  }
-
-  constructor(name: string, source: string, key?: NodeKey) {
-    super(key)
-    this.__name = name
-    this.__source = source
+    return $createComposerSkillNode(serialized.text).updateFromJSON(serialized)
   }
 
   override exportJSON(): SerializedComposerSkillNode {
-    return {
-      ...super.exportJSON(),
-      name: this.__name,
-      source: this.__source,
-      type: "composer-skill",
-      version: 1,
-    }
+    return { ...super.exportJSON(), type: "composer-skill", version: 1 }
   }
 
-  override createDOM(): HTMLElement {
-    const dom = document.createElement("span")
-    dom.className = "relative inline-flex align-middle leading-none"
+  override createDOM(config: EditorConfig): HTMLElement {
+    const dom = super.createDOM(config)
+    dom.className =
+      "rounded-md bg-warning px-space-1 py-0.5 leading-tight font-medium text-warning-primary"
     return dom
-  }
-
-  override updateDOM(): false {
-    return false
-  }
-
-  override getTextContent(): string {
-    return this.__source
-  }
-
-  override isInline(): true {
-    return true
-  }
-
-  override decorate(): React.ReactElement {
-    return <SkillBadge name={this.__name} />
   }
 }
 
-function $createComposerSkillNode(
-  name: string,
-  source: string
-): ComposerSkillNode {
-  return $applyNodeReplacement(new ComposerSkillNode(name, source))
+function $createComposerSkillNode(source: string): ComposerSkillNode {
+  return $applyNodeReplacement(new ComposerSkillNode(source)).setMode("token")
 }
 
 type SlackReferenceKind = "user" | "channel"
@@ -376,11 +342,9 @@ function $createComposerSlackNode(
 
 function isDecoratorNode(
   node: unknown
-): node is ComposerMentionNode | ComposerSkillNode | ComposerSlackNode {
+): node is ComposerMentionNode | ComposerSlackNode {
   return (
-    node instanceof ComposerMentionNode ||
-    node instanceof ComposerSkillNode ||
-    node instanceof ComposerSlackNode
+    node instanceof ComposerMentionNode || node instanceof ComposerSlackNode
   )
 }
 
@@ -578,7 +542,7 @@ function $setComposerPrompt(
         )
       )
     } else {
-      paragraph.append($createComposerSkillNode(segment.name, segment.source))
+      paragraph.append($createComposerSkillNode(segment.source))
     }
   }
   root.append(paragraph)

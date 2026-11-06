@@ -19,6 +19,46 @@ import {
 // Drives the REAL built ui/ app (served same-origin from the harness) for the
 // Slack → web handoff. Only the LLM/GitHub/Slack/token boundaries are faked.
 test.describe("Slack → web handoff (real dashboard UI)", () => {
+  test("selects and copies skills with the rest of the prompt", async ({
+    page,
+    context,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.route("**/dashboard/api/skills?*", (route) =>
+      route.fulfill({
+        json: {
+          items: [
+            {
+              name: "baby-sit",
+              description: "Monitor a PR",
+              instructions: "Monitor a PR",
+            },
+          ],
+          next_offset: null,
+        },
+      }),
+    );
+    await page.goto("/agents");
+    const editor = page.getByTestId("composer-editor");
+    await editor.fill("/baby");
+    await page.getByRole("option").filter({ hasText: "/baby-sit" }).click();
+    await editor.press("End");
+    await editor.pressSequentially("this guy");
+    await editor.press("ControlOrMeta+a");
+    expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(
+      "/baby-sit this guy",
+    );
+    await editor.press("ControlOrMeta+c");
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+      "/baby-sit this guy",
+    );
+    await editor.press("Backspace");
+    await expect(editor).toHaveText("");
+    await editor.press("ControlOrMeta+z");
+    await expect(editor).toHaveText("/baby-sit this guy");
+  });
+
   test("opens the composer without saving a personal model for a fresh user", async ({
     page,
   }) => {
