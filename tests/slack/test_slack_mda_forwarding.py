@@ -116,12 +116,14 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_service, "slack_login", AsyncMock(return_value="ada"))
 
 
+@pytest.mark.parametrize("root_ts", ["", "1786573300.000001"])
 async def test_a_conversation_for_mda_goes_to_trigger_server_exactly_as_slack_sent_it(
     monkeypatch: pytest.MonkeyPatch,
+    root_ts: str,
 ) -> None:
     startable = AsyncMock(return_value=_MDA_THREAD)
     monkeypatch.setattr(mda_forwarding, "startable_thread", startable)
-    request = _FakeRequest(_mention(), dict(_SLACK_HEADERS))
+    request = _FakeRequest(_mention(thread_ts=root_ts), dict(_SLACK_HEADERS))
     tasks = _FakeBackgroundTasks()
 
     response = await slack_routes.slack_webhook(
@@ -129,11 +131,11 @@ async def test_a_conversation_for_mda_goes_to_trigger_server_exactly_as_slack_se
     )
 
     assert response["status"] == "accepted"
-    assert startable.await_args.kwargs["root_ts"] == "1786573369.551099"
+    assert startable.await_args.kwargs["root_ts"] == (root_ts or "1786573369.551099")
     assert startable.await_args.kwargs["can_start"] is True
     cast(AsyncMock, slack_service.account_link_needed).assert_awaited_once_with("U1")
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_awaited_once_with(
-        "A1", "T1", "C1", "1786573369.551099", owner_login="ada"
+        "A1", "T1", "C1", root_ts or "1786573369.551099", owner_login="ada"
     )
     [(task, (url, body, headers))] = tasks.tasks
     # The forward knows which message it carries, to tell its thread if it's lost.
@@ -151,6 +153,7 @@ async def test_a_conversation_for_mda_goes_to_trigger_server_exactly_as_slack_se
     }
     remembered = cast(AsyncMock, mda_forwarding.remember).await_args.args
     assert remembered[0].thread_id == _MDA_THREAD
+    assert remembered[0].thread_ts == (root_ts or "1786573369.551099")
     assert remembered[2] == "1786573369.551099"
 
 

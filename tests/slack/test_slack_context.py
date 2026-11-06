@@ -414,6 +414,64 @@ def _setup_slack_mention_fakes(
     monkeypatch.setattr(webhook_common, "post_account_link_prompt", fake_post_prompt)
 
 
+class TestSlackThreadRootContext:
+    @pytest.mark.parametrize("root_state", ["omitted", "selected", "dispatched", "unfetched"])
+    async def test_channel_run_keeps_undispatched_root(
+        self, monkeypatch: pytest.MonkeyPatch, root_state: str
+    ) -> None:
+        captured: dict[str, object] = {}
+        _setup_slack_mention_fakes(monkeypatch, captured)
+        root_ts = "1700000000.000100"
+        previous_ts = "1700000000.000200"
+        request = SlackRequest(
+            channel_id="C123",
+            thread_ts=root_ts,
+            event_ts="1700000000.000300",
+            thread_id="mapped-thread",
+            user_id="U123",
+            text="<@UBOT> please help",
+            bot_user_id="UBOT",
+        )
+        messages = [
+            {"ts": root_ts, "text": "Why is the deployment failing?", "user": "U456"},
+            {"ts": "1700000000.000150", "text": "older discussion", "user": "U456"},
+            {
+                "ts": previous_ts,
+                "text": "discussion" if root_state == "selected" else "<@UBOT> investigate",
+                "user": "U123",
+            },
+            {"ts": request.event_ts, "text": request.text, "user": request.user_id},
+        ]
+        if root_state == "unfetched":
+            messages = messages[1:]
+        monkeypatch.setattr(
+            webhook_common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
+        )
+        monkeypatch.setattr(
+            slack_webhooks,
+            "_dispatched_slack_context",
+            AsyncMock(return_value=(set(), {root_ts} if root_state == "dispatched" else set())),
+        )
+
+        prepared = await slack_webhooks.prepare_slack_channel_run(request, None)
+
+        assert prepared is not None
+        inputs = [str(message["content"]) for message in prepared.input["messages"]]
+        roots = [content for content in inputs if "Why is the deployment failing?" in content]
+        if root_state in {"omitted", "selected"}:
+            assert len(roots) == 1
+            assert f'timestamp="{root_ts}"' in roots[0]
+            assert inputs.index(roots[0]) < len(inputs) - 1
+        else:
+            assert roots == []
+        assert any(f'timestamp="{previous_ts}"' in content for content in inputs)
+        assert any("older discussion" in content for content in inputs) == (
+            root_state == "selected"
+        )
+        assert "please help" in inputs[-1]
+        assert "run_create" not in captured
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model_choice", [None, ("anthropic:claude-opus-5-5", "max")])
 async def test_web_question_keeps_context_without_slack_delivery(
