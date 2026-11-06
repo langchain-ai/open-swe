@@ -475,6 +475,8 @@ def gateway_overrides(model_id: str) -> dict[str, object] | None:
         # Use HTTPS Responses through the gateway by default; tool-calling OpenAI
         # reasoning models reject reasoning_effort on Chat Completions.
         overrides["use_responses_api"] = gateway_openai_use_responses()
+    elif provider == "google_genai":
+        overrides["api_version"] = "v1beta"
     return overrides
 
 

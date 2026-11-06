@@ -138,6 +138,36 @@ async def test_fireworks_sdk_uses_allowlisted_gateway_path() -> None:
     assert paths == ["/fireworks/v1/chat/completions"]
 
 
+async def test_gemini_sdk_uses_allowlisted_gateway_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths: list[str] = []
+    expected_path = "/gemini/v1beta/models/gemini-4-argon:streamGenerateContent"
+
+    async def handler(request: web.Request) -> web.Response:
+        paths.append(request.path)
+        if request.path != expected_path:
+            return web.json_response({"error": "path not allow-listed by gateway"}, status=501)
+        return web.Response(
+            content_type="text/event-stream",
+            text='data: {"candidates":[{"content":{"parts":[{"text":"ok"}],'
+            '"role":"model"},"finishReason":"STOP"}]}\n\n',
+        )
+
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "dummy")
+    async with _http_server(handler) as base_url:
+        monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", base_url)
+        chat_model = model.build_chat_model(
+            "google_genai:gemini-4-argon",
+            {"max_retries": 1, "max_output_tokens": 64000, "reasoning_effort": "medium"},
+            use_gateway=True,
+        )
+        chunks = [chunk async for chunk in chat_model.astream("hi")]
+
+    assert "".join(str(chunk.content) for chunk in chunks) == "ok"
+    assert paths == [expected_path]
+
+
 # --- resolve_gateway_enabled --------------------------------------------------
 
 
