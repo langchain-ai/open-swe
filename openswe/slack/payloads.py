@@ -54,6 +54,12 @@ class SlackItem(SlackPayload):
     value: JsonValue = None
 
 
+class SlackAssistantThread(SlackPayload):
+    """``event.assistant_thread``, where older payloads nest the search grant."""
+
+    action_token: str = ""
+
+
 class SlackMessage(SlackPayload):
     ts: str = ""
     thread_ts: str = ""
@@ -110,6 +116,8 @@ class SlackEvent(SlackPayload):
     bot_id: str = ""
     app_id: str = ""
     attachments: list[JsonObject] = Field(default_factory=list)
+    action_token: str = ""
+    assistant_thread: SlackAssistantThread | None = None
     message: SlackMessage | None = None
     previous_message: SlackMessage | None = None
     reaction: str = ""
@@ -132,6 +140,13 @@ class SlackEvent(SlackPayload):
         if isinstance(self.user, SlackRef):
             return self.user.id
         return self.user or self.user_id
+
+    @property
+    def search_grant(self) -> str:
+        """The ``action_token`` Slack sent for search, at the top level or nested."""
+        if self.action_token:
+            return self.action_token
+        return self.assistant_thread.action_token if self.assistant_thread else ""
 
     @property
     def is_from_bot(self) -> bool:

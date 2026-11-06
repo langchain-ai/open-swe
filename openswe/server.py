@@ -252,6 +252,7 @@ from openswe.tools import (
     slack_read_channel_messages,
     slack_read_thread_messages,
     slack_reply,
+    slack_search,
     slack_start_review_channel,
     snapshotctl,
     start_thread,
@@ -809,6 +810,7 @@ AGENT_TOOLS: Final = (
     slack_read_channel_messages,
     slack_read_thread_messages,
     slack_reply,
+    slack_search,
     slack_breakout_thread,
     slack_start_review_channel,
     submit_thread_feedback,
@@ -2026,6 +2028,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_no_reply_needed,
         slack_post_message,
         slack_reply,
+        slack_search,
         slack_breakout_thread,
         slack_start_review_channel,
     ]
