@@ -19,6 +19,7 @@ from openswe.agent_api.tokens import RemoteRun
 from openswe.middleware import workflow_push_guard as guard
 from openswe.sandboxes import connect, state
 from openswe.sandboxes.state import SandboxBackendProxy
+from openswe.threads.store import THREADS
 
 
 class _Response:
@@ -464,14 +465,10 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
     monkeypatch.setattr(guard, "post_slack_thread_reply_with_ts", fake_post)
     monkeypatch.setattr(guard, "mark_workflow_push_notified", fake_notified)
 
-    class _NoThreadsClient:
-        async def get(self, thread_id: str) -> dict[str, str]:
-            raise KeyError(thread_id)
+    async def no_thread(thread_id: str) -> None:
+        raise KeyError(thread_id)
 
-    class _NoClient:
-        threads = _NoThreadsClient()
-
-    monkeypatch.setattr(guard, "get_client", lambda url: _NoClient())
+    monkeypatch.setattr(THREADS, "get", no_thread)
 
     called = False
 

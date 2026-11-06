@@ -1,9 +1,14 @@
 """What every graph's MDA run shares: its config, and running as that run."""
 
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from functools import lru_cache
+from typing import cast
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 from pydantic import BaseModel
 
@@ -31,6 +36,34 @@ def run_config(run: RemoteRun, *, settled: bool = True) -> RunnableConfig:
     }
 
 
+@dataclass
+class _Call:
+    """One call's work, and what it answered, for the graph its name compiled once."""
+
+    work: Callable[[Runtime], Awaitable[object]]
+    results: list[object] = field(default_factory=list)
+
+
+_call: ContextVar[_Call] = ContextVar("backend_call")
+
+
+async def _node(state: _NodeState, runtime: Runtime) -> dict[str, bool]:  # noqa: ARG001
+    call = _call.get()
+    call.results.append(await call.work(runtime))
+    return {"done": True}
+
+
+@lru_cache(maxsize=256)
+def _graph(name: str) -> CompiledStateGraph:
+    """The one-node graph ``name``'s calls run in, compiled once: every call of the
+    backend compiling its own cost more than the work most of them do."""
+    builder = StateGraph(_NodeState)
+    builder.add_node(name, _node)
+    builder.add_edge(START, name)
+    builder.add_edge(name, END)
+    return builder.compile(name=name)
+
+
 async def in_graph_context[T](
     config: RunnableConfig,
     work: Callable[[Runtime], Awaitable[T]],
@@ -39,19 +72,14 @@ async def in_graph_context[T](
 ) -> T:
     """Run a named backend operation with graph context and capture its custom stream events."""
     name = config.get("run_name", "backend_callback")
-    results: list[T] = []
-
-    async def node(state: _NodeState, runtime: Runtime) -> dict[str, bool]:  # noqa: ARG001
-        results.append(await work(runtime))
-        return {"done": True}
-
-    builder = StateGraph(_NodeState)
-    builder.add_node(name, node)
-    builder.add_edge(START, name)
-    builder.add_edge(name, END)
-    graph = builder.compile(name=name)
+    call = _Call(work)
     config = {**config, "metadata": {**config.get("metadata", {}), "backend_operation": name}}
-    async for chunk in graph.astream(_NodeState(), config, stream_mode="custom"):
-        if events is not None:
-            events.append(chunk)
-    return results[0]
+    # The node reads this call's work from the context its task copies.
+    token = _call.set(call)
+    try:
+        async for chunk in _graph(name).astream(_NodeState(), config, stream_mode="custom"):
+            if events is not None:
+                events.append(chunk)
+    finally:
+        _call.reset(token)
+    return cast(T, call.results[0])

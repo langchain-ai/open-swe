@@ -35,17 +35,16 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from managed_deepagents.run_resources import on_run_exit
 from runtime_api.catalog import Catalog, SubagentSpec, ToolSpec
-from runtime_api.endpoint import call
 from runtime_api.loop import ModelCall
 from runtime_api.provenance import Provenance
-from runtime_api.tool_search import RESOLVE, ToolLookup
 
 from rt.backend import BackendCallError, OpenSweBackend, Run, RunLocal, current_run, harness_message
 from rt.file_tools import FileToolsMiddleware
 from rt.loop import latest_with_id, visible_messages
 from rt.mcp import McpTools
 from rt.models import build_model
-from rt.search_tools import search_tools_tool
+from rt.search_tools import resolve_tool, search_tools_tool
+from rt.slack_move import MOVE_TOOL, SlackMoveMiddleware
 from rt.tools import backend_tool, operation_tool, run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
@@ -125,17 +124,21 @@ class RunTools:
         )
         self.offered = [tool for tool in self.by_name.values() if tool.name not in code_only]
         in_code = [tool for tool in tools if tool.name in code_only - self.disabled]
+        # A move from code goes through MDA too, as the model's own call of it does.
+        moves = SlackMoveMiddleware(self._backend)
         self.from_code = [
-            *in_code,
-            *(
-                t
-                for t in tools
-                if t.name in catalog.also_from_code
-                and t.name not in self.disabled
-                and t not in in_code
-            ),
-            *self._files.code_tools(catalog.also_from_code),
-        ]
+            moves.code_tool(tool) if tool.name == MOVE_TOOL else tool
+            for tool in [
+                *in_code,
+                *(
+                    t
+                    for t in tools
+                    if t.name in catalog.also_from_code
+                    and t.name not in self.disabled
+                    and t not in in_code
+                ),
+            ]
+        ] + self._files.code_tools(catalog.also_from_code)
         self.hidden = self.excluded | code_only
 
     async def connect(self) -> None:
@@ -220,8 +223,7 @@ class BackendTools:
         if not run.catalog.search_tools:
             return None
         if name not in run.backend_tools:
-            lookup = ToolLookup(run_id=run_id(), name=name)
-            run.backend_tools[name] = (await call(self._backend, RESOLVE, lookup)).tool
+            run.backend_tools[name] = await resolve_tool(self._backend, name)
         return run.backend_tools[name]
 
 

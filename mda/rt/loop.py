@@ -3,7 +3,8 @@
 Before each call it ends the run where a rule says to, adds the thread's task
 context and the reminders a person's new message calls for, keeps the sandbox's
 GitHub proxy fresh, picks the call's route and model, and assembles its system
-prompt and tool list. After an answer that calls no tool, it
+prompt and tool list. A thread's route is classified here, once, alongside the run's
+preparation (``rt.routing``). After an answer that calls no tool, it
 asks again for the reply or CLI result the run owes. When the run ends, it asks
 for the graph's own end-of-run work and reports the end, neither of which the run
 waits for.
@@ -36,31 +37,29 @@ from langgraph.config import get_stream_writer
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
+    JOINED_TASK_CONTEXT,
     CliResultRules,
     LoopRules,
-    ModelSpec,
     Nudging,
     ReplyRules,
     RunModels,
+    TaskContext,
     WorkStateRules,
+    kept_route,
 )
 from runtime_api.endpoint import call
 from runtime_api.loop import (
     FINISH_SCOUT_PLAN,
     GOAL,
     INCIDENT_CONTEXT,
-    MODEL_CHOICE,
     REFRESH_GITHUB_PROXY,
     REMINDERS,
     REPLY_ON_BEHALF,
-    ROUTE_MODEL,
     RUN_ENDED,
     SET_GOAL,
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
-    TASK_CONTEXT,
     BeforeModel,
-    ChosenModel,
     GitHubProxyRefreshed,
     Goal,
     GoalChange,
@@ -71,12 +70,12 @@ from runtime_api.loop import (
     Prepared,
     RefreshGitHubProxy,
     ReplyOnBehalf,
-    Route,
     Routed,
     RunEnded,
     ScoutPlanEnd,
-    TaskContext,
 )
+from runtime_api.model_errors import is_model_failure_reply
+from runtime_api.models import model_for
 from runtime_api.operations import RunRequest
 from runtime_api.provenance import Provenance
 
@@ -90,6 +89,7 @@ from rt.backend import (
     run_call,
     since_last_reply,
 )
+from rt.routing import Route, RouteClassifier
 from rt.tools import STATE_KEY, run_id
 
 logger = logging.getLogger(__name__)
@@ -250,10 +250,6 @@ def _moment(value: object) -> datetime | None:
         return None
 
 
-def _normalized(route: str) -> str:
-    return "fast" if route == "fast_alt" else route
-
-
 class _Turn:
     """What happened since the last thing a person said."""
 
@@ -297,27 +293,22 @@ class _Turn:
 
 
 class Asked:
-    """The task context and GitHub token refresh a model call waits on, asked for at once."""
+    """The GitHub token refresh a model call waits on, asked for alongside the inbox."""
 
-    def __init__(
-        self, context: Awaitable[TaskContext], proxy: Awaitable[dict[str, JsonValue]]
-    ) -> None:
-        self._context = asyncio.ensure_future(context)
+    def __init__(self, proxy: Awaitable[dict[str, JsonValue]]) -> None:
         self._proxy = asyncio.ensure_future(proxy)
         self._answered = False
 
-    async def answers(self) -> tuple[TaskContext, dict[str, JsonValue]]:
+    async def answers(self) -> dict[str, JsonValue]:
         self._answered = True
-        return await self._context, await self._proxy
+        return await self._proxy
 
     async def close(self) -> None:
         """Stop what is still asked; what failed unread is logged."""
-        asked = (self._context, self._proxy)
-        for task in asked:
-            task.cancel()
-        for result in await asyncio.gather(*asked, return_exceptions=True):
-            if not self._answered and isinstance(result, Exception):
-                logger.warning("A call before the model call failed unread", exc_info=result)
+        self._proxy.cancel()
+        [result] = await asyncio.gather(self._proxy, return_exceptions=True)
+        if not self._answered and isinstance(result, Exception):
+            logger.warning("A call before the model call failed unread", exc_info=result)
 
 
 class RunLoop:
@@ -325,9 +316,8 @@ class RunLoop:
 
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
-        # Models each run calls by id, such as one a person asked for, as the backend sets them.
-        self._chosen: RunLocal[dict[tuple[str, str | None], ModelSpec]] = RunLocal(dict)
         self._guidance = RunLocal(_RunGuidance)
+        self._classifier = RouteClassifier()
 
     @property
     def rules(self) -> LoopRules:
@@ -342,7 +332,8 @@ class RunLoop:
     def starting(self) -> dict[str, JsonValue]:
         """The held state a turn starts from: nothing asked again yet, and answers going
         where the turn was asked from."""
-        update: dict[str, JsonValue] = {}
+        # A task joined in an earlier run is in this run's catalog.
+        update: dict[str, JsonValue] = {JOINED_TASK_CONTEXT: None}
         if self.rules.reply is not None:
             update.update(reply_surface=self.rules.reply.surface, reply_nudges=0)
         if self.rules.cli_result is not None:
@@ -359,7 +350,7 @@ class RunLoop:
         held = _held(state)
         if self._stops(held):
             return None
-        return Asked(self._task_context(), self._github_proxy(held))
+        return Asked(self._github_proxy(held))
 
     def _stops(self, held: Mapping[str, object]) -> bool:
         return any(held.get(key) for key in self.rules.stop_when)
@@ -371,14 +362,15 @@ class RunLoop:
         if self._stops(held) or self._awaits_client(state):
             return BeforeModel(jump_to="end")
         if asked is None:
-            asked = Asked(self._task_context(), self._github_proxy(held))
+            asked = Asked(self._github_proxy(held))
         try:
-            context, update = await asked.answers()
+            update = await asked.answers()
         finally:
             await asked.close()
         stopped, reminder, objective = await self._goal(state, held, update)
         if stopped:
             return BeforeModel(update=update, jump_to="end")
+        context = self._task_context(held)
         messages = _messages(state)
         visible = visible_messages(state)
         guidance = self._guidance.get(self._backend.run)
@@ -453,12 +445,9 @@ class RunLoop:
         update.update(reminded)
         added.extend(reminders)
         if route is not None:
-            if route.persist:
-                update["model_route"] = route.route
-            else:
-                update["model_route_attempted_for"] = run_id()
+            update.update(self._kept(route))
         current = {**held, **update}
-        model = await self._model_for(current)
+        model = None if self._models is None else model_for(self._models, current)
         system_prompt, workspace_prompt, thread_prompt = self._system_prompt(current)
         if self.rules.client_prompt:
             system_prompt = f"{system_prompt}\n\n{self.rules.client_prompt}"
@@ -519,35 +508,93 @@ class RunLoop:
             return {}
         return _github_proxy_due(prepared.github_proxy, datetime.now(UTC))
 
-    async def _task_context(self) -> TaskContext:
-        if not self.rules.task_coordination:
-            return TaskContext()
-        return await call(self._backend, TASK_CONTEXT, RunRequest(run_id=run_id()))
+    def _task_context(self, held: Mapping[str, object]) -> TaskContext:
+        """The thread's role and task: the catalog's, or the task it joined since."""
+        context = self.rules.task_context or TaskContext()
+        joined = held.get(JOINED_TASK_CONTEXT)
+        if isinstance(joined, str) and joined:
+            return context.model_copy(update={"message": joined})
+        return context
+
+    def classify_ahead(self, state: Mapping[str, object]) -> asyncio.Task[Route] | None:
+        """Start classifying the turn's route while the run prepares, where the thread's
+        held state leaves its route to the classifier."""
+        if not self._classifies(_held(state)):
+            return None
+        return asyncio.ensure_future(self._classifier.classify(_messages(state)))
+
+    def _classifies(self, held: Mapping[str, object]) -> bool:
+        rules = self.rules.routing
+        requested = held.get("requested_model")
+        return (
+            rules is not None
+            and rules.mode == "auto"
+            and not (isinstance(requested, str) and requested)
+            and kept_route(held.get("model_route")) is None
+            and held.get("model_route_attempted_for") != run_id()
+        )
+
+    async def routed(
+        self,
+        held: Mapping[str, object],
+        messages: Sequence[BaseMessage],
+        classifying: asyncio.Task[Route] | None,
+    ) -> dict[str, JsonValue]:
+        """The held state the turn's route sets as the run starts, the routed model's id and
+        effort with it: the turn's start reports them, and its replies are signed with them.
+
+        ``held`` is the state the run's preparation left, which may have changed what
+        ``classify_ahead`` saw: a classification it no longer needs is stopped.
+        """
+        try:
+            route = await self._route(held, messages, classifying)
+        finally:
+            if classifying is not None:
+                classifying.cancel()
+        if route is None:
+            return {}
+        update = self._kept(route)
+        rules = self.rules.routing
+        model_id = rules.route_model_ids.get(route.route) if rules is not None else None
+        if rules is not None and route.route != "default" and model_id:
+            update.update(
+                selected_model_id=model_id, selected_effort=rules.route_efforts.get(route.route)
+            )
+        return update
+
+    @staticmethod
+    def _kept(route: Route) -> dict[str, JsonValue]:
+        """The route for the thread's later runs, or else for this run alone."""
+        if route.persist:
+            return {"model_route": route.route}
+        return {"model_route_attempted_for": run_id()}
 
     async def _route(
-        self, held: Mapping[str, object], messages: Sequence[BaseMessage]
+        self,
+        held: Mapping[str, object],
+        messages: Sequence[BaseMessage],
+        classifying: Awaitable[Route] | None = None,
     ) -> Route | None:
         """The route and whether it should be kept beyond this run."""
         rules = self.rules.routing
         if rules is None:
             return None
         requested = held.get("requested_model")
-        stored = held.get("model_route")
+        stored = kept_route(held.get("model_route"))
         persist = True
         if isinstance(requested, str) and requested:
             route = "default"
         elif rules.mode is None:
             route = "default"
-        elif isinstance(stored, str) and stored:
-            route = _normalized(stored)
+        elif stored is not None:
+            route = stored
         elif rules.mode == "fast":
             route = "fast"
         elif held.get("model_route_attempted_for") == run_id():
             return None
         else:
-            asked = Routed(run_id=run_id(), humans=human_messages(messages))
-            routed = await call(self._backend, ROUTE_MODEL, asked)
-            route, persist = routed.route, routed.persist
+            classified = await (classifying or self._classifier.classify(messages))
+            route, persist = classified.route, classified.persist
         if rules.mode == "auto" or requested:
             model_id = requested if requested else rules.route_model_ids.get(route)
             if isinstance(model_id, str) and model_id:
@@ -582,31 +629,6 @@ class RunLoop:
             logger.warning("Could not read a person's message for reminders", exc_info=True)
             return reminded, []
         return reminded, messages_from_dict(found.messages)
-
-    async def _chosen_model(self, model_id: str, effort: object) -> ModelSpec:
-        key = (model_id, effort if isinstance(effort, str) else None)
-        chosen = self._chosen.get(self._backend.run)
-        if key not in chosen:
-            choice = ChosenModel(run_id=run_id(), model_id=key[0], effort=key[1])
-            chosen[key] = await call(self._backend, MODEL_CHOICE, choice)
-        return chosen[key]
-
-    async def _model_for(self, held: Mapping[str, object]) -> ModelSpec | None:
-        """The run's own model, a route's, or the one a person asked for."""
-        requested = held.get("requested_model")
-        if isinstance(requested, str) and requested:
-            return await self._chosen_model(requested, held.get("requested_effort"))
-        models = self._models
-        if models is None:
-            return None
-        route = held.get("model_route")
-        routed = models.routes.get(_normalized(route)) if isinstance(route, str) else None
-        if routed is not None and route != "default":
-            return routed
-        selected = held.get("selected_model_id")
-        if isinstance(selected, str) and selected and selected != models.model.model_id:
-            return await self._chosen_model(selected, held.get("selected_effort"))
-        return models.model
 
     def _system_prompt(self, held: Mapping[str, object]) -> tuple[str, str, str]:
         """The prompt every thread shares, the part its workspace's threads share, and the
@@ -656,6 +678,12 @@ class RunLoop:
             return PhaseResult()
         held = _held(state)
         update: dict[str, JsonValue] = {}
+        if is_model_failure_reply(last):
+            # Asking the model again would wait out the same outage or refusal: what was
+            # written for it is the run's answer.
+            if self.rules.reply is not None and held.get("reply_surface") == "slack":
+                await self._reply_on_behalf(state, content_text(last.content))
+            return PhaseResult(update={"reply_nudges": 0, "cli_result_nudges": 0})
         if self.rules.cli_result is not None:
             asked = self._cli_result(self.rules.cli_result, state, held, update)
             if asked is not None:
@@ -914,12 +942,15 @@ class RunLoop:
                 jump_to="model",
             )
         # Silence is the one outcome the person cannot recover from.
-        if text := turn.last_answer():
-            reply = run_call(ReplyOnBehalf, run_id(), state, text=text)
-            await call(self._backend, REPLY_ON_BEHALF, reply)
-        else:
-            logger.warning("Nothing to post on the model's behalf: it wrote no text this turn")
+        await self._reply_on_behalf(state, turn.last_answer())
         return PhaseResult(update={**update, "reply_nudges": 0})
+
+    async def _reply_on_behalf(self, state: Mapping[str, object], text: str) -> None:
+        if not text:
+            logger.warning("Nothing to post on the model's behalf: it wrote no text this turn")
+            return
+        reply = run_call(ReplyOnBehalf, run_id(), state, text=text)
+        await call(self._backend, REPLY_ON_BEHALF, reply)
 
     @staticmethod
     def _replied(rules: ReplyRules, turn: _Turn) -> bool:

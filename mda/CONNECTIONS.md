@@ -11,6 +11,7 @@ Each backend setting is off until set, and unset keeps that credential on the ba
 | `open-swe-exa` | agent | `web_search` | `MDA_EXA_CONNECTION=open-swe-exa` |
 | `open-swe-github-<env>` | user | `open_pull_request`, for the requester's own PR | `MDA_GITHUB_USER_CONNECTION=open-swe-github-<env>` |
 | `open-swe-mcp-<server>` | agent or user | An MCP server whose Robin record names the connection | `connection` on the server's record |
+| `mda/linear-token` | agent | Also Linear's MCP server (`https://mcp.linear.app`), an instance or workspace server whose record names it; the Linear channel's `mda deploy` keeps it | `connection` on the server's record |
 
 ## 0. Prepare the shell
 
@@ -115,6 +116,11 @@ Then save the server's record with the connection and the tools to allow, throug
 
 The credential goes as `Authorization: Bearer <credential>`, or as it is in the header `connection_header` names, such as `DD_API_KEY`.
 The dashboard's forms do not set `connection` yet.
+
+Linear's MCP server needs no connection of its own: it reads the Linear channel's app token, `mda/linear-token`, which the channel's `mda deploy` keeps and Agent Auth renews.
+Linear holds one app token per app, so a server that requests its own, such as with client credentials for the same app, revokes the channel's.
+Save the server with `"connection": {"slug": "mda/linear-token", "owner": "agent"}`, no `oauth` or headers, and a URL on `https://mcp.linear.app` (`/mcp`, `/mcp/readonly` or `/sse`).
+No other server, and no personal server, may name it.
 
 ## 6. Verify
 

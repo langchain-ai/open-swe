@@ -28,6 +28,9 @@ class SlackRequest(BaseModel):
     # Open SWE wrote the request; ``user_id`` is only who the run acts for.
     trigger_system: SystemIdentity | None = None
     thread_id: str | None = None
+    # A branch's new thread starts with what this thread holds (MDA's Slack channel
+    # seeds it), so the Slack messages this thread holds stay out of the prompt.
+    held_thread_id: str = ""
     channel_context: SlackChannelContext | None = None
     team_id: str = ""
     reply_thread_ts: str = ""
@@ -36,6 +39,14 @@ class SlackRequest(BaseModel):
     context_channel_id: str = ""
     breakout_root_suffix: str | None = None
     prior_message_text: str = ""
+    # A breakout's workspace, inherited from the thread it broke out of.
+    inherited_workspace: str | None = None
+    # A `/btw` question, answered on this request's thread rather than as a turn.
+    by_the_way: str | None = None
+    # A bare `/breakout` in a conversation MDA's channel holds: the run moves the thread,
+    # into ``move_channel_id`` when the command names another Slack channel.
+    move_thread: bool = False
+    move_channel_id: str = ""
     # Guidance for this turn alone, from whatever stood in for a typed message.
     turn_context: str = ""
     treat_all_messages_as_mentions: bool = False

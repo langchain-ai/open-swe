@@ -10,6 +10,7 @@ import pytest
 from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.slack import thinking as slack_thinking
 from openswe.users import User
+from tests.conftest import serve_runs_from
 
 dispatch = importlib.import_module("openswe.dispatch")
 
@@ -291,6 +292,7 @@ async def test_dispatch_uses_moved_slack_destination_from_metadata(
     client.threads.get.return_value = {
         "metadata": {"source_context": {"slack_thread": {"channel_id": "C2", "thread_ts": "2.0"}}}
     }
+    serve_runs_from(monkeypatch, client)
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     await dispatch.create_durable_run(
@@ -318,6 +320,7 @@ async def test_dispatch_reads_task_state_if_run_finishes_before_status_sync(
             "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
         }
     }
+    serve_runs_from(monkeypatch, client)
     set_status = AsyncMock()
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     await dispatch.create_durable_run(

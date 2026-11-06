@@ -19,7 +19,7 @@ The backend is a set of stateless APIs MDA calls: typed endpoints at `/agent-api
 Shape new behavior to fit:
 
 - Control flow (when to nudge, route, stop, refresh) is middleware in `mda/rt`; checks around the file and shell tools go in `rt/file_tools.py`.
-- Work that needs the backend's credentials or data is a named `Endpoint` for that work (`route_model`, `task_context`), never a generic phase call or an untyped body.
+- Work that needs the backend's credentials or data is a named `Endpoint` for that work (`model_choice`, `refresh_github_proxy`), never a generic phase call or an untyped body.
 - Data fixed for a run is worked out once when the backend starts it and sent in the run context (`Catalog`, `openswe/agent_api/client.py`); a call that needs a fact derives it from the token.
 - State kept between calls lives in MDA's run state or PostgreSQL, never in backend memory.
 
@@ -57,6 +57,7 @@ The backend never runs middleware around a model call; the only middleware objec
 - Model-facing prompts live in `openswe/resources/prompts/` as `<name>.md` or `<name>.md.jinja`, rendered with `prompt("<dir>/<name>")`.
   Never inline prompt text in Python.
   User-facing copy (UI labels, Slack/GitHub notifications) may stay inline.
+  Exception: a prompt only an MDA channel handler renders lives in `mda/prompts/`, rendered with `rt.prompts.prompt`; so do the route classifier's prompts, copies of the backend's that `tests/agent/test_mda_routing_prompts.py` keeps in step, and the prompts the tools MDA runs itself answer with, which `tests/agent/test_mda_local_results.py` keeps in step.
 - Internal agent notifications use `RunMessage` and the builders in `openswe/input_messages.py` (`system_input` or `build_input_messages`), not bare prose or feature-specific queue payloads.
   Preserve structured messages through delivery instead of wrapping their envelopes again.
   For model-only context, use the structured sender to exclude it from pending previews and the transcript; do not suppress ordinary human follow-ups or user-facing events.
@@ -109,6 +110,12 @@ Never run the full test suite locally; run only tests related to the change.
 
 `mda/` is its own project: its tests live in `mda/tests/` and run in its own environment (`make mda-test`, `make mda-typecheck`).
 Never import `openswe` there; test each side of an endpoint against the models it exchanges.
+Exception for channel input: a channel handler in `mda/` that writes a run's input keeps its own copy of what it needs from the backend, and only that: the `<input-message>` envelope (`mda/rt/input_messages.py`, standard library only, held byte-identical to `openswe.input_messages` by `tests/agent/test_mda_input_messages.py`) fetching the images a message links to (`mda/rt/images.py`, over `rt.public_http`), reading the repository a message names (`mda/rt/repositories.py`, standard library only, held to `openswe.utils.repo` by `tests/agent/test_mda_repositories.py`), and fencing someone else's words as untrusted (`mda/rt/untrusted.py`, standard library only, held byte-identical to `openswe.github.comments` by `tests/agent/test_mda_untrusted.py`).
+The GitHub channel writes an issue mention's run and an automation's prompt (`mda/rt/github_issues.py`, `mda/rt/github_automations.py`) byte for byte as the backend did; `mda/tests/github_prompt_backend.json` holds what the backend wrote.
+Exception for the tools MDA runs itself (`ToolSpec.runtime_runs`): what those that read only their arguments answer (`mda/rt/local_results.py`, standard library only) is held byte-identical to the backend's tools by `tests/agent/test_mda_local_results.py`; change both together.
+The GitHub channel's switchboard (`mda/rt/github_routes.py`, standard library and `runtime_api` only) keeps the backend's GitHub action sets and its mention pattern, held to `openswe.webhooks.common` by `tests/agent/test_mda_github_routes.py`; the handles themselves come from the backend with each delivery.
+The backend still checks anything that grants access, such as a run's repository, before it signs the run.
+Change the backend's envelope and the copy together.
 
 Tests are maintenance cost.
 Add one only when you can name a concrete regression existing coverage would miss.

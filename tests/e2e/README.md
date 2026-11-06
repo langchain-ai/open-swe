@@ -28,7 +28,7 @@ All agent code runs for real.
 | Pinned uv `dcode --acp`, tools, and local project                | **real**; only its model class points at `fake_llm.py`                      |
 | LangSmith snapshot service (capture/delete)                      | **fake** (`patches.py`) — the stand-in sandbox has nothing to snapshot      |
 | GitHub App token mint + installation lookup, `api.github.com/user` identity | stubbed (offline)                                              |
-| GitHub webhook deliveries (CI, review, PR events)                | **real** route, driven by `POST /control/github-event` (signed)            |
+| GitHub webhook deliveries (CI, review, PR events)                | **real** channel API, routed as MDA does, driven by `POST /control/github-event` |
 | Run-completion webhook (`/webhooks/run-complete`)                | **real** — LangGraph delivers it for every dispatched run; `langgraph.e2e.json` allows the loopback URL production rejects |
 | Submitted PR reviews, conditional merge, collaborator permission  | **fake** (`/fake-gh/...`), enforcing self-approval and head-SHA rules      |
 | Review page chat (the PR's `agent` thread) and its diff/comment/review tools | **real**; PR contents, compare and inline comments served by `/fake-gh`    |

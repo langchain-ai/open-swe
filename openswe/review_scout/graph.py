@@ -21,6 +21,7 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
+from runtime_api.models import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from runtime_api.provenance import Provenance
 
 from openswe.dashboard.options import gate_fable_model
@@ -54,7 +55,6 @@ from openswe.tools.record_human_input import record_human_input
 from openswe.tools.suggest_task import suggest_task
 from openswe.ui_invalidations import Topic
 from openswe.utils.deferred_model import make_deferred_error_model
-from openswe.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from openswe.walkthrough.checkout import CheckoutError, PinnedCheckout
 from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
 from openswe.walkthrough.record import PlanMovedError, Walkthrough

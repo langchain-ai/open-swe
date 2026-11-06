@@ -277,7 +277,6 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
         if value is not None:
             wakeup_configurable[key] = value
     active = await get_active_slack_thread(
-        client,
         thread_id,
         cfg.slack_thread.dump() if cfg.slack_thread else None,
     )

@@ -15,7 +15,6 @@ from openswe.slack.payloads import SlackChannelContext, SlackEvent
 from openswe.slack.records import resolve_slack_thread_id
 from openswe.slack.request import SlackRequest
 from openswe.slack.thinking import restore_slack_thinking_status
-from openswe.utils.thread_ops import langgraph_client
 from openswe.webhooks import common
 
 logger = logging.getLogger(__name__)
@@ -103,9 +102,7 @@ async def _dispatch(request: SlackRequest) -> None:
         return
     await restore_slack_thinking_status(request.channel_id, request.thread_ts)
     try:
-        thread_id = await resolve_slack_thread_id(
-            langgraph_client(), request.channel_id, request.thread_ts
-        )
+        thread_id = await resolve_slack_thread_id(request.channel_id, request.thread_ts)
     except SlackThreadMappingError as exc:
         raise SlackRequestError(
             "Robin found conflicting state for this Slack thread and will not guess "

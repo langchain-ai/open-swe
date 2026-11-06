@@ -3,7 +3,6 @@ from typing import Any
 from langgraph.config import get_config
 
 from openswe.slack.client import add_slack_reaction, get_active_slack_thread
-from openswe.utils.thread_ops import langgraph_client
 
 
 async def slack_add_reaction(
@@ -16,7 +15,6 @@ async def slack_add_reaction(
     slack_thread = configurable.get("slack_thread", {})
     thread_id = configurable.get("thread_id")
     active = await get_active_slack_thread(
-        langgraph_client(),
         thread_id if isinstance(thread_id, str) else None,
         slack_thread if isinstance(slack_thread, dict) else None,
     )

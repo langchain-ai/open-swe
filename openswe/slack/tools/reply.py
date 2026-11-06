@@ -139,7 +139,6 @@ async def send_slack_reply(
         return await _ephemeral_reply(cfg, message, blocks, options, state)
     client = get_langgraph_client()
     active = await get_active_slack_thread(
-        client,
         thread_id,
         slack_thread if isinstance(slack_thread, dict) else None,
     )
@@ -174,7 +173,7 @@ async def send_slack_reply(
         else str(thread_ts)
     )
 
-    async with slack_thread_mutation_lock(client, channel_id, thread_ts):
+    async with slack_thread_mutation_lock(channel_id, thread_ts):
         if state and run_id:
             conflict = await _stale_reply_guard(state, channel_id, post_thread_ts, run_id)
             if conflict is not None:

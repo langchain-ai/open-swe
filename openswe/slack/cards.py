@@ -3,8 +3,6 @@
 import logging
 from collections.abc import Awaitable, Callable
 
-from langgraph_sdk import get_client
-
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import Block, block_payload, context
 from openswe.slack.client import (
@@ -30,9 +28,7 @@ async def origin_footer(
     if url := dashboard_thread_url(thread_id):
         links.append(f"<{url}|Web thread>")
     if location is None and (thread_id or fallback):
-        source = await get_active_slack_thread(
-            get_client(), thread_id, fallback.dump() if fallback else None
-        )
+        source = await get_active_slack_thread(thread_id, fallback.dump() if fallback else None)
         if source and source.get("channel_id") and source.get("thread_ts"):
             location = (source["channel_id"], source["thread_ts"])
     if location and (url := await get_slack_permalink(*location)):
@@ -43,7 +39,7 @@ async def origin_footer(
 async def run_slack_location(cfg: RunConfig, thread_id: str) -> tuple[str, str]:
     """The run's own Slack ``(channel_id, thread_ts)``; either may be empty."""
     slack_thread = await get_active_slack_thread(
-        get_client(), thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
+        thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
     )
     channel_id = str((slack_thread or {}).get("channel_id") or "")
     thread_ts = str((slack_thread or {}).get("thread_ts") or "")

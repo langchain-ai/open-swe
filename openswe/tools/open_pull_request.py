@@ -876,7 +876,6 @@ async def _record_pr_telemetry(
                     exc_info=True,
                 )
             active = await get_active_slack_thread(
-                get_client(),
                 thread_id,
                 cfg.slack_thread.dump() if cfg.slack_thread else None,
             )
@@ -946,7 +945,6 @@ async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
 
     if cfg.source == "slack":
         active = await get_active_slack_thread(
-            get_client(),
             cfg.thread_id,
             cfg.slack_thread.dump() if cfg.slack_thread else None,
         )

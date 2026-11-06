@@ -3,7 +3,7 @@
 Provider collections use ``<primitive>.<provider>(...)`` namespaces, while
 resources use ``define_*`` factories::
 
-    channels.slack(name="Support Bot", description="Answers support questions")
+    channels.slack(app={"name": "Support Bot", "description": "Answers support questions"})
     define_mcp(servers={...})
     define_sandbox(default_timeout=600)
     auth.supabase(project_ref="abc")

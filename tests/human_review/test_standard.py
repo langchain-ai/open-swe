@@ -28,7 +28,7 @@ from openswe.human_review.standard import (
 from openswe.slack.blocks import block_payload, section
 from openswe.slack.http import SlackRequestError
 from openswe.users import User, UserIdentity
-from tests.conftest import FakeUserRecords
+from tests.conftest import FakeUserRecords, serve_threads_from
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
@@ -714,7 +714,11 @@ async def test_approved_card_collapses_without_closing_the_request(
 @pytest.mark.parametrize("outcome", [None, "merged"])
 @pytest.mark.parametrize("source", ["unavailable", "moved", "detached"])
 async def test_review_card_keeps_its_originating_slack_thread(
-    in_thread: bool, outcome: str | None, source: str, github_app: AsyncMock
+    in_thread: bool,
+    outcome: str | None,
+    source: str,
+    github_app: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
     request = HumanReviewRequest(
@@ -743,10 +747,10 @@ async def test_review_card_keeps_its_originating_slack_thread(
         },
         side_effect=RuntimeError("Metadata unavailable") if source == "unavailable" else None,
     )
+    serve_threads_from(monkeypatch, client.threads.get)
     with (
         patch.object(ReviewCard, "_review_states", AsyncMock(return_value={})),
         patch.object(ReviewCard, "_warn_target", side_effect=lambda card: card),
-        patch("openswe.slack.cards.get_client", return_value=client),
         patch(
             "openswe.slack.cards.get_slack_permalink",
             AsyncMock(
@@ -1152,8 +1156,6 @@ async def test_only_auto_merge_requests_merge_when_approved(
     from openswe.human_review.merging import MergeResult
     from openswe.human_review.picking import Coverage
 
-    client = MagicMock()
-
     async def thread(thread_id: str) -> MagicMock | None:
         if thread_id == "deleted":
             return None
@@ -1164,10 +1166,10 @@ async def test_only_auto_merge_requests_merge_when_approved(
                 return MagicMock(status=activity, runtime="mda")
         return MagicMock(status="idle", runtime="mda")
 
-    async def runs(thread_id: str, *, status: str, limit: int) -> list[dict[str, str]]:
-        return [{"status": status}] if activity == status else []
+    async def active(thread_id: str) -> bool:
+        return activity in {"pending", "running"}
 
-    client.runs.list = AsyncMock(side_effect=runs)
+    threads = MagicMock(has_active_run=AsyncMock(side_effect=active))
     pr = PullRequest(owner="lc", repo="repo", number=7, author=author)
     pr.threads = [
         ThreadLink(thread_id="implementation", role="primary"),
@@ -1221,7 +1223,7 @@ async def test_only_auto_merge_requests_merge_when_approved(
         patch.object(ReviewCard, "mark_merged", AsyncMock()),
         patch.object(ReviewCard, "refresh", AsyncMock()),
         patch.object(standard.index, "get", AsyncMock(side_effect=thread)),
-        patch.object(standard.RUNTIMES, "runs_on", return_value=MagicMock(client=client)),
+        patch.object(standard.RUNTIMES, "runs_on", return_value=threads),
         patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
         patch.object(
             standard, "merge_pull_request", AsyncMock(return_value=MergeResult("merged", "Merged"))

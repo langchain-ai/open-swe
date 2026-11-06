@@ -15,14 +15,12 @@ from langchain_core.messages import ToolCall, ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
-from langgraph_sdk import get_client
 
 from openswe.middleware.pr_creation_guard import executable_name, shell_commands, shell_tokens
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.run_config import RunConfig
 from openswe.sandboxes.state import SANDBOX_BACKENDS, get_sandbox_backend
 from openswe.slack.client import (
-    LANGGRAPH_URL,
     get_active_slack_thread,
     post_slack_thread_reply_with_ts,
 )
@@ -733,7 +731,6 @@ async def _post_slack_approval_if_needed(
         return
     cfg = _configurable(request)
     active = await get_active_slack_thread(
-        get_client(url=LANGGRAPH_URL),
         cfg.thread_id,
         cfg.slack_thread.dump() if cfg.slack_thread else None,
     )

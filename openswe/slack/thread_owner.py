@@ -9,7 +9,6 @@ from openswe.slack import webhook
 from openswe.slack.channels import SlackChannel
 from openswe.slack.records import resolve_slack_thread_id
 from openswe.slack.request import SlackRequest
-from openswe.utils.thread_ops import langgraph_client
 from openswe.webhooks import common
 
 logger = logging.getLogger(__name__)
@@ -26,7 +25,7 @@ class ThreadOwnerWakeError(Exception):
 
 async def wake_thread_owner(channel_id: str, thread_ts: str, slack_user_id: str, event: str) -> str:
     """Start a run for the thread's owning agent, acting for ``slack_user_id``, about ``event``."""
-    thread_id = await resolve_slack_thread_id(langgraph_client(), channel_id, thread_ts)
+    thread_id = await resolve_slack_thread_id(channel_id, thread_ts)
     channel_context = await SlackChannel.context_for(channel_id)
     repo = await common.get_slack_repo_config(
         channel_id,

@@ -20,7 +20,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Self
 from uuid import UUID, uuid4, uuid7
 
-from langgraph_sdk.client import LangGraphClient
 from sqlalchemy import (
     ColumnElement,
     ForeignKey,
@@ -540,9 +539,7 @@ def _thread_metadata_slack_location(thread: Mapping[str, object]) -> tuple[str, 
         return None
 
 
-async def resolve_slack_thread_id(
-    langgraph_client: LangGraphClient, channel_id: str, thread_ts: str
-) -> str:
+async def resolve_slack_thread_id(channel_id: str, thread_ts: str) -> str:
     """The Open SWE thread bound to a Slack location, binding one first if none is.
 
     A location bound to a thread that takes no new activity moves to its successor.
@@ -562,17 +559,18 @@ async def resolve_slack_thread_id(
             return live
         return await bind_slack_thread_id(channel, timestamp, live, replacing=mapping.thread_id)
 
-    matches = await langgraph_client.threads.search(
+    # The thread index, as the backend's own ``/threads/search`` reads it.
+    found = await index.ThreadSearch(
         metadata={
             "source_context": SourceContext(
                 slack_thread=SlackThreadRef(channel_id=channel, thread_ts=timestamp)
             ).dump()
         },
         limit=2,
-    )
+    ).run()
     matching_ids = {
         candidate
-        for thread in matches or []
+        for thread in (match.as_langgraph() for match in found)
         if isinstance(thread, Mapping)
         and _thread_metadata_slack_location(thread) == (channel, timestamp)
         and isinstance(candidate := thread.get("thread_id") or thread.get("id"), str)

@@ -15,7 +15,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx2
-from langgraph_sdk.client import LangGraphClient
 from pydantic import BaseModel, ConfigDict, ValidationError
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
@@ -1652,7 +1651,6 @@ async def fetch_slack_thread_messages(
 
 @asynccontextmanager
 async def slack_thread_mutation_lock(
-    langgraph_client: LangGraphClient,
     channel_id: str,
     thread_ts: str,
     *,
@@ -1677,7 +1675,7 @@ async def slack_thread_mutation_lock(
             raise TimeoutError("Timed out waiting for the Slack thread mutation lock")
         await asyncio.sleep(_SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS)
     try:
-        yield await get_active_slack_thread(langgraph_client, thread_id) if thread_id else None
+        yield await get_active_slack_thread(thread_id) if thread_id else None
     finally:
         try:
             await event_claims.release(_SLACK_THREAD_MUTATION_LOCK_SCOPE, lock_key)
@@ -1996,15 +1994,17 @@ def normalize_slack_location(channel_id: str, thread_ts: str) -> tuple[str, str]
 
 
 async def get_active_slack_thread(
-    langgraph_client: LangGraphClient,
     thread_id: str | None,
     fallback: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Return the active Slack location stored on an Open SWE thread."""
     if thread_id:
         try:
-            thread = await langgraph_client.threads.get(thread_id)
-            metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
+            # The thread index, which the backend's own thread routes read too.
+            from openswe.threads.store import THREADS  # noqa: PLC0415 - imports Slack
+
+            thread = await THREADS.get(thread_id)
+            metadata = thread.metadata if thread is not None else None
             context = SourceContext.from_metadata(metadata)
             if context.slack_thread is not None:
                 normalize_slack_location(

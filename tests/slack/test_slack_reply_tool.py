@@ -296,7 +296,7 @@ async def test_freshness_conflict_shows_the_model_images_posted_meanwhile(
 async def test_code_channel_reply_stays_in_user_started_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def active_thread(_client: Any, thread_id: str, _fallback: Any) -> dict[str, str]:
+    async def active_thread(thread_id: str, _fallback: Any) -> dict[str, str]:
         assert thread_id == "thread-code"
         return {"channel_id": "C-code", "thread_ts": "0"}
 

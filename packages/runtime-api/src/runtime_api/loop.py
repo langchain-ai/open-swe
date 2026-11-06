@@ -2,9 +2,11 @@
 
 The runtime's middleware runs the loop: it nudges, routes, assembles each call
 and ends the run as the catalog's ``LoopRules`` say. It asks the backend only for
-what needs the backend's data or credentials, one named call each: the route a
-task takes, the reminders a person's message calls for, a model's settings, the task a thread belongs to, the incident a run
-investigates, a fresh GitHub proxy token, a reply posted on the model's behalf, and what the end of the run records.
+what needs the backend's data or credentials, one named call each: the reminders a
+person's message calls for, a model's settings, the incident a run investigates, a fresh
+GitHub proxy token, a reply posted on the model's behalf, and what the end of the run
+records. The runtime classifies each turn's route itself, and the catalog says which
+task the thread belongs to.
 The transcript and usage hear of the run's start, each reply and tool call, and the
 run's end.
 
@@ -23,7 +25,7 @@ from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, Field, JsonValue
 
-from runtime_api.catalog import InboxSpec, ModelSpec
+from runtime_api.catalog import InboxSpec, ModelSpec, TaskContext
 from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
 from runtime_api.operations import RunRequest
 
@@ -184,7 +186,22 @@ class RunEnded(Report):
     replies: list[dict[str, JsonValue]] = []
 
 
+class ModelFailed(Report):
+    """A model call the run cannot recover from, classified while its exception is intact.
+
+    The run fails with it and never reports its end, and the completion webhook sees
+    only the exception's class name: the failure reply reads the code recorded here.
+    """
+
+    # ``runtime_api.model_errors.classify_exception``'s code for the exception.
+    code: str
+    # The exception's class name, which the run fails with.
+    error_type: str
+
+
 class Routed(RunRequest):
+    """A run's request with its human messages, for ``INCIDENT_CONTEXT`` (and the deprecated ``ROUTE_MODEL``)."""
+
     # The run's human messages, the latest of which the route is for.
     humans: list[dict[str, JsonValue]] = []
 
@@ -243,6 +260,8 @@ class Done(BaseModel):
 
 
 class Route(BaseModel):
+    """Deprecated, with ``ROUTE_MODEL``."""
+
     # One of the routes ``RoutingRules.route_model_ids`` names, or ``default``.
     route: str
     # False when the classifier could not decide; the run uses the route for this
@@ -267,16 +286,6 @@ class ChosenModel(RunRequest):
 
     model_id: str
     effort: str | None = None
-
-
-class TaskContext(BaseModel):
-    """The task the thread belongs to, as each model call tells the model."""
-
-    # The thread's role in the task, added to the conversation when it differs from the
-    # role the model last saw there.
-    instructions: str | None = None
-    # The task's context, added to the conversation where the model no longer sees it.
-    message: str | None = None
 
 
 GoalState = Literal["working", "waiting", "waiting_on_user", "paused"]
@@ -336,7 +345,9 @@ SANDBOX_REPLACED = Endpoint("sandbox_replaced", RunRequest, Done, seconds=LOOP_C
 SANDBOX_UNREACHABLE = Endpoint("sandbox_unreachable", SandboxGone, Done, seconds=LOOP_CALL_SECONDS)
 # For the dashboard to show the thread's browser.
 BROWSER = Endpoint("browser", BrowserReport, Done, seconds=LOOP_CALL_SECONDS)
-# Classifies the task the conversation asks for; only reads, so it is safe to send again.
+# Deprecated: the runtime classifies a route and reads the task's context from its
+# catalog itself. Served until every MDA deployment does; a deployment from before
+# asks them, and deploys apart from the backend (``deploy_mda.yml``).
 ROUTE_MODEL = Endpoint(
     "route_model", Routed, Route, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
@@ -344,11 +355,11 @@ ROUTE_MODEL = Endpoint(
 REMINDERS = Endpoint(
     "reminders", PersonMessage, Reminders, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
-MODEL_CHOICE = Endpoint(
-    "model_choice", ChosenModel, ModelSpec, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
-)
 TASK_CONTEXT = Endpoint(
     "task_context", RunRequest, TaskContext, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+)
+MODEL_CHOICE = Endpoint(
+    "model_choice", ChosenModel, ModelSpec, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 # Checks the incident still wants the run and records the evidence its messages carry,
 # each once: safe to send again.
@@ -371,6 +382,8 @@ SET_GOAL = Endpoint("set_goal", GoalChange, Done, seconds=LOOP_CALL_SECONDS)
 RUN_STARTED = Endpoint("run_started", RunStarted, Done, seconds=LOOP_CALL_SECONDS)
 # The run ended: the transcript closes its turn and usage is finalized.
 RUN_ENDED = Endpoint("run_ended", RunEnded, Done, seconds=LOOP_CALL_SECONDS)
+# A model call failed the run: why, for the failure reply.
+MODEL_FAILED = Endpoint("model_failed", ModelFailed, Done, seconds=LOOP_CALL_SECONDS)
 # The run ended at its model-call limit: the person is told.
 STEP_LIMIT_REACHED = Endpoint("step_limit_reached", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
 # A review run ended: its check run on the pull request is settled if it was not.

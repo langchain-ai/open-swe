@@ -5,15 +5,11 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from langgraph_sdk import get_client
-
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.github.thread_token import resolve_thread_github_token
-from openswe.linear.notifications import post_linear_notification
 from openswe.run_config import RunConfig
 from openswe.slack.client import (
-    LANGGRAPH_URL,
     SANDBOX_UNREACHABLE_NOTICE,
     SlackNotice,
     get_active_slack_thread,
@@ -79,7 +75,6 @@ def extract_sandbox_id(text: str) -> str | None:
 
 async def get_slack_target(cfg: RunConfig) -> tuple[str, str] | None:
     active = await get_active_slack_thread(
-        get_client(url=LANGGRAPH_URL),
         cfg.thread_id,
         cfg.slack_thread.dump() if cfg.slack_thread else None,
     )
@@ -142,10 +137,6 @@ async def post_sandbox_unreachable_notification(
         else:
             await post_slack_thread_reply(channel_id, thread_ts, message, notice=notice)
         logger.info("Sent sandbox unreachable notification to Slack thread %s", thread_ts)
-        return
-
-    if cfg.linear_issue and cfg.linear_issue.id:
-        await post_linear_notification(cfg.linear_issue.id, message)
         return
 
     github_target = _get_github_target(cfg)

@@ -1,10 +1,11 @@
 import asyncio
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Literal, cast
 from unittest.mock import AsyncMock
 from xml.etree import ElementTree
 
 import pytest
+from runtime_api.slack import SlackTurnDeclined
 
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.run_config import Repo
@@ -390,7 +391,7 @@ def _setup_slack_mention_fakes(
     async def fake_post_prompt(*args, **kwargs) -> None:
         captured["prompt"] = {"args": args, "kwargs": kwargs}
 
-    async def fake_resolve_slack_thread_id(client, channel_id, thread_ts):
+    async def fake_resolve_slack_thread_id(channel_id, thread_ts):
         return "mapped-thread"
 
     monkeypatch.setattr(webhook_common, "post_slack_trace_reply", fake_post_slack_trace_reply)
@@ -574,7 +575,7 @@ async def test_slack_files_wait_for_the_sandbox_mda_opens_for_the_run(
 async def test_a_channel_run_does_not_wait_on_the_sandbox_for_slack_files(slack_file_mention):
     request, threads, captured = slack_file_mention
 
-    prepared = await slack_webhooks.prepare_slack_channel_run(request, None)
+    prepared, _ = await slack_webhooks.prepare_slack_channel_run(request, None)
 
     # MDA's channel starts the run; nothing holds up its answer for a sandbox.
     assert prepared is not None
@@ -778,6 +779,59 @@ def test_process_slack_mention_mapped_user_unusable_token_prompts_revoked(
 
     assert "run_create" not in captured
     assert captured["prompt"] == {"reason": "revoked"}
+
+
+@pytest.mark.parametrize(
+    ("has_token_record", "reason"), [(False, "sign_in"), (True, "sign_in_again")]
+)
+def test_a_turn_built_for_mdas_slack_channel_says_why_instead_of_prompting(
+    monkeypatch: pytest.MonkeyPatch,
+    has_token_record: bool,
+    reason: Literal["sign_in", "sign_in_again"],
+) -> None:
+    """MDA's Slack channel replies with the decline; the backend posts no prompt itself."""
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+    prompt = AsyncMock()
+    monkeypatch.setattr(webhook_common, "thread_exists", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        webhook_common.User,
+        "login_for_slack",
+        AsyncMock(return_value="mason-gh" if has_token_record else None),
+    )
+    monkeypatch.setattr(webhook_common.User, "login_for_email", AsyncMock(return_value=None))
+    monkeypatch.setattr(webhook_common, "get_valid_access_token", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        webhook_common, "has_access_token_record", AsyncMock(return_value=has_token_record)
+    )
+    monkeypatch.setattr(webhook_common, "post_account_link_prompt", prompt)
+    monkeypatch.setattr(
+        slack_webhooks, "build_settings_url", lambda: "https://openswe.test/settings"
+    )
+
+    prepared, _ = asyncio.run(
+        slack_webhooks.prepare_slack_channel_run(
+            SlackRequest(
+                channel_id="C123",
+                thread_ts="1700000000.000100",
+                event_ts="1700000000.000200",
+                user_id="U123",
+                text="<@UBOT> do the thing",
+                bot_user_id="UBOT",
+                thread_id="11111111-1111-4111-8111-111111111111",
+            ),
+            webhook_common.SlackRepoResolution(
+                Repo(owner="langchain-ai", name="open-swe"), explicit=True
+            ),
+            declines=True,
+        )
+    )
+
+    assert prepared == SlackTurnDeclined(
+        reason=reason, settings_url="https://openswe.test/settings"
+    )
+    assert "run_create" not in captured
+    prompt.assert_not_awaited()
 
 
 @pytest.fixture

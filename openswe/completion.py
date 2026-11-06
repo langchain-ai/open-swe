@@ -26,6 +26,7 @@ from typing import Any
 
 from langchain_core.messages import convert_to_messages
 from langgraph_sdk.client import LangGraphClient
+from runtime_api.model_errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 
 from openswe import event_claims
 from openswe.agent_cost import finalize_agent_invocation_usage
@@ -34,7 +35,6 @@ from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata, channel_of
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
-from openswe.linear.notifications import post_linear_notification
 from openswe.review.findings import REVIEWER_SHADOW_THREAD_KIND, REVIEWER_THREAD_KIND
 from openswe.review.goal_review import GoalReview
 from openswe.review.run_failure import ReviewRunFailure
@@ -47,14 +47,13 @@ from openswe.slack.client import (
 )
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
 from openswe.slack.routed_work import RoutedWork
-from openswe.slack.thinking import sync_slack_background_status
+from openswe.slack.thinking import refresh_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
 from openswe.threads.goal import ThreadGoals
 from openswe.threads.status import refresh_thread_status
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
-from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.langsmith import get_langsmith_error_url
 from openswe.utils.thread_ops import langgraph_client
@@ -232,13 +231,6 @@ async def _post_failure_reply(
             )
         return False
 
-    if source == "linear":
-        if ctx.linear_issue and ctx.linear_issue.id:
-            return await post_linear_notification(
-                ctx.linear_issue.id, _failure_text(status, reason_code=reason_code)
-            )
-        return False
-
     if source in ("github", "github_issue"):
         repo_config = metadata.get("repo")
         number = ctx.pr_number
@@ -392,7 +384,7 @@ async def _handle_successful_run(
     if metadata.get("kind") in {REVIEWER_THREAD_KIND, REVIEWER_SHADOW_THREAD_KIND}:
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
-    await sync_slack_background_status(client, thread_id)
+    await refresh_slack_background_status(thread_id)
     payload_metadata = payload.get("metadata")
     invocation_id = _invocation_id(payload)
     if invocation_id is None:
@@ -580,7 +572,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     if status in _TERMINAL_RUN_STATUSES:
         await RoutedWork(thread_id).settle_origins()
     if is_worker:
-        await sync_slack_background_status(langgraph_client(), thread_id)
+        await refresh_slack_background_status(thread_id)
         if status in _TERMINAL_FAILURE_STATUSES:
             _log_run_failure(thread_id, run_id, status, payload.get("error"))
         return {"status": "ok", "reason": "worker completion handled"}
@@ -618,7 +610,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
 
         return await turns.handle_run_completion(thread_id, run_id, str(status))
     await _settle_code_channel_session(client, thread_id, metadata)
-    await sync_slack_background_status(client, thread_id)
+    await refresh_slack_background_status(thread_id)
     if run_id is None:
         # Payloads without run ids fall back to the old per-thread flag; run-scoped
         # dedupe intentionally does not read it so future runs can still report.
@@ -703,7 +695,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         )
     except Exception:  # noqa: BLE001
         logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)
-    await sync_slack_background_status(client, thread_id)
+    await refresh_slack_background_status(thread_id)
     logger.info(
         "Posted failure reply",
         extra={"failure_reply": {"thread_id": thread_id, "status": status, "code": reason_code}},

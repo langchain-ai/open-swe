@@ -1930,7 +1930,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1,<1" },
     { name = "langchain", specifier = ">=1.4.6,<2" },
     { name = "langchain", extras = ["mcp"], marker = "extra == 'test'", specifier = ">=1.4.6,<2" },
-    { name = "langchain-core", specifier = ">=1.6.2,<2" },
+    { name = "langchain-core", specifier = ">=1.7.2,<2" },
     { name = "langgraph", specifier = ">=1.2.15,<2" },
     { name = "langgraph-prebuilt", specifier = ">=1.1.1,<2" },
     { name = "langgraph-sdk", specifier = ">=0.4.6,<0.5" },
@@ -2327,11 +2327,21 @@ name = "open-swe-runtime-api"
 version = "0.0.0"
 source = { editable = "packages/runtime-api" }
 dependencies = [
+    { name = "httpx2" },
+    { name = "langchain" },
+    { name = "langchain-openai" },
+    { name = "langchain-typesafe" },
     { name = "pydantic" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2.11" }]
+requires-dist = [
+    { name = "httpx2", specifier = ">=2.12.0" },
+    { name = "langchain", specifier = ">=1.4.7" },
+    { name = "langchain-openai", specifier = ">=1.7.3,<2.0.0" },
+    { name = "langchain-typesafe", specifier = "==0.0.1" },
+    { name = "pydantic", specifier = ">=2.11" },
+]
 
 [[package]]
 name = "openai"

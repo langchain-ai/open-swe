@@ -38,6 +38,12 @@ from deepagents.middleware.skills import SkillsMiddleware, SkillsState
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
+from runtime_api.models import (
+    DEFAULT_LLM_REASONING,
+    ModelKwargs,
+    make_model,
+    provider_model_kwargs,
+)
 from runtime_api.provenance import Provenance
 
 from openswe.analytics.usage import record_agent_invocation_usage
@@ -103,12 +109,6 @@ from openswe.utils import ttl_cache
 from openswe.utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from openswe.utils.api_standards_skill import fetch_api_standards_skill
 from openswe.utils.deferred_model import make_deferred_error_model
-from openswe.utils.model import (
-    DEFAULT_LLM_REASONING,
-    ModelKwargs,
-    make_model,
-    provider_model_kwargs,
-)
 from openswe.utils.startup_trace import aphase
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = prompt("reviewer/subagent")

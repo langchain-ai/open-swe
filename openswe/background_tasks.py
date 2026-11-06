@@ -22,7 +22,7 @@ from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.sandboxes.connect import connect_sandbox
 from openswe.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY, ToolAccess
-from openswe.slack.thinking import sync_slack_background_status
+from openswe.slack.thinking import refresh_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tools.background_execute import TASK_ROOT, list_tasks
 from openswe.utils.background_task_state import (
@@ -207,7 +207,7 @@ async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Re
     if not isinstance(sandbox_id, str) or not sandbox_id:
         if tracked_ids:
             metadata = await update_background_task_state(client, thread_id, reset=True)
-        await sync_slack_background_status(client, thread_id, metadata=metadata)
+        await refresh_slack_background_status(thread_id, metadata=metadata)
         return _Reconciled({"status": "missing_sandbox"}, None, tracked=True)
     backend = await connect_sandbox(sandbox_id, thread_id=thread_id)
     tasks = await thread_tasks(backend, thread_id, metadata)
@@ -273,8 +273,8 @@ async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Re
             await _unclaim(backend, task_id)
             logger.warning("Failed to deliver background task %s", task_id, exc_info=True)
     pending = sum(task.get("notification") != "done" for task in terminal)
-    await sync_slack_background_status(
-        client, thread_id, metadata=status_metadata, source_context=status_context
+    await refresh_slack_background_status(
+        thread_id, metadata=status_metadata, source_context=status_context
     )
     result = {
         "status": "running" if running or pending else "idle",

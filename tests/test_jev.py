@@ -129,7 +129,7 @@ async def test_missing_credentials_skips_classification(
 async def test_classifier_deadline_cancels_stalled_request(
     monkeypatch: pytest.MonkeyPatch, transport: InstallTransport
 ) -> None:
-    monkeypatch.setattr("openswe.utils.jev.JEV_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr("runtime_api.classifier.JEV_TIMEOUT_SECONDS", 0.01)
     cancelled = asyncio.Event()
 
     async def handle(request: httpx2.Request) -> httpx2.Response:

@@ -1072,7 +1072,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Output"
                 },
                 "type": "object"
               },
@@ -1257,7 +1257,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -1630,7 +1630,7 @@
           },
           "params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Output"
             },
             "title": "Params",
             "type": "object"
@@ -2613,74 +2613,21 @@
         "title": "EnabledReviewRepoUpdate",
         "type": "object"
       },
-      "EndpointAnswer": {
-        "additionalProperties": false,
-        "description": "The run an endpoint answers with: its input, and the run options a handler\nmay set, all JSON. An endpoint answers ``null`` (or HTTP 204) instead to start\nnothing.\n\nExperimental: this may change in a minor release.",
+      "EndpointRequest_SlackEndpointEvent_": {
+        "description": "What a channel POSTs its endpoint: the event, and the thread it belongs to.\n\nTypedDicts, so a receiver validates a request with pydantic, by the channel's\nevent keys, such as ``TypeAdapter(LinearEndpointRequest)``: the key picks the\npayload's type. TypeScript's ``LinearEndpointRequest<K>`` also narrows to one\nkey; in Python, a union alias can't take the key, so a receiver of one key\nnames it as ``EndpointRequest[EndpointEvent[Literal[key], Payload]]``, with the\npayload types the package exports, or narrows on ``request[\"event\"][\"key\"]``.\n\nExperimental: this may change in a minor release.",
         "properties": {
-          "context": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-            },
-            "title": "Context",
-            "type": "object"
+          "event": {
+            "$ref": "#/components/schemas/SlackEndpointEvent"
           },
-          "input": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-                },
-                "type": "object"
-              }
-            ],
-            "title": "Input"
-          },
-          "metadata": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-            },
-            "title": "Metadata",
-            "type": "object"
-          },
-          "webhook": {
-            "title": "Webhook",
-            "type": "string"
+          "thread": {
+            "$ref": "#/components/schemas/EndpointThread"
           }
         },
         "required": [
-          "input"
+          "event",
+          "thread"
         ],
-        "title": "EndpointAnswer",
-        "type": "object"
-      },
-      "EndpointEvent_str_dict_str__JsonValue__": {
-        "description": "The event a channel sends its endpoint, as the provider sent it.\n\n``EndpointEvent[Literal[\"AgentSessionEvent.created\"], LinearSessionCreatedPayload]``\ntypes one event key's payload; ``LinearEndpointRequest`` and\n``GitHubEndpointRequest`` are the unions of a channel's keys.\n\nExperimental: this may change in a minor release.",
-        "properties": {
-          "deliveryId": {
-            "title": "Deliveryid",
-            "type": "string"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "payload": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Input"
-            },
-            "title": "Payload",
-            "type": "object"
-          }
-        },
-        "required": [
-          "key",
-          "deliveryId",
-          "payload"
-        ],
-        "title": "EndpointEvent",
+        "title": "EndpointRequest",
         "type": "object"
       },
       "EndpointThread": {
@@ -3057,23 +3004,6 @@
           "ready"
         ],
         "title": "GatewayStatus",
-        "type": "object"
-      },
-      "GitHubChannelCall": {
-        "description": "What MDA's GitHub channel POSTs: the event and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
-        "properties": {
-          "event": {
-            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__JsonValue__"
-          },
-          "thread": {
-            "$ref": "#/components/schemas/EndpointThread"
-          }
-        },
-        "required": [
-          "event",
-          "thread"
-        ],
-        "title": "GitHubChannelCall",
         "type": "object"
       },
       "GitHubEndpointActor": {
@@ -3639,7 +3569,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "JsonValue-Input": {},
+      "JsonValue-Output": {},
       "LabelChange": {
         "properties": {
           "name": {
@@ -3712,37 +3642,6 @@
           "body"
         ],
         "title": "LineComment",
-        "type": "object"
-      },
-      "LinearChannelCall": {
-        "description": "What MDA's Linear channel POSTs: the event it validated and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
-        "properties": {
-          "event": {
-            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__JsonValue__"
-          },
-          "thread": {
-            "$ref": "#/components/schemas/EndpointThread"
-          }
-        },
-        "required": [
-          "event",
-          "thread"
-        ],
-        "title": "LinearChannelCall",
-        "type": "object"
-      },
-      "LinearDecline": {
-        "description": "An answer that starts nothing and has MDA's Linear channel tell the session why.",
-        "properties": {
-          "decline": {
-            "title": "Decline",
-            "type": "string"
-          }
-        },
-        "required": [
-          "decline"
-        ],
-        "title": "LinearDecline",
         "type": "object"
       },
       "LinearEndpointActor": {
@@ -4461,7 +4360,7 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Output"
                 },
                 "type": "array"
               },
@@ -4690,7 +4589,7 @@
           },
           "settings": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Output"
             },
             "title": "Settings",
             "type": "object"
@@ -5280,7 +5179,7 @@
         "properties": {
           "annotations": {
             "items": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Output"
             },
             "title": "Annotations",
             "type": "array"
@@ -7406,7 +7305,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -7431,7 +7330,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -7703,7 +7602,7 @@
           },
           "tools": {
             "items": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Output"
             },
             "title": "Tools",
             "type": "array"
@@ -9185,27 +9084,6 @@
         "title": "SlackBotOption",
         "type": "object"
       },
-      "SlackChannelCall": {
-        "description": "What MDA's Slack channel POSTs: the event (MDA's ``SlackEndpointEvent``) and its thread.\n\nThe event stays a plain object here: its fields are read one by one below.",
-        "properties": {
-          "event": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Input"
-            },
-            "title": "Event",
-            "type": "object"
-          },
-          "thread": {
-            "$ref": "#/components/schemas/EndpointThread"
-          }
-        },
-        "required": [
-          "event",
-          "thread"
-        ],
-        "title": "SlackChannelCall",
-        "type": "object"
-      },
       "SlackChannelDirectory": {
         "properties": {
           "channels": {
@@ -9299,6 +9177,104 @@
           "teamId"
         ],
         "title": "SlackEndpointActor",
+        "type": "object"
+      },
+      "SlackEndpointEvent": {
+        "description": "The event a Slack channel sends its endpoint: its key, delivery ID and\nSlack's own event as ``payload``, with the fields of ``SlackEndpointFields``.",
+        "properties": {
+          "actionId": {
+            "title": "Actionid",
+            "type": "string"
+          },
+          "actor": {
+            "$ref": "#/components/schemas/SlackEndpointActor"
+          },
+          "channelId": {
+            "title": "Channelid",
+            "type": "string"
+          },
+          "deliveryId": {
+            "title": "Deliveryid",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/SlackEndpointFile"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "messageTs": {
+            "title": "Messagets",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
+          },
+          "reaction": {
+            "title": "Reaction",
+            "type": "string"
+          },
+          "removed": {
+            "title": "Removed",
+            "type": "boolean"
+          },
+          "teamId": {
+            "title": "Teamid",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "threadTs": {
+            "title": "Threadts",
+            "type": "string"
+          },
+          "userId": {
+            "title": "Userid",
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
+          }
+        },
+        "required": [
+          "key",
+          "deliveryId",
+          "payload"
+        ],
+        "title": "SlackEndpointEvent",
+        "type": "object"
+      },
+      "SlackEndpointFile": {
+        "description": "A ``SlackFile`` as an endpoint is sent it.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mimetype": {
+            "title": "Mimetype",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "SlackEndpointFile",
         "type": "object"
       },
       "SlackTrigger": {
@@ -9801,7 +9777,7 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Output"
                 },
                 "type": "array"
               },
@@ -10430,7 +10406,7 @@
           },
           "create_params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Output"
             },
             "title": "Create Params",
             "type": "object"
@@ -10742,7 +10718,7 @@
           },
           "create_params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Input"
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
             },
             "title": "Create Params",
             "type": "object"
@@ -11380,7 +11356,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -11584,7 +11560,7 @@
       },
       "openswe__transcript__events__JsonObject": {
         "additionalProperties": {
-          "$ref": "#/components/schemas/pydantic__types__JsonValue"
+          "$ref": "#/components/schemas/JsonValue-Output"
         },
         "type": "object"
       },
@@ -28304,53 +28280,6 @@
         ]
       }
     },
-    "/github/channel/events": {
-      "post": {
-        "description": "The run an @openswe mention on an issue starts on the channel's thread, or ``None``.\n\nWhile the thread waits on an interrupt nothing starts: a non-null answer only\ntells the channel Robin would act, so it points the issue to the decision.",
-        "operationId": "github_channel_event_github_channel_events_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GitHubChannelCall"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/EndpointAnswer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Github Channel Event Github Channel Events Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Github Channel Event"
-      }
-    },
     "/health": {
       "get": {
         "operationId": "health_check_health_get",
@@ -28373,37 +28302,27 @@
         "summary": "Health Check"
       }
     },
-    "/linear/channel/events": {
+    "/mda/channel-api/{endpoint}": {
       "post": {
-        "description": "The run a Linear event starts, or ``None`` to start nothing.\n\nAn agent session turn starts the run it prepares, or declines with what the\nchannel tells the session, such as that it names no repository. While the\nsession's thread waits on an interrupt nothing is prepared. Issue events run\nLinear automations.",
-        "operationId": "linear_channel_event_linear_channel_events_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LinearChannelCall"
-              }
+        "description": "What ``endpoint`` answers the channel's call with.",
+        "operationId": "channel_api_mda_channel_api__endpoint__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint",
+            "required": true,
+            "schema": {
+              "title": "Endpoint",
+              "type": "string"
             }
-          },
-          "required": true
-        },
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/EndpointAnswer"
-                    },
-                    {
-                      "$ref": "#/components/schemas/LinearDecline"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Linear Channel Event Linear Channel Events Post"
+                  "$ref": "#/components/schemas/JsonValue-Output"
                 }
               }
             },
@@ -28420,7 +28339,30 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Linear Channel Event"
+        "summary": "Channel Api"
+      }
+    },
+    "/mda/github/deliveries": {
+      "post": {
+        "description": "Take a delivery MDA forwarded; the backend's work runs after the answer.",
+        "operationId": "github_delivery_mda_github_deliveries_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Github Delivery Mda Github Deliveries Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Github Delivery"
       }
     },
     "/mda/resolve-user": {
@@ -28470,26 +28412,15 @@
         "summary": "Resolve User"
       }
     },
-    "/slack/channel/events": {
+    "/mda/slack/channel-events": {
       "post": {
-        "description": "The run a forwarded Slack message starts on the channel's thread, or ``None``.\n\n``None`` when the message wasn't one the backend handed over (the backend\ngates every message before it forwards one), when gating posted the reply\nitself, such as the prompt to connect an account, or when building the run\nfailed, which the Slack thread hears about. MDA retrying a call it got no\nanswer to, under the same ``webhook_id``, gets the run built again.",
-        "operationId": "slack_channel_event_slack_channel_events_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "webhook-id",
-            "required": true,
-            "schema": {
-              "title": "Webhook-Id",
-              "type": "string"
-            }
-          }
-        ],
+        "description": "Record a Slack channel's own change; ``None`` starts no run.",
+        "operationId": "slack_channel_event_mda_slack_channel_events_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SlackChannelCall"
+                "$ref": "#/components/schemas/EndpointRequest_SlackEndpointEvent_"
               }
             }
           },
@@ -28499,17 +28430,7 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/EndpointAnswer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Slack Channel Event Slack Channel Events Post"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"
@@ -28528,27 +28449,41 @@
         "summary": "Slack Channel Event"
       }
     },
-    "/webhooks/github": {
+    "/mda/slack/reactions": {
       "post": {
-        "description": "Handle GitHub webhooks for issue and PR events that tag @open-swe.",
-        "operationId": "github_webhook_webhooks_github_post",
+        "description": "Act on a reaction as ``/webhooks/slack`` does; ``None`` starts no run of MDA's.",
+        "operationId": "slack_reaction_mda_slack_reactions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointRequest_SlackEndpointEvent_"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Github Webhook Webhooks Github Post",
-                  "type": "object"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
-        "summary": "Github Webhook"
+        "summary": "Slack Reaction"
       }
     },
     "/webhooks/rollout": {

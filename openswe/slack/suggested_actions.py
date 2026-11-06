@@ -24,7 +24,6 @@ from openswe.slack.client import post_slack_ephemeral_message, respond_to_slack_
 from openswe.slack.payloads import SlackButtonValue, SlackInteraction
 from openswe.slack.request import SlackRequest
 from openswe.slack.responses import WebhookResponse, accepted, ignored
-from openswe.utils.thread_ops import langgraph_client
 from openswe.webhooks import common
 from openswe.workspaces.routing import is_kitchen_channel
 
@@ -149,7 +148,7 @@ async def handle_button(
             return accepted("Suggestion no longer available")
     thread_ts = value.thread_ts
     channel_context = await common.resolve_slack_channel_context(channel_id)
-    thread_id = await common.resolve_slack_thread_id(langgraph_client(), channel_id, thread_ts)
+    thread_id = await common.resolve_slack_thread_id(channel_id, thread_ts)
     repo = await common.get_slack_repo_config(
         channel_id,
         thread_ts,

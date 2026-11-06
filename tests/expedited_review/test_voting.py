@@ -663,7 +663,6 @@ async def test_author_dm_success_is_quiet_only_when_the_status_card_updates(
         yield
 
     monkeypatch.setattr(clicks, "slack_thread_mutation_lock", lock)
-    monkeypatch.setattr(clicks, "langgraph_client", lambda: None)
     ephemeral = AsyncMock(return_value=True)
     monkeypatch.setattr(clicks, "post_slack_ephemeral_message", ephemeral)
     updated = AsyncMock(return_value=True)

@@ -4,6 +4,7 @@ The model loop runs on Managed Deep Agents, which builds a tool for each of the
 run's tools and calls the backend to run it (``openswe.agent_api``).
 """
 
+import weakref
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
@@ -28,13 +29,32 @@ _json = TypeAdapter(JsonValue)
 EXCLUDED_TOOLS = frozenset({"load_integration_tools"})
 
 
-def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:
+def _parameters(tool: BaseTool) -> dict[str, JsonValue]:
     schema = tool.tool_call_schema
     if isinstance(schema, dict):
         return schema
     if issubclass(schema, BaseModel):
         return schema.model_json_schema()
     return schema.schema()
+
+
+# Each tool's parameters by the tool's identity, while it lives: a tool's schema never
+# changes, and working it out again builds a model of it for every call. Read only.
+_parameters_of: dict[int, tuple[weakref.ref[BaseTool], dict[str, JsonValue]]] = {}
+
+
+def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:
+    """The JSON schema of ``tool``'s arguments, worked out once per tool."""
+    key = id(tool)
+    kept = _parameters_of.get(key)
+    if kept is not None and kept[0]() is tool:
+        return kept[1]
+    parameters = _parameters(tool)
+    _parameters_of[key] = (
+        weakref.ref(tool, lambda _gone: _parameters_of.pop(key, None)),
+        parameters,
+    )
+    return parameters
 
 
 def describe_tool(name: str, tool: BaseTool) -> ToolDescription:

@@ -27,6 +27,7 @@ from openswe.tasks import service as task_service
 from openswe.tools import threads
 from openswe.tools.background_execute import TASK_ROOT, background_execute, current_backend
 from openswe.utils.background_task_state import update_background_task_state
+from tests.conftest import serve_runs_from
 
 TOOLS_URL = "https://agent.example.test/dashboard/api/sandbox-tools"
 FAKE_CURL = """#!/usr/bin/env python3
@@ -218,6 +219,7 @@ async def test_completion_callback_asks_runner_to_retry_until_delivered(
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     dispatch = AsyncMock(side_effect=RuntimeError("unavailable") if dispatch_fails else None)
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    serve_runs_from(monkeypatch, client)
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=[task]))
     monkeypatch.setattr(background_tasks, "dispatch_agent_run", dispatch)
@@ -245,6 +247,7 @@ async def test_completion_callback_cannot_route_outside_its_shared_sandbox(
         "metadata": {"sandbox_id": sandbox_id, "sandbox_host_thread_id": host_id}
     }
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    serve_runs_from(monkeypatch, client)
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock())
     monkeypatch.setattr(
         background_tasks,
@@ -353,6 +356,7 @@ async def test_shared_sandbox_monitors_deliver_only_their_own_completions(
     dispatch = AsyncMock()
     delete_crons = AsyncMock()
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    serve_runs_from(monkeypatch, client)
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=tasks))
     monkeypatch.setattr(background_tasks, "dispatch_agent_run", dispatch)
@@ -636,6 +640,7 @@ async def test_reconcile_uses_fresh_state_for_concurrent_launch(
     backend = AsyncMock()
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    serve_runs_from(monkeypatch, client)
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=[]))
     set_status = AsyncMock()
@@ -685,6 +690,7 @@ async def test_reconcile_refreshes_task_state_after_completion_dispatch(
     backend = AsyncMock()
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    serve_runs_from(monkeypatch, client)
     monkeypatch.setattr(dispatch, "dispatch_client", lambda: client)
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(
@@ -729,6 +735,7 @@ async def test_monitor_deletes_crons_for_missing_thread(monkeypatch: pytest.Monk
     )
     delete_crons = AsyncMock()
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    serve_runs_from(monkeypatch, client)
     monkeypatch.setattr(background_tasks, "_stop_polling", delete_crons)
 
     assert await monitor_background_tasks("thread-1") == {"status": "missing_thread"}

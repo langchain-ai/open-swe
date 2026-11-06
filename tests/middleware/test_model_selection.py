@@ -228,3 +228,22 @@ async def test_handoff_without_routing_keeps_default_model(monkeypatch: pytest.M
     state["model_route"] = (await middleware.abefore_model(state, MagicMock()))["model_route"]
     assert state["model_route"] == "default"
     jev.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("kept", "route"),
+    [
+        ("fast", "fast"),
+        ("fast_alt", "fast"),
+        ("balanced", "balanced"),
+        ("performance", "performance"),
+        ("default", "default"),
+        ("cheapest", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_a_kept_route_reads_as_both_sides_route_it(kept: object, route: str | None) -> None:
+    from runtime_api.catalog import kept_route
+
+    assert kept_route(kept) == route

@@ -2,8 +2,6 @@
 
 import asyncio
 import hashlib
-import hmac
-import json
 import os
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
@@ -162,6 +160,48 @@ def grant_tool_access(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
     return grant
 
 
+def serve_threads_from(monkeypatch: pytest.MonkeyPatch, get: Any) -> None:
+    """Serve the thread store's reads (``THREADS.get``) from a test's ``threads.get`` mock.
+
+    The backend reads a thread's metadata from its index, as its own ``/threads`` routes
+    do; a test that fakes a LangGraph client's ``threads.get`` keeps its threads, and its
+    errors, that way.
+    """
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from openswe.threads.store import THREADS  # noqa: PLC0415 - imports the app
+
+    async def indexed(thread_id: str) -> SimpleNamespace | None:
+        thread = await get(thread_id)
+        if not isinstance(thread, dict):
+            return None
+        return SimpleNamespace(
+            thread_id=thread_id, runtime="mda", metadata=thread.get("metadata") or {}
+        )
+
+    monkeypatch.setattr(THREADS, "get", indexed)
+
+
+def serve_runs_from(monkeypatch: pytest.MonkeyPatch, client: Any) -> None:
+    """Serve thread reads and run checks from a test's fake LangGraph ``client``.
+
+    The backend reads the thread from its index (``THREADS``) and asks the thread's
+    runtime whether a run is still pending or running; both come from ``client`` here,
+    and ``client.threads.get`` counts only the metadata reads.
+    """
+    from openswe.slack import thinking  # noqa: PLC0415 - imports the app
+
+    serve_threads_from(monkeypatch, client.threads.get)
+
+    async def has_active_run(thread_id: str) -> bool:
+        for status in ("pending", "running"):
+            if await client.runs.list(thread_id, status=status, limit=1):
+                return True
+        return False
+
+    monkeypatch.setattr(thinking, "_thread_has_active_runs", has_active_run)
+
+
 def register_github_logins(monkeypatch: pytest.MonkeyPatch, *logins: str) -> None:
     """Treat ``logins`` as registered Open SWE users."""
     from openswe.users import User
@@ -172,37 +212,6 @@ def register_github_logins(monkeypatch: pytest.MonkeyPatch, *logins: str) -> Non
         return frozenset(c.lower() for c in candidates if c.lower() in registered)
 
     monkeypatch.setattr(User, "known_logins", known_logins)
-
-
-async def post_signed_github_webhook(
-    event_type: str,
-    payload: Mapping[str, object],
-    *,
-    secret: str,
-    delivery_id: str | None = None,
-) -> httpx.Response:
-    """POST a signed GitHub webhook to the real app, on the test's own event loop.
-
-    An in-process ``httpx.AsyncClient`` rather than ``TestClient``: a
-    workspace-backed route reads ownership through ``registry_db``'s engine,
-    which is bound to the loop the test runs on, while ``TestClient`` drives the
-    request from a worker thread with an event loop of its own.
-    """
-    from openswe.api.app import app
-
-    body = json.dumps(payload, separators=(",", ":")).encode()
-    signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    headers = {
-        "Content-Type": "application/json",
-        "X-GitHub-Event": event_type,
-        "X-Hub-Signature-256": f"sha256={signature}",
-    }
-    if delivery_id is not None:
-        headers["X-GitHub-Delivery"] = delivery_id
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        return await client.post("/webhooks/github", content=body, headers=headers)
 
 
 _TEST_POSTGRES_URI_SETTING = "TEST_ANALYTICS_POSTGRES_URI"

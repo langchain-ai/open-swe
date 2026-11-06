@@ -1,5 +1,4 @@
 from langgraph.config import get_config
-from langgraph_sdk import get_client
 
 from openswe.agent_api.tokens import AGENT_TURN_KEY
 from openswe.audit_logs.tools import audit_tool
@@ -57,7 +56,6 @@ async def request_pr_review(pr_url: str) -> dict[str, object]:
     )
     slack_thread = configurable.get("slack_thread") or {}
     active = await get_active_slack_thread(
-        get_client(),
         thread_id if isinstance(thread_id, str) else None,
         slack_thread if isinstance(slack_thread, dict) else None,
     )
