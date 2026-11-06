@@ -180,14 +180,23 @@ class ToolSet:
         return [tool for tool in self.tools if tool.name in wanted]
 
     def search(self, query: str, limit: int) -> list[ToolSpec]:
-        """The tools that best match ``query``, ranked by BM25 over name, description and parameters."""
+        """Exact name matches first, then BM25 over name, description and parameters."""
         candidates = [tool for tool in self._searchable if tool.name != SEARCH_TOOLS]
+        matches = {
+            tool.name: tool
+            for term in query.split()
+            for tool in candidates
+            if term.removeprefix("+").casefold()
+            in {name.casefold() for name in (tool.name, tool.code_name) if name is not None}
+        }
         scores = bm25(_tokens(query), [_document(tool) for tool in candidates])
         best = sorted(
             (pair for pair in zip(candidates, scores, strict=True) if pair[1] > 0),
             key=lambda pair: -pair[1],
         )
-        return [tool for tool, _ in best[: max(1, min(limit, _MAX_RESULTS))]]
+        for tool, _ in best:
+            matches.setdefault(tool.name, tool)
+        return list(matches.values())[: max(1, min(limit, _MAX_RESULTS))]
 
     def resolve(self, name: str) -> ToolSpec | None:
         """The tool a run calls as ``name``: its own name, or ``tools.<name>`` from code mode."""
