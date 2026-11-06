@@ -81,10 +81,9 @@ On Apple Silicon Macs running macOS Ventura or later, you can install with Homeb
 brew install --cask langchain-ai/tap/open-swe-desktop
 ```
 
-This installs the desktop app and links the legacy `oswe` command onto your `PATH`.
-The app also bundles `robin`; both commands share configuration and credentials.
+This installs Robin and links the `robin` and `oswe` commands onto your `PATH`; both share configuration and credentials.
 The CLI updates with the app.
-If you installed the cask before it linked `oswe`, run `brew reinstall --cask open-swe-desktop` once to get the link (a plain `brew upgrade` skips auto-updating casks).
+If you installed the cask before 0.3.13, run `brew reinstall --cask open-swe-desktop` once to switch to `Robin.app` and get the `robin` link (a plain `brew upgrade` skips auto-updating casks).
 
 To build and install from source, install Git, Node.js 26, and [Bun](https://bun.com/docs/installation), clone this repository, then run this from its root:
 
