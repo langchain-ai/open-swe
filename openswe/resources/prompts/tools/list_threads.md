@@ -8,4 +8,5 @@ Compact history supplies prior outcomes inline without a `get_thread` call per r
 Use smaller `limit` pages if long outcomes exceed the inline result limit.
 Pass `summary_only=False` for full list metadata, and use `get_thread` for deeper inspection or truncated retry details.
 In an automation run, results cover every public thread.
+From a private thread, results can include the same user's other private threads; shared threads and automation runs cannot discover private threads.
 Results obey the triggering user's access and privacy restrictions; an empty result does not prove no original thread exists.
