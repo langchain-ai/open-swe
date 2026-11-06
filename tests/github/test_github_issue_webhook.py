@@ -12,6 +12,7 @@ from langgraph_sdk.errors import NotFoundError
 
 from openswe.github import routes as github_routes
 from openswe.github import webhook as github_webhooks
+from openswe.github.comments import AGENT_NOTICE_MARKER
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
 from openswe.review.findings import get_thread_slack_ref
 from openswe.review.reviews import trigger_re_review
@@ -338,6 +339,43 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
     assert called == ({"agent_thread_id": expected_thread_id} if accepted else {})
     if body is not None and not accepted and action != "deleted":
         assert response.json() == {"status": "ignored", "reason": "Untagged workflow command"}
+
+
+@pytest.mark.parametrize("event_type", ["issue_comment", "pull_request_review"])
+@pytest.mark.parametrize(
+    ("sender", "body", "accepted"),
+    [
+        ("octocat", AGENT_NOTICE_MARKER, False),
+        ("open-swe[bot]", "The sandbox is unreachable", False),
+        ("octocat", "Try the sandbox again", True),
+    ],
+)
+async def test_github_sandbox_notices_do_not_wake_agent_but_user_retries_do(
+    monkeypatch: pytest.MonkeyPatch, event_type: str, sender: str, body: str, accepted: bool
+) -> None:
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(github_routes, "repo_is_routable", AsyncMock(return_value=True))
+    monkeypatch.setattr(github_routes.EventLog, "record", AsyncMock())
+    monkeypatch.setattr(github_routes, "wake_native_queue", AsyncMock())
+    monkeypatch.setattr(github_routes.CompletedReview, "record", AsyncMock())
+    monkeypatch.setattr(github_webhooks, "settle_human_reviews", AsyncMock())
+    monkeypatch.setattr(
+        webhook_common, "enforce_public_repo_org_gate", AsyncMock(return_value=None)
+    )
+    register_github_logins(monkeypatch, "octocat", "open-swe[bot]")
+    monkeypatch.setattr(
+        github_webhooks, "untagged_agent_pr_thread_id", AsyncMock(return_value="agent-thread")
+    )
+    process = AsyncMock()
+    monkeypatch.setattr(github_webhooks, "process_github_pr_comment", process)
+
+    response = await _post_github_webhook(
+        event_type, _untagged_pr_event(event_type, {"login": sender}, body=body)
+    )
+
+    assert response.status_code == 200
+    assert (response.json()["status"] == "accepted") is accepted
+    assert process.await_count == int(accepted)
 
 
 @pytest.mark.parametrize(
