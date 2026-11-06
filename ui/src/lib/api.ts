@@ -1096,6 +1096,7 @@ export interface OpenPullRequest {
   // null when the review threads could not be read, which is not the same
   // answer as none being unresolved.
   unresolvedThreads: number | null
+  conversationResolutionRequired: boolean | null
   // Why it is on the To Review list: Open SWE assigned it, may assign it once
   // its review goes unclaimed, or it was linked in a Slack thread naming you.
   assignment?:
@@ -1929,7 +1930,8 @@ export const api = {
   ) => pullRequestThread(repo, number, { intent: "message", title, message }),
   mergePullRequest: (
     pr: OpenPullRequest,
-    method: MergeMethod
+    method: MergeMethod,
+    resolveConversations = false
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, {
       action: "merge",
@@ -1938,6 +1940,7 @@ export const api = {
       ...(pr.ci === "pending" && pr.mergeState === "blocked"
         ? { auto_merge: true }
         : {}),
+      ...(resolveConversations ? { resolve_conversations: true } : {}),
     }),
   closePullRequest: (
     pr: OpenPullRequest,

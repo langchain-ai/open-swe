@@ -8,6 +8,7 @@ from openswe.dashboard import profiles
 from openswe.github import http as github_http
 from openswe.github import pull_request_dashboard_routes as pr_routes
 from openswe.github import pull_request_status as prs
+from openswe.github.branch_config import BranchRules
 from openswe.github.ci import RequiredCheck
 from openswe.review import routes as review_routes
 
@@ -145,8 +146,10 @@ async def test_blocked_merge_names_required_checks_the_head_never_reported(
     monkeypatch.setattr(
         prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0, False))
     )
-    rules = AsyncMock(return_value={RequiredCheck("unit"), RequiredCheck("lint")})
-    monkeypatch.setattr(prs.RequiredCheckCache, "read", rules)
+    rules = AsyncMock(
+        return_value=BranchRules({RequiredCheck("unit"), RequiredCheck("lint")}, True)
+    )
+    monkeypatch.setattr(prs.BranchConfig, "read", rules)
     result = await _client(1).load(wanted={"open"})
     assert result is not None
     assert result.missing_checks == missing
@@ -177,7 +180,7 @@ async def test_review_and_thread_status_agree_on_current_check_outcomes(
         "base": {"ref": "main"},
     }
     monkeypatch.setattr(
-        prs.RequiredCheckCache, "read", AsyncMock(return_value={RequiredCheck("unit")})
+        prs.BranchConfig, "read", AsyncMock(return_value=BranchRules({RequiredCheck("unit")}, True))
     )
     runs = [
         {

@@ -24,10 +24,10 @@ from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announceme
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
 from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
+from openswe.github.branch_config import REFRESH_JOB as REQUIRED_CHECK_REFRESH
+from openswe.github.branch_config import refresh_required_checks
 from openswe.github.forwarding import FORWARD_JOB as GITHUB_CHANNEL_FORWARD
 from openswe.github.forwarding import ForwardJob
-from openswe.github.required_check_cache import REFRESH_JOB as REQUIRED_CHECK_REFRESH
-from openswe.github.required_check_cache import refresh_required_checks
 from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.standard import run_deadline
 from openswe.jobs import queue
