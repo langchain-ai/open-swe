@@ -281,7 +281,7 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
         ),
         "display_name": user.display_name if user else "",
         "email": session.get("email") or (user.email or None if user else None),
-        "avatar_url": session.get("avatar_url"),
+        "avatar_url": (user.avatar_url if user else None) or session.get("avatar_url"),
         "user_id": str(user.id) if user else session.get("user_id"),
         "slack_user_id": (user.slack_user_id or None) if user else None,
         "is_admin": session_is_admin(session),
